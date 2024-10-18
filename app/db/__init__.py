@@ -215,8 +215,8 @@ class Base:
                 "name": {  # 字段名
                     "old_value": "old_username",  # 旧值
                     "new_value": "new_username",  # 新值
-                    "include_tables": ["siteuserdata", "siteicon", "sitestatistic"],  # 指定只更新某些表，留空则更新所有表，受限于上面的 tables
-                    "exclude_tables": ["alembic_version", "user", "site"],  # 指定某个表的这个字段不需要更新，留空则更新所有表，受限于上面的 exclude_table
+                    "include_tables": ["siteuserdata", "siteicon", "sitestatistic"],  # 指定只更新某些表，留空则更新所有表，受限于上面的 include_tables
+                    "exclude_tables": ["alembic_version", "user", "site"],  # 指定某个表的这个字段不需要更新，留空则更新所有表，受限于上面的 exclude_tables
                 },
                 "id": {
                     "old_value": "1",
