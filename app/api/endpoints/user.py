@@ -92,7 +92,16 @@ def update_user(
         user_info.pop("name", None)
 
     if old_user_name != new_user_name:
-        success = user.update_all_username(db, user_info, old_user_name, new_user_name)
+        relation_info = {
+            "exclude_tables": ["alembic_version" "user", "site", "siteuserdata", "siteicon", "sitestatistic"],
+            "field": {
+                "username": {
+                    "old_value": old_user_name,
+                    "new_value": new_user_name,
+                },
+            }
+        }
+        success = user.relevancy_update(db, user_info, relation_info)
     else:
         success = user.update(db, user_info)
 

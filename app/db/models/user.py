@@ -83,31 +83,3 @@ class User(Base):
             })
             return True
         return False
-
-    @db_update
-    def update_all_username(self, db: Session, payload, old_username: str, new_username: str):
-        """
-        联动更新所有表中的 username 字段
-        :return:
-        """
-        if not payload:
-            return False
-
-        # 常规更新user表
-        payload = {k: v for k, v in payload.items() if v is not None}
-        for key, value in payload.items():
-            setattr(self, key, value)
-        if inspect(self).detached:
-            db.add(self)
-
-        # 联动更新其他表单
-        tables = Base.metadata.tables
-        for table_name, table in tables.items():
-            # 排除 siteuserdata 表，该表的 username 不是来自 user 表的 name
-            if table_name == ('siteuserdata' or 'user'):
-                continue
-            # 如果表中有 'username' 字段，且值等于 old_username，则更新为 new_username
-            if 'username' in [column.name for column in table.columns]:
-                update_statement = table.update().where(table.c.username == old_username).values(username=new_username)
-                db.execute(update_statement)
-        return True
