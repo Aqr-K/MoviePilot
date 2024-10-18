@@ -1,6 +1,6 @@
 from typing import Any, Self, List, Tuple, Optional, Generator
 
-from sqlalchemy import create_engine, QueuePool, and_, inspect
+from sqlalchemy import create_engine, QueuePool, and_, inspect, MetaData
 from sqlalchemy.orm import declared_attr, sessionmaker, Session, scoped_session, as_declarative
 
 from app.core.config import settings
@@ -152,9 +152,13 @@ class Base:
     id: Any
     __name__: str
 
+    # 数据库元数据
+    metadata = MetaData()
+
     @db_update
     def create(self, db: Session):
         db.add(self)
+        return True
 
     @classmethod
     @db_query
@@ -168,16 +172,19 @@ class Base:
             setattr(self, key, value)
         if inspect(self).detached:
             db.add(self)
+        return True
 
     @classmethod
     @db_update
     def delete(cls, db: Session, rid):
         db.query(cls).filter(and_(cls.id == rid)).delete()
+        return True
 
     @classmethod
     @db_update
     def truncate(cls, db: Session):
         db.query(cls).delete()
+        return True
 
     @classmethod
     @db_query
