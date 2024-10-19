@@ -17,6 +17,7 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
         """
         super().init_service(service_name=VoceChat.__name__.lower(),
                              service_type=VoceChat)
+        self._channel = MessageChannel.VoceChat
 
     @staticmethod
     def get_name() -> str:
@@ -77,7 +78,13 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
             }
             """
             # 获取渠道
-            client_config = self.get_config(source)
+            client_config = None
+            if source:
+                client_config = self.get_config(source)
+            else:
+                client_configs = self.get_configs()
+                if client_configs:
+                    client_config = list(client_configs.values())[0]
             if not client_config:
                 return None
             # 报文体
@@ -102,8 +109,8 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
 
             # 处理消息内容
             if content and userid:
-                logger.info(f"收到VoceChat消息：userid={userid}, text={content}")
-                return CommingMessage(channel=MessageChannel.VoceChat,
+                logger.info(f"收到来自 {client_config.name} 的VoceChat消息：userid={userid}, text={content}")
+                return CommingMessage(channel=MessageChannel.VoceChat, source=client_config.name,
                                       userid=userid, username=userid, text=content)
         except Exception as err:
             logger.error(f"VoceChat消息处理发生错误：{str(err)}")

@@ -28,6 +28,8 @@ class EventType(Enum):
     SiteDeleted = "site.deleted"
     # 站点已更新
     SiteUpdated = "site.updated"
+    # 站点已刷新
+    SiteRefreshed = "site.refreshed"
     # 转移完成
     TransferComplete = "transfer.complete"
     # 下载已添加
@@ -60,6 +62,10 @@ class EventType(Enum):
 class ChainEventType(Enum):
     # 名称识别请求
     NameRecognize = "name.recognize"
+    # 认证验证请求
+    AuthVerification = "auth.verification"
+    # 认证通过拦截
+    AuthPassedIntercept = "auth.passed.intercept"
 
 
 # 系统配置Key字典
