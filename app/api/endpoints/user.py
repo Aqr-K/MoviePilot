@@ -94,7 +94,7 @@ def update_user(
     if old_user_name != new_user_name:
         relation_info = {
             "exclude_tables": ["alembic_version" "user", "site", "siteuserdata", "siteicon", "sitestatistic"],
-            "field": {
+            "column": {
                 "username": {
                     "old_value": old_user_name,
                     "new_value": new_user_name,
