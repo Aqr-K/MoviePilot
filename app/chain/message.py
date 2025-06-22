@@ -272,6 +272,7 @@ class MessageChain(ChainBase):
                         "type": "Torrent",
                         "items": contexts
                     }
+                    _current_page = 0
                     # 保存缓存
                     self.save_cache(user_cache, self._cache_file)
                     # 发送种子数据
