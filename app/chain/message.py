@@ -275,7 +275,8 @@ class MessageChain(ChainBase):
                     # 保存缓存
                     self.save_cache(user_cache, self._cache_file)
                     # 删除原消息
-                    if ChannelCapabilityManager.supports_deletion(channel):
+                    if (original_message_id and original_chat_id and
+                            ChannelCapabilityManager.supports_deletion(channel)):
                         self.delete_message(
                             channel=channel,
                             source=source,
@@ -289,9 +290,7 @@ class MessageChain(ChainBase):
                                                  title=mediainfo.title,
                                                  items=contexts[:self._page_size],
                                                  userid=userid,
-                                                 total=len(contexts),
-                                                 original_message_id=original_message_id,
-                                                 original_chat_id=original_chat_id)
+                                                 total=len(contexts))
 
             elif cache_type in ["Subscribe", "ReSubscribe"]:
                 # 订阅或洗版媒体
@@ -490,9 +489,7 @@ class MessageChain(ChainBase):
                                            source=source,
                                            title=meta.name,
                                            items=medias[:self._page_size],
-                                           userid=userid, total=len(medias),
-                                           original_message_id=original_message_id,
-                                           original_chat_id=original_chat_id)
+                                           userid=userid, total=len(medias))
             else:
                 # 广播事件
                 self.eventmanager.send_event(
@@ -541,15 +538,9 @@ class MessageChain(ChainBase):
         # 解析系统回调数据
         try:
             page_text = callback_data.split("_", 1)[1]
-            if callback_data.startswith('page_'):
-                # 翻页操作原位更新消息
-                self.handle_message(channel=channel, source=source, userid=userid, username=username,
-                                    text=page_text,
-                                    original_message_id=original_message_id, original_chat_id=original_chat_id)
-            else:
-                # 处理新消息
-                self.handle_message(channel=channel, source=source, userid=userid, username=username,
-                                    text=page_text)
+            self.handle_message(channel=channel, source=source, userid=userid, username=username,
+                                text=page_text,
+                                original_message_id=original_message_id, original_chat_id=original_chat_id)
         except IndexError:
             logger.error(f"回调数据格式错误：{callback_data}")
             self.post_message(Notification(

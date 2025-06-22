@@ -334,7 +334,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         success = False
         for conf in self.get_configs().values():
             if channel != self._channel:
-                continue
+                break
             if source != conf.name:
                 continue
             client: Slack = self.get_instance(conf.name)

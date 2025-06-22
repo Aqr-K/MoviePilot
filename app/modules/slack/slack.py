@@ -158,7 +158,7 @@ class Slack:
                                         "emoji": True
                                     },
                                     "url": button["url"],
-                                    "action_id": f"actionId-url-{len(elements)}"
+                                    "action_id": f"actionId-url-{button.get('text', 'url')}-{len(elements)}"
                                 })
                             else:
                                 # 回调按钮
@@ -300,7 +300,7 @@ class Slack:
                                         "emoji": True
                                     },
                                     "url": button["url"],
-                                    "action_id": f"actionId-url-{len(elements)}"
+                                    "action_id": f"actionId-url-{button.get('text', 'url')}-{len(elements)}"
                                 })
                             else:
                                 elements.append({
@@ -465,7 +465,7 @@ class Slack:
                                     "emoji": True
                                 },
                                 "url": button["url"],
-                                "action_id": f"actionId-url-{len(elements)}"
+                                "action_id": f"actionId-url-{button.get('text', 'url')}-{len(elements)}"
                             })
                         else:
                             elements.append({

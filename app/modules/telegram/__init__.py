@@ -299,7 +299,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         success = False
         for conf in self.get_configs().values():
             if channel != self._channel:
-                continue
+                break
             if source != conf.name:
                 continue
             client: Telegram = self.get_instance(conf.name)
