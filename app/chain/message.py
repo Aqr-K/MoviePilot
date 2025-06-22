@@ -1,4 +1,3 @@
-import gc
 import re
 from typing import Any, Optional, Dict, Union, List
 
@@ -275,6 +274,14 @@ class MessageChain(ChainBase):
                     _current_page = 0
                     # 保存缓存
                     self.save_cache(user_cache, self._cache_file)
+                    # 删除原消息
+                    if ChannelCapabilityManager.supports_deletion(channel):
+                        self.delete_message(
+                            channel=channel,
+                            source=source,
+                            message_id=original_message_id,
+                            chat_id=original_chat_id
+                        )
                     # 发送种子数据
                     logger.info(f"搜索到 {len(contexts)} 条数据，开始发送选择消息 ...")
                     self.__post_torrents_message(channel=channel,
@@ -505,6 +512,9 @@ class MessageChain(ChainBase):
         """
         处理按钮回调
         """
+
+        global _current_media
+
         # 提取回调数据
         callback_data = text[9:]  # 去掉 "CALLBACK:" 前缀
         logger.info(f"处理按钮回调：{callback_data}")
@@ -537,7 +547,7 @@ class MessageChain(ChainBase):
                                     text=page_text,
                                     original_message_id=original_message_id, original_chat_id=original_chat_id)
             else:
-                # 发送新消息
+                # 处理新消息
                 self.handle_message(channel=channel, source=source, userid=userid, username=username,
                                     text=page_text)
         except IndexError:
