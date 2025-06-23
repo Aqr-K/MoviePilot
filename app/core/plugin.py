@@ -268,9 +268,6 @@ class PluginManager(metaclass=Singleton):
                     if name in _loaded_modules:
                         continue
                     if check_module_func(obj):
-                        # 如果指定了pid，需要确保类名匹配
-                        if pid and name != pid:
-                            continue
                         _loaded_modules.add(name)
                         plugins.append(obj)
                         logger.debug(f"找到符合条件的插件类：{name}")
