@@ -305,6 +305,7 @@ class PluginManager(metaclass=Singleton):
         event_data: schemas.ConfigChangeEventData = event.event_data
         if event_data.key not in ['DEV', 'PLUGIN_AUTO_RELOAD']:
             return
+        logger.info("配置变更，重新加载插件文件修改监测...")
         self.reload_monitor()
 
     def reload_monitor(self):
