@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List, Tuple
+from typing import Optional, List, Tuple
 
 from app.utils.singleton import Singleton
 
@@ -309,3 +309,4 @@ class StreamingPlatforms(metaclass=Singleton):
         if name is None:
             return False
         return name.upper() in self._lookup_cache
+
