@@ -57,8 +57,6 @@ class ResourceHelper:
                         # 判断版本号
                         if rtype == "auth":
                             # 站点认证资源
-                            if (self._base_dir / "app/helper/sites.py").exists():
-                                continue
                             local_version = SitesHelper().auth_version
                         elif rtype == "sites":
                             # 站点索引资源
@@ -94,7 +92,7 @@ class ResourceHelper:
                                     logger.error(f"文件 {item.get('name')} 下载失败！")
                                 elif res.status_code != 200:
                                     logger.error(f"下载文件 {item.get('name')} 失败：{res.status_code} - {res.reason}")
-                                # 创建文件夹
+                                # 创建插件文件夹
                                 file_path = self._base_dir / save_path / item.get("name")
                                 if not file_path.parent.exists():
                                     file_path.parent.mkdir(parents=True, exist_ok=True)
