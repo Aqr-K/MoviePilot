@@ -88,7 +88,8 @@ class PluginHelper(metaclass=Singleton):
             try:
                 return json.loads(res.text)
             except json.JSONDecodeError:
-                logger.error(f"插件包数据解析失败：{res.text}")
+                if "404: Not Found" not in res.text:
+                    logger.warn(f"插件包数据解析失败：{res.text}")
                 return None
         return {}
 
