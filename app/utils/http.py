@@ -84,7 +84,16 @@ class RequestUtils:
         :return: 响应的内容，若发生RequestException则返回None
         """
         response = self.request(method="get", url=url, params=params, **kwargs)
-        return str(response.content, "utf-8") if response else None
+        if response:
+            try:
+                content = str(response.content, "utf-8")
+                return content
+            except Exception as e:
+                logger.debug(f"处理响应内容失败: {e}")
+                return None
+            finally:
+                response.close()  # 确保连接被关闭
+        return None
 
     def post(self, url: str, data: Any = None, json: dict = None, **kwargs) -> Optional[Response]:
         """
@@ -407,3 +416,65 @@ class RequestUtils:
         except Exception as e:
             logger.debug(f"Error when getting decoded content: {str(e)}")
             return response.text
+
+    @contextmanager
+    def response_manager(self, method: str, url: str, **kwargs):
+        """
+        响应管理器上下文管理器，确保响应对象被正确关闭
+        :param method: HTTP方法
+        :param url: 请求的URL
+        :param kwargs: 其他请求参数
+        """
+        response = None
+        try:
+            response = self.request(method=method, url=url, **kwargs)
+            yield response
+        finally:
+            if response:
+                try:
+                    response.close()
+                except Exception as e:
+                    logger.debug(f"关闭响应失败: {e}")
+
+    def get_json(self, url: str, params: dict = None, **kwargs) -> Optional[dict]:
+        """
+        发送GET请求并返回JSON数据，自动关闭连接
+        :param url: 请求的URL  
+        :param params: 请求的参数
+        :param kwargs: 其他请求参数
+        :return: JSON数据，若发生异常则返回None
+        """
+        response = self.request(method="get", url=url, params=params, **kwargs)
+        if response:
+            try:
+                data = response.json()
+                return data
+            except Exception as e:
+                logger.debug(f"解析JSON失败: {e}")
+                return None
+            finally:
+                response.close()
+        return None
+
+    def post_json(self, url: str, data: Any = None, json: dict = None, **kwargs) -> Optional[dict]:
+        """
+        发送POST请求并返回JSON数据，自动关闭连接
+        :param url: 请求的URL
+        :param data: 请求的数据
+        :param json: 请求的JSON数据
+        :param kwargs: 其他请求参数
+        :return: JSON数据，若发生异常则返回None
+        """
+        if json is None:
+            json = {}
+        response = self.request(method="post", url=url, data=data, json=json, **kwargs)
+        if response:
+            try:
+                data = response.json()
+                return data
+            except Exception as e:
+                logger.debug(f"解析JSON失败: {e}")
+                return None
+            finally:
+                response.close()
+        return None
