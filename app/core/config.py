@@ -85,8 +85,8 @@ class ConfigModel(BaseModel):
     DB_ECHO: bool = False
     # 数据库连接池类型，QueuePool, NullPool
     DB_POOL_TYPE: str = "QueuePool"
-    # 是否在获取连接时进行预先 ping 操作，默认关闭
-    DB_POOL_PRE_PING: bool = False
+    # 是否在获取连接时进行预先 ping 操作
+    DB_POOL_PRE_PING: bool = True
     # 数据库连接的回收时间（秒）
     DB_POOL_RECYCLE: int = 300
     # 数据库连接池获取连接的超时时间（秒）
