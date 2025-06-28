@@ -58,9 +58,15 @@ class ResourceHelper:
                         if rtype == "auth":
                             # 站点认证资源
                             local_version = SitesHelper().auth_version
+                            # 阻断v2.3.0以下的版本直接更新，避免无限重启
+                            if StringUtils.compare_version(local_version, "<", "2.3.0"):
+                                continue
                         elif rtype == "sites":
                             # 站点索引资源
                             local_version = SitesHelper().indexer_version
+                            # 阻断v2.0.0以下的版本直接更新，避免无限重启
+                            if StringUtils.compare_version(local_version, "<", "2.0.0"):
+                                continue
                         else:
                             continue
                         if StringUtils.compare_version(version, ">", local_version):
