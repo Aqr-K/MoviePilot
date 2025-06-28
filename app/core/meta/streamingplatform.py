@@ -272,6 +272,7 @@ class StreamingPlatforms(metaclass=Singleton):
         ("CTHP", "CATCHPLAY+"),
         ("HBOGO", "HBO GO"),
         ("HBO", "HBO"),
+        ("FPTP", "FPT Play"),
     ]
 
     def __init__(self):
