@@ -11,6 +11,7 @@ from app.schemas import Notification, MessageChannel
 from app.utils.http import RequestUtils
 from app.utils.system import SystemUtils
 from app.helper.system import SystemHelper
+from app.helper.plugin import PluginHelper
 from version import FRONTEND_VERSION, APP_VERSION
 
 
@@ -135,6 +136,13 @@ class SystemChain(ChainBase):
                             shutil.rmtree(target_path)
                         shutil.copytree(item, target_path)
                         logger.info(f"已恢复插件目录: {item.name}")
+                        # 安装依赖
+                        requirements_file = target_path / "requirements.txt"
+                        if requirements_file.exists():
+                            logger.info(f"正在安装插件 {item.name} 的依赖...")
+                            success, message = PluginHelper.pip_install_with_fallback(requirements_file)
+                            if not success:
+                                logger.warn(f"插件 {item.name} 依赖安装失败: {message}")
                         restored_count += 1
                     # 如果是文件
                     elif item.is_file():
