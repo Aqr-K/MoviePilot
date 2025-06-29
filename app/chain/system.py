@@ -35,7 +35,7 @@ class SystemChain(ChainBase):
         重启系统
         """
         from app.core.config import global_vars
-        
+
         if channel and userid:
             self.post_message(Notification(channel=channel, source=source,
                                            title="系统正在重启，请耐心等候！", userid=userid))
