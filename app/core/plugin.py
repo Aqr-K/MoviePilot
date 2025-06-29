@@ -389,19 +389,19 @@ class PluginManager(metaclass=Singleton):
         清除插件及其所有子模块的缓存
         :param plugin_id: 插件ID
         """
-        
+
         # 构建插件模块前缀
         if plugin_id:
             plugin_module_prefix = f"app.plugins.{plugin_id.lower()}"
         else:
             plugin_module_prefix = "app.plugins"
-        
+
         # 收集需要删除的模块名（创建模块名列表的副本以避免迭代时修改字典）
         modules_to_remove = []
         for module_name in list(sys.modules.keys()):
             if module_name == plugin_module_prefix or module_name.startswith(plugin_module_prefix + "."):
                 modules_to_remove.append(module_name)
-        
+
         # 删除模块
         for module_name in modules_to_remove:
             try:
@@ -410,11 +410,11 @@ class PluginManager(metaclass=Singleton):
             except KeyError:
                 # 模块可能已经被删除
                 pass
-        
-        if modules_to_remove:
-            logger.info(f"插件 {plugin_id} 共清除 {len(modules_to_remove)} 个模块缓存：{modules_to_remove}")
-        else:
-            logger.debug(f"插件 {plugin_id} 没有找到需要清除的模块缓存")
+        if plugin_id:
+            if modules_to_remove:
+                logger.info(f"插件 {plugin_id} 共清除 {len(modules_to_remove)} 个模块缓存：{modules_to_remove}")
+            else:
+                logger.debug(f"插件 {plugin_id} 没有找到需要清除的模块缓存")
 
     def sync(self) -> List[str]:
         """
