@@ -289,7 +289,7 @@ class RssHelper:
                 if not ret_xml or not ret_xml.strip():
                     logger.error("RSS内容为空")
                     return False
-                
+
                 # 检查是否包含基本的RSS/XML结构
                 ret_xml_stripped = ret_xml.strip()
                 if not ret_xml_stripped.startswith('<'):
