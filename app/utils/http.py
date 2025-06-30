@@ -76,6 +76,9 @@ class AutoCloseResponse:
         """
         self._auto_close()
 
+    def __setstate__(self, state):
+        for name, value in state.items():
+            setattr(self, name, value)
 
 class RequestUtils:
 
