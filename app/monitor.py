@@ -1,10 +1,12 @@
+import json
 import platform
 import re
 import threading
+import time
 import traceback
 from pathlib import Path
 from threading import Lock
-from typing import Any, Optional
+from typing import Any, Optional, Dict, List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from cachetools import TTLCache
@@ -65,8 +67,8 @@ class Monitor(metaclass=Singleton):
     # 定时服务
     _scheduler = None
 
-    # 存储快照
-    _storage_snapshot = {}
+    # 存储快照缓存目录
+    _snapshot_cache_dir = None
 
     # 存储过照间隔（分钟）
     _snapshot_interval = 5
@@ -77,6 +79,9 @@ class Monitor(metaclass=Singleton):
     def __init__(self):
         super().__init__()
         self.all_exts = settings.RMT_MEDIAEXT
+        # 初始化快照缓存目录
+        self._snapshot_cache_dir = settings.TEMP_PATH / "snapshots"
+        self._snapshot_cache_dir.mkdir(exist_ok=True)
         # 启动目录监控和文件整理
         self.init()
 
@@ -93,6 +98,96 @@ class Monitor(metaclass=Singleton):
             return
         logger.info("配置变更事件触发，重新初始化目录监控...")
         self.init()
+
+    def save_snapshot(self, storage: str, snapshot: Dict, file_count: int = 0):
+        """
+        保存快照到文件
+        :param storage: 存储名称
+        :param snapshot: 快照数据
+        :param file_count: 文件数量，用于调整监控间隔
+        """
+        try:
+            cache_file = self._snapshot_cache_dir / f"{storage}_snapshot.json"
+            snapshot_data = {
+                'timestamp': time.time(),
+                'file_count': file_count,
+                'snapshot': snapshot
+            }
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(snapshot_data, f, ensure_ascii=False, indent=2)
+            logger.debug(f"快照已保存到 {cache_file}")
+        except Exception as e:
+            logger.error(f"保存快照失败: {e}")
+
+    def load_snapshot(self, storage: str) -> Optional[Dict]:
+        """
+        从文件加载快照
+        :param storage: 存储名称
+        :return: 快照数据或None
+        """
+        try:
+            cache_file = self._snapshot_cache_dir / f"{storage}_snapshot.json"
+            if cache_file.exists():
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return data
+            return None
+        except Exception as e:
+            logger.error(f"加载快照失败: {e}")
+            return None
+
+    @staticmethod
+    def adjust_monitor_interval(file_count: int) -> int:
+        """
+        根据文件数量动态调整监控间隔
+        :param file_count: 文件数量
+        :return: 监控间隔（分钟）
+        """
+        if file_count < 100:
+            return 5  # 5分钟
+        elif file_count < 500:
+            return 10  # 10分钟
+        elif file_count < 1000:
+            return 15  # 15分钟
+        else:
+            return 30  # 30分钟
+
+    @staticmethod
+    def compare_snapshots(old_snapshot: Dict, new_snapshot: Dict) -> Dict[str, List]:
+        """
+        比对快照，找出变化的文件（只处理新增和修改，不处理删除）
+        :param old_snapshot: 旧快照
+        :param new_snapshot: 新快照
+        :return: 变化信息
+        """
+        changes = {
+            'added': [],
+            'modified': []
+        }
+
+        old_files = set(old_snapshot.keys())
+        new_files = set(new_snapshot.keys())
+
+        # 新增文件
+        changes['added'] = list(new_files - old_files)
+
+        # 修改文件（大小或时间变化）
+        for file_path in old_files & new_files:
+            old_info = old_snapshot[file_path]
+            new_info = new_snapshot[file_path]
+
+            # 检查文件大小变化
+            old_size = old_info.get('size', 0) if isinstance(old_info, dict) else old_info
+            new_size = new_info.get('size', 0) if isinstance(new_info, dict) else new_info
+
+            # 检查修改时间变化（如果有的话）
+            old_time = old_info.get('modify_time', 0) if isinstance(old_info, dict) else 0
+            new_time = new_info.get('modify_time', 0) if isinstance(new_info, dict) else 0
+
+            if old_size != new_size or (old_time and new_time and old_time != new_time):
+                changes['modified'].append(file_path)
+
+        return changes
 
     def init(self):
         """
@@ -155,12 +250,25 @@ class Monitor(metaclass=Singleton):
                         logger.error(f"{mon_path} 启动目录监控失败：{err_msg}")
                     messagehelper.put(f"{mon_path} 启动目录监控失败：{err_msg}", title="目录监控")
             else:
-                # 远程目录监控
-                self._scheduler.add_job(self.polling_observer, 'interval', minutes=self._snapshot_interval,
-                                        kwargs={
-                                            'storage': mon_dir.storage,
-                                            'mon_path': mon_path
-                                        })
+                # 远程目录监控 - 使用智能间隔
+                # 先尝试加载已有快照获取文件数量
+                snapshot_data = self.load_snapshot(mon_dir.storage)
+                file_count = snapshot_data.get('file_count', 0) if snapshot_data else 0
+                interval = self.adjust_monitor_interval(file_count)
+
+                self._scheduler.add_job(
+                    self.polling_observer,
+                    'interval',
+                    minutes=interval,
+                    kwargs={
+                        'storage': mon_dir.storage,
+                        'mon_path': mon_path
+                    },
+                    id=f"monitor_{mon_dir.storage}_{mon_dir.download_path}",
+                    replace_existing=True
+                )
+                logger.info(f"已启动 {mon_path} 的远程目录监控，存储：{mon_dir.storage}，间隔：{interval}分钟")
+
         # 启动定时服务
         if self._scheduler.get_jobs():
             self._scheduler.print_jobs()
@@ -189,23 +297,73 @@ class Monitor(metaclass=Singleton):
 
     def polling_observer(self, storage: str, mon_path: Path):
         """
-        轮询监控
+        轮询监控（改进版）
         """
         with snapshot_lock:
-            # 快照存储
-            new_snapshot = StorageChain().snapshot_storage(storage=storage, path=mon_path)
-            if new_snapshot:
-                # 比较快照
-                old_snapshot = self._storage_snapshot.get(storage)
+            try:
+                logger.debug(f"开始对 {storage}:{mon_path} 进行快照...")
+
+                # 加载上次快照数据
+                old_snapshot_data = self.load_snapshot(storage)
+                old_snapshot = old_snapshot_data.get('snapshot', {}) if old_snapshot_data else {}
+                last_snapshot_time = old_snapshot_data.get('timestamp', 0) if old_snapshot_data else 0
+
+                # 生成新快照（增量模式）
+                new_snapshot = StorageChain().snapshot_storage(
+                    storage=storage,
+                    path=mon_path,
+                    last_snapshot_time=last_snapshot_time
+                )
+
+                if new_snapshot is None:
+                    logger.warn(f"获取 {storage}:{mon_path} 快照失败")
+                    return
+
+                file_count = len(new_snapshot)
+                logger.info(f"{storage}:{mon_path} 快照完成，发现 {file_count} 个文件")
+
                 if old_snapshot:
-                    # 新增的文件
-                    new_files = new_snapshot.keys() - old_snapshot.keys()
-                    for new_file in new_files:
-                        # 添加到待整理队列
-                        self.__handle_file(storage=storage, event_path=Path(new_file),
-                                           file_size=new_snapshot.get(new_file))
-                # 更新快照
-                self._storage_snapshot[storage] = new_snapshot
+                    # 比较快照找出变化
+                    changes = self.compare_snapshots(old_snapshot, new_snapshot)
+
+                    # 处理新增文件
+                    for new_file in changes['added']:
+                        logger.info(f"发现新增文件：{new_file}")
+                        file_info = new_snapshot.get(new_file, {})
+                        file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
+                        self.__handle_file(storage=storage, event_path=Path(new_file), file_size=file_size)
+
+                    # 处理修改文件
+                    for modified_file in changes['modified']:
+                        logger.info(f"发现修改文件：{modified_file}")
+                        file_info = new_snapshot.get(modified_file, {})
+                        file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
+                        self.__handle_file(storage=storage, event_path=Path(modified_file), file_size=file_size)
+
+                    if changes['added'] or changes['modified']:
+                        logger.info(
+                            f"{storage}:{mon_path} 发现 {len(changes['added'])} 个新增文件，{len(changes['modified'])} 个修改文件")
+                else:
+                    logger.info(f"{storage}:{mon_path} 首次快照，暂不处理文件")
+
+                # 保存新快照
+                self.save_snapshot(storage, new_snapshot, file_count)
+
+                # 动态调整监控间隔
+                new_interval = self.adjust_monitor_interval(file_count)
+                current_job = self._scheduler.get_job(f"monitor_{storage}_{mon_path}")
+                if current_job and current_job.trigger.interval.total_seconds() / 60 != new_interval:
+                    # 重新安排任务
+                    self._scheduler.modify_job(
+                        f"monitor_{storage}_{mon_path}",
+                        trigger='interval',
+                        minutes=new_interval
+                    )
+                    logger.info(f"{storage}:{mon_path} 监控间隔已调整为 {new_interval} 分钟")
+
+            except Exception as e:
+                logger.error(f"轮询监控 {storage}:{mon_path} 出现错误：{e}")
+                logger.debug(traceback.format_exc())
 
     def event_handler(self, event, text: str, event_path: str, file_size: float = None):
         """
