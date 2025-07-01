@@ -404,8 +404,6 @@ class MetaBase(object):
         返回资源类型字符串，含分辨率
         """
         ret_string = ""
-        if self.web_source:
-            ret_string = f"{ret_string} {self.web_source}"
         if self.resource_type:
             ret_string = f"{ret_string} {self.resource_type}"
         if self.resource_effect:
@@ -420,8 +418,6 @@ class MetaBase(object):
         返回资源类型字符串，不含分辨率
         """
         ret_string = ""
-        if self.web_source:
-            ret_string = f"{ret_string} {self.web_source}"
         if self.resource_type:
             ret_string = f"{ret_string} {self.resource_type}"
         if self.resource_effect:
