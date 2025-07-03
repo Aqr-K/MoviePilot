@@ -61,8 +61,8 @@ class SMB(StorageBase, metaclass=Singleton):
             share = conf.get("share", "")
             port = conf.get("port", 445)
 
-            if not all([self._host, self._username, self._password, share]):
-                logger.error("【SMB】缺少必要的连接参数")
+            if not all([self._host, share]):
+                logger.error("【SMB】缺少必要的连接参数：host 和 share")
                 return
 
             # 构建服务器路径
@@ -76,7 +76,7 @@ class SMB(StorageBase, metaclass=Singleton):
                 connection_timeout=60,
                 port=port,
                 auth_protocol="negotiate",  # 使用协商认证
-                require_secure_negotiate=True
+                require_secure_negotiate=False  # 匿名访问时可能需要关闭安全协商
             )
 
             # 注册会话以启用连接池
@@ -93,7 +93,11 @@ class SMB(StorageBase, metaclass=Singleton):
             self._test_connection()
             
             self._connected = True
-            logger.info(f"【SMB】连接成功：{self._server_path}")
+            # 判断是否为匿名访问
+            if self._is_anonymous_access():
+                logger.info(f"【SMB】匿名连接成功：{self._server_path}")
+            else:
+                logger.info(f"【SMB】认证连接成功：{self._server_path} (用户：{self._username})")
             
         except Exception as e:
             logger.error(f"【SMB】连接初始化失败：{e}")
@@ -114,6 +118,12 @@ class SMB(StorageBase, metaclass=Singleton):
             raise SMBConnectionError(f"SMB连接错误：{e}")
         except Exception as e:
             raise SMBConnectionError(f"连接测试失败：{e}")
+
+    def _is_anonymous_access(self) -> bool:
+        """
+        检查是否为匿名访问
+        """
+        return not self._username and not self._password
 
     def _check_connection(self):
         """
