@@ -67,7 +67,7 @@ class SMB(StorageBase, metaclass=Singleton):
 
             # 构建服务器路径
             self._server_path = f"\\\\{self._host}\\{share}"
-            
+
             # 配置全局客户端设置
             ClientConfig(
                 username=self._username,
@@ -91,14 +91,14 @@ class SMB(StorageBase, metaclass=Singleton):
 
             # 测试连接
             self._test_connection()
-            
+
             self._connected = True
             # 判断是否为匿名访问
             if self._is_anonymous_access():
                 logger.info(f"【SMB】匿名连接成功：{self._server_path}")
             else:
                 logger.info(f"【SMB】认证连接成功：{self._server_path} (用户：{self._username})")
-            
+
         except Exception as e:
             logger.error(f"【SMB】连接初始化失败：{e}")
             self._connected = False
@@ -137,15 +137,15 @@ class SMB(StorageBase, metaclass=Singleton):
         标准化路径格式为SMB路径
         """
         path_str = str(path)
-        
+
         # 处理根路径
         if path_str in ["/", "\\"]:
             return self._server_path
-        
+
         # 去除前导斜杠
         if path_str.startswith("/"):
             path_str = path_str[1:]
-        
+
         # 构建完整的SMB路径
         if path_str:
             return f"{self._server_path}\\{path_str.replace('/', '\\')}"
@@ -159,12 +159,12 @@ class SMB(StorageBase, metaclass=Singleton):
         try:
             # 检查是否为目录
             is_directory = smbclient.path.isdir(file_path)
-            
+
             # 处理路径
             relative_path = file_path.replace(self._server_path, "").replace("\\", "/")
             if not relative_path.startswith("/"):
                 relative_path = "/" + relative_path
-                
+
             if is_directory and not relative_path.endswith("/"):
                 relative_path += "/"
 
@@ -220,7 +220,7 @@ class SMB(StorageBase, metaclass=Singleton):
         """
         if not self._connected:
             return False
-        
+
         try:
             self._test_connection()
             return True
@@ -244,7 +244,7 @@ class SMB(StorageBase, metaclass=Singleton):
 
             # 构建SMB路径
             smb_path = self._normalize_path(fileitem.path.rstrip("/"))
-            
+
             # 列出目录内容
             try:
                 entries = smbclient.listdir(smb_path)
@@ -259,7 +259,7 @@ class SMB(StorageBase, metaclass=Singleton):
             for entry in entries:
                 if entry in [".", ".."]:
                     continue
-                
+
                 entry_path = f"{smb_path}\\{entry}"
                 try:
                     stat_result = smbclient.stat(entry_path)
@@ -346,16 +346,16 @@ class SMB(StorageBase, metaclass=Singleton):
                 )
 
             smb_path = self._normalize_path(str(path).rstrip("/"))
-            
+
             # 检查路径是否存在
             if not smbclient.path.exists(smb_path):
                 return None
 
             stat_result = smbclient.stat(smb_path)
             file_name = Path(path).name
-            
+
             return self._create_fileitem(stat_result, smb_path, file_name)
-            
+
         except Exception as e:
             logger.debug(f"【SMB】获取文件项失败: {e}")
             return None
@@ -516,18 +516,10 @@ class SMB(StorageBase, metaclass=Singleton):
             return False
 
     def link(self, fileitem: schemas.FileItem, target_file: Path) -> bool:
-        """
-        硬链接文件（SMB不支持，返回False）
-        """
-        logger.warn("【SMB】不支持硬链接操作")
-        return False
+        pass
 
     def softlink(self, fileitem: schemas.FileItem, target_file: Path) -> bool:
-        """
-        软链接文件（SMB不支持，返回False）
-        """
-        logger.warn("【SMB】不支持软链接操作")
-        return False
+        pass
 
     def usage(self) -> Optional[schemas.StorageUsage]:
         """
@@ -535,34 +527,15 @@ class SMB(StorageBase, metaclass=Singleton):
         """
         try:
             self._check_connection()
+            volume_stat = smbclient.stat_volume(self._server_path)
+            return schemas.StorageUsage(
+                total=volume_stat.total_size,
+                available=volume_stat.caller_available_size
+            )
 
-            # 获取磁盘使用情况
-            try:
-                stat_result = smbclient.stat(self._server_path)
-                
-                if hasattr(stat_result, 'f_frsize') and hasattr(stat_result, 'f_blocks'):
-                    block_size = stat_result.f_frsize
-                    total_blocks = stat_result.f_blocks
-                    free_blocks = stat_result.f_bavail
-
-                    total = total_blocks * block_size
-                    available = free_blocks * block_size
-
-                    return schemas.StorageUsage(
-                        total=total,
-                        available=available
-                    )
-            except Exception as e:
-                logger.debug(f"【SMB】获取磁盘使用情况失败: {e}")
-                # 返回默认值
-                return schemas.StorageUsage(
-                    total=0,
-                    available=0
-                )
         except Exception as e:
             logger.error(f"【SMB】获取存储使用情况失败: {e}")
-
-        return None
+            return None
 
     def __del__(self):
         """
