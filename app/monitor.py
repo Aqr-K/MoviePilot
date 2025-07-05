@@ -147,7 +147,7 @@ class Monitor(metaclass=Singleton):
         """
         try:
             logger.info(f"开始强制全量扫描: {storage}:{mon_path}")
-            
+
             # 生成快照
             new_snapshot = StorageChain().snapshot_storage(
                 storage=storage,
@@ -175,12 +175,12 @@ class Monitor(metaclass=Singleton):
                     continue
 
             logger.info(f"{storage}:{mon_path} 全量扫描完成，共处理 {processed_count}/{file_count} 个文件")
-            
+
             # 保存快照
             self.save_snapshot(storage, new_snapshot, file_count)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"强制全量扫描失败: {storage}:{mon_path} - {e}")
             return False
