@@ -492,6 +492,8 @@ class MediaChain(ChainBase):
                         movie_nfo = self.metadata_nfo(meta=meta, mediainfo=mediainfo)
                         if movie_nfo:
                             # 保存或上传nfo文件到上级目录
+                            if not parent:
+                                parent = storagechain.get_parent_item(fileitem)
                             __save_file(_fileitem=parent, _path=nfo_path, _content=movie_nfo)
                         else:
                             logger.warn(f"{filepath.name} nfo文件生成失败！")
