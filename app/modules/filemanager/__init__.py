@@ -547,17 +547,13 @@ class FileManagerModule(_ModuleBase):
                 rename_dict=handler.get_naming_dict(meta=meta,
                                                     mediainfo=mediainfo)
             )
-            # 计算重命名中的文件夹层数
-            rename_list = rename_format.split("/")
-            rename_format_level = len(rename_list) - 1
-            for level, name in enumerate(rename_list):
-                # 处理特例，有的人重命名第一层是年份、分辨率
-                if "{{title}}" in name:
-                    # 找出含标题的这一层作为扫描路径
-                    rename_format_level -= level
-                    break
-            # 取相对路径的第1层目录
-            media_path = target_path.parents[rename_format_level - 1]
+            # 获取重命名后的媒体文件根路径
+            media_path = DirectoryHelper.get_media_root_path(
+                rename_format, rename_path=target_path
+            )
+            if not media_path:
+                # 忽略
+                continue
             if dir_path.is_relative_to(media_path):
                 # 兜底检查，避免不必要的扫盘
                 logger.warn(f"{media_path} 是媒体库目录 {dir_path} 的父目录，忽略获取媒体文件列表，请检查重命名格式！")
