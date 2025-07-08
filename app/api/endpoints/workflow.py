@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import List, Any, Optional
+import json
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user
 from app.chain.workflow import WorkflowChain
 from app.scheduler import Scheduler
+from app.helper.workflow import WorkflowHelper
 
 router = APIRouter()
 
@@ -24,7 +26,8 @@ def list_workflows(db: Session = Depends(get_db),
     """
     获取工作流列表
     """
-    return Workflow.list(db)
+    from app.db.workflow_oper import WorkflowOper
+    return WorkflowOper(db).list()
 
 
 @router.post("/", summary="创建工作流", response_model=schemas.Response)
@@ -34,13 +37,15 @@ def create_workflow(workflow: schemas.Workflow,
     """
     创建工作流
     """
-    if Workflow.get_by_name(db, workflow.name):
+    from app.db.workflow_oper import WorkflowOper
+    if workflow.name and WorkflowOper(db).get_by_name(workflow.name):
         return schemas.Response(success=False, message="已存在相同名称的工作流")
     if not workflow.add_time:
         workflow.add_time = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
     if not workflow.state:
         workflow.state = "P"
-    Workflow(**workflow.dict()).create(db)
+    from app.db.models.workflow import Workflow as WorkflowModel
+    WorkflowModel(**workflow.dict()).create(db)
     return schemas.Response(success=True, message="创建工作流成功")
 
 
@@ -67,7 +72,8 @@ def get_workflow(workflow_id: int,
     """
     获取工作流详情
     """
-    return Workflow.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    return WorkflowOper(db).get(workflow_id)
 
 
 @router.put("/{workflow_id}", summary="更新工作流", response_model=schemas.Response)
@@ -77,7 +83,10 @@ def update_workflow(workflow: schemas.Workflow,
     """
     更新工作流
     """
-    wf = Workflow.get(db, workflow.id)
+    from app.db.workflow_oper import WorkflowOper
+    if not workflow.id:
+        return schemas.Response(success=False, message="工作流ID不能为空")
+    wf = WorkflowOper(db).get(workflow.id)
     if not wf:
         return schemas.Response(success=False, message="工作流不存在")
     wf.update(db, workflow.dict())
@@ -86,21 +95,118 @@ def update_workflow(workflow: schemas.Workflow,
 
 @router.delete("/{workflow_id}", summary="删除工作流", response_model=schemas.Response)
 def delete_workflow(workflow_id: int,
-                    db: Session = Depends(get_db),
-                    _: schemas.TokenPayload = Depends(get_current_active_user)) -> Any:
+                   db: Session = Depends(get_db),
+                   _: schemas.TokenPayload = Depends(get_current_active_user)) -> Any:
     """
     删除工作流
     """
-    workflow = Workflow.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 删除定时任务
     Scheduler().remove_workflow_job(workflow)
     # 删除工作流
-    Workflow.delete(db, workflow_id)
+    from app.db.models.workflow import Workflow as WorkflowModel
+    WorkflowModel.delete(db, workflow_id)
     # 删除缓存
     SystemConfigOper().delete(f"WorkflowCache-{workflow_id}")
     return schemas.Response(success=True, message="删除成功")
+
+
+@router.post("/share", summary="分享工作流", response_model=schemas.Response)
+def workflow_share(
+        workflow_share: schemas.WorkflowShare,
+        _: schemas.TokenPayload = Depends(get_current_active_user)) -> Any:
+    """
+    分享工作流
+    """
+    if not workflow_share.id or not workflow_share.share_title or not workflow_share.share_user:
+        return schemas.Response(success=False, message="请填写工作流ID、分享标题和分享人")
+    
+    state, errmsg = WorkflowHelper().workflow_share(workflow_id=workflow_share.id,
+                                                    share_title=workflow_share.share_title or "",
+                                                    share_comment=workflow_share.share_comment or "",
+                                                    share_user=workflow_share.share_user or "")
+    return schemas.Response(success=state, message=errmsg)
+
+
+@router.delete("/share/{share_id}", summary="删除分享", response_model=schemas.Response)
+def workflow_share_delete(
+        share_id: int,
+        _: schemas.TokenPayload = Depends(get_current_active_user)) -> Any:
+    """
+    删除分享
+    """
+    state, errmsg = WorkflowHelper().share_delete(share_id=share_id)
+    return schemas.Response(success=state, message=errmsg)
+
+
+@router.post("/fork", summary="复用工作流", response_model=schemas.Response)
+def workflow_fork(
+        workflow_share: schemas.WorkflowShare,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)) -> Any:
+    """
+    复用工作流
+    """
+    if not workflow_share.name:
+        return schemas.Response(success=False, message="工作流名称不能为空")
+    
+    # 解析JSON数据，添加错误处理
+    try:
+        actions = json.loads(workflow_share.actions or "[]")
+    except json.JSONDecodeError:
+        return schemas.Response(success=False, message="actions字段JSON格式错误")
+    
+    try:
+        flows = json.loads(workflow_share.flows or "[]")
+    except json.JSONDecodeError:
+        return schemas.Response(success=False, message="flows字段JSON格式错误")
+    
+    try:
+        context = json.loads(workflow_share.context or "{}")
+    except json.JSONDecodeError:
+        return schemas.Response(success=False, message="context字段JSON格式错误")
+    
+    # 创建工作流
+    workflow_dict = {
+        "name": workflow_share.name,
+        "description": workflow_share.description,
+        "timer": workflow_share.timer,
+        "actions": actions,
+        "flows": flows,
+        "context": context,
+        "state": "P"  # 默认暂停状态
+    }
+    
+    # 检查名称是否重复
+    from app.db.workflow_oper import WorkflowOper
+    if WorkflowOper(db).get_by_name(workflow_dict["name"]):
+        return schemas.Response(success=False, message="已存在相同名称的工作流")
+    
+    # 创建新工作流
+    from app.db.models.workflow import Workflow as WorkflowModel
+    workflow = WorkflowModel(**workflow_dict)
+    workflow.create(db)
+    
+    # 更新复用次数
+    if workflow_share.id:
+        WorkflowHelper().workflow_fork(share_id=workflow_share.id)
+    
+    return schemas.Response(success=True, message="复用成功")
+
+
+@router.get("/shares", summary="查询分享的工作流", response_model=List[schemas.WorkflowShare])
+def workflow_shares(
+        name: Optional[str] = None,
+        page: Optional[int] = 1,
+        count: Optional[int] = 30,
+        _: schemas.TokenPayload = Depends(get_current_active_user)) -> Any:
+    """
+    查询分享的工作流
+    """
+    return WorkflowHelper().get_shares(name=name, page=page, count=count)
 
 
 @router.post("/{workflow_id}/run", summary="执行工作流", response_model=schemas.Response)
@@ -123,7 +229,8 @@ def start_workflow(workflow_id: int,
     """
     启用工作流
     """
-    workflow = Workflow.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 添加定时任务
@@ -140,7 +247,8 @@ def pause_workflow(workflow_id: int,
     """
     停用工作流
     """
-    workflow = Workflow.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 删除定时任务
@@ -159,7 +267,8 @@ def reset_workflow(workflow_id: int,
     """
     重置工作流
     """
-    workflow = Workflow.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 停止工作流
