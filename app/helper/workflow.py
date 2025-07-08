@@ -1,13 +1,9 @@
-from threading import Thread
 from typing import List, Tuple, Optional
-import json
 
 from app.core.cache import cached, cache_backend
 from app.core.config import settings
 from app.db.workflow_oper import WorkflowOper
-from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
-from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils
 from app.utils.singleton import WeakSingleton
 from app.utils.system import SystemUtils
@@ -40,17 +36,12 @@ class WorkflowHelper(metaclass=WeakSingleton):
             return False, "当前没有开启工作流数据共享功能"
         
         # 获取工作流信息
-        from app.db import get_db
-        db = next(get_db())
-        try:
-            workflow = WorkflowOper(db).get(workflow_id)
-            if not workflow:
-                return False, "工作流不存在"
-            
-            workflow_dict = workflow.to_dict()
-            workflow_dict.pop("id")
-        finally:
-            db.close()
+        workflow = WorkflowOper().get(workflow_id)
+        if not workflow:
+            return False, "工作流不存在"
+
+        workflow_dict = workflow.to_dict()
+        workflow_dict.pop("id")
         
         # 清除缓存
         cache_backend.clear(region=self._shares_cache_region)

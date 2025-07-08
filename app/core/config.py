@@ -201,8 +201,6 @@ class ConfigModel(BaseModel):
     SUBSCRIBE_RSS_INTERVAL: int = 30
     # 订阅数据共享
     SUBSCRIBE_STATISTIC_SHARE: bool = True
-    # 工作流数据共享
-    WORKFLOW_STATISTIC_SHARE: bool = True
     # 订阅搜索开关
     SUBSCRIBE_SEARCH: bool = False
     # 检查本地媒体库是否存在资源开关
@@ -313,6 +311,8 @@ class ConfigModel(BaseModel):
     DEFAULT_SUB: Optional[str] = "zh-cn"
     # Docker Client API地址
     DOCKER_CLIENT_API: Optional[str] = "tcp://127.0.0.1:38379"
+    # 工作流数据共享
+    WORKFLOW_STATISTIC_SHARE: bool = True
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
