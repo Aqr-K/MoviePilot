@@ -40,12 +40,17 @@ class WorkflowHelper(metaclass=WeakSingleton):
             return False, "当前没有开启工作流数据共享功能"
         
         # 获取工作流信息
-        workflow = WorkflowOper().get(workflow_id)
-        if not workflow:
-            return False, "工作流不存在"
-        
-        workflow_dict = workflow.to_dict()
-        workflow_dict.pop("id")
+        from app.db import get_db
+        db = next(get_db())
+        try:
+            workflow = WorkflowOper(db).get(workflow_id)
+            if not workflow:
+                return False, "工作流不存在"
+            
+            workflow_dict = workflow.to_dict()
+            workflow_dict.pop("id")
+        finally:
+            db.close()
         
         # 清除缓存
         cache_backend.clear(region=self._shares_cache_region)
