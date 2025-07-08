@@ -371,12 +371,16 @@ class MediaChain(ChainBase):
                 if any(f.name.endswith('.nfo') for f in sub_files):
                     logger.info(f"目录 {fileitem.path} 已有NFO文件，开始增量刮削...")
                     for file_path in file_list:
-                        self.scrape_metadata(fileitem=storagechain.get_file_item(storage=fileitem.storage,
-                                                                                 path=Path(file_path)),
-                                             mediainfo=mediainfo,
-                                             init_folder=False,
-                                             parent=fileitem,
-                                             overwrite=overwrite)
+                        file_item = storagechain.get_file_item(storage=fileitem.storage,
+                                                              path=Path(file_path))
+                        if file_item:
+                            # 对于电视剧文件，应该保存到与视频文件相同的目录
+                            # 而不是电视剧根目录
+                            self.scrape_metadata(fileitem=file_item,
+                                                 mediainfo=mediainfo,
+                                                 init_folder=False,
+                                                 parent=None,  # 让函数内部自动获取正确的父目录
+                                                 overwrite=overwrite)
                 else:
                     # 执行全量刮削
                     logger.info(f"开始全量刮削目录 {fileitem.path} ...")
