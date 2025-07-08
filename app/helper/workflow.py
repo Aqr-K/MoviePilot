@@ -4,7 +4,7 @@ import json
 
 from app.core.cache import cached, cache_backend
 from app.core.config import settings
-from app.db.models.workflow import Workflow as WorkflowModel
+from app.db.workflow_oper import WorkflowOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
@@ -36,13 +36,11 @@ class WorkflowHelper(metaclass=WeakSingleton):
         """
         分享工作流
         """
-        if not settings.SUBSCRIBE_STATISTIC_SHARE:  # 复用订阅分享的配置
-            return False, "当前没有开启数据共享功能"
+        if not settings.WORKFLOW_STATISTIC_SHARE:  # 使用独立的工作流分享开关
+            return False, "当前没有开启工作流数据共享功能"
         
         # 获取工作流信息
-        from app.db import get_db
-        db = next(get_db())
-        workflow = WorkflowModel.get(db, workflow_id)
+        workflow = WorkflowOper().get(workflow_id)
         if not workflow:
             return False, "工作流不存在"
         
@@ -75,8 +73,8 @@ class WorkflowHelper(metaclass=WeakSingleton):
         """
         删除分享
         """
-        if not settings.SUBSCRIBE_STATISTIC_SHARE:  # 复用订阅分享的配置
-            return False, "当前没有开启数据共享功能"
+        if not settings.WORKFLOW_STATISTIC_SHARE:  # 使用独立的工作流分享开关
+            return False, "当前没有开启工作流数据共享功能"
         
         res = RequestUtils(proxies=settings.PROXY or {},
                            timeout=5).delete_res(f"{self._workflow_share}/{share_id}",
@@ -94,8 +92,8 @@ class WorkflowHelper(metaclass=WeakSingleton):
         """
         复用分享的工作流
         """
-        if not settings.SUBSCRIBE_STATISTIC_SHARE:  # 复用订阅分享的配置
-            return False, "当前没有开启数据共享功能"
+        if not settings.WORKFLOW_STATISTIC_SHARE:  # 使用独立的工作流分享开关
+            return False, "当前没有开启工作流数据共享功能"
         
         res = RequestUtils(proxies=settings.PROXY or {}, timeout=5, headers={
             "Content-Type": "application/json"
@@ -112,7 +110,7 @@ class WorkflowHelper(metaclass=WeakSingleton):
         """
         获取工作流分享数据
         """
-        if not settings.SUBSCRIBE_STATISTIC_SHARE:  # 复用订阅分享的配置
+        if not settings.WORKFLOW_STATISTIC_SHARE:  # 使用独立的工作流分享开关
             return []
         
         res = RequestUtils(proxies=settings.PROXY or {}, timeout=15).get_res(self._workflow_shares, params={

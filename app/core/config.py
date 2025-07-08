@@ -201,6 +201,8 @@ class ConfigModel(BaseModel):
     SUBSCRIBE_RSS_INTERVAL: int = 30
     # 订阅数据共享
     SUBSCRIBE_STATISTIC_SHARE: bool = True
+    # 工作流数据共享
+    WORKFLOW_STATISTIC_SHARE: bool = True
     # 订阅搜索开关
     SUBSCRIBE_SEARCH: bool = False
     # 检查本地媒体库是否存在资源开关

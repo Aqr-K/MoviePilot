@@ -18,7 +18,10 @@
 - `app/helper/workflow.py` - 新增工作流分享helper类
 
 ### 修改文件
-- `app/api/endpoints/workflow.py` - 新增工作流分享相关API接口
+- `app/api/endpoints/workflow.py` - 新增工作流分享相关API接口，使用WorkflowOper进行数据库操作
+- `app/db/workflow_oper.py` - 新增list方法
+- `app/db/models/workflow.py` - 新增list静态方法
+- `app/core/config.py` - 新增WORKFLOW_STATISTIC_SHARE配置项
 
 ## API接口
 
@@ -112,7 +115,10 @@ GET /api/v1/workflow/shares?name=关键词&page=1&count=30
 
 ## 配置说明
 
-工作流分享功能复用了订阅分享的配置项 `SUBSCRIBE_STATISTIC_SHARE`，当该配置为 `true` 时，工作流分享功能才会启用。
+工作流分享功能使用独立的配置项 `WORKFLOW_STATISTIC_SHARE`，当该配置为 `true` 时，工作流分享功能才会启用。
+
+### 配置项
+- `WORKFLOW_STATISTIC_SHARE`: 工作流数据共享开关，默认为 `true`
 
 ## 服务器接口
 
@@ -153,11 +159,18 @@ def workflow_fork(shareid: int, db: Session = Depends(get_db)):
 
 ## 使用说明
 
-1. **启用功能**: 确保 `SUBSCRIBE_STATISTIC_SHARE` 配置为 `true`
+1. **启用功能**: 确保 `WORKFLOW_STATISTIC_SHARE` 配置为 `true`
 2. **分享工作流**: 通过API接口分享本地工作流到公共服务器
 3. **查看分享**: 查询公共服务器上的工作流分享
 4. **复用工作流**: 将其他用户分享的工作流复制到本地使用
 5. **管理分享**: 删除自己分享的工作流
+
+## 技术改进
+
+1. **独立配置**: 工作流分享功能使用独立的配置开关，不再依赖订阅分享配置
+2. **数据访问层**: 使用WorkflowOper进行数据库操作，提高代码的可维护性和一致性
+3. **错误处理**: 完善的错误处理和参数验证
+4. **类型安全**: 修复了所有类型相关的linter错误
 
 ## 注意事项
 

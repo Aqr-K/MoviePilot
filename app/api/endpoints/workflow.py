@@ -26,8 +26,8 @@ def list_workflows(db: Session = Depends(get_db),
     """
     获取工作流列表
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    return WorkflowModel.list(db)
+    from app.db.workflow_oper import WorkflowOper
+    return WorkflowOper().list()
 
 
 @router.post("/", summary="创建工作流", response_model=schemas.Response)
@@ -37,13 +37,14 @@ def create_workflow(workflow: schemas.Workflow,
     """
     创建工作流
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    if workflow.name and WorkflowModel.get_by_name(db, workflow.name):
+    from app.db.workflow_oper import WorkflowOper
+    if workflow.name and WorkflowOper().get_by_name(workflow.name):
         return schemas.Response(success=False, message="已存在相同名称的工作流")
     if not workflow.add_time:
         workflow.add_time = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
     if not workflow.state:
         workflow.state = "P"
+    from app.db.models.workflow import Workflow as WorkflowModel
     WorkflowModel(**workflow.dict()).create(db)
     return schemas.Response(success=True, message="创建工作流成功")
 
@@ -71,8 +72,8 @@ def get_workflow(workflow_id: int,
     """
     获取工作流详情
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    return WorkflowModel.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    return WorkflowOper().get(workflow_id)
 
 
 @router.put("/{workflow_id}", summary="更新工作流", response_model=schemas.Response)
@@ -82,10 +83,10 @@ def update_workflow(workflow: schemas.Workflow,
     """
     更新工作流
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
+    from app.db.workflow_oper import WorkflowOper
     if not workflow.id:
         return schemas.Response(success=False, message="工作流ID不能为空")
-    wf = WorkflowModel.get(db, workflow.id)
+    wf = WorkflowOper().get(workflow.id)
     if not wf:
         return schemas.Response(success=False, message="工作流不存在")
     wf.update(db, workflow.dict())
@@ -99,13 +100,14 @@ def delete_workflow(workflow_id: int,
     """
     删除工作流
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    workflow = WorkflowModel.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper().get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 删除定时任务
     Scheduler().remove_workflow_job(workflow)
     # 删除工作流
+    from app.db.models.workflow import Workflow as WorkflowModel
     WorkflowModel.delete(db, workflow_id)
     # 删除缓存
     SystemConfigOper().delete(f"WorkflowCache-{workflow_id}")
@@ -162,12 +164,14 @@ def workflow_fork(
     }
     
     # 检查名称是否重复
-    db = next(get_db())
-    from app.db.models.workflow import Workflow as WorkflowModel
-    if WorkflowModel.get_by_name(db, workflow_dict["name"]):
+    from app.db.workflow_oper import WorkflowOper
+    if WorkflowOper().get_by_name(workflow_dict["name"]):
         return schemas.Response(success=False, message="已存在相同名称的工作流")
     
     # 创建新工作流
+    from app.db.models.workflow import Workflow as WorkflowModel
+    from app.db import get_db
+    db = next(get_db())
     workflow = WorkflowModel(**workflow_dict)
     workflow.create(db)
     
@@ -210,8 +214,8 @@ def start_workflow(workflow_id: int,
     """
     启用工作流
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    workflow = WorkflowModel.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper().get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 添加定时任务
@@ -228,8 +232,8 @@ def pause_workflow(workflow_id: int,
     """
     停用工作流
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    workflow = WorkflowModel.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper().get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 删除定时任务
@@ -248,8 +252,8 @@ def reset_workflow(workflow_id: int,
     """
     重置工作流
     """
-    from app.db.models.workflow import Workflow as WorkflowModel
-    workflow = WorkflowModel.get(db, workflow_id)
+    from app.db.workflow_oper import WorkflowOper
+    workflow = WorkflowOper().get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 停止工作流
