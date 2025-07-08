@@ -185,14 +185,15 @@ class TransHandler:
                         file_ext=f".{fileitem.extension}"
                     )
                 )
+                # 计算重命名中的文件夹层级
+                rename_format_level = len(rename_format.split("/")) - 1
+                folder_path = new_file.parents[rename_format_level - 1]
             else:
                 new_file = target_path / fileitem.name
+                folder_path = target_path
 
             # 判断是否要覆盖
             overflag = False
-            # 计算重命名中的文件夹层级
-            rename_format_level = len(rename_format.split("/")) - 1
-            folder_path = new_file.parents[rename_format_level - 1]
             # 目标目录
             target_diritem = target_oper.get_folder(folder_path)
             if not target_diritem:
