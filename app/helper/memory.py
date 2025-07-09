@@ -4,7 +4,6 @@ import threading
 import time
 import os
 import tracemalloc
-import signal
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -45,34 +44,35 @@ class MemoryHelper(metaclass=Singleton):
         self._analysis_timeout = 30  # 分析超时时间（秒）
         self._large_object_threshold = 1024 * 1024  # 大对象阈值（1MB）
         
+        # 线程池用于超时控制
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="MemoryAnalysis")
+        
         # 启用tracemalloc以获得更详细的内存信息
         if not tracemalloc.is_tracing():
             tracemalloc.start(25)  # 保留25个帧
 
-    def _timeout_handler(self, signum, frame):
-        """超时信号处理器"""
-        raise TimeoutException("内存分析超时")
-
     def _run_with_timeout(self, func, *args, **kwargs):
-        """在超时限制下运行函数"""
+        """
+        在超时限制下运行函数，使用ThreadPoolExecutor实现跨平台超时控制
+        """
         try:
-            # 设置信号处理器（仅在主线程中有效）
-            if threading.current_thread() is threading.main_thread():
-                signal.signal(signal.SIGALRM, self._timeout_handler)
-                signal.alarm(self._analysis_timeout)
-            
-            try:
-                result = func(*args, **kwargs)
-                return result
-            finally:
-                if threading.current_thread() is threading.main_thread():
-                    signal.alarm(0)  # 取消闹钟
-        except TimeoutException:
-            logger.warning(f"内存分析函数 {func.__name__} 超时")
+            future = self._executor.submit(func, *args, **kwargs)
+            result = future.result(timeout=self._analysis_timeout)
+            return result
+        except FutureTimeoutError:
+            logger.warning(f"内存分析函数 {func.__name__} 超时 ({self._analysis_timeout}秒)")
             return None
         except Exception as e:
             logger.error(f"内存分析函数 {func.__name__} 出错: {e}")
             return None
+
+    def __del__(self):
+        """析构函数，确保线程池正确关闭"""
+        try:
+            if hasattr(self, '_executor'):
+                self._executor.shutdown(wait=False)
+        except:
+            pass
 
     @eventmanager.register(EventType.ConfigChanged)
     def handle_config_changed(self, event: Event):
