@@ -289,9 +289,6 @@ class MemoryHelper(metaclass=Singleton):
             
             # 获取内存分配统计
             try:
-                stats = tracemalloc.get_traced_memory()
-                f.write(f"内存分配统计: {stats}\n")
-                
                 # 获取前10个内存分配最多的位置
                 snapshot = tracemalloc.take_snapshot()
                 top_stats = snapshot.statistics('lineno')
