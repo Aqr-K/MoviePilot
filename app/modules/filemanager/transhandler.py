@@ -303,9 +303,6 @@ class TransHandler:
                                   fileitem=fileitem,
                                   target_item=new_item,
                                   target_diritem=target_diritem,
-                                  file_count=1,
-                                  file_list_new=[new_item.path],
-                                  total_size=new_item.size,
                                   need_scrape=need_scrape,
                                   transfer_type=transfer_type,
                                   need_notify=need_notify)
