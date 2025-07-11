@@ -649,13 +649,12 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         dependencies = {}
         try:
-            install_plugins = [
-                plugin_id.lower() # 对应插件的小写目录名
+            install_plugins = {
+                plugin_id.lower()  # 对应插件的小写目录名
                 for plugin_id in SystemConfigOper().get(
                     SystemConfigKey.UserInstalledPlugins
-                )
-                or []
-            ]
+                ) or []
+            }
             for plugin_dir in PLUGIN_DIR.iterdir():
                 if plugin_dir.is_dir():
                     requirements_file = plugin_dir / "requirements.txt"
