@@ -154,7 +154,8 @@ class Plex:
                     type=library_type,
                     image_list=image_list,
                     link=f"{self._playhost or self._host}web/index.html#!/media/{self._plex.machineIdentifier}"
-                         f"/com.plexapp.plugins.library?source={library.key}&X-Plex-Token={self._token}"
+                         f"/com.plexapp.plugins.library?source={library.key}&X-Plex-Token={self._token}",
+                    server_type='plex'
                 )
             )
         return libraries
@@ -755,7 +756,8 @@ class Plex:
                 type=item_type,
                 image=image,
                 link=link,
-                percent=item.viewOffset / item.duration * 100 if item.viewOffset and item.duration else 0
+                percent=item.viewOffset / item.duration * 100 if item.viewOffset and item.duration else 0,
+                server_type='plex'
             ))
         return ret_resume[:num]
 
@@ -823,7 +825,8 @@ class Plex:
                     subtitle=item.year,
                     type=item_type,
                     image=image,
-                    link=link
+                    link=link,
+                    server_type='plex'
                 ))
             offset += num
         return ret_resume[:num]
