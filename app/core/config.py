@@ -16,6 +16,7 @@ from app.log import logger, log_settings, LogConfigModel
 from app.utils.system import SystemUtils
 from app.utils.url import UrlUtils
 from app.schemas import MediaType
+from version import APP_VERSION
 
 
 class SystemConfModel(BaseModel):
@@ -514,7 +515,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """
         全局用户代理字符串
         """
-        return f"{platform.system()}/{platform.release()} {self.PROJECT_NAME}/{self.VERSION_FLAG}"
+        return f"{self.PROJECT_NAME}/{APP_VERSION[1:]} ({platform.system()}/{platform.release()})"
 
     @property
     def INNER_CONFIG_PATH(self):
