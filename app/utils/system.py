@@ -96,7 +96,30 @@ class SystemUtils:
         """
         判断是否为ARM64架构
         """
-        return True if platform.machine() == 'aarch64' else False
+        return True if platform.machine().lower() in ('aarch64', 'arm64') else False
+
+    @staticmethod
+    def is_aarch() -> bool:
+        """
+        判断是否为ARM32架构
+        """
+        arch_name = platform.machine().lower()
+        is_arm_prefix = True if arch_name.startswith('arm') or arch_name.startswith('aarch') else False
+        return True if (is_arm_prefix and arch_name not in ('aarch64', 'arm64')) else False
+
+    @staticmethod
+    def is_x86_64() -> bool:
+        """
+        判断是否为AMD64架构
+        """
+        return True if platform.machine().lower() in ('amd64', 'x86_64') else False
+
+    @staticmethod
+    def is_x86_32() -> bool:
+        """
+        判断是否为AMD32架构
+        """
+        return True if platform.machine().lower() in ('i386', 'i686', 'x86', '386', 'x86_32') else False
 
     @staticmethod
     def platform() -> str:
@@ -111,6 +134,22 @@ class SystemUtils:
             return "Arm64"
         else:
             return "Linux"
+
+    @staticmethod
+    def cpu_arch() -> str:
+        """
+        获取CPU架构
+        """
+        if SystemUtils.is_x86_64():
+            return "x86_64"
+        elif SystemUtils.is_x86_32():
+            return "x86_32"
+        elif SystemUtils.is_aarch64():
+            return "Arm64"
+        elif SystemUtils.is_aarch():
+            return "Arm32"
+        else:
+            return platform.machine()
 
     @staticmethod
     def copy(src: Path, dest: Path) -> Tuple[int, str]:
