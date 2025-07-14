@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import platform
 import re
 import secrets
 import sys
@@ -513,7 +514,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """
         全局用户代理字符串
         """
-        return f"{self.PROJECT_NAME}/{self.VERSION_FLAG}"
+        return f"{platform.system()}/{platform.release()} {self.PROJECT_NAME}/{self.VERSION_FLAG}"
 
     @property
     def INNER_CONFIG_PATH(self):
