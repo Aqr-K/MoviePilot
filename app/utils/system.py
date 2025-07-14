@@ -104,8 +104,7 @@ class SystemUtils:
         判断是否为ARM32架构
         """
         arch_name = platform.machine().lower()
-        is_arm_prefix = True if arch_name.startswith('arm') or arch_name.startswith('aarch') else False
-        return True if (is_arm_prefix and arch_name not in ('aarch64', 'arm64')) else False
+        return True if (arch_name.startswith(('arm', 'aarch')) and arch_name not in ('aarch64', 'arm64')) else False
 
     @staticmethod
     def is_x86_64() -> bool:
