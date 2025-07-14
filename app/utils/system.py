@@ -68,35 +68,35 @@ class SystemUtils:
         """
         if SystemUtils.is_windows():
             return False
-        return True if "synology" in SystemUtils.execute('uname -a') else False
+        return "synology" in SystemUtils.execute('uname -a')
 
     @staticmethod
     def is_windows() -> bool:
         """
         判断是否为Windows系统
         """
-        return True if os.name == "nt" else False
+        return os.name == "nt"
 
     @staticmethod
     def is_frozen() -> bool:
         """
         判断是否为冻结的二进制文件
         """
-        return True if getattr(sys, 'frozen', False) else False
+        return getattr(sys, 'frozen', False)
 
     @staticmethod
     def is_macos() -> bool:
         """
         判断是否为MacOS系统
         """
-        return True if platform.system() == 'Darwin' else False
+        return platform.system() == 'Darwin'
 
     @staticmethod
     def is_aarch64() -> bool:
         """
         判断是否为ARM64架构
         """
-        return True if platform.machine().lower() in ('aarch64', 'arm64') else False
+        return platform.machine().lower() in ('aarch64', 'arm64')
 
     @staticmethod
     def is_aarch() -> bool:
@@ -104,21 +104,21 @@ class SystemUtils:
         判断是否为ARM32架构
         """
         arch_name = platform.machine().lower()
-        return True if (arch_name.startswith(('arm', 'aarch')) and arch_name not in ('aarch64', 'arm64')) else False
+        return arch_name.startswith(('arm', 'aarch')) and arch_name not in ('aarch64', 'arm64')
 
     @staticmethod
     def is_x86_64() -> bool:
         """
         判断是否为AMD64架构
         """
-        return True if platform.machine().lower() in ('amd64', 'x86_64') else False
+        return platform.machine().lower() in ('amd64', 'x86_64')
 
     @staticmethod
     def is_x86_32() -> bool:
         """
         判断是否为AMD32架构
         """
-        return True if platform.machine().lower() in ('i386', 'i686', 'x86', '386', 'x86_32') else False
+        return platform.machine().lower() in ('i386', 'i686', 'x86', '386', 'x86_32')
 
     @staticmethod
     def platform() -> str:
