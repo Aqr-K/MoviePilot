@@ -515,7 +515,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """
         全局用户代理字符串
         """
-        return f"{self.PROJECT_NAME}/{APP_VERSION[1:]} ({platform.system()} {platform.release()}; {SystemUtils.cup_arch()})"
+        return f"{self.PROJECT_NAME}/{APP_VERSION[1:]} ({platform.system()} {platform.release()}; {SystemUtils.cpu_arch()})"
 
     @property
     def INNER_CONFIG_PATH(self):
