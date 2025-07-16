@@ -29,7 +29,7 @@ class SubscribeHelper(metaclass=WeakSingleton):
 
     _sub_shares = f"{settings.MP_SERVER_HOST}/subscribe/shares"
 
-    _sub_share_statistic = f"{settings.MP_SERVER_HOST}/subscribe/share/statistic"
+    _sub_share_statistic = f"{settings.MP_SERVER_HOST}/subscribe/share/statistics"
 
     _sub_fork = f"{settings.MP_SERVER_HOST}/subscribe/fork/%s"
 
