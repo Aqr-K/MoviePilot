@@ -474,8 +474,16 @@ class MediaInfo:
         self.names = info.get('names') or []
         # 剩余属性赋值
         for key, value in info.items():
-            # 属性存在、值为空且类型一致则赋值
-            if hasattr(self, key) and not getattr(self, key) and type(getattr(self, key)) == type(value):
+            if not value:
+                continue
+            if not hasattr(self, key):
+                continue
+            current_value = getattr(self, key)
+            if current_value:
+                continue
+            if current_value is None:
+                setattr(self, key, value)
+            elif type(current_value) == type(value):
                 setattr(self, key, value)
 
     def set_douban_info(self, info: dict):
@@ -607,8 +615,16 @@ class MediaInfo:
             self.production_countries = [{"id": country, "name": country} for country in info.get("countries") or []]
         # 剩余属性赋值
         for key, value in info.items():
-            # 属性存在、值为空且类型一致则赋值
-            if hasattr(self, key) and not getattr(self, key) and type(getattr(self, key)) == type(value):
+            if not value:
+                continue
+            if not hasattr(self, key):
+                continue
+            current_value = getattr(self, key)
+            if current_value:
+                continue
+            if current_value is None:
+                setattr(self, key, value)
+            elif type(current_value) == type(value):
                 setattr(self, key, value)
 
     def set_bangumi_info(self, info: dict):
