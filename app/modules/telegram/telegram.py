@@ -26,6 +26,7 @@ class Telegram:
     _bot: telebot.TeleBot = None
     _callback_handlers: Dict[str, Callable] = {}  # 存储回调处理器
     _user_chat_mapping: Dict[str, str] = {}  # userid -> chat_id mapping for reply targeting
+    _bot_username: Optional[str] = None  # Bot username for mention detection
 
     def __init__(self, TELEGRAM_TOKEN: Optional[str] = None, TELEGRAM_CHAT_ID: Optional[str] = None, **kwargs):
         """
@@ -50,6 +51,15 @@ class Telegram:
             _bot = telebot.TeleBot(self._telegram_token, parse_mode="Markdown")
             # 记录句柄
             self._bot = _bot
+            # 获取并存储bot用户名用于@检测
+            try:
+                bot_info = _bot.get_me()
+                self._bot_username = bot_info.username
+                logger.info(f"Telegram bot用户名: @{self._bot_username}")
+            except Exception as e:
+                logger.error(f"获取bot信息失败: {e}")
+                self._bot_username = None
+            
             # 标记渠道来源
             if kwargs.get("name"):
                 self._ds_url = f"{self._ds_url}&source={kwargs.get('name')}"
@@ -62,7 +72,10 @@ class Telegram:
             def echo_all(message):
                 # Update user-chat mapping when receiving messages
                 self._update_user_chat_mapping(message.from_user.id, message.chat.id)
-                RequestUtils(timeout=15).post_res(self._ds_url, json=message.json)
+                
+                # Check if we should process this message
+                if self._should_process_message(message):
+                    RequestUtils(timeout=15).post_res(self._ds_url, json=message.json)
 
             @_bot.callback_query_handler(func=lambda call: True)
             def callback_query(call):
@@ -134,6 +147,51 @@ class Telegram:
         :return: 聊天ID或None
         """
         return self._user_chat_mapping.get(str(userid)) if userid else None
+
+    def _should_process_message(self, message) -> bool:
+        """
+        判断是否应该处理这条消息
+        :param message: Telegram消息对象
+        :return: 是否处理
+        """
+        # 私聊消息总是处理
+        if message.chat.type == 'private':
+            logger.debug(f"处理私聊消息：用户 {message.from_user.id}")
+            return True
+        
+        # 群聊中的命令消息总是处理（以/开头）
+        if message.text and message.text.startswith('/'):
+            logger.debug(f"处理群聊命令消息：{message.text[:20]}...")
+            return True
+        
+        # 群聊中检查是否@了机器人
+        if message.chat.type in ['group', 'supergroup']:
+            if not self._bot_username:
+                # 如果没有获取到bot用户名，为了安全起见处理所有消息
+                logger.debug("未获取到bot用户名，处理所有群聊消息")
+                return True
+            
+            # 检查消息文本中是否包含@bot_username
+            if message.text and f"@{self._bot_username}" in message.text:
+                logger.debug(f"检测到@{self._bot_username}，处理群聊消息")
+                return True
+            
+            # 检查消息实体中是否有提及bot
+            if message.entities:
+                for entity in message.entities:
+                    if entity.type == 'mention':
+                        mention_text = message.text[entity.offset:entity.offset + entity.length]
+                        if mention_text == f"@{self._bot_username}":
+                            logger.debug(f"通过实体检测到@{self._bot_username}，处理群聊消息")
+                            return True
+            
+            # 群聊中没有@机器人，不处理
+            logger.debug(f"群聊消息未@机器人，跳过处理：{message.text[:30] if message.text else 'No text'}...")
+            return False
+        
+        # 其他类型的聊天默认处理
+        logger.debug(f"处理其他类型聊天消息：{message.chat.type}")
+        return True
 
     def get_state(self) -> bool:
         """
