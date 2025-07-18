@@ -25,6 +25,7 @@ class Telegram:
     _event = Event()
     _bot: telebot.TeleBot = None
     _callback_handlers: Dict[str, Callable] = {}  # 存储回调处理器
+    _user_chat_mapping: Dict[str, str] = {}  # userid -> chat_id mapping for reply targeting
 
     def __init__(self, TELEGRAM_TOKEN: Optional[str] = None, TELEGRAM_CHAT_ID: Optional[str] = None, **kwargs):
         """
@@ -59,6 +60,8 @@ class Telegram:
 
             @_bot.message_handler(func=lambda message: True)
             def echo_all(message):
+                # Update user-chat mapping when receiving messages
+                self._update_user_chat_mapping(message.from_user.id, message.chat.id)
                 RequestUtils(timeout=15).post_res(self._ds_url, json=message.json)
 
             @_bot.callback_query_handler(func=lambda call: True)
@@ -67,6 +70,9 @@ class Telegram:
                 处理按钮点击回调
                 """
                 try:
+                    # Update user-chat mapping for callbacks too
+                    self._update_user_chat_mapping(call.from_user.id, call.message.chat.id)
+                    
                     # 解析回调数据
                     callback_data = call.data
                     user_id = str(call.from_user.id)
@@ -112,6 +118,23 @@ class Telegram:
             self._polling_thread.start()
             logger.info("Telegram消息接收服务启动")
 
+    def _update_user_chat_mapping(self, userid: int, chat_id: int) -> None:
+        """
+        更新用户与聊天的映射关系
+        :param userid: 用户ID
+        :param chat_id: 聊天ID
+        """
+        if userid and chat_id:
+            self._user_chat_mapping[str(userid)] = str(chat_id)
+
+    def _get_user_chat_id(self, userid: str) -> Optional[str]:
+        """
+        获取用户对应的聊天ID
+        :param userid: 用户ID
+        :return: 聊天ID或None
+        """
+        return self._user_chat_mapping.get(str(userid)) if userid else None
+
     def get_state(self) -> bool:
         """
         获取状态
@@ -153,10 +176,8 @@ class Telegram:
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
 
-            if userid:
-                chat_id = userid
-            else:
-                chat_id = self._telegram_chat_id
+            # Determine target chat_id with improved logic using user mapping
+            chat_id = self._determine_target_chat_id(userid, original_chat_id)
 
             # 创建按钮键盘
             reply_markup = None
@@ -174,6 +195,29 @@ class Telegram:
         except Exception as msg_e:
             logger.error(f"发送消息失败：{msg_e}")
             return False
+
+    def _determine_target_chat_id(self, userid: Optional[str] = None, 
+                                  original_chat_id: Optional[str] = None) -> str:
+        """
+        确定目标聊天ID，使用用户映射确保回复到正确的聊天
+        :param userid: 用户ID
+        :param original_chat_id: 原消息的聊天ID
+        :return: 目标聊天ID
+        """
+        # 1. 优先使用原消息的聊天ID (编辑消息场景)
+        if original_chat_id:
+            return original_chat_id
+        
+        # 2. 如果有userid，尝试从映射中获取用户的聊天ID
+        if userid:
+            mapped_chat_id = self._get_user_chat_id(userid)
+            if mapped_chat_id:
+                return mapped_chat_id
+            # 如果映射中没有，回退到使用userid作为聊天ID (私聊场景)
+            return userid
+        
+        # 3. 最后使用默认聊天ID
+        return self._telegram_chat_id
 
     def send_medias_msg(self, medias: List[MediaInfo], userid: Optional[str] = None,
                         title: Optional[str] = None, link: Optional[str] = None,
@@ -216,10 +260,8 @@ class Telegram:
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
 
-            if userid:
-                chat_id = userid
-            else:
-                chat_id = self._telegram_chat_id
+            # Determine target chat_id with improved logic using user mapping
+            chat_id = self._determine_target_chat_id(userid, original_chat_id)
 
             # 创建按钮键盘
             reply_markup = None
@@ -278,10 +320,8 @@ class Telegram:
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
 
-            if userid:
-                chat_id = userid
-            else:
-                chat_id = self._telegram_chat_id
+            # Determine target chat_id with improved logic using user mapping
+            chat_id = self._determine_target_chat_id(userid, original_chat_id)
 
             # 创建按钮键盘
             reply_markup = None

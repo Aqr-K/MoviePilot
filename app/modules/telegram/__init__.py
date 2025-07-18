@@ -195,20 +195,22 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         text = msg.get("text")
         user_id = msg.get("from", {}).get("id")
         user_name = msg.get("from", {}).get("username")
+        # Extract chat_id to enable correct reply targeting
+        chat_id = msg.get("chat", {}).get("id")
 
         if text and user_id:
             logger.info(f"收到来自 {client_config.name} 的Telegram消息："
-                        f"userid={user_id}, username={user_name}, text={text}")
+                        f"userid={user_id}, username={user_name}, chat_id={chat_id}, text={text}")
 
             # 检查权限
             admin_users = client_config.config.get("TELEGRAM_ADMINS")
             user_list = client_config.config.get("TELEGRAM_USERS")
-            chat_id = client_config.config.get("TELEGRAM_CHAT_ID")
+            config_chat_id = client_config.config.get("TELEGRAM_CHAT_ID")
 
             if text.startswith("/"):
                 if admin_users \
                         and str(user_id) not in admin_users.split(',') \
-                        and str(user_id) != chat_id:
+                        and str(user_id) != config_chat_id:
                     client.send_msg(title="只有管理员才有权限执行此命令", userid=user_id)
                     return None
             else:
@@ -223,7 +225,8 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 source=client_config.name,
                 userid=user_id,
                 username=user_name,
-                text=text
+                text=text,
+                chat_id=str(chat_id) if chat_id else None
             )
         return None
 
