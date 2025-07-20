@@ -454,7 +454,7 @@ class MediaChain(ChainBase):
             """
             try:
                 logger.info(f"正在下载图片：{_url} ...")
-                r = RequestUtils(proxies=settings.PROXY, ua=settings.USER_AGENT).get_res(url=_url)
+                r = RequestUtils(proxies=settings.PROXY, ua=settings.NORMAL_USER_AGENT).get_res(url=_url)
                 if r:
                     return r.content
                 else:
