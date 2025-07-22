@@ -199,7 +199,7 @@ def start_workflow(workflow_id: int,
     workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
-    if not workflow.event_type or workflow.event_type == "timer":
+    if not workflow.trigger_type or workflow.trigger_type == "timer":
         # 添加定时任务
         Scheduler().update_workflow_job(workflow)
     else:
@@ -278,8 +278,8 @@ def update_workflow(workflow: schemas.Workflow,
     wf = WorkflowOper(db).get(workflow.id)
     if not wf:
         return schemas.Response(success=False, message="工作流不存在")
-    if not wf.event_type:
-        workflow.event_type = "timer"
+    if not wf.trigger_type:
+        workflow.trigger_type = "timer"
     wf.update(db, workflow.dict())
     return schemas.Response(success=True, message="更新成功")
 
@@ -294,7 +294,7 @@ def delete_workflow(workflow_id: int,
     workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
-    if not workflow.event_type or workflow.event_type == "timer":
+    if not workflow.trigger_type or workflow.trigger_type == "timer":
         # 定时触发：删除定时任务
         Scheduler().remove_workflow_job(workflow)
     else:
