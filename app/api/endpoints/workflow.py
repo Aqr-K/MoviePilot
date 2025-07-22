@@ -74,7 +74,7 @@ def get_event_types(_: schemas.TokenPayload = Depends(get_current_active_user)) 
     获取所有事件类型
     """
     return [{
-        "name": event_type.name,
+        "title": event_type.name,
         "value": event_type.value
     } for event_type in EventType]
 

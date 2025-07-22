@@ -83,16 +83,6 @@ class WorkflowExecutor:
             if self.indegree[action_id] == 0:
                 self.queue.append(action_id)
 
-    @eventmanager.register(EventType.WorkflowExecute)
-    def event_execute(self, event: Event):
-        """
-        事件触发工作流执行
-        """
-        workflow_id = event.event_data.get('workflow_id')
-        if not workflow_id:
-            return
-        WorkflowChain.process(workflow_id, from_begin=False)
-
     def execute(self):
         """
         执行工作流
@@ -199,6 +189,16 @@ class WorkflowChain(ChainBase):
     """
     工作流链
     """
+
+    @eventmanager.register(EventType.WorkflowExecute)
+    def event_process(self, event: Event):
+        """
+        事件触发工作流执行
+        """
+        workflow_id = event.event_data.get('workflow_id')
+        if not workflow_id:
+            return
+        self.process(workflow_id, from_begin=False)
 
     @staticmethod
     def process(workflow_id: int, from_begin: Optional[bool] = True) -> Tuple[bool, str]:
