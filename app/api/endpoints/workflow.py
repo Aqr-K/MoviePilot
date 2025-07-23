@@ -17,7 +17,7 @@ from app.db.user_oper import get_current_active_user
 from app.db.workflow_oper import WorkflowOper
 from app.helper.workflow import WorkflowHelper
 from app.scheduler import Scheduler
-from app.schemas.types import EventType
+from app.schemas.types import EventType, EVENT_TYPE_NAMES
 
 router = APIRouter()
 
@@ -74,7 +74,7 @@ def get_event_types(_: schemas.TokenPayload = Depends(get_current_active_user)) 
     获取所有事件类型
     """
     return [{
-        "title": event_type.name,
+        "title": EVENT_TYPE_NAMES.get(event_type, event_type.name),
         "value": event_type.value
     } for event_type in EventType]
 
