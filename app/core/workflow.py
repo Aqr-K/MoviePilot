@@ -133,14 +133,13 @@ class WorkFlowManager(metaclass=Singleton):
         else:
             workflows = WorkflowOper().get_event_triggered_workflows()
         try:
-            with self._lock:
-                for workflow in workflows:
-                    # 确保先移除旧的事件监听器
-                    self.remove_workflow_event(workflow_id=workflow.id, event_type_str=workflow.event_type)
-                    # 如果工作流是事件触发类型且未被禁用
-                    if workflow.trigger_type == "event" and workflow.state != 'P':
-                        # 注册事件触发器
-                        self.register_workflow_event(workflow.id, workflow.event_type)
+            for workflow in workflows:
+                # 确保先移除旧的事件监听器
+                self.remove_workflow_event(workflow_id=workflow.id, event_type_str=workflow.event_type)
+                # 如果工作流是事件触发类型且未被禁用
+                if workflow.trigger_type == "event" and workflow.state != 'P':
+                    # 注册事件触发器
+                    self.register_workflow_event(workflow.id, workflow.event_type)
         except Exception as e:
             logger.error(f"加载事件触发工作流失败: {e}")
 
@@ -154,9 +153,9 @@ class WorkFlowManager(metaclass=Singleton):
             logger.error(f"无效的事件类型: {event_type_str}")
             return
         if event_type in EventType:
+            # 确保先移除旧的事件监听器
+            self.remove_workflow_event(workflow_id, event_type.value)
             with self._lock:
-                # 确保先移除旧的事件监听器
-                self.remove_workflow_event(workflow_id, event_type.value)
                 # 添加新的事件监听器
                 eventmanager.add_event_listener(event_type, self._handle_event)
                 # 记录工作流事件触发器

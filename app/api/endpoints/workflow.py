@@ -217,7 +217,6 @@ def pause_workflow(workflow_id: int,
     """
     停用工作流
     """
-    from app.db.workflow_oper import WorkflowOper
     workflow = WorkflowOper(db).get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
