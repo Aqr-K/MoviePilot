@@ -5,6 +5,7 @@ from typing import List, Tuple
 
 from app.core.config import global_vars
 from app.core.event import eventmanager, Event
+from app.db.models import Workflow
 from app.db.workflow_oper import WorkflowOper
 from app.helper.module import ModuleHelper
 from app.log import logger
@@ -121,6 +122,17 @@ class WorkFlowManager(metaclass=Singleton):
             } for key, action in self._actions.items()
         ]
 
+    def update_workflow_event(self, workflow: Workflow):
+        """
+        更新工作流事件触发器
+        """
+        # 确保先移除旧的事件监听器
+        self.remove_workflow_event(workflow_id=workflow.id, event_type_str=workflow.event_type)
+        # 如果工作流是事件触发类型且未被禁用
+        if workflow.trigger_type == "event" and workflow.state != 'P':
+            # 注册事件触发器
+            self.register_workflow_event(workflow.id, workflow.event_type)
+
     def load_workflow_events(self, workflow_id: Optional[int] = None):
         """
         加载工作流触发事件
@@ -134,12 +146,7 @@ class WorkFlowManager(metaclass=Singleton):
             workflows = WorkflowOper().get_event_triggered_workflows()
         try:
             for workflow in workflows:
-                # 确保先移除旧的事件监听器
-                self.remove_workflow_event(workflow_id=workflow.id, event_type_str=workflow.event_type)
-                # 如果工作流是事件触发类型且未被禁用
-                if workflow.trigger_type == "event" and workflow.state != 'P':
-                    # 注册事件触发器
-                    self.register_workflow_event(workflow.id, workflow.event_type)
+                self.update_workflow_event(workflow)
         except Exception as e:
             logger.error(f"加载事件触发工作流失败: {e}")
 

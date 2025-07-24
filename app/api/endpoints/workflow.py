@@ -39,7 +39,6 @@ def create_workflow(workflow: schemas.Workflow,
     """
     创建工作流
     """
-    from app.db.workflow_oper import WorkflowOper
     if workflow.name and WorkflowOper(db).get_by_name(workflow.name):
         return schemas.Response(success=False, message="已存在相同名称的工作流")
     if not workflow.add_time:
@@ -280,6 +279,12 @@ def update_workflow(workflow: schemas.Workflow,
     if not wf.trigger_type:
         workflow.trigger_type = "timer"
     wf.update(db, workflow.dict())
+    # 更新后的工作流对象
+    updated_workflow = wf.get(workflow.id)
+    # 更新定时任务
+    Scheduler().update_workflow_job(updated_workflow)
+    # 更新事件注册
+    WorkFlowManager().update_workflow_event(updated_workflow)
     return schemas.Response(success=True, message="更新成功")
 
 
@@ -298,7 +303,7 @@ def delete_workflow(workflow_id: int,
         Scheduler().remove_workflow_job(workflow)
     else:
         # 事件触发：从事件触发器中移除
-        WorkFlowManager().register_workflow_event(workflow_id, workflow.event_type)
+        WorkFlowManager().remove_workflow_event(workflow_id, workflow.event_type)
     # 删除工作流
     Workflow.delete(db, workflow_id)
     # 删除缓存
