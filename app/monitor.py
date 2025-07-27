@@ -686,11 +686,11 @@ class Monitor(metaclass=Singleton):
 
                 # 动态调整监控间隔
                 new_interval = self.adjust_monitor_interval(file_count)
-                current_job = self._scheduler.get_job(f"monitor_{storage}_{mon_path}")
+                current_job = self._scheduler.get_job(f"monitor_{storage}")
                 if current_job and current_job.trigger.interval.total_seconds() / 60 != new_interval:
                     # 重新安排任务
                     self._scheduler.modify_job(
-                        f"monitor_{storage}_{mon_path}",
+                        f"monitor_{storage}",
                         trigger='interval',
                         minutes=new_interval
                     )
