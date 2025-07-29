@@ -11,7 +11,6 @@ from typing import Optional, Union, Annotated
 import aiofiles
 import pillow_avif  # noqa 用于自动注册AVIF支持
 from PIL import Image
-from app.helper.sites import SitesHelper
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import StreamingResponse
 
@@ -30,6 +29,7 @@ from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
+from app.helper.sites import SitesHelper
 from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
 from app.log import logger
@@ -396,8 +396,9 @@ async def get_logging(request: Request, length: Optional[int] = 50, logfile: Opt
         # 返回全部日志作为文本响应
         if not log_path.exists():
             return Response(content="日志文件不存在！", media_type="text/plain")
-        with open(log_path, "r", encoding='utf-8') as file:
-            text = file.read()
+        # 使用 aiofiles 异步读取文件
+        async with aiofiles.open(log_path, mode="r", encoding="utf-8") as file:
+            text = await file.read()
         # 倒序输出
         text = "\n".join(text.split("\n")[::-1])
         return Response(content=text, media_type="text/plain")
