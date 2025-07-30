@@ -3,12 +3,12 @@ from typing import List, Tuple, Optional
 
 from app.core.cache import cached, cache_backend
 from app.core.config import settings
+from app.db.models import Workflow
 from app.db.workflow_oper import WorkflowOper
 from app.log import logger
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.singleton import WeakSingleton
 from app.utils.system import SystemUtils
-from db.models import Workflow
 
 
 class WorkflowHelper(metaclass=WeakSingleton):
@@ -93,6 +93,15 @@ class WorkflowHelper(metaclass=WeakSingleton):
             return True, ""
         else:
             return False, res.json().get("message")
+
+    @staticmethod
+    def _handle_list_response(res) -> List[dict]:
+        """
+        处理返回List的HTTP响应
+        """
+        if res and res.status_code == 200:
+            return res.json()
+        return []
 
     def workflow_share(self, workflow_id: int,
                        share_title: str, share_comment: str, share_user: str) -> Tuple[bool, str]:
@@ -228,9 +237,7 @@ class WorkflowHelper(metaclass=WeakSingleton):
             "page": page,
             "count": count
         })
-        if res and res.status_code == 200:
-            return res.json()
-        return []
+        return self._handle_list_response(res)
 
     @cached(region=_shares_cache_region, maxsize=1, skip_empty=True)
     async def async_get_shares(self, name: Optional[str] = None, page: Optional[int] = 1, count: Optional[int] = 30) -> \
@@ -247,9 +254,7 @@ class WorkflowHelper(metaclass=WeakSingleton):
             "page": page,
             "count": count
         })
-        if res and res.status_code == 200:
-            return res.json()
-        return []
+        return self._handle_list_response(res)
 
     def get_user_uuid(self) -> str:
         """
