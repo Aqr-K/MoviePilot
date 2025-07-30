@@ -168,7 +168,9 @@ class RequestUtils:
         try:
             return req_method(method, url, **kwargs)
         except requests.exceptions.RequestException as e:
-            logger.debug(f"请求失败: {e}")
+            # 获取更详细的错误信息
+            error_msg = str(e) if str(e) else f"未知网络错误 (URL: {url}, Method: {method.upper()})"
+            logger.debug(f"请求失败: {error_msg}")
             if raise_exception:
                 raise
             return None
@@ -603,18 +605,18 @@ class AsyncRequestUtils:
         """
         if not proxies:
             return None
-        
+
         # 如果已经是字符串格式，直接返回
         if isinstance(proxies, str):
             return proxies
-        
+
         # 如果是字典格式，提取http或https代理
         if isinstance(proxies, dict):
             # 优先使用https代理，如果没有则使用http代理
             proxy_url = proxies.get("https") or proxies.get("http")
             if proxy_url:
                 return proxy_url
-        
+
         return None
 
     @asynccontextmanager
@@ -669,7 +671,9 @@ class AsyncRequestUtils:
         try:
             return await client.request(method, url, **kwargs)
         except httpx.RequestError as e:
-            logger.debug(f"异步请求失败: {e}")
+            # 获取更详细的错误信息
+            error_msg = str(e) if str(e) else f"未知网络错误 (URL: {url}, Method: {method.upper()})"
+            logger.debug(f"异步请求失败: {error_msg}")
             if raise_exception:
                 raise
             return None
