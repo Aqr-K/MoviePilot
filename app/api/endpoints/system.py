@@ -267,7 +267,7 @@ async def get_progress(request: Request, process_type: str, _: schemas.TokenPayl
                     break
                 detail = progress.get(process_type)
                 yield f"data: {json.dumps(detail)}\n\n"
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             return
 
@@ -384,7 +384,7 @@ async def get_logging(request: Request, length: Optional[int] = 50, logfile: Opt
                         break
                     line = await f.readline()
                     if not line:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(1)
                         continue
                     yield f"data: {line}\n\n"
         except asyncio.CancelledError:
