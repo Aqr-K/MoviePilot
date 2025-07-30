@@ -10,7 +10,7 @@ from typing import Optional, Union, Annotated
 import pillow_avif  # noqa 用于自动注册AVIF支持
 from PIL import Image
 from aiopath import AsyncPath
-from app.helper.sites import SitesHelper  # noqa
+from app.helper.sites import SitesHelper  # noqa  # noqa
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import StreamingResponse
 
