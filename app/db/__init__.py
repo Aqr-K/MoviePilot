@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, Sequence
+from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, Sequence, Union
 
 from sqlalchemy import NullPool, QueuePool, and_, create_engine, inspect, text, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -428,14 +428,5 @@ class DbOper:
     数据库操作基类
     """
 
-    def __init__(self, db: Session = None):
-        self._db = db
-
-
-class AsyncDbOper:
-    """
-    异步数据库操作基类
-    """
-
-    def __init__(self, db: AsyncSession = None):
+    def __init__(self, db: Union[Session, AsyncSession] = None):
         self._db = db

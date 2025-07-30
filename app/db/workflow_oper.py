@@ -1,6 +1,6 @@
 from typing import List, Tuple, Optional, Any, Coroutine, Sequence
 
-from app.db import DbOper, AsyncDbOper
+from app.db import DbOper
 from app.db.models.workflow import Workflow
 
 
@@ -25,11 +25,23 @@ class WorkflowOper(DbOper):
         """
         return Workflow.get(self._db, wid)
 
+    async def async_get(self, wid: int) -> Workflow:
+        """
+        异步查询单个工作流
+        """
+        return await Workflow.async_get(self._db, wid)
+
     def list(self) -> List[Workflow]:
         """
         获取所有工作流列表
         """
         return Workflow.list(self._db)
+
+    async def async_list(self) -> Coroutine[Any, Any, Sequence[Any]]:
+        """
+        异步获取所有工作流列表
+        """
+        return await Workflow.async_list(self._db)
 
     def list_enabled(self) -> List[Workflow]:
         """
@@ -54,6 +66,12 @@ class WorkflowOper(DbOper):
         按名称获取工作流
         """
         return Workflow.get_by_name(self._db, name)
+
+    async def async_get_by_name(self, name: str) -> Workflow:
+        """
+        异步按名称获取工作流
+        """
+        return await Workflow.async_get_by_name(self._db, name)
 
     def start(self, wid: int) -> bool:
         """
@@ -84,27 +102,3 @@ class WorkflowOper(DbOper):
         重置
         """
         return Workflow.reset(self._db, wid, reset_count=reset_count)
-
-
-class AsyncWorkflowOper(AsyncDbOper):
-    """
-    异步工作流管理
-    """
-
-    async def get(self, wid: int) -> Workflow:
-        """
-        异步查询单个工作流
-        """
-        return await Workflow.async_get(self._db, wid)
-
-    async def list(self) -> Coroutine[Any, Any, Sequence[Any]]:
-        """
-        异步获取所有工作流列表
-        """
-        return await Workflow.async_list(self._db)
-
-    async def get_by_name(self, name: str) -> Workflow:
-        """
-        异步按名称获取工作流
-        """
-        return await Workflow.async_get_by_name(self._db, name)

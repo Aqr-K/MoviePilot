@@ -15,7 +15,7 @@ from app.core.workflow import WorkFlowManager
 from app.db import get_async_db, get_db
 from app.db.models import Workflow
 from app.db.systemconfig_oper import SystemConfigOper
-from app.db.workflow_oper import AsyncWorkflowOper, WorkflowOper
+from app.db.workflow_oper import WorkflowOper
 from app.helper.workflow import WorkflowHelper
 from app.scheduler import Scheduler
 from app.schemas.types import EventType, EVENT_TYPE_NAMES
@@ -29,7 +29,7 @@ async def list_workflows(db: AsyncSession = Depends(get_async_db),
     """
     获取工作流列表
     """
-    return await AsyncWorkflowOper(db).list()
+    return await WorkflowOper(db).async_list()
 
 
 @router.post("/", summary="创建工作流", response_model=schemas.Response)
@@ -39,7 +39,7 @@ async def create_workflow(workflow: schemas.Workflow,
     """
     创建工作流
     """
-    if workflow.name and await AsyncWorkflowOper(db).get_by_name(workflow.name):
+    if workflow.name and await WorkflowOper(db).async_get_by_name(workflow.name):
         return schemas.Response(success=False, message="已存在相同名称的工作流")
     if not workflow.add_time:
         workflow.add_time = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
@@ -149,8 +149,8 @@ async def workflow_fork(
     }
 
     # 检查名称是否重复
-    workflow_oper = AsyncWorkflowOper(db)
-    if await workflow_oper.get_by_name(workflow_dict["name"]):
+    workflow_oper = WorkflowOper(db)
+    if await workflow_oper.async_get_by_name(workflow_dict["name"]):
         return schemas.Response(success=False, message="已存在相同名称的工作流")
 
     # 创建新工作流
@@ -158,7 +158,7 @@ async def workflow_fork(
     await workflow_obj.async_create(db)
 
     # 获取工作流ID（在数据库会话有效时）
-    workflow = await workflow_oper.get_by_name(workflow_dict["name"])
+    workflow = await workflow_oper.async_get_by_name(workflow_dict["name"])
 
     # 更新复用次数
     if workflow:
@@ -244,7 +244,7 @@ async def reset_workflow(workflow_id: int,
     """
     重置工作流
     """
-    workflow = await AsyncWorkflowOper(db).get(workflow_id)
+    workflow = await WorkflowOper(db).async_get(workflow_id)
     if not workflow:
         return schemas.Response(success=False, message="工作流不存在")
     # 停止工作流
@@ -263,7 +263,7 @@ async def get_workflow(workflow_id: int,
     """
     获取工作流详情
     """
-    return await AsyncWorkflowOper(db).get(workflow_id)
+    return await WorkflowOper(db).async_get(workflow_id)
 
 
 @router.put("/{workflow_id}", summary="更新工作流", response_model=schemas.Response)

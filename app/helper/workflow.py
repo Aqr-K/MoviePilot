@@ -3,7 +3,7 @@ from typing import List, Tuple, Optional
 
 from app.core.cache import cached, cache_backend
 from app.core.config import settings
-from app.db.workflow_oper import WorkflowOper, AsyncWorkflowOper
+from app.db.workflow_oper import WorkflowOper
 from app.log import logger
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.singleton import WeakSingleton
@@ -79,7 +79,7 @@ class WorkflowHelper(metaclass=WeakSingleton):
             return False, "当前没有开启工作流数据共享功能"
 
         # 获取工作流信息
-        workflow = await AsyncWorkflowOper().get(workflow_id)
+        workflow = await WorkflowOper().async_get(workflow_id)
         if not workflow:
             return False, "工作流不存在"
 
