@@ -394,6 +394,18 @@ class ChainBase(metaclass=ABCMeta):
         """
         return self.run_module("douban_info", doubanid=doubanid, mtype=mtype, raise_exception=raise_exception)
 
+    async def async_douban_info(self, doubanid: str, mtype: Optional[MediaType] = None,
+                                raise_exception: bool = False) -> Optional[dict]:
+        """
+        获取豆瓣信息（异步版本）
+        :param doubanid: 豆瓣ID
+        :param mtype: 媒体类型
+        :return: 豆瓣信息
+        :param raise_exception: 触发速率限制时是否抛出异常
+        """
+        return await self.run_module("async_douban_info", doubanid=doubanid, mtype=mtype,
+                                     raise_exception=raise_exception)
+
     def tvdb_info(self, tvdbid: int) -> Optional[dict]:
         """
         获取TVDB信息
