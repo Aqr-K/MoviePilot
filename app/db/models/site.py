@@ -75,7 +75,7 @@ class Site(Base):
     @async_db_query
     async def async_get_actives(cls, db: AsyncSession):
         result = await db.execute(select(cls).where(cls.is_active == 1))
-        return result.all()
+        return result.scalars().all()
 
     @classmethod
     @db_query
