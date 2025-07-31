@@ -2066,8 +2066,8 @@ class TmdbApi:
             logger.error(str(e))
             return []
 
-    async def async_get_movie_credits(self, tmdbid: int, page: Optional[int] = 1, count: Optional[int] = 24) -> List[
-        dict]:
+    async def async_get_movie_credits(self, tmdbid: int,
+                                      page: Optional[int] = 1, count: Optional[int] = 24) -> List[dict]:
         """
         获取电影的演职员列表（异步版本）
         """
@@ -2150,8 +2150,8 @@ class TmdbApi:
             logger.error(str(e))
             return {}
 
-    async def async_get_person_credits(self, person_id: int, page: Optional[int] = 1, count: Optional[int] = 24) -> \
-    List[dict]:
+    async def async_get_person_credits(self, person_id: int,
+                                       page: Optional[int] = 1, count: Optional[int] = 24) -> List[dict]:
         """
         获取人物参演作品（异步版本）
         """
