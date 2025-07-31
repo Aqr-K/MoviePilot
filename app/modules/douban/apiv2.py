@@ -12,6 +12,7 @@ import requests
 
 from app.core.cache import cached
 from app.core.config import settings
+from app.utils.asyncio import AsyncUtils
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.singleton import WeakSingleton
 
@@ -155,7 +156,7 @@ class DoubanApi(metaclass=WeakSingleton):
 
     def __init__(self):
         self._session = requests.Session()
-        self._async_req = AsyncRequestUtils()
+        self._client = httpx.AsyncClient()
 
     @classmethod
     def __sign(cls, url: str, ts: str, method='GET') -> str:
@@ -249,7 +250,10 @@ class DoubanApi(metaclass=WeakSingleton):
         GET请求（异步版本）
         """
         req_url, params = self._prepare_get_request(url, **kwargs)
-        resp = await self._async_req.get_res(url=req_url, params=params)
+        resp = await AsyncRequestUtils(
+            ua=choice(self._user_agents),
+            client=self._client
+        ).get_res(url=req_url, params=params)
         return self._handle_response(resp)
 
     def _prepare_post_request(self, url: str, **kwargs) -> tuple[str, dict]:
@@ -292,7 +296,10 @@ class DoubanApi(metaclass=WeakSingleton):
         POST请求（异步版本）
         """
         req_url, params = self._prepare_post_request(url, **kwargs)
-        resp = await self._async_req.post_res(url=req_url, data=params)
+        resp = await AsyncRequestUtils(
+            ua=settings.NORMAL_USER_AGENT,
+            client=self._client
+        ).post_res(url=req_url, data=params)
         return self._handle_response(resp)
 
     def imdbid(self, imdbid: str,
@@ -869,3 +876,5 @@ class DoubanApi(metaclass=WeakSingleton):
     def close(self):
         if self._session:
             self._session.close()
+        if self._client:
+            AsyncUtils.run_async(self._client.aclose())
