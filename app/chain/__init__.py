@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
+import aiofiles
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
@@ -58,6 +59,32 @@ class ChainBase(metaclass=ABCMeta):
             except Exception as err:
                 logger.error(f"加载缓存 {filename} 出错：{str(err)}")
         return None
+
+    @staticmethod
+    async def async_load_cache(filename: str) -> Any:
+        """
+        异步从本地加载缓存
+        """
+        cache_path = settings.TEMP_PATH / filename
+        if cache_path.exists():
+            try:
+                async with aiofiles.open(cache_path, 'rb') as f:
+                    content = await f.read()
+                    return pickle.loads(content)
+            except Exception as err:
+                logger.error(f"加载缓存 {filename} 出错：{str(err)}")
+        return None
+
+    @staticmethod
+    async def async_save_cache(cache: Any, filename: str) -> None:
+        """
+        异步保存缓存到本地
+        """
+        try:
+            async with aiofiles.open(settings.TEMP_PATH / filename, 'wb') as f:
+                await f.write(pickle.dumps(cache))
+        except Exception as err:
+            logger.error(f"保存缓存 {filename} 出错：{str(err)}")
 
     @staticmethod
     def save_cache(cache: Any, filename: str) -> None:

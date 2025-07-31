@@ -97,6 +97,77 @@ class SearchChain(ChainBase):
             logger.error(f'加载搜索结果失败：{str(e)} - {traceback.format_exc()}')
             return []
 
+    async def async_last_search_results(self) -> List[Context]:
+        """
+        异步获取上次搜索结果
+        """
+        # 读取本地文件缓存
+        content = await self.async_load_cache(self.__result_temp_file)
+        if not content:
+            return []
+        try:
+            return pickle.loads(content)
+        except Exception as e:
+            logger.error(f'加载搜索结果失败：{str(e)} - {traceback.format_exc()}')
+            return []
+
+    async def async_search_by_id(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
+                                 mtype: MediaType = None, area: Optional[str] = "title", season: Optional[int] = None,
+                                 sites: List[int] = None, cache_local: bool = False) -> List[Context]:
+        """
+        根据TMDBID/豆瓣ID异步搜索资源，精确匹配，不过滤本地存在的资源
+        :param tmdbid: TMDB ID
+        :param doubanid: 豆瓣 ID
+        :param mtype: 媒体，电影 or 电视剧
+        :param area: 搜索范围，title or imdbid
+        :param season: 季数
+        :param sites: 站点ID列表
+        :param cache_local: 是否缓存到本地
+        """
+        mediainfo = await self.async_recognize_media(tmdbid=tmdbid, doubanid=doubanid, mtype=mtype)
+        if not mediainfo:
+            logger.error(f'{tmdbid} 媒体信息识别失败！')
+            return []
+        no_exists = None
+        if season:
+            no_exists = {
+                tmdbid or doubanid: {
+                    season: NotExistMediaInfo(episodes=[])
+                }
+            }
+        # TODO async
+        results = self.process(mediainfo=mediainfo, sites=sites, area=area, no_exists=no_exists)
+        # 保存到本地文件
+        if cache_local:
+            await self.async_save_cache(pickle.dumps(results), self.__result_temp_file)
+        return results
+
+    async def async_search_by_title(self, title: str, page: Optional[int] = 0,
+                                    sites: List[int] = None, cache_local: Optional[bool] = False) -> List[Context]:
+        """
+        根据标题异步搜索资源，不识别不过滤，直接返回站点内容
+        :param title: 标题，为空时返回所有站点首页内容
+        :param page: 页码
+        :param sites: 站点ID列表
+        :param cache_local: 是否缓存到本地
+        """
+        if title:
+            logger.info(f'开始搜索资源，关键词：{title} ...')
+        else:
+            logger.info(f'开始浏览资源，站点：{sites} ...')
+        # 搜索 TODO async
+        torrents = self.__search_all_sites(keywords=[title], sites=sites, page=page) or []
+        if not torrents:
+            logger.warn(f'{title} 未搜索到资源')
+            return []
+        # 组装上下文
+        contexts = [Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                            torrent_info=torrent) for torrent in torrents]
+        # 保存到本地文件
+        if cache_local:
+            await self.async_save_cache(pickle.dumps(contexts), self.__result_temp_file)
+        return contexts
+
     def process(self, mediainfo: MediaInfo,
                 keyword: Optional[str] = None,
                 no_exists: Dict[int, Dict[int, NotExistMediaInfo]] = None,
