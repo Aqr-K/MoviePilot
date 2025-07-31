@@ -1,3 +1,4 @@
+import asyncio
 import concurrent
 import concurrent.futures
 import importlib.util
@@ -830,6 +831,25 @@ class PluginManager(metaclass=Singleton):
         if not hasattr(plugin, method):
             return None
         return getattr(plugin, method)(*args, **kwargs)
+
+    async def async_run_plugin_method(self, pid: str, method: str, *args, **kwargs) -> Any:
+        """
+        异步运行插件方法
+        :param pid: 插件ID
+        :param method: 方法名
+        :param args: 参数
+        :param kwargs: 关键字参数
+        """
+        plugin = self._running_plugins.get(pid)
+        if not plugin:
+            return None
+        if not hasattr(plugin, method):
+            return None
+        method_func = getattr(plugin, method)
+        if asyncio.iscoroutinefunction(method_func):
+            return await method_func(*args, **kwargs)
+        else:
+            return method_func(*args, **kwargs)
 
     def get_plugin_ids(self) -> List[str]:
         """
