@@ -1,12 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-import httpx
 import requests
 
 from app.core.cache import cached
 from app.core.config import settings
-from app.utils.asyncio import AsyncUtils
 from app.utils.http import RequestUtils, AsyncRequestUtils
 
 
@@ -30,9 +28,8 @@ class BangumiApi(object):
 
     def __init__(self):
         self._session = requests.Session()
-        self._req = RequestUtils(session=self._session)
-        self._client = httpx.AsyncClient()
-        self._async_req = AsyncRequestUtils(client=self._client)
+        self._req = RequestUtils(ua=settings.NORMAL_USER_AGENT, session=self._session)
+        self._async_req = AsyncRequestUtils(ua=settings.NORMAL_USER_AGENT)
 
     @cached(maxsize=settings.CONF.bangumi, ttl=settings.CONF.meta)
     def __invoke(self, url, key: Optional[str] = None, **kwargs):
@@ -306,5 +303,3 @@ class BangumiApi(object):
     def close(self):
         if self._session:
             self._session.close()
-        if self._client:
-            AsyncUtils.run_async(self._client.aclose())

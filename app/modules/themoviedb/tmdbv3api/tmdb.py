@@ -5,13 +5,11 @@ import logging
 import time
 from datetime import datetime
 
-import httpx
 import requests
 import requests.exceptions
 
 from app.core.cache import cached
 from app.core.config import settings
-from app.utils.asyncio import AsyncUtils
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from .exceptions import TMDbException
 
@@ -20,12 +18,11 @@ logger = logging.getLogger(__name__)
 
 class TMDb(object):
 
-    def __init__(self, obj_cached=True, session=None, client=None, language=None):
+    def __init__(self, obj_cached=True, session=None, language=None):
         self._api_key = settings.TMDB_API_KEY
         self._language = language or settings.TMDB_LOCALE or "en-US"
         self._session_id = None
         self._session = session
-        self._client = client
         self._wait_on_rate_limit = True
         self._debug_enabled = False
         self._cache_enabled = obj_cached
@@ -37,11 +34,9 @@ class TMDb(object):
 
         if not self._session:
             self._session = requests.Session()
-        self._req = RequestUtils(session=self._session, proxies=self.proxies)
+        self._req = RequestUtils(ua=settings.NORMAL_USER_AGENT, session=self._session, proxies=self.proxies)
 
-        if not self._client:
-            self._client = httpx.AsyncClient()
-        self._async_req = AsyncRequestUtils(client=self._client, proxies=self.proxies)
+        self._async_req = AsyncRequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=self.proxies)
 
         self._remaining = 40
         self._reset = None
@@ -279,5 +274,3 @@ class TMDb(object):
     def close(self):
         if self._session:
             self._session.close()
-        if self._client:
-            AsyncUtils.run_async(self._client.aclose())
