@@ -657,6 +657,19 @@ class ChainBase(metaclass=ABCMeta):
         """
         return self.run_module("refresh_torrents", site=site, keyword=keyword, cat=cat, page=page)
 
+    async def async_refresh_torrents(self, site: dict, keyword: Optional[str] = None,
+                                     cat: Optional[str] = None, page: Optional[int] = 0) -> List[TorrentInfo]:
+        """
+        异步获取站点最新一页的种子，多个站点需要多线程处理
+        :param site:  站点
+        :param keyword:  标题
+        :param cat:  分类
+        :param page:  页码
+        :reutrn: 种子资源列表
+        """
+        return await self.async_run_module("async_refresh_torrents",
+                                           site=site, keyword=keyword, cat=cat, page=page)
+
     def filter_torrents(self, rule_groups: List[str],
                         torrent_list: List[TorrentInfo],
                         mediainfo: MediaInfo = None) -> List[TorrentInfo]:

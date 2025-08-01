@@ -457,6 +457,20 @@ class IndexerModule(_ModuleBase):
         """
         return self.search_torrents(site=site, keywords=[keyword], cat=cat, page=page)
 
+    async def async_refresh_torrents(self, site: dict,
+                                     keyword: Optional[str] = None,
+                                     cat: Optional[str] = None,
+                                     page: Optional[int] = 0) -> Optional[List[TorrentInfo]]:
+        """
+        异步获取站点最新一页的种子，多个站点需要多线程处理
+        :param site:  站点
+        :param keyword:  关键字
+        :param cat:  分类
+        :param page:  页码
+        :reutrn: 种子资源列表
+        """
+        return await self.async_search_torrents(site=site, keywords=[keyword], cat=cat, page=page)
+
     def refresh_userdata(self, site: dict) -> Optional[SiteUserData]:
         """
         刷新站点的用户数据
