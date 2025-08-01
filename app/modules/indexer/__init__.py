@@ -214,7 +214,8 @@ class IndexerModule(_ModuleBase):
             logger.warn(f"{site.get('name')} 未搜索到数据，共搜索 {search_count} 次，耗时 {seconds} 秒")
             return []
         else:
-            logger.info(f"{site.get('name')} 搜索完成，共搜索 {search_count} 次，耗时 {seconds} 秒，返回数据：{len(result_array)}")
+            logger.info(
+                f"{site.get('name')} 搜索完成，共搜索 {search_count} 次，耗时 {seconds} 秒，返回数据：{len(result_array)}")
             # TorrentInfo
             torrents = [TorrentInfo(site=site.get("id"),
                                     site_name=site.get("name"),
@@ -252,11 +253,40 @@ class IndexerModule(_ModuleBase):
         try:
             return _spider.is_error, _spider.get_torrents()
         finally:
-            # 显式清理SiteSpider对象
+            del _spider
+
+    @staticmethod
+    async def __async_spider_search(indexer: dict,
+                                    search_word: Optional[str] = None,
+                                    mtype: MediaType = None,
+                                    cat: Optional[str] = None,
+                                    page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
+        """
+        异步根据关键字搜索单个站点
+        :param: indexer: 站点配置
+        :param: search_word: 关键字
+        :param: cat: 分类
+        :param: page: 页码
+        :param: mtype: 媒体类型
+        :param: timeout: 超时时间
+        :return: 是否发生错误, 种子列表
+        """
+        _spider = SiteSpider(indexer=indexer,
+                             keyword=search_word,
+                             mtype=mtype,
+                             cat=cat,
+                             page=page)
+
+        try:
+            result = await _spider.async_get_torrents()
+            return _spider.is_error, result
+        finally:
             del _spider
 
     def refresh_torrents(self, site: dict,
-                         keyword: Optional[str] = None, cat: Optional[str] = None, page: Optional[int] = 0) -> Optional[List[TorrentInfo]]:
+                         keyword: Optional[str] = None,
+                         cat: Optional[str] = None,
+                         page: Optional[int] = 0) -> Optional[List[TorrentInfo]]:
         """
         获取站点最新一页的种子，多个站点需要多线程处理
         :param site:  站点
