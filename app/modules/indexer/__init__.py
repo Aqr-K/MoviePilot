@@ -164,7 +164,7 @@ class IndexerModule(_ModuleBase):
         """
 
         # 索引结果
-        result_array = []
+        result = []
         # 开始计时
         start_time = datetime.now()
         # 错误标志
@@ -232,7 +232,7 @@ class IndexerModule(_ModuleBase):
         # 返回结果
         return self.__parse_result(
             site=site,
-            result_array=result_array,
+            result_array=result,
             seconds=seconds
         )
 
@@ -252,7 +252,7 @@ class IndexerModule(_ModuleBase):
         """
 
         # 索引结果
-        result_array = []
+        result = []
         # 开始计时
         start_time = datetime.now()
         # 错误标志
@@ -320,7 +320,7 @@ class IndexerModule(_ModuleBase):
         # 返回结果
         return self.__parse_result(
             site=site,
-            result_array=result_array,
+            result_array=result,
             seconds=seconds
         )
 
