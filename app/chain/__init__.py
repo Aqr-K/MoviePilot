@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
+from fastapi.concurrency import run_in_threadpool
+
 import aiofiles
 from aiopath import AsyncPath
 from qbittorrentapi import TorrentFilesList
@@ -216,13 +218,15 @@ class ChainBase(metaclass=ABCMeta):
                             if inspect.iscoroutinefunction(func):
                                 result = await func(*args, **kwargs)
                             else:
-                                result = func(*args, **kwargs)
+                                # 插件同步函数在异步环境中运行，避免阻塞
+                                result = await run_in_threadpool(func, *args, **kwargs)
                         elif isinstance(result, list):
                             # 返回为列表，有多个模块运行结果时进行合并
                             if inspect.iscoroutinefunction(func):
                                 temp = await func(*args, **kwargs)
                             else:
-                                temp = func(*args, **kwargs)
+                                # 插件同步函数在异步环境中运行，避免阻塞
+                                temp = await run_in_threadpool(func, *args, **kwargs)
                             if isinstance(temp, list):
                                 result.extend(temp)
                         else:

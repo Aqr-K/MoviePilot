@@ -145,7 +145,7 @@ async def update_subscribe_status(
         "state": state
     })
     # 发送订阅调整事件
-    eventmanager.async_send_event(EventType.SubscribeModified, {
+    await eventmanager.async_send_event(EventType.SubscribeModified, {
         "subscribe_id": subscribe.id,
         "old_subscribe_info": old_subscribe_dict,
         "subscribe_info": subscribe.to_dict(),
@@ -224,7 +224,7 @@ async def reset_subscribes(
             "state": "R"
         })
         # 发送订阅调整事件
-        eventmanager.async_send_event(EventType.SubscribeModified, {
+        await eventmanager.async_send_event(EventType.SubscribeModified, {
             "subscribe_id": subscribe.id,
             "old_subscribe_info": old_subscribe_dict,
             "subscribe_info": subscribe.to_dict(),
@@ -313,7 +313,7 @@ async def delete_subscribe_by_mediaid(
     for subscribe in delete_subscribes:
         await Subscribe.async_delete(db, subscribe.id)
         # 发送事件
-        eventmanager.async_send_event(EventType.SubscribeDeleted, {
+        await eventmanager.async_send_event(EventType.SubscribeDeleted, {
             "subscribe_id": subscribe.id,
             "subscribe_info": subscribe.to_dict()
         })
@@ -596,7 +596,7 @@ async def delete_subscribe(
     if subscribe:
         await Subscribe.async_delete(db, subscribe_id)
         # 发送事件
-        eventmanager.async_send_event(EventType.SubscribeDeleted, {
+        await eventmanager.async_send_event(EventType.SubscribeDeleted, {
             "subscribe_id": subscribe_id,
             "subscribe_info": subscribe.to_dict()
         })
