@@ -922,6 +922,85 @@ class ChainBase(metaclass=ABCMeta):
         self.messagequeue.send_message("post_message", message=message,
                                        immediately=True if message.userid else False)
 
+    async def async_post_message(self,
+                     message: Optional[Notification] = None,
+                     meta: Optional[MetaBase] = None,
+                     mediainfo: Optional[MediaInfo] = None,
+                     torrentinfo: Optional[TorrentInfo] = None,
+                     transferinfo: Optional[TransferInfo] = None,
+                     **kwargs) -> None:
+        """
+        异步发送消息
+        :param message:  Notification实例
+        :param meta:  元数据
+        :param mediainfo:  媒体信息
+        :param torrentinfo:  种子信息
+        :param transferinfo:  文件整理信息
+        :param kwargs:  其他参数(覆盖业务对象属性值)
+        :return: 成功或失败
+        """
+        # 渲染消息
+        message = MessageTemplateHelper.render(message=message, meta=meta, mediainfo=mediainfo,
+                                               torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
+        # 保存消息
+        self.messagehelper.put(message, role="user", title=message.title)
+        await self.messageoper.async_add(**message.dict())
+        # 发送消息按设置隔离
+        if not message.userid and message.mtype:
+            # 消息隔离设置
+            notify_action = ServiceConfigHelper.get_notification_switch(message.mtype)
+            if notify_action:
+                # 'admin' 'user,admin' 'user' 'all'
+                actions = notify_action.split(",")
+                # 是否已发送管理员标志
+                admin_sended = False
+                send_orignal = False
+                useroper = UserOper()
+                for action in actions:
+                    send_message = copy.deepcopy(message)
+                    if action == "admin" and not admin_sended:
+                        # 仅发送管理员
+                        logger.info(f"{send_message.mtype} 的消息已设置发送给管理员")
+                        # 读取管理员消息IDS
+                        send_message.targets = useroper.get_settings(settings.SUPERUSER)
+                        admin_sended = True
+                    elif action == "user" and send_message.username:
+                        # 发送对应用户
+                        logger.info(f"{send_message.mtype} 的消息已设置发送给用户 {send_message.username}")
+                        # 读取用户消息IDS
+                        send_message.targets = useroper.get_settings(send_message.username)
+                        if send_message.targets is None:
+                            # 没有找到用户
+                            if not admin_sended:
+                                # 回滚发送管理员
+                                logger.info(f"用户 {send_message.username} 不存在，消息将发送给管理员")
+                                # 读取管理员消息IDS
+                                send_message.targets = useroper.get_settings(settings.SUPERUSER)
+                                admin_sended = True
+                            else:
+                                # 管理员发过了，此消息不发了
+                                logger.info(f"用户 {send_message.username} 不存在，消息无法发送到对应用户")
+                                continue
+                        elif send_message.username == settings.SUPERUSER:
+                            # 管理员同名已发送
+                            admin_sended = True
+                    else:
+                        # 按原消息发送全体
+                        if not admin_sended:
+                            send_orignal = True
+                        break
+                    # 按设定发送
+                    await self.eventmanager.async_send_event(etype=EventType.NoticeMessage,
+                                                 data={**send_message.dict(), "type": send_message.mtype})
+                    await self.messagequeue.async_send_message("post_message", message=send_message)
+                if not send_orignal:
+                    return
+        # 发送消息事件
+        await self.eventmanager.async_send_event(etype=EventType.NoticeMessage, data={**message.dict(), "type": message.mtype})
+        # 按原消息发送
+        await self.messagequeue.async_send_message("post_message", message=message,
+                                       immediately=True if message.userid else False)
+
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """
         发送媒体信息选择列表
