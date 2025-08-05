@@ -24,7 +24,8 @@
 
 ## 安装使用
 
-访问官方Wiki：https://wiki.movie-pilot.org
+官方Wiki：https://wiki.movie-pilot.org
+
 API文档：https://api.movie-pilot.org
 
 ## 参与开发
