@@ -122,7 +122,7 @@ class NonBlockingFileHandler:
     """
     _instance = None
     _lock = threading.Lock()
-    _rotating_handlers = {}  # 缓存RotatingFileHandler实例
+    _rotating_handlers = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -213,19 +213,16 @@ class NonBlockingFileHandler:
             # 获取RotatingFileHandler实例
             handler = NonBlockingFileHandler()._get_rotating_handler(entry.file_path)
 
-            # 格式化时间戳
-            timestamp = entry.timestamp.strftime('%Y-%m-%d %H:%M:%S,') + f"{entry.timestamp.microsecond // 1000:03d}"
-            line = f"【{entry.level.upper()}】{timestamp} - {entry.message}\n"
-
-            # 使用RotatingFileHandler的emit方法
+            # 使用RotatingFileHandler的emit方法，只传递原始消息
             handler.emit(logging.LogRecord(
                 name='',
                 level=getattr(logging, entry.level.upper(), logging.INFO),
                 pathname='',
                 lineno=0,
-                msg=line,
+                msg=entry.message,
                 args=(),
-                exc_info=None
+                exc_info=None,
+                created=entry.timestamp.timestamp()
             ))
         except Exception as e:
             # 如果文件写入失败，至少输出到控制台
@@ -276,18 +273,16 @@ class NonBlockingFileHandler:
 
                 # 批量写入
                 for entry in entries:
-                    timestamp = entry.timestamp.strftime(
-                        '%Y-%m-%d %H:%M:%S,') + f"{entry.timestamp.microsecond // 1000:03d}"
-                    line = f"【{entry.level.upper()}】{timestamp} - {entry.message}\n"
-                    # 使用RotatingFileHandler的emit方法
+                    # 使用RotatingFileHandler的emit方法，只传递原始消息
                     handler.emit(logging.LogRecord(
                         name='',
                         level=getattr(logging, entry.level.upper(), logging.INFO),
                         pathname='',
                         lineno=0,
-                        msg=line,
+                        msg=entry.message,
                         args=(),
-                        exc_info=None
+                        exc_info=None,
+                        created=entry.timestamp.timestamp()
                     ))
             except Exception as e:
                 print(f"批量写入失败 {file_path}: {e}")
