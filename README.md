@@ -26,11 +26,11 @@
 
 官方Wiki：https://wiki.movie-pilot.org
 
-API文档：https://api.movie-pilot.org
-
 ## 参与开发
 
-需要 `Python 3.12`、`Node JS v20.12.1`
+API文档：https://api.movie-pilot.org
+
+本地运行需要 `Python 3.12`、`Node JS v20.12.1`
 
 - 克隆主项目 [MoviePilot](https://github.com/jxxghp/MoviePilot) 
 ```shell
