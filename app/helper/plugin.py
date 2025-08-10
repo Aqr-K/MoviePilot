@@ -584,7 +584,8 @@ class PluginHelper(metaclass=WeakSingleton):
 
     def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
-        通过 GitHub Release 源码压缩包安装插件，仅提取 plugins(.vX)/{pid} 目录
+        通过 GitHub Release 源码压缩包安装插件。
+        最新规范：zip 包根目录（第一层）即为插件文件，将其全部解压到 app/plugins/{pid}
         :param pid: 插件 ID（小写）
         :param user_repo: "user/repo"
         :param release_tag: Release 的 tag 名称
@@ -599,24 +600,26 @@ class PluginHelper(metaclass=WeakSingleton):
                 namelist = zf.namelist()
                 if not namelist:
                     return False, "压缩包内容为空"
-                root_prefix = namelist[0].split('/')[0]
-                target_prefix = f"{root_prefix}/{pid.lower()}/"
-
-                if not any(name.startswith(target_prefix) for name in namelist):
-                    return False, f"压缩包中未找到 {pid.lower()} 目录"
+                root_prefix = namelist[0].split('/')[0] + '/'
 
                 dest_base = Path(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
+                extracted_any = False
                 for name in namelist:
-                    if not name.startswith(target_prefix):
+                    if not name.startswith(root_prefix):
                         continue
-                    rel_path = name[len(target_prefix):]
-                    if not rel_path or rel_path.endswith('/'):
-                        (dest_base / rel_path).mkdir(parents=True, exist_ok=True)
+                    rel_path = name[len(root_prefix):]
+                    if not rel_path:
+                        continue
+                    if rel_path.endswith('/'):
+                        (dest_base / rel_path.rstrip('/')).mkdir(parents=True, exist_ok=True)
                         continue
                     dest_path = dest_base / rel_path
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
                     with zf.open(name, 'r') as src, open(dest_path, 'wb') as dst:
                         dst.write(src.read())
+                    extracted_any = True
+                if not extracted_any:
+                    return False, "压缩包中未找到有效文件"
             return True, ""
         except Exception as e:
             logger.error(f"解压 Release 压缩包失败：{e}")
@@ -1468,7 +1471,8 @@ class PluginHelper(metaclass=WeakSingleton):
 
     async def __async_install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
-        通过 GitHub Release 源码压缩包安装插件，仅提取 plugins(.vX)/{pid} 目录（异步）
+        通过 GitHub Release 源码压缩包安装插件（异步）。
+        最新规范：zip 包根目录（第一层）即为插件文件，将其全部解压到 app/plugins/{pid}
         """
         zip_url = f"https://codeload.github.com/{user_repo}/zip/refs/tags/{release_tag}"
         res = await self.__async_request_with_fallback(zip_url, headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
@@ -1480,19 +1484,18 @@ class PluginHelper(metaclass=WeakSingleton):
                 namelist = zf.namelist()
                 if not namelist:
                     return False, "压缩包内容为空"
-                root_prefix = namelist[0].split('/')[0]
-                target_prefix = f"{root_prefix}{pid.lower()}/"
-
-                if not any(name.startswith(target_prefix) for name in namelist):
-                    return False, f"压缩包中未找到 {pid.lower()} 目录"
+                root_prefix = namelist[0].split('/')[0] + '/'
 
                 dest_base = AsyncPath(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
+                extracted_any = False
                 for name in namelist:
-                    if not name.startswith(target_prefix):
+                    if not name.startswith(root_prefix):
                         continue
-                    rel_path = name[len(target_prefix):]
-                    if not rel_path or rel_path.endswith('/'):
-                        await (dest_base / rel_path).mkdir(parents=True, exist_ok=True)
+                    rel_path = name[len(root_prefix):]
+                    if not rel_path:
+                        continue
+                    if rel_path.endswith('/'):
+                        await (dest_base / rel_path.rstrip('/')).mkdir(parents=True, exist_ok=True)
                         continue
                     dest_path = dest_base / rel_path
                     await dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1500,6 +1503,9 @@ class PluginHelper(metaclass=WeakSingleton):
                         data = src.read()
                     async with aiofiles.open(dest_path, 'wb') as dst:
                         await dst.write(data)
+                    extracted_any = True
+                if not extracted_any:
+                    return False, "压缩包中未找到有效文件"
             return True, ""
         except Exception as e:
             logger.error(f"解压 Release 压缩包失败：{e}")
