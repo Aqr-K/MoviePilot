@@ -584,30 +584,57 @@ class PluginHelper(metaclass=WeakSingleton):
 
     def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
-        通过 GitHub Release 源码压缩包安装插件。
-        最新规范：zip 包根目录（第一层）即为插件文件，将其全部解压到 app/plugins/{pid}
-        :param pid: 插件 ID（小写）
-        :param user_repo: "user/repo"
-        :param release_tag: Release 的 tag 名称
+        通过 GitHub Release 资产文件安装插件。
+        规范：release 中存在名为 "{pid}_v{version}.zip" 的资产，zip 根即插件文件；
+        将其全部解压到 app/plugins/{pid}
         """
-        zip_url = f"https://codeload.github.com/{user_repo}/zip/refs/tags/{release_tag}"
-        res = self.__request_with_fallback(zip_url, headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
+        # 拼接资产文件名
+        asset_name = f"{release_tag.lower()}.zip"
+
+        release_api = f"https://api.github.com/repos/{user_repo}/releases/tags/{release_tag}"
+        rel_res = self.__request_with_fallback(
+            release_api,
+            headers=settings.REPO_GITHUB_HEADERS(repo=user_repo),
+            timeout=30,
+            is_api=True,
+        )
+        if rel_res is None or rel_res.status_code != 200:
+            return False, f"获取 Release 信息失败：{rel_res.status_code if rel_res else '连接失败'}"
+
+        try:
+            rel_json = rel_res.json()
+            assets = rel_json.get("assets") or []
+            asset = next((a for a in assets if a.get("name") == asset_name), None)
+            if not asset:
+                return False, f"未找到资产文件：{asset_name}"
+            download_url = asset.get("browser_download_url")
+            if not download_url:
+                return False, "资产缺少下载地址"
+        except Exception as e:
+            logger.error(f"解析 Release 信息失败：{e}")
+            return False, f"解析 Release 信息失败：{e}"
+
+        res = self.__request_with_fallback(download_url, headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
         if res is None or res.status_code != 200:
-            return False, f"下载 Release 压缩包失败：{res.status_code if res else '连接失败'}"
+            return False, f"下载资产失败：{res.status_code if res else '连接失败'}"
 
         try:
             with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
                 namelist = zf.namelist()
                 if not namelist:
                     return False, "压缩包内容为空"
-                root_prefix = namelist[0].split('/')[0] + '/'
+                # 若所有条目均在同一顶层目录下（如 pid/），则剥离这一层，避免出现双层目录
+                names_with_slash = [n for n in namelist if '/' in n]
+                base_prefix = ''
+                if names_with_slash and len(names_with_slash) == len(namelist):
+                    first_seg = names_with_slash[0].split('/')[0]
+                    if all(n.startswith(first_seg + '/') for n in namelist):
+                        base_prefix = first_seg + '/'
 
                 dest_base = Path(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
-                extracted_any = False
+                wrote_any = False
                 for name in namelist:
-                    if not name.startswith(root_prefix):
-                        continue
-                    rel_path = name[len(root_prefix):]
+                    rel_path = name[len(base_prefix):]
                     if not rel_path:
                         continue
                     if rel_path.endswith('/'):
@@ -617,9 +644,9 @@ class PluginHelper(metaclass=WeakSingleton):
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
                     with zf.open(name, 'r') as src, open(dest_path, 'wb') as dst:
                         dst.write(src.read())
-                    extracted_any = True
-                if not extracted_any:
-                    return False, "压缩包中未找到有效文件"
+                    wrote_any = True
+                if not wrote_any:
+                    return False, "压缩包中无可写入文件"
             return True, ""
         except Exception as e:
             logger.error(f"解压 Release 压缩包失败：{e}")
@@ -1471,27 +1498,56 @@ class PluginHelper(metaclass=WeakSingleton):
 
     async def __async_install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
-        通过 GitHub Release 源码压缩包安装插件（异步）。
-        最新规范：zip 包根目录（第一层）即为插件文件，将其全部解压到 app/plugins/{pid}
+        通过 GitHub Release 资产文件安装插件（异步）。
+        规范：release 中存在名为 "{pid}_v{version}.zip" 的资产，zip 根即插件文件；
+        将其全部解压到 app/plugins/{pid}
         """
-        zip_url = f"https://codeload.github.com/{user_repo}/zip/refs/tags/{release_tag}"
-        res = await self.__async_request_with_fallback(zip_url, headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
+        # 拼接资产文件名
+        asset_name = f"{release_tag.lower()}.zip"
+
+        release_api = f"https://api.github.com/repos/{user_repo}/releases/tags/{release_tag}"
+        rel_res = await self.__async_request_with_fallback(
+            release_api,
+            headers=settings.REPO_GITHUB_HEADERS(repo=user_repo),
+            timeout=30,
+            is_api=True,
+        )
+        if rel_res is None or rel_res.status_code != 200:
+            return False, f"获取 Release 信息失败：{rel_res.status_code if rel_res else '连接失败'}"
+
+        try:
+            rel_json = rel_res.json()
+            assets = rel_json.get("assets") or []
+            asset = next((a for a in assets if a.get("name") == asset_name), None)
+            if not asset:
+                return False, f"未找到资产文件：{asset_name}"
+            download_url = asset.get("browser_download_url")
+            if not download_url:
+                return False, "资产缺少下载地址"
+        except Exception as e:
+            logger.error(f"解析 Release 信息失败：{e}")
+            return False, f"解析 Release 信息失败：{e}"
+
+        res = await self.__async_request_with_fallback(download_url, headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
         if res is None or res.status_code != 200:
-            return False, f"下载 Release 压缩包失败：{res.status_code if res else '连接失败'}"
+            return False, f"下载资产失败：{res.status_code if res else '连接失败'}"
 
         try:
             with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
                 namelist = zf.namelist()
                 if not namelist:
                     return False, "压缩包内容为空"
-                root_prefix = namelist[0].split('/')[0] + '/'
+                names_with_slash = [n for n in namelist if '/' in n]
+                base_prefix = ''
+                if names_with_slash and len(names_with_slash) == len(namelist):
+                    first_seg = names_with_slash[0].split('/')[0]
+                    if all(n.startswith(first_seg + '/') for n in namelist):
+                        base_prefix = first_seg + '/'
 
                 dest_base = AsyncPath(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
-                extracted_any = False
+                wrote_any = False
                 for name in namelist:
-                    if not name.startswith(root_prefix):
-                        continue
-                    rel_path = name[len(root_prefix):]
+                    rel_path = name[len(base_prefix):]
                     if not rel_path:
                         continue
                     if rel_path.endswith('/'):
@@ -1503,9 +1559,9 @@ class PluginHelper(metaclass=WeakSingleton):
                         data = src.read()
                     async with aiofiles.open(dest_path, 'wb') as dst:
                         await dst.write(data)
-                    extracted_any = True
-                if not extracted_any:
-                    return False, "压缩包中未找到有效文件"
+                    wrote_any = True
+                if not wrote_any:
+                    return False, "压缩包中无可写入文件"
             return True, ""
         except Exception as e:
             logger.error(f"解压 Release 压缩包失败：{e}")
