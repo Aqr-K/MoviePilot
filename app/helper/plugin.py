@@ -237,9 +237,18 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.debug(f"{pid} 从 package.{package_version}.json 中找到适用于当前版本的插件")
 
         # 2. 决定安装方式（release 或 文件列表）并执行统一安装流程
-        release_tag = self.__get_release_tag(pid, repo_url, package_version)
-        if release_tag:
-            # 如果 release_tag 存在，说明插件有发布版本
+        meta = self.__get_plugin_meta(pid, repo_url, package_version)
+        # 是否release打包
+        is_release = meta.get("release")
+        # 插件版本号
+        plugin_version = meta.get("version")
+        if is_release:
+            # 使用 插件ID_插件版本号 作为 Release tag
+            if not plugin_version:
+                return False, f"未在插件清单中找到 {pid} 的版本号，无法进行 Release 安装"
+            # 拼接 release_tag
+            release_tag = f"{pid}_v{plugin_version}"
+            # 使用 release 进行安装
             def prepare_release() -> Tuple[bool, str]:
                 return self.__install_from_release(
                     pid.lower(), user_repo, package_version if package_version else None, release_tag
@@ -523,20 +532,18 @@ class PluginHelper(metaclass=WeakSingleton):
         logger.error(f"[GitHub] 所有策略均请求失败，URL: {url}，请检查网络连接或 GitHub 配置")
         return None
 
-    def __get_release_tag(self, pid: str, repo_url: str, package_version: Optional[str]) -> Optional[str]:
-        """
-        解析插件在 package(.vX).json 中声明的 release 标签，若版本清单缺失则回退全局 package.json
-        """
+    def __get_plugin_meta(self, pid: str, repo_url: str,
+                           package_version: Optional[str]) -> dict:
         try:
-            meta = (
-                (self.get_plugins(repo_url) or {}).get(pid)
-                if not package_version
-                else (self.get_plugins(repo_url, package_version) or {}).get(pid)
-            )
-            return meta.get("release") if isinstance(meta, dict) else None
+            plugins = (
+                self.get_plugins(repo_url) if not package_version
+                else self.get_plugins(repo_url, package_version)
+            ) or {}
+            meta = plugins.get(pid)
+            return meta if isinstance(meta, dict) else {}
         except Exception as e:
-            logger.warn(f"获取插件 {pid} Release 标签失败：{e}")
-            return None
+            logger.error(f"获取插件 {pid} 元数据失败：{e}")
+            return {}
 
     def __install_flow_sync(self, pid_lower: str, force_install: bool,
                             prepare_content: Callable[[], Tuple[bool, str]]) -> Tuple[bool, str]:
@@ -595,12 +602,11 @@ class PluginHelper(metaclass=WeakSingleton):
                 namelist = zf.namelist()
                 if not namelist:
                     return False, "压缩包内容为空"
-                root_prefix = namelist[0].split('/')[0] + '/'
-                plugins_dir_name = "plugins" + (f".{package_version}" if package_version else "")
-                target_prefix = f"{root_prefix}{plugins_dir_name}/{pid.lower()}/"
+                root_prefix = namelist[0].split('/')[0]
+                target_prefix = f"{root_prefix}/{pid.lower()}/"
 
                 if not any(name.startswith(target_prefix) for name in namelist):
-                    return False, f"压缩包中未找到 {plugins_dir_name}/{pid} 目录"
+                    return False, f"压缩包中未找到 {pid.lower()} 目录"
 
                 dest_base = Path(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
                 for name in namelist:
@@ -1350,9 +1356,18 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.debug(f"{pid} 从 package.{package_version}.json 中找到适用于当前版本的插件")
 
         # 2. 统一异步安装流程（release 或 文件列表）
-        release_tag = await self.__async_get_release_tag(pid, repo_url, package_version)
-        if release_tag:
-            # 如果获取到 release_tag，则使用 Release 安装方式
+        meta = await self.__async_get_plugin_meta(pid, repo_url, package_version)
+        # 是否release打包
+        is_release = meta.get("release")
+        # 插件版本号
+        plugin_version = meta.get("version")
+        if is_release:
+            # 使用 插件ID_插件版本号 作为 Release tag
+            if not plugin_version:
+                return False, f"未在插件清单中找到 {pid} 的版本号，无法进行 Release 安装"
+            # 拼接 release_tag
+            release_tag = f"{pid}_v{plugin_version}"
+            # 使用 release 进行安装
             async def prepare_release() -> Tuple[bool, str]:
                 return await self.__async_install_from_release(
                     pid.lower(), user_repo, package_version if package_version else None, release_tag
@@ -1366,21 +1381,18 @@ class PluginHelper(metaclass=WeakSingleton):
 
             return await self.__install_flow_async(pid.lower(), force_install, prepare_filelist)
 
-    async def __async_get_release_tag(self, pid: str, repo_url: str,
-                                      package_version: Optional[str]) -> Optional[str]:
-        """
-        异步获取插件的 Release 标签
-        """
+    async def __async_get_plugin_meta(self, pid: str, repo_url: str,
+                                      package_version: Optional[str]) -> dict:
         try:
-            meta = (
-                (await self.async_get_plugins(repo_url) or {}).get(pid)
-                if package_version == ""
-                else (await self.async_get_plugins(repo_url, package_version) or {}).get(pid)
-            )
-            return meta.get("release") if isinstance(meta, dict) else None
+            plugins = (
+                await self.async_get_plugins(repo_url) if not package_version
+                else await self.async_get_plugins(repo_url, package_version)
+            ) or {}
+            meta = plugins.get(pid)
+            return meta if isinstance(meta, dict) else {}
         except Exception as e:
-            logger.warn(f"获取插件 {pid} Release 标签失败：{e}")
-            return None
+            logger.warn(f"获取插件 {pid} 元数据失败：{e}")
+            return {}
 
     async def __install_flow_async(self, pid_lower: str, force_install: bool,
                                    prepare_content: Callable[[], Awaitable[Tuple[bool, str]]]) -> Tuple[bool, str]:
@@ -1474,12 +1486,11 @@ class PluginHelper(metaclass=WeakSingleton):
                 namelist = zf.namelist()
                 if not namelist:
                     return False, "压缩包内容为空"
-                root_prefix = namelist[0].split('/')[0] + '/'
-                plugins_dir_name = "plugins" + (f".{package_version}" if package_version else "")
-                target_prefix = f"{root_prefix}{plugins_dir_name}/{pid.lower()}/"
+                root_prefix = namelist[0].split('/')[0]
+                target_prefix = f"{root_prefix}{pid.lower()}/"
 
                 if not any(name.startswith(target_prefix) for name in namelist):
-                    return False, f"压缩包中未找到 {plugins_dir_name}/{pid} 目录"
+                    return False, f"压缩包中未找到 {pid.lower()} 目录"
 
                 dest_base = AsyncPath(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
                 for name in namelist:
