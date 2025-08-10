@@ -251,7 +251,7 @@ class PluginHelper(metaclass=WeakSingleton):
             # 使用 release 进行安装
             def prepare_release() -> Tuple[bool, str]:
                 return self.__install_from_release(
-                    pid.lower(), user_repo, package_version if package_version else None, release_tag
+                    pid.lower(), user_repo, release_tag
                 )
 
             return self.__install_flow_sync(pid.lower(), force_install, prepare_release)
@@ -582,14 +582,11 @@ class PluginHelper(metaclass=WeakSingleton):
         self.install_reg(pid_lower)
         return True, ""
 
-    def __install_from_release(self, pid: str, user_repo: str,
-                               package_version: Optional[str],
-                               release_tag: str) -> Tuple[bool, str]:
+    def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
         通过 GitHub Release 源码压缩包安装插件，仅提取 plugins(.vX)/{pid} 目录
         :param pid: 插件 ID（小写）
         :param user_repo: "user/repo"
-        :param package_version: 版本标识，如 "v2"，为空表示 v1
         :param release_tag: Release 的 tag 名称
         """
         zip_url = f"https://codeload.github.com/{user_repo}/zip/refs/tags/{release_tag}"
@@ -1104,8 +1101,7 @@ class PluginHelper(metaclass=WeakSingleton):
 
         return str(backup_dir) if await backup_dir.exists() else None
 
-    @staticmethod
-    async def __async_restore_plugin(pid: str, backup_dir: str):
+    async def __async_restore_plugin(self, pid: str, backup_dir: str):
         """
         异步还原旧插件目录
         :param pid: 插件 ID
@@ -1118,7 +1114,7 @@ class PluginHelper(metaclass=WeakSingleton):
 
         backup_path = AsyncPath(backup_dir)
         if await backup_path.exists():
-            await PluginHelper._async_copytree(backup_path, plugin_dir)
+            await self._async_copytree(src=backup_path, dst=plugin_dir)
             logger.debug(f"{pid} 已还原插件目录 {plugin_dir}")
             await aioshutil.rmtree(backup_path, ignore_errors=True)
             logger.debug(f"{pid} 已删除备份目录 {backup_dir}")
@@ -1370,7 +1366,7 @@ class PluginHelper(metaclass=WeakSingleton):
             # 使用 release 进行安装
             async def prepare_release() -> Tuple[bool, str]:
                 return await self.__async_install_from_release(
-                    pid.lower(), user_repo, package_version if package_version else None, release_tag
+                    pid.lower(), user_repo, release_tag
                 )
 
             return await self.__install_flow_async(pid.lower(), force_install, prepare_release)
@@ -1470,9 +1466,7 @@ class PluginHelper(metaclass=WeakSingleton):
             return False, m
         return True, ""
 
-    async def __async_install_from_release(self, pid: str, user_repo: str,
-                                           package_version: Optional[str],
-                                           release_tag: str) -> Tuple[bool, str]:
+    async def __async_install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
         通过 GitHub Release 源码压缩包安装插件，仅提取 plugins(.vX)/{pid} 目录（异步）
         """
