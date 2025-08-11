@@ -99,7 +99,6 @@ class PlaywrightHelper:
                         proxy_url = None
                         if proxies and isinstance(proxies, dict):
                             proxy_url = proxies.get("server")
-                        proxy_url = proxy_url or settings.PROXY_HOST
                         solution = self.__flaresolverr_request(url=url, cookies=cookies,
                                                                proxy_url=proxy_url, timeout=timeout)
                         if solution:
@@ -161,7 +160,6 @@ class PlaywrightHelper:
                 proxy_url = None
                 if proxies and isinstance(proxies, dict):
                     proxy_url = proxies.get("server")
-                proxy_url = proxy_url or settings.PROXY_HOST
                 solution = self.__flaresolverr_request(url=url, cookies=cookies,
                                                        proxy_url=proxy_url, timeout=timeout)
                 if solution:
