@@ -143,7 +143,7 @@ class PlaywrightHelper:
                         ua: Optional[str] = None,
                         proxies: Optional[dict] = None,
                         headless: Optional[bool] = False,
-                        timeout: Optional[int] = 20) -> Optional[str]:
+                        timeout: Optional[int] = 30) -> Optional[str]:
         """
         获取网页源码
         :param url: 网页地址
