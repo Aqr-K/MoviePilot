@@ -404,10 +404,7 @@ class TmdbApi:
                 return int(match.group(1))
             except Exception:
                 return None
-        # 兜底：取最后段再取数字前缀
-        last = link.rsplit("/", 1)[-1]
-        num_match = re.match(r"^(\d+)", last)
-        return int(num_match.group(1)) if num_match else None
+        return None
 
     @staticmethod
     def __get_names(tmdb_info: dict) -> List[str]:
