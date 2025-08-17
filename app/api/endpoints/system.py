@@ -24,7 +24,8 @@ from app.core.module import ModuleManager
 from app.core.security import verify_apitoken, verify_resource_token, verify_token
 from app.db.models import User
 from app.db.systemconfig_oper import SystemConfigOper
-from app.db.user_oper import get_current_active_superuser, get_current_active_superuser_async
+from app.db.user_oper import get_current_active_superuser, get_current_active_superuser_async, \
+    get_current_active_user_async
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
@@ -203,7 +204,7 @@ def get_global_setting(token: str):
 
 
 @router.get("/env", summary="查询系统配置", response_model=schemas.Response)
-async def get_env_setting(_: User = Depends(get_current_active_superuser_async)):
+async def get_env_setting(_: User = Depends(get_current_active_user_async)):
     """
     查询系统环境变量，包括当前版本号（仅管理员）
     """
@@ -282,7 +283,7 @@ async def get_progress(request: Request, process_type: str, _: schemas.TokenPayl
 
 @router.get("/setting/{key}", summary="查询系统设置", response_model=schemas.Response)
 async def get_setting(key: str,
-                      _: User = Depends(get_current_active_superuser_async)):
+                      _: User = Depends(get_current_active_user_async)):
     """
     查询系统设置（仅管理员）
     """
