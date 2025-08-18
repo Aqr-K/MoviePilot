@@ -244,10 +244,9 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         exit 1
     fi
     
-    # 定义PostgreSQL命令执行函数
-    pg_exec() {
-        su -s /bin/bash moviepilot -c "cd /tmp && PATH='${POSTGRESQL_BIN_DIR}:\$PATH' $*"
-    }
+    # 设置PATH环境变量，加入PostgreSQL命令路径
+    export PATH="${POSTGRESQL_BIN_DIR}:${PATH}"
+    INFO "设置PATH环境变量: ${PATH}"
     
     # 使用配置目录下的postgresql子目录作为数据目录
     POSTGRESQL_DATA_DIR="${CONFIG_DIR}/postgresql"
@@ -264,7 +263,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         chown -R moviepilot:moviepilot "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
 
         INFO "执行 initdb 命令..."
-        pg_exec "initdb -D '${POSTGRESQL_DATA_DIR}'"
+        gosu moviepilot:moviepilot initdb -D "${POSTGRESQL_DATA_DIR}"
         
         # 配置PostgreSQL
         INFO "复制PostgreSQL配置文件..."
@@ -282,7 +281,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     fi
     
     # 启动PostgreSQL服务
-    if ! pg_exec "pg_ctl -D '${POSTGRESQL_DATA_DIR}' -l '${POSTGRESQL_LOG_DIR}/postgresql.log' start"; then
+    if ! gosu moviepilot:moviepilot pg_ctl -D "${POSTGRESQL_DATA_DIR}" -l "${POSTGRESQL_LOG_DIR}/postgresql.log" start; then
         ERROR "PostgreSQL 服务启动失败！"
         ERROR "请检查日志文件: ${POSTGRESQL_LOG_DIR}/postgresql.log"
         if [ -f "${POSTGRESQL_LOG_DIR}/postgresql.log" ]; then
@@ -297,7 +296,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     # 等待PostgreSQL启动
     INFO "等待PostgreSQL服务启动..."
     local wait_count=0
-    until pg_exec "pg_isready -h localhost -p ${DB_POSTGRESQL_PORT:-5432}"; do
+    until gosu moviepilot:moviepilot pg_isready -h localhost -p "${DB_POSTGRESQL_PORT:-5432}"; do
         sleep 1
         wait_count=$((wait_count + 1))
         if [ $wait_count -gt 30 ]; then
@@ -312,9 +311,9 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     
     # 创建数据库和用户
     INFO "创建PostgreSQL数据库和用户..."
-    pg_exec "psql -h localhost -p ${DB_POSTGRESQL_PORT:-5432} -U postgres -c \"CREATE USER ${DB_POSTGRESQL_USERNAME:-moviepilot} WITH PASSWORD '${DB_POSTGRESQL_PASSWORD:-moviepilot}';\" 2>/dev/null || true"
-    pg_exec "psql -h localhost -p ${DB_POSTGRESQL_PORT:-5432} -U postgres -c \"CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
-    pg_exec "psql -h localhost -p ${DB_POSTGRESQL_PORT:-5432} -U postgres -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
+    gosu moviepilot:moviepilot psql -h localhost -p "${DB_POSTGRESQL_PORT:-5432}" -U postgres -c "CREATE USER ${DB_POSTGRESQL_USERNAME:-moviepilot} WITH PASSWORD '${DB_POSTGRESQL_PASSWORD:-moviepilot}';" 2>/dev/null || true
+    gosu moviepilot:moviepilot psql -h localhost -p "${DB_POSTGRESQL_PORT:-5432}" -U postgres -c "CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};" 2>/dev/null || true
+    gosu moviepilot:moviepilot psql -h localhost -p "${DB_POSTGRESQL_PORT:-5432}" -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};" 2>/dev/null || true
     
     INFO "PostgreSQL服务启动完成"
 fi
