@@ -3,7 +3,7 @@
 
 # Connection and Authentication
 listen_addresses = '*'
-port = ${DB_POSTGRESQL_PORT:-5432}
+port = ${DB_POSTGRESQL_PORT}
 max_connections = 100
 
 # Memory Configuration

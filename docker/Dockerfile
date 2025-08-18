@@ -68,7 +68,6 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && cp -f /app/docker/update.sh /usr/local/bin/mp_update.sh \
     && cp -f /app/docker/entrypoint.sh /entrypoint.sh \
     && cp -f /app/docker/docker_http_proxy.conf /etc/nginx/docker_http_proxy.conf \
-    && cp -f /app/docker/postgresql/pg_hba.conf /app/docker/postgresql/pg_hba.conf.template \
     && chmod +x /entrypoint.sh /usr/local/bin/mp_update.sh \
     && mkdir -p ${HOME} \
     && groupadd -r moviepilot -g 918 \
@@ -78,6 +77,7 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && echo 'fs.inotify.max_user_watches=5242880' >> /etc/sysctl.conf \
     && echo 'fs.inotify.max_user_instances=5242880' >> /etc/sysctl.conf \
     && locale-gen zh_CN.UTF-8 \
+    && for cmd in /usr/lib/postgresql/*/bin/*; do ln -sf "$cmd" /usr/local/bin/; done \
     && FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/version.py) \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Frontend/releases/download/${FRONTEND_VERSION}/dist.zip" | busybox unzip -d / - \
     && mv /dist /public \

@@ -222,19 +222,13 @@ chown -R moviepilot:moviepilot \
     /var/log/nginx
 chown moviepilot:moviepilot /etc/hosts /tmp
 
-# 如果使用PostgreSQL，确保数据目录权限正确
-if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
-    POSTGRESQL_DATA_DIR="${CONFIG_DIR}/postgresql"
-    POSTGRESQL_LOG_DIR="${CONFIG_DIR}/postgresql/logs"
-    mkdir -p "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
-    chown -R postgres:postgres "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
-fi
 # 下载浏览器内核
 if [[ "$HTTPS_PROXY" =~ ^https?:// ]] || [[ "$HTTPS_PROXY" =~ ^https?:// ]] || [[ "$PROXY_HOST" =~ ^https?:// ]]; then
   HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$PROXY_HOST}}" gosu moviepilot:moviepilot playwright install chromium
 else
   gosu moviepilot:moviepilot playwright install chromium
 fi
+
 # 启动PostgreSQL服务
 if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     INFO "→ 启动PostgreSQL服务..."
@@ -242,18 +236,29 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     # 使用配置目录下的postgresql子目录作为数据目录
     POSTGRESQL_DATA_DIR="${CONFIG_DIR}/postgresql"
     POSTGRESQL_LOG_DIR="${CONFIG_DIR}/postgresql/logs"
-    
-    # 创建PostgreSQL数据目录和日志目录
-    mkdir -p "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
+    INFO "数据目录: ${POSTGRESQL_DATA_DIR}"
+    INFO "日志目录: ${POSTGRESQL_LOG_DIR}"
     
     # 初始化PostgreSQL数据目录
-    if [ ! -f "${POSTGRESQL_DATA_DIR}/postgresql.conf" ]; then
+    if [ ! -f "${POSTGRESQL_DATA_DIR}/PG_VERSION" ]; then
         INFO "初始化PostgreSQL数据目录..."
+        
+        # 如果目录存在但不为空，清空它
+        if [ -d "${POSTGRESQL_DATA_DIR}" ] && [ "$(ls -A "${POSTGRESQL_DATA_DIR}")" ]; then
+            WARN "数据目录不为空，清空目录..."
+            rm -rf "${POSTGRESQL_DATA_DIR:?}"/*
+        fi
+        
+        # 确保日志目录存在
+        mkdir -p "${POSTGRESQL_LOG_DIR}"
+        
+        # 确保目录权限正确
         chown -R postgres:postgres "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
+        INFO "执行 initdb 命令..."
+        INFO "数据目录: ${POSTGRESQL_DATA_DIR}"
         su - postgres -c "initdb -D '${POSTGRESQL_DATA_DIR}'"
         
         # 配置PostgreSQL
-        # 复制PostgreSQL配置文件
         INFO "复制PostgreSQL配置文件..."
         cp /app/docker/postgresql/pg_hba.conf "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
         
@@ -265,13 +270,20 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         chown postgres:postgres "${POSTGRESQL_DATA_DIR}/pg_hba.conf" "${POSTGRESQL_DATA_DIR}/postgresql.conf"
         chmod 600 "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
         chmod 644 "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+    else
+        INFO "PostgreSQL数据目录已存在，跳过初始化..."
     fi
     
-    # 确保目录权限正确
-    chown -R postgres:postgres "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
-    
     # 启动PostgreSQL服务
-    su - postgres -c "pg_ctl -D '${POSTGRESQL_DATA_DIR}' -l '${POSTGRESQL_LOG_DIR}/postgresql.log' start"
+    if ! su - postgres -c "pg_ctl -D '${POSTGRESQL_DATA_DIR}' -l '${POSTGRESQL_LOG_DIR}/postgresql.log' start"; then
+        ERROR "PostgreSQL 服务启动失败！"
+        ERROR "请检查日志文件: ${POSTGRESQL_LOG_DIR}/postgresql.log"
+        if [ -f "${POSTGRESQL_LOG_DIR}/postgresql.log" ]; then
+            ERROR "PostgreSQL 日志内容:"
+            tail -20 "${POSTGRESQL_LOG_DIR}/postgresql.log"
+        fi
+        exit 1
+    fi
     
     # 等待PostgreSQL启动
     INFO "等待PostgreSQL服务启动..."
@@ -285,7 +297,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     su - postgres -c "psql -c \"CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
     su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
     
-    INFO "PostgreSQL服务启动完成，数据目录: ${POSTGRESQL_DATA_DIR}"
+    INFO "PostgreSQL服务启动完成"
 fi
 
 # 证书管理
