@@ -267,11 +267,11 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         
         # 配置PostgreSQL
         INFO "复制PostgreSQL配置文件..."
-        cp /app/docker/postgresql/pg_hba.conf "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
+        cp /app/docker/pg_hba.conf "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
         
         # 使用envsubst处理postgresql.conf模板
         export POSTGRESQL_LOG_DIR="${POSTGRESQL_LOG_DIR}"
-        envsubst '${DB_POSTGRESQL_PORT}${POSTGRESQL_LOG_DIR}' < /app/docker/postgresql/postgresql.conf.template > "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+        envsubst '${DB_POSTGRESQL_PORT}${POSTGRESQL_LOG_DIR}' < /app/docker/postgresql.conf.template > "${POSTGRESQL_DATA_DIR}/postgresql.conf"
         
         # 设置正确的权限
         chown postgres:postgres "${POSTGRESQL_DATA_DIR}/pg_hba.conf" "${POSTGRESQL_DATA_DIR}/postgresql.conf"
