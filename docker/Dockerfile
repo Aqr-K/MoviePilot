@@ -28,6 +28,9 @@ RUN apt-get update -y \
         rsync \
         ffmpeg \
         nano \
+        postgresql-client \
+        postgresql \
+        postgresql-contrib \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && \
     if [ "$(uname -m)" = "x86_64" ]; \
@@ -84,6 +87,6 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip" | busybox unzip -d /tmp - \
     && mv -f /tmp/MoviePilot-Resources-main/resources.v2/* /app/app/helper/ \
     && rm -rf /tmp/*
-EXPOSE 3000
+EXPOSE 3000 5432
 VOLUME [ "${CONFIG_DIR}" ]
 ENTRYPOINT [ "/entrypoint.sh" ]

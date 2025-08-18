@@ -82,10 +82,16 @@ class ConfigModel(BaseModel):
     PORT: int = 3001
     # 前端监听端口
     NGINX_PORT: int = 3000
+    # 配置文件目录
+    CONFIG_DIR: Optional[str] = None
+    # 超级管理员
+    SUPERUSER: str = "admin"
     # 是否调试模式
     DEBUG: bool = False
     # 是否开发模式
     DEV: bool = False
+    # 数据库类型，支持 sqlite 和 postgresql，默认使用 sqlite
+    DB_TYPE: str = "sqlite"
     # 是否在控制台输出 SQL 语句，默认关闭
     DB_ECHO: bool = False
     # 数据库连接池类型，QueuePool, NullPool
@@ -100,16 +106,26 @@ class ConfigModel(BaseModel):
     DB_TIMEOUT: int = 60
     # SQLite 是否启用 WAL 模式，默认开启
     DB_WAL_ENABLE: bool = True
+    # PostgreSQL 主机地址
+    DB_POSTGRESQL_HOST: str = "localhost"
+    # PostgreSQL 端口
+    DB_POSTGRESQL_PORT: int = 5432
+    # PostgreSQL 数据库名
+    DB_POSTGRESQL_DATABASE: str = "moviepilot"
+    # PostgreSQL 用户名
+    DB_POSTGRESQL_USERNAME: str = "moviepilot"
+    # PostgreSQL 密码
+    DB_POSTGRESQL_PASSWORD: str = "moviepilot"
+    # PostgreSQL 连接池大小
+    DB_POSTGRESQL_POOL_SIZE: int = 20
+    # PostgreSQL 连接池溢出数量
+    DB_POSTGRESQL_MAX_OVERFLOW: int = 30
     # 缓存类型，支持 cachetools 和 redis，默认使用 cachetools
     CACHE_BACKEND_TYPE: str = "cachetools"
     # 缓存连接字符串，仅外部缓存（如 Redis、Memcached）需要
     CACHE_BACKEND_URL: Optional[str] = None
     # Redis 缓存最大内存限制，未配置时，如开启大内存模式时为 "1024mb"，未开启时为 "256mb"
     CACHE_REDIS_MAXMEMORY: Optional[str] = None
-    # 配置文件目录
-    CONFIG_DIR: Optional[str] = None
-    # 超级管理员
-    SUPERUSER: str = "admin"
     # 辅助认证，允许通过外部服务进行认证、单点登录以及自动创建用户
     AUXILIARY_AUTH_ENABLE: bool = False
     # API密钥，需要更换
@@ -124,6 +140,10 @@ class ConfigModel(BaseModel):
     SEARCH_SOURCE: str = "themoviedb,douban,bangumi"
     # 媒体识别来源 themoviedb/douban
     RECOGNIZE_SOURCE: str = "themoviedb"
+    # 元数据识别缓存过期时间（小时）
+    META_CACHE_EXPIRE: int = 0
+    # 电视剧动漫的分类genre_ids
+    ANIME_GENREIDS: List[int] = Field(default=[16])
     # 刮削来源 themoviedb/douban
     SCRAP_SOURCE: str = "themoviedb"
     # 新增已入库媒体是否跟随TMDB信息变化
@@ -151,10 +171,6 @@ class ConfigModel(BaseModel):
     U115_APP_ID: str = "100196807"
     # Alipan AppId
     ALIPAN_APP_ID: str = "ac1bf04dc9fd4d9aaabb65b4a668d403"
-    # 元数据识别缓存过期时间（小时）
-    META_CACHE_EXPIRE: int = 0
-    # 电视剧动漫的分类genre_ids
-    ANIME_GENREIDS: List[int] = Field(default=[16])
     # 用户认证站点
     AUTH_SITE: str = ""
     # 重启自动升级

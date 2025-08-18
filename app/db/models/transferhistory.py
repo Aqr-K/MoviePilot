@@ -1,18 +1,18 @@
 import time
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Sequence, Boolean, func, or_, JSON, select
+from sqlalchemy import Column, Integer, String, Boolean, func, or_, JSON, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.db import db_query, db_update, Base, async_db_query
+from app.db import db_query, db_update, get_id_column, Base, async_db_query
 
 
 class TransferHistory(Base):
     """
     整理记录
     """
-    id = Column(Integer, Sequence('id'), primary_key=True, index=True)
+    id = get_id_column()
     # 源路径
     src = Column(String, index=True)
     # 源存储
