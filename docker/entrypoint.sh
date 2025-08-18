@@ -233,6 +233,20 @@ fi
 if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     INFO "→ 启动PostgreSQL服务..."
     
+    # 查找PostgreSQL bin目录
+    POSTGRESQL_BIN_DIR=$(find /usr/lib/postgresql -name "bin" -type d 2>/dev/null | head -1)
+    if [ -n "${POSTGRESQL_BIN_DIR}" ]; then
+        INFO "找到PostgreSQL bin目录: ${POSTGRESQL_BIN_DIR}"
+    else
+        ERROR "未找到PostgreSQL bin目录！"
+        exit 1
+    fi
+    
+    # 定义PostgreSQL命令执行函数
+    pg_exec() {
+        su - postgres -c "PATH='${POSTGRESQL_BIN_DIR}:'\"\$PATH\" $*"
+    }
+    
     # 使用配置目录下的postgresql子目录作为数据目录
     POSTGRESQL_DATA_DIR="${CONFIG_DIR}/postgresql"
     POSTGRESQL_LOG_DIR="${CONFIG_DIR}/postgresql/logs"
@@ -255,8 +269,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         # 确保目录权限正确
         chown -R postgres:postgres "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
         INFO "执行 initdb 命令..."
-        INFO "数据目录: ${POSTGRESQL_DATA_DIR}"
-        su - postgres -c "initdb -D '${POSTGRESQL_DATA_DIR}'"
+        pg_exec "initdb -D '${POSTGRESQL_DATA_DIR}'"
         
         # 配置PostgreSQL
         INFO "复制PostgreSQL配置文件..."
@@ -275,7 +288,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     fi
     
     # 启动PostgreSQL服务
-    if ! su - postgres -c "pg_ctl -D '${POSTGRESQL_DATA_DIR}' -l '${POSTGRESQL_LOG_DIR}/postgresql.log' start"; then
+    if ! pg_exec "pg_ctl -D '${POSTGRESQL_DATA_DIR}' -l '${POSTGRESQL_LOG_DIR}/postgresql.log' start"; then
         ERROR "PostgreSQL 服务启动失败！"
         ERROR "请检查日志文件: ${POSTGRESQL_LOG_DIR}/postgresql.log"
         if [ -f "${POSTGRESQL_LOG_DIR}/postgresql.log" ]; then
@@ -287,15 +300,15 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     
     # 等待PostgreSQL启动
     INFO "等待PostgreSQL服务启动..."
-    until su - postgres -c "pg_isready -h localhost -p ${DB_POSTGRESQL_PORT:-5432}"; do
+    until pg_exec "pg_isready -h localhost -p ${DB_POSTGRESQL_PORT:-5432}"; do
         sleep 1
     done
     
     # 创建数据库和用户
     INFO "创建PostgreSQL数据库和用户..."
-    su - postgres -c "psql -c \"CREATE USER ${DB_POSTGRESQL_USERNAME:-moviepilot} WITH PASSWORD '${DB_POSTGRESQL_PASSWORD:-moviepilot}';\" 2>/dev/null || true"
-    su - postgres -c "psql -c \"CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
-    su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
+    pg_exec "psql -c \"CREATE USER ${DB_POSTGRESQL_USERNAME:-moviepilot} WITH PASSWORD '${DB_POSTGRESQL_PASSWORD:-moviepilot}';\" 2>/dev/null || true"
+    pg_exec "psql -c \"CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
+    pg_exec "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
     
     INFO "PostgreSQL服务启动完成"
 fi
