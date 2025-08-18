@@ -257,14 +257,8 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     if [ ! -f "${POSTGRESQL_DATA_DIR}/PG_VERSION" ]; then
         INFO "初始化PostgreSQL数据目录..."
         
-        # 如果目录存在但不为空，清空它
-        if [ -d "${POSTGRESQL_DATA_DIR}" ] && [ "$(ls -A "${POSTGRESQL_DATA_DIR}")" ]; then
-            WARN "数据目录不为空，清空目录..."
-            rm -rf "${POSTGRESQL_DATA_DIR:?}"/*
-        fi
-        
-        # 确保日志目录存在
-        mkdir -p "${POSTGRESQL_LOG_DIR}"
+        # 确保目录存在
+        mkdir -p "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
         
         # 确保目录权限正确
         chown -R postgres:postgres "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
