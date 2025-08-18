@@ -246,7 +246,7 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     
     # 定义PostgreSQL命令执行函数
     pg_exec() {
-        su moviepilot -c "cd /tmp && PATH='${POSTGRESQL_BIN_DIR}:'\"\$PATH\" $*"
+        su -s /bin/bash moviepilot -c "cd /tmp && PATH='${POSTGRESQL_BIN_DIR}:\$PATH' $*"
     }
     
     # 使用配置目录下的postgresql子目录作为数据目录
