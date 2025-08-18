@@ -205,10 +205,12 @@ fi
 
 # 使用 `envsubst` 将模板文件中的 ${NGINX_PORT} 替换为实际的环境变量值
 envsubst '${NGINX_PORT}${PORT}${NGINX_CLIENT_MAX_BODY_SIZE}${ENABLE_SSL}${HTTPS_SERVER_CONF}' < /etc/nginx/nginx.template.conf > /etc/nginx/nginx.conf
+
 # 自动更新
 cd /
 source /usr/local/bin/mp_update.sh
 cd /app || exit
+
 # 更改 moviepilot userid 和 groupid
 groupmod -o -g "${PGID}" moviepilot
 usermod -o -u "${PUID}" moviepilot
@@ -244,12 +246,12 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
     
     # 定义PostgreSQL命令执行函数
     pg_exec() {
-        su - postgres -c "PATH='${POSTGRESQL_BIN_DIR}:'\"\$PATH\" $*"
+        su moviepilot -c "cd /tmp && PATH='${POSTGRESQL_BIN_DIR}:'\"\$PATH\" $*"
     }
     
     # 使用配置目录下的postgresql子目录作为数据目录
     POSTGRESQL_DATA_DIR="${CONFIG_DIR}/postgresql"
-    POSTGRESQL_LOG_DIR="${CONFIG_DIR}/postgresql/logs"
+    POSTGRESQL_LOG_DIR="${CONFIG_DIR}/logs/postgresql"
     INFO "数据目录: ${POSTGRESQL_DATA_DIR}"
     INFO "日志目录: ${POSTGRESQL_LOG_DIR}"
     
@@ -259,9 +261,8 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         
         # 确保目录存在
         mkdir -p "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
-        
-        # 确保目录权限正确
-        chown -R postgres:postgres "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
+        chown -R moviepilot:moviepilot "${POSTGRESQL_DATA_DIR}" "${POSTGRESQL_LOG_DIR}"
+
         INFO "执行 initdb 命令..."
         pg_exec "initdb -D '${POSTGRESQL_DATA_DIR}'"
         
@@ -273,10 +274,9 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         export POSTGRESQL_LOG_DIR="${POSTGRESQL_LOG_DIR}"
         envsubst '${DB_POSTGRESQL_PORT}${POSTGRESQL_LOG_DIR}' < /app/docker/postgresql.conf.template > "${POSTGRESQL_DATA_DIR}/postgresql.conf"
         
-        # 设置正确的权限
-        chown postgres:postgres "${POSTGRESQL_DATA_DIR}/pg_hba.conf" "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        chmod 600 "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
-        chmod 644 "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+        # 设置配置文件权限
+        chown moviepilot:moviepilot "${POSTGRESQL_DATA_DIR}/pg_hba.conf" "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+        chmod 600 "${POSTGRESQL_DATA_DIR}/pg_hba.conf" "${POSTGRESQL_DATA_DIR}/postgresql.conf"
     else
         INFO "PostgreSQL数据目录已存在，跳过初始化..."
     fi
@@ -288,30 +288,44 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         if [ -f "${POSTGRESQL_LOG_DIR}/postgresql.log" ]; then
             ERROR "PostgreSQL 日志内容:"
             tail -20 "${POSTGRESQL_LOG_DIR}/postgresql.log"
+        else
+            ERROR "PostgreSQL 日志文件不存在，可能是权限问题或目录不存在"
         fi
         exit 1
     fi
     
     # 等待PostgreSQL启动
     INFO "等待PostgreSQL服务启动..."
+    local wait_count=0
     until pg_exec "pg_isready -h localhost -p ${DB_POSTGRESQL_PORT:-5432}"; do
         sleep 1
+        wait_count=$((wait_count + 1))
+        if [ $wait_count -gt 30 ]; then
+            ERROR "PostgreSQL 服务启动超时，请检查日志文件: ${POSTGRESQL_LOG_DIR}/postgresql.log"
+            if [ -f "${POSTGRESQL_LOG_DIR}/postgresql.log" ]; then
+                ERROR "PostgreSQL 日志内容:"
+                tail -20 "${POSTGRESQL_LOG_DIR}/postgresql.log"
+            fi
+            exit 1
+        fi
     done
     
     # 创建数据库和用户
     INFO "创建PostgreSQL数据库和用户..."
-    pg_exec "psql -c \"CREATE USER ${DB_POSTGRESQL_USERNAME:-moviepilot} WITH PASSWORD '${DB_POSTGRESQL_PASSWORD:-moviepilot}';\" 2>/dev/null || true"
-    pg_exec "psql -c \"CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
-    pg_exec "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
+    pg_exec "psql -h localhost -p ${DB_POSTGRESQL_PORT:-5432} -U postgres -c \"CREATE USER ${DB_POSTGRESQL_USERNAME:-moviepilot} WITH PASSWORD '${DB_POSTGRESQL_PASSWORD:-moviepilot}';\" 2>/dev/null || true"
+    pg_exec "psql -h localhost -p ${DB_POSTGRESQL_PORT:-5432} -U postgres -c \"CREATE DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} OWNER ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
+    pg_exec "psql -h localhost -p ${DB_POSTGRESQL_PORT:-5432} -U postgres -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_POSTGRESQL_DATABASE:-moviepilot} TO ${DB_POSTGRESQL_USERNAME:-moviepilot};\" 2>/dev/null || true"
     
     INFO "PostgreSQL服务启动完成"
 fi
 
 # 证书管理
 source /app/docker/cert.sh
+
 # 启动前端nginx服务
 INFO "→ 启动前端nginx服务..."
 nginx
+
 # 启动docker http proxy nginx
 if [ -S "/var/run/docker.sock" ]; then
     INFO "→ 启动 Docker Proxy..."
@@ -321,6 +335,7 @@ if [ -S "/var/run/docker.sock" ]; then
         /var/lib/nginx \
         /var/log/nginx
 fi
+
 # 设置后端服务权限掩码
 umask "${UMASK}"
 
