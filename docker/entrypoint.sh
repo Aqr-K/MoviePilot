@@ -253,15 +253,18 @@ if [ "${DB_TYPE:-sqlite}" = "postgresql" ]; then
         su - postgres -c "initdb -D '${POSTGRESQL_DATA_DIR}'"
         
         # 配置PostgreSQL
-        echo "host all all 0.0.0.0/0 md5" >> "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
-        echo "listen_addresses = '*'" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "port = ${DB_POSTGRESQL_PORT:-5432}" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "log_destination = 'stderr'" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "logging_collector = on" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "log_directory = '${POSTGRESQL_LOG_DIR}'" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "log_rotation_age = 1d" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
-        echo "log_rotation_size = 100MB" >> "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+        # 复制PostgreSQL配置文件
+        INFO "复制PostgreSQL配置文件..."
+        cp /app/docker/postgresql/pg_hba.conf "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
+        
+        # 使用envsubst处理postgresql.conf模板
+        export POSTGRESQL_LOG_DIR="${POSTGRESQL_LOG_DIR}"
+        envsubst '${DB_POSTGRESQL_PORT}${POSTGRESQL_LOG_DIR}' < /app/docker/postgresql/postgresql.conf.template > "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+        
+        # 设置正确的权限
+        chown postgres:postgres "${POSTGRESQL_DATA_DIR}/pg_hba.conf" "${POSTGRESQL_DATA_DIR}/postgresql.conf"
+        chmod 600 "${POSTGRESQL_DATA_DIR}/pg_hba.conf"
+        chmod 644 "${POSTGRESQL_DATA_DIR}/postgresql.conf"
     fi
     
     # 确保目录权限正确

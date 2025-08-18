@@ -1,0 +1,65 @@
+# PostgreSQL configuration file template
+# This file will be processed by envsubst to replace environment variables
+
+# Connection and Authentication
+listen_addresses = '*'
+port = ${DB_POSTGRESQL_PORT:-5432}
+max_connections = 100
+
+# Memory Configuration
+shared_buffers = 128MB
+effective_cache_size = 256MB
+work_mem = 4MB
+maintenance_work_mem = 64MB
+
+# Logging Configuration
+log_destination = 'stderr'
+logging_collector = on
+log_directory = '${POSTGRESQL_LOG_DIR}'
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+log_rotation_age = 1d
+log_rotation_size = 100MB
+log_min_messages = warning
+log_min_error_statement = error
+log_min_duration_statement = 1000
+
+# Query Tuning
+random_page_cost = 1.1
+effective_io_concurrency = 200
+
+# WAL Configuration
+wal_level = replica
+max_wal_size = 1GB
+min_wal_size = 80MB
+checkpoint_completion_target = 0.9
+wal_buffers = 16MB
+
+# Background Writer
+bgwriter_delay = 200ms
+bgwriter_lru_maxpages = 100
+bgwriter_lru_multiplier = 2.0
+
+# Autovacuum
+autovacuum = on
+autovacuum_max_workers = 3
+autovacuum_naptime = 1min
+autovacuum_vacuum_threshold = 50
+autovacuum_analyze_threshold = 50
+
+# Client Connection Defaults
+datestyle = 'iso, mdy'
+timezone = 'UTC'
+lc_messages = 'C'
+lc_monetary = 'C'
+lc_numeric = 'C'
+lc_time = 'C'
+default_text_search_config = 'pg_catalog.english'
+
+# Locale and Formatting
+datestyle = 'iso, mdy'
+timezone = 'UTC'
+lc_messages = 'C'
+lc_monetary = 'C'
+lc_numeric = 'C'
+lc_time = 'C'
+default_text_search_config = 'pg_catalog.english'
