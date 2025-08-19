@@ -124,8 +124,7 @@ def _get_postgresql_engine(is_async: bool = False):
 
     # PostgreSQL连接参数
     _connect_args = {
-        "connect_timeout": settings.DB_TIMEOUT,
-        "command_timeout": settings.DB_TIMEOUT,
+        "connect_timeout": settings.DB_TIMEOUT
     }
 
     # 创建同步引擎
