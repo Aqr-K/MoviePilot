@@ -64,9 +64,9 @@ def _get_sqlite_engine(is_async: bool = False):
         # 当使用 QueuePool 时，添加 QueuePool 特有的参数
         if _pool_class == QueuePool:
             _db_kwargs.update({
-                "pool_size": settings.DB_POOL_SIZE,
+                "pool_size": settings.DB_SQLITE_POOL_SIZE,
                 "pool_timeout": settings.DB_POOL_TIMEOUT,
-                "max_overflow": settings.DB_MAX_OVERFLOW
+                "max_overflow": settings.DB_SQLITE_MAX_OVERFLOW
             })
 
         # 创建数据库引擎
@@ -122,6 +122,12 @@ def _get_postgresql_engine(is_async: bool = False):
     else:
         db_url = f"postgresql://{settings.DB_POSTGRESQL_USERNAME}@{settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE}"
 
+    # PostgreSQL连接参数
+    _connect_args = {
+        "connect_timeout": settings.DB_TIMEOUT,
+        "command_timeout": settings.DB_TIMEOUT,
+    }
+
     # 创建同步引擎
     if not is_async:
         # 根据池类型设置 poolclass 和相关参数
@@ -134,6 +140,7 @@ def _get_postgresql_engine(is_async: bool = False):
             "echo": settings.DB_ECHO,
             "poolclass": _pool_class,
             "pool_recycle": settings.DB_POOL_RECYCLE,
+            "connect_args": _connect_args
         }
 
         # 当使用 QueuePool 时，添加 QueuePool 特有的参数
@@ -160,6 +167,7 @@ def _get_postgresql_engine(is_async: bool = False):
             "echo": settings.DB_ECHO,
             "poolclass": NullPool,
             "pool_recycle": settings.DB_POOL_RECYCLE,
+            "connect_args": _connect_args
         }
         # 创建异步数据库引擎
         async_engine = create_async_engine(**_db_kwargs)

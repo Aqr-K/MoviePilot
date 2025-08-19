@@ -101,8 +101,10 @@ class ConfigModel(BaseModel):
     DB_TYPE: str = "sqlite"
     # 是否在控制台输出 SQL 语句，默认关闭
     DB_ECHO: bool = False
-    # SQLite 的 busy_timeout 参数，默认为 60 秒
+    # 数据库连接超时时间（秒），默认为 60 秒
     DB_TIMEOUT: int = 60
+    # 是否启用 WAL 模式，仅适用于SQLite，默认开启
+    DB_WAL_ENABLE: bool = True
     # 数据库连接池类型，QueuePool, NullPool
     DB_POOL_TYPE: str = "QueuePool"
     # 是否在获取连接时进行预先 ping 操作
@@ -112,11 +114,9 @@ class ConfigModel(BaseModel):
     # 数据库连接池获取连接的超时时间（秒）
     DB_POOL_TIMEOUT: int = 30
     # SQLite 连接池大小
-    DB_POOL_SIZE: int = 30
+    DB_SQLITE_POOL_SIZE: int = 30
     # SQLite 连接池溢出数量
-    DB_MAX_OVERFLOW: int = 50
-    # SQLite 是否启用 WAL 模式，默认开启
-    DB_WAL_ENABLE: bool = True
+    DB_SQLITE_MAX_OVERFLOW: int = 50
     # PostgreSQL 主机地址
     DB_POSTGRESQL_HOST: str = "localhost"
     # PostgreSQL 端口
