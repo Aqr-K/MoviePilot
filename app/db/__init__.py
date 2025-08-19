@@ -123,9 +123,7 @@ def _get_postgresql_engine(is_async: bool = False):
         db_url = f"postgresql://{settings.DB_POSTGRESQL_USERNAME}@{settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE}"
 
     # PostgreSQL连接参数
-    _connect_args = {
-        "connect_timeout": settings.DB_TIMEOUT
-    }
+    _connect_args = {}
 
     # 创建同步引擎
     if not is_async:
