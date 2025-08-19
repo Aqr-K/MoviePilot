@@ -12,7 +12,7 @@ class DownloadHistory(Base):
     """
     下载历史记录
     """
-    id = get_id_column('downloadhistory')
+    id = get_id_column()
     # 保存路径
     path = Column(String, nullable=False, index=True)
     # 类型 电影/电视剧
@@ -188,7 +188,7 @@ class DownloadFiles(Base):
     """
     下载文件记录
     """
-    id = get_id_column('downloadfiles')
+    id = get_id_column()
     # 下载器
     downloader = Column(String)
     # 下载任务Hash

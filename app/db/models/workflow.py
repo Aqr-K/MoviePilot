@@ -12,7 +12,7 @@ class Workflow(Base):
     工作流表
     """
     # ID
-    id = get_id_column('workflow')
+    id = get_id_column()
     # 名称
     name = Column(String, index=True, nullable=False)
     # 描述

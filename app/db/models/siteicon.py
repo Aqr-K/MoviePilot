@@ -9,7 +9,7 @@ class SiteIcon(Base):
     """
     站点图标表
     """
-    id = get_id_column('siteicon')
+    id = get_id_column()
     # 站点名称
     name = Column(String, nullable=False)
     # 域名Key

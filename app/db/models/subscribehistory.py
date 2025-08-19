@@ -11,7 +11,7 @@ class SubscribeHistory(Base):
     """
     订阅历史表
     """
-    id = get_id_column('subscribehistory')
+    id = get_id_column()
     # 标题
     name = Column(String, nullable=False, index=True)
     # 年份

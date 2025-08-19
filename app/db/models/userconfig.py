@@ -8,7 +8,7 @@ class UserConfig(Base):
     """
     用户配置表
     """
-    id = get_id_column('userconfig')
+    id = get_id_column()
     # 用户名
     username = Column(String, index=True)
     # 配置键

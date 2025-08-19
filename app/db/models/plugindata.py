@@ -8,7 +8,7 @@ class PluginData(Base):
     """
     插件数据表
     """
-    id = get_id_column('plugindata')
+    id = get_id_column()
     plugin_id = Column(String, nullable=False, index=True)
     key = Column(String, index=True, nullable=False)
     value = Column(JSON)

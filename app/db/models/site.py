@@ -11,7 +11,7 @@ class Site(Base):
     """
     站点表
     """
-    id = get_id_column('site')
+    id = get_id_column()
     # 站点名
     name = Column(String, nullable=False)
     # 域名Key
