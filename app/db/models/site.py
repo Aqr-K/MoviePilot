@@ -69,12 +69,12 @@ class Site(Base):
     @classmethod
     @db_query
     def get_actives(cls, db: Session):
-        return db.query(cls).filter(cls.is_active == 1).all()
+        return db.query(cls).filter(cls.is_active).all()
 
     @classmethod
     @async_db_query
     async def async_get_actives(cls, db: AsyncSession):
-        result = await db.execute(select(cls).where(cls.is_active == 1))
+        result = await db.execute(select(cls).where(cls.is_active))
         return result.scalars().all()
 
     @classmethod
