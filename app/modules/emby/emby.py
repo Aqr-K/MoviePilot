@@ -497,7 +497,7 @@ class Emby:
                 logger.info(f"影片图片链接:{res.url}")
                 return res.url
             else:
-                logger.error("Items/Id/Images 未获取到返回数据或无该影片{}图片".format(image_type))
+                logger.info("Items/Id/Images 未获取到返回数据或无该影片{}图片".format(image_type))
                 return None
         except Exception as e:
             logger.error(f"连接Items/Id/Images出错：" + str(e))
