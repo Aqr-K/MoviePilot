@@ -64,9 +64,9 @@ def _get_sqlite_engine(is_async: bool = False):
         # 当使用 QueuePool 时，添加 QueuePool 特有的参数
         if _pool_class == QueuePool:
             _db_kwargs.update({
-                "pool_size": settings.CONF.dbpool,
+                "pool_size": settings.DB_POOL_SIZE,
                 "pool_timeout": settings.DB_POOL_TIMEOUT,
-                "max_overflow": settings.CONF.dbpooloverflow
+                "max_overflow": settings.DB_MAX_OVERFLOW
             })
 
         # 创建数据库引擎

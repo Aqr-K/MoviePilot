@@ -42,10 +42,6 @@ class SystemConfModel(BaseModel):
     scheduler: int = 0
     # 线程池大小
     threadpool: int = 0
-    # 数据库连接池大小
-    dbpool: int = 0
-    # 数据库连接池溢出数量
-    dbpooloverflow: int = 0
 
 
 class ConfigModel(BaseModel):
@@ -105,6 +101,8 @@ class ConfigModel(BaseModel):
     DB_TYPE: str = "sqlite"
     # 是否在控制台输出 SQL 语句，默认关闭
     DB_ECHO: bool = False
+    # SQLite 的 busy_timeout 参数，默认为 60 秒
+    DB_TIMEOUT: int = 60
     # 数据库连接池类型，QueuePool, NullPool
     DB_POOL_TYPE: str = "QueuePool"
     # 是否在获取连接时进行预先 ping 操作
@@ -113,8 +111,10 @@ class ConfigModel(BaseModel):
     DB_POOL_RECYCLE: int = 300
     # 数据库连接池获取连接的超时时间（秒）
     DB_POOL_TIMEOUT: int = 30
-    # SQLite 的 busy_timeout 参数，默认为 60 秒
-    DB_TIMEOUT: int = 60
+    # SQLite 连接池大小
+    DB_POOL_SIZE: int = 30
+    # SQLite 连接池溢出数量
+    DB_MAX_OVERFLOW: int = 50
     # SQLite 是否启用 WAL 模式，默认开启
     DB_WAL_ENABLE: bool = True
     # PostgreSQL 主机地址
@@ -128,9 +128,9 @@ class ConfigModel(BaseModel):
     # PostgreSQL 密码
     DB_POSTGRESQL_PASSWORD: str = "moviepilot"
     # PostgreSQL 连接池大小
-    DB_POSTGRESQL_POOL_SIZE: int = 20
+    DB_POSTGRESQL_POOL_SIZE: int = 30
     # PostgreSQL 连接池溢出数量
-    DB_POSTGRESQL_MAX_OVERFLOW: int = 30
+    DB_POSTGRESQL_MAX_OVERFLOW: int = 50
 
     # ==================== 缓存配置 ====================
     # 缓存类型，支持 cachetools 和 redis，默认使用 cachetools
@@ -659,9 +659,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 fanart=512,
                 meta=(self.META_CACHE_EXPIRE or 24) * 3600,
                 scheduler=100,
-                threadpool=100,
-                dbpool=100,
-                dbpooloverflow=50
+                threadpool=100
             )
         return SystemConfModel(
             torrents=100,
@@ -672,9 +670,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             fanart=128,
             meta=(self.META_CACHE_EXPIRE or 2) * 3600,
             scheduler=50,
-            threadpool=50,
-            dbpool=50,
-            dbpooloverflow=20
+            threadpool=50
         )
 
     @property
