@@ -28,9 +28,6 @@ RUN apt-get update -y \
         rsync \
         ffmpeg \
         nano \
-        postgresql-client \
-        postgresql \
-        postgresql-contrib \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && \
     if [ "$(uname -m)" = "x86_64" ]; \
@@ -77,7 +74,6 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && echo 'fs.inotify.max_user_watches=5242880' >> /etc/sysctl.conf \
     && echo 'fs.inotify.max_user_instances=5242880' >> /etc/sysctl.conf \
     && locale-gen zh_CN.UTF-8 \
-    && for cmd in /usr/lib/postgresql/*/bin/*; do ln -sf "$cmd" /usr/local/bin/; done \
     && FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/version.py) \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Frontend/releases/download/${FRONTEND_VERSION}/dist.zip" | busybox unzip -d / - \
     && mv /dist /public \
