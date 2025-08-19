@@ -12,7 +12,7 @@ class TransferHistory(Base):
     """
     整理记录
     """
-    id = get_id_column()
+    id = get_id_column('transferhistory')
     # 源路径
     src = Column(String, index=True)
     # 源存储

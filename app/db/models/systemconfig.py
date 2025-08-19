@@ -9,7 +9,7 @@ class SystemConfig(Base):
     """
     配置表
     """
-    id = get_id_column()
+    id = get_id_column('systemconfig')
     # 主键
     key = Column(String, index=True)
     # 值

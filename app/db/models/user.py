@@ -10,7 +10,7 @@ class User(Base):
     用户表
     """
     # ID
-    id = get_id_column()
+    id = get_id_column('user')
     # 用户名，唯一值
     name = Column(String, index=True, nullable=False)
     # 邮箱

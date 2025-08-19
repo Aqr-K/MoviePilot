@@ -12,7 +12,7 @@ class Subscribe(Base):
     """
     订阅表
     """
-    id = get_id_column()
+    id = get_id_column('subscribe')
     # 标题
     name = Column(String, nullable=False, index=True)
     # 年份

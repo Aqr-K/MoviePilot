@@ -11,7 +11,7 @@ class SiteStatistic(Base):
     """
     站点统计表
     """
-    id = get_id_column()
+    id = get_id_column('sitestatistic')
     # 域名Key
     domain = Column(String, index=True)
     # 成功次数

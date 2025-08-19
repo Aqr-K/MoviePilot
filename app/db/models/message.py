@@ -11,7 +11,7 @@ class Message(Base):
     """
     消息表
     """
-    id = get_id_column()
+    id = get_id_column('message')
     # 消息渠道
     channel = Column(String)
     # 消息来源

@@ -9,13 +9,16 @@ from sqlalchemy.orm import Session, as_declarative, declared_attr, scoped_sessio
 from app.core.config import settings
 
 
-def get_id_column():
+def get_id_column(table_name: str = None):
     """
     根据数据库类型返回合适的ID列定义
     """
     if settings.DB_TYPE.lower() == "postgresql":
-        # PostgreSQL使用SERIAL类型
-        return Column(Integer, primary_key=True, index=True)
+        # PostgreSQL使用显式序列，确保序列正确创建
+        if table_name:
+            return Column(Integer, Sequence(f'{table_name}_id_seq'), primary_key=True, index=True)
+        else:
+            return Column(Integer, Sequence('id_seq'), primary_key=True, index=True)
     else:
         # SQLite使用Sequence
         return Column(Integer, Sequence('id'), primary_key=True, index=True)

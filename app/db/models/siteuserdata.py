@@ -12,7 +12,7 @@ class SiteUserData(Base):
     """
     站点数据表
     """
-    id = get_id_column()
+    id = get_id_column('siteuserdata')
     # 站点域名
     domain = Column(String, index=True)
     # 站点名称

@@ -13,7 +13,7 @@ class MediaServerItem(Base):
     """
     媒体服务器媒体条目表
     """
-    id = get_id_column()
+    id = get_id_column('mediaserveritem')
     # 服务器类型
     server = Column(String)
     # 媒体库ID
