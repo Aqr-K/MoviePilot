@@ -52,6 +52,11 @@ def fix_table_sequence(connection, table_name):
     修复单个表的序列
     """
     try:
+        # 跳过alembic_version表，它没有id列
+        if table_name == 'alembic_version':
+            print(f"跳过表 {table_name}，这是Alembic版本表")
+            return
+
         # 检查表是否有id列
         result = connection.execute(sa.text(f"""
             SELECT column_name, data_type, is_nullable, column_default
@@ -78,6 +83,8 @@ def fix_table_sequence(connection, table_name):
 
     except Exception as e:
         print(f"修复表 {table_name} 序列时出错: {e}")
+        # 回滚当前事务，避免影响后续操作
+        connection.rollback()
 
 
 def convert_to_identity(connection, table_name):
