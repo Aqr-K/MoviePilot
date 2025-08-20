@@ -1,5 +1,7 @@
 import sys
 
+from app.helper.redis import RedisHelper, AsyncRedisHelper
+
 # SitesHelper涉及资源包拉取，提前引入并容错提示
 try:
     from app.helper.sites import SitesHelper  # noqa
@@ -12,7 +14,6 @@ except ImportError as e:
 from app.utils.system import SystemUtils
 from app.log import logger
 from app.core.config import settings
-from app.core.cache import close_cache
 from app.core.module import ModuleManager
 from app.core.event import EventManager
 from app.helper.thread import ThreadHelper
@@ -119,8 +120,9 @@ async def stop_modules():
     ThreadHelper().shutdown()
     # 停止消息服务
     stop_message()
-    # 停止缓存连接
-    close_cache()
+    # 关闭Redis缓存连接
+    RedisHelper().close()
+    await AsyncRedisHelper().close()
     # 停止数据库连接
     await close_database()
     # 停止前端服务

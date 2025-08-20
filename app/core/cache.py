@@ -23,7 +23,8 @@ class CacheBackend(ABC):
     """
 
     @abstractmethod
-    def set(self, key: str, value: Any, ttl: int, region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
+    def set(self, key: str, value: Any, ttl: Optional[int] = None,
+            region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
         """
         设置缓存
 
@@ -77,6 +78,16 @@ class CacheBackend(ABC):
         pass
 
     @abstractmethod
+    def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        pass
+
+    @abstractmethod
     def close(self) -> None:
         """
         关闭缓存连接
@@ -114,6 +125,10 @@ class CacheBackend(ABC):
         # 使用有序参数生成缓存键
         return f"{func.__name__}_{hashkey(*keys)}"
 
+    @staticmethod
+    def is_redis() -> bool:
+        return settings.CACHE_BACKEND_TYPE == "redis"
+
 
 class CacheToolsBackend(CacheBackend):
     """
@@ -128,7 +143,7 @@ class CacheToolsBackend(CacheBackend):
     - 不支持按 `key` 独立隔离 TTL 和 Maxsize，仅支持作用于 region 级别
     """
 
-    def __init__(self, maxsize: Optional[int] = 512, ttl: Optional[int] = 1800):
+    def __init__(self, maxsize: Optional[int] = 1024, ttl: Optional[int] = 1800):
         """
         初始化缓存实例
 
@@ -226,6 +241,18 @@ class CacheToolsBackend(CacheBackend):
                     region_cache.clear()
             logger.info("Cleared all cache")
 
+    def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        region_cache = self.__get_region_cache(region)
+        if region_cache is None:
+            return {}
+        return dict(region_cache.items())
+
     def close(self) -> None:
         """
         内存缓存不需要关闭资源
@@ -247,20 +274,14 @@ class RedisBackend(CacheBackend):
     - Pickle 反序列化可能存在安全风险，需进一步重构调用来源，避免复杂对象缓存
     """
 
-    def __init__(self, redis_url: Optional[str] = "redis://localhost", ttl: Optional[int] = 1800):
+    def __init__(self, ttl: Optional[int] = 1800):
         """
         初始化 Redis 缓存实例
 
-        :param redis_url: Redis 服务的 URL
         :param ttl: 缓存的存活时间，单位秒
         """
         self.ttl = ttl
-        self._redis_helper = None
-        try:
-            self.redis_helper = RedisHelper(redis_url=redis_url)
-        except RuntimeError as e:
-            logger.warning(f"Redis缓存初始化失败: {e}")
-            raise e
+        self.redis_helper = RedisHelper()
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None,
             region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
@@ -313,6 +334,15 @@ class RedisBackend(CacheBackend):
         """
         self.redis_helper.clear(region=region)
 
+    def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        return self.redis_helper.items(region=region)
+
     def close(self) -> None:
         """
         关闭 Redis 客户端的连接池
@@ -324,28 +354,16 @@ def get_cache_backend(maxsize: Optional[int] = 512, ttl: Optional[int] = 1800) -
     """
     根据配置获取缓存后端实例
 
-    :param maxsize: 缓存的最大条目数
+    :param maxsize: 缓存的最大条目数，仅使用cachetools时生效
     :param ttl: 缓存的默认存活时间，单位秒
     :return: 返回缓存后端实例
     """
-    cache_type = settings.CACHE_BACKEND_TYPE
-    logger.debug(f"Cache backend type from settings: {cache_type}")
-
-    if cache_type == "redis":
-        redis_url = settings.CACHE_BACKEND_URL
-        if redis_url:
-            try:
-                logger.debug(f"Attempting to use RedisBackend with URL: {redis_url}, TTL: {ttl}")
-                return RedisBackend(redis_url=redis_url, ttl=ttl)
-            except RuntimeError:
-                logger.warning("Falling back to CacheToolsBackend due to Redis connection failure.")
-        else:
-            logger.debug("Cache backend type is redis, but no valid REDIS_URL found. "
-                         "Falling back to CacheToolsBackend.")
-
-    # 如果不是 Redis，回退到内存缓存
-    logger.debug(f"Using CacheToolsBackend with default maxsize: {maxsize}, TTL: {ttl}")
-    return CacheToolsBackend(maxsize=maxsize, ttl=ttl)
+    if settings.CACHE_BACKEND_TYPE == "redis":
+        logger.debug(f"Attempting to use RedisBackend, TTL: {ttl}")
+        return RedisBackend(ttl=ttl)
+    else:
+        logger.debug(f"Using CacheToolsBackend with default maxsize: {maxsize}, TTL: {ttl}")
+        return CacheToolsBackend(maxsize=maxsize, ttl=ttl)
 
 
 class TTLCache:
@@ -369,12 +387,12 @@ class TTLCache:
         self.ttl = ttl
         self._backend = get_cache_backend(maxsize=maxsize, ttl=ttl)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str):
         """
         获取缓存项
         """
         try:
-            value = self._backend.get(str(key))
+            value = self._backend.get(key)
             if value is not None:
                 return value
         except Exception as e:
@@ -382,40 +400,40 @@ class TTLCache:
 
         raise KeyError(key)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: Any):
         """
         设置缓存项
         """
         try:
-            self._backend.set(str(key), value, ttl=self.ttl)
+            self._backend.set(key, value, ttl=self.ttl)
         except Exception as e:
             logger.warning(f"缓存设置失败: {e}")
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: str):
         """
         删除缓存项
         """
         try:
-            self._backend.delete(str(key))
+            self._backend.delete(key)
         except Exception as e:
             logger.warning(f"缓存删除失败: {e}")
 
-    def __contains__(self, key):
+    def __contains__(self, key: str):
         """
         检查键是否存在
         """
         try:
-            return self._backend.exists(str(key))
+            return self._backend.exists(key)
         except Exception as e:
             logger.warning(f"缓存检查失败: {e}")
             return False
 
-    def get(self, key, default=None):
+    def get(self, key: str, default: Any = None):
         """
         获取缓存项，如果不存在返回默认值
         """
         try:
-            value = self._backend.get(str(key))
+            value = self._backend.get(key)
             if value is not None:
                 return value
         except Exception as e:
@@ -442,10 +460,6 @@ class TTLCache:
             logger.warning(f"缓存关闭失败: {e}")
 
 
-# 缓存后端实例
-cache_backend = get_cache_backend()
-
-
 def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Optional[int] = 1800,
            skip_none: Optional[bool] = True, skip_empty: Optional[bool] = False):
     """
@@ -458,6 +472,8 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Opti
     :param skip_empty: 跳过空值缓存（如 None, [], {}, "", set()），默认为 False
     :return: 装饰器函数
     """
+    # 缓存后端实例
+    cache_backend = get_cache_backend(maxsize=maxsize, ttl=ttl)
 
     def should_cache(value: Any) -> bool:
         """
@@ -554,15 +570,3 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Opti
             return wrapper
 
     return decorator
-
-
-def close_cache() -> None:
-    """
-    关闭缓存后端连接并清理资源
-    """
-    try:
-        if cache_backend:
-            cache_backend.close()
-            logger.info("Cache backend closed successfully.")
-    except Exception as e:
-        logger.info(f"Error while closing cache backend: {e}")

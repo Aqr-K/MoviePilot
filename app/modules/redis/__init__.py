@@ -51,9 +51,10 @@ class RedisModule(_ModuleBase):
         """
         if settings.CACHE_BACKEND_TYPE != "redis":
             return None
+        redis_helper = RedisHelper()
         try:
-            redis_helper = RedisHelper(redis_url=settings.CACHE_BACKEND_URL)
+            if redis_helper.test():
+                return True, ""
+            return False, "Redis连接失败，请检查配置"
+        finally:
             redis_helper.close()
-        except RuntimeError as e:
-            return False, f"Redis连接失败：{e}"
-        return True, ""

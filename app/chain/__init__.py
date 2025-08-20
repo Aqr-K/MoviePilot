@@ -13,6 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
+from app.core.cache import get_cache_backend
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, TorrentInfo
 from app.core.event import EventManager
@@ -22,7 +23,6 @@ from app.core.plugin import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
 from app.helper.message import MessageHelper, MessageQueueManager, MessageTemplateHelper
-from app.helper.redis import RedisHelper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import TransferInfo, TransferTorrent, ExistMediaInfo, DownloadingTorrent, CommingMessage, Notification, \
@@ -48,23 +48,17 @@ class ChainBase(metaclass=ABCMeta):
             send_callback=self.run_module
         )
         self.pluginmanager = PluginManager()
-        # 初始化Redis缓存助手
-        self._redis_helper = None
-        if settings.CACHE_BACKEND_TYPE == "redis":
-            try:
-                self._redis_helper = RedisHelper(redis_url=settings.CACHE_BACKEND_URL)
-            except RuntimeError as e:
-                self._redis_helper = None
-                logger.warning(f"Redis缓存初始化失败，将使用本地缓存: {e}")
+        # 文件类缓存，保留1
+        self._cache = get_cache_backend(ttl=30 * 24 * 3600)
 
     def load_cache(self, filename: str) -> Any:
         """
         加载缓存，优先从Redis读取，没有数据时从本地读取（兼容存量未迁移数据）
         """
         # 如果Redis可用，优先从Redis读取
-        if self._redis_helper:
+        if self._cache.is_redis():
             try:
-                cache_data = self._redis_helper.get(filename, region="chain_cache")
+                cache_data = self._cache.get(filename, region="chain_cache")
                 if cache_data is not None:
                     logger.debug(f"从Redis加载缓存: {filename}")
                     return cache_data
@@ -86,9 +80,9 @@ class ChainBase(metaclass=ABCMeta):
         异步加载缓存，优先从Redis读取，没有数据时从本地读取（兼容存量未迁移数据）
         """
         # 如果Redis可用，优先从Redis读取
-        if self._redis_helper:
+        if self._cache.is_redis():
             try:
-                cache_data = self._redis_helper.get(filename, region="chain_cache")
+                cache_data = self._cache.get(filename, region="chain_cache")
                 if cache_data is not None:
                     logger.debug(f"从Redis异步加载缓存: {filename}")
                     return cache_data
@@ -111,9 +105,9 @@ class ChainBase(metaclass=ABCMeta):
         异步保存缓存，优先保存到Redis，同时保存到本地作为备份
         """
         # 如果Redis可用，优先保存到Redis
-        if self._redis_helper:
+        if self._cache.is_redis():
             try:
-                self._redis_helper.set(filename, cache, ttl=86400, region="chain_cache")
+                self._cache.set(filename, cache, region="chain_cache")
                 logger.debug(f"异步保存缓存到Redis: {filename}")
             except Exception as e:
                 logger.warning(f"异步保存缓存到Redis失败: {e}")
@@ -130,9 +124,9 @@ class ChainBase(metaclass=ABCMeta):
         保存缓存，优先保存到Redis，同时保存到本地作为备份
         """
         # 如果Redis可用，优先保存到Redis
-        if self._redis_helper:
+        if self._cache.is_redis():
             try:
-                self._redis_helper.set(filename, cache, ttl=86400, region="chain_cache")
+                self._cache.set(filename, cache, region="chain_cache")
                 logger.debug(f"保存缓存到Redis: {filename}")
             except Exception as e:
                 logger.warning(f"保存缓存到Redis失败: {e}")
@@ -149,9 +143,9 @@ class ChainBase(metaclass=ABCMeta):
         删除缓存，同时删除Redis和本地缓存
         """
         # 如果Redis可用，删除Redis缓存
-        if self._redis_helper:
+        if self._cache.is_redis():
             try:
-                self._redis_helper.delete(filename, region="chain_cache")
+                self._cache.delete(filename, region="chain_cache")
                 logger.debug(f"删除Redis缓存: {filename}")
             except Exception as e:
                 logger.warning(f"删除Redis缓存失败: {e}")
@@ -170,9 +164,9 @@ class ChainBase(metaclass=ABCMeta):
         异步删除缓存，同时删除Redis和本地缓存
         """
         # 如果Redis可用，删除Redis缓存
-        if self._redis_helper:
+        if self._cache.is_redis():
             try:
-                self._redis_helper.delete(filename, region="chain_cache")
+                self._cache.delete(filename, region="chain_cache")
                 logger.debug(f"异步删除Redis缓存: {filename}")
             except Exception as e:
                 logger.warning(f"异步删除Redis缓存失败: {e}")

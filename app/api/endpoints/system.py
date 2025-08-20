@@ -10,7 +10,6 @@ import aiofiles
 import pillow_avif  # noqa 用于自动注册AVIF支持
 from PIL import Image
 from anyio import Path as AsyncPath
-from app.helper.sites import SitesHelper  # noqa  # noqa
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import StreamingResponse
 
@@ -29,7 +28,9 @@ from app.db.user_oper import get_current_active_superuser, get_current_active_su
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
+from app.helper.redis import AsyncRedisHelper
 from app.helper.rule import RuleHelper
+from app.helper.sites import SitesHelper  # noqa  # noqa
 from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
 from app.log import logger
@@ -48,7 +49,7 @@ router = APIRouter()
 async def fetch_image(
         url: str,
         proxy: bool = False,
-        use_disk_cache: bool = False,
+        use_cache: bool = False,
         if_none_match: Optional[str] = None,
         allowed_domains: Optional[set[str]] = None) -> Response:
     """
@@ -64,37 +65,55 @@ async def fetch_image(
     if not SecurityUtils.is_safe_url(url, allowed_domains):
         raise HTTPException(status_code=404, detail="Unsafe URL")
 
-    # 后续观察系统性能表现，如果发现磁盘缓存和HTTP缓存无法满足高并发情况下的响应速度需求，可以考虑重新引入内存缓存
-    cache_path: Optional[AsyncPath] = None
-    if use_disk_cache:
-        # 生成缓存路径
-        base_path = AsyncPath(settings.CACHE_PATH)
-        sanitized_path = SecurityUtils.sanitize_url_path(url)
-        cache_path = base_path / "images" / sanitized_path
+    # 缓存路径
+    sanitized_path = SecurityUtils.sanitize_url_path(url)
+    base_path = AsyncPath(settings.CACHE_PATH)
+    cache_path = base_path / "images" / sanitized_path
 
-        # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
-        if not cache_path.suffix:
-            cache_path = cache_path.with_suffix(".jpg")
-
-        # 确保缓存路径和文件类型合法
-        if not await SecurityUtils.async_is_safe_path(base_path=base_path,
-                                                      user_path=cache_path,
-                                                      allowed_suffixes=settings.SECURITY_IMAGE_SUFFIXES):
-            raise HTTPException(status_code=400, detail="Invalid cache path or file type")
-
-        # 目前暂不考虑磁盘缓存文件是否过期，后续通过缓存清理机制处理
-        if cache_path and await cache_path.exists():
-            try:
-                async with aiofiles.open(cache_path, 'rb') as f:
-                    content = await f.read()
+    if use_cache:
+        if settings.CACHE_BACKEND_TYPE == "redis":
+            # 使用Redis缓存
+            redis_helper = AsyncRedisHelper()
+            content = await redis_helper.get(sanitized_path, region="image_cache")
+            if content:
+                # 检查 If-None-Match
                 etag = HashUtils.md5(content)
-                headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
                 if if_none_match == etag:
+                    headers = RequestUtils.generate_cache_headers()
                     return Response(status_code=304, headers=headers)
-                return Response(content=content, media_type="image/jpeg", headers=headers)
-            except Exception as e:
-                # 如果读取磁盘缓存发生异常，这里仅记录日志，尝试再次请求远端进行处理
-                logger.debug(f"Failed to read cache file {cache_path}: {e}")
+                # 返回缓存图片
+                headers = RequestUtils.generate_cache_headers(etag)
+                return Response(
+                    content=content,
+                    media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
+                    headers=headers
+                )
+        else:
+            # 使用磁盘缓存
+            if not cache_path.suffix:
+                # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
+                cache_path = cache_path.with_suffix(".jpg")
+
+            # 确保缓存路径和文件类型合法
+            if not await SecurityUtils.async_is_safe_path(base_path=base_path,
+                                                          user_path=cache_path,
+                                                          allowed_suffixes=settings.SECURITY_IMAGE_SUFFIXES):
+                raise HTTPException(status_code=400, detail="Invalid cache path or file type")
+
+            # 目前暂不考虑磁盘缓存文件是否过期，通过缓存清理机制处理
+            if cache_path and await cache_path.exists():
+                try:
+                    # 读取磁盘缓存图片返回
+                    async with aiofiles.open(cache_path, 'rb') as f:
+                        content = await f.read()
+                    etag = HashUtils.md5(content)
+                    headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
+                    if if_none_match == etag:
+                        return Response(status_code=304, headers=headers)
+                    return Response(content=content, media_type="image/jpeg", headers=headers)
+                except Exception as e:
+                    # 如果读取磁盘缓存发生异常，这里仅记录日志，尝试再次请求远端进行处理
+                    logger.debug(f"Failed to read cache file {cache_path}: {e}")
 
     # 请求远程图片
     referer = "https://movie.douban.com/" if "doubanio.com" in url else None
@@ -112,22 +131,28 @@ async def fetch_image(
         logger.debug(f"Invalid image format for URL {url}: {e}")
         raise HTTPException(status_code=502, detail="Invalid image format")
 
+    # 获取请求响应头
     response_headers = response.headers
-
     cache_control_header = response_headers.get("Cache-Control", "")
     cache_directive, max_age = RequestUtils.parse_cache_control(cache_control_header)
 
-    # 如果需要使用磁盘缓存，则保存到磁盘
-    if use_disk_cache and cache_path:
-        try:
-            if not await cache_path.parent.exists():
-                await cache_path.parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as tmp_file:
-                await tmp_file.write(content)
-                temp_path = AsyncPath(tmp_file.name)
-            await temp_path.replace(cache_path)
-        except Exception as e:
-            logger.debug(f"Failed to write cache file {cache_path}: {e}")
+    # 保存缓存
+    if use_cache:
+        if settings.CACHE_BACKEND_TYPE == "redis":
+            # 保存到Redis缓存
+            redis_helper = AsyncRedisHelper()
+            await redis_helper.set(sanitized_path, content, region="image_cache")
+        else:
+            # 保存到磁盘缓存
+            try:
+                if not await cache_path.parent.exists():
+                    await cache_path.parent.mkdir(parents=True, exist_ok=True)
+                async with aiofiles.tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as tmp_file:
+                    await tmp_file.write(content)
+                    temp_path = AsyncPath(tmp_file.name)
+                await temp_path.replace(cache_path)
+            except Exception as e:
+                logger.debug(f"Failed to write cache file {cache_path}: {e}")
 
     # 检查 If-None-Match
     etag = HashUtils.md5(content)
@@ -135,8 +160,8 @@ async def fetch_image(
         headers = RequestUtils.generate_cache_headers(etag, cache_directive, max_age)
         return Response(status_code=304, headers=headers)
 
+    # 响应
     headers = RequestUtils.generate_cache_headers(etag, cache_directive, max_age)
-
     return Response(
         content=content,
         media_type=response_headers.get("Content-Type") or UrlUtils.get_mime_type(url, "image/jpeg"),
@@ -159,7 +184,7 @@ async def proxy_img(
     hosts = [config.config.get("host") for config in MediaServerHelper().get_configs().values() if
              config and config.config and config.config.get("host")]
     allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS) | set(hosts)
-    return await fetch_image(url=imgurl, proxy=proxy, use_disk_cache=cache,
+    return await fetch_image(url=imgurl, proxy=proxy, use_cache=cache,
                              if_none_match=if_none_match, allowed_domains=allowed_domains)
 
 
@@ -174,7 +199,7 @@ async def cache_img(
     """
     # 如果没有启用全局图片缓存，则不使用磁盘缓存
     proxy = "doubanio.com" not in url
-    return await fetch_image(url=url, proxy=proxy, use_disk_cache=settings.GLOBAL_IMAGE_CACHE,
+    return await fetch_image(url=url, proxy=proxy, use_cache=settings.GLOBAL_IMAGE_CACHE,
                              if_none_match=if_none_match)
 
 
