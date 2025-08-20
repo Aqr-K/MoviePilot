@@ -202,9 +202,6 @@ class TorrentHelper(metaclass=WeakSingleton):
         if not torrent_content:
             return "", []
         try:
-            if isinstance(torrent_content, bytes):
-                # 如果是字节流，则转换为字符串
-                torrent_content = torrent_content.decode('utf-8', errors='ignore')
             # 解析种子内容
             torrentinfo = Torrent.from_string(torrent_content)
             # 获取文件清单
