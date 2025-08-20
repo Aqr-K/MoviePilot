@@ -92,12 +92,12 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 logger.info(f"Qbittorrent下载器 {name} 连接断开，尝试重连 ...")
                 server.reconnect()
 
-    def download(self, content: Union[Path, str], download_dir: Path, cookie: str,
+    def download(self, content: Union[Path, str, bytes], download_dir: Path, cookie: str,
                  episodes: Set[int] = None, category: Optional[str] = None, label: Optional[str] = None,
                  downloader: Optional[str] = None) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], str]]:
         """
         根据种子文件，选择并添加下载任务
-        :param content:  种子文件地址或者磁力链接
+        :param content:  种子文件地址或者磁力链接或者种子内容
         :param download_dir:  下载目录
         :param cookie:  cookie
         :param episodes:  需要下载的集数
@@ -115,7 +115,10 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 if isinstance(content, Path):
                     torrentinfo = Torrent.from_file(content)
                 else:
-                    torrentinfo = Torrent.from_string(content)
+                    if isinstance(content, bytes):
+                        torrentinfo = Torrent.from_string(content.decode("utf-8", errors='ignore'))
+                    else:
+                        torrentinfo = Torrent.from_string(content)
                 return torrentinfo.name, torrentinfo.total_size
             except Exception as e:
                 logger.error(f"获取种子名称失败：{e}")
@@ -123,6 +126,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
 
         if not content:
             return None, None, None, "下载内容为空"
+
         if isinstance(content, Path) and not content.exists():
             logger.error(f"种子文件不存在：{content}")
             return None, None, None, f"种子文件不存在：{content}"

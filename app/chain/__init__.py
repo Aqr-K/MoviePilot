@@ -686,13 +686,13 @@ class ChainBase(metaclass=ABCMeta):
         return self.run_module("filter_torrents", rule_groups=rule_groups,
                                torrent_list=torrent_list, mediainfo=mediainfo)
 
-    def download(self, content: Union[Path, str], download_dir: Path, cookie: str,
+    def download(self, content: Union[Path, str, bytes], download_dir: Path, cookie: str,
                  episodes: Set[int] = None, category: Optional[str] = None, label: Optional[str] = None,
                  downloader: Optional[str] = None
                  ) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], str]]:
         """
         根据种子文件，选择并添加下载任务
-        :param content:  种子文件地址或者磁力链接
+        :param content:  种子文件地址或者磁力链接或者种子内容
         :param download_dir:  下载目录
         :param cookie:  cookie
         :param episodes:  需要下载的集数
@@ -705,15 +705,16 @@ class ChainBase(metaclass=ABCMeta):
                                cookie=cookie, episodes=episodes, category=category, label=label,
                                downloader=downloader)
 
-    def download_added(self, context: Context, download_dir: Path, torrent_path: Path = None) -> None:
+    def download_added(self, context: Context, download_dir: Path, torrent_content: Union[str, bytes] = None) -> None:
         """
         添加下载任务成功后，从站点下载字幕，保存到下载目录
         :param context:  上下文，包括识别信息、媒体信息、种子信息
         :param download_dir:  下载目录
-        :param torrent_path:  种子文件地址
+        :param torrent_content:  种子内容，如果有则直接使用该内容，否则从context中获取种子文件路径
         :return: None，该方法可被多个模块同时处理
         """
-        return self.run_module("download_added", context=context, torrent_path=torrent_path,
+        return self.run_module("download_added", context=context,
+                               torrent_content=torrent_content,
                                download_dir=download_dir)
 
     def list_torrents(self, status: TorrentStatus = None,
