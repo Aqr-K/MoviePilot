@@ -57,7 +57,7 @@ RUN python3 -m venv ${VENV_PATH} \
 COPY ../requirements.in requirements.in
 RUN ${VENV_PATH}/bin/pip-compile requirements.in \
     && ${VENV_PATH}/bin/pip install -r requirements.txt \
-    && playwright install-deps chromium \
+    && ${VENV_PATH}/bin/playwright install-deps chromium \
     && apt-get remove -y build-essential \
     && apt-get autoremove -y \
     && apt-get clean -y \
