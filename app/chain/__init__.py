@@ -54,6 +54,7 @@ class ChainBase(metaclass=ABCMeta):
             try:
                 self._redis_helper = RedisHelper(redis_url=settings.CACHE_BACKEND_URL)
             except RuntimeError as e:
+                self._redis_helper = None
                 logger.warning(f"Redis缓存初始化失败，将使用本地缓存: {e}")
 
     def load_cache(self, filename: str) -> Any:
