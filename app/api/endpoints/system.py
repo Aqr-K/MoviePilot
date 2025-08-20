@@ -73,8 +73,9 @@ async def fetch_image(
         # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
         cache_path = cache_path.with_suffix(".jpg")
 
-    # 缓存对像
-    cache_backend = get_async_file_cache_backend(base=settings.CACHE_PATH)
+    # 缓存对像，缓存过期时间为全局图片缓存天数
+    cache_backend = get_async_file_cache_backend(base=settings.CACHE_PATH,
+                                                 ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
 
     if use_cache:
         content = await cache_backend.get(cache_path.as_posix(), region="images")

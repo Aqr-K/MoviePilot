@@ -1,6 +1,6 @@
 import json
 import pickle
-from typing import Any, Optional
+from typing import Any, Optional, Generator, Tuple, AsyncGenerator
 from urllib.parse import quote
 
 import redis
@@ -245,7 +245,7 @@ class RedisHelper(metaclass=Singleton):
         except Exception as e:
             logger.error(f"Failed to clear cache, region: {region}, error: {e}")
 
-    def items(self, region: Optional[str] = None):
+    def items(self, region: Optional[str] = None) -> Generator[Tuple[Any, Any], None, None]:
         """
         获取指定区域的所有缓存键值对
 
@@ -525,7 +525,7 @@ class AsyncRedisHelper(metaclass=Singleton):
         except Exception as e:
             logger.error(f"Failed to clear cache (async), region: {region}, error: {e}")
 
-    async def items(self, region: Optional[str] = None):
+    async def items(self, region: Optional[str] = None) -> AsyncGenerator[Tuple[Any, Any], None]:
         """
         获取指定区域的所有缓存键值对
 
@@ -537,12 +537,12 @@ class AsyncRedisHelper(metaclass=Singleton):
             if region:
                 cache_region = self.get_region(quote(region))
                 redis_key = f"{cache_region}:key:*"
-                for key in self.client.scan_iter(redis_key):
+                async for key in self.client.scan_iter(redis_key):
                     value = await self.client.get(key)
                     if value is not None:
                         yield key, self.deserialize(value)
             else:
-                for key in self.client.scan_iter("*"):
+                async for key in self.client.scan_iter("*"):
                     value = await self.client.get(key)
                     if value is not None:
                         yield key, self.deserialize(value)
