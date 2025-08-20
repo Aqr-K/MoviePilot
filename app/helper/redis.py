@@ -10,10 +10,9 @@ from app.core.event import eventmanager, Event
 from app.log import logger
 from app.schemas import ConfigChangeEventData
 from app.schemas.types import EventType
-from app.utils.singleton import Singleton
 
 
-class RedisHelper(metaclass=Singleton):
+class RedisHelper:
     """
     Redis连接和操作助手类
     

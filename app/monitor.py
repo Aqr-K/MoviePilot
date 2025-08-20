@@ -768,7 +768,7 @@ class Monitor(metaclass=Singleton):
 
     def stop(self):
         """
-        退出插件
+        退出监控
         """
         self._event.set()
         if self._observers:
@@ -791,4 +791,6 @@ class Monitor(metaclass=Singleton):
                 except Exception as e:
                     logger.error(f"停止定时服务出现了错误：{e}")
             self._scheduler = None
+        if self._cache:
+            self._cache.close()
         self._event.clear()

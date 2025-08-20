@@ -19,7 +19,7 @@ from app.helper.thread import ThreadHelper
 from app.helper.display import DisplayHelper
 from app.helper.doh import DohHelper
 from app.helper.resource import ResourceHelper
-from app.helper.message import MessageHelper
+from app.helper.message import MessageHelper, stop_message
 from app.helper.subscribe import SubscribeHelper
 from app.db import close_database
 from app.db.systemconfig_oper import SystemConfigOper
@@ -117,6 +117,8 @@ async def stop_modules():
     DisplayHelper().stop()
     # 停止线程池
     ThreadHelper().shutdown()
+    # 停止消息服务
+    stop_message()
     # 停止缓存连接
     close_cache()
     # 停止数据库连接

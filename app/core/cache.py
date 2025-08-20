@@ -442,6 +442,10 @@ class TTLCache:
             logger.warning(f"缓存关闭失败: {e}")
 
 
+# 缓存后端实例
+cache_backend = get_cache_backend()
+
+
 def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Optional[int] = 1800,
            skip_none: Optional[bool] = True, skip_empty: Optional[bool] = False):
     """
@@ -550,10 +554,6 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Opti
             return wrapper
 
     return decorator
-
-
-# 缓存后端实例
-cache_backend = get_cache_backend()
 
 
 def close_cache() -> None:
