@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Set, Dict, Union
 
 from app import schemas
 from app.chain import ChainBase
+from app.core.cache import get_file_cache_backend
 from app.core.config import settings, global_vars
 from app.core.context import MediaInfo, TorrentInfo, Context
 from app.core.event import eventmanager, Event
@@ -217,14 +218,19 @@ class DownloadChain(ChainBase):
                                                                               source=source,
                                                                               userid=userid)
         elif torrent_file:
-            torrent_content = torrent_file.read_bytes()
-            # 获取种子文件的文件夹名和文件清单
-            _folder_name, _file_list = TorrentHelper().get_torrent_info(torrent_file)
-        else:
-            _folder_name, _file_list = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
+            if torrent_file.exists():
+                torrent_content = torrent_file.read_bytes()
+            else:
+                # 缓存处理器
+                cache_backend = get_file_cache_backend()
+                # 读取缓存的种子文件
+                torrent_content = cache_backend.get(torrent_file.as_posix(), region="torrents")
 
         if not torrent_content:
             return None
+
+        # 获取种子文件的文件夹名和文件清单
+        _folder_name, _file_list = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
 
         # 下载目录
         if save_path:
@@ -566,7 +572,7 @@ class DownloadChain(ChainBase):
                                     logger.info(f"开始下载 {torrent.title} ...")
                                     download_id = self.download_single(
                                         context=context,
-                                        torrent_file=content if isinstance(content, Path) else None,
+                                        torrent_content=content,
                                         save_path=save_path,
                                         channel=channel,
                                         source=source,
@@ -733,7 +739,7 @@ class DownloadChain(ChainBase):
                             logger.info(f"开始下载 {torrent.title} ...")
                             download_id = self.download_single(
                                 context=context,
-                                torrent_file=content if isinstance(content, Path) else None,
+                                torrent_content=content,
                                 episodes=selected_episodes,
                                 save_path=save_path,
                                 channel=channel,

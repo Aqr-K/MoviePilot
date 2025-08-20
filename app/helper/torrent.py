@@ -36,16 +36,16 @@ class TorrentHelper(metaclass=WeakSingleton):
             -> Tuple[Optional[Path], Optional[Union[str, bytes]], Optional[str], Optional[list], Optional[str]]:
         """
         把种子下载到本地
-        :return: 种子临时文件相对路径【实际已无效】, 种子内容、种子主目录、种子文件清单、错误信息
+        :return: 种子缓存相对路径【用于索引缓存】, 种子内容、种子主目录、种子文件清单、错误信息
         """
         if url.startswith("magnet:"):
             return None, url, "", [], f"磁力链接"
-        # 构建 torrent 种子文件的临时文件名
-        file_path = Path(StringUtils.md5_hash(url)).with_suffix(".torrent")
+        # 构建 torrent 种子文件的缓存路径
+        cache_path = Path(StringUtils.md5_hash(url)).with_suffix(".torrent")
         # 缓存处理器
         cache_backend = get_file_cache_backend()
         # 读取缓存的种子文件
-        torrent_content = cache_backend.get(file_path.as_posix(), region="torrents")
+        torrent_content = cache_backend.get(cache_path.as_posix(), region="torrents")
         if torrent_content:
             # 缓存已存在
             try:
@@ -55,9 +55,9 @@ class TorrentHelper(metaclass=WeakSingleton):
                 if not folder_name and not file_list:
                     raise ValueError("无效的缓存种子文件")
                 # 成功拿到种子数据
-                return file_path, torrent_content, folder_name, file_list, ""
+                return cache_path, torrent_content, folder_name, file_list, ""
             except Exception as err:
-                logger.error(f"处理缓存的种子文件 {file_path} 时出错: {err}，将重新下载")
+                logger.error(f"处理缓存的种子文件 {cache_path} 时出错: {err}，将重新下载")
         # 下载种子文件
         req = RequestUtils(
             ua=ua,
@@ -77,11 +77,11 @@ class TorrentHelper(metaclass=WeakSingleton):
             ).get_res(url=url, allow_redirects=False)
         if req and req.status_code == 200:
             if not req.content:
-                return file_path, None, "", [], "未下载到种子数据"
+                return cache_path, None, "", [], "未下载到种子数据"
             # 解析内容格式
             if req.content.startswith(b"magnet:"):
                 # 磁力链接
-                return file_path, req.text, "", [], f"获取到磁力链接"
+                return cache_path, req.text, "", [], f"获取到磁力链接"
             if "下载种子文件".encode("utf-8") in req.content:
                 # 首次下载提示页面
                 skip_flag = False
@@ -119,31 +119,32 @@ class TorrentHelper(metaclass=WeakSingleton):
                 except Exception as err:
                     logger.warn(f"触发了站点首次种子下载，尝试自动跳过时出现错误：{str(err)}，链接：{url}")
                 if not skip_flag:
-                    return file_path, None, "", [], "种子数据有误，请确认链接是否正确，如为PT站点则需手工在站点下载一次种子"
+                    return cache_path, None, "", [], "种子数据有误，请确认链接是否正确，如为PT站点则需手工在站点下载一次种子"
             # 种子内容
             if req.content:
                 # 检查是不是种子文件，如果不是仍然抛出异常
                 try:
-                    # 保存到缓存
-                    cache_backend.set(file_path.as_posix(), req.content, region="torrents")
                     # 获取种子目录和文件清单
                     folder_name, file_list = self.get_fileinfo_from_torrent_content(req.content)
+                    if file_list:
+                        # 保存到缓存
+                        cache_backend.set(cache_path.as_posix(), req.content, region="torrents")
                     # 成功拿到种子数据
-                    return file_path, req.content, folder_name, file_list, ""
+                    return cache_path, req.content, folder_name, file_list, ""
                 except Exception as err:
                     logger.error(f"种子文件解析失败：{str(err)}")
                 # 种子数据仍然错误
-                return file_path, None, "", [], "种子数据有误，请确认链接是否正确"
+                return cache_path, None, "", [], "种子数据有误，请确认链接是否正确"
             # 返回失败
-            return file_path, None, "", [], ""
+            return cache_path, None, "", [], ""
         elif req is None:
-            return file_path, None, "", [], "无法打开链接"
+            return cache_path, None, "", [], "无法打开链接"
         elif req.status_code == 429:
-            return file_path, None, "", [], "触发站点流控，请稍后重试"
+            return cache_path, None, "", [], "触发站点流控，请稍后重试"
         else:
             # 把错误的种子记下来，避免重复使用
             self.add_invalid(url)
-            return file_path, None, "", [], f"下载种子出错，状态码：{req.status_code}"
+            return cache_path, None, "", [], f"下载种子出错，状态码：{req.status_code}"
 
     def get_torrent_info(self, torrent_path: Path) -> Tuple[str, List[str]]:
         """
