@@ -7,13 +7,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
-import aiofiles
-from anyio import Path as AsyncPath
 from fastapi.concurrency import run_in_threadpool
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
-from app.core.cache import get_cache_backend
+from app.core.cache import get_file_cache_backend, get_async_file_cache_backend
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, TorrentInfo
 from app.core.event import EventManager
@@ -48,137 +46,66 @@ class ChainBase(metaclass=ABCMeta):
             send_callback=self.run_module
         )
         self.pluginmanager = PluginManager()
-        # 文件类缓存，保留1
-        self._cache = get_cache_backend(ttl=30 * 24 * 3600)
+        self.filecache = get_file_cache_backend()
+        self.async_filecache = get_async_file_cache_backend()
 
     def load_cache(self, filename: str) -> Any:
         """
-        加载缓存，优先从Redis读取，没有数据时从本地读取（兼容存量未迁移数据）
+        加载缓存
         """
-        # 如果Redis可用，优先从Redis读取
-        if self._cache.is_redis():
-            try:
-                cache_data = self._cache.get(filename, region="chain_cache")
-                if cache_data is not None:
-                    logger.debug(f"从Redis加载缓存: {filename}")
-                    return cache_data
-            except Exception as e:
-                logger.warning(f"从Redis加载缓存 {filename} 失败: {e}")
-
-        # 从本地文件读取（兼容存量数据）
-        cache_path = settings.TEMP_PATH / filename
-        if cache_path.exists():
-            try:
-                with open(cache_path, 'rb') as f:
-                    return pickle.load(f)
-            except Exception as err:
-                logger.error(f"加载缓存 {filename} 出错：{str(err)}")
-        return None
+        content = self.filecache.get(filename)
+        if not content:
+            return None
+        try:
+            return pickle.loads(content)
+        except Exception as err:
+            logger.error(f"加载缓存 {filename} 出错：{str(err)}")
+            return None
 
     async def async_load_cache(self, filename: str) -> Any:
         """
-        异步加载缓存，优先从Redis读取，没有数据时从本地读取（兼容存量未迁移数据）
+        异步加载缓存
         """
-        # 如果Redis可用，优先从Redis读取
-        if self._cache.is_redis():
-            try:
-                cache_data = self._cache.get(filename, region="chain_cache")
-                if cache_data is not None:
-                    logger.debug(f"从Redis异步加载缓存: {filename}")
-                    return cache_data
-            except Exception as e:
-                logger.warning(f"从Redis异步加载缓存 {filename} 失败: {e}")
-
-        # 从本地文件读取（兼容存量数据）
-        cache_path = settings.TEMP_PATH / filename
-        if cache_path.exists():
-            try:
-                async with aiofiles.open(cache_path, 'rb') as f:
-                    content = await f.read()
-                    return pickle.loads(content)
-            except Exception as err:
-                logger.error(f"异步加载缓存 {filename} 出错：{str(err)}")
-        return None
+        content = await self.async_filecache.get(filename)
+        if not content:
+            return None
+        try:
+            return pickle.loads(content)
+        except Exception as err:
+            logger.error(f"异步加载缓存 {filename} 出错：{str(err)}")
+            return None
 
     async def async_save_cache(self, cache: Any, filename: str) -> None:
         """
-        异步保存缓存，优先保存到Redis，同时保存到本地作为备份
+        异步保存缓存
         """
-        # 如果Redis可用，优先保存到Redis
-        if self._cache.is_redis():
-            try:
-                self._cache.set(filename, cache, region="chain_cache")
-                logger.debug(f"异步保存缓存到Redis: {filename}")
-            except Exception as e:
-                logger.warning(f"异步保存缓存到Redis失败: {e}")
-        else:
-            # 保存到本地
-            try:
-                async with aiofiles.open(settings.TEMP_PATH / filename, 'wb') as f:
-                    await f.write(pickle.dumps(cache))
-            except Exception as err:
-                logger.error(f"异步保存缓存到本地 {filename} 出错：{str(err)}")
+        try:
+            await self.async_filecache.set(filename, pickle.dumps(cache))
+        except Exception as err:
+            logger.error(f"异步保存缓存 {filename} 出错：{str(err)}")
+            return
 
     def save_cache(self, cache: Any, filename: str) -> None:
         """
-        保存缓存，优先保存到Redis，同时保存到本地作为备份
+        保存缓存
         """
-        # 如果Redis可用，优先保存到Redis
-        if self._cache.is_redis():
-            try:
-                self._cache.set(filename, cache, region="chain_cache")
-                logger.debug(f"保存缓存到Redis: {filename}")
-            except Exception as e:
-                logger.warning(f"保存缓存到Redis失败: {e}")
-        else:
-            # 保存到本地
-            try:
-                with open(settings.TEMP_PATH / filename, 'wb') as f:
-                    pickle.dump(cache, f)  # noqa
-            except Exception as err:
-                logger.error(f"保存缓存到本地 {filename} 出错：{str(err)}")
+        try:
+            self.filecache.set(filename, pickle.dumps(cache))
+        except Exception as err:
+            logger.error(f"保存缓存 {filename} 出错：{str(err)}")
+            return
 
     def remove_cache(self, filename: str) -> None:
         """
         删除缓存，同时删除Redis和本地缓存
         """
-        # 如果Redis可用，删除Redis缓存
-        if self._cache.is_redis():
-            try:
-                self._cache.delete(filename, region="chain_cache")
-                logger.debug(f"删除Redis缓存: {filename}")
-            except Exception as e:
-                logger.warning(f"删除Redis缓存失败: {e}")
-
-        # 删除本地缓存
-        cache_path = settings.TEMP_PATH / filename
-        if cache_path.exists():
-            try:
-                cache_path.unlink()
-                logger.debug(f"删除本地缓存: {filename}")
-            except Exception as e:
-                logger.warning(f"删除本地缓存失败: {e}")
+        self.filecache.delete(filename)
 
     async def async_remove_cache(self, filename: str) -> None:
         """
         异步删除缓存，同时删除Redis和本地缓存
         """
-        # 如果Redis可用，删除Redis缓存
-        if self._cache.is_redis():
-            try:
-                self._cache.delete(filename, region="chain_cache")
-                logger.debug(f"异步删除Redis缓存: {filename}")
-            except Exception as e:
-                logger.warning(f"异步删除Redis缓存失败: {e}")
-
-        # 删除本地缓存
-        cache_path = AsyncPath(settings.TEMP_PATH) / filename
-        if await cache_path.exists():
-            try:
-                await cache_path.unlink()
-                logger.debug(f"异步删除本地缓存: {filename}")
-            except Exception as err:
-                logger.error(f"异步删除本地缓存 {filename} 出错：{str(err)}")
+        pass
 
     @staticmethod
     def __is_valid_empty(ret):

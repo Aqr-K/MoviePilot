@@ -1,5 +1,4 @@
 import io
-import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -10,7 +9,7 @@ from app.chain import ChainBase
 from app.chain.bangumi import BangumiChain
 from app.chain.douban import DoubanChain
 from app.chain.tmdb import TmdbChain
-from app.core.cache import cached
+from app.core.cache import cached, get_file_cache_backend
 from app.core.config import settings, global_vars
 from app.log import logger
 from app.schemas import MediaType
@@ -37,8 +36,6 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         刷新推荐
         """
         logger.debug("Starting to refresh Recommend data.")
-        self._cache.clear(region=self.recommend_cache_region)
-        logger.debug("Recommend Cache has been cleared.")
 
         # 推荐来源方法
         recommend_methods = [
@@ -100,33 +97,26 @@ class RecommendChain(ChainBase, metaclass=Singleton):
                 logger.debug(f"Caching poster image: {poster_url}")
                 self.__fetch_and_save_image(poster_url)
 
-    def __fetch_and_save_image(self, url: str):
+    @staticmethod
+    def __fetch_and_save_image(url: str):
         """
         请求并保存图片
         :param url: 图片路径
         """
         # 生成缓存路径
         sanitized_path = SecurityUtils.sanitize_url_path(url)
-        cache_path = settings.CACHE_PATH / "images" / sanitized_path
+        cache_path = Path("images") / sanitized_path
+        # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
+        if not cache_path.suffix:
+            cache_path = cache_path.with_suffix(".jpg")
 
-        if self._cache.is_redis():
-            if self._cache.get(sanitized_path, region=self.recommend_cache_region):
-                logger.debug(f"Cache hit: Image already exists for URL: {url}")
-                return
-        else:
-            # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
-            if not cache_path.suffix:
-                cache_path = cache_path.with_suffix(".jpg")
+        # 获取缓存后端
+        cache_backend = get_file_cache_backend(base=settings.CACHE_PATH)
 
-            # 确保缓存路径和文件类型合法
-            if not SecurityUtils.is_safe_path(settings.CACHE_PATH, cache_path, settings.SECURITY_IMAGE_SUFFIXES):
-                logger.debug(f"Invalid cache path or file type for URL: {url}, sanitized path: {sanitized_path}")
-                return
-
-            # 本地存在缓存图片，则直接跳过
-            if cache_path.exists():
-                logger.debug(f"Cache hit: Image already exists at {cache_path}")
-                return
+        # 本地存在缓存图片，则直接跳过
+        if cache_backend.get(cache_path.as_posix(), region="images"):
+            logger.debug(f"Cache hit: Image already exists at {cache_path}")
+            return
 
         # 请求远程图片
         referer = "https://movie.douban.com/" if "doubanio.com" in url else None
@@ -142,25 +132,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         except Exception as e:
             logger.debug(f"Invalid image format for URL {url}: {e}")
             return
-        if self._cache.is_redis():
-            # 如果是Redis缓存，直接存储到缓存中
-            try:
-                self._cache.set(sanitized_path, response.content, region=self.recommend_cache_region)
-                logger.debug(f"Successfully cached image for URL: {url} in Redis.")
-            except Exception as e:
-                logger.debug(f"Failed to cache image for URL {url} in Redis: {e}")
-        else:
-            # 如果是本地文件缓存，写入到指定路径
-            try:
-                if not cache_path.parent.exists():
-                    cache_path.parent.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as tmp_file:
-                    tmp_file.write(response.content)
-                    temp_path = Path(tmp_file.name)
-                temp_path.replace(cache_path)
-                logger.debug(f"Successfully cached image at {cache_path} for URL: {url}")
-            except Exception as e:
-                logger.debug(f"Failed to write cache file {cache_path} for URL {url}: {e}")
+
+        # 保存缓存
+        cache_backend.set(cache_path.as_posix(), response.content, region="images")
+        logger.debug(f"Successfully cached image at {cache_path} for URL: {url}")
 
     @log_execution_time(logger=logger)
     @cached(ttl=recommend_ttl, region=recommend_cache_region)

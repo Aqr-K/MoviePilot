@@ -4,6 +4,7 @@ import json
 import re
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Union, Annotated
 
 import aiofiles
@@ -16,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from app import schemas
 from app.chain.search import SearchChain
 from app.chain.system import SystemChain
+from app.core.cache import get_async_file_cache_backend
 from app.core.config import global_vars, settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
@@ -28,7 +30,6 @@ from app.db.user_oper import get_current_active_superuser, get_current_active_su
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
-from app.helper.redis import AsyncRedisHelper
 from app.helper.rule import RuleHelper
 from app.helper.sites import SitesHelper  # noqa  # noqa
 from app.helper.subscribe import SubscribeHelper
@@ -67,53 +68,28 @@ async def fetch_image(
 
     # 缓存路径
     sanitized_path = SecurityUtils.sanitize_url_path(url)
-    base_path = AsyncPath(settings.CACHE_PATH)
-    cache_path = base_path / "images" / sanitized_path
+    cache_path = Path("images") / sanitized_path
+    if not cache_path.suffix:
+        # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
+        cache_path = cache_path.with_suffix(".jpg")
+
+    # 缓存对像
+    cache_backend = get_async_file_cache_backend(base=settings.CACHE_PATH)
 
     if use_cache:
-        if settings.CACHE_BACKEND_TYPE == "redis":
-            # 使用Redis缓存
-            redis_helper = AsyncRedisHelper()
-            content = await redis_helper.get(sanitized_path, region="image_cache")
-            if content:
-                # 检查 If-None-Match
-                etag = HashUtils.md5(content)
-                if if_none_match == etag:
-                    headers = RequestUtils.generate_cache_headers()
-                    return Response(status_code=304, headers=headers)
-                # 返回缓存图片
-                headers = RequestUtils.generate_cache_headers(etag)
-                return Response(
-                    content=content,
-                    media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
-                    headers=headers
-                )
-        else:
-            # 使用磁盘缓存
-            if not cache_path.suffix:
-                # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
-                cache_path = cache_path.with_suffix(".jpg")
-
-            # 确保缓存路径和文件类型合法
-            if not await SecurityUtils.async_is_safe_path(base_path=base_path,
-                                                          user_path=cache_path,
-                                                          allowed_suffixes=settings.SECURITY_IMAGE_SUFFIXES):
-                raise HTTPException(status_code=400, detail="Invalid cache path or file type")
-
-            # 目前暂不考虑磁盘缓存文件是否过期，通过缓存清理机制处理
-            if cache_path and await cache_path.exists():
-                try:
-                    # 读取磁盘缓存图片返回
-                    async with aiofiles.open(cache_path, 'rb') as f:
-                        content = await f.read()
-                    etag = HashUtils.md5(content)
-                    headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
-                    if if_none_match == etag:
-                        return Response(status_code=304, headers=headers)
-                    return Response(content=content, media_type="image/jpeg", headers=headers)
-                except Exception as e:
-                    # 如果读取磁盘缓存发生异常，这里仅记录日志，尝试再次请求远端进行处理
-                    logger.debug(f"Failed to read cache file {cache_path}: {e}")
+        content = await cache_backend.get(cache_path.as_posix(), region="images")
+        if content:
+            # 检查 If-None-Match
+            etag = HashUtils.md5(content)
+            headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
+            if if_none_match == etag:
+                return Response(status_code=304, headers=headers)
+            # 返回缓存图片
+            return Response(
+                content=content,
+                media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
+                headers=headers
+            )
 
     # 请求远程图片
     referer = "https://movie.douban.com/" if "doubanio.com" in url else None
@@ -138,21 +114,8 @@ async def fetch_image(
 
     # 保存缓存
     if use_cache:
-        if settings.CACHE_BACKEND_TYPE == "redis":
-            # 保存到Redis缓存
-            redis_helper = AsyncRedisHelper()
-            await redis_helper.set(sanitized_path, content, region="image_cache")
-        else:
-            # 保存到磁盘缓存
-            try:
-                if not await cache_path.parent.exists():
-                    await cache_path.parent.mkdir(parents=True, exist_ok=True)
-                async with aiofiles.tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as tmp_file:
-                    await tmp_file.write(content)
-                    temp_path = AsyncPath(tmp_file.name)
-                await temp_path.replace(cache_path)
-            except Exception as e:
-                logger.debug(f"Failed to write cache file {cache_path}: {e}")
+        await cache_backend.set(cache_path.as_posix(), content, region="images")
+        logger.debug(f"Image cached at {cache_path.as_posix()}")
 
     # 检查 If-None-Match
     etag = HashUtils.md5(content)

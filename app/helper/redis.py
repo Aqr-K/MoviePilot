@@ -525,6 +525,30 @@ class AsyncRedisHelper(metaclass=Singleton):
         except Exception as e:
             logger.error(f"Failed to clear cache (async), region: {region}, error: {e}")
 
+    async def items(self, region: Optional[str] = None):
+        """
+        获取指定区域的所有缓存键值对
+
+        :param region: 缓存的区
+        :return: 返回键值对生成器
+        """
+        try:
+            await self._connect()
+            if region:
+                cache_region = self.get_region(quote(region))
+                redis_key = f"{cache_region}:key:*"
+                for key in self.client.scan_iter(redis_key):
+                    value = await self.client.get(key)
+                    if value is not None:
+                        yield key, self.deserialize(value)
+            else:
+                for key in self.client.scan_iter("*"):
+                    value = await self.client.get(key)
+                    if value is not None:
+                        yield key, self.deserialize(value)
+        except Exception as e:
+            logger.error(f"Failed to get items from Redis, region: {region}, error: {e}")
+
     async def test(self) -> bool:
         """
         异步测试Redis连接性

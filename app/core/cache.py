@@ -1,14 +1,20 @@
 import inspect
+import shutil
+import tempfile
 import threading
 from abc import ABC, abstractmethod
 from functools import wraps
+from pathlib import Path
 from typing import Any, Dict, Optional
 
+import aiofiles
+import aioshutil
+from anyio import Path as AsyncPath
 from cachetools import TTLCache as CacheToolsTTLCache
 from cachetools.keys import hashkey
 
 from app.core.config import settings
-from app.helper.redis import RedisHelper
+from app.helper.redis import RedisHelper, AsyncRedisHelper
 from app.log import logger
 
 # 默认缓存区
@@ -130,17 +136,122 @@ class CacheBackend(ABC):
         return settings.CACHE_BACKEND_TYPE == "redis"
 
 
+class AsyncCacheBackend(ABC):
+    """
+    缓存后端基类，定义通用的缓存接口（异步）
+    """
+
+    @abstractmethod
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None,
+                  region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
+        """
+        设置缓存
+
+        :param key: 缓存的键
+        :param value: 缓存的值
+        :param ttl: 缓存的存活时间，单位秒
+        :param region: 缓存的区
+        :param kwargs: 其他参数
+        """
+        pass
+
+    @abstractmethod
+    async def exists(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> bool:
+        """
+        判断缓存键是否存在
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 存在返回 True，否则返回 False
+        """
+        pass
+
+    @abstractmethod
+    async def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Any:
+        """
+        获取缓存
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 返回缓存的值，如果缓存不存在返回 None
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
+        """
+        删除缓存
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        """
+        pass
+
+    @abstractmethod
+    async def clear(self, region: Optional[str] = None) -> None:
+        """
+        清除指定区域的缓存或全部缓存
+
+        :param region: 缓存的区
+        """
+        pass
+
+    @abstractmethod
+    async def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """
+        关闭缓存连接
+        """
+        pass
+
+    @staticmethod
+    def get_region(region: Optional[str] = DEFAULT_CACHE_REGION):
+        """
+        获取缓存的区
+        """
+        return f"region:{region}" if region else "region:default"
+
+    @staticmethod
+    def get_cache_key(func, args, kwargs):
+        """
+        获取缓存的键，通过哈希函数对函数的参数进行处理
+        :param func: 被装饰的函数
+        :param args: 位置参数
+        :param kwargs: 关键字参数
+        :return: 缓存键
+        """
+        signature = inspect.signature(func)
+        # 绑定传入的参数并应用默认值
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        # 忽略第一个参数，如果它是实例(self)或类(cls)
+        parameters = list(signature.parameters.keys())
+        if parameters and parameters[0] in ("self", "cls"):
+            bound.arguments.pop(parameters[0], None)
+        # 按照函数签名顺序提取参数值列表
+        keys = [
+            bound.arguments[param] for param in signature.parameters if param in bound.arguments
+        ]
+        # 使用有序参数生成缓存键
+        return f"{func.__name__}_{hashkey(*keys)}"
+
+    @staticmethod
+    def is_redis() -> bool:
+        return settings.CACHE_BACKEND_TYPE == "redis"
+
+
 class CacheToolsBackend(CacheBackend):
     """
     基于 `cachetools.TTLCache` 实现的缓存后端
-
-    特性：
-    - 支持动态设置缓存的 TTL（Time To Live，存活时间）和最大条目数（Maxsize）
-    - 缓存实例按区域（region）划分，不同 region 拥有独立的缓存实例
-    - 同一 region 共享相同的 TTL 和 Maxsize，设置时只能作用于整个 region
-
-    限制：
-    - 不支持按 `key` 独立隔离 TTL 和 Maxsize，仅支持作用于 region 级别
     """
 
     def __init__(self, maxsize: Optional[int] = 1024, ttl: Optional[int] = 1800):
@@ -263,18 +374,9 @@ class CacheToolsBackend(CacheBackend):
 class RedisBackend(CacheBackend):
     """
     基于 Redis 实现的缓存后端，支持通过 Redis 存储缓存
-
-    特性：
-    - 支持动态设置缓存的 TTL（Time To Live，存活时间）
-    - 支持分区域（region）管理缓存，不同的 region 采用独立的命名空间
-    - 支持自定义最大内存限制（maxmemory）和内存淘汰策略（如 allkeys-lru）
-
-    限制：
-    - 由于 Redis 的分布式特性，写入和读取可能受到网络延迟的影响
-    - Pickle 反序列化可能存在安全风险，需进一步重构调用来源，避免复杂对象缓存
     """
 
-    def __init__(self, ttl: Optional[int] = 1800):
+    def __init__(self, ttl: Optional[int] = None):
         """
         初始化 Redis 缓存实例
 
@@ -350,19 +452,342 @@ class RedisBackend(CacheBackend):
         self.redis_helper.close()
 
 
+class AsyncRedisBackend(AsyncCacheBackend):
+    """
+    基于 Redis 实现的缓存后端，支持通过 Redis 存储缓存
+    """
+
+    def __init__(self, ttl: Optional[int] = None):
+        """
+        初始化 Redis 缓存实例
+
+        :param ttl: 缓存的存活时间，单位秒
+        """
+        self.ttl = ttl
+        self.redis_helper = AsyncRedisHelper()
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None,
+                  region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
+        """
+        设置缓存
+
+        :param key: 缓存的键
+        :param value: 缓存的值
+        :param ttl: 缓存的存活时间，单位秒如果未传入则使用默认值
+        :param region: 缓存的区
+        :param kwargs: kwargs
+        """
+        ttl = ttl or self.ttl
+        await self.redis_helper.set(key, value, ttl=ttl, region=region, **kwargs)
+
+    async def exists(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> bool:
+        """
+        判断缓存键是否存在
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 存在返回 True，否则返回 False
+        """
+        return await self.redis_helper.exists(key, region=region)
+
+    async def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Optional[Any]:
+        """
+        获取缓存的值
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 返回缓存的值，如果缓存不存在返回 None
+        """
+        return await self.redis_helper.get(key, region=region)
+
+    async def delete(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
+        """
+        删除缓存
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        """
+        await self.redis_helper.delete(key, region=region)
+
+    async def clear(self, region: Optional[str] = None) -> None:
+        """
+        清除指定区域的缓存或全部缓存
+
+        :param region: 缓存的区
+        """
+        await self.redis_helper.clear(region=region)
+
+    async def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        return await self.redis_helper.items(region=region)
+
+    async def close(self) -> None:
+        """
+        关闭 Redis 客户端的连接池
+        """
+        await self.redis_helper.close()
+
+
+class FileBackend(CacheBackend):
+    """
+    基于 文件系统 实现的缓存后端
+    """
+
+    def __init__(self, base: Path):
+        """
+        初始化文件缓存实例
+        """
+        self.base = base
+        if not self.base.exists():
+            self.base.mkdir(parents=True, exist_ok=True)
+
+    def set(self, key: str, value: Any, region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
+        """
+        设置缓存
+
+        :param key: 缓存的键
+        :param value: 缓存的值
+        :param region: 缓存的区
+        :param kwargs: kwargs
+        """
+        cache_path = self.base / region / key
+        # 确保缓存目录存在
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        # 将值序列化为字符串存储
+        with tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as tmp_file:
+            tmp_file.write(value)
+            temp_path = Path(tmp_file.name)
+        temp_path.replace(cache_path)
+
+    def exists(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> bool:
+        """
+        判断缓存键是否存在
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 存在返回 True，否则返回 False
+        """
+        cache_path = self.base / key
+        return cache_path.exists()
+
+    def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Optional[Any]:
+        """
+        获取缓存的值
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 返回缓存的值，如果缓存不存在返回 None
+        """
+        cache_path = self.base / region / key
+        if not cache_path.exists():
+            return None
+        with open(cache_path, 'rb') as f:
+            return f.read()
+
+    def delete(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
+        """
+        删除缓存
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        """
+        cache_path = self.base / region / key
+        if cache_path.exists():
+            cache_path.unlink()
+
+    def clear(self, region: Optional[str] = None) -> None:
+        """
+        清除指定区域的缓存或全部缓存
+
+        :param region: 缓存的区
+        """
+        if region:
+            # 清理指定缓存区
+            cache_path = self.base / region
+            if cache_path.exists():
+                for item in cache_path.iterdir():
+                    if item.is_file():
+                        item.unlink()
+                    else:
+                        shutil.rmtree(item, ignore_errors=True)
+        else:
+            # 清除所有区域的缓存
+            for item in self.base.iterdir():
+                if item.is_file():
+                    item.unlink()
+                else:
+                    shutil.rmtree(item, ignore_errors=True)
+
+    def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        cache_path = self.base / region
+        if not cache_path.exists():
+            return {}
+        for item in cache_path.iterdir():
+            if item.is_file():
+                with open(item, 'r') as f:
+                    yield f.read()
+
+    def close(self) -> None:
+        """
+        关闭 Redis 客户端的连接池
+        """
+        pass
+
+
+class AsyncFileBackend(AsyncCacheBackend):
+    """
+    基于 文件系统 实现的缓存后端（异步模式）
+    """
+
+    def __init__(self, base: Path):
+        """
+        初始化文件缓存实例
+        """
+        self.base = base
+        if not self.base.exists():
+            self.base.mkdir(parents=True, exist_ok=True)
+
+    async def set(self, key: str, value: Any, region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
+        """
+        设置缓存
+
+        :param key: 缓存的键
+        :param value: 缓存的值
+        :param region: 缓存的区
+        :param kwargs: kwargs
+        """
+        cache_path = AsyncPath(self.base) / region / key
+        # 确保缓存目录存在
+        await cache_path.parent.mkdir(parents=True, exist_ok=True)
+        # 保存文件
+        async with aiofiles.tempfile.NamedTemporaryFile(dir=cache_path.parent, delete=False) as tmp_file:
+            await tmp_file.write(value)
+            temp_path = AsyncPath(tmp_file.name)
+        await temp_path.replace(cache_path)
+
+    async def exists(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> bool:
+        """
+        判断缓存键是否存在
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 存在返回 True，否则返回 False
+        """
+        cache_path = AsyncPath(self.base) / region / key
+        return await cache_path.exists()
+
+    async def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Optional[Any]:
+        """
+        获取缓存的值
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        :return: 返回缓存的值，如果缓存不存在返回 None
+        """
+        cache_path = AsyncPath(self.base) / region / key
+        if not await cache_path.exists():
+            return None
+        async with aiofiles.open(cache_path, 'rb') as f:
+            return await f.read()
+
+    async def delete(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
+        """
+        删除缓存
+
+        :param key: 缓存的键
+        :param region: 缓存的区
+        """
+        cache_path = AsyncPath(self.base) / region / key
+        if await cache_path.exists():
+            await cache_path.unlink()
+
+    async def clear(self, region: Optional[str] = None) -> None:
+        """
+        清除指定区域的缓存或全部缓存
+
+        :param region: 缓存的区
+        """
+        if region:
+            # 清理指定缓存区
+            cache_path = AsyncPath(self.base) / region
+            if await cache_path.exists():
+                for item in cache_path.iterdir():
+                    if await item.is_file():
+                        await item.unlink()
+                    else:
+                        await aioshutil.rmtree(item, ignore_errors=True)
+        else:
+            # 清除所有区域的缓存
+            for item in AsyncPath(self.base).iterdir():
+                if await item.is_file():
+                    await item.unlink()
+                else:
+                    await aioshutil.rmtree(item, ignore_errors=True)
+
+    async def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Dict[str, Any]:
+        """
+        获取指定区域的所有缓存项
+
+        :param region: 缓存的区
+        :return: 返回一个字典，包含所有缓存键值对
+        """
+        cache_path = AsyncPath(self.base) / region
+        if not await cache_path.exists():
+            yield None
+        for item in cache_path.iterdir():
+            if await item.is_file():
+                async with aiofiles.open(item, 'r') as f:
+                    yield await f.read()
+
+    async def close(self) -> None:
+        """
+        关闭 Redis 客户端的连接池
+        """
+        pass
+
+
+def get_file_cache_backend(base: Path = settings.TEMP_PATH) -> CacheBackend:
+    """
+    获取文件缓存后端实例（Redis或文件系统）
+    """
+    if settings.CACHE_BACKEND_TYPE == "redis":
+        return RedisBackend()
+    else:
+        return FileBackend(base=base)
+
+
+def get_async_file_cache_backend(base: Path = settings.TEMP_PATH) -> AsyncCacheBackend:
+    """
+    获取文件异步缓存后端实例（Redis或文件系统）
+    """
+    if settings.CACHE_BACKEND_TYPE == "redis":
+        return AsyncRedisBackend()
+    else:
+        return AsyncFileBackend(base=base)
+
+
 def get_cache_backend(maxsize: Optional[int] = 512, ttl: Optional[int] = 1800) -> CacheBackend:
     """
-    根据配置获取缓存后端实例
+    根据配置获取缓存后端实例（内存或Redis）
 
     :param maxsize: 缓存的最大条目数，仅使用cachetools时生效
     :param ttl: 缓存的默认存活时间，单位秒
     :return: 返回缓存后端实例
     """
     if settings.CACHE_BACKEND_TYPE == "redis":
-        logger.debug(f"Attempting to use RedisBackend, TTL: {ttl}")
         return RedisBackend(ttl=ttl)
     else:
-        logger.debug(f"Using CacheToolsBackend with default maxsize: {maxsize}, TTL: {ttl}")
         return CacheToolsBackend(maxsize=maxsize, ttl=ttl)
 
 
@@ -376,7 +801,7 @@ class TTLCache:
     - 支持Redis和cachetools的切换
     """
 
-    def __init__(self, maxsize: int = 128, ttl: int = 600):
+    def __init__(self, maxsize: int = 128, ttl: int = 1800):
         """
         初始化TTL缓存
 
