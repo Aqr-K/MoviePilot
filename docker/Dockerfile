@@ -81,7 +81,7 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && groupadd -r moviepilot -g 918 \
     && useradd -r moviepilot -g moviepilot -d ${HOME} -s /bin/bash -u 918 \
     && python_ver=$(python3 -V | awk '{print $2}') \
-    && echo "/app/" > /usr/local/lib/python${python_ver%.*}/site-packages/app.pth \
+    && echo "/app/" > ${VENV_PATH}/lib/python${python_ver%.*}/site-packages/app.pth \
     && echo 'fs.inotify.max_user_watches=5242880' >> /etc/sysctl.conf \
     && echo 'fs.inotify.max_user_instances=5242880' >> /etc/sysctl.conf \
     && locale-gen zh_CN.UTF-8 \
