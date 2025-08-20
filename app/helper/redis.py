@@ -52,7 +52,7 @@ class RedisHelper(metaclass=SingletonClass):
             )
             # 测试连接，确保Redis可用
             self.client.ping()
-            logger.debug(f"Successfully connected to Redis")
+            logger.info(f"Successfully connected to Redis：{self.redis_url}")
             self.set_memory_limit()
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
