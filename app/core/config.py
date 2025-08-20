@@ -139,6 +139,14 @@ class ConfigModel(BaseModel):
     CACHE_BACKEND_URL: Optional[str] = "redis://localhost:6379"
     # Redis 缓存最大内存限制，未配置时，如开启大内存模式时为 "1024mb"，未开启时为 "256mb"
     CACHE_REDIS_MAXMEMORY: Optional[str] = None
+    # 全局图片缓存，将媒体图片缓存到本地
+    GLOBAL_IMAGE_CACHE: bool = False
+    # 全局图片缓存保留天数
+    GLOBAL_IMAGE_CACHE_DAYS: int = 7
+    # 临时文件保留天数
+    TEMP_FILE_DAYS: int = 3
+    # 元数据识别缓存过期时间（小时），0为自动
+    META_CACHE_EXPIRE: int = 0
 
     # ==================== 网络代理配置 ====================
     # 网络代理服务器地址
@@ -162,20 +170,10 @@ class ConfigModel(BaseModel):
     SEARCH_SOURCE: str = "themoviedb,douban,bangumi"
     # 媒体识别来源 themoviedb/douban
     RECOGNIZE_SOURCE: str = "themoviedb"
-    # 元数据识别缓存过期时间（小时）
-    META_CACHE_EXPIRE: int = 0
-    # 电视剧动漫的分类genre_ids
-    ANIME_GENREIDS: List[int] = Field(default=[16])
     # 刮削来源 themoviedb/douban
     SCRAP_SOURCE: str = "themoviedb"
-    # 新增已入库媒体是否跟随TMDB信息变化
-    SCRAP_FOLLOW_TMDB: bool = True
-    # 检查本地媒体库是否存在资源开关
-    LOCAL_EXISTS_SEARCH: bool = False
-    # 搜索多个名称
-    SEARCH_MULTIPLE_NAME: bool = False
-    # 最大搜索名称数量
-    MAX_SEARCH_NAME_LIMIT: int = 2
+    # 电视剧动漫的分类genre_ids
+    ANIME_GENREIDS: List[int] = Field(default=[16])
 
     # ==================== TMDB配置 ====================
     # TMDB图片地址
@@ -237,8 +235,6 @@ class ConfigModel(BaseModel):
                                  '.aifc', '.aiff', '.alac', '.adif', '.adts',
                                  '.flac', '.midi', '.opus', '.sfalc']
     )
-    # 下载器临时文件后缀
-    DOWNLOAD_TMPEXT: list = Field(default_factory=lambda: ['.!qb', '.part'])
 
     # ==================== 媒体服务器配置 ====================
     # 媒体服务器同步间隔（小时）
@@ -253,6 +249,8 @@ class ConfigModel(BaseModel):
     SUBSCRIBE_STATISTIC_SHARE: bool = True
     # 订阅搜索开关
     SUBSCRIBE_SEARCH: bool = False
+    # 检查本地媒体库是否存在资源开关
+    LOCAL_EXISTS_SEARCH: bool = False
 
     # ==================== 站点配置 ====================
     # 站点数据刷新间隔（小时）
@@ -261,6 +259,18 @@ class ConfigModel(BaseModel):
     SITE_MESSAGE: bool = True
     # 不能缓存站点资源的站点域名，多个使用,分隔
     NO_CACHE_SITE_KEY: str = "m-team"
+    # OCR服务器地址，用于识别站点验证码
+    OCR_HOST: str = "https://movie-pilot.org"
+    # 仿真类型：playwright 或 flaresolverr
+    BROWSER_EMULATION: str = "playwright"
+    # FlareSolverr 服务地址，例如 http://127.0.0.1:8191
+    FLARESOLVERR_URL: Optional[str] = None
+
+    # ==================== 搜索配置 ====================
+    # 搜索多个名称
+    SEARCH_MULTIPLE_NAME: bool = False
+    # 最大搜索名称数量
+    MAX_SEARCH_NAME_LIMIT: int = 2
 
     # ==================== 下载配置 ====================
     # 种子标签
@@ -269,6 +279,8 @@ class ConfigModel(BaseModel):
     DOWNLOAD_SUBTITLE: bool = True
     # 交互搜索自动下载用户ID，使用,分割
     AUTO_DOWNLOAD_USER: Optional[str] = None
+    # 下载器临时文件后缀
+    DOWNLOAD_TMPEXT: list = Field(default_factory=lambda: ['.!qb', '.part'])
 
     # ==================== CookieCloud配置 ====================
     # CookieCloud是否启动本地服务
@@ -284,7 +296,7 @@ class ConfigModel(BaseModel):
     # CookieCloud同步黑名单，多个域名,分割
     COOKIECLOUD_BLACKLIST: Optional[str] = None
 
-    # ==================== 重命名配置 ====================
+    # ==================== 整理配置 ====================
     # 电影重命名格式
     MOVIE_RENAME_FORMAT: str = "{{title}}{% if year %} ({{year}}){% endif %}" \
                                "/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if videoFormat %} - {{videoFormat}}{% endif %}" \
@@ -298,12 +310,14 @@ class ConfigModel(BaseModel):
     RENAME_FORMAT_S0_NAMES: list = Field(default=["Specials", "SPs"])
     # 为指定默认字幕添加.default后缀
     DEFAULT_SUB: Optional[str] = "zh-cn"
+    # 新增已入库媒体是否跟随TMDB信息变化
+    SCRAP_FOLLOW_TMDB: bool = True
 
     # ==================== 服务地址配置 ====================
-    # OCR服务器地址
-    OCR_HOST: str = "https://movie-pilot.org"
     # 服务器地址，对应 https://github.com/jxxghp/MoviePilot-Server 项目
     MP_SERVER_HOST: str = "https://movie-pilot.org"
+
+    # ==================== 个性化 ====================
     # 登录页面电影海报,tmdb/bing/mediaserver
     WALLPAPER: str = "tmdb"
     # 自定义壁纸api地址
@@ -331,7 +345,7 @@ class ConfigModel(BaseModel):
     # 是否开启插件热加载
     PLUGIN_AUTO_RELOAD: bool = False
 
-    # ==================== GitHub配置 ====================
+    # ==================== Github & PIP ====================
     # Github token，提高请求api限流阈值 ghp_****
     GITHUB_TOKEN: Optional[str] = None
     # Github代理服务器，格式：https://mirror.ghproxy.com/
@@ -346,8 +360,6 @@ class ConfigModel(BaseModel):
     BIG_MEMORY_MODE: bool = False
     # FastApi性能监控
     PERFORMANCE_MONITOR_ENABLE: bool = False
-    # 全局图片缓存，将媒体图片缓存到本地
-    GLOBAL_IMAGE_CACHE: bool = False
     # 是否启用编码探测的性能模式
     ENCODING_DETECTION_PERFORMANCE_MODE: bool = True
     # 编码探测的最低置信度阈值
@@ -383,12 +395,6 @@ class ConfigModel(BaseModel):
     RCLONE_SNAPSHOT_CHECK_FOLDER_MODTIME = True
     # 对OpenList进行快照对比时，是否检查文件夹的修改时间
     OPENLIST_SNAPSHOT_CHECK_FOLDER_MODTIME = True
-
-    # ==================== 浏览器仿真配置 ====================
-    # 仿真类型：playwright 或 flaresolverr
-    BROWSER_EMULATION: str = "playwright"
-    # FlareSolverr 服务地址，例如 http://127.0.0.1:8191
-    FLARESOLVERR_URL: Optional[str] = None
 
     # ==================== Docker配置 ====================
     # Docker Client API地址
