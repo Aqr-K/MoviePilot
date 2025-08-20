@@ -61,6 +61,8 @@ class ConfigModel(BaseModel):
     API_V1_STR: str = "/api/v1"
     # 前端资源路径
     FRONTEND_PATH: str = "/public"
+    # PIP虚拟环境路径
+    VENV_PATH: str = "/opt/venv"
     # 时区
     TZ: str = "Asia/Shanghai"
     # API监听地址
