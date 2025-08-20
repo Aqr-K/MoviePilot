@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional, List, Dict, Union
 from typing import Callable
 
-from cachetools import TTLCache
+from app.core.cache import TTLCache
 from jinja2 import Template
 
 from app.core.config import global_vars

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from functools import wraps
 from typing import Any, Dict, Optional
 
-from cachetools import TTLCache
+from cachetools import TTLCache as CacheToolsTTLCache
 from cachetools.keys import hashkey
 
 from app.core.config import settings
@@ -138,9 +138,9 @@ class CacheToolsBackend(CacheBackend):
         self.maxsize = maxsize
         self.ttl = ttl
         # 存储各个 region 的缓存实例，region -> TTLCache
-        self._region_caches: Dict[str, TTLCache] = {}
+        self._region_caches: Dict[str, CacheToolsTTLCache] = {}
 
-    def __get_region_cache(self, region: str) -> Optional[TTLCache]:
+    def __get_region_cache(self, region: str) -> Optional[CacheToolsTTLCache]:
         """
         获取指定区域的缓存实例，如果不存在则返回 None
         """
@@ -162,7 +162,7 @@ class CacheToolsBackend(CacheBackend):
         maxsize = kwargs.get("maxsize", self.maxsize)
         region = self.get_region(region)
         # 如果该 key 尚未有缓存实例，则创建一个新的 TTLCache 实例
-        region_cache = self._region_caches.setdefault(region, TTLCache(maxsize=maxsize, ttl=ttl))
+        region_cache = self._region_caches.setdefault(region, CacheToolsTTLCache(maxsize=maxsize, ttl=ttl))
         # 设置缓存值
         with lock:
             region_cache[key] = value
@@ -346,6 +346,100 @@ def get_cache_backend(maxsize: Optional[int] = 512, ttl: Optional[int] = 1800) -
     # 如果不是 Redis，回退到内存缓存
     logger.debug(f"Using CacheToolsBackend with default maxsize: {maxsize}, TTL: {ttl}")
     return CacheToolsBackend(maxsize=maxsize, ttl=ttl)
+
+
+class TTLCache:
+    """
+    TTL缓存类，根据配置自动选择使用Redis或cachetools
+
+    特性：
+    - 提供与cachetools.TTLCache相同的接口
+    - 根据配置自动选择缓存后端
+    - 支持Redis和cachetools的切换
+    """
+
+    def __init__(self, maxsize: int = 128, ttl: int = 600):
+        """
+        初始化TTL缓存
+
+        :param maxsize: 缓存的最大条目数
+        :param ttl: 缓存的存活时间，单位秒
+        """
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self._backend = get_cache_backend(maxsize=maxsize, ttl=ttl)
+
+    def __getitem__(self, key):
+        """
+        获取缓存项
+        """
+        try:
+            value = self._backend.get(str(key))
+            if value is not None:
+                return value
+        except Exception as e:
+            logger.warning(f"缓存获取失败: {e}")
+
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        """
+        设置缓存项
+        """
+        try:
+            self._backend.set(str(key), value, ttl=self.ttl)
+        except Exception as e:
+            logger.warning(f"缓存设置失败: {e}")
+
+    def __delitem__(self, key):
+        """
+        删除缓存项
+        """
+        try:
+            self._backend.delete(str(key))
+        except Exception as e:
+            logger.warning(f"缓存删除失败: {e}")
+
+    def __contains__(self, key):
+        """
+        检查键是否存在
+        """
+        try:
+            return self._backend.exists(str(key))
+        except Exception as e:
+            logger.warning(f"缓存检查失败: {e}")
+            return False
+
+    def get(self, key, default=None):
+        """
+        获取缓存项，如果不存在返回默认值
+        """
+        try:
+            value = self._backend.get(str(key))
+            if value is not None:
+                return value
+        except Exception as e:
+            logger.warning(f"缓存获取失败: {e}")
+
+        return default
+
+    def clear(self):
+        """
+        清空缓存
+        """
+        try:
+            self._backend.clear()
+        except Exception as e:
+            logger.warning(f"缓存清空失败: {e}")
+
+    def close(self):
+        """
+        关闭缓存连接
+        """
+        try:
+            self._backend.close()
+        except Exception as e:
+            logger.warning(f"缓存关闭失败: {e}")
 
 
 def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Optional[int] = 1800,
