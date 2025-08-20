@@ -6,10 +6,14 @@ from urllib.parse import quote
 import redis
 
 from app.core.config import settings
+from app.core.event import eventmanager, Event
 from app.log import logger
+from app.schemas import ConfigChangeEventData
+from app.schemas.types import EventType
+from app.utils.singleton import SingletonClass
 
 
-class RedisHelper:
+class RedisHelper(metaclass=SingletonClass):
     """
     Redis连接和操作助手类
     
@@ -53,6 +57,20 @@ class RedisHelper:
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             raise RuntimeError("Redis connection failed") from e
+
+    @eventmanager.register(EventType.ConfigChanged)
+    def handle_config_changed(self, event: Event):
+        """
+        处理配置变更事件，更新Redis设置
+        :param event: 事件对象
+        """
+        if not event:
+            return
+        event_data: ConfigChangeEventData = event.event_data
+        if event_data.key not in ['CACHE_BACKEND_TYPE', 'CACHE_BACKEND_URL', 'CACHE_REDIS_MAXMEMORY']:
+            return
+        logger.info("配置变更，重连Redis...")
+        self._connect()
 
     def set_memory_limit(self, policy: Optional[str] = "allkeys-lru"):
         """

@@ -7,10 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
-from fastapi.concurrency import run_in_threadpool
-
 import aiofiles
 from anyio import Path as AsyncPath
+from fastapi.concurrency import run_in_threadpool
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
@@ -23,6 +22,7 @@ from app.core.plugin import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
 from app.helper.message import MessageHelper, MessageQueueManager, MessageTemplateHelper
+from app.helper.redis import RedisHelper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import TransferInfo, TransferTorrent, ExistMediaInfo, DownloadingTorrent, CommingMessage, Notification, \
@@ -48,12 +48,29 @@ class ChainBase(metaclass=ABCMeta):
             send_callback=self.run_module
         )
         self.pluginmanager = PluginManager()
+        # 初始化Redis缓存助手
+        self._redis_helper = None
+        if settings.CACHE_BACKEND_TYPE == "redis":
+            try:
+                self._redis_helper = RedisHelper(redis_url=settings.CACHE_BACKEND_URL)
+            except RuntimeError as e:
+                logger.warning(f"Redis缓存初始化失败，将使用本地缓存: {e}")
 
-    @staticmethod
-    def load_cache(filename: str) -> Any:
+    def load_cache(self, filename: str) -> Any:
         """
-        从本地加载缓存
+        加载缓存，优先从Redis读取，没有数据时从本地读取（兼容存量未迁移数据）
         """
+        # 如果Redis可用，优先从Redis读取
+        if self._redis_helper:
+            try:
+                cache_data = self._redis_helper.get(filename, region="chain_cache")
+                if cache_data is not None:
+                    logger.debug(f"从Redis加载缓存: {filename}")
+                    return cache_data
+            except Exception as e:
+                logger.warning(f"从Redis加载缓存 {filename} 失败: {e}")
+
+        # 从本地文件读取（兼容存量数据）
         cache_path = settings.TEMP_PATH / filename
         if cache_path.exists():
             try:
@@ -63,11 +80,21 @@ class ChainBase(metaclass=ABCMeta):
                 logger.error(f"加载缓存 {filename} 出错：{str(err)}")
         return None
 
-    @staticmethod
-    async def async_load_cache(filename: str) -> Any:
+    async def async_load_cache(self, filename: str) -> Any:
         """
-        异步从本地加载缓存
+        异步加载缓存，优先从Redis读取，没有数据时从本地读取（兼容存量未迁移数据）
         """
+        # 如果Redis可用，优先从Redis读取
+        if self._redis_helper:
+            try:
+                cache_data = self._redis_helper.get(filename, region="chain_cache")
+                if cache_data is not None:
+                    logger.debug(f"从Redis异步加载缓存: {filename}")
+                    return cache_data
+            except Exception as e:
+                logger.warning(f"从Redis异步加载缓存 {filename} 失败: {e}")
+
+        # 从本地文件读取（兼容存量数据）
         cache_path = settings.TEMP_PATH / filename
         if cache_path.exists():
             try:
@@ -75,51 +102,88 @@ class ChainBase(metaclass=ABCMeta):
                     content = await f.read()
                     return pickle.loads(content)
             except Exception as err:
-                logger.error(f"加载缓存 {filename} 出错：{str(err)}")
+                logger.error(f"异步加载缓存 {filename} 出错：{str(err)}")
         return None
 
-    @staticmethod
-    async def async_save_cache(cache: Any, filename: str) -> None:
+    async def async_save_cache(self, cache: Any, filename: str) -> None:
         """
-        异步保存缓存到本地
+        异步保存缓存，优先保存到Redis，同时保存到本地作为备份
         """
-        try:
-            async with aiofiles.open(settings.TEMP_PATH / filename, 'wb') as f:
-                await f.write(pickle.dumps(cache))
-        except Exception as err:
-            logger.error(f"保存缓存 {filename} 出错：{str(err)}")
+        # 如果Redis可用，优先保存到Redis
+        if self._redis_helper:
+            try:
+                self._redis_helper.set(filename, cache, ttl=86400, region="chain_cache")
+                logger.debug(f"异步保存缓存到Redis: {filename}")
+            except Exception as e:
+                logger.warning(f"异步保存缓存到Redis失败: {e}")
+        else:
+            # 保存到本地
+            try:
+                async with aiofiles.open(settings.TEMP_PATH / filename, 'wb') as f:
+                    await f.write(pickle.dumps(cache))
+            except Exception as err:
+                logger.error(f"异步保存缓存到本地 {filename} 出错：{str(err)}")
 
-    @staticmethod
-    def save_cache(cache: Any, filename: str) -> None:
+    def save_cache(self, cache: Any, filename: str) -> None:
         """
-        保存缓存到本地
+        保存缓存，优先保存到Redis，同时保存到本地作为备份
         """
-        try:
-            with open(settings.TEMP_PATH / filename, 'wb') as f:
-                pickle.dump(cache, f)  # noqa
-        except Exception as err:
-            logger.error(f"保存缓存 {filename} 出错：{str(err)}")
+        # 如果Redis可用，优先保存到Redis
+        if self._redis_helper:
+            try:
+                self._redis_helper.set(filename, cache, ttl=86400, region="chain_cache")
+                logger.debug(f"保存缓存到Redis: {filename}")
+            except Exception as e:
+                logger.warning(f"保存缓存到Redis失败: {e}")
+        else:
+            # 保存到本地
+            try:
+                with open(settings.TEMP_PATH / filename, 'wb') as f:
+                    pickle.dump(cache, f)  # noqa
+            except Exception as err:
+                logger.error(f"保存缓存到本地 {filename} 出错：{str(err)}")
 
-    @staticmethod
-    def remove_cache(filename: str) -> None:
+    def remove_cache(self, filename: str) -> None:
         """
-        删除本地缓存
+        删除缓存，同时删除Redis和本地缓存
         """
+        # 如果Redis可用，删除Redis缓存
+        if self._redis_helper:
+            try:
+                self._redis_helper.delete(filename, region="chain_cache")
+                logger.debug(f"删除Redis缓存: {filename}")
+            except Exception as e:
+                logger.warning(f"删除Redis缓存失败: {e}")
+
+        # 删除本地缓存
         cache_path = settings.TEMP_PATH / filename
         if cache_path.exists():
-            cache_path.unlink()
+            try:
+                cache_path.unlink()
+                logger.debug(f"删除本地缓存: {filename}")
+            except Exception as e:
+                logger.warning(f"删除本地缓存失败: {e}")
 
-    @staticmethod
-    async def async_remove_cache(filename: str) -> None:
+    async def async_remove_cache(self, filename: str) -> None:
         """
-        异步删除本地缓存
+        异步删除缓存，同时删除Redis和本地缓存
         """
+        # 如果Redis可用，删除Redis缓存
+        if self._redis_helper:
+            try:
+                self._redis_helper.delete(filename, region="chain_cache")
+                logger.debug(f"异步删除Redis缓存: {filename}")
+            except Exception as e:
+                logger.warning(f"异步删除Redis缓存失败: {e}")
+
+        # 删除本地缓存
         cache_path = AsyncPath(settings.TEMP_PATH) / filename
         if await cache_path.exists():
             try:
                 await cache_path.unlink()
+                logger.debug(f"异步删除本地缓存: {filename}")
             except Exception as err:
-                logger.error(f"异步删除缓存 {filename} 出错：{str(err)}")
+                logger.error(f"异步删除本地缓存 {filename} 出错：{str(err)}")
 
     @staticmethod
     def __is_valid_empty(ret):
@@ -923,12 +987,12 @@ class ChainBase(metaclass=ABCMeta):
                                        immediately=True if message.userid else False)
 
     async def async_post_message(self,
-                     message: Optional[Notification] = None,
-                     meta: Optional[MetaBase] = None,
-                     mediainfo: Optional[MediaInfo] = None,
-                     torrentinfo: Optional[TorrentInfo] = None,
-                     transferinfo: Optional[TransferInfo] = None,
-                     **kwargs) -> None:
+                                 message: Optional[Notification] = None,
+                                 meta: Optional[MetaBase] = None,
+                                 mediainfo: Optional[MediaInfo] = None,
+                                 torrentinfo: Optional[TorrentInfo] = None,
+                                 transferinfo: Optional[TransferInfo] = None,
+                                 **kwargs) -> None:
         """
         异步发送消息
         :param message:  Notification实例
@@ -991,15 +1055,16 @@ class ChainBase(metaclass=ABCMeta):
                         break
                     # 按设定发送
                     await self.eventmanager.async_send_event(etype=EventType.NoticeMessage,
-                                                 data={**send_message.dict(), "type": send_message.mtype})
+                                                             data={**send_message.dict(), "type": send_message.mtype})
                     await self.messagequeue.async_send_message("post_message", message=send_message)
                 if not send_orignal:
                     return
         # 发送消息事件
-        await self.eventmanager.async_send_event(etype=EventType.NoticeMessage, data={**message.dict(), "type": message.mtype})
+        await self.eventmanager.async_send_event(etype=EventType.NoticeMessage,
+                                                 data={**message.dict(), "type": message.mtype})
         # 按原消息发送
         await self.messagequeue.async_send_message("post_message", message=message,
-                                       immediately=True if message.userid else False)
+                                                   immediately=True if message.userid else False)
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """

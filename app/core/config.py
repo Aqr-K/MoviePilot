@@ -136,7 +136,7 @@ class ConfigModel(BaseModel):
     # 缓存类型，支持 cachetools 和 redis，默认使用 cachetools
     CACHE_BACKEND_TYPE: str = "cachetools"
     # 缓存连接字符串，仅外部缓存（如 Redis、Memcached）需要
-    CACHE_BACKEND_URL: Optional[str] = None
+    CACHE_BACKEND_URL: Optional[str] = "redis://localhost:6379"
     # Redis 缓存最大内存限制，未配置时，如开启大内存模式时为 "1024mb"，未开启时为 "256mb"
     CACHE_REDIS_MAXMEMORY: Optional[str] = None
 
