@@ -4,6 +4,7 @@ from app.core.config import settings
 from app.db import SessionFactory
 from app.modules import _ModuleBase
 from app.schemas.types import ModuleType, OtherModulesType
+from sqlalchemy import text
 
 
 class PostgreSQLModule(_ModuleBase):
@@ -54,7 +55,7 @@ class PostgreSQLModule(_ModuleBase):
         # 测试数据库连接
         db = SessionFactory()
         try:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         except Exception as e:
             return False, f"PostgreSQL连接失败：{e}"
         finally:
