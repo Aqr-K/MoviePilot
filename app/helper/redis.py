@@ -55,6 +55,7 @@ class RedisHelper(metaclass=Singleton):
                 self.set_memory_limit()
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
+            self.client = None
             raise RuntimeError("Redis connection failed") from e
 
     @eventmanager.register(EventType.ConfigChanged)
@@ -334,6 +335,7 @@ class AsyncRedisHelper(metaclass=Singleton):
                 await self.set_memory_limit()
         except Exception as e:
             logger.error(f"Failed to connect to Redis (async): {e}")
+            self.client = None
             raise RuntimeError("Redis async connection failed") from e
 
     @eventmanager.register(EventType.ConfigChanged)
