@@ -7,8 +7,11 @@ ENV LANG="C.UTF-8" \
     DISPLAY=:987 \
     PUID=0 \
     PGID=0 \
-    UMASK=000
+    UMASK=000 \
+    VENV_PATH="/opt/venv"
 WORKDIR "/app"
+
+# 安装系统依赖
 RUN apt-get update -y \
     && apt-get upgrade -y \
     && apt-get -y install \
@@ -28,6 +31,7 @@ RUN apt-get update -y \
         rsync \
         ffmpeg \
         nano \
+        build-essential \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && \
     if [ "$(uname -m)" = "x86_64" ]; \
@@ -43,13 +47,16 @@ RUN apt-get update -y \
         /moviepilot/.cache \
         /var/lib/apt/lists/* \
         /var/tmp/*
+
+# 创建虚拟环境
+RUN python3 -m venv ${VENV_PATH} \
+    && ${VENV_PATH}/bin/pip install --upgrade pip \
+    && ${VENV_PATH}/bin/pip install Cython pip-tools
+
+# 复制依赖文件并安装到虚拟环境
 COPY ../requirements.in requirements.in
-RUN apt-get update -y \
-    && apt-get install -y build-essential \
-    && pip install --upgrade pip \
-    && pip install Cython pip-tools \
-    && pip-compile requirements.in \
-    && pip install -r requirements.txt \
+RUN ${VENV_PATH}/bin/pip-compile requirements.in \
+    && ${VENV_PATH}/bin/pip install -r requirements.txt \
     && playwright install-deps chromium \
     && apt-get remove -y build-essential \
     && apt-get autoremove -y \
@@ -59,7 +66,11 @@ RUN apt-get update -y \
         /moviepilot/.cache \
         /var/lib/apt/lists/* \
         /var/tmp/*
+
+# 复制应用代码
 COPY .. .
+
+# 配置nginx和其他文件
 RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && cp -f /app/docker/nginx.template.conf /etc/nginx/nginx.template.conf \
     && cp -f /app/docker/update.sh /usr/local/bin/mp_update.sh \
@@ -84,6 +95,7 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip" | busybox unzip -d /tmp - \
     && mv -f /tmp/MoviePilot-Resources-main/resources.v2/* /app/app/helper/ \
     && rm -rf /tmp/*
+
 EXPOSE 3000
 VOLUME [ "${CONFIG_DIR}" ]
 ENTRYPOINT [ "/entrypoint.sh" ]

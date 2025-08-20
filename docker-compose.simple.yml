@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  moviepilot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: moviepilot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - CONFIG_DIR=/config
+      - MOVIEPILOT_AUTO_UPDATE=release
+      # 可选：代理设置
+      # - PIP_PROXY=https://pypi.tuna.tsinghua.edu.cn/simple
+      # - GITHUB_PROXY=https://ghproxy.com/
+      # - PROXY_HOST=http://proxy:7890
+      # - GITHUB_TOKEN=your_github_token
+      # 可选：SSL设置
+      # - ENABLE_SSL=true
+      # - SSL_DOMAIN=your.domain.com
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/system/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
