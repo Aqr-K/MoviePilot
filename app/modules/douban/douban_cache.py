@@ -4,7 +4,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Optional
 
-from app.core.cache import Cache
+from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
@@ -34,7 +34,7 @@ class DoubanCache(metaclass=WeakSingleton):
         self.region = "__douban_cache__"
         self._meta_filepath = settings.TEMP_PATH / self.region
         # 初始化缓存
-        self._cache = Cache(maxsize=self.maxsize, ttl=self.ttl)
+        self._cache = TTLCache(region=self.region, maxsize=self.maxsize, ttl=self.ttl)
         # 非Redis加载本地缓存数据
         if not self._cache.is_redis():
             for key, value in self.__load(self._meta_filepath).items():
@@ -61,7 +61,7 @@ class DoubanCache(metaclass=WeakSingleton):
         """
         key = self.__get_key(meta)
         with lock:
-            return self._cache.get(key, region=self.region) or {}
+            return self._cache.get(key) or {}
 
     def delete(self, key: str) -> dict:
         """
@@ -70,9 +70,9 @@ class DoubanCache(metaclass=WeakSingleton):
         @return: 被删除的缓存内容
         """
         with lock:
-            redis_data = self._cache.get(key, region=self.region)
+            redis_data = self._cache.get(key)
             if redis_data:
-                self._cache.delete(key, region=self.region)
+                self._cache.delete(key)
                 return redis_data
             return {}
 
@@ -84,10 +84,10 @@ class DoubanCache(metaclass=WeakSingleton):
         @return: 被修改后缓存内容
         """
         with lock:
-            redis_data = self._cache.get(key, region=self.region)
+            redis_data = self._cache.get(key)
             if redis_data:
                 redis_data["title"] = title
-                self._cache.set(key, redis_data, region=self.region)
+                self._cache.set(key, redis_data)
                 return redis_data
             return {}
 
@@ -139,14 +139,14 @@ class DoubanCache(metaclass=WeakSingleton):
                     "year": cache_year,
                     "title": cache_title,
                     "poster_path": poster_path
-                }, region=self.region)
+                })
 
         elif info is not None:
             # None时不缓存，此时代表网络错误，允许重复请求
             with lock:
                 self._cache.set(self.__get_key(meta), {
                     "id": 0
-                }, region=self.region)
+                })
 
     def save(self, force: Optional[bool] = False) -> None:
         """

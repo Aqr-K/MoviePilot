@@ -895,6 +895,25 @@ class TTLCache:
 
         return default
 
+    def delete(self, key: str):
+        """
+        删除缓存项
+        """
+        try:
+            self._backend.delete(key, region=self.region)
+        except Exception as e:
+            logger.warning(f"缓存删除失败: {e}")
+
+    def items(self):
+        """
+        获取缓存的所有键值对
+        """
+        try:
+            return self._backend.items(region=self.region)
+        except Exception as e:
+            logger.warning(f"缓存获取失败: {e}")
+            return []
+
     def clear(self):
         """
         清空缓存
@@ -903,6 +922,12 @@ class TTLCache:
             self._backend.clear(region=self.region)
         except Exception as e:
             logger.warning(f"缓存清空失败: {e}")
+
+    def is_redis(self) -> bool:
+        """
+        判断当前缓存后端是否为 Redis
+        """
+        return self._backend.is_redis()
 
     def close(self):
         """
