@@ -20,7 +20,7 @@ function WARN() {
     echo -e "${WARN} ${1}"
 }
 
-# 设置虚拟环境路径
+# 设置虚拟环境路径（兼容群晖等系统必须这样配置）
 VENV_PATH="${VENV_PATH:-/opt/venv}"
 export PATH="${VENV_PATH}/bin:$PATH"
 
@@ -121,7 +121,6 @@ function install_backend_and_download_resources() {
     INFO "→ 正在备份插件目录..."
     rm -rf /plugins
     mkdir -p /plugins
-    cp -a /app/app/plugins/* /plugins/
     cp -a /app/app/plugins/* /plugins/
     rm -f /plugins/__init__.py
     # 备份站点资源
