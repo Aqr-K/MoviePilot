@@ -940,7 +940,7 @@ class TTLCache:
             logger.warning(f"缓存关闭失败: {e}")
 
 
-def cached(region: Optional[str] = None, maxsize: Optional[int] = None, ttl: Optional[int] = None,
+def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Optional[int] = None,
            skip_none: Optional[bool] = True, skip_empty: Optional[bool] = False):
     """
     自定义缓存装饰器，支持为每个 key 动态传递 maxsize 和 ttl
