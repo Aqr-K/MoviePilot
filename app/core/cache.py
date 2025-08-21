@@ -16,6 +16,7 @@ from cachetools.keys import hashkey
 from app.core.config import settings
 from app.helper.redis import RedisHelper, AsyncRedisHelper
 from app.log import logger
+from app.utils.singleton import Singleton
 
 # 默认缓存区
 DEFAULT_CACHE_REGION = "DEFAULT"
@@ -23,7 +24,7 @@ DEFAULT_CACHE_REGION = "DEFAULT"
 lock = threading.Lock()
 
 
-class CacheBackend(ABC):
+class CacheBackend(ABC, metaclass=Singleton):
     """
     缓存后端基类，定义通用的缓存接口
     """
@@ -136,7 +137,7 @@ class CacheBackend(ABC):
         return settings.CACHE_BACKEND_TYPE == "redis"
 
 
-class AsyncCacheBackend(ABC):
+class AsyncCacheBackend(ABC, metaclass=Singleton):
     """
     缓存后端基类，定义通用的缓存接口（异步）
     """
@@ -789,15 +790,15 @@ def Cache(maxsize: Optional[int] = None, ttl: Optional[int] = None) -> CacheBack
     """
     根据配置获取缓存后端实例（内存或Redis），maxsize仅在未启用Redis时生效
 
-    :param maxsize: 缓存的最大条目数，仅使用cachetools时生效，不传入默认1024
+    :param maxsize: 缓存的最大条目数，仅使用cachetools时生效
     :param ttl: 缓存的默认存活时间，单位秒
     :return: 返回缓存后端实例
     """
     if settings.CACHE_BACKEND_TYPE == "redis":
         return RedisBackend(ttl=ttl)
     else:
-        # 使用内存缓存，maxsize需要有值，默认1024
-        return MemoryBackend(maxsize=maxsize or 1024, ttl=ttl)
+        # 使用内存缓存，maxsize需要有值
+        return MemoryBackend(maxsize=maxsize, ttl=ttl)
 
 
 class TTLCache:
