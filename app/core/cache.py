@@ -362,6 +362,7 @@ class CacheToolsBackend(CacheBackend):
         region_cache = self.__get_region_cache(region)
         if region_cache is None:
             yield from ()
+            return
         for item in region_cache.items():
             yield item
 
@@ -635,6 +636,7 @@ class FileBackend(CacheBackend):
         cache_path = self.base / region
         if not cache_path.exists():
             yield from ()
+            return
         for item in cache_path.iterdir():
             if item.is_file():
                 with open(item, 'r') as f:
@@ -747,6 +749,7 @@ class AsyncFileBackend(AsyncCacheBackend):
         cache_path = AsyncPath(self.base) / region
         if not await cache_path.exists():
             yield "", None
+            return
         async for item in cache_path.iterdir():
             if await item.is_file():
                 async with aiofiles.open(item, 'r') as f:
