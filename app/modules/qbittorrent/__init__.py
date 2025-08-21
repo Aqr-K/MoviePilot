@@ -5,10 +5,10 @@ from qbittorrentapi import TorrentFilesList
 from torrentool.torrent import Torrent
 
 from app import schemas
-from app.core.cache import get_file_cache_backend
+from app.core.cache import FileCache
 from app.core.config import settings
-from app.core.metainfo import MetaInfo
 from app.core.event import eventmanager, Event
+from app.core.metainfo import MetaInfo
 from app.log import logger
 from app.modules import _ModuleBase, _DownloaderBase
 from app.modules.qbittorrent.qbittorrent import Qbittorrent
@@ -119,7 +119,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                         torrent_content = content.read_bytes()
                     else:
                         # 缓存处理器
-                        cache_backend = get_file_cache_backend()
+                        cache_backend = FileCache()
                         # 读取缓存的种子文件
                         torrent_content = cache_backend.get(content.as_posix(), region="torrents")
                 else:
@@ -137,7 +137,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             return None, None, None, "下载内容为空"
 
         # 读取种子的名称
-        torrent,  content = __get_torrent_info()
+        torrent, content = __get_torrent_info()
         if not torrent:
             return None, None, None, f"添加种子任务失败：无法读取种子文件"
 
@@ -337,7 +337,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                     del torrents
         else:
             return None
-        return ret_torrents # noqa
+        return ret_torrents  # noqa
 
     def transfer_completed(self, hashs: str, downloader: Optional[str] = None) -> None:
         """

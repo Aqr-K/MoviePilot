@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Set, Dict, Union
 
 from app import schemas
 from app.chain import ChainBase
-from app.core.cache import get_file_cache_backend
+from app.core.cache import FileCache
 from app.core.config import settings, global_vars
 from app.core.context import MediaInfo, TorrentInfo, Context
 from app.core.event import eventmanager, Event
@@ -222,7 +222,7 @@ class DownloadChain(ChainBase):
                 torrent_content = torrent_file.read_bytes()
             else:
                 # 缓存处理器
-                cache_backend = get_file_cache_backend()
+                cache_backend = FileCache()
                 # 读取缓存的种子文件
                 torrent_content = cache_backend.get(torrent_file.as_posix(), region="torrents")
 

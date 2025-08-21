@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
-from app.core.cache import get_file_cache_backend, get_async_file_cache_backend
+from app.core.cache import FileCache, AsyncFileCache
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, TorrentInfo
 from app.core.event import EventManager
@@ -46,8 +46,8 @@ class ChainBase(metaclass=ABCMeta):
             send_callback=self.run_module
         )
         self.pluginmanager = PluginManager()
-        self.filecache = get_file_cache_backend()
-        self.async_filecache = get_async_file_cache_backend()
+        self.filecache = FileCache()
+        self.async_filecache = AsyncFileCache()
 
     def load_cache(self, filename: str) -> Any:
         """

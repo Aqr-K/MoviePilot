@@ -762,7 +762,7 @@ class AsyncFileBackend(AsyncCacheBackend):
         pass
 
 
-def get_file_cache_backend(base: Path = settings.TEMP_PATH, ttl: Optional[int] = None) -> CacheBackend:
+def FileCache(base: Path = settings.TEMP_PATH, ttl: Optional[int] = None) -> CacheBackend:
     """
     获取文件缓存后端实例（Redis或文件系统）
     """
@@ -774,7 +774,7 @@ def get_file_cache_backend(base: Path = settings.TEMP_PATH, ttl: Optional[int] =
         return FileBackend(base=base)
 
 
-def get_async_file_cache_backend(base: Path = settings.TEMP_PATH, ttl: Optional[int] = None) -> AsyncCacheBackend:
+def AsyncFileCache(base: Path = settings.TEMP_PATH, ttl: Optional[int] = None) -> AsyncCacheBackend:
     """
     获取文件异步缓存后端实例（Redis或文件系统）
     """
@@ -786,7 +786,7 @@ def get_async_file_cache_backend(base: Path = settings.TEMP_PATH, ttl: Optional[
         return AsyncFileBackend(base=base)
 
 
-def get_cache_backend(maxsize: Optional[int] = 512, ttl: Optional[int] = 1800) -> CacheBackend:
+def Cache(maxsize: Optional[int] = 512, ttl: Optional[int] = 1800) -> CacheBackend:
     """
     根据配置获取缓存后端实例（内存或Redis）
 
@@ -822,7 +822,7 @@ class TTLCache:
         self.region = region
         self.maxsize = maxsize
         self.ttl = ttl
-        self._backend = get_cache_backend(maxsize=maxsize, ttl=ttl)
+        self._backend = Cache(maxsize=maxsize, ttl=ttl)
 
     def __getitem__(self, key: str):
         """
@@ -927,7 +927,7 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 512, ttl: Opti
     :return: 装饰器函数
     """
     # 缓存后端实例
-    cache_backend = get_cache_backend(maxsize=maxsize, ttl=ttl)
+    cache_backend = Cache(maxsize=maxsize, ttl=ttl)
 
     def should_cache(value: Any) -> bool:
         """

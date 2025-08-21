@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from app import schemas
 from app.chain.search import SearchChain
 from app.chain.system import SystemChain
-from app.core.cache import get_async_file_cache_backend
+from app.core.cache import AsyncFileCache
 from app.core.config import global_vars, settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
@@ -74,8 +74,8 @@ async def fetch_image(
         cache_path = cache_path.with_suffix(".jpg")
 
     # 缓存对像，缓存过期时间为全局图片缓存天数
-    cache_backend = get_async_file_cache_backend(base=settings.CACHE_PATH,
-                                                 ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
+    cache_backend = AsyncFileCache(base=settings.CACHE_PATH,
+                                   ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
 
     if use_cache:
         content = await cache_backend.get(cache_path.as_posix(), region="images")

@@ -5,10 +5,10 @@ from torrentool.torrent import Torrent
 from transmission_rpc import File
 
 from app import schemas
-from app.core.cache import get_file_cache_backend
+from app.core.cache import FileCache
 from app.core.config import settings
-from app.core.metainfo import MetaInfo
 from app.core.event import eventmanager, Event
+from app.core.metainfo import MetaInfo
 from app.log import logger
 from app.modules import _ModuleBase, _DownloaderBase
 from app.modules.transmission.transmission import Transmission
@@ -120,7 +120,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                         torrent_content = content.read_bytes()
                     else:
                         # 缓存处理器
-                        cache_backend = get_file_cache_backend()
+                        cache_backend = FileCache()
                         # 读取缓存的种子文件
                         torrent_content = cache_backend.get(content.as_posix(), region="torrents")
                 else:
@@ -325,7 +325,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                     del torrents
         else:
             return None
-        return ret_torrents # noqa
+        return ret_torrents  # noqa
 
     def transfer_completed(self, hashs: str, downloader: Optional[str] = None) -> None:
         """

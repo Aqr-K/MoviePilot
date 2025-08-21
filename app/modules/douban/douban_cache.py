@@ -4,7 +4,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Optional
 
-from app.core.cache import get_cache_backend
+from app.core.cache import Cache
 from app.core.config import settings
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
@@ -34,7 +34,7 @@ class DoubanCache(metaclass=WeakSingleton):
         self.region = "__douban_cache__"
         self._meta_filepath = settings.TEMP_PATH / self.region
         # 初始化缓存
-        self._cache = get_cache_backend(maxsize=self.maxsize, ttl=self.ttl)
+        self._cache = Cache(maxsize=self.maxsize, ttl=self.ttl)
         # 非Redis加载本地缓存数据
         if not self._cache.is_redis():
             for key, value in self.__load(self._meta_filepath).items():

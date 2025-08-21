@@ -9,7 +9,7 @@ from app.chain import ChainBase
 from app.chain.bangumi import BangumiChain
 from app.chain.douban import DoubanChain
 from app.chain.tmdb import TmdbChain
-from app.core.cache import cached, get_file_cache_backend
+from app.core.cache import cached, FileCache
 from app.core.config import settings, global_vars
 from app.log import logger
 from app.schemas import MediaType
@@ -111,8 +111,8 @@ class RecommendChain(ChainBase, metaclass=Singleton):
             cache_path = cache_path.with_suffix(".jpg")
 
         # 获取缓存后端，并设置缓存时间为全局配置的缓存天数
-        cache_backend = get_file_cache_backend(base=settings.CACHE_PATH,
-                                               ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
+        cache_backend = FileCache(base=settings.CACHE_PATH,
+                                  ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
 
         # 本地存在缓存图片，则直接跳过
         if cache_backend.get(cache_path.as_posix(), region="images"):

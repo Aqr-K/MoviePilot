@@ -6,7 +6,7 @@ from urllib.parse import unquote
 
 from torrentool.api import Torrent
 
-from app.core.cache import get_file_cache_backend
+from app.core.cache import FileCache
 from app.core.config import settings
 from app.core.context import Context, TorrentInfo, MediaInfo
 from app.core.meta import MetaBase
@@ -43,7 +43,7 @@ class TorrentHelper(metaclass=WeakSingleton):
         # 构建 torrent 种子文件的缓存路径
         cache_path = Path(StringUtils.md5_hash(url)).with_suffix(".torrent")
         # 缓存处理器
-        cache_backend = get_file_cache_backend()
+        cache_backend = FileCache()
         # 读取缓存的种子文件
         torrent_content = cache_backend.get(cache_path.as_posix(), region="torrents")
         if torrent_content:
