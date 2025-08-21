@@ -307,7 +307,7 @@ class TemplateHelper(metaclass=SingletonClass):
 
     def __init__(self):
         self.builder = TemplateContextBuilder()
-        self.cache = TTLCache(maxsize=100, ttl=600)
+        self.cache = TTLCache(region="notification", maxsize=100, ttl=600)
 
     @staticmethod
     def _generate_cache_key(cuntent: Union[str, dict]) -> str:

@@ -810,13 +810,16 @@ class TTLCache:
     - 支持Redis和cachetools的切换
     """
 
-    def __init__(self, maxsize: int = 128, ttl: int = 1800):
+    def __init__(self, region: Optional[str] = DEFAULT_CACHE_REGION,
+                 maxsize: int = 128, ttl: int = 1800):
         """
         初始化TTL缓存
 
+        :param region: 缓存的区，默认为 DEFAULT_CACHE_REGION
         :param maxsize: 缓存的最大条目数
         :param ttl: 缓存的存活时间，单位秒
         """
+        self.region = region
         self.maxsize = maxsize
         self.ttl = ttl
         self._backend = get_cache_backend(maxsize=maxsize, ttl=ttl)
@@ -826,7 +829,7 @@ class TTLCache:
         获取缓存项
         """
         try:
-            value = self._backend.get(key)
+            value = self._backend.get(key, region=self.region)
             if value is not None:
                 return value
         except Exception as e:
@@ -839,7 +842,7 @@ class TTLCache:
         设置缓存项
         """
         try:
-            self._backend.set(key, value, ttl=self.ttl)
+            self._backend.set(key, value, ttl=self.ttl, region=self.region)
         except Exception as e:
             logger.warning(f"缓存设置失败: {e}")
 
@@ -848,7 +851,7 @@ class TTLCache:
         删除缓存项
         """
         try:
-            self._backend.delete(key)
+            self._backend.delete(key, region=self.region)
         except Exception as e:
             logger.warning(f"缓存删除失败: {e}")
 
@@ -857,7 +860,7 @@ class TTLCache:
         检查键是否存在
         """
         try:
-            return self._backend.exists(key)
+            return self._backend.exists(key, region=self.region)
         except Exception as e:
             logger.warning(f"缓存检查失败: {e}")
             return False
@@ -866,15 +869,25 @@ class TTLCache:
         """
         返回缓存的迭代器
         """
-        for key, _ in self._backend.items():
+        for key, _ in self._backend.items(region=self.region):
             yield key
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None):
+        """
+        设置缓存项，支持自定义 TTL
+        """
+        try:
+            ttl = ttl or self.ttl
+            self._backend.set(key, value, ttl=ttl, region=self.region)
+        except Exception as e:
+            logger.warning(f"缓存设置失败: {e}")
 
     def get(self, key: str, default: Any = None):
         """
         获取缓存项，如果不存在返回默认值
         """
         try:
-            value = self._backend.get(key)
+            value = self._backend.get(key, region=self.region)
             if value is not None:
                 return value
         except Exception as e:
@@ -887,7 +900,7 @@ class TTLCache:
         清空缓存
         """
         try:
-            self._backend.clear()
+            self._backend.clear(region=self.region)
         except Exception as e:
             logger.warning(f"缓存清空失败: {e}")
 

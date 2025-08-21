@@ -72,7 +72,7 @@ class Monitor(metaclass=Singleton):
         # 存储过照间隔（分钟）
         self._snapshot_interval = 5
         # TTL缓存，10秒钟有效
-        self._cache = TTLCache(maxsize=1024, ttl=10)
+        self._cache = TTLCache(region="monitor", maxsize=1024, ttl=10)
         # 监控的文件扩展名
         self.all_exts = settings.RMT_MEDIAEXT
         # 初始化快照缓存目录
