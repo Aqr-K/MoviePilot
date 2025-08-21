@@ -65,76 +65,92 @@ class TransferHistory(Base):
     def list_by_title(cls, db: Session, title: str, page: Optional[int] = 1, count: Optional[int] = 30,
                       status: bool = None):
         if status is not None:
-            return db.query(cls).filter(
+            query = db.query(cls).filter(
                 cls.status == status
             ).order_by(
                 cls.date.desc()
-            ).offset((page - 1) * count).limit(count).all()
+            )
         else:
-            return db.query(cls).filter(or_(
+            query = db.query(cls).filter(or_(
                 cls.title.like(f'%{title}%'),
                 cls.src.like(f'%{title}%'),
                 cls.dest.like(f'%{title}%'),
             )).order_by(
                 cls.date.desc()
-            ).offset((page - 1) * count).limit(count).all()
+            )
+        
+        # 当count为-1时，不限制页数查询所有
+        if count != -1:
+            query = query.offset((page - 1) * count).limit(count)
+        
+        return query.all()
 
     @classmethod
     @async_db_query
     async def async_list_by_title(cls, db: AsyncSession, title: str, page: Optional[int] = 1, count: Optional[int] = 30,
                                   status: bool = None):
         if status is not None:
-            result = await db.execute(
-                select(cls).filter(
-                    cls.status == status
-                ).order_by(
-                    cls.date.desc()
-                ).offset((page - 1) * count).limit(count)
+            query = select(cls).filter(
+                cls.status == status
+            ).order_by(
+                cls.date.desc()
             )
         else:
-            result = await db.execute(
-                select(cls).filter(or_(
-                    cls.title.like(f'%{title}%'),
-                    cls.src.like(f'%{title}%'),
-                    cls.dest.like(f'%{title}%'),
-                )).order_by(
-                    cls.date.desc()
-                ).offset((page - 1) * count).limit(count)
+            query = select(cls).filter(or_(
+                cls.title.like(f'%{title}%'),
+                cls.src.like(f'%{title}%'),
+                cls.dest.like(f'%{title}%'),
+            )).order_by(
+                cls.date.desc()
             )
+        
+        # 当count为-1时，不限制页数查询所有
+        if count != -1:
+            query = query.offset((page - 1) * count).limit(count)
+        
+        result = await db.execute(query)
         return result.scalars().all()
 
     @classmethod
     @db_query
     def list_by_page(cls, db: Session, page: Optional[int] = 1, count: Optional[int] = 30, status: bool = None):
         if status is not None:
-            return db.query(cls).filter(
+            query = db.query(cls).filter(
                 cls.status == status
             ).order_by(
                 cls.date.desc()
-            ).offset((page - 1) * count).limit(count).all()
+            )
         else:
-            return db.query(cls).order_by(
+            query = db.query(cls).order_by(
                 cls.date.desc()
-            ).offset((page - 1) * count).limit(count).all()
+            )
+        
+        # 当count为-1时，不限制页数查询所有
+        if count != -1:
+            query = query.offset((page - 1) * count).limit(count)
+        
+        return query.all()
 
     @classmethod
     @async_db_query
     async def async_list_by_page(cls, db: AsyncSession, page: Optional[int] = 1, count: Optional[int] = 30,
                                  status: bool = None):
         if status is not None:
-            result = await db.execute(
-                select(cls).filter(
-                    cls.status == status
-                ).order_by(
-                    cls.date.desc()
-                ).offset((page - 1) * count).limit(count)
+            query = select(cls).filter(
+                cls.status == status
+            ).order_by(
+                cls.date.desc()
             )
         else:
-            result = await db.execute(
-                select(cls).order_by(
-                    cls.date.desc()
-                ).offset((page - 1) * count).limit(count)
+            query = select(cls).order_by(
+                cls.date.desc()
             )
+        
+        # 当count为-1时，不限制页数查询所有
+        if count != -1:
+            query = query.offset((page - 1) * count).limit(count)
+        
+        result = await db.execute(query)
         return result.scalars().all()
 
     @classmethod
