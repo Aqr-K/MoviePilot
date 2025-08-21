@@ -261,7 +261,7 @@ class MemoryBackend(CacheBackend):
         :param maxsize: 缓存的最大条目数
         :param ttl: 默认缓存存活时间，单位秒
         """
-        self.maxsize = maxsize
+        self.maxsize = maxsize or 1024  # 未设置时默认最大条目数为 1024
         self.ttl = ttl
         # 存储各个 region 的缓存实例，region -> TTLCache
         self._region_caches: Dict[str, MemoryTTLCache] = {}
