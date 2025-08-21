@@ -98,15 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fi \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && curl https://rclone.org/install.sh | bash \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf \
-    /tmp/* \
-    /var/lib/apt/lists/* \
-    /var/tmp/*
-
-# 安装playwright依赖
-RUN playwright install-deps chromium \
+    && playwright install-deps chromium \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf \
