@@ -146,7 +146,7 @@ class TmdbCache(metaclass=WeakSingleton):
         # Redis不可用时，保存到本地文件
         meta_data = self.__load(self._meta_filepath)
         # 当前缓存，去除无法识别
-        new_meta_data = {k: v for k, v in self._cache.items(region=self.region) if v.get("id")}
+        new_meta_data = {k: v for k, v in self._cache.items() if v.get("id")}
 
         if not force \
                 and meta_data.keys() == new_meta_data.keys():
