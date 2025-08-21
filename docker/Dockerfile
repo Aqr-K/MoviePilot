@@ -14,7 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     busybox \
     jq \
-    wget
+    wget \
+    && \
+    if [ "$(uname -m)" = "x86_64" ]; \
+        then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
+    elif [ "$(uname -m)" = "aarch64" ]; \
+        then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
+    fi
 
 # 安装 Python 构建依赖并创建虚拟环境
 WORKDIR /app
@@ -84,12 +90,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     nano \
     && dpkg-reconfigure --frontend noninteractive tzdata \
-    && \
-    if [ "$(uname -m)" = "x86_64" ]; \
-        then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
-    elif [ "$(uname -m)" = "aarch64" ]; \
-        then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
-    fi \
     && curl https://rclone.org/install.sh | bash \
     && apt-get autoremove -y \
     && apt-get clean \
