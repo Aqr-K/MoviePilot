@@ -45,7 +45,7 @@ class DoubanCache(metaclass=WeakSingleton):
         清空所有豆瓣缓存
         """
         with lock:
-            self._cache.clear(region=self.region)
+            self._cache.clear()
 
     @staticmethod
     def __get_key(meta: MetaBase) -> str:
