@@ -75,11 +75,11 @@ class CacheBackend(ABC):
         pass
 
     @abstractmethod
-    def clear(self, region: Optional[str] = None) -> None:
+    def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         pass
 
@@ -188,11 +188,11 @@ class AsyncCacheBackend(ABC):
         pass
 
     @abstractmethod
-    async def clear(self, region: Optional[str] = None) -> None:
+    async def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         pass
 
@@ -332,11 +332,11 @@ class CacheToolsBackend(CacheBackend):
         with lock:
             del region_cache[key]
 
-    def clear(self, region: Optional[str] = None) -> None:
+    def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         if region:
             # 清理指定缓存区
@@ -429,15 +429,15 @@ class RedisBackend(CacheBackend):
         """
         self.redis_helper.delete(key, region=region)
 
-    def clear(self, region: Optional[str] = None) -> None:
+    def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         self.redis_helper.clear(region=region)
 
-    def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Generator[Tuple[Any, Any], None, None]:
+    def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Generator[Tuple[str, Any], None, None]:
         """
         获取指定区域的所有缓存项
 
@@ -510,11 +510,11 @@ class AsyncRedisBackend(AsyncCacheBackend):
         """
         await self.redis_helper.delete(key, region=region)
 
-    async def clear(self, region: Optional[str] = None) -> None:
+    async def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         await self.redis_helper.clear(region=region)
 
@@ -602,11 +602,11 @@ class FileBackend(CacheBackend):
         if cache_path.exists():
             cache_path.unlink()
 
-    def clear(self, region: Optional[str] = None) -> None:
+    def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         if region:
             # 清理指定缓存区
@@ -714,11 +714,11 @@ class AsyncFileBackend(AsyncCacheBackend):
         if await cache_path.exists():
             await cache_path.unlink()
 
-    async def clear(self, region: Optional[str] = None) -> None:
+    async def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
         清除指定区域的缓存或全部缓存
 
-        :param region: 缓存的区
+        :param region: 缓存的区，为None时清空所有区缓存
         """
         if region:
             # 清理指定缓存区
@@ -858,6 +858,13 @@ class TTLCache:
         except Exception as e:
             logger.warning(f"缓存检查失败: {e}")
             return False
+
+    def __iter__(self):
+        """
+        返回缓存的迭代器
+        """
+        for key, _ in self._backend.items():
+            yield key
 
     def get(self, key: str, default: Any = None):
         """

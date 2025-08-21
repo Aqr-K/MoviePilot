@@ -246,7 +246,7 @@ class RedisHelper(metaclass=Singleton):
         except Exception as e:
             logger.error(f"Failed to clear cache, region: {region}, error: {e}")
 
-    def items(self, region: Optional[str] = None) -> Generator[Tuple[Any, Any], None, None]:
+    def items(self, region: Optional[str] = None) -> Generator[Tuple[str, Any], None, None]:
         """
         获取指定区域的所有缓存键值对
 
@@ -476,7 +476,7 @@ class AsyncRedisHelper(metaclass=Singleton):
         except Exception as e:
             logger.error(f"Failed to clear cache (async), region: {region}, error: {e}")
 
-    async def items(self, region: Optional[str] = None) -> AsyncGenerator[Tuple[Any, Any], None]:
+    async def items(self, region: Optional[str] = None) -> AsyncGenerator[Tuple[str, Any], None]:
         """
         获取指定区域的所有缓存键值对
 
