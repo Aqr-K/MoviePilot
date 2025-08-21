@@ -113,10 +113,8 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && cp -f /app/docker/docker_http_proxy.conf /etc/nginx/docker_http_proxy.conf \
     && chmod +x /entrypoint.sh /usr/local/bin/mp_update.sh \
     && mkdir -p ${HOME} \
-    && mkdir -p ${CONFIG_DIR} \
     && groupadd -r moviepilot -g 918 \
     && useradd -r moviepilot -g moviepilot -d ${HOME} -s /bin/bash -u 918 \
-    && chown -R moviepilot:moviepilot /app ${VENV_PATH} /public ${HOME} ${CONFIG_DIR} \
     && python_ver=$(python3 -V | awk '{print $2}') \
     && echo "/app/" > ${VENV_PATH}/lib/python${python_ver%.*}/site-packages/app.pth \
     && echo 'fs.inotify.max_user_watches=5242880' >> /etc/sysctl.conf \
