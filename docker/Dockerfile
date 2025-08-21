@@ -18,7 +18,6 @@ ENV LANG="C.UTF-8" \
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    musl-dev \
     nginx \
     gettext-base \
     locales \
@@ -34,12 +33,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     ffmpeg \
     nano \
-    && \
-    if [ "$(uname -m)" = "x86_64" ]; \
-    then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
-    elif [ "$(uname -m)" = "aarch64" ]; \
-    then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
-    fi \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && curl https://rclone.org/install.sh | bash \
     && apt-get autoremove -y \
@@ -63,17 +56,10 @@ ENV PATH="${VENV_PATH}/bin:${PATH}"
 # 安装系统构建依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    musl-dev \
     curl \
     busybox \
     jq \
-    wget \
-    && \
-    if [ "$(uname -m)" = "x86_64" ]; \
-    then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
-    elif [ "$(uname -m)" = "aarch64" ]; \
-    then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
-    fi
+    wget
 
 # 安装 Python 构建依赖并创建虚拟环境
 WORKDIR /app
