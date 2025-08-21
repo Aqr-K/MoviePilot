@@ -1,5 +1,7 @@
 FROM python:3.12.8-slim-bookworm AS base
 
+
+# 准备软件包
 FROM base AS prepare_package
 
 ENV LANG="C.UTF-8" \
@@ -48,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     /var/tmp/*
 
 
+# 准备 python 环境
 FROM base AS prepare_venv
 
 # 设置环境变量
@@ -81,7 +84,10 @@ RUN python3 -m venv ${VENV_PATH} \
     && pip-compile requirements.in \
     && pip install -r requirements.txt
 
+# 下载准备代码
 FROM prepare_package AS prepare_code
+
+WORKDIR /app
 
 COPY . .
 RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/version.py) \
@@ -97,11 +103,10 @@ RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/
 # final 阶段: 安装运行时依赖和配置最终镜像
 FROM prepare_package AS final
 
+# python 环境
 COPY --from=prepare_venv --chmod=777 ${VENV_PATH} ${VENV_PATH}
 
-# 设置工作目录
-WORKDIR /app
-
+# playwright 环境
 RUN playwright install-deps chromium \
     && apt-get autoremove -y \
     && apt-get clean \
@@ -109,6 +114,9 @@ RUN playwright install-deps chromium \
     /tmp/* \
     /var/lib/apt/lists/* \
     /var/tmp/*
+
+# 准备运行代码
+WORKDIR /app
 
 COPY --from=prepare_code /app /app
 COPY --from=prepare_code /public /public
