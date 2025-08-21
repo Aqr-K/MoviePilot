@@ -79,8 +79,8 @@ class TransferHistory(Base):
                 cls.date.desc()
             )
         
-        # 当count为-1时，不限制页数查询所有
-        if count != -1:
+        # 当count为负数时，不限制页数查询所有
+        if count >= 0:
             query = query.offset((page - 1) * count).limit(count)
         
         return query.all()
@@ -104,8 +104,8 @@ class TransferHistory(Base):
                 cls.date.desc()
             )
         
-        # 当count为-1时，不限制页数查询所有
-        if count != -1:
+        # 当count为负数时，不限制页数查询所有
+        if count >= 0:
             query = query.offset((page - 1) * count).limit(count)
         
         result = await db.execute(query)
@@ -125,8 +125,8 @@ class TransferHistory(Base):
                 cls.date.desc()
             )
         
-        # 当count为-1时，不限制页数查询所有
-        if count != -1:
+        # 当count为负数时，不限制页数查询所有
+        if count >= 0:
             query = query.offset((page - 1) * count).limit(count)
         
         return query.all()
@@ -146,8 +146,8 @@ class TransferHistory(Base):
                 cls.date.desc()
             )
         
-        # 当count为-1时，不限制页数查询所有
-        if count != -1:
+        # 当count为负数时，不限制页数查询所有
+        if count >= 0:
             query = query.offset((page - 1) * count).limit(count)
         
         result = await db.execute(query)
