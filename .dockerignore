@@ -64,10 +64,6 @@ temp/
 *.sqlite
 *.sqlite3
 
-# Config files that should be mounted
-config/
-database/
-
 # Test files
 tests/
 test_*

@@ -20,10 +20,6 @@ function WARN() {
     echo -e "${WARN} ${1}"
 }
 
-# 设置虚拟环境路径
-VENV_PATH="${VENV_PATH:-/opt/venv}"
-export PATH="${VENV_PATH}/bin:$PATH"
-
 # 校正设置目录
 CONFIG_DIR="${CONFIG_DIR:-/config}"
 
@@ -226,8 +222,7 @@ chown -R moviepilot:moviepilot \
     /public \
     "${CONFIG_DIR}" \
     /var/lib/nginx \
-    /var/log/nginx \
-    "${VENV_PATH}"
+    /var/log/nginx
 chown moviepilot:moviepilot /etc/hosts /tmp
 
 # 下载浏览器内核
@@ -275,4 +270,4 @@ fi
 
 # 启动后端服务
 INFO "→ 启动后端服务..."
-exec dumb-init gosu moviepilot:moviepilot ${VENV_PATH}/bin/python3 app/main.py
+exec dumb-init gosu moviepilot:moviepilot python3 app/main.py
