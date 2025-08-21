@@ -167,7 +167,7 @@ class Emby:
                     image=image,
                     link=f'{self._playhost or self._host}web/index.html'
                          f'#!/videos?serverId={self.serverid}&parentId={library.get("Id")}',
-                    server_type= "emby"
+                    server_type="emby"
                 )
             )
         return libraries

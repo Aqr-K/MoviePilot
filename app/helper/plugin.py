@@ -1,13 +1,13 @@
 import importlib
+import io
 import json
 import shutil
 import site
 import sys
 import traceback
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set, Callable, Awaitable
-import zipfile
-import io
 
 import aiofiles
 import aioshutil
@@ -248,6 +248,7 @@ class PluginHelper(metaclass=WeakSingleton):
                 return False, f"未在插件清单中找到 {pid} 的版本号，无法进行 Release 安装"
             # 拼接 release_tag
             release_tag = f"{pid}_v{plugin_version}"
+
             # 使用 release 进行安装
             def prepare_release() -> Tuple[bool, str]:
                 return self.__install_from_release(
@@ -533,12 +534,12 @@ class PluginHelper(metaclass=WeakSingleton):
         return None
 
     def __get_plugin_meta(self, pid: str, repo_url: str,
-                           package_version: Optional[str]) -> dict:
+                          package_version: Optional[str]) -> dict:
         try:
             plugins = (
-                self.get_plugins(repo_url) if not package_version
-                else self.get_plugins(repo_url, package_version)
-            ) or {}
+                          self.get_plugins(repo_url) if not package_version
+                          else self.get_plugins(repo_url, package_version)
+                      ) or {}
             meta = plugins.get(pid)
             return meta if isinstance(meta, dict) else {}
         except Exception as e:
@@ -1393,6 +1394,7 @@ class PluginHelper(metaclass=WeakSingleton):
                 return False, f"未在插件清单中找到 {pid} 的版本号，无法进行 Release 安装"
             # 拼接 release_tag
             release_tag = f"{pid}_v{plugin_version}"
+
             # 使用 release 进行安装
             async def prepare_release() -> Tuple[bool, str]:
                 return await self.__async_install_from_release(
@@ -1411,9 +1413,9 @@ class PluginHelper(metaclass=WeakSingleton):
                                       package_version: Optional[str]) -> dict:
         try:
             plugins = (
-                await self.async_get_plugins(repo_url) if not package_version
-                else await self.async_get_plugins(repo_url, package_version)
-            ) or {}
+                          await self.async_get_plugins(repo_url) if not package_version
+                          else await self.async_get_plugins(repo_url, package_version)
+                      ) or {}
             meta = plugins.get(pid)
             return meta if isinstance(meta, dict) else {}
         except Exception as e:
@@ -1528,7 +1530,8 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"解析 Release 信息失败：{e}")
             return False, f"解析 Release 信息失败：{e}"
 
-        res = await self.__async_request_with_fallback(download_url, headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
+        res = await self.__async_request_with_fallback(download_url,
+                                                       headers=settings.REPO_GITHUB_HEADERS(repo=user_repo))
         if res is None or res.status_code != 200:
             return False, f"下载资产失败：{res.status_code if res else '连接失败'}"
 
