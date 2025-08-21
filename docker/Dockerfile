@@ -1,10 +1,13 @@
 # builder 阶段：完成所有编译、下载和准备工作
-FROM python:3.12.8-slim-bookworm AS builder
+FROM python:3.12.8-slim-bookworm AS base
+
+FROM base AS builder
 
 # 设置环境变量
 ENV LANG="C.UTF-8" \
     TZ="Asia/Shanghai" \
     VENV_PATH="/opt/venv"
+
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
 # 安装系统构建依赖
@@ -17,39 +20,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && \
     if [ "$(uname -m)" = "x86_64" ]; \
-        then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
+    then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
     elif [ "$(uname -m)" = "aarch64" ]; \
-        then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
+    then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
     fi
 
 # 安装 Python 构建依赖并创建虚拟环境
 WORKDIR /app
-COPY ../requirements.in requirements.in
+COPY requirements.in requirements.in
 RUN python3 -m venv ${VENV_PATH} \
     && pip install --upgrade pip \
     && pip install Cython pip-tools \
     && pip-compile requirements.in \
     && pip install -r requirements.txt
 
-# 3. 下载外部资源
-COPY ./version.py .
-RUN mkdir -p /app/app/plugins /app/app/helper /public \
-    && FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/version.py) \
-    && curl -sL "https://github.com/jxxghp/MoviePilot-Frontend/releases/download/${FRONTEND_VERSION}/dist.zip" | busybox unzip -d / - && mv /dist /public \
+# 复制全部源码和下载资源
+COPY . .
+RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/version.py) \
+    && curl -sL "https://github.com/jxxghp/MoviePilot-Frontend/releases/download/${FRONTEND_VERSION}/dist.zip" | busybox unzip -d / - \
+    && mv /dist /public \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Plugins/archive/refs/heads/main.zip" | busybox unzip -d /tmp - \
     && mv -f /tmp/MoviePilot-Plugins-main/plugins.v2/* /app/app/plugins/ \
     && cat /tmp/MoviePilot-Plugins-main/package.json | jq -r 'to_entries[] | select(.value.v2 == true) | .key' | awk '{print tolower($0)}' | \
-        while read -r i; do if [ ! -d "/app/app/plugins/$i" ]; then mv "/tmp/MoviePilot-Plugins-main/plugins/$i" "/app/app/plugins/"; else echo "跳过 $i"; fi; done \
+    while read -r i; do if [ ! -d "/app/app/plugins/$i" ]; then mv "/tmp/MoviePilot-Plugins-main/plugins/$i" "/app/app/plugins/"; else echo "跳过 $i"; fi; done \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip" | busybox unzip -d /tmp - \
-    && mv -f /tmp/MoviePilot-Resources-main/resources.v2/* /app/app/helper/ \
-    && rm -rf /tmp/*
-
-# 复制项目的全部代码
-COPY .. .
+    && mv -f /tmp/MoviePilot-Resources-main/resources.v2/* /app/app/helper/
 
 
 # final 阶段: 安装运行时依赖和配置最终镜像
-FROM python:3.12.8-slim-bookworm AS final
+FROM base AS final
 
 # 设置环境变量
 ENV LANG="C.UTF-8" \
@@ -62,18 +61,20 @@ ENV LANG="C.UTF-8" \
     PGID=0 \
     UMASK=000 \
     VENV_PATH="/opt/venv"
+
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
 # 设置工作目录
 WORKDIR /app
 
 # 从 builder 阶段复制应用代码、所有已下载好的资源、虚拟环境中的依赖
-COPY --from=builder ${VENV_PATH} ${VENV_PATH}
+COPY --from=builder --chmod=777 ${VENV_PATH} ${VENV_PATH}
 COPY --from=builder /app /app
 COPY --from=builder /public /public
 
 # 安装最终镜像所需的运行时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    musl-dev \
     nginx \
     gettext-base \
     locales \
@@ -89,14 +90,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     ffmpeg \
     nano \
+    && \
+    if [ "$(uname -m)" = "x86_64" ]; \
+    then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
+    elif [ "$(uname -m)" = "aarch64" ]; \
+    then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
+    fi \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && curl https://rclone.org/install.sh | bash \
     && apt-get autoremove -y \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf \
+    /tmp/* \
+    /var/lib/apt/lists/* \
+    /var/tmp/*
 
 # 安装playwright依赖
-RUN playwright install-deps chromium
+RUN playwright install-deps chromium \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf \
+    /tmp/* \
+    /var/lib/apt/lists/* \
+    /var/tmp/*
 
 RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && cp -f /app/docker/nginx.template.conf /etc/nginx/nginx.template.conf \
