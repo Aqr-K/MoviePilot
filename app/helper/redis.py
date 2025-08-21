@@ -307,13 +307,11 @@ class AsyncRedisHelper(metaclass=Singleton):
     _complex_serializable_types = set()
     _simple_serializable_types = set()
 
-    def __init__(self, redis_url: Optional[str] = "redis://localhost"):
+    def __init__(self):
         """
         初始化异步Redis助手实例
-
-        :param redis_url: Redis服务的URL
         """
-        self.redis_url = redis_url
+        self.redis_url = settings.CACHE_BACKEND_URL
         self.client: Optional[Redis] = None
 
     async def _connect(self):

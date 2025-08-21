@@ -83,7 +83,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     ffmpeg \
     nano \
-    musl-dev \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && \
     if [ "$(uname -m)" = "x86_64" ]; \
