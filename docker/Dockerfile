@@ -1,7 +1,54 @@
-# builder 阶段：完成所有编译、下载和准备工作
 FROM python:3.12.8-slim-bookworm AS base
 
-FROM base AS builder
+FROM base AS prepare_package
+
+ENV LANG="C.UTF-8" \
+    TZ="Asia/Shanghai" \
+    HOME="/moviepilot" \
+    CONFIG_DIR="/config" \
+    TERM="xterm" \
+    DISPLAY=:987 \
+    PUID=0 \
+    PGID=0 \
+    UMASK=000 \
+    VENV_PATH="/opt/venv"
+
+ENV PATH="${VENV_PATH}/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    musl-dev \
+    nginx \
+    gettext-base \
+    locales \
+    procps \
+    gosu \
+    bash \
+    curl \
+    wget \
+    busybox \
+    dumb-init \
+    jq \
+    fuse3 \
+    rsync \
+    ffmpeg \
+    nano \
+    && \
+    if [ "$(uname -m)" = "x86_64" ]; \
+    then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
+    elif [ "$(uname -m)" = "aarch64" ]; \
+    then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
+    fi \
+    && dpkg-reconfigure --frontend noninteractive tzdata \
+    && curl https://rclone.org/install.sh | bash \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf \
+    /tmp/* \
+    /var/lib/apt/lists/* \
+    /var/tmp/*
+
+
+FROM base AS prepare_venv
 
 # 设置环境变量
 ENV LANG="C.UTF-8" \
@@ -34,7 +81,8 @@ RUN python3 -m venv ${VENV_PATH} \
     && pip-compile requirements.in \
     && pip install -r requirements.txt
 
-# 复制全部源码和下载资源
+FROM prepare_package AS prepare_code
+
 COPY . .
 RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/version.py) \
     && curl -sL "https://github.com/jxxghp/MoviePilot-Frontend/releases/download/${FRONTEND_VERSION}/dist.zip" | busybox unzip -d / - \
@@ -46,65 +94,24 @@ RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/
     && curl -sL "https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip" | busybox unzip -d /tmp - \
     && mv -f /tmp/MoviePilot-Resources-main/resources.v2/* /app/app/helper/
 
-
 # final 阶段: 安装运行时依赖和配置最终镜像
-FROM base AS final
+FROM prepare_package AS final
 
-# 设置环境变量
-ENV LANG="C.UTF-8" \
-    TZ="Asia/Shanghai" \
-    HOME="/moviepilot" \
-    CONFIG_DIR="/config" \
-    TERM="xterm" \
-    DISPLAY=:987 \
-    PUID=0 \
-    PGID=0 \
-    UMASK=000 \
-    VENV_PATH="/opt/venv"
-
-ENV PATH="${VENV_PATH}/bin:${PATH}"
+COPY --from=prepare_venv --chmod=777 ${VENV_PATH} ${VENV_PATH}
 
 # 设置工作目录
 WORKDIR /app
 
-# 从 builder 阶段复制应用代码、所有已下载好的资源、虚拟环境中的依赖
-COPY --from=builder --chmod=777 ${VENV_PATH} ${VENV_PATH}
-COPY --from=builder /app /app
-COPY --from=builder /public /public
-
-# 安装最终镜像所需的运行时依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    musl-dev \
-    nginx \
-    gettext-base \
-    locales \
-    procps \
-    gosu \
-    bash \
-    curl \
-    wget \
-    busybox \
-    dumb-init \
-    jq \
-    fuse3 \
-    rsync \
-    ffmpeg \
-    nano \
-    && \
-    if [ "$(uname -m)" = "x86_64" ]; \
-    then ln -s /usr/lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1; \
-    elif [ "$(uname -m)" = "aarch64" ]; \
-    then ln -s /usr/lib/aarch64-linux-musl/libc.so /lib/libc.musl-aarch64.so.1; \
-    fi \
-    && dpkg-reconfigure --frontend noninteractive tzdata \
-    && curl https://rclone.org/install.sh | bash \
-    && playwright install-deps chromium \
+RUN playwright install-deps chromium \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf \
     /tmp/* \
     /var/lib/apt/lists/* \
     /var/tmp/*
+
+COPY --from=prepare_code /app /app
+COPY --from=prepare_code /public /public
 
 RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && cp -f /app/docker/nginx.template.conf /etc/nginx/nginx.template.conf \
