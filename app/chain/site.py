@@ -313,6 +313,11 @@ class SiteChain(ChainBase):
         siteoper = SiteOper()
         rsshelper = RssHelper()
         for domain, cookie in cookies.items():
+            # 检查系统是否停止
+            if global_vars.is_system_stopped:
+                logger.info("系统正在停止，中断CookieCloud同步")
+                return False, "系统正在停止，同步被中断"
+                
             # 索引器信息
             indexer = siteshelper.get_indexer(domain)
             # 数据库的站点信息
@@ -331,7 +336,7 @@ class SiteChain(ChainBase):
                             cookie=cookie,
                             ua=site_info.ua or settings.USER_AGENT,
                             proxy=True if site_info.proxy else False,
-                            timeout=site_info.timeout
+                            timeout=site_info.timeout or 15
                         )
                         if rss_url:
                             logger.info(f"更新站点 {domain} RSS地址 ...")
