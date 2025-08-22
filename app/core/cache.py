@@ -16,7 +16,6 @@ from cachetools.keys import hashkey
 from app.core.config import settings
 from app.helper.redis import RedisHelper, AsyncRedisHelper
 from app.log import logger
-from app.utils.singleton import Singleton
 
 # 默认缓存区
 DEFAULT_CACHE_REGION = "DEFAULT"
@@ -24,7 +23,7 @@ DEFAULT_CACHE_REGION = "DEFAULT"
 lock = threading.Lock()
 
 
-class CacheBackend(ABC, metaclass=Singleton):
+class CacheBackend(ABC):
     """
     缓存后端基类，定义通用的缓存接口
     """
@@ -137,7 +136,7 @@ class CacheBackend(ABC, metaclass=Singleton):
         return settings.CACHE_BACKEND_TYPE == "redis"
 
 
-class AsyncCacheBackend(ABC, metaclass=Singleton):
+class AsyncCacheBackend(ABC):
     """
     缓存后端基类，定义通用的缓存接口（异步）
     """
