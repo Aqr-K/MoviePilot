@@ -1,6 +1,6 @@
 import json
 import pickle
-from typing import Any, Optional, Generator, Tuple, AsyncGenerator
+from typing import Any, Optional, Generator, Tuple, AsyncGenerator, Union
 from urllib.parse import quote
 
 import redis
@@ -155,11 +155,13 @@ class RedisHelper(metaclass=Singleton):
         return f"{region}:key:{quote(key)}"
 
     @staticmethod
-    def __get_original_key(redis_key: str) -> str:
+    def __get_original_key(redis_key: Union[str, bytes]) -> str:
         """
         从Redis键中提取原始key
         """
         try:
+            if isinstance(redis_key, bytes):
+                redis_key = redis_key.decode("utf-8")
             parts = redis_key.split(":key:")
             return parts[-1]
         except Exception as e:
@@ -393,6 +395,20 @@ class AsyncRedisHelper(metaclass=Singleton):
         region = self.__get_region(quote(region))
         return f"{region}:key:{quote(key)}"
 
+    @staticmethod
+    def __get_original_key(redis_key: Union[str, bytes]) -> str:
+        """
+        从Redis键中提取原始key
+        """
+        try:
+            if isinstance(redis_key, bytes):
+                redis_key = redis_key.decode("utf-8")
+            parts = redis_key.split(":key:")
+            return parts[-1]
+        except Exception as e:
+            logger.warn(f"Failed to parse redis key: {redis_key}, error: {e}")
+            return redis_key
+
     async def set(self, key: str, value: Any, ttl: Optional[int] = None,
                   region: Optional[str] = "DEFAULT", **kwargs) -> None:
         """
@@ -501,12 +517,12 @@ class AsyncRedisHelper(metaclass=Singleton):
                 async for key in self.client.scan_iter(redis_key):
                     value = await self.client.get(key)
                     if value is not None:
-                        yield key, deserialize(value)
+                        yield self.__get_original_key(key), deserialize(value)
             else:
                 async for key in self.client.scan_iter("*"):
                     value = await self.client.get(key)
                     if value is not None:
-                        yield key, deserialize(value)
+                        yield self.__get_original_key(key), deserialize(value)
         except Exception as e:
             logger.error(f"Failed to get items from Redis, region: {region}, error: {e}")
 
