@@ -28,7 +28,6 @@ class CacheBackend(ABC):
     缓存后端基类，定义通用的缓存接口
     """
 
-    # Dict-like operations
     def __getitem__(self, key: str) -> Any:
         """
         获取缓存项，类似 dict[key]
@@ -118,6 +117,15 @@ class CacheBackend(ABC):
         pass
 
     @abstractmethod
+    def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
+        """
+        清除指定区域的缓存或全部缓存
+
+        :param region: 缓存的区，为None时清空所有区缓存
+        """
+        pass
+
+    @abstractmethod
     def items(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Generator[Tuple[str, Any], None, None]:
         """
         获取指定区域的所有缓存项
@@ -182,15 +190,6 @@ class CacheBackend(ABC):
             self.set(key, default, ttl=ttl, region=region, **kwargs)
             return default
         return value
-
-    @abstractmethod
-    def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
-        """
-        清除指定区域的缓存或全部缓存
-
-        :param region: 缓存的区，为None时清空所有区缓存
-        """
-        pass
 
     @abstractmethod
     def close(self) -> None:
@@ -309,13 +308,6 @@ class AsyncCacheBackend(CacheBackend):
         """
         pass
 
-    @abstractmethod
-    async def close(self) -> None:
-        """
-        关闭缓存连接
-        """
-        pass
-
     async def keys(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> AsyncGenerator[str, None]:
         """
         获取所有缓存键，类似 dict.keys()（异步）
@@ -373,6 +365,13 @@ class AsyncCacheBackend(CacheBackend):
             await self.set(key, default, ttl=ttl, region=region, **kwargs)
             return default
         return value
+
+    @abstractmethod
+    async def close(self) -> None:
+        """
+        关闭缓存连接
+        """
+        pass
 
 
 class MemoryBackend(CacheBackend):
@@ -1036,3 +1035,130 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
             return wrapper
 
     return decorator
+
+
+class CacheProxy:
+    """
+    缓存代理类，将缓存后端的方法直接代理到实例上
+    """
+
+    def __init__(self, cache_backend: CacheBackend, region: str, ttl: Optional[int] = None):
+        """
+        初始化缓存代理
+
+        :param cache_backend: 缓存后端实例
+        :param region: 缓存区域
+        :param ttl: TTL 时间（仅用于 TTL 缓存）
+        """
+        self._cache_backend = cache_backend
+        self._region = region
+        self._ttl = ttl
+
+    def __getattr__(self, name):
+        """
+        代理所有未定义的方法到缓存后端
+        """
+        if hasattr(self._cache_backend, name):
+            method = getattr(self._cache_backend, name)
+            if callable(method):
+                # 检查方法签名，自动添加 region 和 ttl 参数
+                def wrapper(*args, **kwargs):
+                    # 检查方法是否接受 region 参数
+                    sig = inspect.signature(method)
+                    params = sig.parameters
+
+                    # 如果方法接受 region 参数且未提供，则添加
+                    if 'region' in params and 'region' not in kwargs:
+                        kwargs['region'] = self._region
+
+                    # 如果方法接受 ttl 参数且未提供，且我们有 ttl 值，则添加
+                    if 'ttl' in params and 'ttl' not in kwargs and self._ttl is not None:
+                        kwargs['ttl'] = self._ttl
+
+                    return method(*args, **kwargs)
+
+                return wrapper
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __getitem__(self, key):
+        """
+        获取缓存项
+        """
+        value = self._cache_backend.get(key, region=self._region)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key, value):
+        """
+        设置缓存项
+        """
+        kwargs = {'region': self._region}
+        if self._ttl is not None:
+            kwargs['ttl'] = self._ttl  # noqa
+        self._cache_backend.set(key, value, **kwargs)
+
+    def __delitem__(self, key):
+        """
+        删除缓存项
+        """
+        if not self._cache_backend.exists(key, region=self._region):
+            raise KeyError(key)
+        self._cache_backend.delete(key, region=self._region)
+
+    def __contains__(self, key):
+        """
+        检查键是否存在
+        """
+        return self._cache_backend.exists(key, region=self._region)
+
+    def __iter__(self):
+        """
+        返回缓存的迭代器
+        """
+        for key, _ in self._cache_backend.items(region=self._region):
+            yield key
+
+    def __len__(self):
+        """
+        返回缓存项的数量
+        """
+        return sum(1 for _ in self._cache_backend.items(region=self._region))
+
+
+class TTLCache(CacheProxy):
+    """
+    基于 TTL 的缓存类，兼容 cachetools.TTLCache 接口
+    使用项目的缓存后端实现，支持 Redis 和内存缓存
+    """
+
+    def __init__(self, maxsize: int = 128, ttl: int = 600, region: Optional[str] = None):
+        """
+        初始化 TTL 缓存
+
+        :param maxsize: 缓存的最大条目数
+        :param ttl: 缓存的存活时间，单位秒
+        :param region: 缓存的区，为 None 时使用默认区
+        """
+        self.maxsize = maxsize
+        self.ttl = ttl
+        cache_backend = Cache(maxsize=maxsize, ttl=ttl)
+        super().__init__(cache_backend, region or DEFAULT_CACHE_REGION, ttl)
+
+
+class LRUCache(CacheProxy):
+    """
+    基于 LRU 的缓存类，兼容 cachetools.LRUCache 接口
+    使用项目的缓存后端实现，支持 Redis 和内存缓存
+    """
+
+    def __init__(self, maxsize: int = 128, region: Optional[str] = None):
+        """
+        初始化 LRU 缓存
+
+        :param maxsize: 缓存的最大条目数
+        :param region: 缓存的区，为 None 时使用默认区
+        """
+        self.maxsize = maxsize
+        cache_backend = Cache(maxsize=maxsize)
+        super().__init__(cache_backend, region or DEFAULT_CACHE_REGION)
