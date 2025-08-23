@@ -45,59 +45,6 @@ DB_POSTGRESQL_MAX_OVERFLOW=30
 
 ## Docker 部署
 
-### 使用内置 PostgreSQL
-
-如果您使用 Docker 部署，MoviePilot 容器内置了 PostgreSQL 服务：
-
-#### 使用 Docker Compose（推荐）
-
-1. 创建 `docker-compose.yml` 文件：
-```yaml
-version: '3.8'
-
-services:
-  moviepilot:
-    image: jxxghp/moviepilot:latest
-    container_name: moviepilot
-    restart: unless-stopped
-    ports:
-      - "3000:3000"  # 前端端口
-      - "3001:3001"  # API端口
-    environment:
-      - DB_TYPE=postgresql
-      - DB_POSTGRESQL_HOST=localhost
-      - DB_POSTGRESQL_PORT=5432
-      - DB_POSTGRESQL_DATABASE=moviepilot
-      - DB_POSTGRESQL_USERNAME=moviepilot
-      - DB_POSTGRESQL_PASSWORD=moviepilot
-    volumes:
-      - ./config:/config
-```
-
-2. 启动服务：
-```bash
-docker-compose up -d
-```
-
-#### 使用 Docker 命令
-
-1. 设置环境变量：
-```bash
-DB_TYPE=postgresql
-```
-
-2. 启动容器时，PostgreSQL 服务会自动：
-   - 在配置目录下创建 `postgresql/` 子目录作为数据目录
-   - 初始化 PostgreSQL 数据目录
-   - 启动 PostgreSQL 服务
-   - 创建数据库和用户
-   - 配置连接权限
-
-3. 数据持久化：
-   - PostgreSQL 数据存储在 `${CONFIG_DIR}/postgresql/` 目录中
-   - 日志文件存储在 `${CONFIG_DIR}/postgresql/logs/` 目录中
-   - 这些目录会通过 Docker 卷映射持久化保存
-
 ### 使用外部 PostgreSQL
 
 如果您想使用外部的 PostgreSQL 服务：
