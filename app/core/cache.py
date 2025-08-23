@@ -217,19 +217,20 @@ class CacheBackend(ABC):
         :param kwargs: 关键字参数
         :return: 缓存键
         """
-        # 使用函数名和参数生成缓存键
-        key_parts = [func.__module__, func.__name__]
-        
-        # 添加位置参数
-        if args:
-            key_parts.extend([str(arg) for arg in args])
-        
-        # 添加关键字参数（排序以确保一致性）
-        if kwargs:
-            sorted_kwargs = sorted(kwargs.items())
-            key_parts.extend([f"{k}={v}" for k, v in sorted_kwargs])
-        
-        return hashkey(*key_parts)
+        signature = inspect.signature(func)
+        # 绑定传入的参数并应用默认值
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        # 忽略第一个参数，如果它是实例(self)或类(cls)
+        parameters = list(signature.parameters.keys())
+        if parameters and parameters[0] in ("self", "cls"):
+            bound.arguments.pop(parameters[0], None)
+        # 按照函数签名顺序提取参数值列表
+        keys = [
+            bound.arguments[param] for param in signature.parameters if param in bound.arguments
+        ]
+        # 使用有序参数生成缓存键
+        return f"{func.__name__}_{hashkey(*keys)}"
 
     def is_redis(self) -> bool:
         """
@@ -437,19 +438,20 @@ class AsyncCacheBackend(ABC):
         :param kwargs: 关键字参数
         :return: 缓存键
         """
-        # 使用函数名和参数生成缓存键
-        key_parts = [func.__module__, func.__name__]
-        
-        # 添加位置参数
-        if args:
-            key_parts.extend([str(arg) for arg in args])
-        
-        # 添加关键字参数（排序以确保一致性）
-        if kwargs:
-            sorted_kwargs = sorted(kwargs.items())
-            key_parts.extend([f"{k}={v}" for k, v in sorted_kwargs])
-        
-        return hashkey(*key_parts)
+        signature = inspect.signature(func)
+        # 绑定传入的参数并应用默认值
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        # 忽略第一个参数，如果它是实例(self)或类(cls)
+        parameters = list(signature.parameters.keys())
+        if parameters and parameters[0] in ("self", "cls"):
+            bound.arguments.pop(parameters[0], None)
+        # 按照函数签名顺序提取参数值列表
+        keys = [
+            bound.arguments[param] for param in signature.parameters if param in bound.arguments
+        ]
+        # 使用有序参数生成缓存键
+        return f"{func.__name__}_{hashkey(*keys)}"
 
     def is_redis(self) -> bool:
         """

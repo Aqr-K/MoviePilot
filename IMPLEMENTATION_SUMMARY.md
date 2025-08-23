@@ -42,12 +42,12 @@
 
 #### 同步版本
 - `get_region(region=None)`: 获取缓存区域名称
-- `get_cache_key(func, args, kwargs)`: 根据函数和参数生成缓存键
+- `get_cache_key(func, args, kwargs)`: 根据函数和参数生成缓存键（使用inspect.signature，支持默认值和self/cls参数处理）
 - `is_redis()`: 判断当前缓存后端是否为Redis
 
 #### 异步版本
 - `get_region(region=None)`: 获取缓存区域名称
-- `get_cache_key(func, args, kwargs)`: 根据函数和参数生成缓存键
+- `get_cache_key(func, args, kwargs)`: 根据函数和参数生成缓存键（使用inspect.signature，支持默认值和self/cls参数处理）
 - `is_redis()`: 判断当前缓存后端是否为Redis
 
 ### 3. 代码优化
@@ -55,6 +55,7 @@
 - 删除了重复的方法定义
 - 统一了CacheBackend和AsyncCacheBackend的接口
 - 简化了TTLCache类，去掉了dict-like方法，只保留基本功能
+- 修复了get_cache_key方法，使其与旧实现保持一致，满足装饰器需要
 - 保持了向后兼容性
 
 ## 使用示例
@@ -199,7 +200,7 @@ cache = AsyncCache(maxsize=1024, ttl=600)
 
 ### 辅助方法
 ✅ `get_region()` 方法完整  
-✅ `get_cache_key()` 方法完整  
+✅ `get_cache_key()` 方法完整（修复后与旧实现保持一致，支持装饰器）  
 ✅ `is_redis()` 方法完整  
 ✅ CacheBackend和AsyncCacheBackend方法数量一致（16个方法）  
 
