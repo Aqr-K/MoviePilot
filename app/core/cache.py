@@ -206,31 +206,6 @@ class CacheBackend(ABC):
         return f"region:{region}" if region else "region:default"
 
     @staticmethod
-    def get_cache_key(func, args, kwargs) -> str:
-        """
-        根据函数和参数生成缓存键
-
-        :param func: 函数对象
-        :param args: 位置参数
-        :param kwargs: 关键字参数
-        :return: 缓存键
-        """
-        signature = inspect.signature(func)
-        # 绑定传入的参数并应用默认值
-        bound = signature.bind(*args, **kwargs)
-        bound.apply_defaults()
-        # 忽略第一个参数，如果它是实例(self)或类(cls)
-        parameters = list(signature.parameters.keys())
-        if parameters and parameters[0] in ("self", "cls"):
-            bound.arguments.pop(parameters[0], None)
-        # 按照函数签名顺序提取参数值列表
-        keys = [
-            bound.arguments[param] for param in signature.parameters if param in bound.arguments
-        ]
-        # 使用有序参数生成缓存键
-        return f"{func.__name__}_{hashkey(*keys)}"
-
-    @staticmethod
     def is_redis() -> bool:
         """
         判断当前缓存后端是否为 Redis
@@ -764,7 +739,7 @@ class FileBackend(CacheBackend):
         for item in cache_path.iterdir():
             if item.is_file():
                 with open(item, 'r') as f:
-                    yield item.name, f.read()
+                    yield item.as_posix(), f.read()
 
     def close(self) -> None:
         """
@@ -877,7 +852,7 @@ class AsyncFileBackend(AsyncCacheBackend):
         async for item in cache_path.iterdir():
             if await item.is_file():
                 async with aiofiles.open(item, 'r') as f:
-                    yield item.name, await f.read()
+                    yield item.as_posix(), await f.read()
 
     async def close(self) -> None:
         """
@@ -971,6 +946,29 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
 
     def decorator(func):
 
+        def __get_cache_key(args, kwargs) -> str:
+            """
+            根据函数和参数生成缓存键
+
+            :param args: 位置参数
+            :param kwargs: 关键字参数
+            :return: 缓存键
+            """
+            signature = inspect.signature(func)
+            # 绑定传入的参数并应用默认值
+            bound = signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            # 忽略第一个参数，如果它是实例(self)或类(cls)
+            parameters = list(signature.parameters.keys())
+            if parameters and parameters[0] in ("self", "cls"):
+                bound.arguments.pop(parameters[0], None)
+            # 按照函数签名顺序提取参数值列表
+            keys = [
+                bound.arguments[param] for param in signature.parameters if param in bound.arguments
+            ]
+            # 使用有序参数生成缓存键
+            return f"{func.__name__}_{hashkey(*keys)}"
+
         # 获取缓存区
         cache_region = region if region is not None else f"{func.__module__}.{func.__name__}"
 
@@ -982,7 +980,7 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
                 # 获取缓存键
-                cache_key = cache_backend.get_cache_key(func, args, kwargs)
+                cache_key = __get_cache_key(args, kwargs)
                 # 尝试获取缓存
                 cached_value = cache_backend.get(cache_key, region=cache_region)
                 if should_cache(cached_value) and is_valid_cache_value(cache_key, cached_value, cache_region):
@@ -1010,7 +1008,7 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
             @wraps(func)
             def wrapper(*args, **kwargs):
                 # 获取缓存键
-                cache_key = cache_backend.get_cache_key(func, args, kwargs)
+                cache_key = __get_cache_key(args, kwargs)
                 # 尝试获取缓存
                 cached_value = cache_backend.get(cache_key, region=cache_region)
                 if should_cache(cached_value) and is_valid_cache_value(cache_key, cached_value, cache_region):
