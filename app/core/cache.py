@@ -100,18 +100,116 @@ class CacheBackend(ABC):
         """
         pass
 
-    @staticmethod
-    def get_region(region: Optional[str] = DEFAULT_CACHE_REGION):
+    # Dict-like operations
+    def __getitem__(self, key: str) -> Any:
+        """
+        获取缓存项，类似 dict[key]
+        """
+        value = self.get(key)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """
+        设置缓存项，类似 dict[key] = value
+        """
+        self.set(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        """
+        删除缓存项，类似 del dict[key]
+        """
+        if not self.exists(key):
+            raise KeyError(key)
+        self.delete(key)
+
+    def __contains__(self, key: str) -> bool:
+        """
+        检查键是否存在，类似 key in dict
+        """
+        return self.exists(key)
+
+    def __iter__(self):
+        """
+        返回缓存的迭代器，类似 iter(dict)
+        """
+        for key, _ in self.items():
+            yield key
+
+    def __len__(self) -> int:
+        """
+        返回缓存项的数量，类似 len(dict)
+        """
+        return sum(1 for _ in self.items())
+
+    def keys(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Generator[str, None, None]:
+        """
+        获取所有缓存键，类似 dict.keys()
+        """
+        for key, _ in self.items(region=region):
+            yield key
+
+    def values(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Generator[Any, None, None]:
+        """
+        获取所有缓存值，类似 dict.values()
+        """
+        for _, value in self.items(region=region):
+            yield value
+
+    def update(self, other: Dict[str, Any], region: Optional[str] = DEFAULT_CACHE_REGION, 
+               ttl: Optional[int] = None, **kwargs) -> None:
+        """
+        更新缓存，类似 dict.update()
+        """
+        for key, value in other.items():
+            self.set(key, value, ttl=ttl, region=region, **kwargs)
+
+    def pop(self, key: str, default: Any = None, region: Optional[str] = DEFAULT_CACHE_REGION) -> Any:
+        """
+        弹出缓存项，类似 dict.pop()
+        """
+        value = self.get(key, region=region)
+        if value is not None:
+            self.delete(key, region=region)
+            return value
+        if default is not None:
+            return default
+        raise KeyError(key)
+
+    def popitem(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Tuple[str, Any]:
+        """
+        弹出最后一个缓存项，类似 dict.popitem()
+        """
+        items = list(self.items(region=region))
+        if not items:
+            raise KeyError("popitem(): cache is empty")
+        key, value = items[-1]
+        self.delete(key, region=region)
+        return key, value
+
+    def setdefault(self, key: str, default: Any = None, region: Optional[str] = DEFAULT_CACHE_REGION,
+                   ttl: Optional[int] = None, **kwargs) -> Any:
+        """
+        设置默认值，类似 dict.setdefault()
+        """
+        value = self.get(key, region=region)
+        if value is None:
+            self.set(key, default, ttl=ttl, region=region, **kwargs)
+            return default
+        return value
+
+    def get_region(self, region: Optional[str] = None) -> str:
         """
         获取缓存的区
         """
         return f"region:{region}" if region else "region:default"
 
-    @staticmethod
-    def get_cache_key(func, args, kwargs):
+    def get_cache_key(self, func, args, kwargs) -> str:
         """
-        获取缓存的键，通过哈希函数对函数的参数进行处理
-        :param func: 被装饰的函数
+        根据函数和参数生成缓存键
+
+        :param func: 函数对象
         :param args: 位置参数
         :param kwargs: 关键字参数
         :return: 缓存键
@@ -131,9 +229,11 @@ class CacheBackend(ABC):
         # 使用有序参数生成缓存键
         return f"{func.__name__}_{hashkey(*keys)}"
 
-    @staticmethod
-    def is_redis() -> bool:
-        return settings.CACHE_BACKEND_TYPE == "redis"
+    def is_redis(self) -> bool:
+        """
+        判断当前缓存后端是否为 Redis
+        """
+        return isinstance(self, RedisBackend) or isinstance(self, AsyncRedisBackend)
 
 
 class AsyncCacheBackend(ABC):
@@ -213,18 +313,121 @@ class AsyncCacheBackend(ABC):
         """
         pass
 
-    @staticmethod
-    def get_region(region: Optional[str] = DEFAULT_CACHE_REGION):
+    # Async dict-like operations
+    async def __getitem__(self, key: str) -> Any:
+        """
+        获取缓存项，类似 dict[key]（异步）
+        """
+        value = await self.get(key)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    async def __setitem__(self, key: str, value: Any) -> None:
+        """
+        设置缓存项，类似 dict[key] = value（异步）
+        """
+        await self.set(key, value)
+
+    async def __delitem__(self, key: str) -> None:
+        """
+        删除缓存项，类似 del dict[key]（异步）
+        """
+        if not await self.exists(key):
+            raise KeyError(key)
+        await self.delete(key)
+
+    async def __contains__(self, key: str) -> bool:
+        """
+        检查键是否存在，类似 key in dict（异步）
+        """
+        return await self.exists(key)
+
+    async def __aiter__(self):
+        """
+        返回缓存的异步迭代器，类似 aiter(dict)
+        """
+        async for key, _ in self.items():
+            yield key
+
+    async def __len__(self) -> int:
+        """
+        返回缓存项的数量，类似 len(dict)（异步）
+        """
+        count = 0
+        async for _ in self.items():
+            count += 1
+        return count
+
+    async def keys(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> AsyncGenerator[str, None]:
+        """
+        获取所有缓存键，类似 dict.keys()（异步）
+        """
+        async for key, _ in self.items(region=region):
+            yield key
+
+    async def values(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> AsyncGenerator[Any, None]:
+        """
+        获取所有缓存值，类似 dict.values()（异步）
+        """
+        async for _, value in self.items(region=region):
+            yield value
+
+    async def update(self, other: Dict[str, Any], region: Optional[str] = DEFAULT_CACHE_REGION, 
+                     ttl: Optional[int] = None, **kwargs) -> None:
+        """
+        更新缓存，类似 dict.update()（异步）
+        """
+        for key, value in other.items():
+            await self.set(key, value, ttl=ttl, region=region, **kwargs)
+
+    async def pop(self, key: str, default: Any = None, region: Optional[str] = DEFAULT_CACHE_REGION) -> Any:
+        """
+        弹出缓存项，类似 dict.pop()（异步）
+        """
+        value = await self.get(key, region=region)
+        if value is not None:
+            await self.delete(key, region=region)
+            return value
+        if default is not None:
+            return default
+        raise KeyError(key)
+
+    async def popitem(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> Tuple[str, Any]:
+        """
+        弹出最后一个缓存项，类似 dict.popitem()（异步）
+        """
+        items = []
+        async for item in self.items(region=region):
+            items.append(item)
+        if not items:
+            raise KeyError("popitem(): cache is empty")
+        key, value = items[-1]
+        await self.delete(key, region=region)
+        return key, value
+
+    async def setdefault(self, key: str, default: Any = None, region: Optional[str] = DEFAULT_CACHE_REGION,
+                         ttl: Optional[int] = None, **kwargs) -> Any:
+        """
+        设置默认值，类似 dict.setdefault()（异步）
+        """
+        value = await self.get(key, region=region)
+        if value is None:
+            await self.set(key, default, ttl=ttl, region=region, **kwargs)
+            return default
+        return value
+
+    def get_region(self, region: Optional[str] = None) -> str:
         """
         获取缓存的区
         """
         return f"region:{region}" if region else "region:default"
 
-    @staticmethod
-    def get_cache_key(func, args, kwargs):
+    def get_cache_key(self, func, args, kwargs) -> str:
         """
-        获取缓存的键，通过哈希函数对函数的参数进行处理
-        :param func: 被装饰的函数
+        根据函数和参数生成缓存键
+
+        :param func: 函数对象
         :param args: 位置参数
         :param kwargs: 关键字参数
         :return: 缓存键
@@ -244,9 +447,11 @@ class AsyncCacheBackend(ABC):
         # 使用有序参数生成缓存键
         return f"{func.__name__}_{hashkey(*keys)}"
 
-    @staticmethod
-    def is_redis() -> bool:
-        return settings.CACHE_BACKEND_TYPE == "redis"
+    def is_redis(self) -> bool:
+        """
+        判断当前缓存后端是否为 Redis
+        """
+        return isinstance(self, RedisBackend) or isinstance(self, AsyncRedisBackend)
 
 
 class MemoryBackend(CacheBackend):
@@ -802,12 +1007,9 @@ def Cache(maxsize: Optional[int] = None, ttl: Optional[int] = None) -> CacheBack
 
 class TTLCache:
     """
-    TTL缓存类，根据配置自动选择使用Redis或cachetools，maxsize仅在未启用Redis时生效
-
-    特性：
-    - 提供与cachetools.TTLCache相同的接口
-    - 根据配置自动选择缓存后端
-    - 支持Redis和cachetools的切换
+    TTL缓存类，现在只是一个简单的包装器，建议直接使用Cache类
+    
+    注意：此类已过时，建议直接使用Cache类，它提供了完整的dict操作特性
     """
 
     def __init__(self, region: Optional[str] = DEFAULT_CACHE_REGION,
@@ -823,54 +1025,6 @@ class TTLCache:
         self.maxsize = maxsize
         self.ttl = ttl
         self._backend = Cache(maxsize=maxsize, ttl=ttl)
-
-    def __getitem__(self, key: str):
-        """
-        获取缓存项
-        """
-        try:
-            value = self._backend.get(key, region=self.region)
-            if value is not None:
-                return value
-        except Exception as e:
-            logger.warning(f"缓存获取失败: {e}")
-
-        raise KeyError(key)
-
-    def __setitem__(self, key: str, value: Any):
-        """
-        设置缓存项
-        """
-        try:
-            self._backend.set(key, value, ttl=self.ttl, region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存设置失败: {e}")
-
-    def __delitem__(self, key: str):
-        """
-        删除缓存项
-        """
-        try:
-            self._backend.delete(key, region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存删除失败: {e}")
-
-    def __contains__(self, key: str):
-        """
-        检查键是否存在
-        """
-        try:
-            return self._backend.exists(key, region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存检查失败: {e}")
-            return False
-
-    def __iter__(self):
-        """
-        返回缓存的迭代器
-        """
-        for key, _ in self._backend.items(region=self.region):
-            yield key
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None):
         """
@@ -903,16 +1057,6 @@ class TTLCache:
             self._backend.delete(key, region=self.region)
         except Exception as e:
             logger.warning(f"缓存删除失败: {e}")
-
-    def items(self):
-        """
-        获取缓存的所有键值对
-        """
-        try:
-            return self._backend.items(region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存获取失败: {e}")
-            return []
 
     def clear(self):
         """
