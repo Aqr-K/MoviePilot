@@ -201,12 +201,9 @@ class CacheBackend(ABC):
 
     def get_region(self, region: Optional[str] = None) -> str:
         """
-        获取缓存区域名称
-
-        :param region: 缓存区域名称
-        :return: 缓存区域名称
+        获取缓存的区
         """
-        return region or DEFAULT_CACHE_REGION
+        return f"region:{region}" if region else "region:default"
 
     def get_cache_key(self, func, args, kwargs) -> str:
         """
@@ -422,12 +419,9 @@ class AsyncCacheBackend(ABC):
 
     def get_region(self, region: Optional[str] = None) -> str:
         """
-        获取缓存区域名称
-
-        :param region: 缓存区域名称
-        :return: 缓存区域名称
+        获取缓存的区
         """
-        return region or DEFAULT_CACHE_REGION
+        return f"region:{region}" if region else "region:default"
 
     def get_cache_key(self, func, args, kwargs) -> str:
         """
