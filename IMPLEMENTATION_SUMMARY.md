@@ -54,6 +54,7 @@
 
 - 删除了重复的方法定义
 - 统一了CacheBackend和AsyncCacheBackend的接口
+- 简化了TTLCache类，去掉了dict-like方法，只保留基本功能
 - 保持了向后兼容性
 
 ## 使用示例
@@ -146,7 +147,19 @@ cache = TTLCache(region="my_region", maxsize=1024, ttl=600)
 from app.core.cache import Cache
 cache = Cache(maxsize=1024, ttl=600)
 # 使用cache.set(key, value, region="my_region")来指定region
+# 或者直接使用dict语法: cache[key] = value
 ```
+
+### TTLCache简化说明
+TTLCache类已经被简化，去掉了dict-like方法（如`__getitem__`、`__setitem__`等），现在只保留基本的方法：
+- `set(key, value, ttl=None)`
+- `get(key, default=None)`
+- `delete(key)`
+- `clear()`
+- `is_redis()`
+- `close()`
+
+建议直接使用Cache类，它提供了完整的dict操作特性。
 
 ### 从AsyncTTLCache迁移
 ```python
@@ -207,10 +220,19 @@ cache = AsyncCache(maxsize=1024, ttl=600)
 成功为CacheBackend模块统一添加了dict相关的操作特性，实现了以下目标：
 
 1. ✅ 统一了缓存接口，所有后端都支持dict操作
-2. ✅ 消除了对TTLCache包装器的依赖
-3. ✅ 保持了向后兼容性
-4. ✅ 提供了完整的dict操作功能
-5. ✅ 支持同步和异步操作
-6. ✅ 提供了详细的迁移指南和测试
+2. ✅ 简化了TTLCache类，去掉了dict-like方法，只保留基本功能
+3. ✅ 消除了对TTLCache包装器的依赖
+4. ✅ 保持了向后兼容性
+5. ✅ 提供了完整的dict操作功能
+6. ✅ 支持同步和异步操作
+7. ✅ 提供了详细的迁移指南和测试
 
-现在开发者可以直接使用CacheBackend的dict操作特性，享受更简洁、更统一的缓存操作体验。
+### 主要改进
+
+1. **性能提升**: 减少了包装器层，直接使用CacheBackend
+2. **接口统一**: 所有缓存后端都支持相同的dict操作接口
+3. **功能完整**: 支持所有标准的dict操作
+4. **代码简化**: TTLCache不再重复实现dict操作
+5. **向后兼容**: 原有的方法仍然可用
+
+现在开发者可以直接使用CacheBackend的dict操作特性，享受更简洁、更统一、更高效的缓存操作体验！

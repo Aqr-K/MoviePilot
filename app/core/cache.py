@@ -1011,12 +1011,9 @@ def Cache(maxsize: Optional[int] = None, ttl: Optional[int] = None) -> CacheBack
 
 class TTLCache:
     """
-    TTL缓存类，根据配置自动选择使用Redis或cachetools，maxsize仅在未启用Redis时生效
-
-    特性：
-    - 提供与cachetools.TTLCache相同的接口
-    - 根据配置自动选择缓存后端
-    - 支持Redis和cachetools的切换
+    TTL缓存类，现在只是一个简单的包装器，建议直接使用Cache类
+    
+    注意：此类已过时，建议直接使用Cache类，它提供了完整的dict操作特性
     """
 
     def __init__(self, region: Optional[str] = DEFAULT_CACHE_REGION,
@@ -1032,54 +1029,6 @@ class TTLCache:
         self.maxsize = maxsize
         self.ttl = ttl
         self._backend = Cache(maxsize=maxsize, ttl=ttl)
-
-    def __getitem__(self, key: str):
-        """
-        获取缓存项
-        """
-        try:
-            value = self._backend.get(key, region=self.region)
-            if value is not None:
-                return value
-        except Exception as e:
-            logger.warning(f"缓存获取失败: {e}")
-
-        raise KeyError(key)
-
-    def __setitem__(self, key: str, value: Any):
-        """
-        设置缓存项
-        """
-        try:
-            self._backend.set(key, value, ttl=self.ttl, region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存设置失败: {e}")
-
-    def __delitem__(self, key: str):
-        """
-        删除缓存项
-        """
-        try:
-            self._backend.delete(key, region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存删除失败: {e}")
-
-    def __contains__(self, key: str):
-        """
-        检查键是否存在
-        """
-        try:
-            return self._backend.exists(key, region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存检查失败: {e}")
-            return False
-
-    def __iter__(self):
-        """
-        返回缓存的迭代器
-        """
-        for key, _ in self._backend.items(region=self.region):
-            yield key
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None):
         """
@@ -1112,16 +1061,6 @@ class TTLCache:
             self._backend.delete(key, region=self.region)
         except Exception as e:
             logger.warning(f"缓存删除失败: {e}")
-
-    def items(self):
-        """
-        获取缓存的所有键值对
-        """
-        try:
-            return self._backend.items(region=self.region)
-        except Exception as e:
-            logger.warning(f"缓存获取失败: {e}")
-            return []
 
     def clear(self):
         """

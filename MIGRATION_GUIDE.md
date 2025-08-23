@@ -48,28 +48,15 @@ from app.core.cache import TTLCache
 cache = TTLCache(region="my_region", maxsize=1024, ttl=600)
 
 # 设置缓存
-cache["key1"] = "value1"
+cache.set("key1", "value1")
 cache.set("key2", "value2")
 
 # 获取缓存
-value1 = cache["key1"]
+value1 = cache.get("key1")
 value2 = cache.get("key2", "default")
 
-# 检查键是否存在
-if "key1" in cache:
-    print("key1 exists")
-
 # 删除缓存
-del cache["key1"]
-cache.delete("key2")
-
-# 迭代缓存
-for key in cache:
-    print(key)
-
-# 获取所有键值对
-for key, value in cache.items():
-    print(f"{key}: {value}")
+cache.delete("key1")
 
 # 清空缓存
 cache.clear()
