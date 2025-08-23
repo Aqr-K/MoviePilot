@@ -10,6 +10,8 @@ import contextlib
 from alembic import op
 import sqlalchemy as sa
 
+from app.log import logger
+
 
 # revision identifiers, used by Alembic.
 revision = 'ecf3c693fdf3'
@@ -22,9 +24,9 @@ def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
     table_name = 'subscribehistory'
+    columns = inspector.get_columns(table_name)
 
     try:
-        columns = inspector.get_columns(table_name)
         sites_col = next((c for c in columns if c['name'] == 'sites'), None)
         # 如果 'sites' 列存在且类型不是 JSON，则进行修改
         if sites_col and not isinstance(sites_col['type'], sa.JSON):
@@ -38,9 +40,7 @@ def upgrade() -> None:
                                 existing_type=sa.String(),
                                 type_=sa.JSON())
     except Exception as e:
-        print(f"Could not alter column 'sites' in table {table_name}: {e}")
-
-    columns = inspector.get_columns(table_name)
+        logger.error(f"Could not alter column 'sites' in table {table_name}: {e}")
 
     if not any(c['name'] == 'custom_words' for c in columns):
         op.add_column(table_name, sa.Column('custom_words', sa.String(), nullable=True))

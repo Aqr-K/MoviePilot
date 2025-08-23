@@ -10,6 +10,7 @@ import contextlib
 from alembic import op
 import sqlalchemy as sa
 
+from app.log import logger
 from app.db import SessionFactory
 from app.db.models import UserConfig
 
@@ -69,7 +70,7 @@ def upgrade() -> None:
                                     existing_type=sa.String(),
                                     type_=sa.JSON())
         except Exception as e:
-            print(f"Could not alter column {column_name} in table {table}: {e}")
+            logger.error(f"Could not alter column {column_name} in table {table}: {e}")
 
     with SessionFactory() as db:
         UserConfig.truncate(db)
