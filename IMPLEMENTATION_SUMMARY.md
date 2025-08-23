@@ -40,6 +40,12 @@
 
 ### 2. 重构的辅助方法
 
+#### 同步版本
+- `get_region(region=None)`: 获取缓存区域名称
+- `get_cache_key(func, args, kwargs)`: 根据函数和参数生成缓存键
+- `is_redis()`: 判断当前缓存后端是否为Redis
+
+#### 异步版本
 - `get_region(region=None)`: 获取缓存区域名称
 - `get_cache_key(func, args, kwargs)`: 根据函数和参数生成缓存键
 - `is_redis()`: 判断当前缓存后端是否为Redis
@@ -158,6 +164,7 @@ cache = AsyncCache(maxsize=1024, ttl=600)
 
 所有dict操作特性都通过了完整测试：
 
+### 同步操作
 ✅ 支持 `dict[key]` 语法  
 ✅ 支持 `key in dict` 语法  
 ✅ 支持 `len(dict)` 语法  
@@ -165,7 +172,23 @@ cache = AsyncCache(maxsize=1024, ttl=600)
 ✅ 支持 `for key in dict` 迭代  
 ✅ 支持 `keys()`, `values()`, `items()` 方法  
 ✅ 支持 `update()`, `pop()`, `popitem()`, `setdefault()` 方法  
-✅ 完整的错误处理机制  
+✅ 完整的错误处理机制
+
+### 异步操作
+✅ 支持 `await dict[key]` 语法  
+✅ 支持 `await key in dict` 语法  
+✅ 支持 `await len(dict)` 语法  
+✅ 支持 `await del dict[key]` 语法  
+✅ 支持 `async for key in dict` 迭代  
+✅ 支持异步 `keys()`, `values()`, `items()` 方法  
+✅ 支持异步 `update()`, `pop()`, `popitem()`, `setdefault()` 方法  
+✅ 完整的异步错误处理机制
+
+### 辅助方法
+✅ `get_region()` 方法完整  
+✅ `get_cache_key()` 方法完整  
+✅ `is_redis()` 方法完整  
+✅ CacheBackend和AsyncCacheBackend方法数量一致（16个方法）  
 
 ## 文件清单
 
