@@ -1130,7 +1130,7 @@ class TTLCache(CacheProxy):
     使用项目的缓存后端实现，支持 Redis 和内存缓存
     """
 
-    def __init__(self, maxsize: int = 128, ttl: int = 600, region: Optional[str] = None):
+    def __init__(self, maxsize: int = 1024, ttl: int = 600, region: Optional[str] = None):
         """
         初始化 TTL 缓存
 
@@ -1138,10 +1138,7 @@ class TTLCache(CacheProxy):
         :param ttl: 缓存的存活时间，单位秒
         :param region: 缓存的区，为 None 时使用默认区
         """
-        self.maxsize = maxsize
-        self.ttl = ttl
-        cache_backend = Cache(maxsize=maxsize, ttl=ttl)
-        super().__init__(cache_backend, region or DEFAULT_CACHE_REGION, ttl)
+        super().__init__(Cache(maxsize=maxsize, ttl=ttl), region or DEFAULT_CACHE_REGION, ttl)
 
 
 class LRUCache(CacheProxy):
@@ -1157,6 +1154,4 @@ class LRUCache(CacheProxy):
         :param maxsize: 缓存的最大条目数
         :param region: 缓存的区，为 None 时使用默认区
         """
-        self.maxsize = maxsize
-        cache_backend = Cache(maxsize=maxsize)
-        super().__init__(cache_backend, region or DEFAULT_CACHE_REGION)
+        super().__init__(Cache(maxsize=maxsize), region or DEFAULT_CACHE_REGION)

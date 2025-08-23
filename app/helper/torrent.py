@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from torrentool.api import Torrent
 
 from app.core.cache import FileCache
+from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.context import Context, TorrentInfo, MediaInfo
 from app.core.meta import MetaBase
@@ -25,7 +26,7 @@ class TorrentHelper:
     """
 
     def __init__(self):
-        self._invalid_torrents = []
+        self._invalid_torrents = TTLCache(maxsize=128, ttl=3600 * 24)
 
     def download_torrent(self, url: str,
                          cookie: Optional[str] = None,
@@ -351,7 +352,7 @@ class TorrentHelper:
         添加无效种子
         """
         if url not in self._invalid_torrents:
-            self._invalid_torrents.append(url)
+            self._invalid_torrents[url] = True
 
     @staticmethod
     def match_torrent(mediainfo: MediaInfo, torrent_meta: MetaBase, torrent: TorrentInfo) -> bool:
