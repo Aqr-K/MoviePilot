@@ -140,18 +140,18 @@ class RedisHelper(metaclass=Singleton):
             logger.error(f"Failed to set Redis maxmemory or policy: {e}")
 
     @staticmethod
-    def __get_region(region: Optional[str] = "DEFAULT"):
+    def __get_region(region: Optional[str] = None):
         """
         获取缓存的区
         """
-        return f"region:{region}" if region else "region:default"
+        return f"region:{quote(region)}" if region else "region:DEFAULT"
 
     def __make_redis_key(self, region: str, key: str) -> str:
         """
         获取缓存Key
         """
         # 使用region作为缓存键的一部分
-        region = self.__get_region(quote(region))
+        region = self.__get_region(region)
         return f"{region}:key:{quote(key)}"
 
     @staticmethod
@@ -247,7 +247,7 @@ class RedisHelper(metaclass=Singleton):
         try:
             self._connect()
             if region:
-                cache_region = self.__get_region(quote(region))
+                cache_region = self.__get_region(region)
                 redis_key = f"{cache_region}:key:*"
                 with self.client.pipeline() as pipe:
                     for key in self.client.scan_iter(redis_key):
@@ -270,7 +270,7 @@ class RedisHelper(metaclass=Singleton):
         try:
             self._connect()
             if region:
-                cache_region = self.__get_region(quote(region))
+                cache_region = self.__get_region(region)
                 redis_key = f"{cache_region}:key:*"
                 for key in self.client.scan_iter(redis_key):
                     value = self.client.get(key)
@@ -392,7 +392,7 @@ class AsyncRedisHelper(metaclass=Singleton):
         获取缓存Key
         """
         # 使用region作为缓存键的一部分
-        region = self.__get_region(quote(region))
+        region = self.__get_region(region)
         return f"{region}:key:{quote(key)}"
 
     @staticmethod
@@ -489,7 +489,7 @@ class AsyncRedisHelper(metaclass=Singleton):
         try:
             await self._connect()
             if region:
-                cache_region = self.__get_region(quote(region))
+                cache_region = self.__get_region(region)
                 redis_key = f"{cache_region}:key:*"
                 async with self.client.pipeline() as pipe:
                     async for key in self.client.scan_iter(redis_key):
@@ -512,7 +512,7 @@ class AsyncRedisHelper(metaclass=Singleton):
         try:
             await self._connect()
             if region:
-                cache_region = self.__get_region(quote(region))
+                cache_region = self.__get_region(region)
                 redis_key = f"{cache_region}:key:*"
                 async for key in self.client.scan_iter(redis_key):
                     value = await self.client.get(key)
