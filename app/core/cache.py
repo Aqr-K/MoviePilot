@@ -1213,32 +1213,6 @@ class CacheProxy:
         self._region = region
         self._ttl = ttl
 
-    def __getattr__(self, name):
-        """
-        代理所有未定义的方法到缓存后端
-        """
-        if hasattr(self._cache_backend, name):
-            method = getattr(self._cache_backend, name)
-            if callable(method):
-                # 检查方法签名，自动添加 region 和 ttl 参数
-                def wrapper(*args, **kwargs):
-                    # 检查方法是否接受 region 参数
-                    sig = inspect.signature(method)
-                    params = sig.parameters
-
-                    # 如果方法接受 region 参数且未提供，则添加
-                    if 'region' in params and 'region' not in kwargs:
-                        kwargs['region'] = self._region
-
-                    # 如果方法接受 ttl 参数且未提供，且我们有 ttl 值，则添加
-                    if 'ttl' in params and 'ttl' not in kwargs and self._ttl is not None:
-                        kwargs['ttl'] = self._ttl
-
-                    return method(*args, **kwargs)
-
-                return wrapper
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
     def __getitem__(self, key):
         """
         获取缓存项
@@ -1283,6 +1257,102 @@ class CacheProxy:
         返回缓存项的数量
         """
         return sum(1 for _ in self._cache_backend.items(region=self._region))
+
+    def get(self, key: str, **kwargs) -> Any:
+        """
+        获取缓存值
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.get(key, **kwargs)
+
+    def set(self, key: str, value: Any, **kwargs) -> None:
+        """
+        设置缓存值
+        """
+        kwargs.setdefault('region', self._region)
+        if self._ttl is not None and 'ttl' not in kwargs:
+            kwargs['ttl'] = self._ttl
+        self._cache_backend.set(key, value, **kwargs)
+
+    def delete(self, key: str, **kwargs) -> None:
+        """
+        删除缓存值
+        """
+        kwargs.setdefault('region', self._region)
+        self._cache_backend.delete(key, **kwargs)
+
+    def exists(self, key: str, **kwargs) -> bool:
+        """
+        检查缓存键是否存在
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.exists(key, **kwargs)
+
+    def clear(self, **kwargs) -> None:
+        """
+        清除缓存
+        """
+        kwargs.setdefault('region', self._region)
+        self._cache_backend.clear(**kwargs)
+
+    def items(self, **kwargs):
+        """
+        获取所有缓存项
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.items(**kwargs)
+
+    def keys(self, **kwargs):
+        """
+        获取所有缓存键
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.keys(**kwargs)
+
+    def values(self, **kwargs):
+        """
+        获取所有缓存值
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.values(**kwargs)
+
+    def update(self, other: Dict[str, Any], **kwargs) -> None:
+        """
+        更新缓存
+        """
+        kwargs.setdefault('region', self._region)
+        if self._ttl is not None and 'ttl' not in kwargs:
+            kwargs['ttl'] = self._ttl
+        self._cache_backend.update(other, **kwargs)
+
+    def pop(self, key: str, default: Any = None, **kwargs) -> Any:
+        """
+        弹出缓存项
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.pop(key, default, **kwargs)
+
+    def popitem(self, **kwargs) -> Tuple[str, Any]:
+        """
+        弹出最后一个缓存项
+        """
+        kwargs.setdefault('region', self._region)
+        return self._cache_backend.popitem(**kwargs)
+
+    def setdefault(self, key: str, default: Any = None, **kwargs) -> Any:
+        """
+        设置默认值
+        """
+        kwargs.setdefault('region', self._region)
+        if self._ttl is not None and 'ttl' not in kwargs:
+            kwargs['ttl'] = self._ttl
+        return self._cache_backend.setdefault(key, default, **kwargs)
+
+    def close(self) -> None:
+        """
+        关闭缓存连接
+        """
+        self._cache_backend.close()
 
 
 class TTLCache(CacheProxy):
