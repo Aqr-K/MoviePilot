@@ -21,7 +21,8 @@ class ProgressHelper(metaclass=WeakSingleton):
         self._progress[self._key] = {
             "enable": False,
             "value": 0,
-            "text": "请稍候..."
+            "text": "请稍候...",
+            "data": {}
         }
 
     def start(self):
@@ -31,19 +32,25 @@ class ProgressHelper(metaclass=WeakSingleton):
     def end(self):
         if not self._progress.get(self._key):
             return
-        self._progress[self._key] = {
-            "enable": False,
-            "value": 100,
-            "text": "正在处理..."
-        }
+        self._progress[self._key].update(
+            {
+                "enable": False,
+                "value": 100,
+                "text": ""
+            }
+        )
 
-    def update(self, value: Union[float, int] = None, text: Optional[str] = None):
+    def update(self, value: Union[float, int] = None, text: Optional[str] = None, data: dict = None):
         if not self._progress.get(self._key).get('enable'):
             return
         if value:
             self._progress[self._key]['value'] = value
         if text:
             self._progress[self._key]['text'] = text
+        if data:
+            if not self._progress[self._key].get('data'):
+                self._progress[self._key]['data'] = {}
+            self._progress[self._key]['data'].update(data)
 
     def get(self) -> dict:
         return self._progress.get(self._key)

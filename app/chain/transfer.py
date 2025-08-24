@@ -555,6 +555,8 @@ class TransferChain(ChainBase, metaclass=Singleton):
         processed_num = 0
         # 失败数量
         fail_num = 0
+        # 已完成文件
+        finished_files = []
 
         progress = ProgressHelper(ProgressKey.FileTransfer)
 
@@ -586,7 +588,11 @@ class TransferChain(ChainBase, metaclass=Singleton):
                     __process_msg = f"正在整理 {fileitem.name} ..."
                     logger.info(__process_msg)
                     progress.update(value=processed_num / total_num * 100,
-                                    text=__process_msg)
+                                    text=__process_msg,
+                                    data={
+                                        "current": Path(fileitem.path).as_posix(),
+                                        "finished":finished_files
+                                    })
                     # 整理
                     state, err_msg = self.__handle_transfer(task=task, callback=item.callback)
                     if not state:
@@ -594,10 +600,12 @@ class TransferChain(ChainBase, metaclass=Singleton):
                         fail_num += 1
                     # 更新进度
                     processed_num += 1
+                    finished_files.append(Path(fileitem.path).as_posix())
                     __process_msg = f"{fileitem.name} 整理完成"
                     logger.info(__process_msg)
                     progress.update(value=processed_num / total_num * 100,
-                                    text=__process_msg)
+                                    text=__process_msg,
+                                    data={})
             except queue.Empty:
                 if not __queue_start:
                     # 结束进度
@@ -1161,6 +1169,8 @@ class TransferChain(ChainBase, metaclass=Singleton):
             processed_num = 0
             # 失败数量
             fail_num = 0
+            # 已完成文件
+            finished_files = []
 
             # 启动进度
             progress = ProgressHelper(ProgressKey.FileTransfer)
@@ -1179,7 +1189,11 @@ class TransferChain(ChainBase, metaclass=Singleton):
                     __process_msg = f"正在整理 （{processed_num + fail_num + 1}/{total_num}）{transfer_task.fileitem.name} ..."
                     logger.info(__process_msg)
                     progress.update(value=(processed_num + fail_num) / total_num * 100,
-                                    text=__process_msg)
+                                    text=__process_msg,
+                                    data={
+                                        "current": Path(transfer_task.fileitem.path).as_posix(),
+                                        "finished": finished_files,
+                                    })
                     state, err_msg = self.__handle_transfer(
                         task=transfer_task,
                         callback=self.__default_callback
@@ -1191,6 +1205,8 @@ class TransferChain(ChainBase, metaclass=Singleton):
                         fail_num += 1
                     else:
                         processed_num += 1
+                    # 记录已完成
+                    finished_files.append(Path(transfer_task.fileitem.path).as_posix())
             finally:
                 transfer_tasks.clear()
                 del transfer_tasks
@@ -1199,7 +1215,8 @@ class TransferChain(ChainBase, metaclass=Singleton):
             __end_msg = f"整理队列处理完成，共整理 {total_num} 个文件，失败 {fail_num} 个"
             logger.info(__end_msg)
             progress.update(value=100,
-                            text=__end_msg)
+                            text=__end_msg,
+                            data={})
             progress.end()
 
         error_msg = "、".join(err_msgs[:2]) + (f"，等{len(err_msgs)}个文件错误！" if len(err_msgs) > 2 else "")
@@ -1345,11 +1362,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
             else:
                 # 更新媒体图片
                 self.obtain_images(mediainfo=mediainfo)
-            # 开始进度
-            progress = ProgressHelper(ProgressKey.FileTransfer)
-            progress.start()
-            progress.update(value=0,
-                            text=f"开始整理 {fileitem.path} ...")
+
             # 开始整理
             state, errmsg = self.do_transfer(
                 fileitem=fileitem,
@@ -1370,7 +1383,6 @@ class TransferChain(ChainBase, metaclass=Singleton):
             if not state:
                 return False, errmsg
 
-            progress.end()
             logger.info(f"{fileitem.path} 整理完成")
             return True, ""
         else:
