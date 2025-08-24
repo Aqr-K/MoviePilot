@@ -1258,6 +1258,12 @@ class CacheProxy:
         """
         return sum(1 for _ in self._cache_backend.items(region=self._region))
 
+    def is_redis(self) -> bool:
+        """
+        检查当前缓存后端是否为 Redis
+        """
+        return self._cache_backend.is_redis()
+
     def get(self, key: str, **kwargs) -> Any:
         """
         获取缓存值
