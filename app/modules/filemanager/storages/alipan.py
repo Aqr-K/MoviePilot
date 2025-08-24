@@ -45,6 +45,9 @@ class AliPan(StorageBase, metaclass=WeakSingleton):
     # 基础url
     base_url = "https://openapi.alipan.com"
 
+    # 文件块大小，默认10MB
+    chunk_size = 10 * 1024 * 1024
+
     def __init__(self):
         super().__init__()
         self._auth_state = {}
@@ -724,7 +727,7 @@ class AliPan(StorageBase, metaclass=WeakSingleton):
                 downloaded_size = 0
 
                 with open(local_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
+                    for chunk in r.iter_content(chunk_size=self.chunk_size):
                         if chunk:
                             f.write(chunk)
                             downloaded_size += len(chunk)

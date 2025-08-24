@@ -31,9 +31,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         "move": "移动",
     }
 
-    # 文件块大小，默认1MB
-    chunk_size = 1024 * 1024
-
+    # 快照检查目录修改时间
     snapshot_check_folder_modtime = settings.OPENLIST_SNAPSHOT_CHECK_FOLDER_MODTIME
 
     def __init__(self):

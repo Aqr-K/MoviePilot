@@ -14,7 +14,7 @@ def transfer_process(path: str) -> Callable[[int | float], None]:
     """
     传输进度回调
     """
-    pbar = tqdm(total=100, desc="整理进度", unit="%")
+    pbar = tqdm(total=100, desc="整理进度")
     progress = ProgressHelper(path)
     progress.start()
 
