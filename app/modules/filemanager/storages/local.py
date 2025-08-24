@@ -200,8 +200,8 @@ class LocalStorage(StorageBase):
         """
         total_size = src.stat().st_size
         copied_size = 0
+        progress_callback = transfer_process(src.as_posix())
         try:
-            progress_callback = transfer_process(src.as_posix())
             with open(src, "rb") as fsrc, open(dest, "wb") as fdst:
                 while True:
                     buf = fsrc.read(self.chunk_size)
@@ -219,6 +219,8 @@ class LocalStorage(StorageBase):
         except Exception as e:
             logger.error(f"【local】复制文件 {src} 失败：{e}")
             return False
+        finally:
+            progress_callback(100)
 
     def upload(
             self,
