@@ -12,7 +12,7 @@ from oss2 import SizedFileAdapter, determine_part_size
 from oss2.models import PartInfo
 
 from app import schemas
-from app.core.config import settings
+from app.core.config import settings, global_vars
 from app.log import logger
 from app.modules.filemanager import StorageBase
 from app.modules.filemanager.storages import transfer_process
@@ -532,6 +532,9 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
             part_number = 1
             offset = 0
             while offset < file_size:
+                if global_vars.is_transfer_stopped(local_path.as_posix()):
+                    logger.info(f"【115】{local_path} 上传已取消！")
+                    return None
                 num_to_upload = min(part_size, file_size - offset)
                 # 调用SizedFileAdapter(fileobj, size)方法会生成一个新的文件对象，重新计算起始追加位置。
                 logger.info(f"【115】开始上传 {target_name} 分片 {part_number}: {offset} -> {offset + num_to_upload}")
@@ -614,10 +617,12 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
 
                 with open(local_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=self.chunk_size):
+                        if global_vars.is_transfer_stopped(fileitem.path):
+                            logger.info(f"【115】{fileitem.path} 下载已取消！")
+                            return None
                         if chunk:
                             f.write(chunk)
                             downloaded_size += len(chunk)
-
                             # 更新进度
                             if file_size:
                                 progress = (downloaded_size * 100) / file_size

@@ -7,7 +7,7 @@ import requests
 
 from app import schemas
 from app.core.cache import cached
-from app.core.config import settings
+from app.core.config import settings, global_vars
 from app.log import logger
 from app.modules.filemanager.storages import StorageBase, transfer_process
 from app.schemas.types import StorageSchema
@@ -561,6 +561,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             r.raise_for_status()
             with open(local_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
+                    if global_vars.is_transfer_stopped(fileitem.path):
+                        logger.info(f"【OpenList】{fileitem.path} 下载已取消！")
+                        return None
                     f.write(chunk)
 
         if local_path.exists():
@@ -601,11 +604,14 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                     self.file_size = file_path.stat().st_size
 
                 def read(self, size=-1):
+                    if global_vars.is_transfer_stopped(path.as_posix()):
+                        logger.info(f"【OpenList】{path} 上传已取消！")
+                        return None
                     chunk = self.file.read(size)
                     if chunk:
                         self.uploaded_size += len(chunk)
                         if self.callback:
-                            percent = (self.uploaded_size* 100) / self.file_size
+                            percent = (self.uploaded_size * 100) / self.file_size
                             self.callback(percent)
                     return chunk
 
