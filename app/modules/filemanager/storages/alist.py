@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -42,6 +43,17 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         初始化
         """
         self.__generate_token.cache_clear()  # noqa
+
+    def _delay_get_item(self, path: Path) -> Optional[schemas.FileItem]:
+        """
+        自动延迟重试 get_item 模块
+        """
+        for _ in range(2):
+            time.sleep(2)
+            fileitem = self.get_item(path)
+            if fileitem:
+                return fileitem
+        return None
 
     @property
     def __get_base_url(self) -> str:
@@ -270,7 +282,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             logger.warn(f'【OpenList】创建目录 {path} 失败，错误信息：{result["message"]}')
             return None
 
-        return self.get_item(path)
+        return self._delay_get_item(path)
 
     def get_folder(self, path: Path) -> Optional[schemas.FileItem]:
         """
@@ -639,10 +651,10 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             progress_callback(100)
 
             # 获取上传后的文件项
-            new_item = self.get_item(target_path)
+            new_item = self._delay_get_item(target_path)
             if new_item and new_name and new_name != path.name:
                 if self.rename(new_item, new_name):
-                    return self.get_item(Path(new_item.path).with_name(new_name))
+                    return self._delay_get_item(Path(new_item.path).with_name(new_name))
 
             return new_item
 
@@ -707,9 +719,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             return False
         # 重命名
         if fileitem.name != new_name:
-            self.rename(
-                self.get_item(path / fileitem.name), new_name
-            )
+            new_item = self._delay_get_item(path / fileitem.name)
+            if new_item:
+                self.rename(new_item, new_name)
         return True
 
     def move(self, fileitem: schemas.FileItem, path: Path, new_name: str) -> bool:
