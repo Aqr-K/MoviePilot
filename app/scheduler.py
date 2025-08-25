@@ -23,13 +23,13 @@ from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.core.plugin import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.message import MessageHelper
 from app.helper.sites import SitesHelper  # noqa
+from app.helper.message import MessageHelper
 from app.helper.wallpaper import WallpaperHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType, Workflow, ConfigChangeEventData
 from app.schemas.types import EventType, SystemConfigKey
-from app.utils.singleton import Singleton
+from app.utils.singleton import SingletonClass
 from app.utils.timer import TimerUtils
 
 lock = threading.Lock()
@@ -39,7 +39,7 @@ class SchedulerChain(ChainBase):
     pass
 
 
-class Scheduler(metaclass=Singleton):
+class Scheduler(metaclass=SingletonClass):
     """
     定时任务管理
     """
@@ -57,6 +57,8 @@ class Scheduler(metaclass=Singleton):
         self._auth_count = 0
         # 用户认证失败消息发送
         self._auth_message = False
+        # 当前事件循环
+        self.loop = asyncio.get_event_loop()
         self.init()
 
     @eventmanager.register(EventType.ConfigChanged)
@@ -454,11 +456,7 @@ class Scheduler(metaclass=Singleton):
             """
             启动协程
             """
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-            return asyncio.run_coroutine_threadsafe(coro, loop)
+            return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
         # 获取定时任务
         job = self.__prepare_job(job_id)
