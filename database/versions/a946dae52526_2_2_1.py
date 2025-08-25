@@ -27,9 +27,6 @@ def upgrade() -> None:
     if settings.DB_TYPE.lower() == "postgresql":
         # PostgreSQL数据库迁移
         migrate_postgresql_userid(connection)
-    else:
-        # SQLite数据库迁移
-        migrate_sqlite_userid(connection)
 
 
 def downgrade() -> None:
@@ -78,68 +75,6 @@ def migrate_postgresql_userid(connection):
         raise
 
 
-def migrate_sqlite_userid(connection):
-    """
-    SQLite数据库userid字段迁移
-    """
-    try:
-        logger.info("开始SQLite数据库userid字段迁移...")
-        
-        # SQLite不支持直接修改列类型，需要重建表
-        # 1. 创建新表结构
-        connection.execute(sa.text("""
-            CREATE TABLE siteuserdata_new (
-                id INTEGER PRIMARY KEY,
-                domain VARCHAR,
-                name VARCHAR,
-                username VARCHAR,
-                userid VARCHAR,
-                user_level VARCHAR,
-                join_at VARCHAR,
-                bonus FLOAT DEFAULT 0,
-                upload FLOAT DEFAULT 0,
-                download FLOAT DEFAULT 0,
-                ratio FLOAT DEFAULT 0,
-                seeding FLOAT DEFAULT 0,
-                leeching FLOAT DEFAULT 0,
-                seeding_size FLOAT DEFAULT 0,
-                leeching_size FLOAT DEFAULT 0,
-                seeding_info JSON DEFAULT '{}',
-                message_unread INTEGER DEFAULT 0,
-                message_unread_contents JSON DEFAULT '[]',
-                err_msg VARCHAR,
-                updated_day VARCHAR,
-                updated_time VARCHAR
-            )
-        """))
-        
-        # 2. 复制数据，将userid转换为字符串
-        connection.execute(sa.text("""
-            INSERT INTO siteuserdata_new 
-            SELECT 
-                id, domain, name, username, 
-                CAST(userid AS VARCHAR) as userid,
-                user_level, join_at, bonus, upload, download, ratio,
-                seeding, leeching, seeding_size, leeching_size,
-                seeding_info, message_unread, message_unread_contents,
-                err_msg, updated_day, updated_time
-            FROM siteuserdata
-        """))
-        
-        # 3. 删除旧表
-        connection.execute(sa.text("DROP TABLE siteuserdata"))
-        
-        # 4. 重命名新表
-        connection.execute(sa.text("ALTER TABLE siteuserdata_new RENAME TO siteuserdata"))
-        
-        # 5. 重新创建索引
-        connection.execute(sa.text("CREATE INDEX ix_siteuserdata_domain ON siteuserdata (domain)"))
-        connection.execute(sa.text("CREATE INDEX ix_siteuserdata_updated_day ON siteuserdata (updated_day)"))
-        
-        logger.info("SQLite数据库userid字段迁移完成")
-        
-    except Exception as e:
-        logger.error(f"SQLite数据库userid字段迁移失败: {e}")
-        raise
+
 
 
