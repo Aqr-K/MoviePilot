@@ -76,7 +76,7 @@ class SynologyChat:
             if image:
                 payload_data['file_url'] = quote(image)
             if userid:
-                payload_data['user_ids'] = [int(userid) if str(userid).isdigit() else userid]
+                payload_data['user_ids'] = [int(userid)]
             else:
                 userids = self.__get_bot_users()
                 if not userids:

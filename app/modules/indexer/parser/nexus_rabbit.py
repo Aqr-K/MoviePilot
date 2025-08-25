@@ -31,7 +31,7 @@ class NexusRabbitSiteUserInfo(SiteParserBase):
             "page": 1,
             "limit": 5000000,
             "action": "userTorrentsList",
-            "data": {"type": "seeding", "id": int(self.userid) if self.userid and str(self.userid).isdigit() else 0},
+            "data": {"type": "seeding", "id": int(self.userid)},
         }
         self._torrent_seeding_headers = {
             "Content-Type": "application/json",
