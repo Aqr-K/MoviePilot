@@ -461,7 +461,7 @@ class Scheduler(metaclass=Singleton):
             if not func:
                 return
             if inspect.iscoroutinefunction(func):
-                AsyncUtils.run_async_in_executor(func(*args, **kwargs))
+                AsyncUtils.run_async(func(*args, **kwargs))
             else:
                 job["func"](*args, **kwargs)
         except Exception as e:
