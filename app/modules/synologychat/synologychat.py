@@ -121,7 +121,7 @@ class SynologyChat:
                 index += 1
 
             if userid:
-                userids = [int(userid) if str(userid).isdigit() else userid]
+                userids = [int(userid)]
             else:
                 userids = self.__get_bot_users()
             payload_data = {
@@ -169,7 +169,7 @@ class SynologyChat:
                 caption = f"{caption}\n[查看详情]({link})"
 
             if userid:
-                userids = [int(userid) if str(userid).isdigit() else userid]
+                userids = [int(userid)]
             else:
                 userids = self.__get_bot_users()
 
