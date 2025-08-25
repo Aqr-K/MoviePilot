@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import threading
 import traceback
@@ -28,7 +29,6 @@ from app.helper.wallpaper import WallpaperHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType, Workflow, ConfigChangeEventData
 from app.schemas.types import EventType, SystemConfigKey
-from app.utils.asyncio import AsyncUtils
 from app.utils.singleton import Singleton
 from app.utils.timer import TimerUtils
 
@@ -449,6 +449,17 @@ class Scheduler(metaclass=Singleton):
         """
         启动定时服务
         """
+
+        def __start_coro(coro):
+            """
+            启动协程
+            """
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+            return asyncio.run_coroutine_threadsafe(coro, loop)
+
         # 获取定时任务
         job = self.__prepare_job(job_id)
         if not job:
@@ -461,7 +472,7 @@ class Scheduler(metaclass=Singleton):
             if not func:
                 return
             if inspect.iscoroutinefunction(func):
-                AsyncUtils.run_async(func(*args, **kwargs))
+                __start_coro(func(*args, **kwargs))
             else:
                 job["func"](*args, **kwargs)
         except Exception as e:
@@ -565,7 +576,7 @@ class Scheduler(metaclass=Singleton):
                             except JobLookupError:
                                 pass
                     if job_removed:
-                        logger.info(f"移除插件服务({plugin_name})：{service.get('name')}")
+                        logger.info(f"移除插件服务({plugin_name})：{service.get('name')}")  # noqa
                 except Exception as e:
                     logger.error(f"移除插件服务失败：{str(e)} - {job_id}: {service}")
                     SchedulerChain().messagehelper.put(title=f"插件 {plugin_name} 服务移除失败",
