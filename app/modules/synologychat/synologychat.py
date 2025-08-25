@@ -76,7 +76,7 @@ class SynologyChat:
             if image:
                 payload_data['file_url'] = quote(image)
             if userid:
-                payload_data['user_ids'] = [int(userid)]
+                payload_data['user_ids'] = [int(userid) if str(userid).isdigit() else userid]
             else:
                 userids = self.__get_bot_users()
                 if not userids:
@@ -121,7 +121,7 @@ class SynologyChat:
                 index += 1
 
             if userid:
-                userids = [int(userid)]
+                userids = [int(userid) if str(userid).isdigit() else userid]
             else:
                 userids = self.__get_bot_users()
             payload_data = {
@@ -169,7 +169,7 @@ class SynologyChat:
                 caption = f"{caption}\n[查看详情]({link})"
 
             if userid:
-                userids = [int(userid)]
+                userids = [int(userid) if str(userid).isdigit() else userid]
             else:
                 userids = self.__get_bot_users()
 
