@@ -1199,16 +1199,25 @@ class SubscribeChain(ChainBase):
                 logger.error(f'订阅 {subscribe.name} 类型错误：{subscribe.type}')
                 continue
             # 识别媒体信息
-            mediainfo: MediaInfo = await self.async_recognize_media(mtype=mtype,
-                                                                    tmdbid=subscribe.tmdbid,
-                                                                    doubanid=subscribe.doubanid,
-                                                                    bangumiid=subscribe.bangumiid,
-                                                                    episode_group=subscribe.episode_group,
-                                                                    cache=False)
-            if not mediainfo:
-                logger.warn(
-                    f'未识别到媒体信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，doubanid：{subscribe.doubanid}')
-                continue
+            if mtype == MediaType.MOVIE:
+                mediainfo: MediaInfo = await self.async_recognize_media(mtype=mtype,
+                                                                        tmdbid=subscribe.tmdbid,
+                                                                        doubanid=subscribe.doubanid,
+                                                                        bangumiid=subscribe.bangumiid,
+                                                                        episode_group=subscribe.episode_group,
+                                                                        cache=False)
+                if not mediainfo:
+                    logger.warn(
+                        f'未识别到媒体信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，doubanid：{subscribe.doubanid}')
+                    continue
+            else:
+                episodes = await TmdbChain().async_tmdb_episodes(tmdbid=subscribe.tmdbid,
+                                                                 season=subscribe.season,
+                                                                 episode_group=subscribe.episode_group)
+                if not episodes:
+                    logger.warn(
+                        f'未识别到季集信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，豆瓣ID：{subscribe.doubanid}，季：{subscribe.season}')
+                    continue
         logger.info(f'订阅日历预缓存完成')
 
     @staticmethod
