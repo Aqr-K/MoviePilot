@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import click
-from pydantic import BaseSettings, BaseModel
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 
 from app.utils.system import SystemUtils
 

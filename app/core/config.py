@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 from urllib.parse import urlparse
 
 from dotenv import set_key
-from pydantic import BaseModel, BaseSettings, validator, Field
+from pydantic import BaseModel, validator, Field
+from pydantic_settings import BaseSettings
 
 from app.log import logger, log_settings, LogConfigModel
 from app.schemas import MediaType

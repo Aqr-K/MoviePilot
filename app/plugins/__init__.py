@@ -5,10 +5,20 @@ from typing import Any, List, Dict, Tuple, Optional
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.event import EventManager
+from app.core.plugin_db_utils import (
+    initialize_plugin_database, 
+    cleanup_plugin_database,
+    validate_plugin_database,
+    get_plugin_database_info,
+    PluginModel
+)
+from app.core.plugin_db import plugin_db_manager
+from app.core.plugin_alembic import plugin_alembic_manager
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
 from app.schemas import Notification, NotificationType, MessageChannel
+from app.log import logger
 
 
 class PluginChian(ChainBase):
@@ -267,6 +277,89 @@ class _PluginBase(metaclass=ABCMeta):
         if not plugin_id:
             plugin_id = self.__class__.__name__
         return self.plugindata.del_data(plugin_id, key)
+
+    def get_plugin_base(self, plugin_id: Optional[str] = None):
+        """
+        获取插件专用数据库Base类
+        :param plugin_id: 插件ID
+        :return: 插件Base类
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return plugin_db_manager.get_plugin_base(plugin_id)
+
+    def get_plugin_session(self, plugin_id: Optional[str] = None):
+        """
+        获取插件专用数据库会话工厂
+        :param plugin_id: 插件ID
+        :return: 会话工厂
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return plugin_db_manager.get_plugin_session(plugin_id)
+
+    def init_plugin_database(self, plugin_id: Optional[str] = None) -> bool:
+        """
+        初始化插件数据库
+        :param plugin_id: 插件ID
+        :return: 是否成功
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return initialize_plugin_database(plugin_id)
+
+    def create_plugin_migration(self, message: str, plugin_id: Optional[str] = None) -> Optional[str]:
+        """
+        创建插件数据库迁移脚本
+        :param message: 迁移信息
+        :param plugin_id: 插件ID
+        :return: 迁移版本ID
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return plugin_alembic_manager.generate_plugin_revision(plugin_id, message)
+
+    def upgrade_plugin_database(self, revision: str = "head", plugin_id: Optional[str] = None) -> bool:
+        """
+        升级插件数据库
+        :param revision: 目标版本
+        :param plugin_id: 插件ID
+        :return: 是否成功
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return plugin_alembic_manager.upgrade_plugin_database(plugin_id, revision)
+
+    def validate_plugin_database(self, plugin_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        验证插件数据库设置
+        :param plugin_id: 插件ID
+        :return: 验证结果
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return validate_plugin_database(plugin_id)
+
+    def get_plugin_database_info(self, plugin_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取插件数据库信息
+        :param plugin_id: 插件ID
+        :return: 数据库信息
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return get_plugin_database_info(plugin_id)
+
+    def cleanup_plugin_database(self, remove_tables: bool = False, plugin_id: Optional[str] = None) -> bool:
+        """
+        清理插件数据库
+        :param remove_tables: 是否删除表
+        :param plugin_id: 插件ID
+        :return: 是否成功
+        """
+        if not plugin_id:
+            plugin_id = self.__class__.__name__
+        return cleanup_plugin_database(plugin_id, remove_tables)
 
     def post_message(self, channel: MessageChannel = None, mtype: NotificationType = None, title: Optional[str] = None,
                      text: Optional[str] = None, image: Optional[str] = None, link: Optional[str] = None,
