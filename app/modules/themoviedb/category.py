@@ -138,7 +138,7 @@ class CategoryHelper(metaclass=WeakSingleton):
                 values = []
                 invert_values = []
 
-                #　如果有 "," 进行分割
+                # 如果有 "," 进行分割
                 values = [str(val) for val in value.split(",") if val]
 
                 expanded_values = []
