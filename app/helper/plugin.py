@@ -470,7 +470,7 @@ class PluginHelper(metaclass=WeakSingleton):
             # 如果不存在，选项为空列表，对后续命令无影响
             logger.debug(f"[PIP] 未发现插件内嵌的 wheels 目录，将仅使用在线源。")
 
-        base_cmd = [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)]
+        base_cmd = [sys.executable, "-m", "pip", "install"] + find_links_option + ["-r", str(requirements_file)]
         strategies = []
 
         # 添加策略到列表中
