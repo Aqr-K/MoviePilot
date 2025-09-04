@@ -615,7 +615,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                     self.uploaded_size = 0
                     self.file_size = file_path.stat().st_size
 
-                def __len__(self):
+                def __len__(self) -> int:
                     return self.file_size
 
                 def read(self, size=-1):
