@@ -665,7 +665,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 douban=512,
                 bangumi=512,
                 fanart=512,
-                meta=(self.META_CACHE_EXPIRE or 24) * 3600,
+                meta=(self.META_CACHE_EXPIRE or 72) * 3600,
                 scheduler=100,
                 threadpool=100
             )
@@ -676,7 +676,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             douban=256,
             bangumi=256,
             fanart=128,
-            meta=(self.META_CACHE_EXPIRE or 2) * 3600,
+            meta=(self.META_CACHE_EXPIRE or 24) * 3600,
             scheduler=50,
             threadpool=50
         )
