@@ -360,8 +360,6 @@ class ConfigModel(BaseModel):
     # ==================== 性能配置 ====================
     # 大内存模式
     BIG_MEMORY_MODE: bool = False
-    # FastApi性能监控
-    PERFORMANCE_MONITOR_ENABLE: bool = False
     # 是否启用编码探测的性能模式
     ENCODING_DETECTION_PERFORMANCE_MODE: bool = True
     # 编码探测的最低置信度阈值
