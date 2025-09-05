@@ -796,6 +796,8 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
         if resp["state"]:
             new_path = Path(path) / fileitem.name
             new_item = self._delay_get_item(new_path)
+            if not new_item:
+                return False
             if self.rename(new_item, new_name):
                 return True
         return False
@@ -826,6 +828,8 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
         if resp["state"]:
             new_path = Path(path) / fileitem.name
             new_file = self._delay_get_item(new_path)
+            if not new_file:
+                return False
             if self.rename(new_file, new_name):
                 return True
         return False
