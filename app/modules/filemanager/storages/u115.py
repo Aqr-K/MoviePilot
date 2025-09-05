@@ -46,6 +46,9 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
     # 文件块大小，默认10MB
     chunk_size = 10 * 1024 * 1024
 
+    # 流控重试间隔时间
+    retry_delay = 70
+
     def __init__(self):
         super().__init__()
         self._auth_state = {}
@@ -236,8 +239,14 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
         if ret_data.get("code") != 0:
             error_msg = ret_data.get("message")
             logger.warn(f"【115】{method} 请求 {endpoint} 出错：{error_msg}！")
+            retry_times = kwargs.get("retry_limit", 5)
             if "已达到当前访问上限" in error_msg:
-                time.sleep(70)
+                if retry_times <= 0:
+                    logger.error(f"【115】{method} 请求 {endpoint} 达到访问上限，重试次数用尽！")
+                    return None
+                kwargs["retry_limit"] = retry_times - 1
+                logger.info(f"【115】{method} 请求 {endpoint} 达到访问上限，等待 {self.retry_delay} 秒后重试...")
+                time.sleep(self.retry_delay)
                 return self._request_api(method, endpoint, result_key, **kwargs)
             return None
 
