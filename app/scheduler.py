@@ -426,7 +426,7 @@ class Scheduler(metaclass=SingletonClass):
                     "interval",
                     id="full_gc",
                     name="主动内存回收",
-                    hours=settings.MEMORY_GC_INTERVAL,
+                    minutes=settings.MEMORY_GC_INTERVAL,
                     kwargs={
                         'job_id': 'full_gc'
                     }
