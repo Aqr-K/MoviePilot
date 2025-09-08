@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import inspect
 import multiprocessing
 import threading
@@ -30,7 +31,7 @@ from app.helper.wallpaper import WallpaperHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType, Workflow, ConfigChangeEventData
 from app.schemas.types import EventType, SystemConfigKey
-from app.utils.gc import auto_gc
+from app.utils.gc import get_memory_usage
 from app.utils.singleton import SingletonClass
 from app.utils.timer import TimerUtils
 
@@ -766,12 +767,16 @@ class Scheduler(metaclass=SingletonClass):
         """
         SchedulerChain().clear_cache()
 
-    @auto_gc
-    def full_gc(self):
+    @staticmethod
+    def full_gc():
         """
         主动内存回收
         """
-        pass
+        memory_before = get_memory_usage()
+        collected = gc.collect()
+        memory_after = get_memory_usage()
+        memory_freed = memory_before - memory_after
+        logger.info(f"主动内存回收完成，回收对象数: {collected}，释放内存: {memory_freed:.2f} MB")
 
     def user_auth(self):
         """
