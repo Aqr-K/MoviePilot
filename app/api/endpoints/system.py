@@ -142,7 +142,7 @@ async def proxy_img(
         cache: bool = False,
         if_none_match: Annotated[str | None, Header()] = None,
         _: schemas.TokenPayload = Depends(verify_resource_token)
-) -> Response:
+) -> Optional[Response]:
     """
     图片代理，可选是否使用代理服务器，支持 HTTP 缓存
     """
@@ -159,7 +159,7 @@ async def cache_img(
         url: str,
         if_none_match: Annotated[str | None, Header()] = None,
         _: schemas.TokenPayload = Depends(verify_resource_token)
-) -> Response:
+) -> Optional[Response]:
     """
     本地缓存图片文件，支持 HTTP 缓存，如果启用全局图片缓存，则使用磁盘缓存
     """
