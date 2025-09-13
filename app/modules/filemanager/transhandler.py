@@ -14,7 +14,6 @@ from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfoPath
 from app.helper.directory import DirectoryHelper
 from app.helper.message import TemplateHelper
-from app.helper.module import ModuleHelper
 from app.log import logger
 from app.modules.filemanager.storages import StorageBase
 from app.schemas import TransferInfo, TmdbEpisode, TransferDirectoryConf, FileItem, TransferInterceptEventData, \
@@ -31,11 +30,7 @@ def _transfer_command_worker(args):
     :param args: 包含所有必要参数的元组
     """
     # 解包参数
-    (fileitem_dict, target_storage, target_file_str, transfer_type, result_queue) = args
-
-    # 重新创建存储操作对象
-    storage_schemas = ModuleHelper.load('app.modules.filemanager.storages',
-                                        filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
+    (fileitem_dict, target_storage, target_file_str, transfer_type, storage_schemas, result_queue) = args
 
     def __get_storage_oper(_storage: str, _func: Optional[str] = None) -> Optional[StorageBase]:
         """
@@ -109,7 +104,8 @@ class TransHandler:
 
     inner_lock: Lock = Lock()
 
-    def __init__(self):
+    def __init__(self, storage_schemas: List[StorageBase]):
+        self.storage_schemas = storage_schemas
         self.result = None
 
     def __reset_result(self):
@@ -390,8 +386,7 @@ class TransHandler:
         finally:
             self.result = None
 
-    @staticmethod
-    def __transfer_command(fileitem: FileItem, target_storage: str,
+    def __transfer_command(self, fileitem: FileItem, target_storage: str,
                            source_oper: StorageBase, target_oper: StorageBase,
                            target_file: Path, transfer_type: str,
                            ) -> Tuple[Optional[FileItem], str]:
@@ -428,6 +423,7 @@ class TransHandler:
                 target_storage,
                 str(target_file),
                 transfer_type,
+                self.storage_schemas,
                 result_queue
             )
 
