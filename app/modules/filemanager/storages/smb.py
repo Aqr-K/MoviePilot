@@ -382,6 +382,11 @@ class SMB(StorageBase, metaclass=WeakSingleton):
             smb_path = self._normalize_path(fileitem.path.rstrip("/"))
             logger.info(f"【SMB】开始删除: {fileitem.path} (类型: {fileitem.type})")
 
+            # 先检查路径是否存在
+            if not smbclient.path.exists(smb_path):
+                logger.warn(f"【SMB】路径不存在，跳过删除: {fileitem.path}")
+                return True
+
             if fileitem.type == "dir":
                 # 递归删除目录及其内容
                 logger.debug(f"【SMB】递归删除目录: {smb_path}")
