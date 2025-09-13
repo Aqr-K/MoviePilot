@@ -30,7 +30,7 @@ def _transfer_command_worker(args):
     :param args: 包含所有必要参数的元组
     """
     # 解包参数
-    (fileitem_dict, target_storage, target_file_str, transfer_type, storage_schemas, result_queue) = args
+    (fileitem, target_storage, target_file, transfer_type, storage_schemas, result_queue) = args
 
     def __get_storage_oper(_storage: str, _func: Optional[str] = None) -> Optional[StorageBase]:
         """
@@ -44,10 +44,6 @@ def _transfer_command_worker(args):
         return None
 
     try:
-        # 重新创建 FileItem 对象
-        fileitem = FileItem(**fileitem_dict)
-        target_file = Path(target_file_str)
-
         # 获取存储操作对象
         source_oper = __get_storage_oper(fileitem.storage)
         target_oper = __get_storage_oper(target_storage)
@@ -407,21 +403,10 @@ class TransHandler:
             result_queue = multiprocessing.Queue()
 
             # 准备参数
-            fileitem_dict = {
-                'storage': fileitem.storage,
-                'path': fileitem.path,
-                'name': fileitem.name,
-                'basename': fileitem.basename,
-                'type': fileitem.type,
-                'size': fileitem.size,
-                'extension': fileitem.extension,
-                'modify_time': fileitem.modify_time
-            }
-
             args = (
-                fileitem_dict,
+                fileitem,
                 target_storage,
-                str(target_file),
+                target_file,
                 transfer_type,
                 self.storage_schemas,
                 result_queue
