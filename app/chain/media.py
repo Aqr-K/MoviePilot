@@ -458,17 +458,16 @@ class MediaChain(ChainBase):
             if not _fileitem or not _content or not _path:
                 return
             # 使用tempfile创建临时文件，手动删除
-            tmp_file = NamedTemporaryFile(delete=False, suffix=_path.suffix)
-            tmp_file_path = Path(tmp_file.name)
-            try:
+            with NamedTemporaryFile(delete=False, suffix=_path.suffix) as tmp_file:
+                tmp_file_path = Path(tmp_file.name)
                 # 写入内容
                 if isinstance(_content, bytes):
                     tmp_file.write(_content)
                 else:
                     tmp_file.write(_content.encode('utf-8'))
                 tmp_file.flush()
-                tmp_file.close()  # 关闭文件句柄
-                
+
+            try:
                 # 上传文件
                 item = storagechain.upload_file(fileitem=_fileitem, path=tmp_file_path, new_name=_path.name)
                 if item:
@@ -497,16 +496,15 @@ class MediaChain(ChainBase):
                 with request_utils.get_stream(url=_url) as r:
                     if r and r.status_code == 200:
                         # 使用tempfile创建临时文件，手动删除
-                        tmp_file = NamedTemporaryFile(delete=False, suffix=_path.suffix)
-                        tmp_file_path = Path(tmp_file.name)
-                        try:
+                        with NamedTemporaryFile(delete=False, suffix=_path.suffix) as tmp_file:
+                            tmp_file_path = Path(tmp_file.name)
                             # 流式写入文件
                             for chunk in r.iter_content(chunk_size=8192):
                                 if chunk:
                                     tmp_file.write(chunk)
                             tmp_file.flush()
-                            tmp_file.close()  # 关闭文件句柄
-                            
+
+                        try:
                             # 上传文件
                             item = storagechain.upload_file(fileitem=_fileitem, path=tmp_file_path,
                                                             new_name=_path.name)
