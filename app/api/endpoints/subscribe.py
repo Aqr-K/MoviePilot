@@ -580,11 +580,21 @@ async def popular_subscribes(
         name: Optional[str] = None,
         page: Optional[int] = 1,
         count: Optional[int] = 30,
+        genre_id: Optional[int] = None,
+        min_rating: Optional[float] = None,
+        max_rating: Optional[float] = None,
         _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     查询分享的订阅
     """
-    return await SubscribeHelper().async_get_shares(name=name, page=page, count=count)
+    return await SubscribeHelper().async_get_shares(
+        name=name, 
+        page=page, 
+        count=count,
+        genre_id=genre_id,
+        min_rating=min_rating,
+        max_rating=max_rating
+    )
 
 
 @router.get("/share/statistics", summary="查询订阅分享统计", response_model=List[schemas.SubscribeShareStatistics])

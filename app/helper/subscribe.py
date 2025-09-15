@@ -382,7 +382,9 @@ class SubscribeHelper(metaclass=WeakSingleton):
         return self._handle_response(res, clear_cache=False)
 
     @cached(region=_shares_cache_region, maxsize=1, ttl=1800, skip_empty=True)
-    def get_shares(self, name: Optional[str] = None, page: Optional[int] = 1, count: Optional[int] = 30) -> List[dict]:
+    def get_shares(self, name: Optional[str] = None, page: Optional[int] = 1, count: Optional[int] = 30,
+                   genre_id: Optional[int] = None, min_rating: Optional[float] = None,
+                   max_rating: Optional[float] = None) -> List[dict]:
         """
         获取订阅分享数据
         """
@@ -390,17 +392,28 @@ class SubscribeHelper(metaclass=WeakSingleton):
         if not enabled:
             return []
 
-        res = RequestUtils(proxies=settings.PROXY, timeout=15).get_res(self._sub_shares, params={
+        params = {
             "name": name,
             "page": page,
             "count": count
-        })
+        }
+        
+        # 添加可选参数
+        if genre_id is not None:
+            params["genre_id"] = genre_id
+        if min_rating is not None:
+            params["min_rating"] = min_rating
+        if max_rating is not None:
+            params["max_rating"] = max_rating
+
+        res = RequestUtils(proxies=settings.PROXY, timeout=15).get_res(self._sub_shares, params=params)
 
         return self._handle_list_response(res)
 
     @cached(region=_shares_cache_region, maxsize=1, ttl=1800, skip_empty=True)
-    async def async_get_shares(self, name: Optional[str] = None, page: Optional[int] = 1, count: Optional[int] = 30) -> \
-            List[dict]:
+    async def async_get_shares(self, name: Optional[str] = None, page: Optional[int] = 1, count: Optional[int] = 30,
+                               genre_id: Optional[int] = None, min_rating: Optional[float] = None,
+                               max_rating: Optional[float] = None) -> List[dict]:
         """
         异步获取订阅分享数据
         """
@@ -408,11 +421,21 @@ class SubscribeHelper(metaclass=WeakSingleton):
         if not enabled:
             return []
 
-        res = await AsyncRequestUtils(proxies=settings.PROXY, timeout=15).get_res(self._sub_shares, params={
+        params = {
             "name": name,
             "page": page,
             "count": count
-        })
+        }
+        
+        # 添加可选参数
+        if genre_id is not None:
+            params["genre_id"] = genre_id
+        if min_rating is not None:
+            params["min_rating"] = min_rating
+        if max_rating is not None:
+            params["max_rating"] = max_rating
+
+        res = await AsyncRequestUtils(proxies=settings.PROXY, timeout=15).get_res(self._sub_shares, params=params)
 
         return self._handle_list_response(res)
 
