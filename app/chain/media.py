@@ -22,6 +22,8 @@ from app.utils.string import StringUtils
 recognize_lock = Lock()
 scraping_lock = Lock()
 
+current_umask = os.umask(0)
+os.umask(current_umask)
 
 class MediaChain(ChainBase):
     """
@@ -459,7 +461,7 @@ class MediaChain(ChainBase):
             if not _fileitem or not _content or not _path:
                 return
             # 使用tempfile创建临时文件，自动删除
-            with NamedTemporaryFile(delete_on_close=False, suffix=_path.suffix) as tmp_file:
+            with NamedTemporaryFile(delete=True, delete_on_close=False, suffix=_path.suffix) as tmp_file:
                 tmp_file_path = Path(tmp_file.name)
                 # 写入内容
                 if isinstance(_content, bytes):
@@ -469,11 +471,9 @@ class MediaChain(ChainBase):
                 tmp_file.flush()
                 tmp_file.close()  # 关闭文件句柄
  
-                current_umask = os.umask(0)
-                os.umask(current_umask)
                 # 刮削文件只需要读写权限
                 tmp_file_path.chmod(0o666 & ~current_umask)
-                
+
                 # 上传文件
                 item = storagechain.upload_file(fileitem=_fileitem, path=tmp_file_path, new_name=_path.name)
                 if item:
@@ -496,7 +496,7 @@ class MediaChain(ChainBase):
                 with request_utils.get_stream(url=_url) as r:
                     if r and r.status_code == 200:
                         # 使用tempfile创建临时文件，自动删除
-                        with NamedTemporaryFile(delete_on_close=False, suffix=_path.suffix) as tmp_file:
+                        with NamedTemporaryFile(delete=True, delete_on_close=False, suffix=_path.suffix) as tmp_file:
                             tmp_file_path = Path(tmp_file.name)
                             # 流式写入文件
                             for chunk in r.iter_content(chunk_size=8192):
@@ -504,12 +504,10 @@ class MediaChain(ChainBase):
                                     tmp_file.write(chunk)
                             tmp_file.flush()
                             tmp_file.close()  # 关闭文件句柄
-                            
-                            current_umask = os.umask(0)
-                            os.umask(current_umask)
+
                             # 刮削的图片只需要读写权限
                             tmp_file_path.chmod(0o666 & ~current_umask)
-                            
+
                             # 上传文件
                             item = storagechain.upload_file(fileitem=_fileitem, path=tmp_file_path,
                                                             new_name=_path.name)
