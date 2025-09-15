@@ -421,11 +421,21 @@ async def popular_subscribes(
         page: Optional[int] = 1,
         count: Optional[int] = 30,
         min_sub: Optional[int] = None,
+        genre_id: Optional[int] = None,
+        min_rating: Optional[float] = None,
+        max_rating: Optional[float] = None,
         _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     查询热门订阅
     """
-    subscribes = await SubscribeHelper().async_get_statistic(stype=stype, page=page, count=count)
+    subscribes = await SubscribeHelper().async_get_statistic(
+        stype=stype,
+        page=page,
+        count=count,
+        genre_id=genre_id,
+        min_rating=min_rating,
+        max_rating=max_rating
+    )
     if subscribes:
         ret_medias = []
         for sub in subscribes:
