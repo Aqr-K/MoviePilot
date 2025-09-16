@@ -20,7 +20,7 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user_async
 from app.helper.subscribe import SubscribeHelper
 from app.scheduler import Scheduler
-from app.schemas.types import MediaType, EventType, SystemConfigKey
+from app.schemas.types import MediaType, EventType, SystemConfigKey, SortType
 
 router = APIRouter()
 
@@ -424,6 +424,7 @@ async def popular_subscribes(
         genre_id: Optional[int] = None,
         min_rating: Optional[float] = None,
         max_rating: Optional[float] = None,
+        sort_type: Optional[str] = None,
         _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     查询热门订阅
@@ -434,7 +435,8 @@ async def popular_subscribes(
         count=count,
         genre_id=genre_id,
         min_rating=min_rating,
-        max_rating=max_rating
+        max_rating=max_rating,
+        sort_type=sort_type
     )
     if subscribes:
         ret_medias = []
@@ -583,6 +585,7 @@ async def popular_subscribes(
         genre_id: Optional[int] = None,
         min_rating: Optional[float] = None,
         max_rating: Optional[float] = None,
+        sort_type: Optional[str] = None,
         _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     查询分享的订阅
@@ -593,7 +596,8 @@ async def popular_subscribes(
         count=count,
         genre_id=genre_id,
         min_rating=min_rating,
-        max_rating=max_rating
+        max_rating=max_rating,
+        sort_type=sort_type
     )
 
 
