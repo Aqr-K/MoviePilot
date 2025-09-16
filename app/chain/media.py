@@ -25,6 +25,7 @@ scraping_lock = Lock()
 current_umask = os.umask(0)
 os.umask(current_umask)
 
+
 class MediaChain(ChainBase):
     """
     媒体信息处理链，单例运行
@@ -470,7 +471,7 @@ class MediaChain(ChainBase):
                     tmp_file.write(_content.encode('utf-8'))
                 tmp_file.flush()
                 tmp_file.close()  # 关闭文件句柄
- 
+
                 # 刮削文件只需要读写权限
                 tmp_file_path.chmod(0o666 & ~current_umask)
 
