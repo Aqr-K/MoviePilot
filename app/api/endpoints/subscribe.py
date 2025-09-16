@@ -20,7 +20,7 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user_async
 from app.helper.subscribe import SubscribeHelper
 from app.scheduler import Scheduler
-from app.schemas.types import MediaType, EventType, SystemConfigKey, SortType
+from app.schemas.types import MediaType, EventType, SystemConfigKey
 
 router = APIRouter()
 
@@ -591,8 +591,8 @@ async def popular_subscribes(
     查询分享的订阅
     """
     return await SubscribeHelper().async_get_shares(
-        name=name, 
-        page=page, 
+        name=name,
+        page=page,
         count=count,
         genre_id=genre_id,
         min_rating=min_rating,
