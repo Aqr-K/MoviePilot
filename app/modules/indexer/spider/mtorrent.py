@@ -76,7 +76,7 @@ class MTorrentSpider:
         else:
             categories = self._movie_category
         # mtorrent搜索imdb需要输入完整imdb链接，参见 https://wiki.m-team.cc/zh-tw/imdbtosearch
-        if keyword.startswith("tt"):
+        if keyword and keyword.startswith("tt"):
             keyword = f"https://www.imdb.com/title/{keyword}"
         return {
             "keyword": keyword,
