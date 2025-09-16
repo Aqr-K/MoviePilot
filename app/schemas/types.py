@@ -9,6 +9,13 @@ class MediaType(Enum):
     UNKNOWN = '未知'
 
 
+# 排序类型枚举
+class SortType(Enum):
+    TIME = "time"  # 按时间排序
+    COUNT = "count"  # 按人数排序
+    RATING = "rating"  # 按评分排序
+
+
 # 种子状态
 class TorrentStatus(Enum):
     TRANSFER = "可转移"
