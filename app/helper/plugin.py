@@ -162,7 +162,7 @@ class PluginHelper(metaclass=WeakSingleton):
             return res.json()
         return {}
 
-    def install_reg(self, pid: str) -> bool:
+    def install_reg(self, pid: str, repo_url: Optional[str] = None) -> bool:
         """
         安装插件统计
         """
@@ -171,24 +171,39 @@ class PluginHelper(metaclass=WeakSingleton):
         if not pid:
             return False
         install_reg_url = self._install_reg.format(pid=pid)
-        res = RequestUtils(proxies=settings.PROXY, timeout=5).get_res(install_reg_url)
+        res = RequestUtils(
+            proxies=settings.PROXY,
+            content_type="application/json",
+            timeout=5
+        ).post(install_reg_url, json={
+            "plugin_id": pid,
+            "repo_url": repo_url
+        })
         if res and res.status_code == 200:
             return True
         return False
 
-    def install_report(self) -> bool:
+    def install_report(self, items: Optional[List[Tuple[str, Optional[str]]]] = None) -> bool:
         """
-        上报存量插件安装统计
+        上报存量插件安装统计（批量）。支持上送 repo_url。
+        :param items: 可选，形如 [(plugin_id, repo_url), ...]；不传则回落到历史配置，仅上送 plugin_id。
         """
         if not settings.PLUGIN_STATISTIC_SHARE:
             return False
-        plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
-        if not plugins:
-            return False
+        payload_plugins = []
+        if items:
+            for pid, repo_url in items:
+                if pid:
+                    payload_plugins.append({"plugin_id": pid, "repo_url": repo_url})
+        else:
+            plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
+            if not plugins:
+                return False
+            payload_plugins = [{"plugin_id": plugin, "repo_url": None} for plugin in plugins]
         res = RequestUtils(proxies=settings.PROXY,
                            content_type="application/json",
                            timeout=5).post(self._install_report,
-                                           json={"plugins": [{"plugin_id": plugin} for plugin in plugins]})
+                                           json={"plugins": payload_plugins})
         return True if res else False
 
     def install(self, pid: str, repo_url: str, package_version: Optional[str] = None, force_install: bool = False) \
@@ -256,13 +271,13 @@ class PluginHelper(metaclass=WeakSingleton):
                     pid.lower(), user_repo, release_tag
                 )
 
-            return self.__install_flow_sync(pid.lower(), force_install, prepare_release)
+            return self.__install_flow_sync(pid.lower(), force_install, prepare_release, repo_url)
         else:
             # 如果 release_tag 不存在，说明插件没有发布版本，使用文件列表方式安装
             def prepare_filelist() -> Tuple[bool, str]:
                 return self.__prepare_content_via_filelist_sync(pid.lower(), user_repo, package_version)
 
-            return self.__install_flow_sync(pid.lower(), force_install, prepare_filelist)
+            return self.__install_flow_sync(pid.lower(), force_install, prepare_filelist, repo_url)
 
     def __get_file_list(self, pid: str, user_repo: str, package_version: Optional[str] = None) -> \
             Tuple[Optional[list], Optional[str]]:
@@ -559,7 +574,8 @@ class PluginHelper(metaclass=WeakSingleton):
             return {}
 
     def __install_flow_sync(self, pid_lower: str, force_install: bool,
-                            prepare_content: Callable[[], Tuple[bool, str]]) -> Tuple[bool, str]:
+                            prepare_content: Callable[[], Tuple[bool, str]],
+                            repo_url: Optional[str] = None) -> Tuple[bool, str]:
         """
         同步安装统一流程：备份→清理→准备内容→安装依赖→上报
         prepare_content 负责把插件文件放到 app/plugins/{pid}
@@ -592,7 +608,7 @@ class PluginHelper(metaclass=WeakSingleton):
                 logger.warning(f"{pid_lower} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
-        self.install_reg(pid_lower)
+        self.install_reg(pid_lower, repo_url)
         return True, ""
 
     def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
@@ -981,7 +997,7 @@ class PluginHelper(metaclass=WeakSingleton):
             return res.json()
         return {}
 
-    async def async_install_reg(self, pid: str) -> bool:
+    async def async_install_reg(self, pid: str, repo_url: Optional[str] = None) -> bool:
         """
         异步安装插件统计
         """
@@ -990,24 +1006,39 @@ class PluginHelper(metaclass=WeakSingleton):
         if not pid:
             return False
         install_reg_url = self._install_reg.format(pid=pid)
-        res = await AsyncRequestUtils(proxies=settings.PROXY, timeout=5).get_res(install_reg_url)
+        res = await AsyncRequestUtils(
+            proxies=settings.PROXY,
+            content_type="application/json",
+            timeout=5
+        ).post(install_reg_url, json={
+            "plugin_id": pid,
+            "repo_url": repo_url
+        })
         if res and res.status_code == 200:
             return True
         return False
 
-    async def async_install_report(self) -> bool:
+    async def async_install_report(self, items: Optional[List[Tuple[str, Optional[str]]]] = None) -> bool:
         """
-        异步上报存量插件安装统计
+        异步上报存量插件安装统计（批量）。支持上送 repo_url。
+        :param items: 可选，形如 [(plugin_id, repo_url), ...]；不传则回落到历史配置，仅上送 plugin_id。
         """
         if not settings.PLUGIN_STATISTIC_SHARE:
             return False
-        plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
-        if not plugins:
-            return False
+        payload_plugins = []
+        if items:
+            for pid, repo_url in items:
+                if pid:
+                    payload_plugins.append({"plugin_id": pid, "repo_url": repo_url})
+        else:
+            plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
+            if not plugins:
+                return False
+            payload_plugins = [{"plugin_id": plugin, "repo_url": None} for plugin in plugins]
         res = await AsyncRequestUtils(proxies=settings.PROXY,
                                       content_type="application/json",
                                       timeout=5).post(self._install_report,
-                                                      json={"plugins": [{"plugin_id": plugin} for plugin in plugins]})
+                                                      json={"plugins": payload_plugins})
         return True if res else False
 
     async def __async_get_file_list(self, pid: str, user_repo: str, package_version: Optional[str] = None) -> \
@@ -1418,13 +1449,13 @@ class PluginHelper(metaclass=WeakSingleton):
                     pid.lower(), user_repo, release_tag
                 )
 
-            return await self.__install_flow_async(pid.lower(), force_install, prepare_release)
+            return await self.__install_flow_async(pid.lower(), force_install, prepare_release, repo_url)
         else:
             # 如果没有 release_tag，则使用文件列表安装方式
             async def prepare_filelist() -> Tuple[bool, str]:
                 return await self.__prepare_content_via_filelist_async(pid.lower(), user_repo, package_version)
 
-            return await self.__install_flow_async(pid.lower(), force_install, prepare_filelist)
+            return await self.__install_flow_async(pid.lower(), force_install, prepare_filelist, repo_url)
 
     async def __async_get_plugin_meta(self, pid: str, repo_url: str,
                                       package_version: Optional[str]) -> dict:
@@ -1440,7 +1471,8 @@ class PluginHelper(metaclass=WeakSingleton):
             return {}
 
     async def __install_flow_async(self, pid_lower: str, force_install: bool,
-                                   prepare_content: Callable[[], Awaitable[Tuple[bool, str]]]) -> Tuple[bool, str]:
+                                   prepare_content: Callable[[], Awaitable[Tuple[bool, str]]],
+                                   repo_url: Optional[str] = None) -> Tuple[bool, str]:
         """
         异步安装流程，处理插件内容准备、依赖安装和注册
         """
@@ -1472,7 +1504,7 @@ class PluginHelper(metaclass=WeakSingleton):
                 logger.warning(f"{pid_lower} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
-        await self.async_install_reg(pid_lower)
+        await self.async_install_reg(pid_lower, repo_url)
         return True, ""
 
     def __prepare_content_via_filelist_sync(self, pid_lower: str, user_repo: str,
