@@ -55,18 +55,18 @@ class TrimeMedia:
         """
         return self._api
 
+    class _ApiCreateResult:
+        api: fnapi.Api
+        version: fnapi.Version
+
     @staticmethod
-    def __create_api(host: Optional[str]):
+    def __create_api(host: Optional[str]) -> Optional["TrimeMedia._ApiCreateResult"]:
         """
         创建一个飞牛API
 
         :param host:  服务端地址
         :return: 如果地址无效、不可访问则返回None
         """
-
-        class Result:
-            api: fnapi.Api
-            version: fnapi.Version
 
         if not host:
             return None
@@ -75,13 +75,13 @@ class TrimeMedia:
 
         if not host.endswith("/v"):
             # 尝试补上结尾的/v 测试能否正常访问
-            res = Result()
+            res = TrimeMedia._ApiCreateResult()
             res.api = fnapi.Api(host + "/v", api_key)
             if fnver := res.api.sys_version():
                 res.version = fnver
                 return res
         # 测试用户配置的地址
-        res = Result()
+        res = TrimeMedia._ApiCreateResult()
         res.api = fnapi.Api(host, api_key)
         if fnver := res.api.sys_version():
             res.version = fnver
@@ -92,9 +92,7 @@ class TrimeMedia:
         self.disconnect()
 
     def is_configured(self) -> bool:
-        if self._host and self._username and self._password:
-            return True
-        return False
+        return bool(self._host and self._username and self._password)
 
     def is_authenticated(self) -> bool:
         """
