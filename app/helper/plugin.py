@@ -291,7 +291,7 @@ class PluginHelper(metaclass=WeakSingleton):
         # 如果 package_version 存在（如 "v2"），则加上版本号
         if package_version:
             file_api += f".{package_version}"
-        file_api += f"/{pid}"
+        file_api += f"/{pid.lower()}"
 
         res = self.__request_with_fallback(file_api,
                                            headers=settings.REPO_GITHUB_HEADERS(repo=user_repo),
@@ -1053,7 +1053,7 @@ class PluginHelper(metaclass=WeakSingleton):
         # 如果 package_version 存在（如 "v2"），则加上版本号
         if package_version:
             file_api += f".{package_version}"
-        file_api += f"/{pid}"
+        file_api += f"/{pid.lower()}"
 
         res = await self.__async_request_with_fallback(file_api,
                                                        headers=settings.REPO_GITHUB_HEADERS(repo=user_repo),
