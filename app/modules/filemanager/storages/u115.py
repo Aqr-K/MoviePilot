@@ -91,6 +91,8 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
                         "refresh_time": int(time.time()),
                         **tokens
                     })
+                else:
+                    return None
             access_token = tokens.get("access_token")
             if access_token:
                 self.session.headers.update({"Authorization": f"Bearer {access_token}"})
