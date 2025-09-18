@@ -268,16 +268,16 @@ class PluginHelper(metaclass=WeakSingleton):
             # 使用 release 进行安装
             def prepare_release() -> Tuple[bool, str]:
                 return self.__install_from_release(
-                    pid.lower(), user_repo, release_tag
+                    pid, user_repo, release_tag
                 )
 
-            return self.__install_flow_sync(pid.lower(), force_install, prepare_release, repo_url)
+            return self.__install_flow_sync(pid, force_install, prepare_release, repo_url)
         else:
             # 如果 release_tag 不存在，说明插件没有发布版本，使用文件列表方式安装
             def prepare_filelist() -> Tuple[bool, str]:
                 return self.__prepare_content_via_filelist_sync(pid.lower(), user_repo, package_version)
 
-            return self.__install_flow_sync(pid.lower(), force_install, prepare_filelist, repo_url)
+            return self.__install_flow_sync(pid, force_install, prepare_filelist, repo_url)
 
     def __get_file_list(self, pid: str, user_repo: str, package_version: Optional[str] = None) -> \
             Tuple[Optional[list], Optional[str]]:
@@ -424,8 +424,8 @@ class PluginHelper(metaclass=WeakSingleton):
         :param pid: 插件 ID
         :return: 备份目录路径
         """
-        plugin_dir = PLUGIN_DIR / pid
-        backup_dir = Path(settings.TEMP_PATH) / "plugin_backup" / pid
+        plugin_dir = PLUGIN_DIR / pid.lower()
+        backup_dir = Path(settings.TEMP_PATH) / "plugin_backup" / pid.lower()
 
         if plugin_dir.exists():
             # 备份时清理已有的备份目录，防止残留文件影响
@@ -445,7 +445,7 @@ class PluginHelper(metaclass=WeakSingleton):
         :param pid: 插件 ID
         :param backup_dir: 备份目录路径
         """
-        plugin_dir = PLUGIN_DIR / pid
+        plugin_dir = PLUGIN_DIR / pid.lower()
         if plugin_dir.exists():
             shutil.rmtree(plugin_dir, ignore_errors=True)
             logger.debug(f"{pid} 已清理插件目录 {plugin_dir}")
@@ -462,7 +462,7 @@ class PluginHelper(metaclass=WeakSingleton):
         删除旧插件
         :param pid: 插件 ID
         """
-        plugin_dir = PLUGIN_DIR / pid
+        plugin_dir = PLUGIN_DIR / pid.lower()
         if plugin_dir.exists():
             shutil.rmtree(plugin_dir, ignore_errors=True)
 
@@ -573,7 +573,7 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"获取插件 {pid} 元数据失败：{e}")
             return {}
 
-    def __install_flow_sync(self, pid_lower: str, force_install: bool,
+    def __install_flow_sync(self, pid: str, force_install: bool,
                             prepare_content: Callable[[], Tuple[bool, str]],
                             repo_url: Optional[str] = None) -> Tuple[bool, str]:
         """
@@ -582,33 +582,33 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         backup_dir = None
         if not force_install:
-            backup_dir = self.__backup_plugin(pid_lower)
+            backup_dir = self.__backup_plugin(pid)
 
-        self.__remove_old_plugin(pid_lower)
+        self.__remove_old_plugin(pid)
 
         success, message = prepare_content()
         if not success:
-            logger.error(f"{pid_lower} 准备插件内容失败：{message}")
+            logger.error(f"{pid} 准备插件内容失败：{message}")
             if backup_dir:
-                self.__restore_plugin(pid_lower, backup_dir)
-                logger.warning(f"{pid_lower} 插件安装失败，已还原备份插件")
+                self.__restore_plugin(pid, backup_dir)
+                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
             else:
-                self.__remove_old_plugin(pid_lower)
-                logger.warning(f"{pid_lower} 已清理对应插件目录，请尝试重新安装")
+                self.__remove_old_plugin(pid)
+                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, message
 
-        dependencies_exist, dep_ok, dep_msg = self.__install_dependencies_if_required(pid_lower)
+        dependencies_exist, dep_ok, dep_msg = self.__install_dependencies_if_required(pid)
         if dependencies_exist and not dep_ok:
-            logger.error(f"{pid_lower} 依赖安装失败：{dep_msg}")
+            logger.error(f"{pid} 依赖安装失败：{dep_msg}")
             if backup_dir:
-                self.__restore_plugin(pid_lower, backup_dir)
-                logger.warning(f"{pid_lower} 插件安装失败，已还原备份插件")
+                self.__restore_plugin(pid, backup_dir)
+                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
             else:
-                self.__remove_old_plugin(pid_lower)
-                logger.warning(f"{pid_lower} 已清理对应插件目录，请尝试重新安装")
+                self.__remove_old_plugin(pid)
+                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
-        self.install_reg(pid_lower, repo_url)
+        self.install_reg(pid, repo_url)
         return True, ""
 
     def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
@@ -1165,8 +1165,8 @@ class PluginHelper(metaclass=WeakSingleton):
         :param pid: 插件 ID
         :return: 备份目录路径
         """
-        plugin_dir = AsyncPath(PLUGIN_DIR) / pid
-        backup_dir = AsyncPath(settings.TEMP_PATH) / "plugin_backup" / pid
+        plugin_dir = AsyncPath(PLUGIN_DIR) / pid.lower()
+        backup_dir = AsyncPath(settings.TEMP_PATH) / "plugin_backup" / pid.lower()
 
         if await plugin_dir.exists():
             # 备份时清理已有的备份目录，防止残留文件影响
@@ -1186,7 +1186,7 @@ class PluginHelper(metaclass=WeakSingleton):
         :param pid: 插件 ID
         :param backup_dir: 备份目录路径
         """
-        plugin_dir = AsyncPath(PLUGIN_DIR) / pid
+        plugin_dir = AsyncPath(PLUGIN_DIR) / pid.lower()
         if await plugin_dir.exists():
             await aioshutil.rmtree(plugin_dir, ignore_errors=True)
             logger.debug(f"{pid} 已清理插件目录 {plugin_dir}")
@@ -1204,7 +1204,7 @@ class PluginHelper(metaclass=WeakSingleton):
         异步删除旧插件
         :param pid: 插件 ID
         """
-        plugin_dir = AsyncPath(PLUGIN_DIR) / pid
+        plugin_dir = AsyncPath(PLUGIN_DIR) / pid.lower()
         if await plugin_dir.exists():
             await aioshutil.rmtree(plugin_dir, ignore_errors=True)
 
@@ -1446,16 +1446,16 @@ class PluginHelper(metaclass=WeakSingleton):
             # 使用 release 进行安装
             async def prepare_release() -> Tuple[bool, str]:
                 return await self.__async_install_from_release(
-                    pid.lower(), user_repo, release_tag
+                    pid, user_repo, release_tag
                 )
 
-            return await self.__install_flow_async(pid.lower(), force_install, prepare_release, repo_url)
+            return await self.__install_flow_async(pid, force_install, prepare_release, repo_url)
         else:
             # 如果没有 release_tag，则使用文件列表安装方式
             async def prepare_filelist() -> Tuple[bool, str]:
-                return await self.__prepare_content_via_filelist_async(pid.lower(), user_repo, package_version)
+                return await self.__prepare_content_via_filelist_async(pid, user_repo, package_version)
 
-            return await self.__install_flow_async(pid.lower(), force_install, prepare_filelist, repo_url)
+            return await self.__install_flow_async(pid, force_install, prepare_filelist, repo_url)
 
     async def __async_get_plugin_meta(self, pid: str, repo_url: str,
                                       package_version: Optional[str]) -> dict:
@@ -1470,7 +1470,7 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.warn(f"获取插件 {pid} 元数据失败：{e}")
             return {}
 
-    async def __install_flow_async(self, pid_lower: str, force_install: bool,
+    async def __install_flow_async(self, pid: str, force_install: bool,
                                    prepare_content: Callable[[], Awaitable[Tuple[bool, str]]],
                                    repo_url: Optional[str] = None) -> Tuple[bool, str]:
         """
@@ -1478,71 +1478,71 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         backup_dir = None
         if not force_install:
-            backup_dir = await self.__async_backup_plugin(pid_lower)
+            backup_dir = await self.__async_backup_plugin(pid)
 
-        await self.__async_remove_old_plugin(pid_lower)
+        await self.__async_remove_old_plugin(pid)
 
         success, message = await prepare_content()
         if not success:
-            logger.error(f"{pid_lower} 准备插件内容失败：{message}")
+            logger.error(f"{pid} 准备插件内容失败：{message}")
             if backup_dir:
-                await self.__async_restore_plugin(pid_lower, backup_dir)
-                logger.warning(f"{pid_lower} 插件安装失败，已还原备份插件")
+                await self.__async_restore_plugin(pid, backup_dir)
+                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
             else:
-                await self.__async_remove_old_plugin(pid_lower)
-                logger.warning(f"{pid_lower} 已清理对应插件目录，请尝试重新安装")
+                await self.__async_remove_old_plugin(pid)
+                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, message
 
-        dependencies_exist, dep_ok, dep_msg = await self.__async_install_dependencies_if_required(pid_lower)
+        dependencies_exist, dep_ok, dep_msg = await self.__async_install_dependencies_if_required(pid)
         if dependencies_exist and not dep_ok:
-            logger.error(f"{pid_lower} 依赖安装失败：{dep_msg}")
+            logger.error(f"{pid} 依赖安装失败：{dep_msg}")
             if backup_dir:
-                await self.__async_restore_plugin(pid_lower, backup_dir)
-                logger.warning(f"{pid_lower} 插件安装失败，已还原备份插件")
+                await self.__async_restore_plugin(pid, backup_dir)
+                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
             else:
-                await self.__async_remove_old_plugin(pid_lower)
-                logger.warning(f"{pid_lower} 已清理对应插件目录，请尝试重新安装")
+                await self.__async_remove_old_plugin(pid)
+                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
-        await self.async_install_reg(pid_lower, repo_url)
+        await self.async_install_reg(pid, repo_url)
         return True, ""
 
-    def __prepare_content_via_filelist_sync(self, pid_lower: str, user_repo: str,
+    def __prepare_content_via_filelist_sync(self, pid: str, user_repo: str,
                                             package_version: Optional[str]) -> Tuple[bool, str]:
         """
         同步准备插件内容，通过文件列表获取插件文件和依赖
         """
-        file_list, msg = self.__get_file_list(pid_lower, user_repo, package_version)
+        file_list, msg = self.__get_file_list(pid, user_repo, package_version)
         if not file_list:
             return False, msg
         requirements_file_info = next((f for f in file_list if f.get("name") == "requirements.txt"), None)
         if requirements_file_info:
-            ok, m = self.__download_and_install_requirements(requirements_file_info, pid_lower, user_repo)
+            ok, m = self.__download_and_install_requirements(requirements_file_info, pid, user_repo)
             if not ok:
-                logger.debug(f"{pid_lower} 依赖预安装失败：{m}")
+                logger.debug(f"{pid} 依赖预安装失败：{m}")
             else:
-                logger.debug(f"{pid_lower} 依赖预安装成功")
-        ok, m = self.__download_files(pid_lower, file_list, user_repo, package_version, True)
+                logger.debug(f"{pid} 依赖预安装成功")
+        ok, m = self.__download_files(pid, file_list, user_repo, package_version, True)
         if not ok:
             return False, m
         return True, ""
 
-    async def __prepare_content_via_filelist_async(self, pid_lower: str, user_repo: str,
+    async def __prepare_content_via_filelist_async(self, pid: str, user_repo: str,
                                                    package_version: Optional[str]) -> Tuple[bool, str]:
         """
         异步准备插件内容，通过文件列表获取插件文件和依赖
         """
-        file_list, msg = await self.__async_get_file_list(pid_lower, user_repo, package_version)
+        file_list, msg = await self.__async_get_file_list(pid, user_repo, package_version)
         if not file_list:
             return False, msg
         requirements_file_info = next((f for f in file_list if f.get("name") == "requirements.txt"), None)
         if requirements_file_info:
-            ok, m = await self.__async_download_and_install_requirements(requirements_file_info, pid_lower, user_repo)
+            ok, m = await self.__async_download_and_install_requirements(requirements_file_info, pid, user_repo)
             if not ok:
-                logger.debug(f"{pid_lower} 依赖预安装失败：{m}")
+                logger.debug(f"{pid} 依赖预安装失败：{m}")
             else:
-                logger.debug(f"{pid_lower} 依赖预安装成功")
-        ok, m = await self.__async_download_files(pid_lower, file_list, user_repo, package_version, True)
+                logger.debug(f"{pid} 依赖预安装成功")
+        ok, m = await self.__async_download_files(pid, file_list, user_repo, package_version, True)
         if not ok:
             return False, m
         return True, ""
