@@ -265,7 +265,6 @@ class PluginManager(metaclass=Singleton):
 
                 # 导入模块
                 module = importlib.import_module(module_name)
-                importlib.reload(module)
 
                 # 检查模块中的类
                 for name, obj in module.__dict__.items():
@@ -411,6 +410,10 @@ class PluginManager(metaclass=Singleton):
             except KeyError:
                 # 模块可能已经被删除
                 pass
+
+        importlib.invalidate_caches()
+        logger.debug("已清除查找器的缓存")
+
         if plugin_id:
             if modules_to_remove:
                 logger.info(f"插件 {plugin_id} 共清除 {len(modules_to_remove)} 个模块缓存：{modules_to_remove}")
