@@ -27,7 +27,7 @@ from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
-from app.utils.limit import rate_limit_window
+from app.utils.debouncer import debounce
 from app.utils.object import ObjectUtils
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
@@ -47,33 +47,62 @@ class PluginMonitorHandler(FileSystemEventHandler):
         if not event_path.name.endswith(".py") or "pycache" in event_path.parts:
             return
 
-        # 读取插件根目录下的__init__.py文件，读取class XXXX(_PluginBase)的类名
+        # 防抖模式下处理文件修改事件
+        self._handle_modification(event_path)
+
+    @debounce(interval=1.0, leading=False, source="PluginMonitorHandler", enable_logging=False)
+    def _handle_modification(self, event_path: Path):
+        """
+        处理文件修改事件
+        :param event_path:
+        :return:
+        """
+        logger.debug(f"防抖计时结束，开始处理文件修改事件: {event_path}")
+        # 解析插件ID
+        pid = self._get_plugin_id_from_path(event_path)
+        if not pid:
+            logger.debug(f"文件不属于任何有效插件，已忽略: {event_path}")
+            return
+
+        # 触发重载
+        self.__reload_plugin(pid)
+
+    @staticmethod
+    def _get_plugin_id_from_path(event_path: Path) -> Optional[str]:
+        """
+        根据文件路径解析出插件的ID。
+        :param event_path: 被修改文件的 Path 对象。
+        :return: 插件ID字符串，如果不是有效插件文件则返回 None。
+        """
         try:
             plugins_root = settings.ROOT_PATH / "app" / "plugins"
             # 确保修改的文件在 plugins 目录下
             if plugins_root not in event_path.parents:
-                return
-            # 获取插件目录路径，没有找到__init__.py时，说明不是有效包，跳过插件重载
-            # 插件重载目前没有支持app/plugins/plugin/package/__init__.py的场景，这里也不做支持
+                return None
+
+            # 找到插件的根目录
             plugin_dir = event_path.parent
+            while plugin_dir.parent != plugins_root:
+                plugin_dir = plugin_dir.parent
+                if plugin_dir == plugins_root:  # 防止无限循环
+                    break
+
             init_file = plugin_dir / "__init__.py"
             if not init_file.exists():
-                logger.debug(f"{plugin_dir} 下没有找到 __init__.py，跳过插件重载")
-                return
+                return None
 
+            # 读取 __init__.py 文件，查找插件主类名
             with open(init_file, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            pid = None
-            for line in lines:
-                if line.startswith("class") and "(_PluginBase)" in line:
-                    pid = line.split("class ")[1].split("(_PluginBase)")[0].strip()
-            if pid:
-                self.__reload_plugin(pid)
+                for line in f:
+                    if line.startswith("class") and "(_PluginBase)" in line:
+                        # 解析出类名作为插件ID
+                        return line.split("class ")[1].split("(_PluginBase)")[0].strip()
+            return None
         except Exception as e:
-            logger.error(f"插件文件修改后重载出错：{str(e)}")
+            logger.error(f"从路径解析插件ID时出错: {e}")
+            return None
 
     @staticmethod
-    @rate_limit_window(max_calls=1, window_seconds=2, source="PluginMonitor", enable_logging=False)
     def __reload_plugin(pid):
         """
         重新加载插件
