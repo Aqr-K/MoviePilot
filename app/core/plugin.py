@@ -27,7 +27,7 @@ from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
-from app.utils.debouncer import debounce
+from app.utils.debounce import debounce
 from app.utils.object import ObjectUtils
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
