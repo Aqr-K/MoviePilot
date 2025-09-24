@@ -542,7 +542,7 @@ class Telegram:
                 # 发送图片到Telegram
                 ret = self._bot.send_photo(chat_id=userid or self._telegram_chat_id,
                                            photo=photo,
-                                           caption=self.escape_markdown(caption),
+                                           caption=caption,
                                            parse_mode="MarkdownV2",
                                            reply_markup=reply_markup)
                 if ret is None:
@@ -553,12 +553,12 @@ class Telegram:
         if len(caption) > 4095:
             for i in range(0, len(caption), 4095):
                 ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
-                                             text=self.escape_markdown(caption[i:i + 4095]),
+                                             text=caption[i:i + 4095],
                                              parse_mode="MarkdownV2",
                                              reply_markup=reply_markup if i == 0 else None)
         else:
             ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
-                                         text=self.escape_markdown(caption),
+                                         text=caption,
                                          parse_mode="MarkdownV2",
                                          reply_markup=reply_markup)
         if ret is None:
