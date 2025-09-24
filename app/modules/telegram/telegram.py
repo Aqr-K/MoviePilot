@@ -237,6 +237,8 @@ class Telegram:
             return False
 
         try:
+            if title:
+                title = self.escape_markdown(title)
             if text:
                 # 对text进行Markdown特殊字符转义
                 text = self.escape_markdown(text)
