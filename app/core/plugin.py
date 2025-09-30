@@ -302,6 +302,8 @@ class PluginManager(metaclass=Singleton):
             logger.info("正在停止插件文件修改监测...")
             self._stop_monitor_event.set()
             self._monitor_thread.join(timeout=5)
+            if self._monitor_thread.is_alive():
+                logger.warning("插件文件修改监测线程在5秒内未能正常停止。")
             self._monitor_thread = None
             logger.info("插件文件修改监测停止完成")
         else:
