@@ -18,6 +18,7 @@ from starlette import status
 from watchfiles import watch
 
 from app import schemas
+from app.core.cache import cached
 from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.db.plugindata_oper import PluginDataOper
@@ -913,10 +914,14 @@ class PluginManager(metaclass=Singleton):
         """
         return list(self._running_plugins.keys())
 
+    @cached(maxsize=1, ttl=1800)
     def get_online_plugins(self, force: bool = False) -> List[schemas.Plugin]:
         """
         获取所有在线插件信息
         """
+        if force:
+            self.get_online_plugins.cache_clear()
+
         if not settings.PLUGIN_MARKET:
             return []
 
@@ -1212,11 +1217,15 @@ class PluginManager(metaclass=Singleton):
 
         return plugin
 
+    @cached(maxsize=1, ttl=1800)
     async def async_get_online_plugins(self, force: bool = False) -> List[schemas.Plugin]:
         """
         异步获取所有在线插件信息
         :param force: 是否强制刷新（忽略缓存）
         """
+        if force:
+            await self.async_get_online_plugins.cache_clear()
+
         if not settings.PLUGIN_MARKET:
             return []
 
