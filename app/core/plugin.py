@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import concurrent
 import concurrent.futures
@@ -372,10 +373,22 @@ class PluginManager(metaclass=Singleton):
 
             # 读取 __init__.py 文件，查找插件主类名
             with open(init_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.startswith("class") and "(_PluginBase)" in line:
-                        # 解析出类名作为插件ID
-                        return line.split("class ")[1].split("(_PluginBase)")[0].strip()
+                source_code = f.read()
+
+            tree = ast.parse(source_code)
+
+            # 遍历AST，查找继承自 _PluginBase 的类
+            for node in ast.walk(tree):
+                # 检查节点是否为类定义
+                if isinstance(node, ast.ClassDef):
+                    # 遍历该类的所有基类
+                    for base in node.bases:
+                        # 检查基类是否是我们寻找的 _PluginBase
+                        # ast.Name 用于处理简单的基类名
+                        if isinstance(base, ast.Name) and base.id == '_PluginBase':
+                            # 返回这个类的名字
+                            return node.name
+
             return None
         except Exception as e:
             logger.error(f"从路径解析插件ID时出错: {e}")
