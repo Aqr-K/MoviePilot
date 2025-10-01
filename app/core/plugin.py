@@ -360,15 +360,14 @@ class PluginManager(metaclass=Singleton):
         try:
             plugins_root = settings.ROOT_PATH / "app" / "plugins"
             # 确保修改的文件在 plugins 目录下
-            if plugins_root not in event_path.parents:
+            if not event_path.is_relative_to(plugins_root):
                 return None
 
-            # 找到插件的根目录
-            plugin_dir = event_path.parent
-            while plugin_dir.parent != plugins_root:
-                plugin_dir = plugin_dir.parent
-                if plugin_dir == plugins_root:  # 防止无限循环
-                    break
+            try:
+                plugin_dir_name = event_path.relative_to(plugins_root).parts[0]
+                plugin_dir = plugins_root / plugin_dir_name
+            except (ValueError, IndexError):
+                return None
 
             init_file = plugin_dir / "__init__.py"
             if not init_file.exists():
