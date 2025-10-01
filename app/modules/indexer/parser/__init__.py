@@ -33,6 +33,8 @@ class SiteSchema(Enum):
     MTorrent = "MTorrent"
     Yema = "Yema"
     HDDolby = "HDDolby"
+    Zhixing = "Zhixing"
+    Bitpt = "Bitpt"
 
 
 class SiteParserBase(metaclass=ABCMeta):
