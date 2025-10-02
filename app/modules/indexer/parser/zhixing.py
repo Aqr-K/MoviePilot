@@ -1,3 +1,8 @@
+#
+# 知行 http://pt.zhixing.bjtu.edu.cn/
+# author: ThedoRap
+# time: 2025-10-02
+#
 # -*- coding: utf-8 -*-
 import re
 from typing import Optional, Tuple
@@ -22,7 +27,7 @@ class ZhixingSiteUserInfo(SiteParserBase):
         self._sys_mail_unread_page = None
         self._user_mail_unread_page = None
         self._mail_unread_params = {}
-        self._torrent_seeding_page = "user/{uid}/seeding"
+        self._torrent_seeding_base = "user/{uid}/seeding/"
         self._torrent_seeding_params = {}
         self._torrent_seeding_headers = {}
         self._addition_headers = {}
@@ -76,27 +81,25 @@ class ZhixingSiteUserInfo(SiteParserBase):
         self.bonus = float(info_dict.get('保种积分')) if '保种积分' in info_dict else 0.0
         self.message_unread = 0  # 暂无消息解析
 
-        self.seeding = int(info_dict.get('当前保种数量')) if '当前保种数量' in info_dict else 0
-        self.seeding_size = num_filesize_safe(info_dict.get('当前保种容量')) if '当前保种容量' in info_dict else 0
+        if hasattr(self, '_torrent_seeding_base') and self._torrent_seeding_base:
+            self.seeding = 0
+            self.seeding_size = 0
+        else:
+            self.seeding = int(info_dict.get('当前保种数量')) if '当前保种数量' in info_dict else 0
+            self.seeding_size = num_filesize_safe(info_dict.get('当前保种容量')) if '当前保种容量' in info_dict else 0
 
     def _parse_user_traffic_info(self, html_text: str):
-        """
-        解析用户流量信息
-        """
         pass
 
     def _parse_user_detail_info(self, html_text: str):
-        """
-        解析用户详细信息
-        """
         pass
 
-    def _parse_user_torrent_seeding_info(self, html_text: str, multi_page: Optional[bool] = False) -> Optional[str]:
+    def _parse_user_torrent_seeding_page_info(self, html_text: str) -> Tuple[int, int]:
         """
-        解析用户做种信息
+        解析用户做种信息单页，返回本页数量和大小
         """
         if not html_text:
-            return None
+            return 0, 0
         soup = BeautifulSoup(html_text, 'html.parser')
         torrents = soup.find_all('tr', id=re.compile(r'^t\d+'))
         page_seeding = 0
@@ -107,30 +110,17 @@ class ZhixingSiteUserInfo(SiteParserBase):
                 size_text = size_td.find('a').text if size_td.find('a') else size_td.text.strip()
                 page_seeding += 1
                 page_seeding_size += StringUtils.num_filesize(size_text)
-
-        self.seeding += page_seeding
-        self.seeding_size += page_seeding_size
-
-        # 是否存在下页数据
-        next_page = None
-        # 假设有分页元素，类似 <div class="pager"> 中的 <a href="...?p=2">下一页</a>
-        pager = soup.find('div', class_='pager')
-        if pager:
-            next_link = pager.find('a', string=re.compile('下一页'))
-            if next_link:
-                next_page = next_link['href']
-
-        return next_page
+        return page_seeding, page_seeding_size
 
     def _parse_message_unread_links(self, html_text: str, msg_links: list) -> Optional[str]:
-        """
-        解析未读消息链接，这里直接读出详情
-        """
         pass
 
     def _parse_message_content(self, html_text) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        pass
+
+    def _parse_user_torrent_seeding_info(self, html_text: str):
         """
-        解析消息内容
+        占位，避免抽象类报错
         """
         pass
 
@@ -153,5 +143,31 @@ class ZhixingSiteUserInfo(SiteParserBase):
                 basic_url = self._user_basic_page.format(uid=self.userid)
                 basic_html = self._get_page_content(url=urljoin(self._base_url, basic_url))
                 self._parse_user_base_info(basic_html)
-            if self._torrent_seeding_page:
-                self._torrent_seeding_page = self._torrent_seeding_page.format(uid=self.userid)
+            if hasattr(self, '_torrent_seeding_base') and self._torrent_seeding_base:
+                seeding_base = self._torrent_seeding_base.format(uid=self.userid)
+                seeding_base_url = urljoin(self._base_url, seeding_base)
+                page_num = 1
+                while True:
+                    seeding_url = f"{seeding_base_url}/p{page_num}"
+                    seeding_html = self._get_page_content(url=seeding_url)
+                    page_seeding, page_seeding_size = self._parse_user_torrent_seeding_page_info(seeding_html)
+                    self.seeding += page_seeding
+                    self.seeding_size += page_seeding_size
+                    if page_seeding == 0:
+                        break
+                    page_num += 1
+
+        # 🔑 最终对外统一转字符串，避免 join 报错
+        self.userid = str(self.userid or "")
+        self.username = str(self.username or "")
+        self.user_level = str(self.user_level or "")
+        self.join_at = str(self.join_at or "")
+
+        self.upload = str(self.upload or 0)
+        self.download = str(self.download or 0)
+        self.ratio = str(self.ratio or 0)
+        self.bonus = str(self.bonus or 0.0)
+        self.message_unread = str(self.message_unread or 0)
+
+        self.seeding = str(self.seeding or 0)
+        self.seeding_size = str(self.seeding_size or 0)
