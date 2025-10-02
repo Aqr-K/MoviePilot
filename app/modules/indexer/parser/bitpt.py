@@ -23,8 +23,8 @@ class BitptSiteUserInfo(SiteParserBase):
         self._sys_mail_unread_page = None
         self._user_mail_unread_page = None
         self._mail_unread_params = {}
-        self._torrent_seeding_page = "browse.php?t=myseed"
-        self._torrent_seeding_params = {"st": "2", "d": "desc"}
+        self._torrent_seeding_base = "browse.php"
+        self._torrent_seeding_params = {"t": "myseed", "st": "2", "d": "desc"}
         self._torrent_seeding_headers = {}
         self._addition_headers = {}
 
@@ -61,7 +61,7 @@ class BitptSiteUserInfo(SiteParserBase):
         self.bonus = float(re.search(r'累计([\d\.]+)', bonus_str).group(1)) if re.search(r'累计([\d\.]+)', bonus_str) else 0
         self.message_unread = 0
 
-        if self._torrent_seeding_page:
+        if hasattr(self, '_torrent_seeding_base') and self._torrent_seeding_base:
             self.seeding = 0
             self.seeding_size = 0
         else:
@@ -86,15 +86,23 @@ class BitptSiteUserInfo(SiteParserBase):
         if not html_text:
             return 0, 0
         soup = BeautifulSoup(html_text, 'html.parser')
-        torrents = soup.find_all('tr', id=re.compile(r'^t\d+'))
+        torrent_table = soup.find('table', class_='torrenttable')
+        if not torrent_table:
+            return 0, 0
+        rows = torrent_table.find_all('tr')
+        if len(rows) <= 1:
+            return 0, 0
+        torrents = [row for row in rows[1:] if 'btr' in row.get('class', [])]
         page_seeding = 0
         page_seeding_size = 0
         for torrent in torrents:
             size_td = torrent.find('td', class_='r')
             if size_td:
-                size_text = size_td.find('a').text if size_td.find('a') else size_td.text.strip()
-                page_seeding += 1
-                page_seeding_size += StringUtils.num_filesize(size_text)
+                size_a = size_td.find('a')
+                size_text = size_a.text.strip() if size_a else size_td.text.strip()
+                if size_text:
+                    page_seeding += 1
+                    page_seeding_size += StringUtils.num_filesize(size_text)
         return page_seeding, page_seeding_size
 
     def _parse_message_unread_links(self, html_text: str, msg_links: list) -> Optional[str]:
@@ -121,9 +129,8 @@ class BitptSiteUserInfo(SiteParserBase):
             basic_html = self._get_page_content(url=urljoin(self._base_url, basic_url))
             self._parse_user_base_info(basic_html)
 
-        if self._torrent_seeding_page:
-            seeding_base = self._torrent_seeding_page
-            seeding_base_url = urljoin(self._base_url, seeding_base)
+        if hasattr(self, '_torrent_seeding_base') and self._torrent_seeding_base:
+            seeding_base_url = urljoin(self._base_url, self._torrent_seeding_base)
             params = self._torrent_seeding_params.copy()
             page_num = 1
             while True:

@@ -27,7 +27,7 @@ class ZhixingSiteUserInfo(SiteParserBase):
         self._sys_mail_unread_page = None
         self._user_mail_unread_page = None
         self._mail_unread_params = {}
-        self._torrent_seeding_base = "user/{uid}/seeding/"
+        self._torrent_seeding_base = "user/{uid}/seeding"
         self._torrent_seeding_params = {}
         self._torrent_seeding_headers = {}
         self._addition_headers = {}
@@ -63,6 +63,8 @@ class ZhixingSiteUserInfo(SiteParserBase):
                     value = re.split(r'\s*\(', value_text)[0].strip().split('查看')[0].strip()
                     info_dict[key] = value
 
+        self._basic_info = info_dict  # Save for fallback
+
         self.userid = info_dict.get('UID')
         self.username = info_dict.get('用户名')
         self.user_level = info_dict.get('用户组')
@@ -81,12 +83,9 @@ class ZhixingSiteUserInfo(SiteParserBase):
         self.bonus = float(info_dict.get('保种积分')) if '保种积分' in info_dict else 0.0
         self.message_unread = 0  # 暂无消息解析
 
-        if hasattr(self, '_torrent_seeding_base') and self._torrent_seeding_base:
-            self.seeding = 0
-            self.seeding_size = 0
-        else:
-            self.seeding = int(info_dict.get('当前保种数量')) if '当前保种数量' in info_dict else 0
-            self.seeding_size = num_filesize_safe(info_dict.get('当前保种容量')) if '当前保种容量' in info_dict else 0
+        # Temporarily set seeding from basic, will override or fallback later
+        self.seeding = int(info_dict.get('当前保种数量')) if '当前保种数量' in info_dict else 0
+        self.seeding_size = num_filesize_safe(info_dict.get('当前保种容量')) if '当前保种容量' in info_dict else 0
 
     def _parse_user_traffic_info(self, html_text: str):
         pass
@@ -144,6 +143,8 @@ class ZhixingSiteUserInfo(SiteParserBase):
                 basic_html = self._get_page_content(url=urljoin(self._base_url, basic_url))
                 self._parse_user_base_info(basic_html)
             if hasattr(self, '_torrent_seeding_base') and self._torrent_seeding_base:
+                self.seeding = 0  # Reset to sum from pages
+                self.seeding_size = 0
                 seeding_base = self._torrent_seeding_base.format(uid=self.userid)
                 seeding_base_url = urljoin(self._base_url, seeding_base)
                 page_num = 1
@@ -156,6 +157,16 @@ class ZhixingSiteUserInfo(SiteParserBase):
                     if page_seeding == 0:
                         break
                     page_num += 1
+                # Fallback to basic if no seeding found from pages
+                if self.seeding == 0 and hasattr(self, '_basic_info'):
+                    def num_filesize_safe(s: str):
+                        if s:
+                            s = s.strip()
+                            if re.match(r'^\d+(\.\d+)?$', s):
+                                s += ' B'
+                        return StringUtils.num_filesize(s) if s else 0
+                    self.seeding = int(self._basic_info.get('当前保种数量', 0))
+                    self.seeding_size = num_filesize_safe(self._basic_info.get('当前保种容量', ''))
 
         # 🔑 最终对外统一转字符串，避免 join 报错
         self.userid = str(self.userid or "")
