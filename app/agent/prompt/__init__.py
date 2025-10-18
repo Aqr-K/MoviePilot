@@ -21,7 +21,7 @@ class PromptManager:
         if prompt_name in self.prompts_cache:
             return self.prompts_cache[prompt_name]
 
-        prompt_file = self.prompts_dir / "definition" / prompt_name
+        prompt_file = self.prompts_dir / "prompt" / prompt_name
 
         try:
             with open(prompt_file, 'r', encoding='utf-8') as f:
