@@ -987,8 +987,9 @@ class DoubanModule(_ModuleBase):
             if doubanid and not str(doubanid).isdigit():
                 doubanid = re.search(r"\d+", doubanid).group(0)
                 result["id"] = doubanid
-            logger.info(f"{imdbid} 查询到豆瓣信息：{result.get('title')}")
-            return result
+                logger.info(f"{imdbid} 查询到豆瓣信息：{result.get('title')}")
+                return result
+            return None
         return None
 
     @staticmethod
