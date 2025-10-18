@@ -231,7 +231,7 @@ class MoviePilotAgent:
 
             # 执行Agent
             logger.info(f"Agent执行推理: session_id={self.session_id}, input={message}")
-            result = await self._execute_agent(input_context)
+            await self._execute_agent(input_context)
 
             # 获取Agent回复
             agent_message = await self.callback_handler.get_message()
@@ -239,8 +239,7 @@ class MoviePilotAgent:
             # 发送Agent回复给用户
             self.message_helper.put(
                 message=agent_message,
-                role="system",
-                title="AI助手回复"
+                role="system"
             )
 
             # 添加Agent回复到记忆
@@ -260,7 +259,7 @@ class MoviePilotAgent:
             self.message_helper.put(
                 message=error_message,
                 role="system",
-                title="AI助手错误"
+                title="MoviePilot助手错误"
             )
             return error_message
 
