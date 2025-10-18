@@ -2,7 +2,7 @@ from typing import List, Optional, Union
 
 from pydantic import Field
 
-from app.actions import BaseAction, ActionChain
+from app.workflow.actions import BaseAction, ActionChain
 from app.schemas import ActionParams, ActionContext, Notification
 from app.core.config import settings
 

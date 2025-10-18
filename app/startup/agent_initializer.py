@@ -26,7 +26,7 @@ class AgentInitializer:
                 logger.info("AI智能体功能未启用")
                 return True
             
-            from app.agent.agent import agent_manager
+            from app.agent import agent_manager
             self.agent_manager = agent_manager
             
             await agent_manager.initialize()

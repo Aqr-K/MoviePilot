@@ -1,4 +1,4 @@
-from app.actions import BaseAction
+from app.workflow.actions import BaseAction
 from app.chain.subscribe import SubscribeChain
 from app.core.config import settings, global_vars
 from app.core.context import MediaInfo

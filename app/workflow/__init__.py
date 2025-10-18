@@ -46,7 +46,7 @@ class WorkFlowManager(metaclass=Singleton):
         # 加载所有动作
         self._actions = {}
         actions = ModuleHelper.load(
-            "app.actions",
+            "app.workflow.actions",
             filter_func=lambda _, obj: filter_func(obj)
         )
         for action in actions:

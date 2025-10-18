@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import Field
 
-from app.actions import BaseAction
+from app.workflow.actions import BaseAction
 from app.core.config import global_vars
 from app.log import logger
 from app.schemas import ActionParams, ActionContext

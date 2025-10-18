@@ -847,7 +847,7 @@ class MessageChain(ChainBase):
 
             # 异步处理AI智能体请求
             import asyncio
-            from app.agent.agent import agent_manager
+            from app.agent import agent_manager
             
             # 生成会话ID
             session_id = f"user_{userid}_{hash(user_message) % 10000}"

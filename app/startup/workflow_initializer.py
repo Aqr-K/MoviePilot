@@ -1,5 +1,4 @@
-from app.core.workflow import WorkFlowManager
-from app.chain.workflow import WorkflowChain
+from app.workflow import WorkFlowManager
 
 
 def init_workflow():

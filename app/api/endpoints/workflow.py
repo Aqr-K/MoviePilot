@@ -11,7 +11,7 @@ from app.chain.workflow import WorkflowChain
 from app.core.config import global_vars
 from app.core.plugin import PluginManager
 from app.core.security import verify_token
-from app.core.workflow import WorkFlowManager
+from app.workflow import WorkFlowManager
 from app.db import get_async_db, get_db
 from app.db.models import Workflow
 from app.db.systemconfig_oper import SystemConfigOper

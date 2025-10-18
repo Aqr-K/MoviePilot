@@ -1,4 +1,4 @@
-from app.actions import BaseAction
+from app.workflow.actions import BaseAction
 from app.schemas import ActionContext
 
 

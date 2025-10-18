@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from pydantic import Field
 
-from app.actions import BaseAction
+from app.workflow.actions import BaseAction
 from app.chain.recommend import RecommendChain
 from app.schemas import ActionParams, ActionContext
 from app.core.config import settings, global_vars

@@ -4,7 +4,7 @@ from typing import Optional, List
 
 from pydantic import Field
 
-from app.actions import BaseAction
+from app.workflow.actions import BaseAction
 from app.chain.search import SearchChain
 from app.core.config import global_vars
 from app.log import logger
