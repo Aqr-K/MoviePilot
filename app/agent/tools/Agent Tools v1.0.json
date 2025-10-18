@@ -1,27 +1,27 @@
 [
     {
-        "description": "搜索媒体资源，包括电影、电视剧、动漫等。可以根据标题、年份、类型等条件进行搜索。",
+        "description": "Search for media resources including movies, TV shows, anime, etc. Supports searching by title, year, type, and other criteria. Returns detailed media information from TMDB database.",
         "name": "search_media",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "title": {
-                    "description": "媒体标题",
+                    "description": "The title of the media to search for (e.g., 'The Matrix', 'Breaking Bad')",
                     "type": "string"
                 },
                 "year": {
-                    "description": "年份（可选）",
+                    "description": "Release year of the media (optional, helps narrow down results)",
                     "type": "string"
                 },
                 "media_type": {
-                    "description": "媒体类型：movie（电影）、tv（电视剧）、anime（动漫）",
+                    "description": "Type of media content: 'movie' for films, 'tv' for television series, 'anime' for anime series",
                     "type": "string"
                 },
                 "season": {
-                    "description": "季数（仅电视剧和动漫）",
+                    "description": "Season number for TV shows and anime (optional, only applicable for series)",
                     "type": "integer"
                 }
             },
@@ -33,32 +33,32 @@
         }
     },
     {
-        "description": "添加媒体订阅，为用户感兴趣的媒体内容创建订阅规则。",
+        "description": "Add media subscription to create automated download rules for movies and TV shows. The system will automatically search and download new episodes or releases based on the subscription criteria.",
         "name": "add_subscribe",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "title": {
-                    "description": "媒体标题",
+                    "description": "The title of the media to subscribe to (e.g., 'The Matrix', 'Breaking Bad')",
                     "type": "string"
                 },
                 "year": {
-                    "description": "年份",
+                    "description": "Release year of the media (required for accurate identification)",
                     "type": "string"
                 },
                 "media_type": {
-                    "description": "媒体类型：movie（电影）、tv（电视剧）",
+                    "description": "Type of media content: 'movie' for films, 'tv' for television series",
                     "type": "string"
                 },
                 "season": {
-                    "description": "季数（仅电视剧）",
+                    "description": "Season number for TV shows (optional, if not specified will subscribe to all seasons)",
                     "type": "integer"
                 },
                 "tmdb_id": {
-                    "description": "TMDB ID（可选）",
+                    "description": "TMDB database ID for precise media identification (optional but recommended for accuracy)",
                     "type": "string"
                 }
             },
@@ -72,32 +72,32 @@
         }
     },
     {
-        "description": "搜索站点种子资源，根据媒体信息搜索可下载的种子文件。",
+        "description": "Search for torrent files across configured indexer sites based on media information. Returns available torrent downloads with details like file size, quality, and download links.",
         "name": "search_torrents",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "title": {
-                    "description": "资源标题",
+                    "description": "The title of the media resource to search for (e.g., 'The Matrix 1999', 'Breaking Bad S01E01')",
                     "type": "string"
                 },
                 "year": {
-                    "description": "年份（可选）",
+                    "description": "Release year of the media (optional, helps narrow down search results)",
                     "type": "string"
                 },
                 "media_type": {
-                    "description": "媒体类型：movie（电影）、tv（电视剧）",
+                    "description": "Type of media content: 'movie' for films, 'tv' for television series",
                     "type": "string"
                 },
                 "season": {
-                    "description": "季数（仅电视剧）",
+                    "description": "Season number for TV shows (optional, only applicable for series)",
                     "type": "integer"
                 },
                 "sites": {
-                    "description": "搜索的站点ID列表（可选）",
+                    "description": "Array of specific site IDs to search on (optional, if not provided searches all configured sites)",
                     "items": {
                         "type": "integer"
                     },
@@ -112,32 +112,32 @@
         }
     },
     {
-        "description": "添加下载任务，将搜索到的种子资源添加到下载器。",
+        "description": "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings.",
         "name": "add_download",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "torrent_title": {
-                    "description": "种子标题",
+                    "description": "The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')",
                     "type": "string"
                 },
                 "torrent_url": {
-                    "description": "种子下载链接",
+                    "description": "Direct URL to the torrent file (.torrent) or magnet link",
                     "type": "string"
                 },
                 "downloader": {
-                    "description": "下载器名称（可选）",
+                    "description": "Name of the downloader to use (optional, uses default if not specified)",
                     "type": "string"
                 },
                 "save_path": {
-                    "description": "保存路径（可选）",
+                    "description": "Directory path where the downloaded files should be saved (optional, uses default path if not specified)",
                     "type": "string"
                 },
                 "labels": {
-                    "description": "标签（可选，多个用逗号分隔）",
+                    "description": "Comma-separated list of labels/tags to assign to the download (optional, e.g., 'movie,hd,bluray')",
                     "type": "string"
                 }
             },
@@ -150,20 +150,20 @@
         }
     },
     {
-        "description": "查询订阅状态，查看用户的订阅列表和状态。",
+        "description": "Query subscription status and list all user subscriptions. Shows active subscriptions, their download status, and configuration details.",
         "name": "query_subscribes",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "status": {
-                    "description": "订阅状态过滤：active（活跃）、inactive（非活跃）、all（全部）",
+                    "description": "Filter subscriptions by status: 'active' for enabled subscriptions, 'inactive' for disabled ones, 'all' for all subscriptions",
                     "type": "string"
                 },
                 "media_type": {
-                    "description": "媒体类型过滤：movie（电影）、tv（电视剧）、all（全部）",
+                    "description": "Filter by media type: 'movie' for films, 'tv' for television series, 'all' for all types",
                     "type": "string"
                 }
             },
@@ -174,20 +174,20 @@
         }
     },
     {
-        "description": "查询下载状态，查看下载器的任务列表和进度。",
+        "description": "Query download status and list all active download tasks. Shows download progress, completion status, and task details from configured downloaders.",
         "name": "query_downloads",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "downloader": {
-                    "description": "下载器名称（可选）",
+                    "description": "Name of specific downloader to query (optional, if not provided queries all configured downloaders)",
                     "type": "string"
                 },
                 "status": {
-                    "description": "下载状态过滤：downloading（下载中）、completed（已完成）、paused（暂停）、all（全部）",
+                    "description": "Filter downloads by status: 'downloading' for active downloads, 'completed' for finished downloads, 'paused' for paused downloads, 'all' for all downloads",
                     "type": "string"
                 }
             },
@@ -198,12 +198,12 @@
         }
     },
     {
-        "description": "查询下载器配置，查看可用的下载器列表和配置信息。",
+        "description": "Query downloader configuration and list all available downloaders. Shows downloader status, connection details, and configuration settings.",
         "name": "query_downloaders",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 }
             },
@@ -214,24 +214,24 @@
         }
     },
     {
-        "description": "获取热门媒体推荐，包括电影、电视剧等热门内容。",
+        "description": "Get trending and popular media recommendations from various sources. Returns curated lists of popular movies, TV shows, and anime based on different criteria like trending, ratings, or calendar schedules.",
         "name": "get_recommendations",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "source": {
-                    "description": "推荐来源：tmdb_trending（TMDB热门）、douban_hot（豆瓣热门）、bangumi_calendar（Bangumi日历）",
+                    "description": "Recommendation source: 'tmdb_trending' for TMDB trending content, 'douban_hot' for Douban popular content, 'bangumi_calendar' for Bangumi anime calendar",
                     "type": "string"
                 },
                 "media_type": {
-                    "description": "媒体类型：movie（电影）、tv（电视剧）、all（全部）",
+                    "description": "Type of media content: 'movie' for films, 'tv' for television series, 'all' for all types",
                     "type": "string"
                 },
                 "limit": {
-                    "description": "返回数量限制（默认20）",
+                    "description": "Maximum number of recommendations to return (default: 20, maximum: 100)",
                     "type": "integer"
                 }
             },
@@ -242,20 +242,20 @@
         }
     },
     {
-        "description": "查询媒体库状态，查看已入库的媒体文件情况。",
+        "description": "Query media library status and list all media files that have been successfully processed and added to the media server (Plex, Emby, Jellyfin). Shows library statistics and file details.",
         "name": "query_media_library",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "media_type": {
-                    "description": "媒体类型：movie（电影）、tv（电视剧）、all（全部）",
+                    "description": "Type of media content: 'movie' for films, 'tv' for television series, 'all' for all types",
                     "type": "string"
                 },
                 "title": {
-                    "description": "媒体标题（可选，用于精确查询）",
+                    "description": "Specific media title to search for (optional, if provided returns detailed info for that specific media)",
                     "type": "string"
                 }
             },
@@ -266,20 +266,20 @@
         }
     },
     {
-        "description": "发送消息通知，向用户发送操作结果或重要信息。",
+        "description": "Send notification message to the user through configured notification channels (Telegram, Slack, WeChat, etc.). Used to inform users about operation results, errors, or important updates.",
         "name": "send_message",
         "parameters": {
             "properties": {
                 "explanation": {
-                    "description": "使用此工具的原因说明",
+                    "description": "Clear explanation of why this tool is being used in the current context",
                     "type": "string"
                 },
                 "message": {
-                    "description": "要发送的消息内容",
+                    "description": "The message content to send to the user (should be clear and informative)",
                     "type": "string"
                 },
                 "message_type": {
-                    "description": "消息类型：info（信息）、success（成功）、warning（警告）、error（错误）",
+                    "description": "Type of message: 'info' for general information, 'success' for successful operations, 'warning' for warnings, 'error' for error messages",
                     "type": "string"
                 }
             },
