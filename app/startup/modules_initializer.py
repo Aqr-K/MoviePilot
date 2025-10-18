@@ -27,6 +27,7 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.command import CommandChain
 from app.schemas import Notification, NotificationType
 from app.schemas.types import SystemConfigKey
+from app.startup.agent_initializer import init_agent, stop_agent
 
 
 def start_frontend():
@@ -110,6 +111,8 @@ async def stop_modules():
     """
     服务关闭
     """
+    # 停止AI智能体
+    await stop_agent()
     # 停止模块
     ModuleManager().stop()
     # 停止事件消费
@@ -151,6 +154,8 @@ def init_modules():
     EventManager().start()
     # 初始化订阅分享
     SubscribeHelper()
+    # 初始化AI智能体
+    init_agent()
     # 启动前端服务
     start_frontend()
     # 检查认证状态

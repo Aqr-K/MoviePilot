@@ -1,0 +1,293 @@
+[
+    {
+        "description": "搜索媒体资源，包括电影、电视剧、动漫等。可以根据标题、年份、类型等条件进行搜索。",
+        "name": "search_media",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "媒体标题",
+                    "type": "string"
+                },
+                "year": {
+                    "description": "年份（可选）",
+                    "type": "string"
+                },
+                "media_type": {
+                    "description": "媒体类型：movie（电影）、tv（电视剧）、anime（动漫）",
+                    "type": "string"
+                },
+                "season": {
+                    "description": "季数（仅电视剧和动漫）",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "title",
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "添加媒体订阅，为用户感兴趣的媒体内容创建订阅规则。",
+        "name": "add_subscribe",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "媒体标题",
+                    "type": "string"
+                },
+                "year": {
+                    "description": "年份",
+                    "type": "string"
+                },
+                "media_type": {
+                    "description": "媒体类型：movie（电影）、tv（电视剧）",
+                    "type": "string"
+                },
+                "season": {
+                    "description": "季数（仅电视剧）",
+                    "type": "integer"
+                },
+                "tmdb_id": {
+                    "description": "TMDB ID（可选）",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "title",
+                "year",
+                "media_type",
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "搜索站点种子资源，根据媒体信息搜索可下载的种子文件。",
+        "name": "search_torrents",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "资源标题",
+                    "type": "string"
+                },
+                "year": {
+                    "description": "年份（可选）",
+                    "type": "string"
+                },
+                "media_type": {
+                    "description": "媒体类型：movie（电影）、tv（电视剧）",
+                    "type": "string"
+                },
+                "season": {
+                    "description": "季数（仅电视剧）",
+                    "type": "integer"
+                },
+                "sites": {
+                    "description": "搜索的站点ID列表（可选）",
+                    "items": {
+                        "type": "integer"
+                    },
+                    "type": "array"
+                }
+            },
+            "required": [
+                "title",
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "添加下载任务，将搜索到的种子资源添加到下载器。",
+        "name": "add_download",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "torrent_title": {
+                    "description": "种子标题",
+                    "type": "string"
+                },
+                "torrent_url": {
+                    "description": "种子下载链接",
+                    "type": "string"
+                },
+                "downloader": {
+                    "description": "下载器名称（可选）",
+                    "type": "string"
+                },
+                "save_path": {
+                    "description": "保存路径（可选）",
+                    "type": "string"
+                },
+                "labels": {
+                    "description": "标签（可选，多个用逗号分隔）",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "torrent_title",
+                "torrent_url",
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "查询订阅状态，查看用户的订阅列表和状态。",
+        "name": "query_subscribes",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "订阅状态过滤：active（活跃）、inactive（非活跃）、all（全部）",
+                    "type": "string"
+                },
+                "media_type": {
+                    "description": "媒体类型过滤：movie（电影）、tv（电视剧）、all（全部）",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "查询下载状态，查看下载器的任务列表和进度。",
+        "name": "query_downloads",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "downloader": {
+                    "description": "下载器名称（可选）",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "下载状态过滤：downloading（下载中）、completed（已完成）、paused（暂停）、all（全部）",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "查询下载器配置，查看可用的下载器列表和配置信息。",
+        "name": "query_downloaders",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "获取热门媒体推荐，包括电影、电视剧等热门内容。",
+        "name": "get_recommendations",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "source": {
+                    "description": "推荐来源：tmdb_trending（TMDB热门）、douban_hot（豆瓣热门）、bangumi_calendar（Bangumi日历）",
+                    "type": "string"
+                },
+                "media_type": {
+                    "description": "媒体类型：movie（电影）、tv（电视剧）、all（全部）",
+                    "type": "string"
+                },
+                "limit": {
+                    "description": "返回数量限制（默认20）",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "查询媒体库状态，查看已入库的媒体文件情况。",
+        "name": "query_media_library",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "media_type": {
+                    "description": "媒体类型：movie（电影）、tv（电视剧）、all（全部）",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "媒体标题（可选，用于精确查询）",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "explanation"
+            ],
+            "type": "object"
+        }
+    },
+    {
+        "description": "发送消息通知，向用户发送操作结果或重要信息。",
+        "name": "send_message",
+        "parameters": {
+            "properties": {
+                "explanation": {
+                    "description": "使用此工具的原因说明",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "要发送的消息内容",
+                    "type": "string"
+                },
+                "message_type": {
+                    "description": "消息类型：info（信息）、success（成功）、warning（警告）、error（错误）",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "message",
+                "explanation"
+            ],
+            "type": "object"
+        }
+    }
+]

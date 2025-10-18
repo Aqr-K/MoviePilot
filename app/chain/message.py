@@ -163,6 +163,10 @@ class MessageChain(ChainBase):
                                           original_message_id=original_message_id, original_chat_id=original_chat_id)
                 else:
                     logger.warning(f"渠道 {channel.value} 不支持回调，但收到了回调消息：{text}")
+            elif text.startswith('/ai') or text.startswith('/AI'):
+                # AI智能体处理
+                self._handle_ai_message(text=text, channel=channel, source=source,
+                                      userid=userid, username=username)
             elif text.startswith('/'):
                 # 执行命令
                 self.eventmanager.send_event(
@@ -815,3 +819,63 @@ class MessageChain(ChainBase):
                 buttons.append(page_buttons)
 
         return buttons
+
+    def _handle_ai_message(self, text: str, channel: MessageChannel, source: str,
+                          userid: Union[str, int], username: str) -> None:
+        """
+        处理AI智能体消息
+        """
+        try:
+            # 检查AI智能体是否启用
+            if not settings.AI_AGENT_ENABLE:
+                self.messagehelper.put("AI智能体功能未启用，请在系统设置中启用", role="system", title="AI助手")
+                return
+
+            # 检查LLM配置
+            if not settings.LLM_API_KEY:
+                self.messagehelper.put("LLM API密钥未配置，请检查系统设置", role="system", title="AI助手")
+                return
+
+            # 提取用户消息
+            user_message = text[3:].strip()  # 移除 "/ai" 前缀
+            if not user_message:
+                self.messagehelper.put("请输入您的问题或需求", role="system", title="AI助手")
+                return
+
+            # 发送处理中消息
+            self.messagehelper.put("正在处理您的请求，请稍候...", role="system", title="AI助手")
+
+            # 异步处理AI智能体请求
+            import asyncio
+            from app.agent.agent import agent_manager
+            
+            # 生成会话ID
+            session_id = f"user_{userid}_{hash(user_message) % 10000}"
+            
+            # 在事件循环中处理
+            try:
+                loop = asyncio.get_event_loop()
+                response = loop.run_until_complete(
+                    agent_manager.process_message(
+                        session_id=session_id,
+                        user_id=str(userid),
+                        message=user_message
+                    )
+                )
+            except RuntimeError:
+                # 如果没有事件循环，创建新的
+                response = asyncio.run(
+                    agent_manager.process_message(
+                        session_id=session_id,
+                        user_id=str(userid),
+                        message=user_message
+                    )
+                )
+
+            # 发送AI智能体回复
+            self.messagehelper.put(response, role="system", title="AI助手")
+
+        except Exception as e:
+            logger.error(f"处理AI智能体消息失败: {e}")
+            self.messagehelper.put(f"AI智能体处理失败: {str(e)}", role="system", title="AI助手")
+

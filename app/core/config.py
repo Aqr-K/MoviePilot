@@ -406,6 +406,32 @@ class ConfigModel(BaseModel):
     # Docker Client API地址
     DOCKER_CLIENT_API: Optional[str] = "tcp://127.0.0.1:38379"
 
+    # ==================== AI智能体配置 ====================
+    # AI智能体开关
+    AI_AGENT_ENABLE: bool = False
+    # LLM提供商 (openai/google/deepseek)
+    LLM_PROVIDER: str = "openai"
+    # LLM模型名称
+    LLM_MODEL: str = "gpt-3.5-turbo"
+    # LLM API密钥
+    LLM_API_KEY: Optional[str] = None
+    # LLM基础URL（用于自定义API端点）
+    LLM_BASE_URL: Optional[str] = None
+    # LLM温度参数
+    LLM_TEMPERATURE: float = 0.7
+    # LLM最大迭代次数
+    LLM_MAX_ITERATIONS: int = 5
+    # LLM工具调用超时时间（秒）
+    LLM_TOOL_TIMEOUT: int = 300
+    # 是否启用详细日志
+    LLM_VERBOSE: bool = False
+    # 最大记忆消息数量
+    LLM_MAX_MEMORY_MESSAGES: int = 50
+    # 记忆保留天数
+    LLM_MEMORY_RETENTION_DAYS: int = 30
+    # Redis记忆保留天数（如果使用Redis）
+    LLM_REDIS_MEMORY_RETENTION_DAYS: int = 7
+
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
     """
