@@ -18,14 +18,13 @@ logger = logging.getLogger(__name__)
 
 class TMDb(object):
 
-    def __init__(self, obj_cached=True, session=None, language=None):
+    def __init__(self, session=None, language=None):
         self._api_key = settings.TMDB_API_KEY
         self._language = language or settings.TMDB_LOCALE or "en-US"
         self._session_id = None
         self._session = session
         self._wait_on_rate_limit = True
         self._debug_enabled = False
-        self._cache_enabled = obj_cached
         self._proxies = settings.PROXY
         self._domain = settings.TMDB_API_DOMAIN
         self._page = None
@@ -41,7 +40,6 @@ class TMDb(object):
         self._remaining = 40
         self._reset = None
         self._timeout = 15
-        self.obj_cached = obj_cached
 
         self.__clear_async_cache__ = False
 
@@ -118,14 +116,6 @@ class TMDb(object):
     @debug.setter
     def debug(self, debug):
         self._debug_enabled = bool(debug)
-
-    @property
-    def cache(self):
-        return self._cache_enabled
-
-    @cache.setter
-    def cache(self, cache):
-        self._cache_enabled = bool(cache)
 
     @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True)
     def cached_request(self, method, url, data, json,
@@ -224,8 +214,9 @@ class TMDb(object):
         self._validate_api_key()
         url = self._build_url(action, params)
 
-        if self.cache and self.obj_cached and call_cached and method != "POST":
-            req = self.cached_request(method, url, data, json)
+        if call_cached and method != "POST":
+            req = self.cached_request(method, url, data, json,
+                                      _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
         else:
             req = self.request(method, url, data, json)
 
@@ -253,8 +244,9 @@ class TMDb(object):
         self._validate_api_key()
         url = self._build_url(action, params)
 
-        if self.cache and self.obj_cached and call_cached and method != "POST":
-            req = await self.async_cached_request(method, url, data, json)
+        if call_cached and method != "POST":
+            req = await self.async_cached_request(method, url, data, json,
+                                                  _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
         else:
             req = await self.async_request(method, url, data, json)
 

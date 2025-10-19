@@ -290,7 +290,7 @@ class DownloadChain(ChainBase):
             # 登记下载记录
             downloadhis = DownloadHistoryOper()
             downloadhis.add(
-                path=str(download_path),
+                path=download_path.as_posix(),
                 type=_media.type.value,
                 title=_media.title,
                 year=_media.year,
@@ -331,8 +331,8 @@ class DownloadChain(ChainBase):
                 files_to_add.append({
                     "download_hash": _hash,
                     "downloader": _downloader,
-                    "fullpath": str(_save_path / file),
-                    "savepath": str(_save_path),
+                    "fullpath": (_save_path / file).as_posix(),
+                    "savepath": _save_path.as_posix(),
                     "filepath": file,
                     "torrentname": _meta.org_string,
                 })
