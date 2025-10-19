@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
-from app.core.cache import FileCache, AsyncFileCache
+from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, TorrentInfo
 from app.core.event import EventManager
@@ -358,9 +358,10 @@ class ChainBase(metaclass=ABCMeta):
         if tmdbid:
             doubanid = None
             bangumiid = None
-        return self.run_module("recognize_media", meta=meta, mtype=mtype,
-                               tmdbid=tmdbid, doubanid=doubanid, bangumiid=bangumiid,
-                               episode_group=episode_group, cache=cache)
+        with fresh(not cache):
+            return self.run_module("recognize_media", meta=meta, mtype=mtype,
+                                tmdbid=tmdbid, doubanid=doubanid, bangumiid=bangumiid,
+                                episode_group=episode_group, cache=cache)
 
     async def async_recognize_media(self, meta: MetaBase = None,
                                     mtype: Optional[MediaType] = None,
@@ -391,9 +392,10 @@ class ChainBase(metaclass=ABCMeta):
         if tmdbid:
             doubanid = None
             bangumiid = None
-        return await self.async_run_module("async_recognize_media", meta=meta, mtype=mtype,
-                                           tmdbid=tmdbid, doubanid=doubanid, bangumiid=bangumiid,
-                                           episode_group=episode_group, cache=cache)
+        async with async_fresh(not cache):
+            return await self.async_run_module("async_recognize_media", meta=meta, mtype=mtype,
+                                            tmdbid=tmdbid, doubanid=doubanid, bangumiid=bangumiid,
+                                            episode_group=episode_group, cache=cache)
 
     def match_doubaninfo(self, name: str, imdbid: Optional[str] = None,
                          mtype: Optional[MediaType] = None, year: Optional[str] = None, season: Optional[int] = None,

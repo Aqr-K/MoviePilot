@@ -1,8 +1,10 @@
+import contextvars
 import inspect
 import shutil
 import tempfile
 import threading
 from abc import ABC, abstractmethod
+from contextlib import contextmanager, asynccontextmanager
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, Optional, Generator, AsyncGenerator, Tuple, Literal, Union
@@ -26,6 +28,9 @@ DEFAULT_CACHE_SIZE = 1024
 DEFAULT_CACHE_TTL = 365 * 24 * 60 * 60
 
 lock = threading.Lock()
+
+# 上下文变量来控制缓存行为
+_fresh = contextvars.ContextVar('fresh', default=False)
 
 
 class CacheBackend(ABC):
@@ -1010,6 +1015,45 @@ class AsyncFileBackend(AsyncCacheBackend):
         pass
 
 
+@contextmanager
+def fresh(fresh: bool = False):
+    """
+    是否获取新数据（不使用缓存的值）
+
+    Usage:
+    with fresh():
+        result = some_cached_function()
+    """
+    token = _fresh.set(fresh)
+    try:
+        yield
+    finally:
+        _fresh.reset(token)
+
+@asynccontextmanager
+async def async_fresh(fresh: bool = False):
+    """
+    是否获取新数据（不使用缓存的值）
+
+    Usage:
+    async with async_fresh():
+        result = await some_async_cached_function()
+    """
+    token = _fresh.set(fresh)
+    try:
+        yield
+    finally:
+        _fresh.reset(token)
+
+def is_fresh() -> bool:
+    """
+    是否获取新数据
+    """
+    try:
+        return _fresh.get()
+    except LookupError:
+        return False
+
 def FileCache(base: Path = settings.TEMP_PATH, ttl: Optional[int] = None) -> CacheBackend:
     """
     获取文件缓存后端实例（Redis或文件系统），ttl仅在Redis环境中有效
@@ -1084,16 +1128,6 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
     """
 
     def decorator(func):
-        # 检查是否为异步函数
-        is_async = inspect.iscoroutinefunction(func)
-
-        # 根据函数类型选择对应的缓存后端，没有ttl时默认是 LRU 缓存，否则是 TTL 缓存
-        if is_async:
-            # 异步函数使用异步缓存后端
-            cache_backend = AsyncCache(cache_type="ttl" if ttl else "lru", maxsize=maxsize, ttl=ttl)
-        else:
-            # 同步函数使用同步缓存后端
-            cache_backend = Cache(cache_type="ttl" if ttl else "lru", maxsize=maxsize, ttl=ttl)
 
         def should_cache(value: Any) -> bool:
             """
@@ -1169,16 +1203,20 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
         is_async = inspect.iscoroutinefunction(func)
 
         if is_async:
+            # 异步函数使用异步缓存后端
+            cache_backend = AsyncCache(cache_type="ttl" if ttl else "lru", maxsize=maxsize, ttl=ttl)
             # 异步函数的缓存装饰器
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
                 # 获取缓存键
                 cache_key = __get_cache_key(args, kwargs)
-                # 尝试获取缓存
-                cached_value = await cache_backend.get(cache_key, region=cache_region)
-                if should_cache(cached_value) and await async_is_valid_cache_value(cache_key, cached_value,
-                                                                                   cache_region):
-                    return cached_value
+
+                if not is_fresh():
+                    # 尝试获取缓存
+                    cached_value = await cache_backend.get(cache_key, region=cache_region)
+                    if should_cache(cached_value) and await async_is_valid_cache_value(cache_key, cached_value,
+                                                                                    cache_region):
+                        return cached_value
                 # 执行异步函数并缓存结果
                 result = await func(*args, **kwargs)
                 # 判断是否需要缓存
@@ -1198,15 +1236,19 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
             async_wrapper.cache_clear = cache_clear
             return async_wrapper
         else:
+            # 同步函数使用同步缓存后端
+            cache_backend = Cache(cache_type="ttl" if ttl else "lru", maxsize=maxsize, ttl=ttl)
             # 同步函数的缓存装饰器
             @wraps(func)
             def wrapper(*args, **kwargs):
                 # 获取缓存键
                 cache_key = __get_cache_key(args, kwargs)
-                # 尝试获取缓存
-                cached_value = cache_backend.get(cache_key, region=cache_region)
-                if should_cache(cached_value) and is_valid_cache_value(cache_key, cached_value, cache_region):
-                    return cached_value
+
+                if not is_fresh():
+                    # 尝试获取缓存
+                    cached_value = cache_backend.get(cache_key, region=cache_region)
+                    if should_cache(cached_value) and is_valid_cache_value(cache_key, cached_value, cache_region):
+                        return cached_value
                 # 执行函数并缓存结果
                 result = func(*args, **kwargs)
                 # 判断是否需要缓存
