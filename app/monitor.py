@@ -46,12 +46,18 @@ class FileMonitorHandler(FileSystemEventHandler):
         self.callback = callback
 
     def on_created(self, event: FileSystemEvent):
-        self.callback.event_handler(event=event, text="创建", event_path=event.src_path,
-                                    file_size=Path(event.src_path).stat().st_size)
+        try:
+            self.callback.event_handler(event=event, text="创建", event_path=event.src_path,
+                                        file_size=Path(event.src_path).stat().st_size)
+        except Exception as e:
+            logger.error(f"on_created 异常: {e}")
 
     def on_moved(self, event: FileSystemMovedEvent):
-        self.callback.event_handler(event=event, text="移动", event_path=event.dest_path,
-                                    file_size=Path(event.dest_path).stat().st_size)
+        try:
+            self.callback.event_handler(event=event, text="移动", event_path=event.dest_path,
+                                        file_size=Path(event.dest_path).stat().st_size)
+        except Exception as e:
+            logger.error(f"on_moved 异常: {e}")
 
 
 class Monitor(metaclass=SingletonClass):
