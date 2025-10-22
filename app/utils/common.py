@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import time
 from functools import wraps
@@ -48,7 +49,7 @@ def retry(ExceptionToCheck: Any,
                         logger.warn(msg)
                     else:
                         print(msg)
-                    time.sleep(mdelay)
+                    await asyncio.sleep(mdelay)
                     mtries -= 1
                     mdelay *= backoff
             return await f(*args, **kwargs)
