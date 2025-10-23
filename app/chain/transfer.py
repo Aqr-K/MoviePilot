@@ -33,6 +33,7 @@ from app.schemas.types import TorrentStatus, EventType, MediaType, ProgressKey, 
     SystemConfigKey, ChainEventType, ContentType
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
+from app.utils.system import SystemUtils
 
 downloader_lock = threading.Lock()
 job_lock = threading.Lock()
@@ -329,8 +330,12 @@ class JobManager:
             # 计算状态为完成的任务数
             if __mediaid__ not in self._job_view:
                 return 0
-            return sum([task.fileitem.size for task in self._job_view[__mediaid__].tasks if
-                        task.state == "completed" and task.fileitem.size is not None])
+            return sum([
+                task.fileitem.size if task.fileitem.size is not None
+                else (SystemUtils.get_directory_size(Path(task.fileitem.path)) if task.fileitem.storage == "local" else 0)
+                for task in self._job_view[__mediaid__].tasks
+                if task.state == "completed"
+            ])
 
     def total(self) -> int:
         """

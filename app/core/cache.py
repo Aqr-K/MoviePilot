@@ -1016,7 +1016,7 @@ class AsyncFileBackend(AsyncCacheBackend):
 
 
 @contextmanager
-def fresh(fresh: bool = False):
+def fresh(fresh: bool = True):
     """
     是否获取新数据（不使用缓存的值）
 
@@ -1031,7 +1031,7 @@ def fresh(fresh: bool = False):
         _fresh.reset(token)
 
 @asynccontextmanager
-async def async_fresh(fresh: bool = False):
+async def async_fresh(fresh: bool = True):
     """
     是否获取新数据（不使用缓存的值）
 
