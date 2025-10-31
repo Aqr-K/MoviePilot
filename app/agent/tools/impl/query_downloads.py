@@ -27,7 +27,7 @@ class QueryDownloadsTool(MoviePilotTool):
                     continue
                 filtered_downloads.append(dl)
             if filtered_downloads:
-                return json.dumps([d.dict() if hasattr(d, 'dict') else d.model_dump() if hasattr(d, 'model_dump') else d for d in filtered_downloads], ensure_ascii=False, indent=2)
+                return json.dumps([d.dict() for d in filtered_downloads])
             return "未找到相关下载任务。"
         except Exception as e:
             logger.error(f"查询下载失败: {e}", exc_info=True)

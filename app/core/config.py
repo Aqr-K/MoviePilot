@@ -420,7 +420,7 @@ class ConfigModel(BaseModel):
     # LLM温度参数
     LLM_TEMPERATURE: float = 0.7
     # LLM最大迭代次数
-    LLM_MAX_ITERATIONS: int = 5
+    LLM_MAX_ITERATIONS: int = 15
     # LLM工具调用超时时间（秒）
     LLM_TOOL_TIMEOUT: int = 300
     # 是否启用详细日志

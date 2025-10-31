@@ -33,7 +33,7 @@ class GetRecommendationsTool(MoviePilotTool):
             
             if results:
                 # 使用 to_dict() 方法
-                return json.dumps([r.to_dict() if hasattr(r, 'to_dict') else r.dict() if hasattr(r, 'dict') else r.model_dump() if hasattr(r, 'model_dump') else r for r in results], ensure_ascii=False, indent=2)
+                return json.dumps(results)
             return "未找到推荐内容。"
         except Exception as e:
             logger.error(f"获取推荐失败: {e}", exc_info=True)
