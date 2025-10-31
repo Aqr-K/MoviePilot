@@ -26,12 +26,13 @@ class MoviePilotTool(BaseTool):
     async def _arun(self, **kwargs) -> str:
         raise NotImplementedError
 
-    def _send_tool_message(self, message: str, **kwargs):
+    def _send_tool_message(self, message: str, title: str = None, **kwargs):
         """发送工具执行消息"""
         try:
             self._message_helper.put(
                 message=message,
-                role="system"
+                role="system",
+                title=title or "工具执行"
             )
         except Exception as e:
             logger.error(f"发送工具消息失败: {e}")

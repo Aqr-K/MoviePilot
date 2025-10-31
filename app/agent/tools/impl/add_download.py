@@ -20,12 +20,12 @@ class AddDownloadTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
         
         # 发送工具执行说明
-        self._send_tool_message(f"正在添加下载任务: {torrent_title}", "info")
+        self._send_tool_message(f"正在添加下载任务: {torrent_title}", title="添加下载")
         
         try:
             if not torrent_title or not torrent_url:
                 error_message = "错误：必须提供种子标题和下载链接"
-                self._send_tool_message(error_message, "error")
+                self._send_tool_message(error_message, title="下载失败")
                 return error_message
 
             # 使用DownloadChain添加下载
@@ -42,17 +42,22 @@ class AddDownloadTool(MoviePilotTool):
                 meta_info=meta_info
             )
 
-            did = download_chain.download_single(context=context, downloader=downloader, 
-                                               save_path=save_path, label=labels)
+            did = download_chain.download_single(
+                context=context, 
+                downloader=downloader, 
+                save_path=save_path, 
+                label=labels
+            )
             if did:
                 success_message = f"成功添加下载任务：{torrent_title}"
-                self._send_tool_message(success_message, "success")
+                self._send_tool_message(success_message, title="下载成功")
                 return success_message
             else:
                 error_message = "添加下载任务失败"
-                self._send_tool_message(error_message, "error")
+                self._send_tool_message(error_message, title="下载失败")
                 return error_message
         except Exception as e:
             error_message = f"添加下载任务时发生错误: {str(e)}"
-            self._send_tool_message(error_message, "error")
+            logger.error(f"添加下载任务失败: {e}", exc_info=True)
+            self._send_tool_message(error_message, title="下载失败")
             return error_message

@@ -20,14 +20,14 @@ class QuerySubscribesTool(MoviePilotTool):
             subscribes = subscribe_oper.list()
             filtered_subscribes = []
             for sub in subscribes:
-                if status != "all" and sub.status != status:
+                if status != "all" and sub.state != status:
                     continue
                 if media_type != "all" and sub.type != media_type:
                     continue
                 filtered_subscribes.append(sub)
             if filtered_subscribes:
-                return json.dumps([s.dict() for s in filtered_subscribes], ensure_ascii=False, indent=2)
+                return json.dumps([s.to_dict() for s in filtered_subscribes], ensure_ascii=False, indent=2)
             return "未找到相关订阅。"
         except Exception as e:
-            logger.error(f"查询订阅失败: {e}")
+            logger.error(f"查询订阅失败: {e}", exc_info=True)
             return f"查询订阅时发生错误: {str(e)}"
