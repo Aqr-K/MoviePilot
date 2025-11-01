@@ -140,7 +140,9 @@ class MoviePilotAgent:
         return MoviePilotToolFactory.create_tools(
             session_id=self.session_id,
             user_id=self.user_id,
-            message_helper=self.message_helper
+            channel=self.channel,
+            source=self.source,
+            username=self.username
         )
 
     @staticmethod
