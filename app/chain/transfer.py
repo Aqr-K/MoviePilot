@@ -1116,6 +1116,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
                                                                            file_meta=file_meta)
                     if begin_ep is not None:
                         file_meta.begin_episode = begin_ep
+                    if part is not None:
                         file_meta.part = part
                     if end_ep is not None:
                         file_meta.end_episode = end_ep
@@ -1125,10 +1126,10 @@ class TransferChain(ChainBase, metaclass=Singleton):
                 downloadhis = DownloadHistoryOper()
                 if bluray_dir:
                     # 蓝光原盘，按目录名查询
-                    download_history = downloadhis.get_by_path(str(file_path))
+                    download_history = downloadhis.get_by_path(file_path.as_posix())
                 else:
                     # 按文件全路径查询
-                    download_file = downloadhis.get_file_by_fullpath(str(file_path))
+                    download_file = downloadhis.get_file_by_fullpath(file_path.as_posix())
                     if download_file:
                         download_history = downloadhis.get_by_hash(download_file.download_hash)
 
@@ -1441,7 +1442,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
 
         for keyword in exclude_words:
             if keyword and re.search(r"%s" % keyword, file_path, re.IGNORECASE):
-                logger.debug(f"{file_path} 命中屏蔽词 {keyword}")
+                logger.warn(f"{file_path} 命中屏蔽词 {keyword}")
                 return True
         return False
 
@@ -1477,7 +1478,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
                 file_path = save_path / file.name
                 # 如果存在未被屏蔽的媒体文件，则不删除种子
                 if (file_path.suffix in self.all_exts
-                        and not self._is_blocked_by_exclude_words(str(file_path), transfer_exclude_words)
+                        and not self._is_blocked_by_exclude_words(file_path.as_posix(), transfer_exclude_words)
                         and file_path.exists()):
                     return False
 

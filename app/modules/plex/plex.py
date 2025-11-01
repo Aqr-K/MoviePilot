@@ -437,7 +437,7 @@ class Plex:
 
     @staticmethod
     def __get_ids(guids: List[Any]) -> dict:
-        def parse_tmdb_id(value: str) -> (bool, int):
+        def parse_tmdb_id(value: str) -> tuple[bool, int]:
             """尝试将TMDB ID字符串转换为整数。如果成功，返回(True, int)，失败则返回(False, None)。"""
             try:
                 int_value = int(value)
@@ -509,7 +509,7 @@ class Plex:
             item_type=item.type,
             title=item.title,
             original_title=item.originalTitle,
-            year=item.year,
+            year=str(item.year),
             tmdbid=ids.get("tmdb_id"),
             imdbid=ids.get("imdb_id"),
             tvdbid=ids.get("tvdb_id"),

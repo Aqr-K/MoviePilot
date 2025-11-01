@@ -367,7 +367,6 @@ class TemplateHelper(metaclass=SingletonClass):
                 return rendered
             return None
         except Exception as e:
-            logger.error(f"模板处理失败: {str(e)}")
             raise ValueError(f"模板处理失败: {str(e)}") from e
 
     @staticmethod

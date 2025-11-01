@@ -14,7 +14,7 @@ from app.db.models import User
 from app.db.models.downloadhistory import DownloadHistory
 from app.db.models.transferhistory import TransferHistory
 from app.db.user_oper import get_current_active_superuser_async, get_current_active_superuser
-from app.schemas.types import EventType, MediaType
+from app.schemas.types import EventType
 
 router = APIRouter()
 
@@ -70,7 +70,7 @@ async def transfer_history(title: Optional[str] = None,
 
     return schemas.Response(success=True,
                             data={
-                                "list": result,
+                                "list": [item.to_dict() for item in result],
                                 "total": total,
                             })
 
