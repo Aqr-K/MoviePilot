@@ -410,15 +410,15 @@ class ConfigModel(BaseModel):
     # AI智能体开关
     AI_AGENT_ENABLE: bool = False
     # LLM提供商 (openai/google/deepseek)
-    LLM_PROVIDER: str = "openai"
+    LLM_PROVIDER: str = "deepseek"
     # LLM模型名称
-    LLM_MODEL: str = "gpt-3.5-turbo"
+    LLM_MODEL: str = "deepseek-chat"
     # LLM API密钥
     LLM_API_KEY: Optional[str] = None
     # LLM基础URL（用于自定义API端点）
-    LLM_BASE_URL: Optional[str] = None
+    LLM_BASE_URL: Optional[str] = "https://api.deepseek.com"
     # LLM温度参数
-    LLM_TEMPERATURE: float = 0.7
+    LLM_TEMPERATURE: float = 0.1
     # LLM最大迭代次数
     LLM_MAX_ITERATIONS: int = 15
     # LLM工具调用超时时间（秒）
