@@ -13,7 +13,7 @@ class QuerySubscribesTool(MoviePilotTool):
     description: str = "查询订阅状态，查看用户的订阅列表和状态。"
 
     async def _arun(self, explanation: str, status: Optional[str] = "all", 
-                    media_type: Optional[str] = "all") -> str:
+                    media_type: Optional[str] = "all", **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}")
         try:
             subscribe_oper = SubscribeOper()

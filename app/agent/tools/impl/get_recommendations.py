@@ -13,7 +13,7 @@ class GetRecommendationsTool(MoviePilotTool):
     description: str = "获取热门媒体推荐，包括电影、电视剧等热门内容。"
 
     async def _arun(self, explanation: str, source: Optional[str] = "tmdb_trending", 
-                    media_type: Optional[str] = "all", limit: Optional[int] = 20) -> str:
+                    media_type: Optional[str] = "all", limit: Optional[int] = 20, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: source={source}, media_type={media_type}, limit={limit}")
         try:
             recommend_chain = RecommendChain()

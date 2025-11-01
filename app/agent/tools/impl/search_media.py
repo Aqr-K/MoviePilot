@@ -15,7 +15,7 @@ class SearchMediaTool(MoviePilotTool):
     description: str = "搜索媒体资源，包括电影、电视剧、动漫等。可以根据标题、年份、类型等条件进行搜索。"
 
     async def _arun(self, title: str, explanation: str, year: Optional[str] = None, 
-                    media_type: Optional[str] = None, season: Optional[int] = None) -> str:
+                    media_type: Optional[str] = None, season: Optional[int] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}")
         
         # 发送工具执行说明

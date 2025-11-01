@@ -13,7 +13,7 @@ class AddSubscribeTool(MoviePilotTool):
     description: str = "添加媒体订阅，为用户感兴趣的媒体内容创建订阅规则。"
 
     async def _arun(self, title: str, year: str, media_type: str, explanation: str, 
-                    season: Optional[int] = None, tmdb_id: Optional[str] = None) -> str:
+                    season: Optional[int] = None, tmdb_id: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, tmdb_id={tmdb_id}")
         
         # 发送工具执行说明

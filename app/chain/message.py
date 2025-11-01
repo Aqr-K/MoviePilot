@@ -1,6 +1,8 @@
+import asyncio
 import re
 from typing import Any, Optional, Dict, Union, List
 
+from app.agent import agent_manager
 from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
@@ -828,54 +830,77 @@ class MessageChain(ChainBase):
         try:
             # 检查AI智能体是否启用
             if not settings.AI_AGENT_ENABLE:
-                self.messagehelper.put("AI智能体功能未启用，请在系统设置中启用", role="system", title="AI助手")
+                self.post_message(Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title="MoviePilot智能助手未启用，请在系统设置中启用"
+                ))
                 return
 
             # 检查LLM配置
             if not settings.LLM_API_KEY:
-                self.messagehelper.put("LLM API密钥未配置，请检查系统设置", role="system", title="AI助手")
+                self.post_message(Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title="MoviePilot智能助未配置，请在系统设置中配置"
+                ))
                 return
 
             # 提取用户消息
             user_message = text[3:].strip()  # 移除 "/ai" 前缀
             if not user_message:
-                self.messagehelper.put("请输入您的问题或需求", role="system", title="AI助手")
+                self.post_message(Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title="请输入您的问题或需求"
+                ))
                 return
 
             # 发送处理中消息
-            self.messagehelper.put("正在处理您的请求，请稍候...", role="system", title="AI助手")
+            self.post_message(Notification(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                title="正在处理您的请求，请稍候..."
+            ))
 
-            # 异步处理AI智能体请求
-            import asyncio
-            from app.agent import agent_manager
-            
             # 生成会话ID
             session_id = f"user_{userid}_{hash(user_message) % 10000}"
             
             # 在事件循环中处理
             try:
                 loop = asyncio.get_event_loop()
-                response = loop.run_until_complete(
+                loop.run_until_complete(
                     agent_manager.process_message(
                         session_id=session_id,
                         user_id=str(userid),
-                        message=user_message
+                        message=user_message,
+                        channel=channel.value if channel else None,
+                        source=source,
+                        username=username
                     )
                 )
             except RuntimeError:
                 # 如果没有事件循环，创建新的
-                response = asyncio.run(
+                asyncio.run(
                     agent_manager.process_message(
                         session_id=session_id,
                         user_id=str(userid),
-                        message=user_message
+                        message=user_message,
+                        channel=channel.value if channel else None,
+                        source=source,
+                        username=username
                     )
                 )
 
-            # 发送AI智能体回复
-            self.messagehelper.put(response, role="system", title="AI助手")
-
         except Exception as e:
             logger.error(f"处理AI智能体消息失败: {e}")
-            self.messagehelper.put(f"AI智能体处理失败: {str(e)}", role="system", title="AI助手")
+            self.messagehelper.put(f"AI智能体处理失败: {str(e)}", role="system", title="MoviePilot助手")
 

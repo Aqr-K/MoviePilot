@@ -924,7 +924,7 @@ class Jellyfin:
                         image = self.generate_image_link(item.get("Id"), "Backdrop", False)
                     if item_type == MediaType.MOVIE.value:
                         title = item.get("Name")
-                        subtitle = item.get("ProductionYear")
+                        subtitle = str(item.get("ProductionYear")) if item.get("ProductionYear") else None
                     else:
                         title = f'{item.get("SeriesName")}'
                         subtitle = f'S{item.get("ParentIndexNumber")}:{item.get("IndexNumber")} - {item.get("Name")}'
@@ -984,7 +984,7 @@ class Jellyfin:
                     ret_latest.append(schemas.MediaServerPlayItem(
                         id=item.get("Id"),
                         title=item.get("Name"),
-                        subtitle=item.get("ProductionYear"),
+                        subtitle=str(item.get("ProductionYear")) if item.get("ProductionYear") else None,
                         type=item_type,
                         image=image,
                         link=link,

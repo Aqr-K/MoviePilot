@@ -13,7 +13,7 @@ class QueryDownloadsTool(MoviePilotTool):
     description: str = "查询下载状态，查看下载器的任务列表和进度。"
 
     async def _arun(self, explanation: str, downloader: Optional[str] = None, 
-                    status: Optional[str] = "all") -> str:
+                    status: Optional[str] = "all", **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}")
         try:
             download_chain = DownloadChain()

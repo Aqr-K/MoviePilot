@@ -13,7 +13,7 @@ class QueryMediaLibraryTool(MoviePilotTool):
     description: str = "查询媒体库状态，查看已入库的媒体文件情况。"
 
     async def _arun(self, explanation: str, media_type: Optional[str] = "all", 
-                    title: Optional[str] = None) -> str:
+                    title: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")
         try:
             media_server_oper = MediaServerOper()

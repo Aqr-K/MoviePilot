@@ -12,7 +12,7 @@ class QueryDownloadersTool(MoviePilotTool):
     name: str = "query_downloaders"
     description: str = "查询下载器配置，查看可用的下载器列表和配置信息。"
 
-    async def _arun(self, explanation: str) -> str:
+    async def _arun(self, explanation: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
         try:
             system_config_oper = SystemConfigOper()

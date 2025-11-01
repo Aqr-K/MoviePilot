@@ -746,7 +746,7 @@ class Plex:
             item_type = MediaType.MOVIE.value if item.TYPE == "movie" else MediaType.TV.value
             if item_type == MediaType.MOVIE.value:
                 title = item.title
-                subtitle = item.year
+                subtitle = str(item.year) if item.year else None
             else:
                 title = item.grandparentTitle
                 subtitle = f"S{item.parentIndex}:E{item.index} - {item.title}"
@@ -825,7 +825,7 @@ class Plex:
                 ret_resume.append(schemas.MediaServerPlayItem(
                     id=item.key,
                     title=title,
-                    subtitle=item.year,
+                    subtitle=str(item.year) if item.year else None,
                     type=item_type,
                     image=image,
                     link=link,

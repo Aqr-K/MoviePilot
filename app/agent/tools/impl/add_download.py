@@ -16,7 +16,7 @@ class AddDownloadTool(MoviePilotTool):
 
     async def _arun(self, torrent_title: str, torrent_url: str, explanation: str, 
                     downloader: Optional[str] = None, save_path: Optional[str] = None, 
-                    labels: Optional[str] = None) -> str:
+                    labels: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
         
         # 发送工具执行说明

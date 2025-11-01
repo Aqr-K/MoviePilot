@@ -15,7 +15,7 @@ class SearchTorrentsTool(MoviePilotTool):
 
     async def _arun(self, title: str, explanation: str, year: Optional[str] = None, 
                     media_type: Optional[str] = None, season: Optional[int] = None, 
-                    sites: Optional[List[int]] = None) -> str:
+                    sites: Optional[List[int]] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, sites={sites}")
         
         # 发送工具执行说明

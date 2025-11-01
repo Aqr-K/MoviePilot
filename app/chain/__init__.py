@@ -852,6 +852,10 @@ class ChainBase(metaclass=ABCMeta):
         # 渲染消息
         message = MessageTemplateHelper.render(message=message, meta=meta, mediainfo=mediainfo,
                                                torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
+        # 检查消息是否有效
+        if not message:
+            logger.warning("消息为空，跳过发送")
+            return
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         self.messageoper.add(**message.model_dump())
@@ -931,6 +935,10 @@ class ChainBase(metaclass=ABCMeta):
         # 渲染消息
         message = MessageTemplateHelper.render(message=message, meta=meta, mediainfo=mediainfo,
                                                torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
+        # 检查消息是否有效
+        if not message:
+            logger.warning("消息为空，跳过发送")
+            return
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         await self.messageoper.async_add(**message.model_dump())
