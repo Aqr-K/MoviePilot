@@ -621,7 +621,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             return False, f"配置项 '{key}' 不存在"
 
         try:
-            field = self.__fields__[key]
+            field = Settings.model_fields[key]
             original_value = getattr(self, key)
             if field.name == "API_TOKEN":
                 converted_value, needs_update = self.validate_api_token(value, original_value)

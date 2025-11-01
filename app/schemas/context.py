@@ -86,7 +86,7 @@ class MediaInfo(BaseModel):
     # IMDB ID
     imdb_id: Optional[str] = None
     # TVDB ID
-    tvdb_id: Optional[str] = None
+    tvdb_id: Optional[int] = None
     # 豆瓣ID
     douban_id: Optional[str] = None
     # Bangumi ID
@@ -167,7 +167,7 @@ class MediaInfo(BaseModel):
     # 评价数量
     vote_count: Optional[int] = 0
     # 流行度
-    popularity: Optional[int] = 0
+    popularity: Optional[float] = 0.0
     # 时长
     runtime: Optional[int] = None
     # 下一集

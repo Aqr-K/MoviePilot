@@ -257,7 +257,7 @@ class MediaInfo:
     # 评价数量
     vote_count: int = None
     # 流行度
-    popularity: int = None
+    popularity: float = None
     # 时长
     runtime: int = None
     # 下一集
