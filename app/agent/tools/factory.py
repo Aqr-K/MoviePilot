@@ -37,12 +37,11 @@ class MoviePilotToolFactory:
             SendMessageTool
         ]
         for ToolClass in tool_definitions:
-            tools.append(ToolClass(
+            tool = ToolClass(
                 session_id=session_id,
-                user_id=user_id,
-                channel=channel,
-                source=source,
-                username=username
-            ))
+                user_id=user_id
+            )
+            tool.set_message_attr(channel=channel, source=source, username=username)
+            tools.append(tool)
         logger.info(f"成功创建 {len(tools)} 个MoviePilot工具")
         return tools

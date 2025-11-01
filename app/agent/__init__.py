@@ -249,7 +249,7 @@ class MoviePilotAgent:
             agent_message = await self.callback_handler.get_message()
 
             # 发送Agent回复给用户（通过原渠道）
-            self._send_message_to_channel(agent_message)
+            self.send_agent_message(agent_message)
 
             # 添加Agent回复到记忆
             await self.memory_manager.add_memory(
@@ -265,21 +265,8 @@ class MoviePilotAgent:
             error_message = f"处理消息时发生错误: {str(e)}"
             logger.error(error_message)
             # 发送错误消息给用户（通过原渠道）
-            self._send_message_to_channel(error_message)
+            self.send_agent_message(error_message)
             return error_message
-
-    def _send_message_to_channel(self, message: str, title: str = "MoviePilot助手"):
-        """通过原渠道发送消息给用户"""
-        AgentChain().post_message(
-            Notification(
-                channel=self.channel,
-                source=self.source,
-                userid=self.user_id,
-                username=self.username,
-                title=title,
-                text=message
-            )
-        )
 
     async def _execute_agent(self, input_context: Dict[str, Any]) -> Dict[str, Any]:
         """执行LangChain Agent"""
@@ -313,6 +300,19 @@ class MoviePilotAgent:
                 "intermediate_steps": [],
                 "token_usage": {}
             }
+
+    def send_agent_message(self, message: str, title: str = "MoviePilot助手"):
+        """通过原渠道发送消息给用户"""
+        AgentChain().post_message(
+            Notification(
+                channel=self.channel,
+                source=self.source,
+                userid=self.user_id,
+                username=self.username,
+                title=title,
+                text=message
+            )
+        )
 
     async def cleanup(self):
         """清理智能体资源"""

@@ -257,6 +257,10 @@
                 "title": {
                     "description": "Specific media title to search for (optional, if provided returns detailed info for that specific media)",
                     "type": "string"
+                },
+                "year": {
+                    "description": "Release year of the media (optional, helps narrow down search results)",
+                    "type": "string"
                 }
             },
             "required": [
