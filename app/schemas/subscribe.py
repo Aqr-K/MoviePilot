@@ -24,7 +24,7 @@ class Subscribe(BaseModel):
     # 背景图
     backdrop: Optional[str] = None
     # 评分
-    vote: Optional[float] = 0
+    vote: Optional[float] = 0.0
     # 描述
     description: Optional[str] = None
     # 过滤规则
@@ -110,7 +110,7 @@ class SubscribeShare(BaseModel):
     # 背景图
     backdrop: Optional[str] = None
     # 评分
-    vote: Optional[int] = 0
+    vote: Optional[float] = 0.0
     # 描述
     description: Optional[str] = None
     # 包含

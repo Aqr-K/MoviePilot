@@ -178,7 +178,7 @@ def get_global_setting(token: str):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # FIXME: 新增敏感配置项时要在此处添加排除项
-    info = settings.dict(
+    info = settings.model_dump(
         exclude={"SECRET_KEY", "RESOURCE_SECRET_KEY", "API_TOKEN", "TMDB_API_KEY", "TVDB_API_KEY", "FANART_API_KEY",
                  "COOKIECLOUD_KEY", "COOKIECLOUD_PASSWORD", "GITHUB_TOKEN", "REPO_GITHUB_TOKEN", "U115_APP_ID",
                  "ALIPAN_APP_ID", "TVDB_V4_API_KEY", "TVDB_V4_API_PIN"}
@@ -199,7 +199,7 @@ async def get_env_setting(_: User = Depends(get_current_active_user_async)):
     """
     查询系统环境变量，包括当前版本号（仅管理员）
     """
-    info = settings.dict(
+    info = settings.model_dump(
         exclude={"SECRET_KEY", "RESOURCE_SECRET_KEY"}
     )
     info.update({
