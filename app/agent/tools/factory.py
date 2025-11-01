@@ -1,6 +1,6 @@
 """MoviePilot工具工厂"""
 
-from typing import List
+from typing import List, Callable
 
 from app.agent.tools.impl.add_download import AddDownloadTool
 from app.agent.tools.impl.add_subscribe import AddSubscribeTool
@@ -21,7 +21,8 @@ class MoviePilotToolFactory:
 
     @staticmethod
     def create_tools(session_id: str, user_id: str,
-                     channel: str = None, source: str = None, username: str = None) -> List[MoviePilotTool]:
+                     channel: str = None, source: str = None, username: str = None,
+                     callback_handler: Callable = None) -> List[MoviePilotTool]:
         """创建MoviePilot工具列表"""
         tools = []
         tool_definitions = [
@@ -42,6 +43,7 @@ class MoviePilotToolFactory:
                 user_id=user_id
             )
             tool.set_message_attr(channel=channel, source=source, username=username)
+            tool.set_callback_handler(callback_handler=callback_handler)
             tools.append(tool)
         logger.info(f"成功创建 {len(tools)} 个MoviePilot工具")
         return tools

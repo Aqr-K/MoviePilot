@@ -14,9 +14,12 @@ from app.schemas import MediaServerItem
 class QueryMediaLibraryInput(BaseModel):
     """查询媒体库工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    media_type: Optional[str] = Field("all", description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
-    title: Optional[str] = Field(None, description="Specific media title to search for (optional, if provided returns detailed info for that specific media)")
-    year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down search results)")
+    media_type: Optional[str] = Field("all",
+                                      description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
+    title: Optional[str] = Field(None,
+                                 description="Specific media title to search for (optional, if provided returns detailed info for that specific media)")
+    year: Optional[str] = Field(None,
+                                description="Release year of the media (optional, helps narrow down search results)")
 
 
 class QueryMediaLibraryTool(MoviePilotTool):
@@ -24,8 +27,8 @@ class QueryMediaLibraryTool(MoviePilotTool):
     description: str = "Query media library status and list all media files that have been successfully processed and added to the media server (Plex, Emby, Jellyfin). Shows library statistics and file details."
     args_schema: Type[BaseModel] = QueryMediaLibraryInput
 
-    async def _arun(self, media_type: Optional[str] = "all",
-                    title: Optional[str] = None, year: Optional[str] = None, **kwargs) -> str:
+    async def run(self, media_type: Optional[str] = "all",
+                  title: Optional[str] = None, year: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")
         try:
             media_server_oper = MediaServerOper()

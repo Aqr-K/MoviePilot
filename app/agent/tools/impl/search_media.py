@@ -16,8 +16,10 @@ class SearchMediaInput(BaseModel):
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     title: str = Field(..., description="The title of the media to search for (e.g., 'The Matrix', 'Breaking Bad')")
     year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down results)")
-    media_type: Optional[str] = Field(None, description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
-    season: Optional[int] = Field(None, description="Season number for TV shows and anime (optional, only applicable for series)")
+    media_type: Optional[str] = Field(None,
+                                      description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
+    season: Optional[int] = Field(None,
+                                  description="Season number for TV shows and anime (optional, only applicable for series)")
 
 
 class SearchMediaTool(MoviePilotTool):
@@ -25,13 +27,13 @@ class SearchMediaTool(MoviePilotTool):
     description: str = "Search for media resources including movies, TV shows, anime, etc. Supports searching by title, year, type, and other criteria. Returns detailed media information from TMDB database."
     args_schema: Type[BaseModel] = SearchMediaInput
 
-    async def _arun(self, title: str, year: Optional[str] = None,
-                    media_type: Optional[str] = None, season: Optional[int] = None, **kwargs) -> str:
+    async def run(self, title: str, year: Optional[str] = None,
+                  media_type: Optional[str] = None, season: Optional[int] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}")
 
         # 发送工具执行说明
-        self.send_tool_message(f"正在搜索媒体资源: {title}" + (f" ({year})" if year else ""), title="搜索中")
+        await self.send_tool_message(f"正在搜索媒体资源: {title}" + (f" ({year})" if year else ""), title="搜索中")
 
         try:
             media_chain = MediaChain()
@@ -62,24 +64,24 @@ class SearchMediaTool(MoviePilotTool):
 
                 if filtered_results:
                     result_message = f"找到 {len(filtered_results)} 个相关媒体资源"
-                    self.send_tool_message(result_message, title="搜索成功")
+                    await self.send_tool_message(result_message, title="搜索成功")
 
                     # 发送详细结果
                     for i, result in enumerate(filtered_results[:5]):  # 只显示前5个结果
                         media_info = f"{i + 1}. {result.title} ({result.year}) - {result.type.value if result.type else '未知'}"
-                        self.send_tool_message(media_info, title="搜索结果")
+                        await self.send_tool_message(media_info, title="搜索结果")
 
                     return json.dumps([r.to_dict() for r in filtered_results], ensure_ascii=False, indent=2)
                 else:
                     error_message = f"未找到符合条件的媒体资源: {title}"
-                    self.send_tool_message(error_message, title="搜索完成")
+                    await self.send_tool_message(error_message, title="搜索完成")
                     return error_message
             else:
                 error_message = f"未找到相关媒体资源: {title}"
-                self.send_tool_message(error_message, title="搜索完成")
+                await self.send_tool_message(error_message, title="搜索完成")
                 return error_message
         except Exception as e:
             error_message = f"搜索媒体失败: {str(e)}"
             logger.error(f"搜索媒体失败: {e}", exc_info=True)
-            self.send_tool_message(error_message, title="搜索失败")
+            await self.send_tool_message(error_message, title="搜索失败")
             return error_message

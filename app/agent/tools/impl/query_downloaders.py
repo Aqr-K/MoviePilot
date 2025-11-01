@@ -5,10 +5,10 @@ from typing import Type
 
 from pydantic import BaseModel, Field
 
+from app.agent.tools.base import MoviePilotTool
 from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
-from app.agent.tools.base import MoviePilotTool
 
 
 class QueryDownloadersInput(BaseModel):
@@ -21,7 +21,7 @@ class QueryDownloadersTool(MoviePilotTool):
     description: str = "Query downloader configuration and list all available downloaders. Shows downloader status, connection details, and configuration settings."
     args_schema: Type[BaseModel] = QueryDownloadersInput
 
-    async def _arun(self, **kwargs) -> str:
+    async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
         try:
             system_config_oper = SystemConfigOper()
