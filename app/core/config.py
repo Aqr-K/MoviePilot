@@ -547,18 +547,14 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """
         if not isinstance(data, dict):
             return data
-        
+
         # 处理 API_TOKEN 特殊验证
         if 'API_TOKEN' in data:
             converted_value, needs_update = cls.validate_api_token(data['API_TOKEN'], data['API_TOKEN'])
             if needs_update:
-                cls.update_env_config(
-                    type('Field', (), {'name': 'API_TOKEN'})(),
-                    data['API_TOKEN'],
-                    converted_value
-                )
+                cls.update_env_config("API_TOKEN", data["API_TOKEN"], converted_value)
                 data['API_TOKEN'] = converted_value
-        
+
         # 对其他字段进行类型转换
         for field_name, field_info in cls.model_fields.items():
             if field_name not in data:
@@ -566,35 +562,31 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             value = data[field_name]
             if value is None:
                 continue
-            
+
             field = cls.model_fields.get(field_name)
             if field:
                 converted_value, needs_update = cls.generic_type_converter(
                     value, value, field.annotation, field.default, field_name
                 )
                 if needs_update:
-                    cls.update_env_config(
-                        type('Field', (), {'name': field_name})(),
-                        value,
-                        converted_value
-                    )
+                    cls.update_env_config(field_name, value, converted_value)
                     data[field_name] = converted_value
-        
+
         return data
 
     @staticmethod
-    def update_env_config(field: Any, original_value: Any, converted_value: Any) -> Tuple[bool, str]:
+    def update_env_config(field_name: str, original_value: Any, converted_value: Any) -> Tuple[bool, str]:
         """
         更新 env 配置
         """
         message = None
         is_converted = original_value is not None and str(original_value) != str(converted_value)
         if is_converted:
-            message = f"配置项 '{field.name}' 的值 '{original_value}' 无效，已替换为 '{converted_value}'"
+            message = f"配置项 '{field_name}' 的值 '{original_value}' 无效，已替换为 '{converted_value}'"
             logger.warning(message)
 
-        if field.name in os.environ:
-            message = f"配置项 '{field.name}' 已在环境变量中设置，请手动更新以保持一致性"
+        if field_name in os.environ:
+            message = f"配置项 '{field_name}' 已在环境变量中设置，请手动更新以保持一致性"
             logger.warning(message)
             return False, message
         else:
@@ -604,10 +596,10 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             else:
                 value_to_write = str(converted_value) if converted_value is not None else ""
 
-            set_key(dotenv_path=SystemUtils.get_env_path(), key_to_set=field.name, value_to_set=value_to_write,
+            set_key(dotenv_path=SystemUtils.get_env_path(), key_to_set=field_name, value_to_set=value_to_write,
                     quote_mode="always")
             if is_converted:
-                logger.info(f"配置项 '{field.name}' 已自动修正并写入到 'app.env' 文件")
+                logger.info(f"配置项 '{field_name}' 已自动修正并写入到 'app.env' 文件")
         return True, message
 
     def update_setting(self, key: str, value: Any) -> Tuple[Optional[bool], str]:
@@ -623,17 +615,15 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         try:
             field = Settings.model_fields[key]
             original_value = getattr(self, key)
-            if field.name == "API_TOKEN":
+            if key == "API_TOKEN":
                 converted_value, needs_update = self.validate_api_token(value, original_value)
             else:
-                converted_value, needs_update = self.generic_type_converter(value,
-                                                                            original_value,
-                                                                            field.type_,
-                                                                            field.default,
-                                                                            key)
+                converted_value, needs_update = self.generic_type_converter(
+                    value, original_value, field.annotation, field.default, key
+                )
             # 如果没有抛出异常，则统一使用 converted_value 进行更新
             if needs_update or str(value) != str(converted_value):
-                success, message = self.update_env_config(field, value, converted_value)
+                success, message = self.update_env_config(key, value, converted_value)
                 # 仅成功更新配置时，才更新内存
                 if success:
                     setattr(self, key, converted_value)

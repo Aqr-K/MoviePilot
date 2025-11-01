@@ -129,7 +129,7 @@ class TransHandler:
                             transfer_type=transfer_type,
                             need_notify=need_notify,
                         )
-                        return self.result.copy()
+                        return self.result.model_copy()
                 else:
                     new_path = target_path / fileitem.name
                 # 整理目录
@@ -147,7 +147,7 @@ class TransHandler:
                                       fileitem=fileitem,
                                       transfer_type=transfer_type,
                                       need_notify=need_notify)
-                    return self.result.copy()
+                    return self.result.model_copy()
 
                 logger.info(f"文件夹 {fileitem.path} 整理成功")
                 # 返回整理后的路径
@@ -158,7 +158,7 @@ class TransHandler:
                                   need_scrape=need_scrape,
                                   need_notify=need_notify,
                                   transfer_type=transfer_type)
-                return self.result.copy()
+                return self.result.model_copy()
             else:
                 # 整理单个文件
                 if mediainfo.type == MediaType.TV:
@@ -171,7 +171,7 @@ class TransHandler:
                                           fail_list=[fileitem.path],
                                           transfer_type=transfer_type,
                                           need_notify=need_notify)
-                        return self.result.copy()
+                        return self.result.model_copy()
 
                     # 文件结束季为空
                     in_meta.end_season = None
@@ -207,7 +207,7 @@ class TransHandler:
                             transfer_type=transfer_type,
                             need_notify=need_notify,
                         )
-                        return self.result.copy()
+                        return self.result.model_copy()
                 else:
                     new_file = target_path / fileitem.name
                     folder_path = target_path
@@ -224,7 +224,7 @@ class TransHandler:
                                       fail_list=[fileitem.path],
                                       transfer_type=transfer_type,
                                       need_notify=need_notify)
-                    return self.result.copy()
+                    return self.result.model_copy()
                 # 目标文件
                 target_item = target_oper.get_item(new_file)
                 if target_item:
@@ -255,7 +255,7 @@ class TransHandler:
                                                   fail_list=[fileitem.path],
                                                   transfer_type=transfer_type,
                                                   need_notify=need_notify)
-                                return self.result.copy()
+                                return self.result.model_copy()
                         elif overwrite_mode == 'never':
                             # 存在不覆盖
                             self.__set_result(success=False,
@@ -266,7 +266,7 @@ class TransHandler:
                                               fail_list=[fileitem.path],
                                               transfer_type=transfer_type,
                                               need_notify=need_notify)
-                            return self.result.copy()
+                            return self.result.model_copy()
                         elif overwrite_mode == 'latest':
                             # 仅保留最新版本
                             logger.info(f"当前整理覆盖模式设置为仅保留最新版本，将覆盖：{new_file}")
@@ -293,7 +293,7 @@ class TransHandler:
                                       fail_list=[fileitem.path],
                                       transfer_type=transfer_type,
                                       need_notify=need_notify)
-                    return self.result.copy()
+                    return self.result.model_copy()
 
                 logger.info(f"文件 {fileitem.path} 整理成功")
                 self.__set_result(success=True,
@@ -303,7 +303,7 @@ class TransHandler:
                                   need_scrape=need_scrape,
                                   transfer_type=transfer_type,
                                   need_notify=need_notify)
-                return self.result.copy()
+                return self.result.model_copy()
         finally:
             self.result = None
 
