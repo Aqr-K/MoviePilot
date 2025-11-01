@@ -46,7 +46,7 @@ class FetchTorrentsAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict:  # noqa
-        return FetchTorrentsParams().dict()
+        return FetchTorrentsParams().model_dump()
 
     @property
     def success(self) -> bool:

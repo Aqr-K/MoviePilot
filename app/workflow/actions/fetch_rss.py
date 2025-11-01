@@ -47,7 +47,7 @@ class FetchRssAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict:  # noqa
-        return FetchRssParams().dict()
+        return FetchRssParams().model_dump()
 
     @property
     def success(self) -> bool:

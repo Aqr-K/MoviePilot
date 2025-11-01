@@ -44,7 +44,7 @@ class AddDownloadAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict:  # noqa
-        return AddDownloadParams().dict()
+        return AddDownloadParams().model_dump()
 
     @property
     def success(self) -> bool:

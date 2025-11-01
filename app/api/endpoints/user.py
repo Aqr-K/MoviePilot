@@ -41,7 +41,7 @@ async def create_user(
     user = await current_user.async_get_by_name(db, name=user_in.name)
     if user:
         return schemas.Response(success=False, message="用户已存在")
-    user_info = user_in.dict()
+    user_info = user_in.model_dump()
     if user_info.get("password"):
         user_info["hashed_password"] = get_password_hash(user_info["password"])
         user_info.pop("password")
@@ -59,7 +59,7 @@ async def update_user(
     """
     更新用户
     """
-    user_info = user_in.dict()
+    user_info = user_in.model_dump()
     if user_info.get("password"):
         # 正则表达式匹配密码包含字母、数字、特殊字符中的至少两项
         pattern = r'^(?![a-zA-Z]+$)(?!\d+$)(?![^\da-zA-Z\s]+$).{6,50}$'

@@ -1,6 +1,6 @@
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.schemas.context import Context, MediaInfo
 from app.schemas.download import DownloadTask
@@ -29,8 +29,7 @@ class Workflow(BaseModel):
     add_time: Optional[str] = Field(default=None, description="创建时间")
     last_time: Optional[str] = Field(default=None, description="最后执行时间")
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ActionParams(BaseModel):
@@ -108,5 +107,4 @@ class WorkflowShare(BaseModel):
     date: Optional[str] = Field(default=None, description="分享时间")
     count: Optional[int] = Field(default=0, description="复用人次")
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

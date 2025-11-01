@@ -39,7 +39,7 @@ class ScrapeFileAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return ScrapeFileParams().dict()
+        return ScrapeFileParams().model_dump()
 
     @property
     def success(self) -> bool:

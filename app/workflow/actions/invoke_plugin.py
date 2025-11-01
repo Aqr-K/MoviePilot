@@ -37,7 +37,7 @@ class InvokePluginAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return InvokePluginParams().dict()
+        return InvokePluginParams().model_dump()
 
     @property
     def success(self) -> bool:

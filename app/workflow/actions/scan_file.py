@@ -42,7 +42,7 @@ class ScanFileAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return ScanFileParams().dict()
+        return ScanFileParams().model_dump()
 
     @property
     def success(self) -> bool:

@@ -107,7 +107,7 @@ class FetchMediasAction(BaseAction):
         if event and event.event_data:
             event_data: RecommendSourceEventData = event.event_data
             if event_data.extra_sources:
-                self.__inner_sources.extend([s.dict() for s in event_data.extra_sources])
+                self.__inner_sources.extend([s.model_dump() for s in event_data.extra_sources])
 
     @classmethod
     @property
@@ -122,7 +122,7 @@ class FetchMediasAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return FetchMediasParams().dict()
+        return FetchMediasParams().model_dump()
 
     @property
     def success(self) -> bool:

@@ -137,7 +137,7 @@ async def transfer(days: Optional[int] = 7,
     return [stat[1] for stat in transfer_stat]
 
 
-@router.get("/cpu", summary="获取当前CPU使用率", response_model=int)
+@router.get("/cpu", summary="获取当前CPU使用率", response_model=float)
 def cpu(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     获取当前CPU使用率
@@ -145,7 +145,7 @@ def cpu(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     return SystemUtils.cpu_usage()
 
 
-@router.get("/cpu2", summary="获取当前CPU使用率（API_TOKEN）", response_model=int)
+@router.get("/cpu2", summary="获取当前CPU使用率（API_TOKEN）", response_model=float)
 def cpu2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
     """
     获取当前CPU使用率 API_TOKEN认证（?token=xxx）

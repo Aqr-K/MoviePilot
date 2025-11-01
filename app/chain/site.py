@@ -56,7 +56,7 @@ class SiteChain(ChainBase):
         if userdata:
             SiteOper().update_userdata(domain=StringUtils.get_url_domain(site.get("domain")),
                                        name=site.get("name"),
-                                       payload=userdata.dict())
+                                       payload=userdata.model_dump())
             # 发送事件
             eventmanager.send_event(EventType.SiteRefreshed, {
                 "site_id": site.get("id")

@@ -79,7 +79,7 @@ async def create_subscribe(
     # 订阅用户
     subscribe_in.username = current_user.name
     # 转化为字典
-    subscribe_dict = subscribe_in.dict()
+    subscribe_dict = subscribe_in.model_dump()
     if subscribe_in.id:
         subscribe_dict.pop("id", None)
     sid, message = await SubscribeChain().async_add(mtype=mtype,
@@ -106,7 +106,7 @@ async def update_subscribe(
         return schemas.Response(success=False, message="订阅不存在")
     # 避免更新缺失集数
     old_subscribe_dict = subscribe.to_dict()
-    subscribe_dict = subscribe_in.dict()
+    subscribe_dict = subscribe_in.model_dump()
     if not subscribe_in.lack_episode:
         # 没有缺失集数时，缺失集数清空，避免更新为0
         subscribe_dict.pop("lack_episode")
@@ -529,7 +529,7 @@ async def subscribe_fork(
     """
     复用订阅
     """
-    sub_dict = sub.dict()
+    sub_dict = sub.model_dump()
     sub_dict.pop("id")
     for key in list(sub_dict.keys()):
         if not hasattr(schemas.Subscribe(), key):

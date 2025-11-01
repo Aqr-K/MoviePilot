@@ -40,7 +40,7 @@ class CommingMessage(BaseModel):
         """
         转换为字典
         """
-        items = self.dict()
+        items = self.model_dump()
         for k, v in items.items():
             if isinstance(v, MessageChannel):
                 items[k] = v.value
@@ -88,7 +88,7 @@ class Notification(BaseModel):
         """
         转换为字典
         """
-        items = self.dict()
+        items = self.model_dump()
         for k, v in items.items():
             if isinstance(v, MessageChannel) \
                     or isinstance(v, NotificationType):

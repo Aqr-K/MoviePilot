@@ -47,7 +47,7 @@ class StorageHelper:
                 if s.type == storage:
                     s.config = conf
                     break
-        SystemConfigOper().set(SystemConfigKey.Storages, [s.dict() for s in storagies])
+        SystemConfigOper().set(SystemConfigKey.Storages, [s.model_dump() for s in storagies])
 
     def add_storage(self, storage: str, name: str, conf: dict):
         """
@@ -68,7 +68,7 @@ class StorageHelper:
                 name=name,
                 config=conf
             ))
-        SystemConfigOper().set(SystemConfigKey.Storages, [s.dict() for s in storagies])
+        SystemConfigOper().set(SystemConfigKey.Storages, [s.model_dump() for s in storagies])
 
     def reset_storage(self, storage: str):
         """
@@ -79,4 +79,4 @@ class StorageHelper:
             if s.type == storage:
                 s.config = {}
                 break
-        SystemConfigOper().set(SystemConfigKey.Storages, [s.dict() for s in storagies])
+        SystemConfigOper().set(SystemConfigKey.Storages, [s.model_dump() for s in storagies])

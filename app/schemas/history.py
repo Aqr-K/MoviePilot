@@ -1,6 +1,6 @@
 from typing import Optional, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class DownloadHistory(BaseModel):
@@ -51,8 +51,7 @@ class DownloadHistory(BaseModel):
     # 自定义剧集组
     episode_group: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TransferHistory(BaseModel):
@@ -97,5 +96,4 @@ class TransferHistory(BaseModel):
     # 日期
     date: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

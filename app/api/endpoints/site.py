@@ -67,7 +67,7 @@ async def add_site(
     site_in.name = site_info.get("name")
     site_in.id = None
     site_in.public = 1 if site_info.get("public") else 0
-    site = Site(**site_in.dict())
+    site = Site(**site_in.model_dump())
     site.create(db)
     # 通知站点更新
     await eventmanager.async_send_event(EventType.SiteUpdated, {
@@ -92,7 +92,7 @@ async def update_site(
     # 校正地址格式
     _scheme, _netloc = StringUtils.get_url_netloc(site_in.url)
     site_in.url = f"{_scheme}://{_netloc}/"
-    await site.async_update(db, site_in.dict())
+    await site.async_update(db, site_in.model_dump())
     # 通知站点更新
     await eventmanager.async_send_event(EventType.SiteUpdated, {
         "domain": site_in.domain
@@ -399,7 +399,7 @@ def auth_site(
     if not auth_info or not auth_info.site or not auth_info.params:
         return schemas.Response(success=False, message="请输入认证站点和认证参数")
     status, msg = SitesHelper().check_user(auth_info.site, auth_info.params)
-    SystemConfigOper().set(SystemConfigKey.UserSiteAuthParams, auth_info.dict())
+    SystemConfigOper().set(SystemConfigKey.UserSiteAuthParams, auth_info.model_dump())
     # 认证成功后，重新初始化插件
     PluginManager().init_config()
     Scheduler().init_plugin_jobs()

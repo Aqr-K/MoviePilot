@@ -1,6 +1,6 @@
 from typing import Optional, Any, Union, Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Site(BaseModel):
@@ -47,8 +47,7 @@ class Site(BaseModel):
     # 下载器
     downloader: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SiteStatistic(BaseModel):
@@ -67,8 +66,7 @@ class SiteStatistic(BaseModel):
     # 备注
     note: Optional[Any] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SiteUserData(BaseModel):

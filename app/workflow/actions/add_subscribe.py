@@ -37,7 +37,7 @@ class AddSubscribeAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict:  # noqa
-        return AddSubscribeParams().dict()
+        return AddSubscribeParams().model_dump()
 
     @property
     def success(self) -> bool:
@@ -57,7 +57,7 @@ class AddSubscribeAction(BaseAction):
                 logger.info(f"{media.title} {media.year} 已添加过订阅，跳过")
                 continue
             mediainfo = MediaInfo()
-            mediainfo.from_dict(media.dict())
+            mediainfo.from_dict(media.model_dump())
             subscribechain = SubscribeChain()
             if subscribechain.exists(mediainfo):
                 logger.info(f"{media.title} 已存在订阅")

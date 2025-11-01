@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set, Callable
 
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.message import MessageChannel
 from app.schemas.file import FileItem
@@ -68,7 +68,8 @@ class AuthCredentials(ChainEventData):
     channel: Optional[str] = Field(default=None, description="认证渠道")
     service: Optional[str] = Field(default=None, description="服务名称")
 
-    @root_validator(pre=True)
+    @model_validator(mode='before')
+    @classmethod
     def check_fields_based_on_grant_type(cls, values):  # noqa
         grant_type = values.get("grant_type")
         if not grant_type:

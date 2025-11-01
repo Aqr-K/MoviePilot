@@ -132,7 +132,7 @@ async def subscribe(subscription: schemas.Subscription, _: schemas.TokenPayload 
     """
     客户端webpush通知订阅
     """
-    subinfo = subscription.dict()
+    subinfo = subscription.model_dump()
     if subinfo not in global_vars.get_subscriptions():
         global_vars.push_subscription(subinfo)
     logger.debug(f"通知订阅成功: {subinfo}")
@@ -148,7 +148,7 @@ def send_notification(payload: schemas.SubscriptionMessage, _: schemas.TokenPayl
         try:
             webpush(
                 subscription_info=sub,
-                data=json.dumps(payload.dict()),
+                data=json.dumps(payload.model_dump()),
                 vapid_private_key=settings.VAPID.get("privateKey"),
                 vapid_claims={
                     "sub": settings.VAPID.get("subject")

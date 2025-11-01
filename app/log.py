@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import click
-from pydantic import BaseSettings, BaseModel
+from pydantic import BaseModel, ConfigDict
+from pydantic_settings import BaseSettings
 
 from app.utils.system import SystemUtils
 
@@ -21,8 +22,7 @@ class LogConfigModel(BaseModel):
     Pydantic 配置模型，描述所有配置项及其类型和默认值
     """
 
-    class Config:
-        extra = "ignore"  # 忽略未定义的配置项
+    model_config = ConfigDict(extra="ignore")  # 忽略未定义的配置项
 
     # 配置文件目录
     CONFIG_DIR: Optional[str] = None
@@ -71,10 +71,11 @@ class LogSettings(BaseSettings, LogConfigModel):
         """
         return self.LOG_MAX_FILE_SIZE * 1024 * 1024
 
-    class Config:
-        case_sensitive = True
-        env_file = SystemUtils.get_env_path()
-        env_file_encoding = "utf-8"
+    model_config = ConfigDict(
+        case_sensitive=True,
+        env_file=SystemUtils.get_env_path(),
+        env_file_encoding="utf-8"
+    )
 
 
 # 实例化日志设置

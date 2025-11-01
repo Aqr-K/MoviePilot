@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from app.db.media_oper import MediaOper
+from app.db.mediaserver_oper import MediaServerOper
 from app.log import logger
 from app.agent.tools.base import MoviePilotTool
 
@@ -16,8 +16,8 @@ class QueryMediaLibraryTool(MoviePilotTool):
                     title: Optional[str] = None) -> str:
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")
         try:
-            media_oper = MediaOper()
-            medias = media_oper.list()
+            media_server_oper = MediaServerOper()
+            medias = media_server_oper.list()
             filtered_medias = []
             for media in medias:
                 if media_type != "all" and media.type != media_type:

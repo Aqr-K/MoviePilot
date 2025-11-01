@@ -29,7 +29,7 @@ class SendEventAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return SendEventParams().dict()
+        return SendEventParams().model_dump()
 
     @property
     def success(self) -> bool:

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 class ConversationMemory(BaseModel):
@@ -16,10 +16,11 @@ class ConversationMemory(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
+    
+    @field_serializer('created_at', 'updated_at', when_used='json')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
 
 
 class AgentState(BaseModel):
@@ -30,10 +31,11 @@ class AgentState(BaseModel):
     is_thinking: bool = Field(default=False, description="是否正在思考")
     last_activity: datetime = Field(default_factory=datetime.now, description="最后活动时间")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
+    
+    @field_serializer('last_activity', when_used='json')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
 
 
 class UserMessage(BaseModel):

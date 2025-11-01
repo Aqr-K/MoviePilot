@@ -40,10 +40,10 @@ def download(
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
     mediainfo = MediaInfo()
-    mediainfo.from_dict(media_in.dict())
+    mediainfo.from_dict(media_in.model_dump())
     # 种子信息
     torrentinfo = TorrentInfo()
-    torrentinfo.from_dict(torrent_in.dict())
+    torrentinfo.from_dict(torrent_in.model_dump())
     # 手动下载始终使用选择的下载器
     torrentinfo.site_downloader = downloader
     # 上下文
@@ -81,7 +81,7 @@ def add(
         return schemas.Response(success=False, message="无法识别媒体信息")
     # 种子信息
     torrentinfo = TorrentInfo()
-    torrentinfo.from_dict(torrent_in.dict())
+    torrentinfo.from_dict(torrent_in.model_dump())
     # 上下文
     context = Context(
         meta_info=metainfo,

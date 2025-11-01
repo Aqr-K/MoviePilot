@@ -154,7 +154,7 @@ class FilterModule(_ModuleBase):
         custom_rules = self.rulehelper.get_custom_rules()
         for rule in custom_rules:
             logger.info(f"加载自定义规则 {rule.id} - {rule.name}")
-            self.rule_set[rule.id] = rule.dict()
+            self.rule_set[rule.id] = rule.model_dump()
 
     @staticmethod
     def get_name() -> str:

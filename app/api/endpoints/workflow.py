@@ -47,7 +47,7 @@ async def create_workflow(workflow: schemas.Workflow,
         workflow.state = "P"
     if not workflow.trigger_type:
         workflow.trigger_type = "timer"
-    workflow_obj = Workflow(**workflow.dict())
+    workflow_obj = Workflow(**workflow.model_dump())
     await workflow_obj.async_create(db)
     return schemas.Response(success=True, message="创建工作流成功")
 
@@ -277,7 +277,7 @@ def update_workflow(workflow: schemas.Workflow,
         return schemas.Response(success=False, message="工作流不存在")
     if not wf.trigger_type:
         workflow.trigger_type = "timer"
-    wf.update(db, workflow.dict())
+    wf.update(db, workflow.model_dump())
     # 更新后的工作流对象
     updated_workflow = workflow_oper.get(workflow.id)
     # 更新定时任务

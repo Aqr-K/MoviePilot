@@ -180,7 +180,7 @@ class WorkflowExecutor:
         """
         合并上下文
         """
-        for key, value in context.dict().items():
+        for key, value in context.model_dump().items():
             if not getattr(self.context, key, None):
                 setattr(self.context, key, value)
 

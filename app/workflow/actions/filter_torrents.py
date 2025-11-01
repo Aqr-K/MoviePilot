@@ -44,7 +44,7 @@ class FilterTorrentsAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return FilterTorrentsParams().dict()
+        return FilterTorrentsParams().model_dump()
 
     @property
     def success(self) -> bool:

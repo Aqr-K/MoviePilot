@@ -44,7 +44,7 @@ class TransferFileAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict:  # noqa
-        return TransferFileParams().dict()
+        return TransferFileParams().model_dump()
 
     @property
     def success(self) -> bool:

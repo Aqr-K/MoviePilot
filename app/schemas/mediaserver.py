@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional, Dict, Union, List, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.schemas.types import MediaType
 
@@ -125,8 +125,7 @@ class MediaServerItem(BaseModel):
     lst_mod_date: Optional[str] = None
     user_state: Optional[MediaServerItemUserState] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MediaServerSeasonInfo(BaseModel):

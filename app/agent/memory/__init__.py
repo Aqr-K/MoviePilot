@@ -235,7 +235,7 @@ class ConversationMemoryManager:
         # 保存到Redis，设置TTL自动过期
         if settings.CACHE_BACKEND_TYPE == "redis":
             try:
-                memory_dict = memory.dict()
+                memory_dict = memory.model_dump()
                 redis_key = f"agent_memory:{memory.user_id}:{memory.session_id}" if memory.user_id else f"agent_memory:{memory.session_id}"
                 ttl = int(timedelta(days=settings.LLM_REDIS_MEMORY_RETENTION_DAYS).total_seconds())
                 await self.redis_helper.set(

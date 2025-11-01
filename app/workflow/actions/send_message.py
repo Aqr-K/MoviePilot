@@ -36,7 +36,7 @@ class SendMessageAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return SendMessageParams().dict()
+        return SendMessageParams().model_dump()
 
     @property
     def success(self) -> bool:

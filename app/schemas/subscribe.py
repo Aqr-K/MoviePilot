@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Subscribe(BaseModel):
@@ -76,8 +76,7 @@ class Subscribe(BaseModel):
     # 剧集组
     episode_group: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubscribeShare(BaseModel):

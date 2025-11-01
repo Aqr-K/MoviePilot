@@ -73,10 +73,10 @@ class TransferTask(BaseModel):
         返回字典
         """
         dicts = vars(self).copy()
-        dicts["fileitem"] = self.fileitem.dict() if self.fileitem else None
-        dicts["meta"] = self.meta.dict() if self.meta else None
-        dicts["mediainfo"] = self.mediainfo.dict() if self.mediainfo else None
-        dicts["target_directory"] = self.target_directory.dict() if self.target_directory else None
+        dicts["fileitem"] = self.fileitem.model_dump() if self.fileitem else None
+        dicts["meta"] = self.meta.model_dump() if self.meta else None
+        dicts["mediainfo"] = self.mediainfo.model_dump() if self.mediainfo else None
+        dicts["target_directory"] = self.target_directory.model_dump() if self.target_directory else None
         return dicts
 
 
@@ -144,8 +144,8 @@ class TransferInfo(BaseModel):
         返回字典
         """
         dicts = vars(self).copy()
-        dicts["fileitem"] = self.fileitem.dict() if self.fileitem else None
-        dicts["target_item"] = self.target_item.dict() if self.target_item else None
+        dicts["fileitem"] = self.fileitem.model_dump() if self.fileitem else None
+        dicts["target_item"] = self.target_item.model_dump() if self.target_item else None
         return dicts
 
 

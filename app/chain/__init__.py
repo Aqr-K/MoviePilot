@@ -854,7 +854,7 @@ class ChainBase(metaclass=ABCMeta):
                                                torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
-        self.messageoper.add(**message.dict())
+        self.messageoper.add(**message.model_dump())
         # 发送消息按设置隔离
         if not message.userid and message.mtype:
             # 消息隔离设置
@@ -901,12 +901,12 @@ class ChainBase(metaclass=ABCMeta):
                         break
                     # 按设定发送
                     self.eventmanager.send_event(etype=EventType.NoticeMessage,
-                                                 data={**send_message.dict(), "type": send_message.mtype})
+                                                 data={**send_message.model_dump(), "type": send_message.mtype})
                     self.messagequeue.send_message("post_message", message=send_message)
                 if not send_orignal:
                     return
         # 发送消息事件
-        self.eventmanager.send_event(etype=EventType.NoticeMessage, data={**message.dict(), "type": message.mtype})
+        self.eventmanager.send_event(etype=EventType.NoticeMessage, data={**message.model_dump(), "type": message.mtype})
         # 按原消息发送
         self.messagequeue.send_message("post_message", message=message,
                                        immediately=True if message.userid else False)
@@ -933,7 +933,7 @@ class ChainBase(metaclass=ABCMeta):
                                                torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
-        await self.messageoper.async_add(**message.dict())
+        await self.messageoper.async_add(**message.model_dump())
         # 发送消息按设置隔离
         if not message.userid and message.mtype:
             # 消息隔离设置
@@ -980,13 +980,13 @@ class ChainBase(metaclass=ABCMeta):
                         break
                     # 按设定发送
                     await self.eventmanager.async_send_event(etype=EventType.NoticeMessage,
-                                                             data={**send_message.dict(), "type": send_message.mtype})
+                                                             data={**send_message.model_dump(), "type": send_message.mtype})
                     await self.messagequeue.async_send_message("post_message", message=send_message)
                 if not send_orignal:
                     return
         # 发送消息事件
         await self.eventmanager.async_send_event(etype=EventType.NoticeMessage,
-                                                 data={**message.dict(), "type": message.mtype})
+                                                 data={**message.model_dump(), "type": message.mtype})
         # 按原消息发送
         await self.messagequeue.async_send_message("post_message", message=message,
                                                    immediately=True if message.userid else False)
@@ -1000,7 +1000,7 @@ class ChainBase(metaclass=ABCMeta):
         """
         note_list = [media.to_dict() for media in medias]
         self.messagehelper.put(message, role="user", note=note_list, title=message.title)
-        self.messageoper.add(**message.dict(), note=note_list)
+        self.messageoper.add(**message.model_dump(), note=note_list)
         return self.messagequeue.send_message("post_medias_message", message=message, medias=medias,
                                               immediately=True if message.userid else False)
 
@@ -1013,7 +1013,7 @@ class ChainBase(metaclass=ABCMeta):
         """
         note_list = [torrent.torrent_info.to_dict() for torrent in torrents]
         self.messagehelper.put(message, role="user", note=note_list, title=message.title)
-        self.messageoper.add(**message.dict(), note=note_list)
+        self.messageoper.add(**message.model_dump(), note=note_list)
         return self.messagequeue.send_message("post_torrents_message", message=message, torrents=torrents,
                                               immediately=True if message.userid else False)
 

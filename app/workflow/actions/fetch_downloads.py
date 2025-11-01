@@ -33,7 +33,7 @@ class FetchDownloadsAction(BaseAction):
     @classmethod
     @property
     def data(cls) -> dict: # noqa
-        return FetchDownloadsParams().dict()
+        return FetchDownloadsParams().model_dump()
 
     @property
     def success(self) -> bool:

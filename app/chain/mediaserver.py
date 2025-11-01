@@ -167,7 +167,7 @@ class MediaServerChain(ChainBase):
                             for episode in espisodes_info:
                                 seasoninfo[episode.season] = episode.episodes
                         # 插入数据
-                        item_dict = item.dict()
+                        item_dict = item.model_dump()
                         item_dict["seasoninfo"] = seasoninfo
                         item_dict["item_type"] = item_type
                         dboper.add(**item_dict)
