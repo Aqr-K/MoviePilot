@@ -13,7 +13,7 @@ from app.agent.tools.base import MoviePilotTool
 class QuerySubscribesInput(BaseModel):
     """查询订阅工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    status: Optional[str] = Field("all", description="Filter subscriptions by status: 'active' for enabled subscriptions, 'inactive' for disabled ones, 'all' for all subscriptions")
+    status: Optional[str] = Field("all", description="Filter subscriptions by status: 'R' for enabled subscriptions, 'P' for disabled ones, 'all' for all subscriptions")
     media_type: Optional[str] = Field("all", description="Filter by media type: 'movie' for films, 'tv' for television series, 'all' for all types")
 
 

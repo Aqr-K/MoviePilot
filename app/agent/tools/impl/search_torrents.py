@@ -16,7 +16,7 @@ class SearchTorrentsInput(BaseModel):
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     title: str = Field(..., description="The title of the media resource to search for (e.g., 'The Matrix 1999', 'Breaking Bad S01E01')")
     year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down search results)")
-    media_type: Optional[str] = Field(None, description="Type of media content: 'movie' for films, 'tv' for television series")
+    media_type: Optional[str] = Field(None, description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
     season: Optional[int] = Field(None, description="Season number for TV shows (optional, only applicable for series)")
     sites: Optional[List[int]] = Field(None, description="Array of specific site IDs to search on (optional, if not provided searches all configured sites)")
 

@@ -16,7 +16,7 @@ class SearchMediaInput(BaseModel):
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     title: str = Field(..., description="The title of the media to search for (e.g., 'The Matrix', 'Breaking Bad')")
     year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down results)")
-    media_type: Optional[str] = Field(None, description="Type of media content: 'movie' for films, 'tv' for television series, 'anime' for anime series")
+    media_type: Optional[str] = Field(None, description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
     season: Optional[int] = Field(None, description="Season number for TV shows and anime (optional, only applicable for series)")
 
 

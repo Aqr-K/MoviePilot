@@ -14,7 +14,7 @@ class GetRecommendationsInput(BaseModel):
     """获取推荐工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     source: Optional[str] = Field("tmdb_trending", description="Recommendation source: 'tmdb_trending' for TMDB trending content, 'douban_hot' for Douban popular content, 'bangumi_calendar' for Bangumi anime calendar")
-    media_type: Optional[str] = Field("all", description="Type of media content: 'movie' for films, 'tv' for television series, 'all' for all types")
+    media_type: Optional[str] = Field("all", description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
     limit: Optional[int] = Field(20, description="Maximum number of recommendations to return (default: 20, maximum: 100)")
 
 

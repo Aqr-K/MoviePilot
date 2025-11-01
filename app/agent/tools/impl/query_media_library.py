@@ -14,7 +14,7 @@ from app.schemas import MediaServerItem
 class QueryMediaLibraryInput(BaseModel):
     """查询媒体库工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    media_type: Optional[str] = Field("all", description="Type of media content: 'movie' for films, 'tv' for television series, 'all' for all types")
+    media_type: Optional[str] = Field("all", description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
     title: Optional[str] = Field(None, description="Specific media title to search for (optional, if provided returns detailed info for that specific media)")
     year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down search results)")
 

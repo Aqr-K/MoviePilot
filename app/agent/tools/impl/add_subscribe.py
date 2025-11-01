@@ -15,7 +15,7 @@ class AddSubscribeInput(BaseModel):
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     title: str = Field(..., description="The title of the media to subscribe to (e.g., 'The Matrix', 'Breaking Bad')")
     year: str = Field(..., description="Release year of the media (required for accurate identification)")
-    media_type: str = Field(..., description="Type of media content: 'movie' for films, 'tv' for television series")
+    media_type: str = Field(..., description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
     season: Optional[int] = Field(None, description="Season number for TV shows (optional, if not specified will subscribe to all seasons)")
     tmdb_id: Optional[str] = Field(None, description="TMDB database ID for precise media identification (optional but recommended for accuracy)")
 
