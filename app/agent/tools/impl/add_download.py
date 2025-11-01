@@ -1,6 +1,8 @@
 """添加下载工具"""
 
-from typing import Optional
+from typing import Optional, Type
+
+from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.download import DownloadChain
@@ -10,11 +12,22 @@ from app.log import logger
 from app.schemas import TorrentInfo
 
 
+class AddDownloadInput(BaseModel):
+    """添加下载工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    torrent_title: str = Field(..., description="The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')")
+    torrent_url: str = Field(..., description="Direct URL to the torrent file (.torrent) or magnet link")
+    downloader: Optional[str] = Field(None, description="Name of the downloader to use (optional, uses default if not specified)")
+    save_path: Optional[str] = Field(None, description="Directory path where the downloaded files should be saved (optional, uses default path if not specified)")
+    labels: Optional[str] = Field(None, description="Comma-separated list of labels/tags to assign to the download (optional, e.g., 'movie,hd,bluray')")
+
+
 class AddDownloadTool(MoviePilotTool):
     name: str = "add_download"
-    description: str = "添加下载任务，将搜索到的种子资源添加到下载器。"
+    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings."
+    args_schema: Type[BaseModel] = AddDownloadInput
 
-    async def _arun(self, torrent_title: str, torrent_url: str, explanation: str,
+    async def _arun(self, torrent_title: str, torrent_url: str,
                     downloader: Optional[str] = None, save_path: Optional[str] = None,
                     labels: Optional[str] = None, **kwargs) -> str:
         logger.info(

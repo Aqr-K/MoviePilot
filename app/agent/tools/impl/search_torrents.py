@@ -1,7 +1,9 @@
 """搜索种子工具"""
 
 import json
-from typing import List, Optional
+from typing import List, Optional, Type
+
+from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.search import SearchChain
@@ -9,11 +11,22 @@ from app.log import logger
 from app.schemas.types import MediaType
 
 
+class SearchTorrentsInput(BaseModel):
+    """搜索种子工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    title: str = Field(..., description="The title of the media resource to search for (e.g., 'The Matrix 1999', 'Breaking Bad S01E01')")
+    year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down search results)")
+    media_type: Optional[str] = Field(None, description="Type of media content: 'movie' for films, 'tv' for television series")
+    season: Optional[int] = Field(None, description="Season number for TV shows (optional, only applicable for series)")
+    sites: Optional[List[int]] = Field(None, description="Array of specific site IDs to search on (optional, if not provided searches all configured sites)")
+
+
 class SearchTorrentsTool(MoviePilotTool):
     name: str = "search_torrents"
-    description: str = "搜索站点种子资源，根据媒体信息搜索可下载的种子文件。"
+    description: str = "Search for torrent files across configured indexer sites based on media information. Returns available torrent downloads with details like file size, quality, and download links."
+    args_schema: Type[BaseModel] = SearchTorrentsInput
 
-    async def _arun(self, title: str, explanation: str, year: Optional[str] = None,
+    async def _arun(self, title: str, year: Optional[str] = None,
                     media_type: Optional[str] = None, season: Optional[int] = None,
                     sites: Optional[List[int]] = None, **kwargs) -> str:
         logger.info(

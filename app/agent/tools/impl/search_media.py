@@ -1,7 +1,9 @@
 """搜索媒体工具"""
 
 import json
-from typing import Optional
+from typing import Optional, Type
+
+from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
@@ -9,11 +11,21 @@ from app.log import logger
 from app.schemas.types import MediaType
 
 
+class SearchMediaInput(BaseModel):
+    """搜索媒体工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    title: str = Field(..., description="The title of the media to search for (e.g., 'The Matrix', 'Breaking Bad')")
+    year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down results)")
+    media_type: Optional[str] = Field(None, description="Type of media content: 'movie' for films, 'tv' for television series, 'anime' for anime series")
+    season: Optional[int] = Field(None, description="Season number for TV shows and anime (optional, only applicable for series)")
+
+
 class SearchMediaTool(MoviePilotTool):
     name: str = "search_media"
-    description: str = "搜索媒体资源，包括电影、电视剧、动漫等。可以根据标题、年份、类型等条件进行搜索。"
+    description: str = "Search for media resources including movies, TV shows, anime, etc. Supports searching by title, year, type, and other criteria. Returns detailed media information from TMDB database."
+    args_schema: Type[BaseModel] = SearchMediaInput
 
-    async def _arun(self, title: str, explanation: str, year: Optional[str] = None,
+    async def _arun(self, title: str, year: Optional[str] = None,
                     media_type: Optional[str] = None, season: Optional[int] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}")

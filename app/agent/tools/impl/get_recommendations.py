@@ -1,18 +1,29 @@
 """获取推荐工具"""
 
 import json
-from typing import Optional
+from typing import Optional, Type
+
+from pydantic import BaseModel, Field
 
 from app.chain.recommend import RecommendChain
 from app.log import logger
 from app.agent.tools.base import MoviePilotTool
 
 
+class GetRecommendationsInput(BaseModel):
+    """获取推荐工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    source: Optional[str] = Field("tmdb_trending", description="Recommendation source: 'tmdb_trending' for TMDB trending content, 'douban_hot' for Douban popular content, 'bangumi_calendar' for Bangumi anime calendar")
+    media_type: Optional[str] = Field("all", description="Type of media content: 'movie' for films, 'tv' for television series, 'all' for all types")
+    limit: Optional[int] = Field(20, description="Maximum number of recommendations to return (default: 20, maximum: 100)")
+
+
 class GetRecommendationsTool(MoviePilotTool):
     name: str = "get_recommendations"
-    description: str = "获取热门媒体推荐，包括电影、电视剧等热门内容。"
+    description: str = "Get trending and popular media recommendations from various sources. Returns curated lists of popular movies, TV shows, and anime based on different criteria like trending, ratings, or calendar schedules."
+    args_schema: Type[BaseModel] = GetRecommendationsInput
 
-    async def _arun(self, explanation: str, source: Optional[str] = "tmdb_trending", 
+    async def _arun(self, source: Optional[str] = "tmdb_trending",
                     media_type: Optional[str] = "all", limit: Optional[int] = 20, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: source={source}, media_type={media_type}, limit={limit}")
         try:

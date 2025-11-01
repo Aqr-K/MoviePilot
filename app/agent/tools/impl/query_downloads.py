@@ -1,18 +1,28 @@
 """查询下载工具"""
 
 import json
-from typing import Optional
+from typing import Optional, Type
+
+from pydantic import BaseModel, Field
 
 from app.chain.download import DownloadChain
 from app.log import logger
 from app.agent.tools.base import MoviePilotTool
 
 
+class QueryDownloadsInput(BaseModel):
+    """查询下载工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    downloader: Optional[str] = Field(None, description="Name of specific downloader to query (optional, if not provided queries all configured downloaders)")
+    status: Optional[str] = Field("all", description="Filter downloads by status: 'downloading' for active downloads, 'completed' for finished downloads, 'paused' for paused downloads, 'all' for all downloads")
+
+
 class QueryDownloadsTool(MoviePilotTool):
     name: str = "query_downloads"
-    description: str = "查询下载状态，查看下载器的任务列表和进度。"
+    description: str = "Query download status and list all active download tasks. Shows download progress, completion status, and task details from configured downloaders."
+    args_schema: Type[BaseModel] = QueryDownloadsInput
 
-    async def _arun(self, explanation: str, downloader: Optional[str] = None, 
+    async def _arun(self, downloader: Optional[str] = None,
                     status: Optional[str] = "all", **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}")
         try:

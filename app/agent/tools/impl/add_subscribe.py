@@ -1,6 +1,8 @@
 """添加订阅工具"""
 
-from typing import Optional
+from typing import Optional, Type
+
+from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.subscribe import SubscribeChain
@@ -8,11 +10,22 @@ from app.log import logger
 from app.schemas.types import MediaType
 
 
+class AddSubscribeInput(BaseModel):
+    """添加订阅工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    title: str = Field(..., description="The title of the media to subscribe to (e.g., 'The Matrix', 'Breaking Bad')")
+    year: str = Field(..., description="Release year of the media (required for accurate identification)")
+    media_type: str = Field(..., description="Type of media content: 'movie' for films, 'tv' for television series")
+    season: Optional[int] = Field(None, description="Season number for TV shows (optional, if not specified will subscribe to all seasons)")
+    tmdb_id: Optional[str] = Field(None, description="TMDB database ID for precise media identification (optional but recommended for accuracy)")
+
+
 class AddSubscribeTool(MoviePilotTool):
     name: str = "add_subscribe"
-    description: str = "添加媒体订阅，为用户感兴趣的媒体内容创建订阅规则。"
+    description: str = "Add media subscription to create automated download rules for movies and TV shows. The system will automatically search and download new episodes or releases based on the subscription criteria."
+    args_schema: Type[BaseModel] = AddSubscribeInput
 
-    async def _arun(self, title: str, year: str, media_type: str, explanation: str,
+    async def _arun(self, title: str, year: str, media_type: str,
                     season: Optional[int] = None, tmdb_id: Optional[str] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, tmdb_id={tmdb_id}")

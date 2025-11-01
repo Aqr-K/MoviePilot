@@ -41,10 +41,10 @@ class MoviePilotTool(BaseTool):
         """发送工具消息"""
         ToolChain().post_message(
             Notification(
-                channel=self.channel,
-                source=self.source,
-                userid=self.user_id,
-                username=self.username,
+                channel=self._channel,
+                source=self._source,
+                userid=self._user_id,
+                username=self._username,
                 title=title,
                 text=message
             )
