@@ -48,34 +48,11 @@ class PluginHelper(metaclass=WeakSingleton):
                 if self.install_report():
                     self.systemconfig.set(SystemConfigKey.PluginInstallReport, "1")
 
-    def get_plugins(self, repo_url: str, package_version: Optional[str] = None,
-                    force: bool = False) -> Optional[Dict[str, dict]]:
-        """
-        获取Github所有最新插件列表
-        :param repo_url: Github仓库地址
-        :param package_version: 首选插件版本 (如 "v2", "v3")，如果不指定则获取 v1 版本
-        :param force: 是否强制刷新，忽略缓存
-        """
-        # 如果强制刷新，直接调用不带缓存的版本
-        if force:
-            return self._request_plugins(repo_url, package_version)
-        else:
-            return self._request_plugins_cached(repo_url, package_version)
-
     @cached(maxsize=128, ttl=1800)
-    def _request_plugins_cached(self, repo_url: str,
-                                package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
-        """
-        获取Github所有最新插件列表（使用缓存）
-        :param repo_url: Github仓库地址
-        :param package_version: 首选插件版本 (如 "v2", "v3")，如果不指定则获取 v1 版本
-        """
-        return self._request_plugins(repo_url, package_version)
-
-    def _request_plugins(self, repo_url: str,
+    def get_plugins(self, repo_url: str,
                          package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
         """
-        获取Github所有最新插件列表（不使用缓存）
+        获取Github所有最新插件列表
         :param repo_url: Github仓库地址
         :param package_version: 首选插件版本 (如 "v2", "v3")，如果不指定则获取 v1 版本
         """
@@ -932,33 +909,11 @@ class PluginHelper(metaclass=WeakSingleton):
         logger.error(f"[GitHub] 所有策略均请求失败，URL: {url}，请检查网络连接或 GitHub 配置")
         return None
 
-    async def async_get_plugins(self, repo_url: str, package_version: Optional[str] = None,
-                                force: bool = False) -> Optional[Dict[str, dict]]:
-        """
-        异步获取Github所有最新插件列表
-        :param repo_url: Github仓库地址
-        :param package_version: 首选插件版本 (如 "v2", "v3")，如果不指定则获取 v1 版本
-        :param force: 是否强制刷新，忽略缓存
-        """
-        if force:
-            return await self._async_request_plugins(repo_url, package_version)
-        else:
-            return await self._async_request_plugins_cached(repo_url, package_version)
-
     @cached(maxsize=128, ttl=1800)
-    async def _async_request_plugins_cached(self, repo_url: str,
-                                            package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
-        """
-        获取Github所有最新插件列表（使用缓存）
-        :param repo_url: Github仓库地址
-        :param package_version: 首选插件版本 (如 "v2", "v3")，如果不指定则获取 v1 版本
-        """
-        return await self._async_request_plugins(repo_url, package_version)
-
-    async def _async_request_plugins(self, repo_url: str,
+    async def async_get_plugins(self, repo_url: str,
                                      package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
         """
-        异步获取Github所有最新插件列表（不使用缓存）
+        异步获取Github所有最新插件列表
         :param repo_url: Github仓库地址
         :param package_version: 首选插件版本 (如 "v2", "v3")，如果不指定则获取 v1 版本
         """
