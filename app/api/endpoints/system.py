@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Re
 from fastapi.responses import StreamingResponse
 
 from app import schemas
+from app.chain.mediaserver import MediaServerChain
 from app.chain.search import SearchChain
 from app.chain.system import SystemChain
 from app.core.cache import AsyncFileCache
@@ -52,6 +53,7 @@ async def fetch_image(
         proxy: bool = False,
         use_cache: bool = False,
         if_none_match: Optional[str] = None,
+        cookies: Optional[str | dict] = None,
         allowed_domains: Optional[set[str]] = None) -> Optional[Response]:
     """
     处理图片缓存逻辑，支持HTTP缓存和磁盘缓存
@@ -96,8 +98,13 @@ async def fetch_image(
     # 请求远程图片
     referer = "https://movie.douban.com/" if "doubanio.com" in url else None
     proxies = settings.PROXY if proxy else None
-    response = await AsyncRequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=proxies, referer=referer,
-                                       accept_type="image/avif,image/webp,image/apng,*/*").get_res(url=url)
+    response = await AsyncRequestUtils(
+        ua=settings.NORMAL_USER_AGENT,
+        proxies=proxies,
+        referer=referer,
+        cookies=cookies,
+        accept_type="image/avif,image/webp,image/apng,*/*",
+    ).get_res(url=url)
     if not response:
         logger.warn(f"Failed to fetch image from URL: {url}")
         return None
@@ -150,7 +157,8 @@ async def proxy_img(
     hosts = [config.config.get("host") for config in MediaServerHelper().get_configs().values() if
              config and config.config and config.config.get("host")]
     allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS) | set(hosts)
-    return await fetch_image(url=imgurl, proxy=proxy, use_cache=cache,
+    cookies = MediaServerChain().get_image_cookies(server=None, image_url=imgurl)
+    return await fetch_image(url=imgurl, proxy=proxy, use_cache=cache, cookies=cookies,
                              if_none_match=if_none_match, allowed_domains=allowed_domains)
 
 

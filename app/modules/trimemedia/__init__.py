@@ -382,3 +382,27 @@ class TrimeMediaModule(_ModuleBase, _MediaServerBase[TrimeMedia]):
         if not server_obj:
             return []
         return server_obj.get_latest_backdrops(num=count, remote=remote) or []
+
+    def mediaserver_image_cookies(
+        self,
+        server: Optional[str] = None,
+        image_url: Optional[str] = None,
+        **kwargs,
+    ) -> Optional[str | dict]:
+        """
+        获取飞牛影视服务器的图片Cookies
+
+        :param server: 媒体服务器名称
+        :param image_url: 图片网址
+        """
+        if not image_url:
+            return None
+        if server:
+            server_obj = self.get_instance(server)
+            if not server_obj:
+                return None
+            return server_obj.get_image_cookies(image_url)
+        else:
+            for server_obj in self.get_instances().values():
+                if cookies := server_obj.get_image_cookies(image_url):
+                    return cookies
