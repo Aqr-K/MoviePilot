@@ -648,6 +648,8 @@ class TrimeMedia:
         """
         获得指定图片的Cookies
         """
+        if not self.is_authenticated():
+            return None
         if not image_url or not SecurityUtils.is_safe_url(
             image_url, [self._api.host], strict=True
         ):
