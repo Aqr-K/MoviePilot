@@ -147,6 +147,7 @@ async def proxy_img(
         imgurl: str,
         proxy: bool = False,
         cache: bool = False,
+        use_cookies: bool = False,
         if_none_match: Annotated[str | None, Header()] = None,
         _: schemas.TokenPayload = Depends(verify_resource_token)
 ) -> Response:
@@ -157,7 +158,11 @@ async def proxy_img(
     hosts = [config.config.get("host") for config in MediaServerHelper().get_configs().values() if
              config and config.config and config.config.get("host")]
     allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS) | set(hosts)
-    cookies = MediaServerChain().get_image_cookies(server=None, image_url=imgurl)
+    cookies = (
+        MediaServerChain().get_image_cookies(server=None, image_url=imgurl)
+        if use_cookies
+        else None
+    )
     return await fetch_image(url=imgurl, proxy=proxy, use_cache=cache, cookies=cookies,
                              if_none_match=if_none_match, allowed_domains=allowed_domains)
 

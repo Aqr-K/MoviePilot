@@ -200,6 +200,7 @@ class TrimeMedia:
                     ],
                     link=f"{self._playhost or self._api.host}/library/{library.guid}",
                     server_type="trimemedia",
+                    use_cookies=True,
                 )
             )
         return libraries
@@ -498,6 +499,7 @@ class TrimeMedia:
                 else 0
             ),
             server_type="trimemedia",
+            use_cookies=True,
         )
 
     def get_items(
