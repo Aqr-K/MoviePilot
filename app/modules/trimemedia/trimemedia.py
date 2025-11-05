@@ -5,6 +5,7 @@ import app.modules.trimemedia.api as fnapi
 from app import schemas
 from app.log import logger
 from app.schemas import MediaType
+from app.utils.security import SecurityUtils
 from app.utils.url import UrlUtils
 
 
@@ -20,6 +21,7 @@ class TrimeMedia:
     _sync_libraries: List[str] = []
 
     _api: Optional[fnapi.Api] = None
+    _version: Optional[fnapi.Version] = None
 
     def __init__(
         self,
@@ -54,6 +56,13 @@ class TrimeMedia:
         获得飞牛API
         """
         return self._api
+
+    @property
+    def version(self) -> Optional[fnapi.Version]:
+        """
+        获得飞牛API的版本
+        """
+        return self._version
 
     class _ApiCreateResult:
         api: fnapi.Api
@@ -123,7 +132,9 @@ class TrimeMedia:
         self.disconnect()
         if result := self.__create_api(self._host):
             self._api = result.api
+            self._version = result.version
             # 版本号:0.8.53, 服务版本:0.8.23
+            # 版本号:0.8.56, 服务版本:0.8.23 接口/memory/user/list改为/manager/user/list
             logger.debug(
                 f"版本号:{result.version.frontend}, 服务版本:{result.version.backend}"
             )
@@ -189,6 +200,7 @@ class TrimeMedia:
                     ],
                     link=f"{self._playhost or self._api.host}/library/{library.guid}",
                     server_type="trimemedia",
+                    use_cookies=True,
                 )
             )
         return libraries
@@ -487,6 +499,7 @@ class TrimeMedia:
                 else 0
             ),
             server_type="trimemedia",
+            use_cookies=True,
         )
 
     def get_items(
@@ -603,6 +616,7 @@ class TrimeMedia:
             if (item_details := self._api.item(item.guid)) is None:
                 continue
             if remote:
+                # FIXME 新版飞牛的壁纸无法直接在浏览器中访问
                 img_host = self._playhost or self._api.host
             else:
                 img_host = self._api.host
@@ -631,3 +645,15 @@ class TrimeMedia:
             )
             else False
         )
+
+    def get_image_cookies(self, image_url: str):
+        """
+        获得指定图片的Cookies
+        """
+        if not self.is_authenticated():
+            return None
+        if not image_url or not SecurityUtils.is_safe_url(
+            image_url, [self._api.host], strict=True
+        ):
+            return None
+        return {"Trim-MC-token": self._api.token}
