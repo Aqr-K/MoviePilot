@@ -21,7 +21,7 @@ class ObjectUtilsTest(TestCase):
         def not_implemented_function():
             raise NotImplementedError
 
-        def not_implemented_function_no_call():
+        def not_implemented_function_with_call():
             raise NotImplementedError()
 
         async def multiple_lines_async_def(_param1: str,
@@ -36,6 +36,6 @@ class ObjectUtilsTest(TestCase):
         self.assertFalse(ObjectUtils.check_method(docstring_function))
         self.assertFalse(ObjectUtils.check_method(ellipsis_function))
         self.assertFalse(ObjectUtils.check_method(not_implemented_function))
-        self.assertFalse(ObjectUtils.check_method(not_implemented_function_no_call))
+        self.assertFalse(ObjectUtils.check_method(not_implemented_function_with_call))
         self.assertFalse(ObjectUtils.check_method(multiple_lines_async_def))
         self.assertTrue(ObjectUtils.check_method(empty_function))

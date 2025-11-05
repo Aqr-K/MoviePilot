@@ -2,7 +2,7 @@ import ast
 import dis
 import inspect
 import textwrap
-from types import FunctionType, MethodType
+from types import FunctionType
 from typing import Any, Callable, get_type_hints
 
 
@@ -41,7 +41,7 @@ class ObjectUtils:
         return len(list(parameters.keys()))
 
     @staticmethod
-    def check_method(func: FunctionType | MethodType) -> bool:
+    def check_method(func: Callable[..., Any]) -> bool:
         """
         检查函数是否已实现
         """
@@ -60,10 +60,9 @@ class ObjectUtils:
                 # 跳过 docstring 或 ...
                 if isinstance(stmt, ast.Expr):
                     expr = stmt.value
-                    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
-                        continue
-                    if isinstance(expr, ast.Constant) and expr.value is Ellipsis:
-                        continue
+                    if isinstance(expr, ast.Constant):
+                        if isinstance(expr.value, str) or expr.value is Ellipsis:
+                            continue
                 # 检查 raise NotImplementedError
                 if isinstance(stmt, ast.Raise):
                     exc = stmt.exc
@@ -77,7 +76,7 @@ class ObjectUtils:
         except Exception as err:
             print(err)
             # 源代码分析失败时，进行字节码分析
-            code_obj = func.__code__
+            code_obj = func.__code__  # type: ignore[attr-defined]
             instructions = list(dis.get_instructions(code_obj))
             # 检查是否为仅返回None的简单结构
             if len(instructions) == 2:
