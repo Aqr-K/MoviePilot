@@ -1,6 +1,8 @@
+import ast
 import dis
 import inspect
-from types import FunctionType
+import textwrap
+from types import FunctionType, MethodType
 from typing import Any, Callable, get_type_hints
 
 
@@ -39,40 +41,38 @@ class ObjectUtils:
         return len(list(parameters.keys()))
 
     @staticmethod
-    def check_method(func: FunctionType) -> bool:
+    def check_method(func: FunctionType | MethodType) -> bool:
         """
         检查函数是否已实现
         """
         try:
-            # 尝试通过源代码分析
-            source = inspect.getsource(func)
-            in_comment = False
-            for line in source.split('\n'):
-                line = line.strip()
-                # 跳过空行
-                if not line:
-                    continue
-                # 处理"""单行注释
-                if (line.startswith(('"""', "'''"))
-                        and line.endswith(('"""', "'''"))
-                        and len(line) > 3):
-                    continue
-                # 处理"""多行注释
-                if line.startswith(('"""', "'''")):
-                    in_comment = not in_comment
-                    continue
-                # 在注释中则跳过
-                if in_comment:
-                    continue
-                # 跳过#注释、pass语句、装饰器、函数定义行
-                if (line.startswith('#')
-                        or line == "pass"
-                        or line.startswith('@')
-                        or line.startswith('def ')):
-                    continue
-                # 发现有效代码行
+            src = inspect.getsource(func)
+            tree = ast.parse(textwrap.dedent(src))
+            node = tree.body[0]
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 return True
-            # 没有有效代码行
+            body = node.body
+
+            for stmt in body:
+                # 跳过 pass
+                if isinstance(stmt, ast.Pass):
+                    continue
+                # 跳过 docstring 或 ...
+                if isinstance(stmt, ast.Expr):
+                    expr = stmt.value
+                    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+                        continue
+                    if isinstance(expr, ast.Constant) and expr.value is Ellipsis:
+                        continue
+                # 检查 raise NotImplementedError
+                if isinstance(stmt, ast.Raise):
+                    exc = stmt.exc
+                    if isinstance(exc, ast.Call) and getattr(exc.func, "id", None) == "NotImplementedError":
+                        continue
+                    if isinstance(exc, ast.Name) and exc.id == "NotImplementedError":
+                        continue
+
+                return True
             return False
         except Exception as err:
             print(err)
