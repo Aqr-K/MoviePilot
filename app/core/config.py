@@ -407,6 +407,8 @@ class ConfigModel(BaseModel):
     # ==================== Docker配置 ====================
     # Docker Client API地址
     DOCKER_CLIENT_API: Optional[str] = "tcp://127.0.0.1:38379"
+    # Playwright浏览器类型，chromium/firefox
+    PLAYWRIGHT_BROWSER_TYPE: str = "chromium"
 
     # ==================== AI智能体配置 ====================
     # AI智能体开关
