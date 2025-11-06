@@ -150,7 +150,7 @@ class TorrentsChain(ChainBase):
             return []
         # 解析RSS
         rss_items = RssHelper().parse(site.get("rss"), True if site.get("proxy") else False,
-                                      timeout=int(site.get("timeout") or 30))
+                                      timeout=int(site.get("timeout") or 30), ua=site.get("ua") if site.get("ua") else None)
         if rss_items is None:
             # rss过期，尝试保留原配置生成新的rss
             self.__renew_rss_url(domain=domain, site=site)
