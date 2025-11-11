@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from dotenv import set_key
 from pydantic import BaseModel, Field, ConfigDict, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.log import logger, log_settings, LogConfigModel
 from app.schemas import MediaType
@@ -438,10 +438,10 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
     系统配置类
     """
 
-    model_config = ConfigDict(
+    model_config = SettingsConfigDict(
         case_sensitive=True,
         env_file=SystemUtils.get_env_path(),
-        env_file_encoding="utf-8"
+        env_file_encoding="utf-8",
     )
 
     def __init__(self, **kwargs):

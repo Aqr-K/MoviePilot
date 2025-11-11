@@ -232,6 +232,19 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
         super().__init__()
         self._default_config_name: Optional[str] = None
 
+    def init_service(self, service_name: str,
+                     service_type: Optional[Union[Type[TService], Callable[..., TService]]] = None):
+        """
+        初始化服务，获取配置并实例化对应服务
+
+        :param service_name: 服务名称，作为配置匹配的依据
+        :param service_type: 服务的类型，可以是类类型（Type[TService]）、工厂函数（Callable）或 None 来跳过实例化
+        """
+        # 重置默认配置名称
+        self.reset_default_config_name()
+        # 初始化服务
+        super().init_service(service_name, service_type)
+
     def get_default_config_name(self) -> Optional[str]:
         """
         获取默认服务配置的名称
@@ -262,6 +275,12 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
         if not self._service_name:
             return {}
         return {conf.name: conf for conf in configs if conf.type == self._service_name and conf.enabled}
+
+    def reset_default_config_name(self):
+        """
+        重置默认配置名称
+        """
+        self._default_config_name = None
 
 
 class _MediaServerBase(ServiceBase[TService, MediaServerConf]):

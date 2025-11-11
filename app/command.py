@@ -215,7 +215,7 @@ class Command(metaclass=Singleton):
         except Exception as e:
             logger.error(f"Error occurred during command initialization in background: {e}", exc_info=True)
 
-    def __trigger_register_commands_event(self) -> (Optional[Event], dict):
+    def __trigger_register_commands_event(self) -> tuple[Optional[Event], dict]:
         """
         触发事件，允许调整命令数据
         """

@@ -94,7 +94,6 @@ class MetaVideo(MetaBase):
         title = re.sub(r'\d{4}[\s._-]\d{1,2}[\s._-]\d{1,2}', "", title)
         # 拆分tokens
         tokens = Tokens(title)
-        self.tokens = tokens
         # 实例化StreamingPlatforms对象
         streaming_platforms = StreamingPlatforms()
         # 解析名称、年份、季、集、资源类型、分辨率等
@@ -102,7 +101,7 @@ class MetaVideo(MetaBase):
         while token:
             self._index += 1  # 更新当前处理的token索引
             # Part
-            self.__init_part(token)
+            self.__init_part(token, tokens)
             # 标题
             if self._continue_flag:
                 self.__init_name(token)
@@ -123,7 +122,7 @@ class MetaVideo(MetaBase):
                 self.__init_resource_type(token)
             # 流媒体平台
             if self._continue_flag:
-                self.__init_web_source(token, streaming_platforms)
+                self.__init_web_source(token, tokens, streaming_platforms)
             # 视频编码
             if self._continue_flag:
                 self.__init_video_encode(token)
@@ -311,7 +310,7 @@ class MetaVideo(MetaBase):
                     self.en_name = token
                 self._last_token_type = "enname"
 
-    def __init_part(self, token: str):
+    def __init_part(self, token: str, tokens: Tokens):
         """
         识别Part
         """
@@ -327,12 +326,12 @@ class MetaVideo(MetaBase):
         if re_res:
             if not self.part:
                 self.part = re_res.group(1)
-            nextv = self.tokens.cur()
+            nextv = tokens.cur()
             if nextv \
                     and ((nextv.isdigit() and (len(nextv) == 1 or len(nextv) == 2 and nextv.startswith('0')))
                          or nextv.upper() in ['A', 'B', 'C', 'I', 'II', 'III']):
                 self.part = "%s%s" % (self.part, nextv)
-                self.tokens.get_next()
+                tokens.get_next()
             self._last_token_type = "part"
             self._continue_flag = False
             # self._stop_name_flag = False
@@ -582,7 +581,7 @@ class MetaVideo(MetaBase):
                 self._effect.append(effect)
             self._last_token = effect.upper()
 
-    def __init_web_source(self, token: str, streaming_platforms: StreamingPlatforms):
+    def __init_web_source(self, token: str, tokens: Tokens, streaming_platforms: StreamingPlatforms):
         """
         识别流媒体平台
         """
@@ -594,10 +593,10 @@ class MetaVideo(MetaBase):
 
         prev_token = None
         prev_idx = self._index - 2
-        if 0 <= prev_idx < len(self.tokens.tokens):
-            prev_token = self.tokens.tokens[prev_idx]
+        if 0 <= prev_idx < len(tokens.tokens):
+            prev_token = tokens.tokens[prev_idx]
 
-        next_token = self.tokens.peek()
+        next_token = tokens.peek()
 
         if streaming_platforms.is_streaming_platform(token):
             platform_name = streaming_platforms.get_streaming_platform_name(token)
@@ -616,7 +615,7 @@ class MetaVideo(MetaBase):
                         platform_name = streaming_platforms.get_streaming_platform_name(combined_token)
                         query_range = 2
                         if is_next:
-                            self.tokens.get_next()
+                            tokens.get_next()
                         break
 
         if not platform_name:
@@ -626,8 +625,8 @@ class MetaVideo(MetaBase):
         match_start_idx = self._index - query_range
         match_end_idx = self._index - 1
         start_index = max(0, match_start_idx - query_range)
-        end_index = min(len(self.tokens.tokens), match_end_idx + 1 + query_range)
-        tokens_to_check = self.tokens.tokens[start_index:end_index]
+        end_index = min(len(tokens.tokens), match_end_idx + 1 + query_range)
+        tokens_to_check = tokens.tokens[start_index:end_index]
 
         if any(tok and tok.upper() in web_tokens for tok in tokens_to_check):
             self.web_source = platform_name

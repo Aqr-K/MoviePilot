@@ -158,6 +158,8 @@ class MediaInfo(BaseModel):
     production_countries: Optional[list] = Field(default_factory=list)
     # 语种
     spoken_languages: Optional[list] = Field(default_factory=list)
+    # 所有发行日期
+    release_dates: list = Field(default_factory=list)
     # 状态
     status: Optional[str] = None
     # 标签
