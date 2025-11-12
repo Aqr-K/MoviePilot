@@ -250,6 +250,8 @@ class MediaInfo:
     production_countries: list = field(default_factory=list)
     # 语种
     spoken_languages: list = field(default_factory=list)
+    # 所有发行日期
+    release_dates: list = field(default_factory=list)
     # 状态
     status: str = None
     # 标签
@@ -433,6 +435,18 @@ class MediaInfo:
             if self.release_date:
                 # 年份
                 self.year = self.release_date[:4]
+            # 所有发行日期
+            self.release_dates = [
+                {
+                    "date": release_date.get("release_date"),
+                    "iso_code": result.get("iso_3166_1"),
+                    "note": release_date.get("note"),
+                    "type": release_date.get("type"),
+                }
+                for result in info.get("release_dates", {}).get("results", [])
+                for release_date in result.get("release_dates", [])
+                if release_date.get("release_date")
+            ]
         else:
             # 电视剧
             self.title = info.get('name')
