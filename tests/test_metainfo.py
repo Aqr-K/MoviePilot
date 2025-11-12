@@ -18,7 +18,7 @@ class MetaInfoTest(TestCase):
             if info.get("path"):
                 meta_info = MetaInfoPath(path=Path(info.get("path")))
             else:
-                meta_info = MetaInfo(title=info.get("title"), subtitle=info.get("subtitle"))
+                meta_info = MetaInfo(title=info.get("title"), subtitle=info.get("subtitle"), custom_words=["#"])
             target = {
                 "type": meta_info.type.value,
                 "cn_name": meta_info.cn_name or "",
