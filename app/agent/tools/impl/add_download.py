@@ -4,7 +4,7 @@ from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
-from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.base import MoviePilotTool, ToolChain
 from app.chain.download import DownloadChain
 from app.core.context import Context
 from app.core.metainfo import MetaInfo
@@ -18,6 +18,8 @@ class AddDownloadInput(BaseModel):
     torrent_title: str = Field(...,
                                description="The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')")
     torrent_url: str = Field(..., description="Direct URL to the torrent file (.torrent) or magnet link")
+    torrent_description: Optional[str] = Field(None,
+                                                  description="Brief description of the torrent content (optional)")
     downloader: Optional[str] = Field(None,
                                       description="Name of the downloader to use (optional, uses default if not specified)")
     save_path: Optional[str] = Field(None,
@@ -31,7 +33,7 @@ class AddDownloadTool(MoviePilotTool):
     description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings."
     args_schema: Type[BaseModel] = AddDownloadInput
 
-    async def run(self, torrent_title: str, torrent_url: str,
+    async def run(self, torrent_title: str, torrent_url: str, torrent_description: Optional[str] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
         logger.info(
@@ -49,10 +51,11 @@ class AddDownloadTool(MoviePilotTool):
                 title=torrent_title,
                 download_url=torrent_url
             )
-            meta_info = MetaInfo(title=torrent_title)
+            meta_info = MetaInfo(title=torrent_title, subtitle=torrent_description)
             context = Context(
                 torrent_info=torrent_info,
-                meta_info=meta_info
+                meta_info=meta_info,
+                media_info=ToolChain().recognize_media(meta=meta_info)
             )
 
             did = download_chain.download_single(
