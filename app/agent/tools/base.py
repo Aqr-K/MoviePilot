@@ -41,7 +41,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 发送执行工具说明
         explanation = kwargs.get("explanation")
         if explanation:
-            await self.send_tool_message(f"⏯️[{explanation}]")
+            await self.send_tool_message(f"▶️️{explanation}")
         return await self.run(**kwargs)
 
     @abstractmethod
