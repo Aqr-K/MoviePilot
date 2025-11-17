@@ -52,7 +52,52 @@ class SearchTorrentsTool(MoviePilotTool):
                 filtered_torrents.append(torrent)
 
             if filtered_torrents:
-                return json.dumps([t.to_dict() for t in filtered_torrents], ensure_ascii=False, indent=2)
+                # 限制最多50条结果
+                total_count = len(filtered_torrents)
+                limited_torrents = filtered_torrents[:50]
+                # 精简字段，只保留关键信息
+                simplified_torrents = []
+                for t in limited_torrents:
+                    simplified = {}
+                    # 精简 torrent_info
+                    if t.torrent_info:
+                        simplified["torrent_info"] = {
+                            "title": t.torrent_info.title,
+                            "size": t.torrent_info.size,
+                            "seeders": t.torrent_info.seeders,
+                            "peers": t.torrent_info.peers,
+                            "site_name": t.torrent_info.site_name,
+                            "enclosure": t.torrent_info.enclosure,
+                            "page_url": t.torrent_info.page_url,
+                            "volume_factor": t.torrent_info.volume_factor,
+                            "pubdate": t.torrent_info.pubdate
+                        }
+                    # 精简 media_info
+                    if t.media_info:
+                        simplified["media_info"] = {
+                            "title": t.media_info.title,
+                            "en_title": t.media_info.en_title,
+                            "year": t.media_info.year,
+                            "type": t.media_info.type.value if t.media_info.type else None,
+                            "season": t.media_info.season,
+                            "tmdb_id": t.media_info.tmdb_id
+                        }
+                    # 精简 meta_info
+                    if t.meta_info:
+                        simplified["meta_info"] = {
+                            "name": t.meta_info.name,
+                            "cn_name": t.meta_info.cn_name,
+                            "en_name": t.meta_info.en_name,
+                            "year": t.meta_info.year,
+                            "type": t.meta_info.type.value if t.meta_info.type else None,
+                            "begin_season": t.meta_info.begin_season
+                        }
+                    simplified_torrents.append(simplified)
+                result_json = json.dumps(simplified_torrents, ensure_ascii=False, indent=2)
+                # 如果结果被裁剪，添加提示信息
+                if total_count > 50:
+                    return f"注意：搜索结果共找到 {total_count} 条，为节省上下文空间，仅显示前 50 条结果。\n\n{result_json}"
+                return result_json
             else:
                 return f"未找到相关种子资源: {title}"
         except Exception as e:

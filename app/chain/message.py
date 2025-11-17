@@ -868,7 +868,7 @@ class MessageChain(ChainBase):
                 source=source,
                 userid=userid,
                 username=username,
-                title="正在处理您的请求，请稍候..."
+                title="MoviePilot助手已收到您的请求，请稍候..."
             ))
 
             # 生成会话ID

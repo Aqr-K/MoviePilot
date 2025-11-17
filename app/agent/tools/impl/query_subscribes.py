@@ -37,8 +37,37 @@ class QuerySubscribesTool(MoviePilotTool):
                     continue
                 filtered_subscribes.append(sub)
             if filtered_subscribes:
-                return json.dumps([s.to_dict() for s in filtered_subscribes], ensure_ascii=False, indent=2)
-            return "未找到相关订阅。"
+                # 限制最多20条结果
+                total_count = len(filtered_subscribes)
+                limited_subscribes = filtered_subscribes[:20]
+                # 精简字段，只保留关键信息
+                simplified_subscribes = []
+                for s in limited_subscribes:
+                    simplified = {
+                        "id": s.id,
+                        "name": s.name,
+                        "year": s.year,
+                        "type": s.type,
+                        "season": s.season,
+                        "tmdbid": s.tmdbid,
+                        "doubanid": s.doubanid,
+                        "bangumiid": s.bangumiid,
+                        "poster": s.poster,
+                        "vote": s.vote,
+                        "description": s.description[:200] + "..." if s.description and len(s.description) > 200 else s.description,
+                        "state": s.state,
+                        "total_episode": s.total_episode,
+                        "lack_episode": s.lack_episode,
+                        "last_update": s.last_update,
+                        "username": s.username
+                    }
+                    simplified_subscribes.append(simplified)
+                result_json = json.dumps(simplified_subscribes, ensure_ascii=False, indent=2)
+                # 如果结果被裁剪，添加提示信息
+                if total_count > 20:
+                    return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 20 条结果。\n\n{result_json}"
+                return result_json
+            return "未找到相关订阅"
         except Exception as e:
             logger.error(f"查询订阅失败: {e}", exc_info=True)
             return f"查询订阅时发生错误: {str(e)}"

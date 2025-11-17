@@ -51,8 +51,33 @@ class GetRecommendationsTool(MoviePilotTool):
                 results = recommend_chain.bangumi_calendar(limit=limit)
 
             if results:
-                # 使用 to_dict() 方法
-                return json.dumps(results)
+                # 限制最多20条结果
+                total_count = len(results)
+                limited_results = results[:20]
+                # 精简字段，只保留关键信息
+                simplified_results = []
+                for r in limited_results:
+                    # r 已经是字典格式（to_dict的结果）
+                    simplified = {
+                        "title": r.get("title"),
+                        "en_title": r.get("en_title"),
+                        "year": r.get("year"),
+                        "type": r.get("type"),
+                        "season": r.get("season"),
+                        "tmdb_id": r.get("tmdb_id"),
+                        "imdb_id": r.get("imdb_id"),
+                        "douban_id": r.get("douban_id"),
+                        "overview": r.get("overview", "")[:200] + "..." if r.get("overview") and len(r.get("overview", "")) > 200 else r.get("overview"),
+                        "vote_average": r.get("vote_average"),
+                        "poster_path": r.get("poster_path"),
+                        "detail_link": r.get("detail_link")
+                    }
+                    simplified_results.append(simplified)
+                result_json = json.dumps(simplified_results, ensure_ascii=False, indent=2)
+                # 如果结果被裁剪，添加提示信息
+                if total_count > 20:
+                    return f"注意：推荐结果共找到 {total_count} 条，为节省上下文空间，仅显示前 20 条结果。\n\n{result_json}"
+                return result_json
             return "未找到推荐内容。"
         except Exception as e:
             logger.error(f"获取推荐失败: {e}", exc_info=True)

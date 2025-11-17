@@ -39,7 +39,41 @@ class QueryDownloadsTool(MoviePilotTool):
                     continue
                 filtered_downloads.append(dl)
             if filtered_downloads:
-                return json.dumps([d.model_dump() for d in filtered_downloads])
+                # 限制最多20条结果
+                total_count = len(filtered_downloads)
+                limited_downloads = filtered_downloads[:20]
+                # 精简字段，只保留关键信息
+                simplified_downloads = []
+                for d in limited_downloads:
+                    simplified = {
+                        "downloader": d.downloader,
+                        "hash": d.hash,
+                        "title": d.title,
+                        "name": d.name,
+                        "year": d.year,
+                        "season_episode": d.season_episode,
+                        "size": d.size,
+                        "progress": d.progress,
+                        "state": d.state,
+                        "upspeed": d.upspeed,
+                        "dlspeed": d.dlspeed,
+                        "left_time": d.left_time
+                    }
+                    # 精简 media 字段
+                    if d.media:
+                        simplified["media"] = {
+                            "tmdbid": d.media.get("tmdbid"),
+                            "type": d.media.get("type"),
+                            "title": d.media.get("title"),
+                            "season": d.media.get("season"),
+                            "episode": d.media.get("episode")
+                        }
+                    simplified_downloads.append(simplified)
+                result_json = json.dumps(simplified_downloads, ensure_ascii=False, indent=2)
+                # 如果结果被裁剪，添加提示信息
+                if total_count > 20:
+                    return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 20 条结果。\n\n{result_json}"
+                return result_json
             return "未找到相关下载任务。"
         except Exception as e:
             logger.error(f"查询下载失败: {e}", exc_info=True)
