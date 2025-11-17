@@ -745,6 +745,36 @@ class PluginManager(metaclass=Singleton):
                     logger.error(f"获取插件 {plugin_id} 动作出错：{str(e)}")
         return ret_actions
 
+    def get_plugin_agent_tools(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        获取插件智能体工具
+        [{
+            "plugin_id": "插件ID",
+            "plugin_name": "插件名称",
+            "tools": [ToolClass1, ToolClass2, ...]
+        }]
+        """
+        ret_tools = []
+        # 创建字典快照避免并发修改
+        running_plugins_snapshot = dict(self._running_plugins)
+        for plugin_id, plugin in running_plugins_snapshot.items():
+            if pid and pid != plugin_id:
+                continue
+            if hasattr(plugin, "get_agent_tools") and ObjectUtils.check_method(plugin.get_agent_tools):
+                try:
+                    if not plugin.get_state():
+                        continue
+                    tools = plugin.get_agent_tools()
+                    if tools:
+                        ret_tools.append({
+                            "plugin_id": plugin_id,
+                            "plugin_name": plugin.plugin_name,
+                            "tools": tools
+                        })
+                except Exception as e:
+                    logger.error(f"获取插件 {plugin_id} 智能体工具出错：{str(e)}")
+        return ret_tools
+
     @staticmethod
     def get_plugin_remote_entry(plugin_id: str, dist_path: str) -> str:
         """
