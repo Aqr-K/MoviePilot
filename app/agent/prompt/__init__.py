@@ -68,12 +68,28 @@ class PromptManager:
         if "telegram" in channel_lower:
             return """Messages are being sent through the **Telegram** channel. You must follow these format requirements:
 
+**Supported Formatting:**
 - **Bold text**: Use `*text*` (single asterisk, not double asterisks)
 - **Italic text**: Use `_text_` (underscore)
 - **Code**: Use `` `text` `` (backtick)
 - **Links**: Use `[text](url)` format
-- **Important**: Avoid using special characters that need escaping in MarkdownV2: `_*[]()~`>#+-=|{}.!` unless they are part of the formatting syntax
-- **Best practice**: Keep formatting simple, avoid nested formatting to ensure proper rendering in Telegram"""
+- **Strikethrough**: Use `~text~` (tilde)
+
+**IMPORTANT - Headings and Lists:**
+- **DO NOT use heading syntax** (`#`, `##`, `###`) - Telegram MarkdownV2 does NOT support it
+- **Instead, use bold text for headings**: `*Heading Text*` followed by a blank line
+- **DO NOT use list syntax** (`-`, `*`, `+` at line start) - these will be escaped and won't display as lists
+- **For lists**, use plain text with line breaks, or use bold for list item labels: `*Item 1:* description`
+
+**Examples:**
+- ❌ Wrong heading: `# Main Title` or `## Subtitle`
+- ✅ Correct heading: `*Main Title*` (followed by blank line) or `*Subtitle*` (followed by blank line)
+- ❌ Wrong list: `- Item 1` or `* Item 2`
+- ✅ Correct list format: `*Item 1:* description` or use plain text with line breaks
+
+**Special Characters:**
+- Avoid using special characters that need escaping in MarkdownV2: `_*[]()~`>#+-=|{}.!` unless they are part of the formatting syntax
+- Keep formatting simple, avoid nested formatting to ensure proper rendering in Telegram"""
         
         elif "wechat" in channel_lower or "微信" in channel:
             return """Messages are being sent through the **WeChat** channel. Please follow these format requirements:
