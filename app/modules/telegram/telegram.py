@@ -321,6 +321,8 @@ class Telegram:
             return None
 
         try:
+            if title:
+                title = self.escape_markdown(title)
             index, image, caption = 1, "", "*%s*" % title
             for media in medias:
                 if not image:
@@ -382,6 +384,8 @@ class Telegram:
             return None
 
         try:
+            if title:
+                title = self.escape_markdown(title)
             index, caption = 1, "*%s*" % title
             image = torrents[0].media_info.get_message_image()
             for context in torrents:
