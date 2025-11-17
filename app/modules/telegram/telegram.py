@@ -276,7 +276,7 @@ class Telegram:
                 return self.__send_request(userid=chat_id, image=image, caption=caption, reply_markup=reply_markup)
 
         except Exception as msg_e:
-            logger.error(f"发送消息失败：{msg_e}")
+            logger.error(f"使用 send_msg 发送消息失败：{msg_e}")
             return False
 
     def _determine_target_chat_id(self, userid: Optional[str] = None,
@@ -321,6 +321,9 @@ class Telegram:
             return None
 
         try:
+            if title:
+                # 标题总是转义（因为通常标题不包含Markdown格式）
+                title = self.escape_markdown(title)
             index, image, caption = 1, "", "*%s*" % title
             for media in medias:
                 if not image:
@@ -360,7 +363,7 @@ class Telegram:
                 return self.__send_request(userid=chat_id, image=image, caption=caption, reply_markup=reply_markup)
 
         except Exception as msg_e:
-            logger.error(f"发送消息失败：{msg_e}")
+            logger.error(f"使用 send_medias_msg 发送消息失败：{msg_e}")
             return False
 
     def send_torrents_msg(self, torrents: List[Context],
@@ -382,6 +385,9 @@ class Telegram:
             return None
 
         try:
+            if title:
+                # 标题总是转义（因为通常标题不包含Markdown格式）
+                title = self.escape_markdown(title)
             index, caption = 1, "*%s*" % title
             image = torrents[0].media_info.get_message_image()
             for context in torrents:
@@ -420,7 +426,7 @@ class Telegram:
                 return self.__send_request(userid=chat_id, image=image, caption=caption, reply_markup=reply_markup)
 
         except Exception as msg_e:
-            logger.error(f"发送消息失败：{msg_e}")
+            logger.error(f"使用 send_torrents_msg 发送消息失败：{msg_e}")
             return False
 
     @staticmethod
