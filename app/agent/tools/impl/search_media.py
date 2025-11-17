@@ -63,25 +63,12 @@ class SearchMediaTool(MoviePilotTool):
                     filtered_results.append(result)
 
                 if filtered_results:
-                    result_message = f"找到 {len(filtered_results)} 个相关媒体资源"
-                    await self.send_tool_message(result_message, title="搜索成功")
-
-                    # 发送详细结果
-                    for i, result in enumerate(filtered_results[:5]):  # 只显示前5个结果
-                        media_info = f"{i + 1}. {result.title} ({result.year}) - {result.type.value if result.type else '未知'}"
-                        await self.send_tool_message(media_info, title="搜索结果")
-
                     return json.dumps([r.to_dict() for r in filtered_results], ensure_ascii=False, indent=2)
                 else:
-                    error_message = f"未找到符合条件的媒体资源: {title}"
-                    await self.send_tool_message(error_message, title="搜索完成")
-                    return error_message
+                    return f"未找到符合条件的媒体资源: {title}"
             else:
-                error_message = f"未找到相关媒体资源: {title}"
-                await self.send_tool_message(error_message, title="搜索完成")
-                return error_message
+                return f"未找到相关媒体资源: {title}"
         except Exception as e:
             error_message = f"搜索媒体失败: {str(e)}"
             logger.error(f"搜索媒体失败: {e}", exc_info=True)
-            await self.send_tool_message(error_message, title="搜索失败")
             return error_message

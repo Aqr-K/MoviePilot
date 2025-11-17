@@ -55,23 +55,10 @@ class SearchTorrentsTool(MoviePilotTool):
                 filtered_torrents.append(torrent)
 
             if filtered_torrents:
-                result_message = f"找到 {len(filtered_torrents)} 个相关种子资源"
-                await self.send_tool_message(result_message, title="搜索成功")
-
-                # 发送详细结果
-                for i, torrent in enumerate(filtered_torrents[:5]):  # 只显示前5个结果
-                    torrent_title = torrent.torrent_info.title if torrent.torrent_info else torrent.meta_info.title if torrent.meta_info else "未知"
-                    site_name = torrent.torrent_info.site_name if torrent.torrent_info else "未知站点"
-                    torrent_info = f"{i + 1}. {torrent_title} - {site_name}"
-                    await self.send_tool_message(torrent_info, title="搜索结果")
-
                 return json.dumps([t.to_dict() for t in filtered_torrents], ensure_ascii=False, indent=2)
             else:
-                error_message = f"未找到相关种子资源: {title}"
-                await self.send_tool_message(error_message, title="搜索完成")
-                return error_message
+                return f"未找到相关种子资源: {title}"
         except Exception as e:
             error_message = f"搜索种子时发生错误: {str(e)}"
             logger.error(f"搜索种子失败: {e}", exc_info=True)
-            await self.send_tool_message(error_message, title="搜索失败")
             return error_message
