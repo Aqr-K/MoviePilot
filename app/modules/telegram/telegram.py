@@ -32,7 +32,7 @@ class Telegram:
     _user_chat_mapping: Dict[str, str] = {}  # userid -> chat_id mapping for reply targeting
     _bot_username: Optional[str] = None  # Bot username for mention detection
     _escape_chars = r'_*[]()~`>#+-=|{}.!' # Telegram MarkdownV2
-    _markdown_escape_pattern = re.compile(f'([{re.escape(_escape_chars)}])') #Telegram MarkdownV2 规则转义特殊字符正则pattern
+    _markdown_escape_pattern = re.compile(f'([{re.escape(_escape_chars)}])') # Telegram MarkdownV2 规则转义特殊字符正则pattern
     def __init__(self, TELEGRAM_TOKEN: Optional[str] = None, TELEGRAM_CHAT_ID: Optional[str] = None, **kwargs):
         """
         初始化参数
@@ -216,7 +216,8 @@ class Telegram:
                  userid: Optional[str] = None, link: Optional[str] = None,
                  buttons: Optional[List[List[dict]]] = None,
                  original_message_id: Optional[int] = None,
-                 original_chat_id: Optional[str] = None) -> Optional[bool]:
+                 original_chat_id: Optional[str] = None,
+                 escape_markdown: bool = True) -> Optional[bool]:
         """
         发送Telegram消息
         :param title: 消息标题
@@ -227,7 +228,8 @@ class Telegram:
         :param buttons: 按钮列表，格式：[[{"text": "按钮文本", "callback_data": "回调数据"}]]
         :param original_message_id: 原消息ID，如果提供则编辑原消息
         :param original_chat_id: 原消息的聊天ID，编辑消息时需要
-        :userid: 发送消息的目标用户ID，为空则发给管理员
+        :param escape_markdown: 是否对内容进行Markdown转义
+
         """
         if not self._telegram_token or not self._telegram_chat_id:
             return None
@@ -240,9 +242,12 @@ class Telegram:
             if title:
                 title = self.escape_markdown(title)
             if text:
-                # 对text进行Markdown特殊字符转义
-                text = self.escape_markdown(text)
-                caption = f"*{title}*\n{text}"
+                if escape_markdown:
+                    text = self.escape_markdown(text)
+                if title:
+                    caption = f"*{title}*\n{text}"
+                else:
+                    caption = text
             else:
                 caption = f"*{title}*"
 

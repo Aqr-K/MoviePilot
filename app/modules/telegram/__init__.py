@@ -261,7 +261,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
 
         return cleaned
 
-    def post_message(self, message: Notification) -> None:
+    def post_message(self, message: Notification, **kwargs) -> None:
         """
         发送消息
         :param message: 消息体
@@ -283,7 +283,8 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                                 image=message.image, userid=userid, link=message.link,
                                 buttons=message.buttons,
                                 original_message_id=message.original_message_id,
-                                original_chat_id=message.original_chat_id)
+                                original_chat_id=message.original_chat_id,
+                                escape_markdown=kwargs.get("escape_markdown"))
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """

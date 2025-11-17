@@ -71,7 +71,7 @@ class WebPushModule(_ModuleBase, _MessageBase):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
-    def post_message(self, message: Notification) -> None:
+    def post_message(self, message: Notification, **kwargs) -> None:
         """
         发送消息
         :param message: 消息内容

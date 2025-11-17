@@ -906,14 +906,14 @@ class ChainBase(metaclass=ABCMeta):
                     # 按设定发送
                     self.eventmanager.send_event(etype=EventType.NoticeMessage,
                                                  data={**send_message.model_dump(), "type": send_message.mtype})
-                    self.messagequeue.send_message("post_message", message=send_message)
+                    self.messagequeue.send_message("post_message", message=send_message, **kwargs)
                 if not send_orignal:
                     return
         # 发送消息事件
         self.eventmanager.send_event(etype=EventType.NoticeMessage, data={**message.model_dump(), "type": message.mtype})
         # 按原消息发送
         self.messagequeue.send_message("post_message", message=message,
-                                       immediately=True if message.userid else False)
+                                       immediately=True if message.userid else False, **kwargs)
 
     async def async_post_message(self,
                                  message: Optional[Notification] = None,
@@ -989,7 +989,7 @@ class ChainBase(metaclass=ABCMeta):
                     # 按设定发送
                     await self.eventmanager.async_send_event(etype=EventType.NoticeMessage,
                                                              data={**send_message.model_dump(), "type": send_message.mtype})
-                    await self.messagequeue.async_send_message("post_message", message=send_message)
+                    await self.messagequeue.async_send_message("post_message", message=send_message, **kwargs)
                 if not send_orignal:
                     return
         # 发送消息事件
@@ -997,7 +997,7 @@ class ChainBase(metaclass=ABCMeta):
                                                  data={**message.model_dump(), "type": message.mtype})
         # 按原消息发送
         await self.messagequeue.async_send_message("post_message", message=message,
-                                                   immediately=True if message.userid else False)
+                                                   immediately=True if message.userid else False, **kwargs)
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """

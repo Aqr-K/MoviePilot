@@ -120,7 +120,7 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
             logger.debug(f"解析SynologyChat消息失败：{str(err)}")
         return None
 
-    def post_message(self, message: Notification) -> None:
+    def post_message(self, message: Notification, **kwargs) -> None:
         """
         发送消息
         :param message: 消息体

@@ -264,7 +264,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                                   userid=userid, username=username, text=text)
         return None
 
-    def post_message(self, message: Notification) -> None:
+    def post_message(self, message: Notification, **kwargs) -> None:
         """
         发送消息
         :param message: 消息
