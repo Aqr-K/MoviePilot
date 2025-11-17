@@ -39,7 +39,7 @@ class AddDownloadTool(MoviePilotTool):
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
+            f"执行工具: {self.name}, 参数: site_name={site_name}, torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
 
         try:
             if not torrent_title or not torrent_url:
@@ -49,6 +49,8 @@ class AddDownloadTool(MoviePilotTool):
             download_chain = DownloadChain()
 
             # 根据站点名称查询站点cookie
+            if not site_name:
+                return "错误：必须提供站点名称，请从搜索资源结果信息中获取"
             siteinfo = await SiteOper().async_get_by_name(site_name)
             if not siteinfo:
                 return f"错误：未找到站点信息：{site_name}"
