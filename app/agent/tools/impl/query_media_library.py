@@ -32,10 +32,10 @@ class QueryMediaLibraryTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")
         try:
             media_server_oper = MediaServerOper()
-            filtered_medias: List[MediaServerItem] = media_server_oper.exists(title=title, year=year, mtype=media_type)
+            filtered_medias: List[MediaServerItem] = await media_server_oper.async_exists(title=title, year=year, mtype=media_type)
             if filtered_medias:
                 return json.dumps([m.to_dict() for m in filtered_medias])
-            return "媒体库中未找到相关媒体。"
+            return "媒体库中未找到相关媒体"
         except Exception as e:
             logger.error(f"查询媒体库失败: {e}", exc_info=True)
             return f"查询媒体库时发生错误: {str(e)}"

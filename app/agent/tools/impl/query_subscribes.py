@@ -28,7 +28,7 @@ class QuerySubscribesTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}")
         try:
             subscribe_oper = SubscribeOper()
-            subscribes = subscribe_oper.list()
+            subscribes = await subscribe_oper.async_list()
             filtered_subscribes = []
             for sub in subscribes:
                 if status != "all" and sub.state != status:

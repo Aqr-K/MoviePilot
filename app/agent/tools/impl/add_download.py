@@ -58,7 +58,8 @@ class AddDownloadTool(MoviePilotTool):
             # 创建下载上下文
             torrent_info = TorrentInfo(
                 title=torrent_title,
-                download_url=torrent_url,
+                description=torrent_description,
+                enclosure=torrent_url,
                 site_name=site_name,
                 site_ua=siteinfo.ua,
                 site_cookie=siteinfo.cookie,
@@ -67,7 +68,7 @@ class AddDownloadTool(MoviePilotTool):
                 site_downloader=siteinfo.downloader
             )
             meta_info = MetaInfo(title=torrent_title, subtitle=torrent_description)
-            media_info = ToolChain().recognize_media(meta=meta_info)
+            media_info = await ToolChain().async_recognize_media(meta=meta_info)
             if not media_info:
                 return "错误：无法识别媒体信息，无法添加下载任务"
             context = Context(

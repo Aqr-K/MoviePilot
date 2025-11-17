@@ -43,7 +43,7 @@ class AddSubscribeTool(MoviePilotTool):
                 except (ValueError, TypeError):
                     logger.warning(f"无效的 tmdb_id: {tmdb_id}，将忽略")
 
-            sid, message = subscribe_chain.add(
+            sid, message = await subscribe_chain.async_add(
                 mtype=MediaType(media_type),
                 title=title,
                 year=year,

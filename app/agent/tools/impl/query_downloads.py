@@ -74,7 +74,7 @@ class QueryDownloadsTool(MoviePilotTool):
                 if total_count > 20:
                     return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 20 条结果。\n\n{result_json}"
                 return result_json
-            return "未找到相关下载任务。"
+            return "未找到相关下载任务"
         except Exception as e:
             logger.error(f"查询下载失败: {e}", exc_info=True)
             return f"查询下载时发生错误: {str(e)}"

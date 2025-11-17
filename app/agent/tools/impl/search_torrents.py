@@ -41,7 +41,7 @@ class SearchTorrentsTool(MoviePilotTool):
 
         try:
             search_chain = SearchChain()
-            torrents = search_chain.search_by_title(title=title, sites=sites)
+            torrents = await search_chain.async_search_by_title(title=title, sites=sites)
             filtered_torrents = []
             # 编译正则表达式（如果提供）
             regex_pattern = None

@@ -29,7 +29,7 @@ class QuerySitesTool(MoviePilotTool):
         try:
             site_oper = SiteOper()
             # 获取所有站点（按优先级排序）
-            sites = site_oper.list_order_by_pri()
+            sites = await site_oper.async_list()
             filtered_sites = []
             for site in sites:
                 # 按状态过滤
@@ -59,7 +59,7 @@ class QuerySitesTool(MoviePilotTool):
                     simplified_sites.append(simplified)
                 result_json = json.dumps(simplified_sites, ensure_ascii=False, indent=2)
                 return result_json
-            return "未找到相关站点。"
+            return "未找到相关站点"
         except Exception as e:
             logger.error(f"查询站点失败: {e}", exc_info=True)
             return f"查询站点时发生错误: {str(e)}"

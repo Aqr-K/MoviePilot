@@ -37,13 +37,11 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 发送运行工具前的消息
         agent_message = await self._callback_handler.get_message()
         if agent_message:
-            await self.send_tool_message(agent_message)
+            await self.send_tool_message(agent_message, title="MoviePilot助手")
         # 发送执行工具说明
         explanation = kwargs.get("explanation")
         if explanation:
-            if not explanation.startswith("正在"):
-                explanation = "正在" + explanation
-            await self.send_tool_message(f"{explanation} ...")
+            await self.send_tool_message(f"⏯️[{explanation}]")
         return await self.run(**kwargs)
 
     @abstractmethod

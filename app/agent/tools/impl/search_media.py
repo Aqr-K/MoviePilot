@@ -44,7 +44,7 @@ class SearchMediaTool(MoviePilotTool):
                 search_title = f"{search_title} S{season:02d}"
 
             # 使用 MediaChain.search 方法
-            meta, results = media_chain.search(title=search_title)
+            meta, results = await media_chain.async_search(title=search_title)
 
             # 过滤结果
             if results:

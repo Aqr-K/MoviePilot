@@ -38,17 +38,17 @@ class GetRecommendationsTool(MoviePilotTool):
             recommend_chain = RecommendChain()
             results = []
             if source == "tmdb_trending":
-                results = recommend_chain.tmdb_trending(limit=limit)
+                results = await recommend_chain.async_tmdb_trending(limit=limit)
             elif source == "douban_hot":
                 if media_type == "movie":
-                    results = recommend_chain.douban_movie_hot(limit=limit)
+                    results = await recommend_chain.async_douban_movie_hot(limit=limit)
                 elif media_type == "tv":
-                    results = recommend_chain.douban_tv_hot(limit=limit)
+                    results = await recommend_chain.async_douban_tv_hot(limit=limit)
                 else:  # all
-                    results.extend(recommend_chain.douban_movie_hot(limit=limit))
-                    results.extend(recommend_chain.douban_tv_hot(limit=limit))
+                    results.extend(await recommend_chain.async_douban_movie_hot(limit=limit))
+                    results.extend(await recommend_chain.async_douban_tv_hot(limit=limit))
             elif source == "bangumi_calendar":
-                results = recommend_chain.bangumi_calendar(limit=limit)
+                results = await recommend_chain.async_bangumi_calendar(limit=limit)
 
             if results:
                 # 限制最多20条结果
