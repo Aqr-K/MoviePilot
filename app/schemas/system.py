@@ -30,11 +30,11 @@ class MediaServerConf(BaseModel):
     # 类型 emby/jellyfin/plex
     type: Optional[str] = None
     # 配置
-    config: Optional[dict] = Field(default_factory=dict)
+    config: Optional[dict] = Field(default_factory={})
     # 是否启用
     enabled: Optional[bool] = False
     # 同步媒体体库列表
-    sync_libraries: Optional[list] = Field(default_factory=list)
+    sync_libraries: Optional[list] = Field(default_factory=[])
 
 
 class DownloaderConf(BaseModel):
@@ -48,7 +48,7 @@ class DownloaderConf(BaseModel):
     # 是否默认
     default: Optional[bool] = False
     # 配置
-    config: Optional[dict] = Field(default_factory=dict)
+    config: Optional[dict] = Field(default_factory={})
     # 是否启用
     enabled: Optional[bool] = False
 
@@ -62,9 +62,9 @@ class NotificationConf(BaseModel):
     # 类型 telegram/wechat/vocechat/synologychat/slack/webpush
     type: Optional[str] = None
     # 配置
-    config: Optional[dict] = Field(default_factory=dict)
+    config: Optional[dict] = Field(default_factory={})
     # 场景开关
-    switchs: Optional[list] = Field(default_factory=list)
+    switchs: Optional[list] = Field(default_factory=[])
     # 是否启用
     enabled: Optional[bool] = False
 
@@ -88,7 +88,7 @@ class StorageConf(BaseModel):
     # 名称
     name: Optional[str] = None
     # 配置
-    config: Optional[dict] = Field(default_factory=dict)
+    config: Optional[dict] = Field(default_factory={})
 
 
 class TransferDirectoryConf(BaseModel):

@@ -97,11 +97,11 @@ class SiteUserData(BaseModel):
     # 下载体积
     leeching_size: Optional[int] = 0
     # 做种人数, 种子大小
-    seeding_info: Optional[list] = Field(default_factory=list)
+    seeding_info: Optional[list] = Field(default_factory=[])
     # 未读消息
     message_unread: Optional[int] = 0
     # 未读消息内容
-    message_unread_contents: Optional[list] = Field(default_factory=list)
+    message_unread_contents: Optional[list] = Field(default_factory=[])
     # 错误信息
     err_msg: Optional[str] = None
     # 更新日期
@@ -112,7 +112,7 @@ class SiteUserData(BaseModel):
 
 class SiteAuth(BaseModel):
     site: Optional[str] = None
-    params: Optional[Dict[str, Union[int, str]]] = Field(default_factory=dict)
+    params: Optional[Dict[str, Union[int, str]]] = Field(default_factory={})
 
 
 class SiteCategory(BaseModel):

@@ -9,4 +9,4 @@ class Response(BaseModel):
     # 消息文本
     message: Optional[str] = None
     # 数据
-    data: Optional[Union[dict, list]] = Field(default_factory=dict)
+    data: Optional[Union[dict, list]] = Field(default_factory={})

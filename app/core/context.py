@@ -57,7 +57,7 @@ class TorrentInfo:
     # HR
     hit_and_run: bool = False
     # 种子标签
-    labels: list = field(default_factory=list)
+    labels: list = field(default_factory=[])
     # 种子优先级
     pri_order: int = 0
     # 种子分类 电影/电视剧
@@ -197,61 +197,61 @@ class MediaInfo:
     # 描述
     overview: str = None
     # 风格ID
-    genre_ids: list = field(default_factory=list)
+    genre_ids: list = field(default_factory=[])
     # 所有别名和译名
-    names: list = field(default_factory=list)
+    names: list = field(default_factory=[])
     # 各季的剧集清单信息
-    seasons: Dict[int, list] = field(default_factory=dict)
+    seasons: Dict[int, list] = field(default_factory={})
     # 各季详情
-    season_info: List[dict] = field(default_factory=list)
+    season_info: List[dict] = field(default_factory=[])
     # 各季的年份
-    season_years: dict = field(default_factory=dict)
+    season_years: dict = field(default_factory={})
     # 二级分类
     category: str = ""
     # TMDB INFO
-    tmdb_info: dict = field(default_factory=dict)
+    tmdb_info: dict = field(default_factory={})
     # 豆瓣 INFO
-    douban_info: dict = field(default_factory=dict)
+    douban_info: dict = field(default_factory={})
     # Bangumi INFO
-    bangumi_info: dict = field(default_factory=dict)
+    bangumi_info: dict = field(default_factory={})
     # 导演
-    directors: List[dict] = field(default_factory=list)
+    directors: List[dict] = field(default_factory=[])
     # 演员
-    actors: List[dict] = field(default_factory=list)
+    actors: List[dict] = field(default_factory=[])
     # 是否成人内容
     adult: bool = False
     # 创建人
-    created_by: list = field(default_factory=list)
+    created_by: list = field(default_factory=[])
     # 集时长
-    episode_run_time: list = field(default_factory=list)
+    episode_run_time: list = field(default_factory=[])
     # 风格
-    genres: List[dict] = field(default_factory=list)
+    genres: List[dict] = field(default_factory=[])
     # 首播日期
     first_air_date: str = None
     # 首页
     homepage: str = None
     # 语种
-    languages: list = field(default_factory=list)
+    languages: list = field(default_factory=[])
     # 最后上映日期
     last_air_date: str = None
     # 流媒体平台
-    networks: list = field(default_factory=list)
+    networks: list = field(default_factory=[])
     # 集数
     number_of_episodes: int = None
     # 季数
     number_of_seasons: int = None
     # 原产国
-    origin_country: list = field(default_factory=list)
+    origin_country: list = field(default_factory=[])
     # 原名
     original_name: str = None
     # 出品公司
-    production_companies: list = field(default_factory=list)
+    production_companies: list = field(default_factory=[])
     # 出品国
-    production_countries: list = field(default_factory=list)
+    production_countries: list = field(default_factory=[])
     # 语种
-    spoken_languages: list = field(default_factory=list)
+    spoken_languages: list = field(default_factory=[])
     # 所有发行日期
-    release_dates: list = field(default_factory=list)
+    release_dates: list = field(default_factory=[])
     # 状态
     status: str = None
     # 标签
@@ -263,11 +263,11 @@ class MediaInfo:
     # 时长
     runtime: int = None
     # 下一集
-    next_episode_to_air: dict = field(default_factory=dict)
+    next_episode_to_air: dict = field(default_factory={})
     # 内容分级
     content_rating: str = None
     # 全部剧集组
-    episode_groups: List[dict] = field(default_factory=list)
+    episode_groups: List[dict] = field(default_factory=[])
     # 剧集组
     episode_group: str = None
 

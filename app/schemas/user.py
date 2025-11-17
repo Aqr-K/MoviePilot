@@ -18,9 +18,9 @@ class UserBase(BaseModel):
     # 是否开启二次验证
     is_otp: Optional[bool] = False
     # 权限
-    permissions: Optional[dict] = Field(default_factory=dict)
+    permissions: Optional[dict] = Field(default_factory={})
     # 个性化设置
-    settings: Optional[dict] = Field(default_factory=dict)
+    settings: Optional[dict] = Field(default_factory={})
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,8 +30,8 @@ class UserCreate(UserBase):
     name: str
     email: Optional[str] = None
     password: Optional[str] = None
-    settings: Optional[dict] = Field(default_factory=dict)
-    permissions: Optional[dict] = Field(default_factory=dict)
+    settings: Optional[dict] = Field(default_factory={})
+    permissions: Optional[dict] = Field(default_factory={})
 
 
 # Properties to receive via API on update
@@ -40,8 +40,8 @@ class UserUpdate(UserBase):
     name: str
     email: Optional[str] = None
     password: Optional[str] = None
-    settings: Optional[dict] = Field(default_factory=dict)
-    permissions: Optional[dict] = Field(default_factory=dict)
+    settings: Optional[dict] = Field(default_factory={})
+    permissions: Optional[dict] = Field(default_factory={})
 
 
 class UserInDBBase(UserBase):

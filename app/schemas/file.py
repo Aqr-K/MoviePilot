@@ -21,7 +21,7 @@ class FileItem(BaseModel):
     # 修改时间
     modify_time: Optional[float] = None
     # 子节点
-    children: Optional[list] = Field(default_factory=list)
+    children: Optional[list] = Field(default_factory=[])
     # ID
     fileid: Optional[str] = None
     # 父ID
@@ -45,4 +45,4 @@ class StorageUsage(BaseModel):
 
 class StorageTransType(BaseModel):
     # 传输类型
-    transtype: Optional[dict] = Field(default_factory=dict)
+    transtype: Optional[dict] = Field(default_factory={})

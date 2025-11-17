@@ -12,7 +12,7 @@ class Event(BaseModel):
     事件模型
     """
     event_type: str = Field(..., description="事件类型")
-    event_data: Optional[dict] = Field(default={}, description="事件数据")
+    event_data: Optional[dict] = Field(default_factory={}, description="事件数据")
     priority: Optional[int] = Field(0, description="事件优先级")
 
 
@@ -60,7 +60,7 @@ class AuthCredentials(ChainEventData):
     mfa_code: Optional[str] = Field(None, description="一次性密码，目前仅适用于 'password' 认证类型")
     code: Optional[str] = Field(None, description="授权码，适用于 'authorization_code' 认证类型")
     grant_type: str = Field(..., description="认证类型，如 'password', 'authorization_code', 'client_credentials'")
-    # scope: List[str] = Field(default_factory=list, description="权限范围，如 ['read', 'write']")
+    # scope: List[str] = Field(default_factory=[], description="权限范围，如 ['read', 'write']")
 
     # 输出参数
     # grant_type 为 authorization_code 时，输出参数包括 username、token、channel、service
@@ -216,7 +216,7 @@ class ResourceDownloadEventData(ChainEventData):
     channel: Optional[MessageChannel] = Field(None, description="通知渠道")
     origin: Optional[str] = Field(None, description="来源")
     downloader: Optional[str] = Field(None, description="下载器")
-    options: Optional[dict] = Field(default={}, description="其他参数")
+    options: Optional[dict] = Field(default_factory={}, description="其他参数")
 
     # 输出参数
     cancel: bool = Field(default=False, description="是否取消下载")
@@ -263,7 +263,7 @@ class DiscoverMediaSource(BaseModel):
     mediaid_prefix: str = Field(..., description="媒体ID的前缀，不含:")
     api_path: str = Field(..., description="媒体数据源API地址")
     filter_params: Optional[Dict[str, Any]] = Field(default=None, description="过滤参数")
-    filter_ui: Optional[List[dict]] = Field(default=[], description="过滤参数UI配置")
+    filter_ui: Optional[List[dict]] = Field(default_factory=[], description="过滤参数UI配置")
     depends: Optional[Dict[str, list]] = Field(default=None, description="UI依赖关系字典")
 
 
@@ -276,7 +276,7 @@ class DiscoverSourceEventData(ChainEventData):
         extra_sources (List[DiscoverMediaSource]): 额外媒体数据源
     """
     # 输出参数
-    extra_sources: List[DiscoverMediaSource] = Field(default_factory=list, description="额外媒体数据源")
+    extra_sources: List[DiscoverMediaSource] = Field(default_factory=[], description="额外媒体数据源")
 
 
 class RecommendMediaSource(BaseModel):
@@ -297,7 +297,7 @@ class RecommendSourceEventData(ChainEventData):
         extra_sources (List[RecommendMediaSource]): 额外媒体数据源
     """
     # 输出参数
-    extra_sources: List[RecommendMediaSource] = Field(default_factory=list, description="额外媒体数据源")
+    extra_sources: List[RecommendMediaSource] = Field(default_factory=[], description="额外媒体数据源")
 
 
 class MediaRecognizeConvertEventData(ChainEventData):
@@ -317,7 +317,7 @@ class MediaRecognizeConvertEventData(ChainEventData):
     convert_type: str = Field(..., description="转换类型（themoviedb/douban）")
 
     # 输出参数
-    media_dict: dict = Field(default_factory=dict, description="转换后的媒体信息（TheMovieDb/豆瓣）")
+    media_dict: dict = Field(default_factory={}, description="转换后的媒体信息（TheMovieDb/豆瓣）")
 
 
 class StorageOperSelectionEventData(ChainEventData):

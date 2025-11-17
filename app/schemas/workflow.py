@@ -19,13 +19,13 @@ class Workflow(BaseModel):
     timer: Optional[str] = Field(default=None, description="定时器")
     trigger_type: Optional[str] = Field(default='timer', description="触发类型：timer-定时触发 event-事件触发 manual-手动触发")
     event_type: Optional[str] = Field(default=None, description="事件类型（当trigger_type为event时使用）")
-    event_conditions: Optional[dict] = Field(default={}, description="事件条件（JSON格式，用于过滤事件）")
+    event_conditions: Optional[dict] = Field(default_factory={}, description="事件条件（JSON格式，用于过滤事件）")
     state: Optional[str] = Field(default=None, description="状态")
     current_action: Optional[str] = Field(default=None, description="已执行动作")
     result: Optional[str] = Field(default=None, description="任务执行结果")
     run_count: Optional[int] = Field(default=0, description="已执行次数")
-    actions: Optional[list] = Field(default=[], description="任务列表")
-    flows: Optional[list] = Field(default=[], description="任务流")
+    actions: Optional[list] = Field(default_factory=[], description="任务列表")
+    flows: Optional[list] = Field(default_factory=[], description="任务流")
     add_time: Optional[str] = Field(default=None, description="创建时间")
     last_time: Optional[str] = Field(default=None, description="最后执行时间")
 
@@ -48,8 +48,8 @@ class Action(BaseModel):
     type: Optional[str] = Field(default=None, description="动作类型 (类名)")
     name: Optional[str] = Field(default=None, description="动作名称")
     description: Optional[str] = Field(default=None, description="动作描述")
-    position: Optional[dict] = Field(default={}, description="位置")
-    data: Optional[dict] = Field(default={}, description="参数")
+    position: Optional[dict] = Field(default_factory={}, description="位置")
+    data: Optional[dict] = Field(default_factory={}, description="参数")
 
 
 class ActionExecution(BaseModel):
@@ -66,13 +66,13 @@ class ActionContext(BaseModel):
     动作基础上下文，各动作通用数据
     """
     content: Optional[str] = Field(default=None, description="文本类内容")
-    torrents: Optional[List[Context]] = Field(default=[], description="资源列表")
-    medias: Optional[List[MediaInfo]] = Field(default=[], description="媒体列表")
-    fileitems: Optional[List[FileItem]] = Field(default=[], description="文件列表")
-    downloads: Optional[List[DownloadTask]] = Field(default=[], description="下载任务列表")
-    sites: Optional[List[Site]] = Field(default=[], description="站点列表")
-    subscribes: Optional[List[Subscribe]] = Field(default=[], description="订阅列表")
-    execute_history: Optional[List[ActionExecution]] = Field(default=[], description="执行历史")
+    torrents: Optional[List[Context]] = Field(default_factory=[], description="资源列表")
+    medias: Optional[List[MediaInfo]] = Field(default_factory=[], description="媒体列表")
+    fileitems: Optional[List[FileItem]] = Field(default_factory=[], description="文件列表")
+    downloads: Optional[List[DownloadTask]] = Field(default_factory=[], description="下载任务列表")
+    sites: Optional[List[Site]] = Field(default_factory=[], description="站点列表")
+    subscribes: Optional[List[Subscribe]] = Field(default_factory=[], description="订阅列表")
+    execute_history: Optional[List[ActionExecution]] = Field(default_factory=[], description="执行历史")
     progress: Optional[int] = Field(default=0, description="执行进度（%）")
 
 
