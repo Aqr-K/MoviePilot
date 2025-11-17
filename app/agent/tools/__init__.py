@@ -8,6 +8,7 @@ from app.agent.tools.impl.add_download import AddDownloadTool
 from app.agent.tools.impl.query_subscribes import QuerySubscribesTool
 from app.agent.tools.impl.query_downloads import QueryDownloadsTool
 from app.agent.tools.impl.query_downloaders import QueryDownloadersTool
+from app.agent.tools.impl.query_sites import QuerySitesTool
 from app.agent.tools.impl.get_recommendations import GetRecommendationsTool
 from app.agent.tools.impl.query_media_library import QueryMediaLibraryTool
 from app.agent.tools.impl.send_message import SendMessageTool
@@ -22,6 +23,7 @@ __all__ = [
     "QuerySubscribesTool",
     "QueryDownloadsTool",
     "QueryDownloadersTool",
+    "QuerySitesTool",
     "GetRecommendationsTool",
     "QueryMediaLibraryTool",
     "SendMessageTool",

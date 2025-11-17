@@ -67,6 +67,12 @@ class Site(Base):
         return result.scalar_one_or_none()
 
     @classmethod
+    @async_db_query
+    async def async_get_by_name(cls, db: AsyncSession, name: str):
+        result = await db.execute(select(cls).where(cls.name == name))
+        return result.scalar_one_or_none()
+
+    @classmethod
     @db_query
     def get_actives(cls, db: Session):
         return db.query(cls).filter(cls.is_active).all()

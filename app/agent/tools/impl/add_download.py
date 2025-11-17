@@ -8,6 +8,7 @@ from app.agent.tools.base import MoviePilotTool, ToolChain
 from app.chain.download import DownloadChain
 from app.core.context import Context
 from app.core.metainfo import MetaInfo
+from app.db.site_oper import SiteOper
 from app.log import logger
 from app.schemas import TorrentInfo
 
@@ -15,6 +16,7 @@ from app.schemas import TorrentInfo
 class AddDownloadInput(BaseModel):
     """添加下载工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    site_name: str = Field(..., description="Name of the torrent site/source (e.g., 'The Pirate Bay')")
     torrent_title: str = Field(...,
                                description="The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')")
     torrent_url: str = Field(..., description="Direct URL to the torrent file (.torrent) or magnet link")
@@ -33,7 +35,7 @@ class AddDownloadTool(MoviePilotTool):
     description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings."
     args_schema: Type[BaseModel] = AddDownloadInput
 
-    async def run(self, torrent_title: str, torrent_url: str, torrent_description: Optional[str] = None,
+    async def run(self, site_name: str, torrent_title: str, torrent_url: str, torrent_description: Optional[str] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
         logger.info(
@@ -46,16 +48,30 @@ class AddDownloadTool(MoviePilotTool):
             # 使用DownloadChain添加下载
             download_chain = DownloadChain()
 
+            # 根据站点名称查询站点cookie
+            siteinfo = await SiteOper().async_get_by_name(site_name)
+            if not siteinfo:
+                return f"错误：未找到站点信息：{site_name}"
+
             # 创建下载上下文
             torrent_info = TorrentInfo(
                 title=torrent_title,
-                download_url=torrent_url
+                download_url=torrent_url,
+                site_name=site_name,
+                site_ua=siteinfo.ua,
+                site_cookie=siteinfo.cookie,
+                site_proxy=siteinfo.proxy,
+                site_order=siteinfo.pri,
+                site_downloader=siteinfo.downloader
             )
             meta_info = MetaInfo(title=torrent_title, subtitle=torrent_description)
+            media_info = ToolChain().recognize_media(meta=meta_info)
+            if not media_info:
+                return "错误：无法识别媒体信息，无法添加下载任务"
             context = Context(
                 torrent_info=torrent_info,
                 meta_info=meta_info,
-                media_info=ToolChain().recognize_media(meta=meta_info)
+                media_info=media_info
             )
 
             did = download_chain.download_single(

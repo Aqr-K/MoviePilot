@@ -8,6 +8,7 @@ from app.agent.tools.impl.get_recommendations import GetRecommendationsTool
 from app.agent.tools.impl.query_downloaders import QueryDownloadersTool
 from app.agent.tools.impl.query_downloads import QueryDownloadsTool
 from app.agent.tools.impl.query_media_library import QueryMediaLibraryTool
+from app.agent.tools.impl.query_sites import QuerySitesTool
 from app.agent.tools.impl.query_subscribes import QuerySubscribesTool
 from app.agent.tools.impl.search_media import SearchMediaTool
 from app.agent.tools.impl.search_torrents import SearchTorrentsTool
@@ -33,6 +34,7 @@ class MoviePilotToolFactory:
             QuerySubscribesTool,
             QueryDownloadsTool,
             QueryDownloadersTool,
+            QuerySitesTool,
             GetRecommendationsTool,
             QueryMediaLibraryTool,
             SendMessageTool

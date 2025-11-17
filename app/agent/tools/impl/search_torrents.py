@@ -1,6 +1,7 @@
 """搜索种子工具"""
 
 import json
+import re
 from typing import List, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -23,6 +24,8 @@ class SearchTorrentsInput(BaseModel):
     season: Optional[int] = Field(None, description="Season number for TV shows (optional, only applicable for series)")
     sites: Optional[List[int]] = Field(None,
                                        description="Array of specific site IDs to search on (optional, if not provided searches all configured sites)")
+    filter_pattern: Optional[str] = Field(None,
+                                          description="Regular expression pattern to filter torrent titles by resolution, quality, or other keywords (e.g., '4K|2160p|UHD' for 4K content, '1080p|BluRay' for 1080p BluRay)")
 
 
 class SearchTorrentsTool(MoviePilotTool):
@@ -32,14 +35,23 @@ class SearchTorrentsTool(MoviePilotTool):
 
     async def run(self, title: str, year: Optional[str] = None,
                   media_type: Optional[str] = None, season: Optional[int] = None,
-                  sites: Optional[List[int]] = None, **kwargs) -> str:
+                  sites: Optional[List[int]] = None, filter_pattern: Optional[str] = None, **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, sites={sites}")
+            f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, sites={sites}, filter_pattern={filter_pattern}")
 
         try:
             search_chain = SearchChain()
             torrents = search_chain.search_by_title(title=title, sites=sites)
             filtered_torrents = []
+            # 编译正则表达式（如果提供）
+            regex_pattern = None
+            if filter_pattern:
+                try:
+                    regex_pattern = re.compile(filter_pattern, re.IGNORECASE)
+                except re.error as e:
+                    logger.warning(f"正则表达式编译失败: {filter_pattern}, 错误: {e}")
+                    return f"正则表达式格式错误: {str(e)}"
+            
             for torrent in torrents:
                 # torrent 是 Context 对象，需要通过 meta_info 和 media_info 访问属性
                 if year and torrent.meta_info and torrent.meta_info.year != year:
@@ -49,6 +61,10 @@ class SearchTorrentsTool(MoviePilotTool):
                         continue
                 if season and torrent.meta_info and torrent.meta_info.begin_season != season:
                     continue
+                # 使用正则表达式过滤标题（分辨率、质量等关键字）
+                if regex_pattern and torrent.torrent_info and torrent.torrent_info.title:
+                    if not regex_pattern.search(torrent.torrent_info.title):
+                        continue
                 filtered_torrents.append(torrent)
 
             if filtered_torrents:
