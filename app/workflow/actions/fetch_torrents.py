@@ -20,7 +20,7 @@ class FetchTorrentsParams(ActionParams):
     year: Optional[str] = Field(default=None, description="年份")
     type: Optional[str] = Field(default=None, description="资源类型 (电影/电视剧)")
     season: Optional[int] = Field(default=None, description="季度")
-    sites: Optional[List[int]] = Field(default_factory=[], description="站点列表")
+    sites: Optional[List[int]] = Field(default=[], description="站点列表")
     match_media: Optional[bool] = Field(default=False, description="匹配媒体信息")
 
 

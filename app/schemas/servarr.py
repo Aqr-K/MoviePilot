@@ -28,9 +28,9 @@ class SonarrSeries(BaseModel):
     overview: Optional[str] = None
     network: Optional[str] = None
     airTime: Optional[str] = None
-    images: list = Field(default_factory=[])
+    images: list = Field(default_factory=list)
     remotePoster: Optional[str] = None
-    seasons: list = Field(default_factory=[])
+    seasons: list = Field(default_factory=list)
     year: Optional[str] = None
     path: Optional[str] = None
     profileId: Optional[int] = None
@@ -49,11 +49,11 @@ class SonarrSeries(BaseModel):
     cleanTitle: Optional[str] = None
     titleSlug: Optional[str] = None
     certification: Optional[str] = None
-    genres: list = Field(default_factory=[])
-    tags: list = Field(default_factory=[])
+    genres: list = Field(default_factory=list)
+    tags: list = Field(default_factory=list)
     added: Optional[str] = None
     ratings: Optional[dict] = None
     qualityProfileId: Optional[int] = None
-    statistics: dict = Field(default_factory={})
+    statistics: dict = Field(default_factory=dict)
     isAvailable: Optional[bool] = False
     hasFile: Optional[bool] = False

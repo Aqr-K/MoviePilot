@@ -29,5 +29,5 @@ class TmdbEpisode(BaseModel):
     season_number: Optional[int] = None
     still_path: Optional[str] = None
     vote_average: Optional[float] = None
-    crew: Optional[list] = Field(default_factory=[])
-    guest_stars: Optional[list] = Field(default_factory=[])
+    crew: Optional[list] = Field(default_factory=list)
+    guest_stars: Optional[list] = Field(default_factory=list)

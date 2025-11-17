@@ -19,7 +19,7 @@ class Token(BaseModel):
     # 权限级别
     level: int = 1
     # 详细权限
-    permissions: Optional[dict] = Field(default_factory={})
+    permissions: Optional[dict] = Field(default_factory=dict)
     # 是否显示配置向导
     widzard: Optional[bool] = None
 

@@ -12,7 +12,7 @@ class InvokePluginParams(ActionParams):
     """
     plugin_id: str = Field(default=None, description="插件ID")
     action_id: str = Field(default=None, description="动作ID")
-    action_params: dict = Field(default_factory={}, description="动作参数")
+    action_params: dict = Field(default={}, description="动作参数")
 
 
 class InvokePluginAction(BaseAction):

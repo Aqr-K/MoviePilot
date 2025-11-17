@@ -13,7 +13,7 @@ class ExistMediaInfo(BaseModel):
     # 类型 电影、电视剧
     type: Optional[MediaType] = None
     # 季
-    seasons: Optional[Dict[int, list]] = Field(default_factory={})
+    seasons: Optional[Dict[int, list]] = Field(default_factory=dict)
     # 媒体服务器类型：plex、jellyfin、emby、trimemedia
     server_type: Optional[str] = None
     # 媒体服务器名称
@@ -29,7 +29,7 @@ class NotExistMediaInfo(BaseModel):
     # 季
     season: Optional[int] = None
     # 剧集列表
-    episodes: Optional[list] = Field(default_factory=[])
+    episodes: Optional[list] = Field(default_factory=list)
     # 总集数
     total_episode: Optional[int] = 0
     # 开始集
@@ -135,7 +135,7 @@ class MediaServerSeasonInfo(BaseModel):
     媒体服务器媒体剧集信息
     """
     season: Optional[int] = None
-    episodes: Optional[List[int]] = Field(default_factory=[])
+    episodes: Optional[List[int]] = Field(default_factory=list)
 
 
 class WebhookEventInfo(BaseModel):
@@ -163,7 +163,7 @@ class WebhookEventInfo(BaseModel):
     save_reason: Optional[str] = None
     item_isvirtual: Optional[bool] = None
     media_type: Optional[str] = None
-    json_object: Optional[dict] = Field(default_factory={})
+    json_object: Optional[dict] = Field(default_factory=dict)
 
 
 class MediaServerPlayItem(BaseModel):
@@ -177,7 +177,7 @@ class MediaServerPlayItem(BaseModel):
     image: Optional[str] = None
     link: Optional[str] = None
     percent: Optional[float] = None
-    BackdropImageTags: Optional[list] = Field(default_factory=[])
+    BackdropImageTags: Optional[list] = Field(default_factory=list)
     server_type: Optional[str] = None
     # 飞牛的图片需要Cookies
     use_cookies: Optional[bool] = None

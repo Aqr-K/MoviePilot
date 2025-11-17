@@ -40,7 +40,7 @@ class DownloadingTorrent(BaseModel):
     state: Optional[str] = 'downloading'
     upspeed: Optional[str] = None
     dlspeed: Optional[str] = None
-    media: Optional[dict] = Field(default_factory={})
+    media: Optional[dict] = Field(default_factory=dict)
     userid: Optional[str] = None
     username: Optional[str] = None
     left_time: Optional[str] = None
@@ -97,7 +97,7 @@ class TransferJob(BaseModel):
     """
     media: Optional[MediaInfo] = None
     season: Optional[int] = None
-    tasks: Optional[List[TransferJobTask]] = Field(default_factory=[])
+    tasks: Optional[List[TransferJobTask]] = Field(default_factory=list)
 
 
 class TransferInfo(BaseModel):
@@ -117,21 +117,21 @@ class TransferInfo(BaseModel):
     # 处理文件数
     file_count: Optional[int] = Field(default=0)
     # 处理文件清单
-    file_list: Optional[list] = Field(default_factory=[])
+    file_list: Optional[list] = Field(default_factory=list)
     # 目标文件清单
-    file_list_new: Optional[list] = Field(default_factory=[])
+    file_list_new: Optional[list] = Field(default_factory=list)
     # 总文件大小
     total_size: Optional[int] = Field(default=0)
     # 失败清单
-    fail_list: Optional[list] = Field(default_factory=[])
+    fail_list: Optional[list] = Field(default_factory=list)
     # 处理字幕文件清单
-    subtitle_list: Optional[list] = Field(default_factory=[])
+    subtitle_list: Optional[list] = Field(default_factory=list)
     # 目标字幕文件清单
-    subtitle_list_new: Optional[list] = Field(default_factory=[])
+    subtitle_list_new: Optional[list] = Field(default_factory=list)
     # 处理音频文件清单
-    audio_list: Optional[list] = Field(default_factory=[])
+    audio_list: Optional[list] = Field(default_factory=list)
     # 目标音频文件清单
-    audio_list_new: Optional[list] = Field(default_factory=[])
+    audio_list_new: Optional[list] = Field(default_factory=list)
     # 错误信息
     message: Optional[str] = None
     # 是否需要刮削

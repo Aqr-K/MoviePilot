@@ -121,7 +121,7 @@ class Subscription(BaseModel):
     客户端消息订阅
     """
     endpoint: Optional[str] = None
-    keys: Optional[dict] = Field(default_factory={})
+    keys: Optional[dict] = Field(default_factory=dict)
 
 
 class SubscriptionMessage(BaseModel):
@@ -132,7 +132,7 @@ class SubscriptionMessage(BaseModel):
     body: Optional[str] = None
     icon: Optional[str] = None
     url: Optional[str] = None
-    data: Optional[dict] = Field(default_factory={})
+    data: Optional[dict] = Field(default_factory=dict)
 
 
 class ChannelCapability(Enum):

@@ -11,8 +11,8 @@ class ConversationMemory(BaseModel):
     session_id: str = Field(description="会话ID")
     user_id: Optional[str] = Field(default=None, description="用户ID")
     title: Optional[str] = Field(default=None, description="会话标题")
-    messages: List[Dict[str, Any]] = Field(default_factory=[], description="消息列表")
-    context: Dict[str, Any] = Field(default_factory={}, description="会话上下文")
+    messages: List[Dict[str, Any]] = Field(default_factory=list, description="消息列表")
+    context: Dict[str, Any] = Field(default_factory=dict, description="会话上下文")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
     

@@ -13,7 +13,7 @@ class FilterTorrentsParams(ActionParams):
     """
     过滤资源数据参数
     """
-    rule_groups: Optional[List[str]] = Field(default_factory=[], description="规则组")
+    rule_groups: Optional[List[str]] = Field(default=[], description="规则组")
     quality: Optional[str] = Field(default=None, description="资源质量")
     resolution: Optional[str] = Field(default=None, description="资源分辨率")
     effect: Optional[str] = Field(default=None, description="特效")

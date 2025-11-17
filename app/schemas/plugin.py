@@ -43,7 +43,7 @@ class Plugin(BaseModel):
     # 安装次数
     install_count: Optional[int] = 0
     # 更新记录
-    history: Optional[dict] = Field(default_factory={})
+    history: Optional[dict] = Field(default_factory=dict)
     # 添加时间，值越小表示越靠后发布
     add_time: Optional[int] = 0
     # 插件公钥
@@ -62,11 +62,11 @@ class PluginDashboard(Plugin):
     # 演染模式
     render_mode: Optional[str] = Field(default="vuetify")
     # 全局配置
-    attrs: Optional[dict] = Field(default_factory={})
+    attrs: Optional[dict] = Field(default_factory=dict)
     # col列数
-    cols: Optional[dict] = Field(default_factory={})
+    cols: Optional[dict] = Field(default_factory=dict)
     # 页面元素
-    elements: Optional[List[dict]] = Field(default_factory=[])
+    elements: Optional[List[dict]] = Field(default_factory=list)
 
 
 class PluginMemoryInfo(BaseModel):
