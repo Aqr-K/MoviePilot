@@ -60,7 +60,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         """设置回调处理器"""
         self._callback_handler = callback_handler
 
-    async def send_tool_message(self, message: str, title: str = "MoviePilot助手"):
+    async def send_tool_message(self, message: str, title: str = ""):
         """发送工具消息"""
         await ToolChain().async_post_message(
             Notification(
