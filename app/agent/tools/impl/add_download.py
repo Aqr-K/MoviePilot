@@ -37,14 +37,9 @@ class AddDownloadTool(MoviePilotTool):
         logger.info(
             f"执行工具: {self.name}, 参数: torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
 
-        # 发送工具执行说明
-        await self.send_tool_message(f"正在添加下载任务: {torrent_title}", title="添加下载")
-
         try:
             if not torrent_title or not torrent_url:
-                error_message = "错误：必须提供种子标题和下载链接"
-                await self.send_tool_message(error_message, title="下载失败")
-                return error_message
+                return "错误：必须提供种子标题和下载链接"
 
             # 使用DownloadChain添加下载
             download_chain = DownloadChain()
@@ -67,15 +62,9 @@ class AddDownloadTool(MoviePilotTool):
                 label=labels
             )
             if did:
-                success_message = f"成功添加下载任务：{torrent_title}"
-                await self.send_tool_message(success_message, title="下载成功")
-                return success_message
+                return f"成功添加下载任务：{torrent_title}"
             else:
-                error_message = "添加下载任务失败"
-                await self.send_tool_message(error_message, title="下载失败")
-                return error_message
+                return "添加下载任务失败"
         except Exception as e:
-            error_message = f"添加下载任务时发生错误: {str(e)}"
             logger.error(f"添加下载任务失败: {e}", exc_info=True)
-            await self.send_tool_message(error_message, title="下载失败")
-            return error_message
+            return f"添加下载任务时发生错误: {str(e)}"

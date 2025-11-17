@@ -30,6 +30,11 @@ class GetRecommendationsTool(MoviePilotTool):
                   media_type: Optional[str] = "all", limit: Optional[int] = 20, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: source={source}, media_type={media_type}, limit={limit}")
         try:
+            name_dicts = {
+                "tmdb_trending": "TMDB 热门推荐",
+                "douban_hot": "豆瓣热门推荐",
+                "bangumi_calendar": "番组计划推荐"
+            }
             recommend_chain = RecommendChain()
             results = []
             if source == "tmdb_trending":

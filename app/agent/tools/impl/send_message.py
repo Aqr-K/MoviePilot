@@ -25,7 +25,7 @@ class SendMessageTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: message={message}, message_type={message_type}")
         try:
             await self.send_tool_message(message, title=message_type)
-            return "消息已发送。"
+            return "消息已发送"
         except Exception as e:
             logger.error(f"发送消息失败: {e}")
             return f"发送消息时发生错误: {str(e)}"

@@ -33,9 +33,6 @@ class AddSubscribeTool(MoviePilotTool):
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, tmdb_id={tmdb_id}")
 
-        # 发送工具执行说明
-        await self.send_tool_message(f"正在添加订阅: {title} ({year}) - {media_type}", title="添加订阅")
-
         try:
             subscribe_chain = SubscribeChain()
             # 转换 tmdb_id 为整数
@@ -55,15 +52,9 @@ class AddSubscribeTool(MoviePilotTool):
                 username=self._user_id
             )
             if sid:
-                success_message = f"成功添加订阅：{title} ({year})"
-                await self.send_tool_message(success_message, title="订阅成功")
-                return success_message
+                return f"成功添加订阅：{title} ({year})"
             else:
-                error_message = f"添加订阅失败：{message}"
-                await self.send_tool_message(error_message, title="订阅失败")
-                return error_message
+                return f"添加订阅失败：{message}"
         except Exception as e:
-            error_message = f"添加订阅时发生错误: {str(e)}"
             logger.error(f"添加订阅失败: {e}", exc_info=True)
-            await self.send_tool_message(error_message, title="订阅失败")
-            return error_message
+            return f"添加订阅时发生错误: {str(e)}"

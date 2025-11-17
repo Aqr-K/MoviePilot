@@ -36,9 +36,6 @@ class SearchTorrentsTool(MoviePilotTool):
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, sites={sites}")
 
-        # 发送工具执行说明
-        await self.send_tool_message(f"正在搜索种子资源: {title}" + (f" ({year})" if year else ""), title="搜索种子")
-
         try:
             search_chain = SearchChain()
             torrents = search_chain.search_by_title(title=title, sites=sites)
