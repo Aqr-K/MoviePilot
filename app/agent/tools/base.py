@@ -41,7 +41,10 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 发送执行工具说明
         explanation = kwargs.get("explanation")
         if explanation:
-            await self.send_tool_message(f"▶️️{explanation}")
+            # 使用分隔线和图标将工具执行消息"包起来"，使其与正常Agent消息区分
+            separator = "━━━━━━━━━━━━━━━━"
+            tool_message = f"{separator}\n⚙️ {explanation}\n{separator}"
+            await self.send_tool_message(tool_message)
         return await self.run(**kwargs)
 
     @abstractmethod
