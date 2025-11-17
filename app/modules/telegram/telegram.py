@@ -238,10 +238,13 @@ class Telegram:
 
         try:
             if title:
-                title = self.escape_markdown(title)
+                # 标题会被包装为粗体，所以不需要保护格式化，直接转义即可
+                title = self.convert_markdown_to_telegram(title)
+                title = self.escape_markdown(title, protect_formatted=False)
             if text:
-                # 对text进行Markdown特殊字符转义
-                text = self.escape_markdown(text)
+                # 文本内容可以包含格式化，需要保护格式化部分
+                text = self.convert_markdown_to_telegram(text)
+                text = self.escape_markdown(text, protect_formatted=True)
                 caption = f"*{title}*\n{text}"
             else:
                 caption = f"*{title}*"
@@ -601,8 +604,113 @@ class Telegram:
             self._polling_thread.join()
             logger.info("Telegram消息接收服务已停止")
 
-    def escape_markdown(self, text: str) -> str:
-        # 按 Telegram MarkdownV2 规则转义特殊字符
+    def convert_markdown_to_telegram(self, text: str) -> str:
+        """
+        将标准Markdown格式转换为Telegram MarkdownV2格式
+        :param text: 标准Markdown文本
+        :return: Telegram MarkdownV2格式文本
+        """
         if not isinstance(text, str):
             return str(text) if text is not None else ""
-        return self._markdown_escape_pattern.sub(r'\\\1', text)
+        
+        # 使用占位符保护已转换的格式，避免重复转换
+        placeholders = {}
+        placeholder_index = 0
+        
+        # 第一步：转换标准Markdown粗体 **text** 为 Telegram MarkdownV2 *text*
+        def replace_bold(match):
+            nonlocal placeholder_index
+            placeholder = f"__BOLD_PLACEHOLDER_{placeholder_index}__"
+            placeholders[placeholder] = f"*{match.group(1)}*"
+            placeholder_index += 1
+            return placeholder
+        
+        text = re.sub(r'\*\*(.+?)\*\*', replace_bold, text)
+        
+        # 第二步：转换标准Markdown斜体 *text* 为 Telegram MarkdownV2 _text_
+        # 此时不会匹配到已经转换的粗体（因为已经被占位符替换）
+        def replace_italic(match):
+            nonlocal placeholder_index
+            placeholder = f"__ITALIC_PLACEHOLDER_{placeholder_index}__"
+            placeholders[placeholder] = f"_{match.group(1)}_"
+            placeholder_index += 1
+            return placeholder
+        
+        text = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', replace_italic, text)
+        
+        # 恢复占位符
+        for placeholder, original in placeholders.items():
+            text = text.replace(placeholder, original)
+        
+        # 代码块格式保持不变 `` `text` ``
+        # 链接格式保持不变 [text](url)
+        
+        return text
+
+    def escape_markdown(self, text: str, protect_formatted: bool = False) -> str:
+        """
+        按 Telegram MarkdownV2 规则转义特殊字符
+        :param text: 要转义的文本
+        :param protect_formatted: 是否保护已格式化的部分（粗体、斜体、代码、链接）
+        :return: 转义后的文本
+        """
+        if not isinstance(text, str):
+            return str(text) if text is not None else ""
+        
+        if not protect_formatted:
+            # 简单转义所有特殊字符
+            return self._markdown_escape_pattern.sub(r'\\\1', text)
+        
+        # 保护已格式化的部分，只转义未格式化的特殊字符
+        # 使用临时占位符保护格式化部分
+        placeholders = {}
+        placeholder_index = 0
+        
+        # 保护链接 [text](url)
+        def replace_link(match):
+            nonlocal placeholder_index
+            placeholder = f"__LINK_{placeholder_index}__"
+            placeholders[placeholder] = match.group(0)
+            placeholder_index += 1
+            return placeholder
+        
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', replace_link, text)
+        
+        # 保护粗体 *text*
+        def replace_bold(match):
+            nonlocal placeholder_index
+            placeholder = f"__BOLD_{placeholder_index}__"
+            placeholders[placeholder] = match.group(0)
+            placeholder_index += 1
+            return placeholder
+        
+        text = re.sub(r'\*([^*\n]+?)\*', replace_bold, text)
+        
+        # 保护斜体 _text_
+        def replace_italic(match):
+            nonlocal placeholder_index
+            placeholder = f"__ITALIC_{placeholder_index}__"
+            placeholders[placeholder] = match.group(0)
+            placeholder_index += 1
+            return placeholder
+        
+        text = re.sub(r'_([^_\n]+?)_', replace_italic, text)
+        
+        # 保护代码 `text`
+        def replace_code(match):
+            nonlocal placeholder_index
+            placeholder = f"__CODE_{placeholder_index}__"
+            placeholders[placeholder] = match.group(0)
+            placeholder_index += 1
+            return placeholder
+        
+        text = re.sub(r'`([^`\n]+?)`', replace_code, text)
+        
+        # 转义剩余的特殊字符
+        text = self._markdown_escape_pattern.sub(r'\\\1', text)
+        
+        # 恢复占位符
+        for placeholder, original in placeholders.items():
+            text = text.replace(placeholder, original)
+        
+        return text

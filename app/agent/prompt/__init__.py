@@ -40,9 +40,61 @@ class PromptManager:
             logger.error(f"加载提示词失败: {prompt_name}, 错误: {e}")
             raise
 
-    def get_agent_prompt(self) -> str:
-        """获取智能体提示词"""
-        return self.load_prompt("Agent Prompt.txt")
+    def get_agent_prompt(self, channel: str = None) -> str:
+        """
+        获取智能体提示词
+        :param channel: 消息渠道（Telegram、微信、Slack等）
+        :return: 提示词内容
+        """
+        base_prompt = self.load_prompt("Agent Prompt.txt")
+        
+        # 根据渠道添加特定的格式说明
+        if channel:
+            channel_format_info = self._get_channel_format_info(channel)
+            if channel_format_info:
+                base_prompt += f"\n\n## Current Message Channel Format Requirements\n\n{channel_format_info}"
+        
+        return base_prompt
+    
+    @staticmethod
+    def _get_channel_format_info(channel: str) -> str:
+        """
+        获取渠道特定的格式说明
+        :param channel: 消息渠道
+        :return: 格式说明文本
+        """
+        channel_lower = channel.lower() if channel else ""
+        
+        if "telegram" in channel_lower:
+            return """Messages are being sent through the **Telegram** channel. You must follow these format requirements:
+
+- **Bold text**: Use `*text*` (single asterisk, not double asterisks)
+- **Italic text**: Use `_text_` (underscore)
+- **Code**: Use `` `text` `` (backtick)
+- **Links**: Use `[text](url)` format
+- **Important**: Avoid using special characters that need escaping in MarkdownV2: `_*[]()~`>#+-=|{}.!` unless they are part of the formatting syntax
+- **Best practice**: Keep formatting simple, avoid nested formatting to ensure proper rendering in Telegram"""
+        
+        elif "wechat" in channel_lower or "微信" in channel:
+            return """Messages are being sent through the **WeChat** channel. Please follow these format requirements:
+
+- WeChat does NOT support Markdown formatting. Use plain text format only.
+- Do NOT use any Markdown syntax (such as `**bold**`, `*italic*`, `` `code` `` etc.)
+- Use plain text descriptions. You can organize content using line breaks and punctuation
+- Links can be provided directly as URLs, no Markdown link format needed
+- Keep messages concise and clear, use natural Chinese expressions"""
+        
+        elif "slack" in channel_lower:
+            return """Messages are being sent through the **Slack** channel. Please follow these format requirements:
+
+- Slack supports Markdown formatting
+- Use `*text*` for bold
+- Use `_text_` for italic
+- Use `` `text` `` for code
+- Link format: `<url|text>` or `[text](url)`"""
+        
+        # 其他渠道使用标准Markdown
+        return None
 
     def clear_cache(self):
         """清空缓存"""

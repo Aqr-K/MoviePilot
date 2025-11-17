@@ -209,7 +209,7 @@ class MoviePilotAgent:
 
             # 构建输入上下文
             input_context = {
-                "system_prompt": self.prompt_manager.get_agent_prompt(),
+                "system_prompt": self.prompt_manager.get_agent_prompt(channel=self.channel),
                 "input": message
             }
 
