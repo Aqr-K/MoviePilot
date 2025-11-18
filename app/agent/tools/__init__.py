@@ -16,6 +16,7 @@ from app.agent.tools.impl.query_media_library import QueryMediaLibraryTool
 from app.agent.tools.impl.send_message import SendMessageTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
+from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
 from .factory import MoviePilotToolFactory
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "QueryDownloadersTool",
     "QuerySitesTool",
     "TestSiteTool",
+    "UpdateSiteCookieTool",
     "GetRecommendationsTool",
     "QueryMediaLibraryTool",
     "SendMessageTool",

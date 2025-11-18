@@ -29,6 +29,12 @@ class SiteOper(DbOper):
         """
         return Site.get(self._db, sid)
 
+    async def async_get(self, sid: int) -> Site:
+        """
+        异步查询单个站点
+        """
+        return await Site.async_get(self._db, sid)
+
     def list(self) -> List[Site]:
         """
         获取站点列表

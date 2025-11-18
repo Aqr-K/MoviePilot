@@ -17,6 +17,7 @@ from app.agent.tools.impl.search_torrents import SearchTorrentsTool
 from app.agent.tools.impl.send_message import SendMessageTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
+from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -42,6 +43,7 @@ class MoviePilotToolFactory:
             QueryDownloadersTool,
             QuerySitesTool,
             TestSiteTool,
+            UpdateSiteCookieTool,
             GetRecommendationsTool,
             QueryMediaLibraryTool,
             SendMessageTool,
