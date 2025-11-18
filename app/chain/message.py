@@ -1,5 +1,7 @@
 import asyncio
 import re
+import time
+from datetime import datetime, timedelta
 from typing import Any, Optional, Dict, Union, List
 
 from app.agent import agent_manager
@@ -35,6 +37,10 @@ class MessageChain(ChainBase):
     _cache_file = "__user_messages__"
     # 每页数据量
     _page_size: int = 8
+    # 用户会话信息 {userid: (session_id, last_time)}
+    _user_sessions: Dict[Union[str, int], tuple] = {}
+    # 会话超时时间（分钟）
+    _session_timeout_minutes: int = 15
 
     @staticmethod
     def __get_noexits_info(
@@ -822,6 +828,90 @@ class MessageChain(ChainBase):
 
         return buttons
 
+    def _get_or_create_session_id(self, userid: Union[str, int]) -> str:
+        """
+        获取或创建会话ID
+        如果用户上次会话在15分钟内，则复用相同的会话ID；否则创建新的会话ID
+        """
+        current_time = datetime.now()
+        
+        # 检查用户是否有已存在的会话
+        if userid in MessageChain._user_sessions:
+            session_id, last_time = MessageChain._user_sessions[userid]
+            
+            # 计算时间差
+            time_diff = current_time - last_time
+            
+            # 如果时间差小于等于15分钟，复用会话ID
+            if time_diff <= timedelta(minutes=MessageChain._session_timeout_minutes):
+                # 更新最后使用时间
+                MessageChain._user_sessions[userid] = (session_id, current_time)
+                logger.info(f"复用会话ID: {session_id}, 用户: {userid}, 距离上次会话: {time_diff.total_seconds() / 60:.1f}分钟")
+                return session_id
+        
+        # 创建新的会话ID
+        new_session_id = f"user_{userid}_{int(time.time())}"
+        MessageChain._user_sessions[userid] = (new_session_id, current_time)
+        logger.info(f"创建新会话ID: {new_session_id}, 用户: {userid}")
+        return new_session_id
+
+    @staticmethod
+    def clear_user_session(userid: Union[str, int]) -> bool:
+        """
+        清除指定用户的会话信息
+        返回是否成功清除
+        """
+        if userid in MessageChain._user_sessions:
+            session_id, _ = MessageChain._user_sessions.pop(userid)
+            logger.info(f"已清除用户 {userid} 的会话: {session_id}")
+            return True
+        return False
+
+    def remote_clear_session(self, channel: MessageChannel, userid: Union[str, int], source: Optional[str] = None):
+        """
+        清除用户会话（远程命令接口）
+        """
+        # 获取并清除会话信息
+        session_id = None
+        if userid in MessageChain._user_sessions:
+            session_id, _ = MessageChain._user_sessions.pop(userid)
+            logger.info(f"已清除用户 {userid} 的会话: {session_id}")
+        
+        # 如果有会话ID，同时清除智能体的会话记忆
+        if session_id:
+            try:
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(
+                        agent_manager.clear_session(
+                            session_id=session_id,
+                            user_id=str(userid)
+                        )
+                    )
+                except RuntimeError:
+                    asyncio.run(
+                        agent_manager.clear_session(
+                            session_id=session_id,
+                            user_id=str(userid)
+                        )
+                    )
+            except Exception as e:
+                logger.warning(f"清除智能体会话记忆失败: {e}")
+            
+            self.post_message(Notification(
+                channel=channel,
+                source=source,
+                title="智能体会话已清除，下次将创建新的会话",
+                userid=userid
+            ))
+        else:
+            self.post_message(Notification(
+                channel=channel,
+                source=source,
+                title="您当前没有活跃的智能体会话",
+                userid=userid
+            ))
+
     def _handle_ai_message(self, text: str, channel: MessageChannel, source: str,
                           userid: Union[str, int], username: str) -> None:
         """
@@ -871,8 +961,8 @@ class MessageChain(ChainBase):
                 title="MoviePilot助手已收到您的请求，请稍候..."
             ))
 
-            # 生成会话ID
-            session_id = f"user_{userid}_{hash(user_message) % 10000}"
+            # 生成或复用会话ID
+            session_id = self._get_or_create_session_id(userid)
             
             # 在事件循环中处理
             try:
