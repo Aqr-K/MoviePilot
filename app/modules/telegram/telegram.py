@@ -7,10 +7,10 @@ from typing import Optional, List, Dict, Callable
 from urllib.parse import urljoin
 
 import telebot
+import telegramify_markdown
 from telebot import apihelper
 from telebot.types import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.types import InputMediaPhoto
-import telegramify_markdown
 
 from app.core.config import settings
 from app.core.context import MediaInfo, Context
@@ -237,7 +237,6 @@ class Telegram:
             return False
 
         try:
-            # 构建完整的 Markdown 文本，然后统一转换
             if title and text:
                 caption = f"**{title}**\n{text}"
             elif title:
@@ -249,10 +248,6 @@ class Telegram:
 
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
-
-            # 使用 telegramify-markdown 转换整个文本
-            if caption:
-                caption = self.escape_markdown_smart(caption)
 
             # Determine target chat_id with improved logic using user mapping
             chat_id = self._determine_target_chat_id(userid, original_chat_id)
@@ -316,7 +311,6 @@ class Telegram:
             return None
 
         try:
-            # 构建完整的 Markdown 文本，然后统一转换
             index, image, caption = 1, "", f"**{title}**" if title else ""
             for media in medias:
                 if not image:
@@ -338,10 +332,6 @@ class Telegram:
 
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
-
-            # 使用 telegramify-markdown 转换整个文本
-            if caption:
-                caption = self.escape_markdown_smart(caption)
 
             # Determine target chat_id with improved logic using user mapping
             chat_id = self._determine_target_chat_id(userid, original_chat_id)
@@ -382,7 +372,6 @@ class Telegram:
             return None
 
         try:
-            # 构建完整的 Markdown 文本，然后统一转换
             index, caption = 1, f"**{title}**" if title else ""
             image = torrents[0].media_info.get_message_image()
             for context in torrents:
@@ -403,10 +392,6 @@ class Telegram:
 
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
-
-            # 使用 telegramify-markdown 转换整个文本
-            if caption:
-                caption = self.escape_markdown_smart(caption)
 
             # Determine target chat_id with improved logic using user mapping
             chat_id = self._determine_target_chat_id(userid, original_chat_id)
@@ -565,21 +550,39 @@ class Telegram:
                 if ret is None:
                     raise RetryException("发送图片消息失败")
                 return True
-        # 按4096分段循环发送消息
+        # 使用 telegramify-markdown 的 telegramify 函数智能分割长消息
+        # telegramify 会自动处理 Markdown 格式转换和智能分割，避免在格式标记中间分割
         ret = None
-        if len(caption) > 4095:
-            for i in range(0, len(caption), 4095):
+        try:
+            # 使用 telegramify 处理原始 Markdown 文本
+            # telegramify 会同时完成格式转换和智能分割
+            # 如果文本已经转换过，也可以直接传入，telegramify 会处理
+            chunks = list(telegramify_markdown.telegramify(
+                caption,
+                max_length=4095,  # Telegram 消息最大长度
+                interpreter=None  # 不使用代码块解释器，直接发送文本
+            ))
+
+            if not chunks:
+                # 如果没有分割，使用 markdownify 转换后直接发送
+                converted = telegramify_markdown.markdownify(
+                    caption,
+                    max_line_length=None,
+                    normalize_whitespace=False
+                )
+                chunks = [converted]
+
+            # 发送所有消息块（telegramify 已经转换过格式，直接发送）
+            for i, chunk in enumerate(chunks):
                 ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
-                                             text=caption[i:i + 4095],
+                                             text=chunk,
                                              parse_mode="MarkdownV2",
                                              reply_markup=reply_markup if i == 0 else None)
-        else:
-            ret = self._bot.send_message(chat_id=userid or self._telegram_chat_id,
-                                         text=caption,
-                                         parse_mode="MarkdownV2",
-                                         reply_markup=reply_markup)
-        if ret is None:
-            raise RetryException("发送文本消息失败")
+                if ret is None:
+                    raise RetryException(f"发送文本消息失败（第 {i + 1}/{len(chunks)} 条）")
+        except Exception as e:
+            logger.warning(f"Telegram 发送消息失败：{e}")
+
         return True if ret else False
 
     def register_commands(self, commands: Dict[str, dict]):
@@ -627,10 +630,10 @@ class Telegram:
         """
         if not isinstance(text, str):
             return str(text) if text is not None else ""
-        
+
         if not text:
             return ""
-        
+
         try:
             # 使用 telegramify-markdown 的 markdownify 函数进行转换
             # markdownify 会自动处理 Markdown 格式和特殊字符转义
