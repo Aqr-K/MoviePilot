@@ -27,6 +27,17 @@ class ListDirectoryTool(MoviePilotTool):
     description: str = "List contents of a file system directory. Shows files and subdirectories with their names, types, sizes, and modification times. Returns up to 20 items and the total count if there are more items."
     args_schema: Type[BaseModel] = ListDirectoryInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据目录参数生成友好的提示消息"""
+        path = kwargs.get("path", "")
+        storage = kwargs.get("storage", "local")
+        
+        message = f"正在查询目录: {path}"
+        if storage != "local":
+            message += f" [存储: {storage}]"
+        
+        return message
+
     async def run(self, path: str, storage: Optional[str] = "local",
                   sort_by: Optional[str] = "name", **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: path={path}, storage={storage}, sort_by={sort_by}")

@@ -22,6 +22,20 @@ class DeleteDownloadTool(MoviePilotTool):
     description: str = "Delete a download task from the downloader. Can delete by task hash (unique identifier) or task title/name. Optionally specify the downloader name and whether to delete downloaded files."
     args_schema: Type[BaseModel] = DeleteDownloadInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据删除参数生成友好的提示消息"""
+        task_identifier = kwargs.get("task_identifier", "")
+        downloader = kwargs.get("downloader")
+        delete_files = kwargs.get("delete_files", False)
+        
+        message = f"正在删除下载任务: {task_identifier}"
+        if downloader:
+            message += f" [下载器: {downloader}]"
+        if delete_files:
+            message += " (包含文件)"
+        
+        return message
+
     async def run(self, task_identifier: str, downloader: Optional[str] = None,
                   delete_files: Optional[bool] = False, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: task_identifier={task_identifier}, downloader={downloader}, delete_files={delete_files}")

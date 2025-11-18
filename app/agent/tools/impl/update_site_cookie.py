@@ -25,6 +25,18 @@ class UpdateSiteCookieTool(MoviePilotTool):
     description: str = "Update site Cookie and User-Agent by logging in with username and password. This tool can automatically obtain and update the site's authentication credentials. Supports two-step verification for sites that require it. Accepts site ID, site name, or site domain/URL as identifier."
     args_schema: Type[BaseModel] = UpdateSiteCookieInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据更新参数生成友好的提示消息"""
+        site_identifier = kwargs.get("site_identifier", "")
+        username = kwargs.get("username", "")
+        two_step_code = kwargs.get("two_step_code")
+        
+        message = f"正在更新站点Cookie: {site_identifier} (用户: {username})"
+        if two_step_code:
+            message += " [需要两步验证]"
+        
+        return message
+
     async def run(self, site_identifier: str, username: str, password: str, 
                   two_step_code: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: site_identifier={site_identifier}, username={username}")

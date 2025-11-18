@@ -24,6 +24,27 @@ class QueryWorkflowsTool(MoviePilotTool):
     description: str = "Query workflow list and status. Shows workflow name, description, trigger type, state, execution count, and other workflow details. Supports filtering by state, name, and trigger type."
     args_schema: Type[BaseModel] = QueryWorkflowsInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        state = kwargs.get("state", "all")
+        name = kwargs.get("name")
+        trigger_type = kwargs.get("trigger_type", "all")
+        
+        parts = ["正在查询工作流"]
+        
+        if state != "all":
+            state_map = {"W": "等待", "R": "运行中", "P": "暂停", "S": "成功", "F": "失败"}
+            parts.append(f"状态: {state_map.get(state, state)}")
+        
+        if trigger_type != "all":
+            trigger_map = {"timer": "定时触发", "event": "事件触发", "manual": "手动触发"}
+            parts.append(f"触发类型: {trigger_map.get(trigger_type, trigger_type)}")
+        
+        if name:
+            parts.append(f"名称: {name}")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, state: Optional[str] = "all",
                   name: Optional[str] = None,
                   trigger_type: Optional[str] = "all", **kwargs) -> str:

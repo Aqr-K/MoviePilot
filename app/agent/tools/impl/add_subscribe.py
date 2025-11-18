@@ -38,6 +38,23 @@ class AddSubscribeTool(MoviePilotTool):
     description: str = "Add media subscription to create automated download rules for movies and TV shows. The system will automatically search and download new episodes or releases based on the subscription criteria. Supports advanced filtering options like quality, resolution, and effect filters using regular expressions."
     args_schema: Type[BaseModel] = AddSubscribeInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据订阅参数生成友好的提示消息"""
+        title = kwargs.get("title", "")
+        year = kwargs.get("year", "")
+        media_type = kwargs.get("media_type", "")
+        season = kwargs.get("season")
+        
+        message = f"正在添加订阅: {title}"
+        if year:
+            message += f" ({year})"
+        if media_type:
+            message += f" [{media_type}]"
+        if season:
+            message += f" 第{season}季"
+        
+        return message
+
     async def run(self, title: str, year: str, media_type: str,
                   season: Optional[int] = None, tmdb_id: Optional[str] = None,
                   start_episode: Optional[int] = None, total_episode: Optional[int] = None,

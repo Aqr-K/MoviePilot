@@ -1,6 +1,6 @@
 """运行定时服务工具"""
 
-from typing import Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,11 @@ class RunSchedulerTool(MoviePilotTool):
     name: str = "run_scheduler"
     description: str = "Manually trigger a scheduled task to run immediately. This will execute the specified scheduler job by its ID."
     args_schema: Type[BaseModel] = RunSchedulerInput
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据运行参数生成友好的提示消息"""
+        job_id = kwargs.get("job_id", "")
+        return f"正在运行定时服务 (ID: {job_id})"
 
     async def run(self, job_id: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: job_id={job_id}")

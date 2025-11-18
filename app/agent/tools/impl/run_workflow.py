@@ -23,6 +23,19 @@ class RunWorkflowTool(MoviePilotTool):
     description: str = "Execute a specific workflow manually. Can run workflow by ID or name. Supports running from the beginning or continuing from the last executed action."
     args_schema: Type[BaseModel] = RunWorkflowInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据工作流参数生成友好的提示消息"""
+        workflow_identifier = kwargs.get("workflow_identifier", "")
+        from_begin = kwargs.get("from_begin", True)
+        
+        message = f"正在执行工作流: {workflow_identifier}"
+        if not from_begin:
+            message += " (从上次位置继续)"
+        else:
+            message += " (从头开始)"
+        
+        return message
+
     async def run(self, workflow_identifier: str,
                   from_begin: Optional[bool] = True, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: workflow_identifier={workflow_identifier}, from_begin={from_begin}")

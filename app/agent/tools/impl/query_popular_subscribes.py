@@ -31,6 +31,27 @@ class QueryPopularSubscribesTool(MoviePilotTool):
     description: str = "Query popular subscriptions based on user shared data. Shows media with the most subscribers, supports filtering by genre, rating, minimum subscribers, and pagination."
     args_schema: Type[BaseModel] = QueryPopularSubscribesInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        stype = kwargs.get("stype", "")
+        page = kwargs.get("page", 1)
+        min_sub = kwargs.get("min_sub")
+        min_rating = kwargs.get("min_rating")
+        max_rating = kwargs.get("max_rating")
+        
+        parts = [f"正在查询热门订阅 [{stype}]"]
+        
+        if min_sub:
+            parts.append(f"最少订阅: {min_sub}")
+        if min_rating:
+            parts.append(f"最低评分: {min_rating}")
+        if max_rating:
+            parts.append(f"最高评分: {max_rating}")
+        if page > 1:
+            parts.append(f"第{page}页")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, stype: str,
                   page: Optional[int] = 1,
                   count: Optional[int] = 30,

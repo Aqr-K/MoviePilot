@@ -1,7 +1,7 @@
 """查询定时服务工具"""
 
 import json
-from typing import Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,10 @@ class QuerySchedulersTool(MoviePilotTool):
     name: str = "query_schedulers"
     description: str = "Query scheduled tasks and list all available scheduler jobs. Shows job status, next run time, and provider information."
     args_schema: Type[BaseModel] = QuerySchedulersInput
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """生成友好的提示消息"""
+        return "正在查询定时服务"
 
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")

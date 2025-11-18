@@ -35,6 +35,20 @@ class AddDownloadTool(MoviePilotTool):
     description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings."
     args_schema: Type[BaseModel] = AddDownloadInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据下载参数生成友好的提示消息"""
+        torrent_title = kwargs.get("torrent_title", "")
+        site_name = kwargs.get("site_name", "")
+        downloader = kwargs.get("downloader")
+        
+        message = f"正在添加下载任务: {torrent_title}"
+        if site_name:
+            message += f" (来源: {site_name})"
+        if downloader:
+            message += f" [下载器: {downloader}]"
+        
+        return message
+
     async def run(self, site_name: str, torrent_title: str, torrent_url: str, torrent_description: Optional[str] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:

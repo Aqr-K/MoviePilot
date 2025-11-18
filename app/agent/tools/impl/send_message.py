@@ -21,6 +21,20 @@ class SendMessageTool(MoviePilotTool):
     description: str = "Send notification message to the user through configured notification channels (Telegram, Slack, WeChat, etc.). Used to inform users about operation results, errors, or important updates."
     args_schema: Type[BaseModel] = SendMessageInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据消息参数生成友好的提示消息"""
+        message = kwargs.get("message", "")
+        message_type = kwargs.get("message_type", "info")
+        
+        type_map = {"info": "信息", "success": "成功", "warning": "警告", "error": "错误"}
+        type_desc = type_map.get(message_type, message_type)
+        
+        # 截断过长的消息
+        if len(message) > 50:
+            message = message[:50] + "..."
+        
+        return f"正在发送{type_desc}消息: {message}"
+
     async def run(self, message: str, message_type: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: message={message}, message_type={message_type}")
         try:

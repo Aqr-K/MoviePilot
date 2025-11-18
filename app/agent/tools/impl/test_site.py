@@ -1,6 +1,6 @@
 """测试站点连通性工具"""
 
-from typing import Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,11 @@ class TestSiteTool(MoviePilotTool):
     name: str = "test_site"
     description: str = "Test site connectivity and availability. This will check if a site is accessible and can be logged in. Accepts site ID, site name, or site domain/URL as identifier."
     args_schema: Type[BaseModel] = TestSiteInput
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据测试参数生成友好的提示消息"""
+        site_identifier = kwargs.get("site_identifier", "")
+        return f"正在测试站点连通性: {site_identifier}"
 
     async def run(self, site_identifier: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: site_identifier={site_identifier}")

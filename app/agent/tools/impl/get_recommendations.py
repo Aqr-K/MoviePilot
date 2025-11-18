@@ -26,6 +26,26 @@ class GetRecommendationsTool(MoviePilotTool):
     description: str = "Get trending and popular media recommendations from various sources. Returns curated lists of popular movies, TV shows, and anime based on different criteria like trending, ratings, or calendar schedules."
     args_schema: Type[BaseModel] = GetRecommendationsInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据推荐参数生成友好的提示消息"""
+        source = kwargs.get("source", "tmdb_trending")
+        media_type = kwargs.get("media_type", "all")
+        limit = kwargs.get("limit", 20)
+        
+        source_map = {
+            "tmdb_trending": "TMDB热门",
+            "douban_hot": "豆瓣热门",
+            "bangumi_calendar": "番组计划"
+        }
+        source_desc = source_map.get(source, source)
+        
+        message = f"正在获取推荐: {source_desc}"
+        if media_type != "all":
+            message += f" [{media_type}]"
+        message += f" (限制: {limit}条)"
+        
+        return message
+
     async def run(self, source: Optional[str] = "tmdb_trending",
                   media_type: Optional[str] = "all", limit: Optional[int] = 20, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: source={source}, media_type={media_type}, limit={limit}")

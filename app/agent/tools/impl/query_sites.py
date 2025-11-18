@@ -24,6 +24,22 @@ class QuerySitesTool(MoviePilotTool):
     description: str = "Query site status and list all configured sites. Shows site name, domain, status, priority, and basic configuration."
     args_schema: Type[BaseModel] = QuerySitesInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        status = kwargs.get("status", "all")
+        name = kwargs.get("name")
+        
+        parts = ["正在查询站点"]
+        
+        if status != "all":
+            status_map = {"active": "已启用", "inactive": "已禁用"}
+            parts.append(f"状态: {status_map.get(status, status)}")
+        
+        if name:
+            parts.append(f"名称: {name}")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, status: Optional[str] = "all", name: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: status={status}, name={name}")
         try:

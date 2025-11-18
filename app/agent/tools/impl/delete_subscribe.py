@@ -1,6 +1,6 @@
 """删除订阅工具"""
 
-from typing import Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,11 @@ class DeleteSubscribeTool(MoviePilotTool):
     name: str = "delete_subscribe"
     description: str = "Delete a media subscription by its ID. This will remove the subscription and stop automatic downloads for that media."
     args_schema: Type[BaseModel] = DeleteSubscribeInput
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据删除参数生成友好的提示消息"""
+        subscribe_id = kwargs.get("subscribe_id")
+        return f"正在删除订阅 (ID: {subscribe_id})"
 
     async def run(self, subscribe_id: int, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: subscribe_id={subscribe_id}")

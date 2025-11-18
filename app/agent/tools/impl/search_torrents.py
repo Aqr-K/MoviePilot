@@ -33,6 +33,26 @@ class SearchTorrentsTool(MoviePilotTool):
     description: str = "Search for torrent files across configured indexer sites based on media information. Returns available torrent downloads with details like file size, quality, and download links."
     args_schema: Type[BaseModel] = SearchTorrentsInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据搜索参数生成友好的提示消息"""
+        title = kwargs.get("title", "")
+        year = kwargs.get("year")
+        media_type = kwargs.get("media_type")
+        season = kwargs.get("season")
+        filter_pattern = kwargs.get("filter_pattern")
+        
+        message = f"正在搜索种子: {title}"
+        if year:
+            message += f" ({year})"
+        if media_type:
+            message += f" [{media_type}]"
+        if season:
+            message += f" 第{season}季"
+        if filter_pattern:
+            message += f" 过滤: {filter_pattern}"
+        
+        return message
+
     async def run(self, title: str, year: Optional[str] = None,
                   media_type: Optional[str] = None, season: Optional[int] = None,
                   sites: Optional[List[int]] = None, filter_pattern: Optional[str] = None, **kwargs) -> str:

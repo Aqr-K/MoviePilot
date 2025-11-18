@@ -1,6 +1,6 @@
 """MoviePilot工具基类"""
 from abc import ABCMeta, abstractmethod
-from typing import Callable, Any
+from typing import Callable, Any, Optional
 
 from langchain.tools import BaseTool
 from pydantic import PrivateAttr
@@ -39,13 +39,32 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if agent_message:
             await self.send_tool_message(agent_message, title="MoviePilot助手")
         # 发送执行工具说明
-        explanation = kwargs.get("explanation")
-        if explanation:
-            # 使用分隔线和图标将工具执行消息"包起来"，使其与正常Agent消息区分
-            separator = "━━━━━━━━━━━━━━━━"
-            tool_message = f"{separator}\n⚙️ {explanation}\n{separator}"
-            await self.send_tool_message(tool_message)
+        # 优先使用工具自定义的提示消息，如果没有则使用 explanation
+        tool_message = self.get_tool_message(**kwargs)
+        if not tool_message:
+            explanation = kwargs.get("explanation")
+            if explanation:
+                tool_message = explanation
+        
+        if tool_message:
+            formatted_message = f"⚙️ {tool_message} ⚙️"
+            await self.send_tool_message(formatted_message)
         return await self.run(**kwargs)
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """
+        获取工具执行时的友好提示消息
+        
+        子类可以重写此方法，根据实际参数生成个性化的提示消息。
+        如果返回 None 或空字符串，将回退使用 explanation 参数。
+        
+        Args:
+            **kwargs: 工具的所有参数（包括 explanation）
+            
+        Returns:
+            str: 友好的提示消息，如果返回 None 或空字符串则使用 explanation
+        """
+        return None
 
     @abstractmethod
     async def run(self, **kwargs) -> str:

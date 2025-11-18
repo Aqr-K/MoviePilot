@@ -27,6 +27,26 @@ class QuerySubscribeSharesTool(MoviePilotTool):
     description: str = "Query shared subscriptions from other users. Shows popular subscriptions shared by the community with filtering and pagination support."
     args_schema: Type[BaseModel] = QuerySubscribeSharesInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        name = kwargs.get("name")
+        page = kwargs.get("page", 1)
+        min_rating = kwargs.get("min_rating")
+        max_rating = kwargs.get("max_rating")
+        
+        parts = ["正在查询订阅分享"]
+        
+        if name:
+            parts.append(f"名称: {name}")
+        if min_rating:
+            parts.append(f"最低评分: {min_rating}")
+        if max_rating:
+            parts.append(f"最高评分: {max_rating}")
+        if page > 1:
+            parts.append(f"第{page}页")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, name: Optional[str] = None,
                   page: Optional[int] = 1,
                   count: Optional[int] = 30,

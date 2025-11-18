@@ -27,6 +27,23 @@ class SearchMediaTool(MoviePilotTool):
     description: str = "Search for media resources including movies, TV shows, anime, etc. Supports searching by title, year, type, and other criteria. Returns detailed media information from TMDB database."
     args_schema: Type[BaseModel] = SearchMediaInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据搜索参数生成友好的提示消息"""
+        title = kwargs.get("title", "")
+        year = kwargs.get("year")
+        media_type = kwargs.get("media_type")
+        season = kwargs.get("season")
+        
+        message = f"正在搜索媒体: {title}"
+        if year:
+            message += f" ({year})"
+        if media_type:
+            message += f" [{media_type}]"
+        if season:
+            message += f" 第{season}季"
+        
+        return message
+
     async def run(self, title: str, year: Optional[str] = None,
                   media_type: Optional[str] = None, season: Optional[int] = None, **kwargs) -> str:
         logger.info(

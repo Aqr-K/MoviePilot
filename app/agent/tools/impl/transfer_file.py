@@ -31,6 +31,24 @@ class TransferFileTool(MoviePilotTool):
     description: str = "Transfer/organize a file or directory to the media library. Automatically recognizes media information and organizes files according to configured rules. Supports custom target paths, media identification, and transfer modes."
     args_schema: Type[BaseModel] = TransferFileInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据整理参数生成友好的提示消息"""
+        file_path = kwargs.get("file_path", "")
+        media_type = kwargs.get("media_type")
+        transfer_type = kwargs.get("transfer_type")
+        background = kwargs.get("background", False)
+        
+        message = f"正在整理文件: {file_path}"
+        if media_type:
+            message += f" [{media_type}]"
+        if transfer_type:
+            transfer_map = {"move": "移动", "copy": "复制", "link": "硬链接", "softlink": "软链接"}
+            message += f" 模式: {transfer_map.get(transfer_type, transfer_type)}"
+        if background:
+            message += " [后台运行]"
+        
+        return message
+
     async def run(self, file_path: str, storage: Optional[str] = "local",
                   target_path: Optional[str] = None,
                   target_storage: Optional[str] = None,

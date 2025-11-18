@@ -23,6 +23,20 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
     description: str = "Query subscription history records. Shows completed subscriptions with their details including name, type, rating, completion date, and other subscription information. Supports filtering by media type and name. Returns up to 30 records."
     args_schema: Type[BaseModel] = QuerySubscribeHistoryInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        media_type = kwargs.get("media_type", "all")
+        name = kwargs.get("name")
+        
+        parts = ["正在查询订阅历史"]
+        
+        if media_type != "all":
+            parts.append(f"类型: {media_type}")
+        if name:
+            parts.append(f"名称: {name}")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, media_type: Optional[str] = "all",
                   name: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, name={name}")

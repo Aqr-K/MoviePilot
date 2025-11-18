@@ -27,6 +27,29 @@ class QueryDownloadsTool(MoviePilotTool):
     description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash or title. Shows download progress, completion status, and task details from configured downloaders."
     args_schema: Type[BaseModel] = QueryDownloadsInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        downloader = kwargs.get("downloader")
+        status = kwargs.get("status", "all")
+        hash_value = kwargs.get("hash")
+        title = kwargs.get("title")
+        
+        parts = ["正在查询下载任务"]
+        
+        if downloader:
+            parts.append(f"下载器: {downloader}")
+        
+        if status != "all":
+            status_map = {"downloading": "下载中", "completed": "已完成", "paused": "已暂停"}
+            parts.append(f"状态: {status_map.get(status, status)}")
+        
+        if hash_value:
+            parts.append(f"Hash: {hash_value[:8]}...")
+        elif title:
+            parts.append(f"标题: {title}")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, downloader: Optional[str] = None,
                   status: Optional[str] = "all",
                   hash: Optional[str] = None,

@@ -26,6 +26,24 @@ class QueryTransferHistoryTool(MoviePilotTool):
     description: str = "Query file transfer history records. Shows transfer status, source and destination paths, media information, and transfer details. Supports filtering by title and status."
     args_schema: Type[BaseModel] = QueryTransferHistoryInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        title = kwargs.get("title")
+        status = kwargs.get("status", "all")
+        page = kwargs.get("page", 1)
+        
+        parts = ["正在查询整理历史"]
+        
+        if title:
+            parts.append(f"标题: {title}")
+        if status != "all":
+            status_map = {"success": "成功", "failed": "失败"}
+            parts.append(f"状态: {status_map.get(status, status)}")
+        if page > 1:
+            parts.append(f"第{page}页")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, title: Optional[str] = None,
                   status: Optional[str] = "all",
                   page: Optional[int] = 1, **kwargs) -> str:

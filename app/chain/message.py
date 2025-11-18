@@ -828,7 +828,8 @@ class MessageChain(ChainBase):
 
         return buttons
 
-    def _get_or_create_session_id(self, userid: Union[str, int]) -> str:
+    @staticmethod
+    def _get_or_create_session_id(userid: Union[str, int]) -> str:
         """
         获取或创建会话ID
         如果用户上次会话在15分钟内，则复用相同的会话ID；否则创建新的会话ID

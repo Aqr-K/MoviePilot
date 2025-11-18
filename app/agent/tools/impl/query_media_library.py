@@ -27,6 +27,23 @@ class QueryMediaLibraryTool(MoviePilotTool):
     description: str = "Check if a specific media resource already exists in the media library (Plex, Emby, Jellyfin). Use this tool to verify whether a movie or TV series has been successfully processed and added to the media server before performing operations like downloading or subscribing."
     args_schema: Type[BaseModel] = QueryMediaLibraryInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        media_type = kwargs.get("media_type", "all")
+        title = kwargs.get("title")
+        year = kwargs.get("year")
+        
+        parts = ["正在查询媒体库"]
+        
+        if title:
+            parts.append(f"标题: {title}")
+        if year:
+            parts.append(f"年份: {year}")
+        if media_type != "all":
+            parts.append(f"类型: {media_type}")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, media_type: Optional[str] = "all",
                   title: Optional[str] = None, year: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")

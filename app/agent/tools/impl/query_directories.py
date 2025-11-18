@@ -26,6 +26,27 @@ class QueryDirectoriesTool(MoviePilotTool):
     description: str = "Query system directory configuration and list all configured directories. Shows download directories, media library directories, storage settings, transfer modes, and other directory-related configurations."
     args_schema: Type[BaseModel] = QueryDirectoriesInput
 
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """根据查询参数生成友好的提示消息"""
+        directory_type = kwargs.get("directory_type", "all")
+        storage_type = kwargs.get("storage_type", "all")
+        name = kwargs.get("name")
+        
+        parts = ["正在查询目录配置"]
+        
+        if directory_type != "all":
+            type_map = {"download": "下载目录", "library": "媒体库目录"}
+            parts.append(f"类型: {type_map.get(directory_type, directory_type)}")
+        
+        if storage_type != "all":
+            storage_map = {"local": "本地存储", "remote": "远程存储"}
+            parts.append(f"存储: {storage_map.get(storage_type, storage_type)}")
+        
+        if name:
+            parts.append(f"名称: {name}")
+        
+        return " | ".join(parts) if len(parts) > 1 else parts[0]
+
     async def run(self, directory_type: Optional[str] = "all",
                   storage_type: Optional[str] = "all",
                   name: Optional[str] = None, **kwargs) -> str:

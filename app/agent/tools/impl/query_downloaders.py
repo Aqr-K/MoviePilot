@@ -1,7 +1,7 @@
 """查询下载器工具"""
 
 import json
-from typing import Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,10 @@ class QueryDownloadersTool(MoviePilotTool):
     name: str = "query_downloaders"
     description: str = "Query downloader configuration and list all available downloaders. Shows downloader status, connection details, and configuration settings."
     args_schema: Type[BaseModel] = QueryDownloadersInput
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        """生成友好的提示消息"""
+        return "正在查询下载器配置"
 
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
