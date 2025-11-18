@@ -87,7 +87,6 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
                         "bangumiid": record.bangumiid,
                         "poster": record.poster,
                         "vote": record.vote,
-                        "description": record.description[:200] + "..." if record.description and len(record.description) > 200 else record.description,
                         "total_episode": record.total_episode,
                         "date": record.date,
                         "username": record.username

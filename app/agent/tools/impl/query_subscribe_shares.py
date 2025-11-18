@@ -92,7 +92,6 @@ class QuerySubscribeSharesTool(MoviePilotTool):
                     "bangumiid": share.get("bangumiid"),
                     "poster": share.get("poster"),
                     "vote": share.get("vote"),
-                    "description": share.get("description"),
                     "share_title": share.get("share_title"),
                     "share_comment": share.get("share_comment"),
                     "share_user": share.get("share_user"),

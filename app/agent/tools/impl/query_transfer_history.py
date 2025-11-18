@@ -62,7 +62,7 @@ class QueryTransferHistoryTool(MoviePilotTool):
                 page = 1
 
             # 每页记录数
-            count = 30
+            count = 50
 
             # 获取数据库会话
             async with AsyncSessionFactory() as db:

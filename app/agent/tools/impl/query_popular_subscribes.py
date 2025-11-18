@@ -110,7 +110,6 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                 media.tvdb_id = sub.get("tvdbid")
                 media.imdb_id = sub.get("imdbid")
                 media.season = sub.get("season")
-                media.overview = sub.get("description")
                 media.vote_average = sub.get("vote")
                 media.poster_path = sub.get("poster")
                 media.backdrop_path = sub.get("backdrop")
@@ -134,7 +133,6 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                     "tvdb_id": media_dict.get("tvdb_id"),
                     "imdb_id": media_dict.get("imdb_id"),
                     "season": media_dict.get("season"),
-                    "overview": media_dict.get("overview"),
                     "vote_average": media_dict.get("vote_average"),
                     "poster_path": media_dict.get("poster_path"),
                     "backdrop_path": media_dict.get("backdrop_path"),
