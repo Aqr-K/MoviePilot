@@ -633,52 +633,68 @@ class Telegram:
         if not any(char in self._escape_chars for char in text):
             return text
         
-        # 标记受保护的区域（Markdown标记内的内容不转义）
+        # 标记受保护的位置（只保护Markdown分隔符本身，不保护内容区域）
         protected = [False] * len(text)
         
         # 按优先级匹配Markdown标记（从最复杂到最简单）
-        # 1. 链接：[text](url) - 必须最先匹配
+        # 1. 链接：[text](url) - 必须最先匹配，只保护分隔符 [ ] ( )
         link_pattern = r'\[([^\]]*)\]\(([^)]*)\)'
         for match in re.finditer(link_pattern, text):
-            for i in range(match.start(), match.end()):
-                protected[i] = True
+            # 只保护分隔符：[, ], (, )
+            protected[match.start()] = True  # [
+            # match.end(1) 是第一个捕获组结束位置，即 ] 的位置
+            protected[match.end(1)] = True   # ]
+            # ( 在 ] 之后一个字符
+            if match.end(1) + 1 < len(text):
+                protected[match.end(1) + 1] = True  # (
+            # ) 在匹配结束前一个字符
+            if match.end() > 0:
+                protected[match.end() - 1] = True   # )
         
-        # 2. 粗体：*text*（单个*，不是**）
+        # 2. 粗体：*text*（单个*，不是**），只保护分隔符 *
         bold_pattern = r'(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)'
         for match in re.finditer(bold_pattern, text):
+            # 检查是否与已保护的链接重叠
             if not any(protected[match.start():match.end()]):
-                for i in range(match.start(), match.end()):
-                    protected[i] = True
+                # 只保护分隔符：第一个和最后一个 *
+                protected[match.start()] = True  # 第一个 *
+                protected[match.end() - 1] = True  # 最后一个 *
         
-        # 3. 斜体：_text_（单个_，不是__）
+        # 3. 斜体：_text_（单个_，不是__），只保护分隔符 _
         italic_pattern = r'(?<!_)_(?!_)([^_]+?)(?<!_)_(?!_)'
         for match in re.finditer(italic_pattern, text):
+            # 检查是否与已保护的区域重叠
             if not any(protected[match.start():match.end()]):
-                for i in range(match.start(), match.end()):
-                    protected[i] = True
+                # 只保护分隔符：第一个和最后一个 _
+                protected[match.start()] = True  # 第一个 _
+                protected[match.end() - 1] = True  # 最后一个 _
         
-        # 4. 代码：`text`
+        # 4. 代码：`text`，只保护分隔符 `
         code_pattern = r'`([^`]+)`'
         for match in re.finditer(code_pattern, text):
+            # 检查是否与已保护的区域重叠
             if not any(protected[match.start():match.end()]):
-                for i in range(match.start(), match.end()):
-                    protected[i] = True
+                # 只保护分隔符：第一个和最后一个 `
+                protected[match.start()] = True  # 第一个 `
+                protected[match.end() - 1] = True  # 最后一个 `
         
-        # 5. 删除线：~text~
+        # 5. 删除线：~text~，只保护分隔符 ~
         strikethrough_pattern = r'~([^~]+)~'
         for match in re.finditer(strikethrough_pattern, text):
+            # 检查是否与已保护的区域重叠
             if not any(protected[match.start():match.end()]):
-                for i in range(match.start(), match.end()):
-                    protected[i] = True
+                # 只保护分隔符：第一个和最后一个 ~
+                protected[match.start()] = True  # 第一个 ~
+                protected[match.end() - 1] = True  # 最后一个 ~
         
         # 构建结果：只转义未保护区域的特殊字符
         result = []
         for i, char in enumerate(text):
             if protected[i]:
-                # 受保护区域（Markdown标记内），不转义
+                # 受保护位置（Markdown分隔符），不转义
                 result.append(char)
             elif char in self._escape_chars:
-                # 未保护区域，转义特殊字符
+                # 未保护区域，转义特殊字符（包括Markdown内容区域中的特殊字符）
                 result.append('\\' + char)
             else:
                 result.append(char)
