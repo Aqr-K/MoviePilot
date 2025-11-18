@@ -1,0 +1,136 @@
+"""查询热门订阅工具"""
+
+import json
+from typing import Optional, Type
+
+import cn2an
+from pydantic import BaseModel, Field
+
+from app.agent.tools.base import MoviePilotTool
+from app.core.context import MediaInfo
+from app.helper.subscribe import SubscribeHelper
+from app.log import logger
+from app.schemas.types import MediaType
+
+
+class QueryPopularSubscribesInput(BaseModel):
+    """查询热门订阅工具的输入参数模型"""
+    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    stype: str = Field(..., description="Media type: '电影' for films, '电视剧' for television series")
+    page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")
+    count: Optional[int] = Field(30, description="Number of items per page (default: 30)")
+    min_sub: Optional[int] = Field(None, description="Minimum number of subscribers filter (optional, e.g., 5)")
+    genre_id: Optional[int] = Field(None, description="Filter by genre ID (optional)")
+    min_rating: Optional[float] = Field(None, description="Minimum rating filter (optional, e.g., 7.5)")
+    max_rating: Optional[float] = Field(None, description="Maximum rating filter (optional, e.g., 10.0)")
+    sort_type: Optional[str] = Field(None, description="Sort type (optional, e.g., 'count', 'rating')")
+
+
+class QueryPopularSubscribesTool(MoviePilotTool):
+    name: str = "query_popular_subscribes"
+    description: str = "Query popular subscriptions based on user shared data. Shows media with the most subscribers, supports filtering by genre, rating, minimum subscribers, and pagination."
+    args_schema: Type[BaseModel] = QueryPopularSubscribesInput
+
+    async def run(self, stype: str,
+                  page: Optional[int] = 1,
+                  count: Optional[int] = 30,
+                  min_sub: Optional[int] = None,
+                  genre_id: Optional[int] = None,
+                  min_rating: Optional[float] = None,
+                  max_rating: Optional[float] = None,
+                  sort_type: Optional[str] = None, **kwargs) -> str:
+        logger.info(
+            f"执行工具: {self.name}, 参数: stype={stype}, page={page}, count={count}, min_sub={min_sub}, "
+            f"genre_id={genre_id}, min_rating={min_rating}, max_rating={max_rating}, sort_type={sort_type}")
+
+        try:
+            if page is None or page < 1:
+                page = 1
+            if count is None or count < 1:
+                count = 30
+
+            subscribe_helper = SubscribeHelper()
+            subscribes = await subscribe_helper.async_get_statistic(
+                stype=stype,
+                page=page,
+                count=count,
+                genre_id=genre_id,
+                min_rating=min_rating,
+                max_rating=max_rating,
+                sort_type=sort_type
+            )
+
+            if not subscribes:
+                return "未找到热门订阅数据（可能订阅统计功能未启用）"
+
+            # 转换为MediaInfo格式并过滤
+            ret_medias = []
+            for sub in subscribes:
+                # 订阅人数
+                subscriber_count = sub.get("count", 0)
+                # 如果设置了最小订阅人数，进行过滤
+                if min_sub and subscriber_count < min_sub:
+                    continue
+
+                media = MediaInfo()
+                media.type = MediaType(sub.get("type"))
+                media.tmdb_id = sub.get("tmdbid")
+                # 处理标题
+                title = sub.get("name")
+                season = sub.get("season")
+                if season and int(season) > 1 and media.tmdb_id:
+                    # 小写数据转大写
+                    season_str = cn2an.an2cn(season, "low")
+                    title = f"{title} 第{season_str}季"
+                media.title = title
+                media.year = sub.get("year")
+                media.douban_id = sub.get("doubanid")
+                media.bangumi_id = sub.get("bangumiid")
+                media.tvdb_id = sub.get("tvdbid")
+                media.imdb_id = sub.get("imdbid")
+                media.season = sub.get("season")
+                media.overview = sub.get("description")
+                media.vote_average = sub.get("vote")
+                media.poster_path = sub.get("poster")
+                media.backdrop_path = sub.get("backdrop")
+                media.popularity = subscriber_count
+                ret_medias.append(media)
+
+            if not ret_medias:
+                return "未找到符合条件的热门订阅"
+
+            # 转换为字典格式，只保留关键信息
+            simplified_medias = []
+            for media in ret_medias:
+                media_dict = media.to_dict()
+                simplified = {
+                    "type": media_dict.get("type"),
+                    "title": media_dict.get("title"),
+                    "year": media_dict.get("year"),
+                    "tmdb_id": media_dict.get("tmdb_id"),
+                    "douban_id": media_dict.get("douban_id"),
+                    "bangumi_id": media_dict.get("bangumi_id"),
+                    "tvdb_id": media_dict.get("tvdb_id"),
+                    "imdb_id": media_dict.get("imdb_id"),
+                    "season": media_dict.get("season"),
+                    "overview": media_dict.get("overview"),
+                    "vote_average": media_dict.get("vote_average"),
+                    "poster_path": media_dict.get("poster_path"),
+                    "backdrop_path": media_dict.get("backdrop_path"),
+                    "popularity": media_dict.get("popularity"),  # 订阅人数
+                    "subscriber_count": media_dict.get("popularity")  # 明确标注为订阅人数
+                }
+                # 截断过长的描述
+                if simplified.get("overview") and len(simplified["overview"]) > 200:
+                    simplified["overview"] = simplified["overview"][:200] + "..."
+                simplified_medias.append(simplified)
+
+            result_json = json.dumps(simplified_medias, ensure_ascii=False, indent=2)
+
+            pagination_info = f"第 {page} 页，每页 {count} 条，共 {len(simplified_medias)} 条结果"
+
+            return f"{pagination_info}\n\n{result_json}"
+        except Exception as e:
+            logger.error(f"查询热门订阅失败: {e}", exc_info=True)
+            return f"查询热门订阅时发生错误: {str(e)}"
+

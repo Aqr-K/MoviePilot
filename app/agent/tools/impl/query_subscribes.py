@@ -16,7 +16,7 @@ class QuerySubscribesInput(BaseModel):
     status: Optional[str] = Field("all",
                                   description="Filter subscriptions by status: 'R' for enabled subscriptions, 'P' for disabled ones, 'all' for all subscriptions")
     media_type: Optional[str] = Field("all",
-                                      description="Filter by media type: 'movie' for films, 'tv' for television series, 'all' for all types")
+                                      description="Filter by media type: '电影' for films, '电视剧' for television series, 'all' for all types")
 
 
 class QuerySubscribesTool(MoviePilotTool):
