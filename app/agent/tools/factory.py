@@ -4,11 +4,14 @@ from typing import List, Callable
 
 from app.agent.tools.impl.add_download import AddDownloadTool
 from app.agent.tools.impl.add_subscribe import AddSubscribeTool
+from app.agent.tools.impl.update_subscribe import UpdateSubscribeTool
 from app.agent.tools.impl.get_recommendations import GetRecommendationsTool
 from app.agent.tools.impl.query_downloaders import QueryDownloadersTool
 from app.agent.tools.impl.query_downloads import QueryDownloadsTool
 from app.agent.tools.impl.query_media_library import QueryMediaLibraryTool
 from app.agent.tools.impl.query_sites import QuerySitesTool
+from app.agent.tools.impl.update_site import UpdateSiteTool
+from app.agent.tools.impl.query_site_userdata import QuerySiteUserdataTool
 from app.agent.tools.impl.test_site import TestSiteTool
 from app.agent.tools.impl.query_subscribes import QuerySubscribesTool
 from app.agent.tools.impl.query_subscribe_shares import QuerySubscribeSharesTool
@@ -49,6 +52,7 @@ class MoviePilotToolFactory:
             RecognizeMediaTool,
             ScrapeMetadataTool,
             AddSubscribeTool,
+            UpdateSubscribeTool,
             SearchTorrentsTool,
             AddDownloadTool,
             QuerySubscribesTool,
@@ -60,6 +64,8 @@ class MoviePilotToolFactory:
             DeleteDownloadTool,
             QueryDownloadersTool,
             QuerySitesTool,
+            UpdateSiteTool,
+            QuerySiteUserdataTool,
             TestSiteTool,
             UpdateSiteCookieTool,
             GetRecommendationsTool,
