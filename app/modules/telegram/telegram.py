@@ -557,7 +557,7 @@ class Telegram:
             # 使用 telegramify 处理原始 Markdown 文本
             chunks = list(telegramify_markdown.markdownify(
                 caption,
-                max_length=4095
+                max_line_length=4095
             ))
 
             if not chunks:
