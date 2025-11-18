@@ -611,33 +611,3 @@ class Telegram:
             self._bot.stop_polling()
             self._polling_thread.join()
             logger.info("Telegram消息接收服务已停止")
-
-    @staticmethod
-    def escape_markdown_smart(text: str) -> str:
-        """
-        使用 telegramify-markdown 库将文本转换为 Telegram MarkdownV2 格式
-        支持原始 Markdown 格式转换，自动处理特殊字符转义
-        
-        :param text: 要转换的文本（可以是纯文本或包含 Markdown 格式）
-        :return: 转换后的 Telegram MarkdownV2 格式文本
-        """
-        if not isinstance(text, str):
-            return str(text) if text is not None else ""
-
-        if not text:
-            return ""
-
-        try:
-            # 使用 telegramify-markdown 的 markdownify 函数进行转换
-            # markdownify 会自动处理 Markdown 格式和特殊字符转义
-            converted = telegramify_markdown.markdownify(
-                text,
-                max_line_length=None,  # 不限制行长度
-                normalize_whitespace=False  # 保留原始空白字符
-            )
-            return converted
-        except Exception as e:
-            # 如果转换失败，记录错误并返回转义后的文本（使用简单转义作为后备）
-            logger.warning(f"使用 telegramify-markdown 转换失败，使用简单转义: {e}")
-            # 简单转义所有特殊字符作为后备方案
-            return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
