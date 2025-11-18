@@ -222,7 +222,7 @@ async def read_userdata(
     user_data = await SiteUserData.async_get_by_domain(db, domain=site.domain, workdate=workdate)
     if not user_data:
         return schemas.Response(success=False, data=[])
-    return schemas.Response(success=True, data=user_data)
+    return schemas.Response(success=True, data=user_data.to_dict())
 
 
 @router.get("/test/{site_id}", summary="连接测试", response_model=schemas.Response)

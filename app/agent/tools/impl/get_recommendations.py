@@ -145,11 +145,6 @@ class GetRecommendationsTool(MoviePilotTool):
                         logger.warning(f"推荐结果格式异常，跳过: {type(r)}")
                         continue
                     
-                    # 处理 overview 字段，截断过长的描述
-                    overview = r.get("overview") or ""
-                    if overview and len(overview) > 200:
-                        overview = overview[:200] + "..."
-                    
                     simplified = {
                         "title": r.get("title"),
                         "en_title": r.get("en_title"),
@@ -159,7 +154,6 @@ class GetRecommendationsTool(MoviePilotTool):
                         "tmdb_id": r.get("tmdb_id"),
                         "imdb_id": r.get("imdb_id"),
                         "douban_id": r.get("douban_id"),
-                        "overview": overview,
                         "vote_average": r.get("vote_average"),
                         "poster_path": r.get("poster_path"),
                         "detail_link": r.get("detail_link")

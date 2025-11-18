@@ -74,7 +74,6 @@ class QueryEpisodeScheduleTool(MoviePilotTool):
                     "episode_number": episode.episode_number,
                     "name": episode.name,
                     "air_date": air_date,
-                    "overview": episode.overview,
                     "runtime": episode.runtime,
                     "vote_average": episode.vote_average,
                     "still_path": episode.still_path,

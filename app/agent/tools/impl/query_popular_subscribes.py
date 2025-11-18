@@ -139,9 +139,6 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                     "popularity": media_dict.get("popularity"),  # 订阅人数
                     "subscriber_count": media_dict.get("popularity")  # 明确标注为订阅人数
                 }
-                # 截断过长的描述
-                if simplified.get("overview") and len(simplified["overview"]) > 200:
-                    simplified["overview"] = simplified["overview"][:200] + "..."
                 simplified_medias.append(simplified)
 
             result_json = json.dumps(simplified_medias, ensure_ascii=False, indent=2)
