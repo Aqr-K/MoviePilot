@@ -37,6 +37,7 @@ beautifulsoup4~=4.13.4
 pillow~=11.2.1
 pillow-avif-plugin~=1.5.2
 pyTelegramBotAPI~=4.27.0
+telegramify-markdown~=0.5.2
 playwright~=1.53.0
 cf_clearance~=0.31.0
 torrentool~=1.2.0
