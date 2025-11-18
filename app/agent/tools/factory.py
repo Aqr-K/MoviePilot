@@ -18,6 +18,11 @@ from app.agent.tools.impl.send_message import SendMessageTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
 from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
+from app.agent.tools.impl.delete_download import DeleteDownloadTool
+from app.agent.tools.impl.query_directories import QueryDirectoriesTool
+from app.agent.tools.impl.list_directory import ListDirectoryTool
+from app.agent.tools.impl.query_transfer_history import QueryTransferHistoryTool
+from app.agent.tools.impl.transfer_file import TransferFileTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -40,12 +45,17 @@ class MoviePilotToolFactory:
             QuerySubscribesTool,
             DeleteSubscribeTool,
             QueryDownloadsTool,
+            DeleteDownloadTool,
             QueryDownloadersTool,
             QuerySitesTool,
             TestSiteTool,
             UpdateSiteCookieTool,
             GetRecommendationsTool,
             QueryMediaLibraryTool,
+            QueryDirectoriesTool,
+            ListDirectoryTool,
+            QueryTransferHistoryTool,
+            TransferFileTool,
             SendMessageTool,
             QuerySchedulersTool,
             RunSchedulerTool
