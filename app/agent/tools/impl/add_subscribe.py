@@ -21,17 +21,32 @@ class AddSubscribeInput(BaseModel):
                                   description="Season number for TV shows (optional, if not specified will subscribe to all seasons)")
     tmdb_id: Optional[str] = Field(None,
                                    description="TMDB database ID for precise media identification (optional but recommended for accuracy)")
+    start_episode: Optional[int] = Field(None,
+                                          description="Starting episode number for TV shows (optional, defaults to 1 if not specified)")
+    total_episode: Optional[int] = Field(None,
+                                          description="Total number of episodes for TV shows (optional, will be auto-detected from TMDB if not specified)")
+    quality: Optional[str] = Field(None,
+                                   description="Quality filter as regular expression (optional, e.g., 'BluRay|WEB-DL|HDTV')")
+    resolution: Optional[str] = Field(None,
+                                      description="Resolution filter as regular expression (optional, e.g., '1080p|720p|2160p')")
+    effect: Optional[str] = Field(None,
+                                  description="Effect filter as regular expression (optional, e.g., 'HDR|DV|SDR')")
 
 
 class AddSubscribeTool(MoviePilotTool):
     name: str = "add_subscribe"
-    description: str = "Add media subscription to create automated download rules for movies and TV shows. The system will automatically search and download new episodes or releases based on the subscription criteria."
+    description: str = "Add media subscription to create automated download rules for movies and TV shows. The system will automatically search and download new episodes or releases based on the subscription criteria. Supports advanced filtering options like quality, resolution, and effect filters using regular expressions."
     args_schema: Type[BaseModel] = AddSubscribeInput
 
     async def run(self, title: str, year: str, media_type: str,
-                  season: Optional[int] = None, tmdb_id: Optional[str] = None, **kwargs) -> str:
+                  season: Optional[int] = None, tmdb_id: Optional[str] = None,
+                  start_episode: Optional[int] = None, total_episode: Optional[int] = None,
+                  quality: Optional[str] = None, resolution: Optional[str] = None,
+                  effect: Optional[str] = None, **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, season={season}, tmdb_id={tmdb_id}")
+            f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, "
+            f"season={season}, tmdb_id={tmdb_id}, start_episode={start_episode}, "
+            f"total_episode={total_episode}, quality={quality}, resolution={resolution}, effect={effect}")
 
         try:
             subscribe_chain = SubscribeChain()
@@ -43,16 +58,45 @@ class AddSubscribeTool(MoviePilotTool):
                 except (ValueError, TypeError):
                     logger.warning(f"无效的 tmdb_id: {tmdb_id}，将忽略")
 
+            # 构建额外的订阅参数
+            subscribe_kwargs = {}
+            if start_episode is not None:
+                subscribe_kwargs['start_episode'] = start_episode
+            if total_episode is not None:
+                subscribe_kwargs['total_episode'] = total_episode
+            if quality:
+                subscribe_kwargs['quality'] = quality
+            if resolution:
+                subscribe_kwargs['resolution'] = resolution
+            if effect:
+                subscribe_kwargs['effect'] = effect
+
             sid, message = await subscribe_chain.async_add(
                 mtype=MediaType(media_type),
                 title=title,
                 year=year,
                 tmdbid=tmdbid_int,
                 season=season,
-                username=self._user_id
+                username=self._user_id,
+                **subscribe_kwargs
             )
             if sid:
-                return f"成功添加订阅：{title} ({year})"
+                result_msg = f"成功添加订阅：{title} ({year})"
+                if subscribe_kwargs:
+                    params = []
+                    if start_episode is not None:
+                        params.append(f"开始集数: {start_episode}")
+                    if total_episode is not None:
+                        params.append(f"总集数: {total_episode}")
+                    if quality:
+                        params.append(f"质量过滤: {quality}")
+                    if resolution:
+                        params.append(f"分辨率过滤: {resolution}")
+                    if effect:
+                        params.append(f"特效过滤: {effect}")
+                    if params:
+                        result_msg += f"\n配置参数: {', '.join(params)}"
+                return result_msg
             else:
                 return f"添加订阅失败：{message}"
         except Exception as e:
