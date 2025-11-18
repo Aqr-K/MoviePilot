@@ -47,7 +47,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 tool_message = explanation
         
         if tool_message:
-            formatted_message = f"⚙️ {tool_message} ⚙️"
+            formatted_message = f"⚙️ => {tool_message}"
             await self.send_tool_message(formatted_message)
         return await self.run(**kwargs)
 
