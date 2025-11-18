@@ -13,7 +13,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from app.agent.callback import StreamingCallbackHandler
 from app.agent.memory import ConversationMemoryManager
 from app.agent.prompt import PromptManager
-from app.agent.tools import MoviePilotToolFactory
+from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
 from app.helper.message import MessageHelper
