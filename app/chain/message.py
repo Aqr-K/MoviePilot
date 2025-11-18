@@ -952,15 +952,6 @@ class MessageChain(ChainBase):
                 ))
                 return
 
-            # 发送处理中消息
-            self.post_message(Notification(
-                channel=channel,
-                source=source,
-                userid=userid,
-                username=username,
-                title="MoviePilot助手已收到您的请求，请稍候..."
-            ))
-
             # 生成或复用会话ID
             session_id = self._get_or_create_session_id(userid)
             
