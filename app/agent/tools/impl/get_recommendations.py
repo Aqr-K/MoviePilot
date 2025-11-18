@@ -53,17 +53,23 @@ class GetRecommendationsTool(MoviePilotTool):
             recommend_chain = RecommendChain()
             results = []
             if source == "tmdb_trending":
-                results = await recommend_chain.async_tmdb_trending(limit=limit)
+                # async_tmdb_trending 只接受 page 参数，返回固定数量的结果
+                # 如果需要限制数量，需要在返回后截取
+                results = await recommend_chain.async_tmdb_trending(page=1)
+                if limit and limit > 0:
+                    results = results[:limit]
             elif source == "douban_hot":
+                # async_douban_movie_hot 和 async_douban_tv_hot 接受 page 和 count 参数
                 if media_type == "movie":
-                    results = await recommend_chain.async_douban_movie_hot(limit=limit)
+                    results = await recommend_chain.async_douban_movie_hot(page=1, count=limit)
                 elif media_type == "tv":
-                    results = await recommend_chain.async_douban_tv_hot(limit=limit)
+                    results = await recommend_chain.async_douban_tv_hot(page=1, count=limit)
                 else:  # all
-                    results.extend(await recommend_chain.async_douban_movie_hot(limit=limit))
-                    results.extend(await recommend_chain.async_douban_tv_hot(limit=limit))
+                    results.extend(await recommend_chain.async_douban_movie_hot(page=1, count=limit))
+                    results.extend(await recommend_chain.async_douban_tv_hot(page=1, count=limit))
             elif source == "bangumi_calendar":
-                results = await recommend_chain.async_bangumi_calendar(limit=limit)
+                # async_bangumi_calendar 接受 page 和 count 参数
+                results = await recommend_chain.async_bangumi_calendar(page=1, count=limit)
 
             if results:
                 # 限制最多20条结果
@@ -72,7 +78,16 @@ class GetRecommendationsTool(MoviePilotTool):
                 # 精简字段，只保留关键信息
                 simplified_results = []
                 for r in limited_results:
-                    # r 已经是字典格式（to_dict的结果）
+                    # r 应该是字典格式（to_dict的结果），但为了安全起见进行检查
+                    if not isinstance(r, dict):
+                        logger.warning(f"推荐结果格式异常，跳过: {type(r)}")
+                        continue
+                    
+                    # 处理 overview 字段，截断过长的描述
+                    overview = r.get("overview") or ""
+                    if overview and len(overview) > 200:
+                        overview = overview[:200] + "..."
+                    
                     simplified = {
                         "title": r.get("title"),
                         "en_title": r.get("en_title"),
@@ -82,7 +97,7 @@ class GetRecommendationsTool(MoviePilotTool):
                         "tmdb_id": r.get("tmdb_id"),
                         "imdb_id": r.get("imdb_id"),
                         "douban_id": r.get("douban_id"),
-                        "overview": r.get("overview", "")[:200] + "..." if r.get("overview") and len(r.get("overview", "")) > 200 else r.get("overview"),
+                        "overview": overview,
                         "vote_average": r.get("vote_average"),
                         "poster_path": r.get("poster_path"),
                         "detail_link": r.get("detail_link")
