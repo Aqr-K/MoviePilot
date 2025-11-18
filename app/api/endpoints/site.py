@@ -219,10 +219,10 @@ async def read_userdata(
             status_code=404,
             detail=f"站点 {site_id} 不存在",
         )
-    user_data = await SiteUserData.async_get_by_domain(db, domain=site.domain, workdate=workdate)
-    if not user_data:
+    user_datas = await SiteUserData.async_get_by_domain(db, domain=site.domain, workdate=workdate)
+    if not user_datas:
         return schemas.Response(success=False, data=[])
-    return schemas.Response(success=True, data=user_data.to_dict())
+    return schemas.Response(success=True, data=[data.to_dict() for data in user_datas])
 
 
 @router.get("/test/{site_id}", summary="连接测试", response_model=schemas.Response)
