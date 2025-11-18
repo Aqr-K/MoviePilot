@@ -90,6 +90,5 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 username=self._username,
                 title=title,
                 text=message
-            ),
-            escape_markdown=False
+            )
         )

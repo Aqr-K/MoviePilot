@@ -283,8 +283,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                                 image=message.image, userid=userid, link=message.link,
                                 buttons=message.buttons,
                                 original_message_id=message.original_message_id,
-                                original_chat_id=message.original_chat_id,
-                                escape_markdown=kwargs.get("escape_markdown"))
+                                original_chat_id=message.original_chat_id)
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """

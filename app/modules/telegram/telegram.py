@@ -32,7 +32,7 @@ class Telegram:
     _user_chat_mapping: Dict[str, str] = {}  # userid -> chat_id mapping for reply targeting
     _bot_username: Optional[str] = None  # Bot username for mention detection
     _escape_chars = r'_*[]()~`>#+-=|{}.!' # Telegram MarkdownV2
-    _markdown_escape_pattern = re.compile(f'([{re.escape(_escape_chars)}])') # Telegram MarkdownV2 规则转义特殊字符正则pattern
+
     def __init__(self, TELEGRAM_TOKEN: Optional[str] = None, TELEGRAM_CHAT_ID: Optional[str] = None, **kwargs):
         """
         初始化参数
@@ -216,8 +216,7 @@ class Telegram:
                  userid: Optional[str] = None, link: Optional[str] = None,
                  buttons: Optional[List[List[dict]]] = None,
                  original_message_id: Optional[int] = None,
-                 original_chat_id: Optional[str] = None,
-                 escape_markdown: bool = True) -> Optional[bool]:
+                 original_chat_id: Optional[str] = None) -> Optional[bool]:
         """
         发送Telegram消息
         :param title: 消息标题
@@ -228,7 +227,6 @@ class Telegram:
         :param buttons: 按钮列表，格式：[[{"text": "按钮文本", "callback_data": "回调数据"}]]
         :param original_message_id: 原消息ID，如果提供则编辑原消息
         :param original_chat_id: 原消息的聊天ID，编辑消息时需要
-        :param escape_markdown: 是否对内容进行Markdown转义
 
         """
         if not self._telegram_token or not self._telegram_chat_id:
@@ -240,15 +238,10 @@ class Telegram:
 
         try:
             if title:
-                # 标题总是转义（因为通常标题不包含Markdown格式）
-                title = self.escape_markdown(title)
+                title = self.escape_markdown_smart(title)
+
             if text:
-                if escape_markdown:
-                    # 完全转义模式：转义所有特殊字符
-                    text = self.escape_markdown(text)
-                else:
-                    # 智能转义模式：保留Markdown格式，只转义普通文本中的特殊字符
-                    text = self.escape_markdown_smart(text)
+                text = self.escape_markdown_smart(text)
                 if title:
                     caption = f"*{title}*\n{text}"
                 else:
@@ -322,8 +315,8 @@ class Telegram:
 
         try:
             if title:
-                # 标题总是转义（因为通常标题不包含Markdown格式）
-                title = self.escape_markdown(title)
+                title = self.escape_markdown_smart(title)
+
             index, image, caption = 1, "", "*%s*" % title
             for media in medias:
                 if not image:
@@ -386,8 +379,8 @@ class Telegram:
 
         try:
             if title:
-                # 标题总是转义（因为通常标题不包含Markdown格式）
-                title = self.escape_markdown(title)
+                title = self.escape_markdown_smart(title)
+
             index, caption = 1, "*%s*" % title
             image = torrents[0].media_info.get_message_image()
             for context in torrents:
@@ -616,12 +609,6 @@ class Telegram:
             self._bot.stop_polling()
             self._polling_thread.join()
             logger.info("Telegram消息接收服务已停止")
-
-    def escape_markdown(self, text: str) -> str:
-        # 按 Telegram MarkdownV2 规则转义特殊字符
-        if not isinstance(text, str):
-            return str(text) if text is not None else ""
-        return self._markdown_escape_pattern.sub(r'\\\1', text)
 
     def escape_markdown_smart(self, text: str) -> str:
         """
