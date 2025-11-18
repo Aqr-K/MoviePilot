@@ -555,21 +555,14 @@ class Telegram:
         ret = None
         try:
             # 使用 telegramify 处理原始 Markdown 文本
-            # telegramify 会同时完成格式转换和智能分割
-            # 如果文本已经转换过，也可以直接传入，telegramify 会处理
-            chunks = list(telegramify_markdown.telegramify(
+            chunks = list(telegramify_markdown.markdownify(
                 caption,
-                max_length=4095,  # Telegram 消息最大长度
-                interpreter=None  # 不使用代码块解释器，直接发送文本
+                max_length=4095
             ))
 
             if not chunks:
                 # 如果没有分割，使用 markdownify 转换后直接发送
-                converted = telegramify_markdown.markdownify(
-                    caption,
-                    max_line_length=None,
-                    normalize_whitespace=False
-                )
+                converted = telegramify_markdown.markdownify(caption)
                 chunks = [converted]
 
             # 发送所有消息块（telegramify 已经转换过格式，直接发送）
