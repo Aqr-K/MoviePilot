@@ -184,10 +184,20 @@ MoviePilot的MCP工具可以通过HTTP协议在支持MCP的客户端中使用。
 }
 ```
 
-### Cursor IDE
+### 其他支持MCP的聊天客户端
 
-在Cursor的设置中添加MCP服务器配置：
+对于其他支持MCP协议的聊天客户端（如其他AI聊天助手、对话机器人等），通常可以通过配置文件或设置界面添加HTTP协议的MCP服务器。配置格式可能因客户端而异，但通常需要以下信息：
 
+**配置参数**：
+1. **服务器类型**: HTTP
+2. **服务器地址**: `http://your-moviepilot-host:3001/api/v1/mcp`
+3. **认证方式**: 
+   - 在HTTP请求头中添加 `X-API-KEY: <your_api_key>`
+   - 或在URL查询参数中添加 `apikey=<your_api_key>`
+
+**示例配置**（通用格式）：
+
+使用请求头方式：
 ```json
 {
   "mcpServers": {
@@ -201,17 +211,29 @@ MoviePilot的MCP工具可以通过HTTP协议在支持MCP的客户端中使用。
 }
 ```
 
-### 其他支持MCP的客户端
+或使用查询参数方式：
+```json
+{
+  "mcpServers": {
+    "moviepilot": {
+      "url": "http://localhost:3001/api/v1/mcp?apikey=your_api_key_here"
+    }
+  }
+}
+```
 
-对于其他支持MCP协议的客户端，可以按照以下方式配置：
+**支持的端点**:
+- `GET /tools` - 列出所有工具
+- `POST /tools/call` - 调用工具
+- `GET /tools/{tool_name}` - 获取工具详情
+- `GET /tools/{tool_name}/schema` - 获取工具参数Schema
 
-1. **服务器地址**: `http://your-moviepilot-host:3001/api/v1/mcp`
-2. **认证方式**: 在HTTP请求头中添加 `X-API-KEY: <your_api_key>` 或在URL查询参数中添加 `apikey=<your_api_key>`
-3. **支持的端点**:
-   - `GET /tools` - 列出所有工具
-   - `POST /tools/call` - 调用工具
-   - `GET /tools/{tool_name}` - 获取工具详情
-   - `GET /tools/{tool_name}/schema` - 获取工具参数Schema
+配置完成后，您就可以在聊天对话中使用MoviePilot的各种工具，例如：
+- 添加媒体订阅
+- 查询下载历史
+- 搜索媒体资源
+- 管理媒体服务器
+- 等等...
 
 ### 获取API Key
 
