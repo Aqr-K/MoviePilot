@@ -12,7 +12,7 @@ MoviePilot的智能体工具已通过HTTP API暴露，可以通过RESTful API调
 
 获取所有可用的MCP工具列表。
 
-**认证**: 需要API KEY，?api_key=MoviePilot设置中的API Key
+**认证**: 需要API KEY，从 URL 查询参数中获取 `apikey=xxx`，或请求头中获取 `X-API-KEY`
 
 **响应示例**:
 ```json
