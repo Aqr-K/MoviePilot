@@ -225,7 +225,7 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
         retry_times = kwargs.pop("retry_limit", 5)
 
         # qps 速率限制
-        if endpoint in self.qps_limiter.keys():
+        if endpoint in self.qps_limiter:
             self.qps_limiter[endpoint].acquire()
 
         try:
@@ -509,7 +509,7 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
                     return schemas.FileItem(
                         storage=self.schema.value,
                         fileid=str(info_resp["file_id"]),
-                        path=str(target_path)
+                        path=target_path.as_posix()
                         + ("/" if info_resp["file_category"] == "0" else ""),
                         type="file" if info_resp["file_category"] == "1" else "dir",
                         name=info_resp["file_name"],
