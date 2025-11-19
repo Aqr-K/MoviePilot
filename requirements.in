@@ -87,4 +87,4 @@ langchain-openai==0.3.33
 langchain-google-genai==2.0.10
 langchain-deepseek==0.1.4
 langchain-experimental==0.3.4
-openai==1.108.2
+openai~=2.8.1
