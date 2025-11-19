@@ -948,29 +948,16 @@ class MessageChain(ChainBase):
             session_id = self._get_or_create_session_id(userid)
             
             # 在事件循环中处理
-            try:
-                GlobalVar.CURRENT_EVENT_LOOP.run_until_complete(
-                    agent_manager.process_message(
-                        session_id=session_id,
-                        user_id=str(userid),
-                        message=user_message,
-                        channel=channel.value if channel else None,
-                        source=source,
-                        username=username
-                    )
+            GlobalVar.CURRENT_EVENT_LOOP.run_until_complete(
+                agent_manager.process_message(
+                    session_id=session_id,
+                    user_id=str(userid),
+                    message=user_message,
+                    channel=channel.value if channel else None,
+                    source=source,
+                    username=username
                 )
-            except RuntimeError:
-                # 如果没有事件循环，创建新的
-                asyncio.run(
-                    agent_manager.process_message(
-                        session_id=session_id,
-                        user_id=str(userid),
-                        message=user_message,
-                        channel=channel.value if channel else None,
-                        source=source,
-                        username=username
-                    )
-                )
+            )
 
         except Exception as e:
             logger.error(f"处理AI智能体消息失败: {e}")
