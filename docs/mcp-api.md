@@ -12,7 +12,7 @@ MoviePilot的智能体工具已通过HTTP API暴露，可以通过RESTful API调
 
 获取所有可用的MCP工具列表。
 
-**认证**: 需要API KEY，从 URL 查询参数中获取 `apikey=xxx`，或请求头中获取 `X-API-KEY`
+**认证**: 需要API KEY，在请求头中添加 `X-API-KEY: <api_key>` 或在查询参数中添加 `apikey=<api_key>`
 
 **响应示例**:
 ```json
@@ -46,7 +46,7 @@ MoviePilot的智能体工具已通过HTTP API暴露，可以通过RESTful API调
 
 调用指定的MCP工具。
 
-**认证**: 需要Bearer Token
+**认证**: 需要API KEY，在请求头中添加 `X-API-KEY: <api_key>` 或在查询参数中添加 `apikey=<api_key>`
 
 **请求体**:
 ```json
@@ -84,7 +84,7 @@ MoviePilot的智能体工具已通过HTTP API暴露，可以通过RESTful API调
 
 获取指定工具的详细信息。
 
-**认证**: 需要Bearer Token
+**认证**: 需要API KEY，在请求头中添加 `X-API-KEY: <api_key>` 或在查询参数中添加 `apikey=<api_key>`
 
 **路径参数**:
 - `tool_name`: 工具名称
@@ -114,7 +114,7 @@ MoviePilot的智能体工具已通过HTTP API暴露，可以通过RESTful API调
 
 获取指定工具的参数Schema（JSON Schema格式）。
 
-**认证**: 需要Bearer Token
+**认证**: 需要API KEY，在请求头中添加 `X-API-KEY: <api_key>` 或在查询参数中添加 `apikey=<api_key>`
 
 **路径参数**:
 - `tool_name`: 工具名称
@@ -138,128 +138,115 @@ MoviePilot的智能体工具已通过HTTP API暴露，可以通过RESTful API调
 }
 ```
 
-## 使用示例
+## MCP客户端配置
 
-### 使用curl调用工具
+MoviePilot的MCP工具可以通过HTTP协议在支持MCP的客户端中使用。以下是常见MCP客户端的配置方法：
 
-```bash
-# 1. 获取访问令牌（通过登录API）
-TOKEN=$(curl -X POST "http://localhost:3001/api/v1/login/access-token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=admin&password=your_password" | jq -r '.access_token')
+### Claude Desktop (Anthropic)
 
-# 2. 列出所有工具
-curl -X GET "http://localhost:3001/api/v1/mcp/tools" \
-  -H "Authorization: Bearer $TOKEN"
+在Claude Desktop的配置文件中添加MoviePilot的MCP服务器配置：
 
-# 3. 调用工具
-curl -X POST "http://localhost:3001/api/v1/mcp/tools/call" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool_name": "query_subscribes",
-    "arguments": {
-      "status": "all",
-      "media_type": "all"
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "moviepilot": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-http",
+        "http://localhost:3001/api/v1/mcp"
+      ],
+      "env": {
+        "X-API-KEY": "your_api_key_here"
+      }
     }
-  }'
-
-# 4. 获取工具详情
-curl -X GET "http://localhost:3001/api/v1/mcp/tools/add_subscribe" \
-  -H "Authorization: Bearer $TOKEN"
+  }
+}
 ```
 
-### 使用Python调用
+**注意**: 如果MCP HTTP服务器不支持环境变量传递API Key，可以使用查询参数方式：
 
-```python
-import requests
-
-# 配置
-BASE_URL = "http://localhost:3001/api/v1"
-TOKEN = "your_access_token"
-HEADERS = {"Authorization": f"Bearer {TOKEN}"}
-
-# 1. 列出所有工具
-response = requests.get(f"{BASE_URL}/mcp/tools", headers=HEADERS)
-tools = response.json()
-print(f"可用工具数量: {len(tools)}")
-
-# 2. 调用工具
-tool_call = {
-    "tool_name": "add_subscribe",
-    "arguments": {
-        "title": "流浪地球",
-        "year": "2019",
-        "media_type": "电影"
+```json
+{
+  "mcpServers": {
+    "moviepilot": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-http",
+        "http://localhost:3001/api/v1/mcp?apikey=your_api_key_here"
+      ]
     }
+  }
 }
-response = requests.post(
-    f"{BASE_URL}/mcp/tools/call",
-    headers=HEADERS,
-    json=tool_call
-)
-result = response.json()
-print(f"执行结果: {result['result']}")
-
-# 3. 获取工具Schema
-response = requests.get(
-    f"{BASE_URL}/mcp/tools/add_subscribe/schema",
-    headers=HEADERS
-)
-schema = response.json()
-print(f"工具Schema: {schema}")
 ```
 
-### 使用JavaScript/TypeScript调用
+### 其他支持MCP的聊天客户端
 
-```typescript
-const BASE_URL = 'http://localhost:3001/api/v1';
-const TOKEN = 'your_access_token';
+对于其他支持MCP协议的聊天客户端（如其他AI聊天助手、对话机器人等），通常可以通过配置文件或设置界面添加HTTP协议的MCP服务器。配置格式可能因客户端而异，但通常需要以下信息：
 
-// 列出所有工具
-async function listTools() {
-  const response = await fetch(`${BASE_URL}/mcp/tools`, {
-    headers: {
-      'Authorization': `Bearer ${TOKEN}`
+**配置参数**：
+1. **服务器类型**: HTTP
+2. **服务器地址**: `http://your-moviepilot-host:3001/api/v1/mcp`
+3. **认证方式**: 
+   - 在HTTP请求头中添加 `X-API-KEY: <your_api_key>`
+   - 或在URL查询参数中添加 `apikey=<your_api_key>`
+
+**示例配置**（通用格式）：
+
+使用请求头方式：
+```json
+{
+  "mcpServers": {
+    "moviepilot": {
+      "url": "http://localhost:3001/api/v1/mcp",
+      "headers": {
+        "X-API-KEY": "your_api_key_here"
+      }
     }
-  });
-  return await response.json();
+  }
 }
-
-// 调用工具
-async function callTool(toolName: string, arguments: Record<string, any>) {
-  const response = await fetch(`${BASE_URL}/mcp/tools/call`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      tool_name: toolName,
-      arguments: arguments
-    })
-  });
-  return await response.json();
-}
-
-// 使用示例
-const result = await callTool('query_subscribes', {
-  status: 'all',
-  media_type: 'all'
-});
-console.log(result);
 ```
+
+或使用查询参数方式：
+```json
+{
+  "mcpServers": {
+    "moviepilot": {
+      "url": "http://localhost:3001/api/v1/mcp?apikey=your_api_key_here"
+    }
+  }
+}
+```
+
+**支持的端点**:
+- `GET /tools` - 列出所有工具
+- `POST /tools/call` - 调用工具
+- `GET /tools/{tool_name}` - 获取工具详情
+- `GET /tools/{tool_name}/schema` - 获取工具参数Schema
+
+配置完成后，您就可以在聊天对话中使用MoviePilot的各种工具，例如：
+- 添加媒体订阅
+- 查询下载历史
+- 搜索媒体资源
+- 管理媒体服务器
+- 等等...
+
+### 获取API Key
+
+API Key可以在MoviePilot的系统设置中生成和查看。请妥善保管您的API Key，不要泄露给他人。
 
 ## 认证
 
-所有MCP API端点都需要认证。支持以下认证方式：
+所有MCP API端点都需要认证。**仅支持API Key认证方式**：
 
-1. **Bearer Token**: 在请求头中添加 `Authorization: Bearer <token>`
-2. **API Key**: 在请求头中添加 `X-API-KEY: <api_key>` 或在查询参数中添加 `apikey=<api_key>`
+- **请求头方式**: 在请求头中添加 `X-API-KEY: <api_key>`
+- **查询参数方式**: 在URL查询参数中添加 `apikey=<api_key>`
 
-获取Token的方式：
-- 通过登录API: `POST /api/v1/login/access-token`
-- 通过API Key: 在系统设置中生成API Key
+**获取API Key**: 在MoviePilot系统设置中生成和查看API Key。请妥善保管您的API Key，不要泄露给他人。
 
 ## 错误处理
 
@@ -267,7 +254,7 @@ API会返回标准的HTTP状态码：
 
 - `200 OK`: 请求成功
 - `400 Bad Request`: 请求参数错误
-- `401 Unauthorized`: 未认证或Token无效
+- `401 Unauthorized`: 未认证或API Key无效
 - `404 Not Found`: 工具不存在
 - `500 Internal Server Error`: 服务器内部错误
 
