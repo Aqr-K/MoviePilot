@@ -32,7 +32,7 @@ class AddDownloadInput(BaseModel):
 
 class AddDownloadTool(MoviePilotTool):
     name: str = "add_download"
-    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings. The site's priority (pri) is used for ordering downloads - smaller values have higher priority (e.g., pri=1 has higher priority than pri=10)."
+    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings."
     args_schema: Type[BaseModel] = AddDownloadInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

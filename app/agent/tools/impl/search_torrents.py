@@ -30,7 +30,7 @@ class SearchTorrentsInput(BaseModel):
 
 class SearchTorrentsTool(MoviePilotTool):
     name: str = "search_torrents"
-    description: str = "Search for torrent files across configured indexer sites based on media information. Returns available torrent downloads with details like file size, quality, and download links. Sites are searched in priority order (smaller priority value = higher priority, e.g., pri=1 sites are searched before pri=10 sites)."
+    description: str = "Search for torrent files across configured indexer sites based on media information. Returns available torrent downloads with details like file size, quality, and download links."
     args_schema: Type[BaseModel] = SearchTorrentsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
