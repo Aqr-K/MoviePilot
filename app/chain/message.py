@@ -10,7 +10,7 @@ from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
 from app.chain.subscribe import SubscribeChain
-from app.core.config import settings
+from app.core.config import settings, GlobalVar
 from app.core.context import MediaInfo, Context
 from app.core.meta import MetaBase
 from app.db.user_oper import UserOper
@@ -881,21 +881,12 @@ class MessageChain(ChainBase):
         # 如果有会话ID，同时清除智能体的会话记忆
         if session_id:
             try:
-                try:
-                    loop = asyncio.get_event_loop()
-                    loop.run_until_complete(
-                        agent_manager.clear_session(
-                            session_id=session_id,
-                            user_id=str(userid)
-                        )
+                GlobalVar.CURRENT_EVENT_LOOP.run_until_complete(
+                    agent_manager.clear_session(
+                        session_id=session_id,
+                        user_id=str(userid)
                     )
-                except RuntimeError:
-                    asyncio.run(
-                        agent_manager.clear_session(
-                            session_id=session_id,
-                            user_id=str(userid)
-                        )
-                    )
+                )
             except Exception as e:
                 logger.warning(f"清除智能体会话记忆失败: {e}")
             
@@ -958,8 +949,7 @@ class MessageChain(ChainBase):
             
             # 在事件循环中处理
             try:
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(
+                GlobalVar.CURRENT_EVENT_LOOP.run_until_complete(
                     agent_manager.process_message(
                         session_id=session_id,
                         user_id=str(userid),

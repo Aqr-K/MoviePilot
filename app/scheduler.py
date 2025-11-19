@@ -21,7 +21,7 @@ from app.chain.site import SiteChain
 from app.chain.subscribe import SubscribeChain
 from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
-from app.core.config import settings
+from app.core.config import settings, GlobalVar
 from app.core.event import eventmanager, Event
 from app.core.plugin import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
@@ -60,8 +60,7 @@ class Scheduler(metaclass=SingletonClass):
         self._auth_count = 0
         # 用户认证失败消息发送
         self._auth_message = False
-        # 当前事件循环
-        self.loop = asyncio.get_event_loop()
+        # 初始化
         self.init()
 
     @eventmanager.register(EventType.ConfigChanged)
@@ -475,7 +474,7 @@ class Scheduler(metaclass=SingletonClass):
             """
             启动协程
             """
-            return asyncio.run_coroutine_threadsafe(coro, self.loop)
+            return asyncio.run_coroutine_threadsafe(coro, GlobalVar.CURRENT_EVENT_LOOP)
 
         # 获取定时任务
         job = self.__prepare_job(job_id)

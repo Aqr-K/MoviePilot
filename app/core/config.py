@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import os
@@ -6,6 +7,7 @@ import re
 import secrets
 import sys
 import threading
+from asyncio import AbstractEventLoop
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 from urllib.parse import urlparse
@@ -852,6 +854,8 @@ class GlobalVar(object):
     EMERGENCY_STOP_WORKFLOWS: List[int] = []
     # 需应急停止文件整理
     EMERGENCY_STOP_TRANSFER: List[str] = []
+    # 当前事件循环
+    CURRENT_EVENT_LOOP: AbstractEventLoop = asyncio.get_event_loop()
 
     def stop_system(self):
         """

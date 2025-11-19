@@ -1,6 +1,5 @@
 """刮削媒体元数据工具"""
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Optional, Type
@@ -9,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
+from app.core.config import GlobalVar
 from app.core.metainfo import MetaInfoPath
 from app.log import logger
 from app.schemas import FileItem
@@ -83,8 +83,7 @@ class ScrapeMetadataTool(MoviePilotTool):
                 }, ensure_ascii=False)
             
             # 在线程池中执行同步的刮削操作
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
+            await GlobalVar.CURRENT_EVENT_LOOP.run_in_executor(
                 None,
                 lambda: media_chain.scrape_metadata(
                     fileitem=fileitem,
