@@ -1,6 +1,6 @@
 """添加订阅工具"""
 
-from typing import Optional, Type
+from typing import Optional, Type, List
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,8 @@ class AddSubscribeInput(BaseModel):
                                       description="Resolution filter as regular expression (optional, e.g., '1080p|720p|2160p')")
     effect: Optional[str] = Field(None,
                                   description="Effect filter as regular expression (optional, e.g., 'HDR|DV|SDR')")
+    filter_groups: Optional[List[str]] = Field(None,
+                                               description="List of filter rule group names to apply (optional, use query_rule_groups tool to get available rule groups)")
 
 
 class AddSubscribeTool(MoviePilotTool):
@@ -59,11 +61,12 @@ class AddSubscribeTool(MoviePilotTool):
                   season: Optional[int] = None, tmdb_id: Optional[str] = None,
                   start_episode: Optional[int] = None, total_episode: Optional[int] = None,
                   quality: Optional[str] = None, resolution: Optional[str] = None,
-                  effect: Optional[str] = None, **kwargs) -> str:
+                  effect: Optional[str] = None, filter_groups: Optional[List[str]] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, "
             f"season={season}, tmdb_id={tmdb_id}, start_episode={start_episode}, "
-            f"total_episode={total_episode}, quality={quality}, resolution={resolution}, effect={effect}")
+            f"total_episode={total_episode}, quality={quality}, resolution={resolution}, "
+            f"effect={effect}, filter_groups={filter_groups}")
 
         try:
             subscribe_chain = SubscribeChain()
@@ -87,6 +90,8 @@ class AddSubscribeTool(MoviePilotTool):
                 subscribe_kwargs['resolution'] = resolution
             if effect:
                 subscribe_kwargs['effect'] = effect
+            if filter_groups:
+                subscribe_kwargs['filter_groups'] = filter_groups
 
             sid, message = await subscribe_chain.async_add(
                 mtype=MediaType(media_type),
@@ -111,6 +116,8 @@ class AddSubscribeTool(MoviePilotTool):
                         params.append(f"分辨率过滤: {resolution}")
                     if effect:
                         params.append(f"特效过滤: {effect}")
+                    if filter_groups:
+                        params.append(f"规则组: {', '.join(filter_groups)}")
                     if params:
                         result_msg += f"\n配置参数: {', '.join(params)}"
                 return result_msg
