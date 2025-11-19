@@ -382,3 +382,27 @@ def rate_limit_window(max_calls: int, window_seconds: float,
     limiter = WindowRateLimiter(max_calls, window_seconds, source, enable_logging)
     # 使用通用装饰器逻辑包装该限流器
     return rate_limit_handler(limiter, raise_on_limit)
+
+
+class QpsRateLimiter:
+    """
+    速率控制器，精确控制 QPS
+    """
+
+    def __init__(self, qps: float | int):
+        if qps <= 0:
+            qps = float("inf")
+        self.interval = 1.0 / qps
+        self.lock = threading.Lock()
+        self.next_call_time = time.monotonic()
+
+    def acquire(self) -> None:
+        """
+        获取调用许可，阻塞直到满足速率限制
+        """
+        with self.lock:
+            now = time.monotonic()
+            wait_time = self.next_call_time - now
+            if wait_time > 0:
+                time.sleep(wait_time)
+            self.next_call_time = max(now, self.next_call_time) + self.interval
