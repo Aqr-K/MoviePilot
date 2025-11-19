@@ -259,10 +259,11 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
                 )
                 return None
             kwargs["retry_limit"] = retry_times - 1
+            sleep_duration = 2 ** (5 - retry_times + 1)
             logger.info(
-                f"【115】{method} 请求 {endpoint} 错误 {e}，等待 {self.retry_delay} 秒后重试..."
+                f"【115】{method} 请求 {endpoint} 错误 {e}，等待 {sleep_duration} 秒后重试..."
             )
-            time.sleep(2 ** (5 - retry_times + 1))
+            time.sleep(sleep_duration)
             return self._request_api(method, endpoint, result_key, **kwargs)
 
         # 返回数据
