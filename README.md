@@ -30,6 +30,8 @@
 
 API文档：https://api.movie-pilot.org
 
+MCP工具API文档：详见 [docs/mcp-api.md](docs/mcp-api.md)
+
 本地运行需要 `Python 3.12`、`Node JS v20.12.1`
 
 - 克隆主项目 [MoviePilot](https://github.com/jxxghp/MoviePilot) 
