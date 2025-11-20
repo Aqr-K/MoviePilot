@@ -20,7 +20,7 @@ class UpdateSiteInput(BaseModel):
     site_id: int = Field(..., description="The ID of the site to update")
     name: Optional[str] = Field(None, description="Site name (optional)")
     url: Optional[str] = Field(None, description="Site URL (optional, will be automatically formatted)")
-    pri: Optional[int] = Field(None, description="Site priority (optional, higher number = higher priority)")
+    pri: Optional[int] = Field(None, description="Site priority (optional, smaller value = higher priority, e.g., pri=1 has higher priority than pri=10)")
     rss: Optional[str] = Field(None, description="RSS feed URL (optional)")
     cookie: Optional[str] = Field(None, description="Site cookie (optional)")
     ua: Optional[str] = Field(None, description="User-Agent string (optional)")
@@ -39,7 +39,7 @@ class UpdateSiteInput(BaseModel):
 
 class UpdateSiteTool(MoviePilotTool):
     name: str = "update_site"
-    description: str = "Update site configuration including URL, priority, authentication credentials (cookie, UA, API key), proxy settings, rate limits, and other site properties. Supports updating multiple site attributes at once."
+    description: str = "Update site configuration including URL, priority, authentication credentials (cookie, UA, API key), proxy settings, rate limits, and other site properties. Supports updating multiple site attributes at once. Site priority (pri): smaller values have higher priority (e.g., pri=1 has higher priority than pri=10)."
     args_schema: Type[BaseModel] = UpdateSiteInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
