@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, Any
 
 from fastapi.concurrency import run_in_threadpool
 
-from app.core.config import GlobalVar
+from app.core.config import global_vars
 from app.helper.thread import ThreadHelper
 from app.log import logger
 from app.schemas import ChainEventData
@@ -453,7 +453,7 @@ class EventManager(metaclass=Singleton):
                 # 对于异步函数，直接在事件循环中运行
                 asyncio.run_coroutine_threadsafe(
                     self.__safe_invoke_handler_async(handler, isolated_event),
-                    GlobalVar.CURRENT_EVENT_LOOP
+                    global_vars.loop
                 )
             else:
                 # 对于同步函数，在线程池中运行

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.subscribe import SubscribeChain
-from app.core.config import GlobalVar
+from app.core.config import global_vars
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
 
@@ -30,28 +30,29 @@ class SearchSubscribeTool(MoviePilotTool):
         """根据搜索参数生成友好的提示消息"""
         subscribe_id = kwargs.get("subscribe_id")
         manual = kwargs.get("manual", False)
-        
+
         message = f"正在搜索订阅 #{subscribe_id} 的缺失剧集"
         if manual:
             message += "（手动搜索）"
-        
+
         return message
 
-    async def run(self, subscribe_id: int, manual: Optional[bool] = False, 
+    async def run(self, subscribe_id: int, manual: Optional[bool] = False,
                   filter_groups: Optional[List[str]] = None, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: subscribe_id={subscribe_id}, manual={manual}, filter_groups={filter_groups}")
-        
+        logger.info(
+            f"执行工具: {self.name}, 参数: subscribe_id={subscribe_id}, manual={manual}, filter_groups={filter_groups}")
+
         try:
             # 先验证订阅是否存在
             subscribe_oper = SubscribeOper()
             subscribe = subscribe_oper.get(subscribe_id)
-            
+
             if not subscribe:
                 return json.dumps({
                     "success": False,
                     "message": f"订阅不存在: {subscribe_id}"
                 }, ensure_ascii=False)
-            
+
             # 获取订阅信息用于返回
             subscribe_info = {
                 "id": subscribe.id,
@@ -65,7 +66,7 @@ class SearchSubscribeTool(MoviePilotTool):
                 "tmdbid": subscribe.tmdbid,
                 "doubanid": subscribe.doubanid
             }
-            
+
             # 检查订阅状态
             if subscribe.state == "S":
                 return json.dumps({
@@ -73,19 +74,19 @@ class SearchSubscribeTool(MoviePilotTool):
                     "message": f"订阅 #{subscribe_id} ({subscribe.name}) 已暂停，无法搜索",
                     "subscribe": subscribe_info
                 }, ensure_ascii=False)
-            
+
             # 如果提供了 filter_groups 参数，先更新订阅的规则组
             if filter_groups is not None:
                 subscribe_oper.update(subscribe_id, {"filter_groups": filter_groups})
                 logger.info(f"更新订阅 #{subscribe_id} 的规则组为: {filter_groups}")
-            
+
             # 调用 SubscribeChain 的 search 方法
             # search 方法是同步的，需要在异步环境中运行
             subscribe_chain = SubscribeChain()
-            
+
             # 在线程池中执行同步的搜索操作
             # 当 sid 有值时，state 参数会被忽略，直接处理该订阅
-            await GlobalVar.CURRENT_EVENT_LOOP.run_in_executor(
+            await global_vars.loop.run_in_executor(
                 None,
                 lambda: subscribe_chain.search(
                     sid=subscribe_id,
@@ -93,7 +94,7 @@ class SearchSubscribeTool(MoviePilotTool):
                     manual=manual
                 )
             )
-            
+
             # 重新获取订阅信息以获取更新后的状态
             updated_subscribe = subscribe_oper.get(subscribe_id)
             if updated_subscribe:
@@ -103,19 +104,19 @@ class SearchSubscribeTool(MoviePilotTool):
                     "last_update": updated_subscribe.last_update,
                     "filter_groups": updated_subscribe.filter_groups
                 })
-            
+
             # 如果提供了规则组，会在返回信息中显示
             result = {
                 "success": True,
                 "message": f"订阅 #{subscribe_id} ({subscribe.name}) 搜索完成",
                 "subscribe": subscribe_info
             }
-            
+
             if filter_groups is not None:
                 result["message"] += f"（已应用规则组: {', '.join(filter_groups)}）"
-            
+
             return json.dumps(result, ensure_ascii=False, indent=2)
-            
+
         except Exception as e:
             error_message = f"搜索订阅缺失剧集失败: {str(e)}"
             logger.error(f"搜索订阅缺失剧集失败: {e}", exc_info=True)
@@ -124,4 +125,3 @@ class SearchSubscribeTool(MoviePilotTool):
                 "message": error_message,
                 "subscribe_id": subscribe_id
             }, ensure_ascii=False)
-

@@ -1,4 +1,3 @@
-import asyncio
 import re
 import time
 from datetime import datetime, timedelta
@@ -10,7 +9,7 @@ from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
 from app.chain.subscribe import SubscribeChain
-from app.core.config import settings, GlobalVar
+from app.core.config import settings, global_vars
 from app.core.context import MediaInfo, Context
 from app.core.meta import MetaBase
 from app.db.user_oper import UserOper
@@ -174,7 +173,7 @@ class MessageChain(ChainBase):
             elif text.startswith('/ai') or text.startswith('/AI'):
                 # AI智能体处理
                 self._handle_ai_message(text=text, channel=channel, source=source,
-                                      userid=userid, username=username)
+                                        userid=userid, username=username)
             elif text.startswith('/'):
                 # 执行命令
                 self.eventmanager.send_event(
@@ -329,7 +328,8 @@ class MessageChain(ChainBase):
                             else:
                                 best_version = True
                             # 转换用户名
-                            mp_name = UserOper().get_name(**{f"{channel.name.lower()}_userid": userid}) if channel else None
+                            mp_name = UserOper().get_name(
+                                **{f"{channel.name.lower()}_userid": userid}) if channel else None
                             # 添加订阅，状态为N
                             SubscribeChain().add(title=mediainfo.title,
                                                  year=mediainfo.year,
@@ -505,7 +505,8 @@ class MessageChain(ChainBase):
                     # 开始搜索
                     if not medias:
                         self.post_message(Notification(
-                            channel=channel, source=source, title=f"{meta.name} 没有找到对应的媒体信息！", userid=userid))
+                            channel=channel, source=source, title=f"{meta.name} 没有找到对应的媒体信息！",
+                            userid=userid))
                         return
                     logger.info(f"搜索到 {len(medias)} 条相关媒体信息")
                     try:
@@ -835,21 +836,22 @@ class MessageChain(ChainBase):
         如果用户上次会话在15分钟内，则复用相同的会话ID；否则创建新的会话ID
         """
         current_time = datetime.now()
-        
+
         # 检查用户是否有已存在的会话
         if userid in MessageChain._user_sessions:
             session_id, last_time = MessageChain._user_sessions[userid]
-            
+
             # 计算时间差
             time_diff = current_time - last_time
-            
+
             # 如果时间差小于等于15分钟，复用会话ID
             if time_diff <= timedelta(minutes=MessageChain._session_timeout_minutes):
                 # 更新最后使用时间
                 MessageChain._user_sessions[userid] = (session_id, current_time)
-                logger.info(f"复用会话ID: {session_id}, 用户: {userid}, 距离上次会话: {time_diff.total_seconds() / 60:.1f}分钟")
+                logger.info(
+                    f"复用会话ID: {session_id}, 用户: {userid}, 距离上次会话: {time_diff.total_seconds() / 60:.1f}分钟")
                 return session_id
-        
+
         # 创建新的会话ID
         new_session_id = f"user_{userid}_{int(time.time())}"
         MessageChain._user_sessions[userid] = (new_session_id, current_time)
@@ -877,11 +879,11 @@ class MessageChain(ChainBase):
         if userid in MessageChain._user_sessions:
             session_id, _ = MessageChain._user_sessions.pop(userid)
             logger.info(f"已清除用户 {userid} 的会话: {session_id}")
-        
+
         # 如果有会话ID，同时清除智能体的会话记忆
         if session_id:
             try:
-                GlobalVar.CURRENT_EVENT_LOOP.run_until_complete(
+                global_vars.loop.run_until_complete(
                     agent_manager.clear_session(
                         session_id=session_id,
                         user_id=str(userid)
@@ -889,7 +891,7 @@ class MessageChain(ChainBase):
                 )
             except Exception as e:
                 logger.warning(f"清除智能体会话记忆失败: {e}")
-            
+
             self.post_message(Notification(
                 channel=channel,
                 source=source,
@@ -905,7 +907,7 @@ class MessageChain(ChainBase):
             ))
 
     def _handle_ai_message(self, text: str, channel: MessageChannel, source: str,
-                          userid: Union[str, int], username: str) -> None:
+                           userid: Union[str, int], username: str) -> None:
         """
         处理AI智能体消息
         """
@@ -946,9 +948,9 @@ class MessageChain(ChainBase):
 
             # 生成或复用会话ID
             session_id = self._get_or_create_session_id(userid)
-            
+
             # 在事件循环中处理
-            GlobalVar.CURRENT_EVENT_LOOP.run_until_complete(
+            global_vars.loop.run_until_complete(
                 agent_manager.process_message(
                     session_id=session_id,
                     user_id=str(userid),
@@ -962,4 +964,3 @@ class MessageChain(ChainBase):
         except Exception as e:
             logger.error(f"处理AI智能体消息失败: {e}")
             self.messagehelper.put(f"AI智能体处理失败: {str(e)}", role="system", title="MoviePilot助手")
-

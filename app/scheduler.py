@@ -21,7 +21,7 @@ from app.chain.site import SiteChain
 from app.chain.subscribe import SubscribeChain
 from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
-from app.core.config import settings, GlobalVar
+from app.core.config import settings, global_vars
 from app.core.event import eventmanager, Event
 from app.core.plugin import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
@@ -474,7 +474,7 @@ class Scheduler(metaclass=SingletonClass):
             """
             启动协程
             """
-            return asyncio.run_coroutine_threadsafe(coro, GlobalVar.CURRENT_EVENT_LOOP)
+            return asyncio.run_coroutine_threadsafe(coro, global_vars.loop)
 
         # 获取定时任务
         job = self.__prepare_job(job_id)

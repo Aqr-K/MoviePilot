@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
-from app.core.config import GlobalVar
+from app.core.config import global_vars
 from app.core.metainfo import MetaInfoPath
 from app.log import logger
 from app.schemas import FileItem
@@ -17,9 +17,12 @@ from app.schemas import FileItem
 class ScrapeMetadataInput(BaseModel):
     """刮削媒体元数据工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    path: str = Field(..., description="Path to the file or directory to scrape metadata for (e.g., '/path/to/file.mkv' or '/path/to/directory')")
-    storage: Optional[str] = Field("local", description="Storage type: 'local' for local storage, 'smb', 'alist', etc. for remote storage (default: 'local')")
-    overwrite: Optional[bool] = Field(False, description="Whether to overwrite existing metadata files (default: False)")
+    path: str = Field(...,
+                      description="Path to the file or directory to scrape metadata for (e.g., '/path/to/file.mkv' or '/path/to/directory')")
+    storage: Optional[str] = Field("local",
+                                   description="Storage type: 'local' for local storage, 'smb', 'alist', etc. for remote storage (default: 'local')")
+    overwrite: Optional[bool] = Field(False,
+                                      description="Whether to overwrite existing metadata files (default: False)")
 
 
 class ScrapeMetadataTool(MoviePilotTool):
@@ -32,19 +35,19 @@ class ScrapeMetadataTool(MoviePilotTool):
         path = kwargs.get("path", "")
         storage = kwargs.get("storage", "local")
         overwrite = kwargs.get("overwrite", False)
-        
+
         message = f"正在刮削媒体元数据: {path}"
         if storage != "local":
             message += f" [存储: {storage}]"
         if overwrite:
             message += " [覆盖模式]"
-        
+
         return message
 
     async def run(self, path: str, storage: Optional[str] = "local",
                   overwrite: Optional[bool] = False, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: path={path}, storage={storage}, overwrite={overwrite}")
-        
+
         try:
             # 验证路径
             if not path:
@@ -52,14 +55,14 @@ class ScrapeMetadataTool(MoviePilotTool):
                     "success": False,
                     "message": "刮削路径不能为空"
                 }, ensure_ascii=False)
-            
+
             # 创建 FileItem
             fileitem = FileItem(
                 storage=storage,
                 path=path,
                 type="file" if Path(path).suffix else "dir"
             )
-            
+
             # 检查本地存储路径是否存在
             if storage == "local":
                 scrape_path = Path(path)
@@ -68,22 +71,22 @@ class ScrapeMetadataTool(MoviePilotTool):
                         "success": False,
                         "message": f"刮削路径不存在: {path}"
                     }, ensure_ascii=False)
-            
+
             # 识别媒体信息
             media_chain = MediaChain()
             scrape_path = Path(path)
             meta = MetaInfoPath(scrape_path)
             mediainfo = await media_chain.async_recognize_by_meta(meta)
-            
+
             if not mediainfo:
                 return json.dumps({
                     "success": False,
                     "message": f"刮削失败，无法识别媒体信息: {path}",
                     "path": path
                 }, ensure_ascii=False)
-            
+
             # 在线程池中执行同步的刮削操作
-            await GlobalVar.CURRENT_EVENT_LOOP.run_in_executor(
+            await global_vars.loop.run_in_executor(
                 None,
                 lambda: media_chain.scrape_metadata(
                     fileitem=fileitem,
@@ -92,7 +95,7 @@ class ScrapeMetadataTool(MoviePilotTool):
                     overwrite=overwrite
                 )
             )
-            
+
             return json.dumps({
                 "success": True,
                 "message": f"{path} 刮削完成",
@@ -105,7 +108,7 @@ class ScrapeMetadataTool(MoviePilotTool):
                     "season": mediainfo.season
                 }
             }, ensure_ascii=False, indent=2)
-        
+
         except Exception as e:
             error_message = f"刮削媒体元数据失败: {str(e)}"
             logger.error(f"刮削媒体元数据失败: {e}", exc_info=True)
@@ -114,4 +117,3 @@ class ScrapeMetadataTool(MoviePilotTool):
                 "message": error_message,
                 "path": path
             }, ensure_ascii=False)
-

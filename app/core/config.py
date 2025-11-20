@@ -920,6 +920,19 @@ class GlobalVar(object):
             return True
         return False
 
+    @property
+    def loop(self) -> AbstractEventLoop:
+        """
+        当前循环
+        """
+        return self.CURRENT_EVENT_LOOP
+
+    def set_loop(self, loop: AbstractEventLoop):
+        """
+        设置循环
+        """
+        self.CURRENT_EVENT_LOOP = loop
+
 
 # 全局标识
 global_vars = GlobalVar()
