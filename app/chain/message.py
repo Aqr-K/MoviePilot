@@ -1,3 +1,4 @@
+import asyncio
 import re
 import time
 from datetime import datetime, timedelta
@@ -883,11 +884,12 @@ class MessageChain(ChainBase):
         # 如果有会话ID，同时清除智能体的会话记忆
         if session_id:
             try:
-                global_vars.loop.run_until_complete(
+                asyncio.run_coroutine_threadsafe(
                     agent_manager.clear_session(
                         session_id=session_id,
                         user_id=str(userid)
-                    )
+                    ),
+                    global_vars.loop
                 )
             except Exception as e:
                 logger.warning(f"清除智能体会话记忆失败: {e}")
@@ -950,7 +952,7 @@ class MessageChain(ChainBase):
             session_id = self._get_or_create_session_id(userid)
 
             # 在事件循环中处理
-            global_vars.loop.run_until_complete(
+            asyncio.run_coroutine_threadsafe(
                 agent_manager.process_message(
                     session_id=session_id,
                     user_id=str(userid),
@@ -958,7 +960,8 @@ class MessageChain(ChainBase):
                     channel=channel.value if channel else None,
                     source=source,
                     username=username
-                )
+                ),
+                global_vars.loop
             )
 
         except Exception as e:
