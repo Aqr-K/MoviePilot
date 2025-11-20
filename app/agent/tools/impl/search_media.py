@@ -51,17 +51,8 @@ class SearchMediaTool(MoviePilotTool):
 
         try:
             media_chain = MediaChain()
-            # 构建搜索标题
-            search_title = title
-            if year:
-                search_title = f"{title} {year}"
-            if media_type:
-                search_title = f"{search_title} {media_type}"
-            if season:
-                search_title = f"{search_title} S{season:02d}"
-
             # 使用 MediaChain.search 方法
-            meta, results = await media_chain.async_search(title=search_title)
+            meta, results = await media_chain.async_search(title=title)
 
             # 过滤结果
             if results:
