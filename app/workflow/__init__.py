@@ -41,7 +41,7 @@ class WorkFlowManager(metaclass=Singleton):
                 return False
             if obj.__name__ == "BaseAction":
                 return False
-            return obj.__module__.startswith("app.actions")
+            return obj.__module__.startswith("app.workflow.actions")
 
         # 加载所有动作
         self._actions = {}
