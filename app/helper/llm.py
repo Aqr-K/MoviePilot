@@ -15,7 +15,8 @@ class LLMHelper:
         else:
             return self._get_openai_compatible_models(provider, api_key, base_url)
 
-    def _get_google_models(self, api_key: str) -> List[str]:
+    @staticmethod
+    def _get_google_models(api_key: str) -> List[str]:
         """获取Google模型列表"""
         try:
             import google.generativeai as genai
@@ -26,7 +27,8 @@ class LLMHelper:
             logger.error(f"获取Google模型列表失败：{e}")
             raise e
 
-    def _get_openai_compatible_models(self, provider: str, api_key: str, base_url: str = None) -> List[str]:
+    @staticmethod
+    def _get_openai_compatible_models(provider: str, api_key: str, base_url: str = None) -> List[str]:
         """获取OpenAI兼容模型列表"""
         try:
             from openai import OpenAI
