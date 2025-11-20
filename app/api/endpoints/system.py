@@ -44,6 +44,7 @@ from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.security import SecurityUtils
 from app.utils.url import UrlUtils
 from version import APP_VERSION
+from app.helper.llm import LLMHelper
 
 router = APIRouter()
 
@@ -336,6 +337,18 @@ async def set_setting(
         return schemas.Response(success=True)
     else:
         return schemas.Response(success=False, message=f"配置项 '{key}' 不存在")
+
+
+@router.get("/llm-models", summary="获取LLM模型列表", response_model=schemas.Response)
+async def get_llm_models(provider: str, api_key: str, base_url: Optional[str] = None, _: User = Depends(get_current_active_user_async)):
+    """
+    获取LLM模型列表
+    """
+    try:
+        models = LLMHelper().get_models(provider, api_key, base_url)
+        return schemas.Response(success=True, data=models)
+    except Exception as e:
+        return schemas.Response(success=False, message=str(e))
 
 
 @router.get("/message", summary="实时消息")
