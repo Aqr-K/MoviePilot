@@ -66,7 +66,6 @@ def add(
         torrent_in: schemas.TorrentInfo,
         tmdbid: Annotated[int | None, Body()] = None,
         doubanid: Annotated[str | None, Body()] = None,
-        bangumiid: Annotated[int | None, Body()] = None,
         downloader: Annotated[str | None, Body()] = None,
         save_path: Annotated[str | None, Body()] = None,
         current_user: User = Depends(get_current_active_user)) -> Any:
@@ -76,7 +75,7 @@ def add(
     # 元数据
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
-    mediainfo = MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid, bangumiid=bangumiid)
+    mediainfo = MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid)
     if not mediainfo:
         return schemas.Response(success=False, message="无法识别媒体信息")
     # 种子信息
