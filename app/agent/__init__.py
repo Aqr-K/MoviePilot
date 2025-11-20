@@ -1,6 +1,7 @@
 """MoviePilot AI智能体实现"""
 
 import asyncio
+import threading
 from typing import Dict, List, Any
 
 from langchain.agents import AgentExecutor, create_openai_tools_agent
@@ -19,6 +20,9 @@ from app.core.config import settings
 from app.helper.message import MessageHelper
 from app.log import logger
 from app.schemas import Notification
+
+# 用于保护环境变量修改的线程锁
+_env_lock = threading.Lock()
 
 
 class AgentChain(ChainBase):
@@ -77,28 +81,29 @@ class MoviePilotAgent:
             from contextlib import contextmanager
             from langchain_google_genai import ChatGoogleGenerativeAI
 
-            # 使用临时环境变量配置代理
+            # 使用线程锁保护的临时环境变量配置
             @contextmanager
             def _temp_proxy_env():
-                """临时设置代理环境变量的上下文管理器"""
-                old_http = os.environ.get("HTTP_PROXY")
-                old_https = os.environ.get("HTTPS_PROXY")
-                try:
-                    if settings.PROXY_HOST:
-                        os.environ["HTTP_PROXY"] = settings.PROXY_HOST
-                        os.environ["HTTPS_PROXY"] = settings.PROXY_HOST
-                    yield
-                finally:
-                    # 恢复原始环境变量
-                    if old_http is not None:
-                        os.environ["HTTP_PROXY"] = old_http
-                    elif "HTTP_PROXY" in os.environ:
-                        del os.environ["HTTP_PROXY"]
+                """线程安全的临时设置代理环境变量的上下文管理器"""
+                with _env_lock:
+                    old_http = os.environ.get("HTTP_PROXY")
+                    old_https = os.environ.get("HTTPS_PROXY")
+                    try:
+                        if settings.PROXY_HOST:
+                            os.environ["HTTP_PROXY"] = settings.PROXY_HOST
+                            os.environ["HTTPS_PROXY"] = settings.PROXY_HOST
+                        yield
+                    finally:
+                        # 恢复原始环境变量
+                        if old_http is not None:
+                            os.environ["HTTP_PROXY"] = old_http
+                        elif "HTTP_PROXY" in os.environ:
+                            del os.environ["HTTP_PROXY"]
 
-                    if old_https is not None:
-                        os.environ["HTTPS_PROXY"] = old_https
-                    elif "HTTPS_PROXY" in os.environ:
-                        del os.environ["HTTPS_PROXY"]
+                        if old_https is not None:
+                            os.environ["HTTPS_PROXY"] = old_https
+                        elif "HTTPS_PROXY" in os.environ:
+                            del os.environ["HTTPS_PROXY"]
 
             # 在临时环境变量中初始化 ChatGoogleGenerativeAI
             with _temp_proxy_env():
