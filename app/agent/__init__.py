@@ -73,15 +73,43 @@ class MoviePilotAgent:
             raise ValueError("未配置 LLM_API_KEY")
 
         if provider == "google":
+            import os
+            from contextlib import contextmanager
             from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(
-                model=settings.LLM_MODEL,
-                google_api_key=api_key,
-                max_retries=3,
-                temperature=settings.LLM_TEMPERATURE,
-                streaming=True,
-                callbacks=[self.callback_handler]
-            )
+
+            # 使用临时环境变量配置代理
+            @contextmanager
+            def _temp_proxy_env():
+                """临时设置代理环境变量的上下文管理器"""
+                old_http = os.environ.get("HTTP_PROXY")
+                old_https = os.environ.get("HTTPS_PROXY")
+                try:
+                    if settings.PROXY_HOST:
+                        os.environ["HTTP_PROXY"] = settings.PROXY_HOST
+                        os.environ["HTTPS_PROXY"] = settings.PROXY_HOST
+                    yield
+                finally:
+                    # 恢复原始环境变量
+                    if old_http is not None:
+                        os.environ["HTTP_PROXY"] = old_http
+                    elif "HTTP_PROXY" in os.environ:
+                        del os.environ["HTTP_PROXY"]
+
+                    if old_https is not None:
+                        os.environ["HTTPS_PROXY"] = old_https
+                    elif "HTTPS_PROXY" in os.environ:
+                        del os.environ["HTTPS_PROXY"]
+
+            # 在临时环境变量中初始化 ChatGoogleGenerativeAI
+            with _temp_proxy_env():
+                return ChatGoogleGenerativeAI(
+                    model=settings.LLM_MODEL,
+                    google_api_key=api_key,
+                    max_retries=3,
+                    temperature=settings.LLM_TEMPERATURE,
+                    streaming=True,
+                    callbacks=[self.callback_handler]
+                )
         elif provider == "deepseek":
             from langchain_deepseek import ChatDeepSeek
             return ChatDeepSeek(
@@ -103,7 +131,8 @@ class MoviePilotAgent:
                 temperature=settings.LLM_TEMPERATURE,
                 streaming=True,
                 callbacks=[self.callback_handler],
-                stream_usage=True
+                stream_usage=True,
+                openai_proxy=settings.PROXY_HOST
             )
 
     def _initialize_tools(self) -> List:
