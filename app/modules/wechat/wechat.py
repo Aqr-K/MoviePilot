@@ -169,8 +169,8 @@ class WeChat:
         :param link: 跳转链接
         :return: 发送状态，错误信息
         """
-        if not title:
-            logger.error("消息标题不能为空")
+        if not title and not text:
+            logger.error("消息标题和内容不能都为空")
             return False
         if text:
             formatted_text = text.replace("\n\n", "\n")
