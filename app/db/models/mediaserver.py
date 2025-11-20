@@ -65,6 +65,14 @@ class MediaServerItem(Base):
     @classmethod
     @db_query
     def exists_by_title(cls, db: Session, title: str, mtype: str, year: str):
+        if not mtype and not year:
+            return db.query(cls).filter(cls.title == title).first()
+        elif not year:
+            return db.query(cls).filter(cls.title == title,
+                                        cls.item_type == mtype).first()
+        elif not mtype:
+            return db.query(cls).filter(cls.title == title,
+                                        cls.year == str(year)).first()
         return db.query(cls).filter(cls.title == title,
                                     cls.item_type == mtype,
                                     cls.year == str(year)).first()
@@ -85,7 +93,16 @@ class MediaServerItem(Base):
     @classmethod
     @async_db_query
     async def async_exists_by_title(cls, db: AsyncSession, title: str, mtype: str, year: str):
-        result = await db.execute(select(cls).filter(cls.title == title,
+        if not mtype and not year:
+            result = await db.execute(select(cls).filter(cls.title == title))
+        elif not year:
+            result = await db.execute(select(cls).filter(cls.title == title,
+                                                         cls.item_type == mtype))
+        elif not mtype:
+            result = await db.execute(select(cls).filter(cls.title == title,
+                                                         cls.year == str(year)))
+        else:
+            result = await db.execute(select(cls).filter(cls.title == title,
                                                      cls.item_type == mtype,
                                                      cls.year == str(year)))
         return result.scalars().first()
