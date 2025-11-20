@@ -3,11 +3,11 @@
 import json
 import re
 from typing import Optional, Type
-from urllib.parse import quote, urlparse, parse_qs
 
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.core.config import settings
 from app.log import logger
 from app.utils.http import AsyncRequestUtils
 
@@ -47,8 +47,8 @@ class SearchWebTool(MoviePilotTool):
             # 限制最大结果数
             max_results = min(max(1, max_results or 5), 10)
             
-            # 使用DuckDuckGo搜索API
-            search_results = await self._search_duckduckgo(query, max_results)
+            # 使用DuckDuckGo API进行搜索
+            search_results = await self._search_duckduckgo_api(query, max_results)
             
             if not search_results:
                 return f"未找到与 '{query}' 相关的搜索结果"
@@ -64,49 +64,9 @@ class SearchWebTool(MoviePilotTool):
             logger.error(f"搜索网络内容失败: {e}", exc_info=True)
             return error_message
 
-    async def _search_duckduckgo(self, query: str, max_results: int) -> list:
-        """
-        使用DuckDuckGo搜索API进行搜索
-        
-        Args:
-            query: 搜索查询
-            max_results: 最大结果数
-            
-        Returns:
-            搜索结果列表
-        """
-        try:
-            # DuckDuckGo Instant Answer API
-            # 使用HTML接口获取搜索结果
-            search_url = f"https://html.duckduckgo.com/html/?q={quote(query)}"
-            
-            http_utils = AsyncRequestUtils(
-                ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                timeout=10
-            )
-            
-            response = await http_utils.get(search_url)
-            
-            if not response:
-                # 如果HTML接口失败，尝试使用API接口
-                return await self._search_duckduckgo_api(query, max_results)
-            
-            # 解析HTML结果
-            results = self._parse_duckduckgo_html(response, max_results)
-            
-            if results:
-                return results
-            
-            # 如果HTML解析失败，尝试API接口
-            return await self._search_duckduckgo_api(query, max_results)
-            
-        except Exception as e:
-            logger.warning(f"DuckDuckGo HTML搜索失败: {e}，尝试API接口")
-            return await self._search_duckduckgo_api(query, max_results)
-
     async def _search_duckduckgo_api(self, query: str, max_results: int) -> list:
         """
-        使用DuckDuckGo API进行搜索（备用方案）
+        使用DuckDuckGo API进行搜索
         
         Args:
             query: 搜索查询
@@ -125,7 +85,12 @@ class SearchWebTool(MoviePilotTool):
                 "skip_disambig": "1"
             }
             
-            http_utils = AsyncRequestUtils(timeout=10)
+            # 使用代理（如果配置了）
+            http_utils = AsyncRequestUtils(
+                proxies=settings.PROXY,
+                timeout=10
+            )
+            
             data = await http_utils.get_json(api_url, params=params)
             
             results = []
@@ -147,135 +112,35 @@ class SearchWebTool(MoviePilotTool):
                         text = topic.get("Text", "")
                         first_url = topic.get("FirstURL", "")
                         if text and first_url:
+                            # 提取标题（通常在" - "之前）
+                            title = text.split(" - ")[0] if " - " in text else text[:100]
+                            snippet = text
+                            
                             results.append({
-                                "title": topic.get("Text", "").split(" - ")[0] if " - " in text else text[:50],
-                                "snippet": text,
+                                "title": title.strip(),
+                                "snippet": snippet,
                                 "url": first_url,
                                 "source": "DuckDuckGo Related"
+                            })
+                
+                # 处理Results（搜索结果）
+                api_results = data.get("Results", [])
+                for result in api_results[:max_results - len(results)]:
+                    if isinstance(result, dict):
+                        title = result.get("Text", "")
+                        url = result.get("FirstURL", "")
+                        if title and url:
+                            results.append({
+                                "title": title,
+                                "snippet": result.get("Text", ""),
+                                "url": url,
+                                "source": "DuckDuckGo Results"
                             })
             
             return results[:max_results]
             
         except Exception as e:
             logger.warning(f"DuckDuckGo API搜索失败: {e}")
-            # 如果DuckDuckGo失败，尝试使用Bing搜索（备用）
-            return await self._search_bing_fallback(query, max_results)
-
-    def _parse_duckduckgo_html(self, html: str, max_results: int) -> list:
-        """
-        解析DuckDuckGo HTML搜索结果
-        
-        Args:
-            html: HTML内容
-            max_results: 最大结果数
-            
-        Returns:
-            搜索结果列表
-        """
-        try:
-            from bs4 import BeautifulSoup
-            
-            soup = BeautifulSoup(html, 'html.parser')
-            results = []
-            
-            # 尝试多种可能的HTML结构
-            # 方法1: 查找class为"result"的div
-            result_divs = soup.find_all('div', class_='result')
-            if not result_divs:
-                # 方法2: 查找class包含"result"的元素
-                result_divs = soup.find_all('div', class_=re.compile(r'result'))
-            if not result_divs:
-                # 方法3: 查找包含链接的div，这些通常是搜索结果
-                result_divs = soup.find_all('div', limit=max_results * 3)
-            
-            for div in result_divs[:max_results * 2]:  # 多查找一些，以便过滤
-                try:
-                    # 查找标题链接
-                    title_elem = None
-                    # 尝试多种可能的类名
-                    for class_name in ['result__a', 'web-result__a', 'result-link', 'result__url']:
-                        title_elem = div.find('a', class_=class_name)
-                        if title_elem:
-                            break
-                    
-                    # 如果没找到，尝试查找div内的第一个链接
-                    if not title_elem:
-                        title_elem = div.find('a')
-                    
-                    if not title_elem:
-                        continue
-                    
-                    title = title_elem.get_text(strip=True)
-                    url = title_elem.get('href', '')
-                    
-                    # 清理URL（DuckDuckGo有时会添加重定向）
-                    if url.startswith('/l/?kh=') or url.startswith('/l/?uddg='):
-                        # 提取实际URL
-                        parsed = urlparse(url)
-                        query_params = parse_qs(parsed.query)
-                        if 'uddg' in query_params:
-                            url = query_params['uddg'][0]
-                        elif 'u' in query_params:
-                            url = query_params['u'][0]
-                    
-                    # 提取摘要
-                    snippet = ""
-                    for class_name in ['result__snippet', 'web-result__snippet', 'result__body']:
-                        snippet_elem = div.find(class_=class_name)
-                        if snippet_elem:
-                            snippet = snippet_elem.get_text(strip=True)
-                            break
-                    
-                    # 如果没找到摘要，尝试从div的文本中提取（排除标题）
-                    if not snippet:
-                        div_text = div.get_text(strip=True)
-                        if title and title in div_text:
-                            snippet = div_text.replace(title, '', 1).strip()
-                        else:
-                            snippet = div_text[:200]  # 限制长度
-                    
-                    if title and url and len(results) < max_results:
-                        results.append({
-                            "title": title,
-                            "snippet": snippet,
-                            "url": url,
-                            "source": "DuckDuckGo"
-                        })
-                except Exception as e:
-                    logger.debug(f"解析单个搜索结果失败: {e}")
-                    continue
-                
-                if len(results) >= max_results:
-                    break
-            
-            return results[:max_results]
-            
-        except Exception as e:
-            logger.warning(f"解析DuckDuckGo HTML失败: {e}")
-            return []
-
-    async def _search_bing_fallback(self, query: str, max_results: int) -> list:
-        """
-        使用Bing搜索作为备用方案（简单实现）
-        
-        Args:
-            query: 搜索查询
-            max_results: 最大结果数
-            
-        Returns:
-            搜索结果列表
-        """
-        try:
-            # 使用Bing搜索（需要API密钥，这里仅作为示例）
-            # 实际使用时可能需要配置API密钥
-            logger.info("尝试使用Bing搜索作为备用方案")
-            
-            # 这里可以扩展实现Bing搜索
-            # 目前返回空列表，让调用者知道搜索失败
-            return []
-            
-        except Exception as e:
-            logger.warning(f"Bing搜索失败: {e}")
             return []
 
     def _format_and_truncate_results(self, results: list, max_results: int) -> dict:
