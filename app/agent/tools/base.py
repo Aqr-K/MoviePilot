@@ -7,6 +7,7 @@ from pydantic import PrivateAttr
 
 from app.agent import StreamingCallbackHandler
 from app.chain import ChainBase
+from app.log import logger
 from app.schemas import Notification
 
 
@@ -49,7 +50,10 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if tool_message:
             formatted_message = f"⚙️ => {tool_message}"
             await self.send_tool_message(formatted_message)
-        return await self.run(**kwargs)
+        logger.debug(f'Executing tool {self.name} with args: {kwargs}')
+        result = await self.run(**kwargs)
+        logger.debug(f'Tool {self.name} executed with result: {result}')
+        return result
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """

@@ -6,9 +6,11 @@ from typing import Optional, List, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.db.mediaserver_oper import MediaServerOper
+from app.chain.mediaserver import MediaServerChain
+from app.core.context import MediaInfo
 from app.log import logger
 from app.schemas import MediaServerItem
+from app.schemas.types import MediaType
 
 
 class QueryMediaLibraryInput(BaseModel):
@@ -48,11 +50,49 @@ class QueryMediaLibraryTool(MoviePilotTool):
                   title: Optional[str] = None, year: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")
         try:
-            media_server_oper = MediaServerOper()
-            filtered_medias: List[MediaServerItem] = await media_server_oper.async_exists(title=title, year=year, mtype=media_type)
-            if filtered_medias:
-                return json.dumps([m.to_dict() for m in filtered_medias])
-            return "媒体库中未找到相关媒体"
+            if not title:
+                return "请提供媒体标题进行查询"
+            
+            # 创建 MediaInfo 对象
+            mediainfo = MediaInfo()
+            mediainfo.title = title
+            mediainfo.year = year
+            
+            # 转换媒体类型
+            if media_type == "电影":
+                mediainfo.type = MediaType.MOVIE
+            elif media_type == "电视剧":
+                mediainfo.type = MediaType.TV
+            # media_type == "all" 时不设置类型，让媒体服务器自动判断
+            
+            # 调用媒体服务器接口实时查询
+            media_chain = MediaServerChain()
+            existsinfo = media_chain.media_exists(mediainfo=mediainfo)
+            
+            if not existsinfo:
+                return "媒体库中未找到相关媒体"
+            
+            # 如果找到了，获取详细信息
+            result_items = []
+            if existsinfo.itemid and existsinfo.server:
+                iteminfo = media_chain.iteminfo(server=existsinfo.server, item_id=existsinfo.itemid)
+                if iteminfo:
+                    # 使用 model_dump() 转换为字典格式
+                    item_dict = iteminfo.model_dump(exclude_none=True)
+                    result_items.append(item_dict)
+            
+            if result_items:
+                return json.dumps(result_items, ensure_ascii=False)
+            
+            # 如果找到了但没有详细信息，返回基本信息
+            result_dict = {
+                "type": existsinfo.type.value if existsinfo.type else None,
+                "server": existsinfo.server,
+                "server_type": existsinfo.server_type,
+                "itemid": existsinfo.itemid,
+                "seasons": existsinfo.seasons if existsinfo.seasons else {}
+            }
+            return json.dumps([result_dict], ensure_ascii=False)
         except Exception as e:
             logger.error(f"查询媒体库失败: {e}", exc_info=True)
             return f"查询媒体库时发生错误: {str(e)}"
