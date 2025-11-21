@@ -33,6 +33,8 @@ class AddSubscribeInput(BaseModel):
                                   description="Effect filter as regular expression (optional, e.g., 'HDR|DV|SDR')")
     filter_groups: Optional[List[str]] = Field(None,
                                                description="List of filter rule group names to apply (optional, use query_rule_groups tool to get available rule groups)")
+    sites: Optional[List[int]] = Field(None,
+                                       description="List of site IDs to search from (optional, use query_sites tool to get available site IDs)")
 
 
 class AddSubscribeTool(MoviePilotTool):
@@ -61,12 +63,13 @@ class AddSubscribeTool(MoviePilotTool):
                   season: Optional[int] = None, tmdb_id: Optional[str] = None,
                   start_episode: Optional[int] = None, total_episode: Optional[int] = None,
                   quality: Optional[str] = None, resolution: Optional[str] = None,
-                  effect: Optional[str] = None, filter_groups: Optional[List[str]] = None, **kwargs) -> str:
+                  effect: Optional[str] = None, filter_groups: Optional[List[str]] = None,
+                  sites: Optional[List[int]] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, "
             f"season={season}, tmdb_id={tmdb_id}, start_episode={start_episode}, "
             f"total_episode={total_episode}, quality={quality}, resolution={resolution}, "
-            f"effect={effect}, filter_groups={filter_groups}")
+            f"effect={effect}, filter_groups={filter_groups}, sites={sites}")
 
         try:
             subscribe_chain = SubscribeChain()
@@ -92,6 +95,8 @@ class AddSubscribeTool(MoviePilotTool):
                 subscribe_kwargs['effect'] = effect
             if filter_groups:
                 subscribe_kwargs['filter_groups'] = filter_groups
+            if sites:
+                subscribe_kwargs['sites'] = sites
 
             sid, message = await subscribe_chain.async_add(
                 mtype=MediaType(media_type),
@@ -118,6 +123,8 @@ class AddSubscribeTool(MoviePilotTool):
                         params.append(f"特效过滤: {effect}")
                     if filter_groups:
                         params.append(f"规则组: {', '.join(filter_groups)}")
+                    if sites:
+                        params.append(f"站点: {', '.join(map(str, sites))}")
                     if params:
                         result_msg += f"\n配置参数: {', '.join(params)}"
                 return result_msg
