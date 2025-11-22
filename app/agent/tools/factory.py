@@ -22,6 +22,7 @@ from app.agent.tools.impl.query_subscribe_history import QuerySubscribeHistoryTo
 from app.agent.tools.impl.delete_subscribe import DeleteSubscribeTool
 from app.agent.tools.impl.search_media import SearchMediaTool
 from app.agent.tools.impl.search_person import SearchPersonTool
+from app.agent.tools.impl.search_person_credits import SearchPersonCreditsTool
 from app.agent.tools.impl.recognize_media import RecognizeMediaTool
 from app.agent.tools.impl.scrape_metadata import ScrapeMetadataTool
 from app.agent.tools.impl.query_episode_schedule import QueryEpisodeScheduleTool
@@ -55,6 +56,7 @@ class MoviePilotToolFactory:
         tool_definitions = [
             SearchMediaTool,
             SearchPersonTool,
+            SearchPersonCreditsTool,
             RecognizeMediaTool,
             ScrapeMetadataTool,
             QueryEpisodeScheduleTool,
