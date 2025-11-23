@@ -943,17 +943,10 @@ class MessageChain(ChainBase):
                 return
 
             # 提取用户消息
-            if not text.startswith("/ai"):
-                self.post_message(Notification(
-                    channel=channel,
-                    source=source,
-                    userid=userid,
-                    username=username,
-                    title="消息格式错误，请以 /ai 开头"
-                ))
-                return
-            
-            user_message = text[3:].strip()  # 移除 "/ai" 前缀
+            if text.startswith("/ai"):
+                user_message = text[3:].strip()  # 移除 "/ai" 前缀
+            else:
+                user_message = text.strip()  # 按原消息处理
             if not user_message:
                 self.post_message(Notification(
                     channel=channel,
