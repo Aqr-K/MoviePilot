@@ -85,25 +85,26 @@ async def search(title: str,
             return obj.get("source")
         return obj.source
 
-    result = []
     media_chain = MediaChain()
     if type == "media":
         _, medias = await media_chain.async_search(title=title)
-        if medias:
-            result = [media.to_dict() for media in medias]
+        result = [media.to_dict() for media in medias] if medias else []
     elif type == "collection":
-        result = await media_chain.async_search_collections(name=title)
-    else:
-        result = await media_chain.async_search_persons(name=title)
-    if result:
-        # 按设置的顺序对结果进行排序
-        setting_order = settings.SEARCH_SOURCE.split(',') or []
-        sort_order = {}
-        for index, source in enumerate(setting_order):
-            sort_order[source] = index
-        result = sorted(result, key=lambda x: sort_order.get(__get_source(x), 4))
-        return result[(page - 1) * count:page * count]
-    return []
+        collections = await media_chain.async_search_collections(name=title)
+        result = [collection.to_dict() for collection in collections] if collections else []
+    else:  # person
+        persons = await media_chain.async_search_persons(name=title)
+        result = [person.model_dump() for person in persons] if persons else []
+
+    if not result:
+        return []
+
+    # 排序和分页
+    setting_order = settings.SEARCH_SOURCE.split(',') if settings.SEARCH_SOURCE else []
+    sort_order = {source: index for index, source in enumerate(setting_order)}
+
+    sorted_result = sorted(result, key=lambda x: sort_order.get(__get_source(x), 4))
+    return sorted_result[(page - 1) * count:page * count]
 
 
 @router.post("/scrape/{storage}", summary="刮削媒体信息", response_model=schemas.Response)
