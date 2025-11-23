@@ -64,7 +64,8 @@ class SearchWebTool(MoviePilotTool):
             logger.error(f"搜索网络内容失败: {e}", exc_info=True)
             return error_message
 
-    async def _search_duckduckgo_api(self, query: str, max_results: int) -> list:
+    @staticmethod
+    async def _search_duckduckgo_api(query: str, max_results: int) -> list:
         """
         使用DuckDuckGo API进行搜索
         
@@ -143,7 +144,8 @@ class SearchWebTool(MoviePilotTool):
             logger.warning(f"DuckDuckGo API搜索失败: {e}")
             return []
 
-    def _format_and_truncate_results(self, results: list, max_results: int) -> dict:
+    @staticmethod
+    def _format_and_truncate_results(results: list, max_results: int) -> dict:
         """
         格式化并裁剪搜索结果以避免占用过多上下文
         

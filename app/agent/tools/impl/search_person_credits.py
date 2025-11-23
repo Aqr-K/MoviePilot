@@ -35,8 +35,6 @@ class SearchPersonCreditsTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: person_id={person_id}, source={source}, page={page}")
 
         try:
-            medias = None
-            
             # 根据source选择相应的chain
             if source.lower() == "tmdb":
                 tmdb_chain = TmdbChain()
