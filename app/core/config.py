@@ -411,6 +411,8 @@ class ConfigModel(BaseModel):
     # ==================== AI智能体配置 ====================
     # AI智能体开关
     AI_AGENT_ENABLE: bool = False
+    # 合局AI智能体
+    AI_AGENT_GLOBAL: bool = False
     # LLM提供商 (openai/google/deepseek)
     LLM_PROVIDER: str = "deepseek"
     # LLM模型名称

@@ -1,7 +1,7 @@
 """查询媒体库工具"""
 
 import json
-from typing import Optional, List, Type
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -9,7 +9,6 @@ from app.agent.tools.base import MoviePilotTool
 from app.chain.mediaserver import MediaServerChain
 from app.core.context import MediaInfo
 from app.log import logger
-from app.schemas import MediaServerItem
 from app.schemas.types import MediaType
 
 

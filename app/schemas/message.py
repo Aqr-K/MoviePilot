@@ -14,7 +14,7 @@ class CommingMessage(BaseModel):
     # 用户ID
     userid: Optional[Union[str, int]] = None
     # 用户名称
-    username: Optional[str] = None
+    username: Optional[Union[str, int]] = None
     # 消息渠道
     channel: Optional[MessageChannel] = None
     # 来源（渠道名称）
