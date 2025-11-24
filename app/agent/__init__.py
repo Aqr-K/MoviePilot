@@ -73,8 +73,6 @@ class MoviePilotAgent:
         """初始化LLM模型"""
         provider = settings.LLM_PROVIDER.lower()
         api_key = settings.LLM_API_KEY
-        if not api_key:
-            raise ValueError("未配置 LLM_API_KEY")
 
         if provider == "google":
             import os
