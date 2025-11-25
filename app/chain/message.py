@@ -931,19 +931,11 @@ class MessageChain(ChainBase):
                 ))
                 return
 
-            # 检查LLM配置
-            if not settings.LLM_API_KEY:
-                self.post_message(Notification(
-                    channel=channel,
-                    source=source,
-                    userid=userid,
-                    username=username,
-                    title="MoviePilot智能助未配置，请在系统设置中配置"
-                ))
-                return
-
             # 提取用户消息
-            user_message = text[3:].strip()  # 移除 "/ai" 前缀
+            if text.lower().startswith("/ai"):
+                user_message = text[3:].strip()  # 移除 "/ai" 前缀（大小写不敏感）
+            else:
+                user_message = text.strip()  # 按原消息处理
             if not user_message:
                 self.post_message(Notification(
                     channel=channel,

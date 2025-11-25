@@ -1024,13 +1024,11 @@ def fresh(fresh: bool = True):
     with fresh():
         result = some_cached_function()
     """
-    token = _fresh.set(fresh)
-    logger.debug(f"Setting fresh mode to {fresh}. {id(token):#x}")
+    token = _fresh.set(fresh or is_fresh())
     try:
         yield
     finally:
         _fresh.reset(token)
-        logger.debug(f"Reset fresh mode. {id(token):#x}")
 
 @asynccontextmanager
 async def async_fresh(fresh: bool = True):
@@ -1041,13 +1039,11 @@ async def async_fresh(fresh: bool = True):
     async with async_fresh():
         result = await some_async_cached_function()
     """
-    token = _fresh.set(fresh)
-    logger.debug(f"Setting async_fresh mode to {fresh}. {id(token):#x}")
+    token = _fresh.set(fresh or is_fresh())
     try:
         yield
     finally:
         _fresh.reset(token)
-        logger.debug(f"Reset async_fresh mode. {id(token):#x}")
 
 def is_fresh() -> bool:
     """
