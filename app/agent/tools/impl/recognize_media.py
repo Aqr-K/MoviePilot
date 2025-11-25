@@ -22,7 +22,7 @@ class RecognizeMediaInput(BaseModel):
 
 class RecognizeMediaTool(MoviePilotTool):
     name: str = "recognize_media"
-    description: str = "Recognize media information from torrent titles or file paths. Supports two modes: 1) Recognize from torrent title and optional subtitle, 2) Recognize from file path. Returns detailed media information including title, year, type, TMDB ID, overview, and other metadata."
+    description: str = "Extract/identify media information from torrent titles or file paths (NOT database search). Supports two modes: 1) Extract from torrent title and optional subtitle, 2) Extract from file path. Returns detailed media information. Use 'search_media' to search TMDB database, or 'scrape_metadata' to generate metadata files for existing files."
     args_schema: Type[BaseModel] = RecognizeMediaInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

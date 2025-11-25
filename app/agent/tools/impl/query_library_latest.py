@@ -11,17 +11,17 @@ from app.helper.service import ServiceConfigHelper
 from app.log import logger
 
 
-class QueryMediaLatestInput(BaseModel):
+class QueryLibraryLatestInput(BaseModel):
     """查询媒体服务器最近入库影片工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     server: Optional[str] = Field(None, description="Media server name (optional, if not specified queries all enabled media servers)")
     count: Optional[int] = Field(20, description="Number of items to return (default: 20)")
 
 
-class QueryMediaLatestTool(MoviePilotTool):
-    name: str = "query_media_latest"
+class QueryLibraryLatestTool(MoviePilotTool):
+    name: str = "query_library_latest"
     description: str = "Query the latest media items added to the media server (Plex, Emby, Jellyfin). Returns recently added movies and TV series with their titles, images, links, and other metadata."
-    args_schema: Type[BaseModel] = QueryMediaLatestInput
+    args_schema: Type[BaseModel] = QueryLibraryLatestInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""

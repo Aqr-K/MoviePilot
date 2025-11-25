@@ -24,7 +24,7 @@ class ListDirectoryInput(BaseModel):
 
 class ListDirectoryTool(MoviePilotTool):
     name: str = "list_directory"
-    description: str = "List contents of a file system directory. Shows files and subdirectories with their names, types, sizes, and modification times. Returns up to 20 items and the total count if there are more items."
+    description: str = "List actual files and folders in a file system directory (NOT configuration). Shows files and subdirectories with their names, types, sizes, and modification times. Returns up to 20 items and the total count if there are more items. Use 'query_directories' to query directory configuration settings."
     args_schema: Type[BaseModel] = ListDirectoryInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

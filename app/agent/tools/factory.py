@@ -8,9 +8,9 @@ from app.agent.tools.impl.update_subscribe import UpdateSubscribeTool
 from app.agent.tools.impl.search_subscribe import SearchSubscribeTool
 from app.agent.tools.impl.get_recommendations import GetRecommendationsTool
 from app.agent.tools.impl.query_downloaders import QueryDownloadersTool
-from app.agent.tools.impl.query_downloads import QueryDownloadsTool
-from app.agent.tools.impl.query_media_library import QueryMediaLibraryTool
-from app.agent.tools.impl.query_media_latest import QueryMediaLatestTool
+from app.agent.tools.impl.query_download_tasks import QueryDownloadTasksTool
+from app.agent.tools.impl.query_library_exists import QueryLibraryExistsTool
+from app.agent.tools.impl.query_library_latest import QueryLibraryLatestTool
 from app.agent.tools.impl.query_sites import QuerySitesTool
 from app.agent.tools.impl.update_site import UpdateSiteTool
 from app.agent.tools.impl.query_site_userdata import QuerySiteUserdataTool
@@ -36,7 +36,7 @@ from app.agent.tools.impl.query_workflows import QueryWorkflowsTool
 from app.agent.tools.impl.run_workflow import RunWorkflowTool
 from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
 from app.agent.tools.impl.delete_download import DeleteDownloadTool
-from app.agent.tools.impl.query_directories import QueryDirectoriesTool
+from app.agent.tools.impl.query_directory_settings import QueryDirectorySettingsTool
 from app.agent.tools.impl.list_directory import ListDirectoryTool
 from app.agent.tools.impl.query_transfer_history import QueryTransferHistoryTool
 from app.agent.tools.impl.transfer_file import TransferFileTool
@@ -73,7 +73,7 @@ class MoviePilotToolFactory:
             QueryRuleGroupsTool,
             QuerySubscribeHistoryTool,
             DeleteSubscribeTool,
-            QueryDownloadsTool,
+            QueryDownloadTasksTool,
             DeleteDownloadTool,
             QueryDownloadersTool,
             QuerySitesTool,
@@ -82,9 +82,9 @@ class MoviePilotToolFactory:
             TestSiteTool,
             UpdateSiteCookieTool,
             GetRecommendationsTool,
-            QueryMediaLibraryTool,
-            QueryMediaLatestTool,
-            QueryDirectoriesTool,
+            QueryLibraryExistsTool,
+            QueryLibraryLatestTool,
+            QueryDirectorySettingsTool,
             ListDirectoryTool,
             QueryTransferHistoryTool,
             TransferFileTool,

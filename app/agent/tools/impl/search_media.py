@@ -24,7 +24,7 @@ class SearchMediaInput(BaseModel):
 
 class SearchMediaTool(MoviePilotTool):
     name: str = "search_media"
-    description: str = "Search for media resources including movies, TV shows, anime, etc. Supports searching by title, year, type, and other criteria. Returns detailed media information from TMDB database."
+    description: str = "Search TMDB database for media resources (movies, TV shows, anime, etc.) by title, year, type, and other criteria. Returns detailed media information from TMDB. Use 'recognize_media' to extract info from torrent titles/file paths, or 'scrape_metadata' to generate metadata files."
     args_schema: Type[BaseModel] = SearchMediaInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

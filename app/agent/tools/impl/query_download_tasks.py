@@ -11,7 +11,7 @@ from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.log import logger
 
 
-class QueryDownloadsInput(BaseModel):
+class QueryDownloadTasksInput(BaseModel):
     """查询下载工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     downloader: Optional[str] = Field(None,
@@ -22,10 +22,10 @@ class QueryDownloadsInput(BaseModel):
     title: Optional[str] = Field(None, description="Query download tasks by title/name (optional, supports partial match, searches all tasks if provided)")
 
 
-class QueryDownloadsTool(MoviePilotTool):
-    name: str = "query_downloads"
+class QueryDownloadTasksTool(MoviePilotTool):
+    name: str = "query_download_tasks"
     description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash or title. Shows download progress, completion status, and task details from configured downloaders."
-    args_schema: Type[BaseModel] = QueryDownloadsInput
+    args_schema: Type[BaseModel] = QueryDownloadTasksInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""

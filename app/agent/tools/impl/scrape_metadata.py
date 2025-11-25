@@ -27,7 +27,7 @@ class ScrapeMetadataInput(BaseModel):
 
 class ScrapeMetadataTool(MoviePilotTool):
     name: str = "scrape_metadata"
-    description: str = "Scrape media metadata (NFO files, posters, backgrounds, etc.) for a file or directory. Automatically recognizes media information from the file path and generates metadata files. Supports both local and remote storage."
+    description: str = "Generate metadata files (NFO files, posters, backgrounds, etc.) for existing media files or directories. Automatically recognizes media information from the file path and creates metadata files. Supports both local and remote storage. Use 'search_media' to search TMDB database, or 'recognize_media' to extract info from torrent titles/file paths without generating files."
     args_schema: Type[BaseModel] = ScrapeMetadataInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

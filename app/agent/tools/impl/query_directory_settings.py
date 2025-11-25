@@ -10,7 +10,7 @@ from app.helper.directory import DirectoryHelper
 from app.log import logger
 
 
-class QueryDirectoriesInput(BaseModel):
+class QueryDirectorySettingsInput(BaseModel):
     """查询系统目录设置工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     directory_type: Optional[str] = Field("all",
@@ -21,10 +21,10 @@ class QueryDirectoriesInput(BaseModel):
                                description="Filter directories by name (partial match, optional)")
 
 
-class QueryDirectoriesTool(MoviePilotTool):
-    name: str = "query_directories"
-    description: str = "Query system directory configuration and list all configured directories. Shows download directories, media library directories, storage settings, transfer modes, and other directory-related configurations."
-    args_schema: Type[BaseModel] = QueryDirectoriesInput
+class QueryDirectorySettingsTool(MoviePilotTool):
+    name: str = "query_directory_settings"
+    description: str = "Query system directory configuration settings (NOT file listings). Returns configured directory paths, storage types, transfer modes, and other directory-related settings. Use 'list_directory' to list actual files and folders in a directory."
+    args_schema: Type[BaseModel] = QueryDirectorySettingsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""
