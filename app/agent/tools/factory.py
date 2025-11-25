@@ -10,6 +10,7 @@ from app.agent.tools.impl.get_recommendations import GetRecommendationsTool
 from app.agent.tools.impl.query_downloaders import QueryDownloadersTool
 from app.agent.tools.impl.query_downloads import QueryDownloadsTool
 from app.agent.tools.impl.query_media_library import QueryMediaLibraryTool
+from app.agent.tools.impl.query_media_latest import QueryMediaLatestTool
 from app.agent.tools.impl.query_sites import QuerySitesTool
 from app.agent.tools.impl.update_site import UpdateSiteTool
 from app.agent.tools.impl.query_site_userdata import QuerySiteUserdataTool
@@ -82,6 +83,7 @@ class MoviePilotToolFactory:
             UpdateSiteCookieTool,
             GetRecommendationsTool,
             QueryMediaLibraryTool,
+            QueryMediaLatestTool,
             QueryDirectoriesTool,
             ListDirectoryTool,
             QueryTransferHistoryTool,
