@@ -70,7 +70,7 @@ class Notification(BaseModel):
     # 用户ID
     userid: Optional[Union[str, int]] = None
     # 用户名称
-    username: Optional[str] = None
+    username: Optional[Union[str, int]] = None
     # 时间
     date: Optional[str] = None
     # 消息方向

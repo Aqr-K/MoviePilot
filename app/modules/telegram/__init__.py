@@ -1,12 +1,10 @@
 import copy
 import json
 import re
-from typing import Dict
-from typing import Optional, Union, List, Tuple, Any
+from typing import Dict, Optional, Union, List, Tuple, Any
 
 from app.core.context import MediaInfo, Context
-from app.core.event import Event
-from app.core.event import eventmanager
+from app.core.event import eventmanager, Event
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
 from app.modules.telegram.telegram import Telegram
