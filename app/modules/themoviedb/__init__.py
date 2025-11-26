@@ -7,6 +7,7 @@ import zhconv
 from app import schemas
 from app.core.config import settings
 from app.core.context import MediaInfo
+from app.core.event import eventmanager, Event
 from app.core.meta import MetaBase
 from app.log import logger
 from app.modules import _ModuleBase
@@ -14,8 +15,7 @@ from app.modules.themoviedb.category import CategoryHelper
 from app.modules.themoviedb.scraper import TmdbScraper
 from app.modules.themoviedb.tmdb_cache import TmdbCache
 from app.modules.themoviedb.tmdbapi import TmdbApi
-from app.schemas import MediaPerson
-from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecognizeType
+from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecognizeType, EventType
 from app.utils.http import RequestUtils
 
 
@@ -38,6 +38,23 @@ class TheMovieDbModule(_ModuleBase):
         self.tmdb = TmdbApi()
         self.category = CategoryHelper()
         self.scraper = TmdbScraper()
+
+    @eventmanager.register(EventType.ConfigChanged)
+    def handle_config_changed(self, event: Event):
+        """
+        处理配置变更事件
+        :param event: 事件对象
+        """
+        if not event:
+            return
+        event_data: schemas.ConfigChangeEventData = event.event_data
+        if event_data.key not in ["PROXY", "TMDB_API_DOMAIN", "TMDB_API_KEY", "TMDB_LOCALE"]:
+            return
+        logger.info("配置变更，重新初始化TheMovieDb模块...")
+        # 停止模块
+        self.stop()
+        # 初始化模块
+        self.init_module()
 
     @staticmethod
     def get_name() -> str:
@@ -635,7 +652,7 @@ class TheMovieDbModule(_ModuleBase):
             return medias
         return []
 
-    def search_persons(self, name: str) -> Optional[List[MediaPerson]]:
+    def search_persons(self, name: str) -> Optional[List[schemas.MediaPerson]]:
         """
         搜索人物信息
         """
@@ -645,10 +662,10 @@ class TheMovieDbModule(_ModuleBase):
             return []
         results = self.tmdb.search_persons(name)
         if results:
-            return [MediaPerson(source='themoviedb', **person) for person in results]
+            return [schemas.MediaPerson(source='themoviedb', **person) for person in results]
         return []
 
-    async def async_search_persons(self, name: str) -> Optional[List[MediaPerson]]:
+    async def async_search_persons(self, name: str) -> Optional[List[schemas.MediaPerson]]:
         """
         异步搜索人物信息
         """
@@ -658,7 +675,7 @@ class TheMovieDbModule(_ModuleBase):
             return []
         results = await self.tmdb.async_search_persons(name)
         if results:
-            return [MediaPerson(source='themoviedb', **person) for person in results]
+            return [schemas.MediaPerson(source='themoviedb', **person) for person in results]
         return []
 
     def search_collections(self, name: str) -> Optional[List[MediaInfo]]:
