@@ -418,6 +418,9 @@ class TransHandler:
                         return None, f"{fileitem.path} {fileitem.storage} 下载失败"
             elif fileitem.storage == target_storage:
                 # 同一网盘
+                if not source_oper.is_support_transtype(transfer_type):
+                    return None, f"存储 {fileitem.storage} 不支持 {transfer_type} 整理方式"
+
                 if transfer_type == "copy":
                     # 复制文件到新目录
                     target_fileitem = target_oper.get_folder(target_file.parent)
@@ -438,6 +441,11 @@ class TransHandler:
                             return None, f"【{target_storage}】{fileitem.path} 移动文件失败"
                     else:
                         return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
+                elif transfer_type == "link":
+                    if source_oper.link(fileitem, target_file):
+                        return target_oper.get_item(target_file), ""
+                    else:
+                        return None, f"【{target_storage}】{fileitem.path} 创建硬链接失败"
                 else:
                     return None, f"不支持的整理方式：{transfer_type}"
 

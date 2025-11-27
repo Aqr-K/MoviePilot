@@ -37,6 +37,7 @@ class SMB(StorageBase, metaclass=WeakSingleton):
     transtype = {
         "move": "移动",
         "copy": "复制",
+        "link": "硬链接",
     }
 
     # 文件块大小，默认10MB
@@ -635,7 +636,39 @@ class SMB(StorageBase, metaclass=WeakSingleton):
             return False
 
     def link(self, fileitem: schemas.FileItem, target_file: Path) -> bool:
-        pass
+        """
+        硬链接文件
+        Samba服务器需要开启 unix extensions 支持
+        """
+        try:
+            self._check_connection()
+            src_path = self._normalize_path(fileitem.path)
+            dst_path = self._normalize_path(target_file)
+            
+            # 检查源文件是否存在
+            if not smbclient.path.exists(src_path):
+                raise FileNotFoundError(f"源文件不存在: {src_path}")
+            
+            # 确保目标路径的父目录存在
+            dst_parent = "\\".join(dst_path.rsplit("\\", 1)[:-1])
+            if dst_parent and not smbclient.path.exists(dst_parent):
+                logger.info(f"【SMB】创建目标目录: {dst_parent}")
+                smbclient.makedirs(dst_parent, exist_ok=True)
+            
+            # 尝试创建硬链接
+            smbclient.link(src_path, dst_path)
+            logger.info(f"【SMB】硬链接创建成功: {src_path} -> {dst_path}")
+            return True
+            
+        except SMBResponseException as e:
+            # SMB协议错误，可能不支持硬链接
+            logger.error(f"【SMB】创建硬链接失败(当前Samba服务器可能不支持硬链接): {e}")
+            return False
+        except Exception as e:
+            logger.error(f"【SMB】创建硬链接失败: {e}")
+            return False
+        
+            
 
     def softlink(self, fileitem: schemas.FileItem, target_file: Path) -> bool:
         pass
