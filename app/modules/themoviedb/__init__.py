@@ -48,7 +48,7 @@ class TheMovieDbModule(_ModuleBase):
         if not event:
             return
         event_data: schemas.ConfigChangeEventData = event.event_data
-        if event_data.key not in ["PROXY", "TMDB_API_DOMAIN", "TMDB_API_KEY", "TMDB_LOCALE"]:
+        if event_data.key not in ["PROXY_HOST", "TMDB_API_DOMAIN", "TMDB_API_KEY", "TMDB_LOCALE"]:
             return
         logger.info("配置变更，重新初始化TheMovieDb模块...")
         # 停止模块
