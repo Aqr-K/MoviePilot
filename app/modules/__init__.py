@@ -4,14 +4,21 @@ from typing import Generic, Tuple, Union, TypeVar, Type, Dict, Optional, Callabl
 from app.helper.service import ServiceConfigHelper
 from app.schemas import Notification, NotificationConf, MediaServerConf, DownloaderConf
 from app.schemas.types import ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
-    OtherModulesType
+    OtherModulesType, SystemConfigKey
+from app.utils.mixins import ConfigReloadMixin
 
 
-class _ModuleBase(metaclass=ABCMeta):
+class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
     """
     模块基类，实现对应方法，在有需要时会被自动调用，返回None代表不启用该模块，将继续执行下一模块
     输入参数与输出参数一致的，或没有输出的，可以被多个模块重复实现
     """
+
+    def on_config_changed(self):
+        self.init_module()
+
+    def get_reload_name(self):
+        return self.get_name()
 
     @abstractmethod
     def init_module(self) -> None:
@@ -177,6 +184,7 @@ class _MessageBase(ServiceBase[TService, NotificationConf]):
     """
     消息基类
     """
+    CONFIG_WATCH = {SystemConfigKey.Notifications.value}
 
     def __init__(self):
         """
@@ -224,6 +232,7 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
     """
     下载器基类
     """
+    CONFIG_WATCH = {SystemConfigKey.Downloaders.value}
 
     def __init__(self):
         """
@@ -287,6 +296,7 @@ class _MediaServerBase(ServiceBase[TService, MediaServerConf]):
     """
     媒体服务器基类
     """
+    CONFIG_WATCH = {SystemConfigKey.MediaServers.value}
 
     def get_configs(self) -> Dict[str, MediaServerConf]:
         """

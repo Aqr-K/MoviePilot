@@ -8,34 +8,31 @@ from typing import Tuple
 import docker
 
 from app.core.config import settings
-from app.core.event import eventmanager, Event
 from app.log import logger
-from app.schemas import ConfigChangeEventData
-from app.schemas.types import EventType
+from app.utils.mixins import ConfigReloadMixin
 from app.utils.system import SystemUtils
 
 
-class SystemHelper:
+class SystemHelper(ConfigReloadMixin):
     """
     系统工具类，提供系统相关的操作和判断
     """
+    CONFIG_WATCH = {
+        "DEBUG",
+        "LOG_LEVEL",
+        "LOG_MAX_FILE_SIZE",
+        "LOG_BACKUP_COUNT",
+        "LOG_FILE_FORMAT",
+        "LOG_CONSOLE_FORMAT",
+    }
 
     __system_flag_file = "/var/log/nginx/__moviepilot__"
 
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件，更新日志设置
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: ConfigChangeEventData = event.event_data
-        if event_data.key not in ['DEBUG', 'LOG_LEVEL', 'LOG_MAX_FILE_SIZE', 'LOG_BACKUP_COUNT',
-                                  'LOG_FILE_FORMAT', 'LOG_CONSOLE_FORMAT']:
-            return
-        logger.info("配置变更，更新日志设置...")
+    def on_config_changed(self):
         logger.update_loggers()
+
+    def get_reload_name(self):
+        return "日志设置"
 
     @staticmethod
     def can_restart() -> bool:

@@ -14,10 +14,8 @@ from threading import Lock
 from typing import Dict, Optional
 
 from app.core.config import settings
-from app.core.event import Event, eventmanager
 from app.log import logger
-from app.schemas import ConfigChangeEventData
-from app.schemas.types import EventType
+from app.utils.mixins import ConfigReloadMixin
 from app.utils.singleton import Singleton
 
 # 定义一个全局线程池执行器
@@ -69,25 +67,23 @@ def enable_doh(enable: bool):
         socket.getaddrinfo = _orig_getaddrinfo
 
 
-class DohHelper(metaclass=Singleton):
+class DohHelper(ConfigReloadMixin, metaclass=Singleton):
     """
     DoH帮助类，用于处理DNS over HTTPS解析。
     """
+    CONFIG_WATCH = {"DOH_ENABLE", "DOH_DOMAINS", "DOH_RESOLVERS"}
+
     def __init__(self):
         enable_doh(settings.DOH_ENABLE)
 
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        if not event:
-            return
-        event_data: ConfigChangeEventData = event.event_data
-        if event_data.key not in ["DOH_ENABLE", "DOH_DOMAINS", "DOH_RESOLVERS"]:
-            return
+    def on_config_changed(self):
         with _doh_lock:
             # DOH配置有变动的情况下，清空缓存
             _doh_cache.clear()
         enable_doh(settings.DOH_ENABLE)
 
+    def get_reload_name(self):
+        return 'DoH'
 
 def _doh_query(resolver: str, host: str) -> Optional[str]:
     """

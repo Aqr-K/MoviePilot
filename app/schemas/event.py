@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Set, Callable
+from typing import Iterable, Optional, Dict, Any, List, Set, Callable
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.message import MessageChannel
 from app.schemas.file import FileItem
@@ -27,9 +27,28 @@ class ConfigChangeEventData(BaseEventData):
     """
     ConfigChange 事件的数据模型
     """
-    key: str = Field(..., description="配置项的键")
+    key: set[str] = Field(..., description="配置项的键（集合类型）")
     value: Optional[Any] = Field(default=None, description="配置项的新值")
     change_type: str = Field(default="update", description="配置项的变更类型，如 'add', 'update', 'delete'")
+
+    @field_validator('key', mode='before')
+    @classmethod
+    def convert_to_set(cls, v):
+        """将输入的 str、list、dict.keys() 等转为 set"""
+        if v is None:
+            return set()
+        elif isinstance(v, str):
+            return {v}
+        elif isinstance(v, dict):
+            return set(str(k) for k in v.keys())
+        elif isinstance(v, (list, tuple)):
+            return set(str(item) for item in v)
+        elif isinstance(v, set):
+            return set(str(item) for item in v)
+        elif isinstance(v, Iterable):
+            return set(str(item) for item in v)
+        else:
+            return {str(v)}
 
 
 class ChainEventData(BaseEventData):

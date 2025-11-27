@@ -4,13 +4,13 @@ import re
 from typing import Dict, Optional, Union, List, Tuple, Any
 
 from app.core.context import MediaInfo, Context
-from app.core.event import eventmanager, Event
+from app.core.event import eventmanager
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
 from app.modules.telegram.telegram import Telegram
-from app.schemas import MessageChannel, CommingMessage, Notification, CommandRegisterEventData, ConfigChangeEventData, \
+from app.schemas import MessageChannel, CommingMessage, Notification, CommandRegisterEventData, \
     NotificationConf
-from app.schemas.types import ModuleType, ChainEventType, SystemConfigKey, EventType
+from app.schemas.types import ModuleType, ChainEventType
 from app.utils.structures import DictUtils
 
 
@@ -23,20 +23,6 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         super().init_service(service_name=Telegram.__name__.lower(),
                              service_type=Telegram)
         self._channel = MessageChannel.Telegram
-
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: ConfigChangeEventData = event.event_data
-        if event_data.key not in [SystemConfigKey.Notifications.value]:
-            return
-        logger.info("配置变更，重新加载Telegram模块...")
-        self.init_module()
 
     @staticmethod
     def get_name() -> str:

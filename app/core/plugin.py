@@ -6,11 +6,11 @@ import importlib.util
 import inspect
 import os
 import sys
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-import threading
 from typing import Any, Dict, List, Optional, Type, Union, Callable, Tuple
 
 from fastapi import HTTPException
@@ -20,7 +20,7 @@ from watchfiles import watch
 from app import schemas
 from app.core.cache import fresh, async_fresh
 from app.core.config import settings
-from app.core.event import eventmanager, Event
+from app.core.event import eventmanager
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.plugin import PluginHelper
@@ -28,16 +28,16 @@ from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
+from app.utils.mixins import ConfigReloadMixin
 from app.utils.object import ObjectUtils
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 
 
-class PluginManager(metaclass=Singleton):
-    """
-    插件管理器
-    """
+class PluginManager(ConfigReloadMixin, metaclass=Singleton):
+    """插件管理器"""
+    CONFIG_WATCH = {"DEV", "PLUGIN_AUTO_RELOAD"}
 
     def __init__(self):
         # 插件列表
@@ -250,19 +250,11 @@ class PluginManager(metaclass=Singleton):
         """
         return self._plugins
 
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: schemas.ConfigChangeEventData = event.event_data
-        if event_data.key not in ['DEV', 'PLUGIN_AUTO_RELOAD']:
-            return
-        logger.info("配置变更，重新加载插件文件修改监测...")
+    def on_config_changed(self):
         self.reload_monitor()
+
+    def get_reload_name(self) -> str:
+        return "插件文件修改监测"
 
     def reload_monitor(self):
         """
