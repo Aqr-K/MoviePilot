@@ -7,7 +7,6 @@ import zhconv
 from app import schemas
 from app.core.config import settings
 from app.core.context import MediaInfo
-from app.core.event import eventmanager, Event
 from app.core.meta import MetaBase
 from app.log import logger
 from app.modules import _ModuleBase
@@ -15,7 +14,7 @@ from app.modules.themoviedb.category import CategoryHelper
 from app.modules.themoviedb.scraper import TmdbScraper
 from app.modules.themoviedb.tmdb_cache import TmdbCache
 from app.modules.themoviedb.tmdbapi import TmdbApi
-from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecognizeType, EventType
+from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecognizeType
 from app.utils.http import RequestUtils
 
 
@@ -23,6 +22,7 @@ class TheMovieDbModule(_ModuleBase):
     """
     TMDB媒体信息匹配
     """
+    CONFIG_WATCH = {"PROXY_HOST", "TMDB_API_DOMAIN", "TMDB_API_KEY", "TMDB_LOCALE"}
 
     # 元数据缓存
     cache: TmdbCache = None
@@ -39,18 +39,7 @@ class TheMovieDbModule(_ModuleBase):
         self.category = CategoryHelper()
         self.scraper = TmdbScraper()
 
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: schemas.ConfigChangeEventData = event.event_data
-        if event_data.key not in ["PROXY_HOST", "TMDB_API_DOMAIN", "TMDB_API_KEY", "TMDB_LOCALE"]:
-            return
-        logger.info("配置变更，重新初始化TheMovieDb模块...")
+    def on_config_changed(self):
         # 停止模块
         self.stop()
         # 初始化模块

@@ -7,10 +7,8 @@ import redis
 from redis.asyncio import Redis
 
 from app.core.config import settings
-from app.core.event import eventmanager, Event
 from app.log import logger
-from app.schemas import ConfigChangeEventData
-from app.schemas.types import EventType
+from app.utils.mixins import ConfigReloadMixin
 from app.utils.singleton import Singleton
 
 # 类型缓存集合，针对非容器简单类型
@@ -74,16 +72,17 @@ def deserialize(value: bytes) -> Any:
         raise ValueError("Unknown serialization format")
 
 
-class RedisHelper(metaclass=Singleton):
+class RedisHelper(ConfigReloadMixin, metaclass=Singleton):
     """
     Redis连接和操作助手类，单例模式
-    
+
     特性：
     - 管理Redis连接池和客户端
     - 提供序列化和反序列化功能
     - 支持内存限制和淘汰策略设置
     - 提供键名生成和区域管理功能
     """
+    CONFIG_WATCH = {"CACHE_BACKEND_TYPE", "CACHE_BACKEND_URL", "CACHE_REDIS_MAXMEMORY"}
 
     def __init__(self):
         """
@@ -114,25 +113,17 @@ class RedisHelper(metaclass=Singleton):
             self.client = None
             raise RuntimeError("Redis connection failed") from e
 
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件，更新Redis设置
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: ConfigChangeEventData = event.event_data
-        if event_data.key not in ['CACHE_BACKEND_TYPE', 'CACHE_BACKEND_URL', 'CACHE_REDIS_MAXMEMORY']:
-            return
-        logger.info("配置变更，重连Redis...")
+    def on_config_changed(self):
         self.close()
         self._connect()
+
+    def get_reload_name(self):
+        return "Redis"
 
     def set_memory_limit(self, policy: Optional[str] = "allkeys-lru"):
         """
         动态设置Redis最大内存和内存淘汰策略
-        
+
         :param policy: 淘汰策略（如'allkeys-lru'）
         """
         try:
@@ -310,10 +301,10 @@ class RedisHelper(metaclass=Singleton):
             logger.debug("Redis connection closed")
 
 
-class AsyncRedisHelper(metaclass=Singleton):
+class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
     """
     异步Redis连接和操作助手类，单例模式
-    
+
     特性：
     - 管理异步Redis连接池和客户端
     - 提供序列化和反序列化功能
@@ -321,6 +312,7 @@ class AsyncRedisHelper(metaclass=Singleton):
     - 提供键名生成和区域管理功能
     - 所有操作都是异步的
     """
+    CONFIG_WATCH = {"CACHE_BACKEND_TYPE", "CACHE_BACKEND_URL", "CACHE_REDIS_MAXMEMORY"}
 
     def __init__(self):
         """
@@ -351,25 +343,17 @@ class AsyncRedisHelper(metaclass=Singleton):
             self.client = None
             raise RuntimeError("Redis async connection failed") from e
 
-    @eventmanager.register(EventType.ConfigChanged)
-    async def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件，更新Redis设置
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: ConfigChangeEventData = event.event_data
-        if event_data.key not in ['CACHE_BACKEND_TYPE', 'CACHE_BACKEND_URL', 'CACHE_REDIS_MAXMEMORY']:
-            return
-        logger.info("配置变更，重连Redis (async)...")
+    async def on_config_changed(self):
         await self.close()
         await self._connect()
+
+    def get_reload_name(self):
+        return "Redis (async)"
 
     async def set_memory_limit(self, policy: Optional[str] = "allkeys-lru"):
         """
         动态设置Redis最大内存和内存淘汰策略
-        
+
         :param policy: 淘汰策略（如'allkeys-lru'）
         """
         try:

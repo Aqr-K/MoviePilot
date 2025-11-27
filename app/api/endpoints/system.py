@@ -248,13 +248,11 @@ async def set_env_setting(env: dict,
         )
 
     if success_updates:
-        for key in success_updates.keys():
-            # 发送配置变更事件
-            await eventmanager.async_send_event(etype=EventType.ConfigChanged, data=ConfigChangeEventData(
-                key=key,
-                value=getattr(settings, key, None),
-                change_type="update"
-            ))
+        # 发送配置变更事件
+        await eventmanager.async_send_event(etype=EventType.ConfigChanged, data=ConfigChangeEventData(
+            key=success_updates.keys(),
+            change_type="update"
+        ))
 
     return schemas.Response(
         success=True,

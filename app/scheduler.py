@@ -22,16 +22,17 @@ from app.chain.subscribe import SubscribeChain
 from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
 from app.core.config import settings, global_vars
-from app.core.event import eventmanager, Event
+from app.core.event import eventmanager
 from app.core.plugin import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
 from app.helper.sites import SitesHelper  # noqa
 from app.helper.wallpaper import WallpaperHelper
 from app.log import logger
-from app.schemas import Notification, NotificationType, Workflow, ConfigChangeEventData
+from app.schemas import Notification, NotificationType, Workflow
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.gc import get_memory_usage
+from app.utils.mixins import ConfigReloadMixin
 from app.utils.singleton import SingletonClass
 from app.utils.timer import TimerUtils
 
@@ -42,10 +43,20 @@ class SchedulerChain(ChainBase):
     pass
 
 
-class Scheduler(metaclass=SingletonClass):
+class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
     """
     定时任务管理
     """
+    CONFIG_WATCH = {
+        "DEV",
+        "COOKIECLOUD_INTERVAL",
+        "MEDIASERVER_SYNC_INTERVAL",
+        "SUBSCRIBE_SEARCH",
+        "SUBSCRIBE_SEARCH_INTERVAL",
+        "SUBSCRIBE_MODE",
+        "SUBSCRIBE_RSS_INTERVAL",
+        "SITEDATA_REFRESH_INTERVAL",
+    }
 
     def __init__(self):
         # 定时服务
@@ -63,21 +74,11 @@ class Scheduler(metaclass=SingletonClass):
         # 初始化
         self.init()
 
-    @eventmanager.register(EventType.ConfigChanged)
-    def handle_config_changed(self, event: Event):
-        """
-        处理配置变更事件
-        :param event: 事件对象
-        """
-        if not event:
-            return
-        event_data: ConfigChangeEventData = event.event_data
-        if event_data.key not in ['DEV', 'COOKIECLOUD_INTERVAL', 'MEDIASERVER_SYNC_INTERVAL', 'SUBSCRIBE_SEARCH',
-                                  'SUBSCRIBE_SEARCH_INTERVAL', 'SUBSCRIBE_MODE', 'SUBSCRIBE_RSS_INTERVAL',
-                                  'SITEDATA_REFRESH_INTERVAL']:
-            return
-        logger.info(f"配置项 {event_data.key} 变更，重新初始化定时服务...")
+    def on_config_changed(self):
         self.init()
+
+    def get_reload_name(self):
+        return "定时服务"
 
     def init(self):
         """
