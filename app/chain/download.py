@@ -232,13 +232,18 @@ class DownloadChain(ChainBase):
         # 获取种子文件的文件夹名和文件清单
         _folder_name, _file_list = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
 
+        storage = 'local'
         # 下载目录
         if save_path:
             # 下载目录使用自定义的
             download_dir = Path(save_path)
+            # Check if the download_dir matches any configured dirs
+            dir_info = DirectoryHelper().get_dir(dest_path=download_dir)
+            storage = dir_info.storage if dir_info else storage
         else:
             # 根据媒体信息查询下载目录配置
-            dir_info = DirectoryHelper().get_dir(_media, storage="local", include_unsorted=True)
+            dir_info = DirectoryHelper().get_dir(_media, include_unsorted=True)
+            storage = dir_info.storage if dir_info else storage
             # 拼装子目录
             if dir_info:
                 # 一级目录
@@ -358,7 +363,7 @@ class DownloadChain(ChainBase):
                 username=username,
             )
             # 下载成功后处理
-            self.download_added(context=context, download_dir=download_dir, torrent_content=torrent_content)
+            self.download_added(context=context, download_dir=download_dir, storage=storage, torrent_content=torrent_content)
             # 广播事件
             self.eventmanager.send_event(EventType.DownloadAdded, {
                 "hash": _hash,
