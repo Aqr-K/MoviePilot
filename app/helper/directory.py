@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from app import schemas
 from app.core.context import MediaInfo
@@ -51,7 +51,7 @@ class DirectoryHelper:
         """
         return [d for d in self.get_library_dirs() if d.library_storage == "local"]
 
-    def get_dir(self, media: MediaInfo, include_unsorted: Optional[bool] = False,
+    def get_dir(self, media: Optional[MediaInfo], include_unsorted: Optional[bool] = False,
                 storage: Optional[str] = None, src_path: Path = None,
                 target_storage: Optional[str] = None, dest_path: Path = None
                 ) -> Optional[schemas.TransferDirectoryConf]:
@@ -64,11 +64,8 @@ class DirectoryHelper:
         :param src_path: 源目录，有值时直接匹配
         :param dest_path: 目标目录，有值时直接匹配
         """
-        # 处理类型
-        if not media:
-            return None
         # 电影/电视剧
-        media_type = media.type.value
+        media_type = media.type.value if media else None
         dirs = self.get_dirs()
 
         # 如果存在源目录，并源目录为任一下载目录的子目录时，则进行源目录匹配，否则，允许源目录按同盘优先的逻辑匹配
@@ -93,7 +90,7 @@ class DirectoryHelper:
             if dest_path and dest_path != Path(d.library_path):
                 continue
             # 目录类型为全部的，符合条件
-            if not d.media_type:
+            if not media_type or not d.media_type:
                 matched_dirs.append(d)
                 continue
             # 目录类型相等，目录类别为全部，符合条件
@@ -109,10 +106,26 @@ class DirectoryHelper:
                 # 优先源目录同盘
                 for matched_dir in matched_dirs:
                     matched_path = Path(matched_dir.download_path)
-                    if SystemUtils.is_same_disk(matched_path, src_path):
+                    if self._is_same_source((src_path, storage or "local"), (matched_path, matched_dir.library_storage)):
                         return matched_dir
             return matched_dirs[0]
         return None
+
+    @staticmethod
+    def _is_same_source(src: Tuple[Path, str],  tar: Tuple[Path, str]) -> bool:
+        """
+        判断源目录和目标目录是否在同一存储盘
+
+        :param src: 源目录路径和存储类型
+        :param tar: 目标目录路径和存储类型
+        :return: 是否在同一存储盘
+        """
+        src_path, src_storage = src
+        tar_path, tar_storage = tar
+        if "local" == tar_storage == src_storage:
+            return SystemUtils.is_same_disk(src_path, tar_path)
+        # 网络存储，直接比较类型
+        return src_storage == tar_storage
 
     @staticmethod
     def get_media_root_path(rename_format: str, rename_path: Path) -> Optional[Path]:
