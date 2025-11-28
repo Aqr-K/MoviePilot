@@ -101,10 +101,15 @@ class SubtitleModule(_ModuleBase):
             time.sleep(1)
         # 目录仍然不存在，且有文件夹名，则创建目录
         if not working_dir_item and folder_name:
-            working_dir_item = storageChain.create_folder(
-                storageChain.get_file_item(storage, download_dir), 
-                folder_name
-            )
+            parent_dir_item = storageChain.get_file_item(storage, download_dir)
+            if parent_dir_item:
+                working_dir_item = storageChain.create_folder(
+                    parent_dir_item,
+                    folder_name
+                )
+            else:
+                logger.error(f"下载根目录不存在，无法创建字幕文件夹：{download_dir}")
+                return
         if not working_dir_item:
             logger.error(f"下载目录不存在，无法保存字幕：{download_dir / folder_name}")
             return
