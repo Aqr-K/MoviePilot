@@ -239,11 +239,11 @@ class DownloadChain(ChainBase):
             download_dir = Path(save_path)
             # Check if the download_dir matches any configured dirs
             dir_info = DirectoryHelper().get_dir(dest_path=download_dir)
-            storage = dir_info.library_storage if dir_info else storage
+            storage = dir_info.storage if dir_info else storage
         else:
             # 根据媒体信息查询下载目录配置
             dir_info = DirectoryHelper().get_dir(_media, include_unsorted=True)
-            storage = dir_info.library_storage if dir_info else storage
+            storage = dir_info.storage if dir_info else storage
             # 拼装子目录
             if dir_info:
                 # 一级目录
