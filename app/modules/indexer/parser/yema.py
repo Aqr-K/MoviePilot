@@ -52,7 +52,7 @@ class TYemaSiteUserInfo(SiteParserBase):
         user_info = detail.get("data", {})
         self.userid = user_info.get("id")
         self.username = user_info.get("name")
-        self.user_level = user_info.get("level")
+        self.user_level = str(user_info.get("level")) if user_info.get("level") is not None else None
         self.join_at = StringUtils.unify_datetime_str(user_info.get("registerTime"))
 
         self.upload = user_info.get('uploadSize')
