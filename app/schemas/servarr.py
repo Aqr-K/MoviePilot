@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class RadarrMovie(BaseModel):
     id: Optional[int] = None
     title: Optional[str] = None
-    year: Optional[str] = None
+    year: Optional[str | int] = None
     isAvailable: bool = False
     monitored: bool = False
     tmdbId: Optional[int] = None
@@ -31,7 +31,7 @@ class SonarrSeries(BaseModel):
     images: list = Field(default_factory=list)
     remotePoster: Optional[str] = None
     seasons: list = Field(default_factory=list)
-    year: Optional[str] = None
+    year: Optional[str | int] = None
     path: Optional[str] = None
     profileId: Optional[int] = None
     languageProfileId: Optional[int] = None
