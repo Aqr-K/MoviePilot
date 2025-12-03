@@ -643,17 +643,23 @@ class TmdbApi:
                 reverse=True
             )
             for tv in tvs:
-                # 年份
+                # 使用年份、名称匹配
                 tv_year = tv.get('first_air_date')[0:4] if tv.get('first_air_date') else None
                 if (self.__compare_names(name, tv.get('name'))
                     or self.__compare_names(name, tv.get('original_name'))) \
                         and (tv_year == str(season_year)):
                     return tv
-                # 匹配别名、译名
+                # 获取别名、译名重新匹配
                 if not tv.get("names"):
                     tv = self.get_info(mtype=MediaType.TV, tmdbid=tv.get("id"))
-                if not tv or not self.__compare_names(name, tv.get("names")):
+                if not tv or not (
+                    self.__compare_names(name, tv.get("name"))
+                    or self.__compare_names(name, tv.get("original_name"))
+                    or self.__compare_names(name, tv.get("names"))):
                     continue
+                if tv_year == str(season_year):
+                    return tv
+                # 季年份匹配
                 if __season_match(tv_info=tv, _season_year=season_year):
                     return tv
         return {}
