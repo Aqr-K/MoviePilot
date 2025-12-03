@@ -640,7 +640,7 @@ class Emby:
                 item_type=item.get("Type"),
                 title=item.get("Name"),
                 original_title=item.get("OriginalTitle"),
-                year=str(item.get("ProductionYear")),
+                year=item.get("ProductionYear"),
                 tmdbid=int(tmdbid) if tmdbid else None,
                 imdbid=item.get("ProviderIds", {}).get("Imdb"),
                 tvdbid=item.get("ProviderIds", {}).get("Tvdb"),

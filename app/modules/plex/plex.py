@@ -509,7 +509,7 @@ class Plex:
             item_type=item.type,
             title=item.title,
             original_title=item.originalTitle,
-            year=str(item.year),
+            year=item.year,
             tmdbid=ids.get("tmdb_id"),
             imdbid=ids.get("imdb_id"),
             tvdbid=ids.get("tvdb_id"),

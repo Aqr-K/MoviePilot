@@ -744,11 +744,11 @@ class TmdbApi:
         if validation_result is not None:
             return validation_result
 
-        logger.info("正在从TheDbMovie网站查询：%s ..." % name)
+        logger.info("正在从TheMovieDb网站查询：%s ..." % name)
         tmdb_url = self._build_tmdb_search_url(name)
         res = RequestUtils(timeout=5, ua=settings.NORMAL_USER_AGENT, proxies=settings.PROXY).get_res(url=tmdb_url)
         if res is None:
-            logger.error("无法连接TheDbMovie")
+            logger.error("无法连接TheMovieDb")
             return None
 
         # 响应验证
