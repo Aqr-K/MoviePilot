@@ -88,4 +88,4 @@ langchain-google-genai~=2.0.10
 langchain-deepseek~=0.1.4
 langchain-experimental~=0.3.4
 openai~=1.108.2
-google-generativeai～=0.8.5
+google-generativeai~=0.8.5
