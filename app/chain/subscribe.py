@@ -949,7 +949,7 @@ class SubscribeChain(ChainBase):
                                         and torrent_mediainfo.douban_id != mediainfo.douban_id:
                                     continue
                                 logger.info(
-                                    f'{mediainfo.title_year} 通过媒体信ID匹配到可选资源：{torrent_info.site_name} - {torrent_info.title}')
+                                    f'{mediainfo.title_year} 通过媒体ID匹配到可选资源：{torrent_info.site_name} - {torrent_info.title}')
                             else:
                                 continue
 

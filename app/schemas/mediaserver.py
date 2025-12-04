@@ -43,7 +43,7 @@ class RefreshMediaItem(BaseModel):
     # 标题
     title: Optional[str] = None
     # 年份
-    year: Optional[str] = None
+    year: Optional[Union[str, int]] = None
     # 类型
     type: Optional[MediaType] = None
     # 类别
@@ -110,7 +110,7 @@ class MediaServerItem(BaseModel):
     # 原标题
     original_title: Optional[str] = None
     # 年份
-    year: Optional[str] = None
+    year: Optional[Union[str, int]] = None
     # TMDBID
     tmdbid: Optional[int] = None
     # IMDBID

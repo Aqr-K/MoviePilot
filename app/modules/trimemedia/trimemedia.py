@@ -449,7 +449,7 @@ class TrimeMedia:
             item_type=item_type,
             title=item.title,
             original_title=item.original_title,
-            year=str(year),
+            year=year,
             tmdbid=item.tmdb_id,
             imdbid=item.imdb_id,
             user_state=user_state,

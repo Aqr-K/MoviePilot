@@ -1,17 +1,18 @@
 import asyncio
+import io
 import re
 import threading
-from threading import Event
+from pathlib import Path
 from typing import Optional, List, Dict, Callable
 from urllib.parse import urljoin
 
-import telebot
+from PIL import Image
+from telebot import TeleBot, apihelper
+from telebot.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegramify_markdown import standardize, telegramify
 from telegramify_markdown.type import ContentTypes, SentType
-from telebot import apihelper
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from telebot.types import InputMediaPhoto
 
+from app.core.cache import FileCache
 from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
@@ -19,6 +20,7 @@ from app.helper.thread import ThreadHelper
 from app.log import logger
 from app.utils.common import retry
 from app.utils.http import RequestUtils
+from app.utils.security import SecurityUtils
 from app.utils.string import StringUtils
 
 
@@ -28,8 +30,7 @@ class RetryException(Exception):
 
 class Telegram:
     _ds_url = f"http://127.0.0.1:{settings.PORT}/api/v1/message?token={settings.API_TOKEN}"
-    _event = Event()
-    _bot: telebot.TeleBot = None
+    _bot: TeleBot = None
     _callback_handlers: Dict[str, Callable] = {}  # 存储回调处理器
     _user_chat_mapping: Dict[str, str] = {}  # userid -> chat_id mapping for reply targeting
     _bot_username: Optional[str] = None  # Bot username for mention detection
@@ -54,7 +55,7 @@ class Telegram:
             else:
                 apihelper.proxy = settings.PROXY
             # bot
-            _bot = telebot.TeleBot(self._telegram_token, parse_mode="MarkdownV2")
+            _bot = TeleBot(self._telegram_token, parse_mode="MarkdownV2")
             # 记录句柄
             self._bot = _bot
             # 获取并存储bot用户名用于@检测
@@ -539,6 +540,9 @@ class Telegram:
         try:
             # 处理图片
             image = self.__process_image(image) if image else None
+        except RetryException as e:
+            logger.error(f"{str(e)}, 达到重试次数上限, 仅发送文本消息")
+            image = None
 
             # 图片消息的标题长度限制为1024，文本消息为4096
             caption_limit = 1024 if image else 4096
@@ -554,22 +558,41 @@ class Telegram:
             return False
 
     @retry(RetryException, logger=logger)
-    def __process_image(self, image_url: str) -> bytes:
+    def __process_image(self, image_url: str) -> Optional[bytes]:
         """
         处理图片URL，获取图片内容
         """
+        # 缓存路径
+        sanitized_path = SecurityUtils.sanitize_url_path(image_url)
+        cache_path = Path("images") / sanitized_path
+        # 没有文件类型，则添加后缀
+        if not cache_path.suffix:
+            cache_path = cache_path.with_suffix(".jpg")
+
+        cache_backend = FileCache(base=settings.CACHE_PATH,
+                                  ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
+
+        content = cache_backend.get(cache_path.as_posix(), region="images")
+        if content:
+            return content
+
+        # 请求远程图片
+        referer = "https://movie.douban.com/" if "doubanio.com" in image_url else None
+        proxies = settings.PROXY if not referer else None
+        res = RequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=proxies, referer=referer).get_res(url=image_url)
+        if not res or not res.content:
+            raise RetryException("获取图片失败")
+
         try:
-            res = RequestUtils(
-                proxies=settings.PROXY,
-                ua=settings.NORMAL_USER_AGENT
-            ).get_res(image_url)
-
-            if not res or not res.content:
-                raise RetryException("获取图片失败")
-
+            # 验证内容是否为有效图片
+            Image.open(io.BytesIO(res.content)).verify()
+            # 保存缓存
+            cache_backend.set(cache_path.as_posix(), res.content, region="images")
             return res.content
         except Exception as e:
-            raise
+            logger.error(f"图片验证失败：{str(e)}, 仅发送文本消息")
+            return None
+
 
     @retry(RetryException, logger=logger)
     def __send_short_message(self, image: Optional[bytes], caption: str, **kwargs):
@@ -637,7 +660,7 @@ class Telegram:
             try:
                 raise RetryException(f"消息 [{i + 1}/{len(boxs)}] 发送失败") from e
             except NameError:
-                raise RetryException("发送长消息失败") from e
+                raise
 
     def register_commands(self, commands: Dict[str, dict]):
         """
@@ -650,7 +673,7 @@ class Telegram:
             self._bot.delete_my_commands()
             self._bot.set_my_commands(
                 commands=[
-                    telebot.types.BotCommand(cmd[1:], str(desc.get("description"))) for cmd, desc in
+                    BotCommand(cmd[1:], str(desc.get("description"))) for cmd, desc in
                     commands.items()
                 ]
             )

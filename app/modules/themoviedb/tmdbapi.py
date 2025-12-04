@@ -643,17 +643,23 @@ class TmdbApi:
                 reverse=True
             )
             for tv in tvs:
-                # 年份
+                # 使用年份、名称匹配
                 tv_year = tv.get('first_air_date')[0:4] if tv.get('first_air_date') else None
                 if (self.__compare_names(name, tv.get('name'))
                     or self.__compare_names(name, tv.get('original_name'))) \
                         and (tv_year == str(season_year)):
                     return tv
-                # 匹配别名、译名
+                # 获取别名、译名重新匹配
                 if not tv.get("names"):
                     tv = self.get_info(mtype=MediaType.TV, tmdbid=tv.get("id"))
-                if not tv or not self.__compare_names(name, tv.get("names")):
+                if not tv or not (
+                    self.__compare_names(name, tv.get("name"))
+                    or self.__compare_names(name, tv.get("original_name"))
+                    or self.__compare_names(name, tv.get("names"))):
                     continue
+                if tv_year == str(season_year):
+                    return tv
+                # 季年份匹配
                 if __season_match(tv_info=tv, _season_year=season_year):
                     return tv
         return {}
@@ -744,11 +750,11 @@ class TmdbApi:
         if validation_result is not None:
             return validation_result
 
-        logger.info("正在从TheDbMovie网站查询：%s ..." % name)
+        logger.info("正在从TheMovieDb网站查询：%s ..." % name)
         tmdb_url = self._build_tmdb_search_url(name)
         res = RequestUtils(timeout=5, ua=settings.NORMAL_USER_AGENT, proxies=settings.PROXY).get_res(url=tmdb_url)
         if res is None:
-            logger.error("无法连接TheDbMovie")
+            logger.error("无法连接TheMovieDb")
             return None
 
         # 响应验证

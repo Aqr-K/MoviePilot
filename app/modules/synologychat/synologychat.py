@@ -41,7 +41,7 @@ class SynologyChat:
     def send_msg(self, title: str, text: Optional[str] = None, image: Optional[str] = None,
                  userid: Optional[str] = None, link: Optional[str] = None) -> Optional[bool]:
         """
-        发送Telegram消息
+        发送SynologyChat消息
         :param title: 消息标题
         :param text: 消息内容
         :param image: 消息图片地址
