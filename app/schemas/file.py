@@ -24,7 +24,8 @@ class FileURI(BaseModel):
                 path = uri[len(protocol):]
                 storage = s.value
                 break
-
+        if not path.startswith("/"):
+            path = "/" + path
         path = Path(path).as_posix()
         return cls(storage=storage, path=path)
 
