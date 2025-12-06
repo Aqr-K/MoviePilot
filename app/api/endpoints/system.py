@@ -1,15 +1,12 @@
 import asyncio
-import io
 import json
 import re
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, Union, Annotated
 
 import aiofiles
 import pillow_avif  # noqa 用于自动注册AVIF支持
-from PIL import Image
 from anyio import Path as AsyncPath
 from app.helper.sites import SitesHelper  # noqa  # noqa
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
@@ -19,7 +16,6 @@ from app import schemas
 from app.chain.mediaserver import MediaServerChain
 from app.chain.search import SearchChain
 from app.chain.system import SystemChain
-from app.core.cache import AsyncFileCache
 from app.core.config import global_vars, settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
@@ -29,12 +25,14 @@ from app.db.models import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_superuser, get_current_active_superuser_async, \
     get_current_active_user_async
+from app.helper.llm import LLMHelper
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
 from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
+from app.helper.graphics import ImageHelper
 from app.log import logger
 from app.scheduler import Scheduler
 from app.schemas import ConfigChangeEventData
@@ -44,14 +42,13 @@ from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.security import SecurityUtils
 from app.utils.url import UrlUtils
 from version import APP_VERSION
-from app.helper.llm import LLMHelper
 
 router = APIRouter()
 
 
 async def fetch_image(
         url: str,
-        proxy: bool = False,
+        proxy: Optional[bool] = None,
         use_cache: bool = False,
         if_none_match: Optional[str] = None,
         cookies: Optional[str | dict] = None,
@@ -70,77 +67,24 @@ async def fetch_image(
         logger.warn(f"Blocked unsafe image URL: {url}")
         return None
 
-    # 缓存路径
-    sanitized_path = SecurityUtils.sanitize_url_path(url)
-    cache_path = Path("images") / sanitized_path
-    if not cache_path.suffix:
-        # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
-        cache_path = cache_path.with_suffix(".jpg")
-
-    # 缓存对像，缓存过期时间为全局图片缓存天数
-    cache_backend = AsyncFileCache(base=settings.CACHE_PATH,
-                                   ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
-
-    if use_cache:
-        content = await cache_backend.get(cache_path.as_posix(), region="images")
-        if content:
-            # 检查 If-None-Match
-            etag = HashUtils.md5(content)
-            headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
-            if if_none_match == etag:
-                return Response(status_code=304, headers=headers)
-            # 返回缓存图片
-            return Response(
-                content=content,
-                media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
-                headers=headers
-            )
-
-    # 请求远程图片
-    referer = "https://movie.douban.com/" if "doubanio.com" in url else None
-    proxies = settings.PROXY if proxy else None
-    response = await AsyncRequestUtils(
-        ua=settings.NORMAL_USER_AGENT,
-        proxies=proxies,
-        referer=referer,
+    content = await ImageHelper().async_fetch_image(
+        url=url,
+        proxy=proxy,
+        use_cache=use_cache,
         cookies=cookies,
-        accept_type="image/avif,image/webp,image/apng,*/*",
-    ).get_res(url=url)
-    if not response:
-        logger.warn(f"Failed to fetch image from URL: {url}")
-        return None
-
-    # 验证下载的内容是否为有效图片
-    try:
-        content = response.content
-        Image.open(io.BytesIO(content)).verify()
-    except Exception as e:
-        logger.warn(f"Invalid image format for URL {url}: {e}")
-        return None
-
-    # 获取请求响应头
-    response_headers = response.headers
-    cache_control_header = response_headers.get("Cache-Control", "")
-    cache_directive, max_age = RequestUtils.parse_cache_control(cache_control_header)
-
-    # 保存缓存
-    if use_cache:
-        await cache_backend.set(cache_path.as_posix(), content, region="images")
-        logger.debug(f"Image cached at {cache_path.as_posix()}")
-
-    # 检查 If-None-Match
-    etag = HashUtils.md5(content)
-    if if_none_match == etag:
-        headers = RequestUtils.generate_cache_headers(etag, cache_directive, max_age)
-        return Response(status_code=304, headers=headers)
-
-    # 响应
-    headers = RequestUtils.generate_cache_headers(etag, cache_directive, max_age)
-    return Response(
-        content=content,
-        media_type=response_headers.get("Content-Type") or UrlUtils.get_mime_type(url, "image/jpeg"),
-        headers=headers
     )
+    if content:
+        # 检查 If-None-Match
+        etag = HashUtils.md5(content)
+        headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
+        if if_none_match == etag:
+            return Response(status_code=304, headers=headers)
+        # 返回缓存图片
+        return Response(
+            content=content,
+            media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
+            headers=headers
+        )
 
 
 @router.get("/img/{proxy}", summary="图片代理")
@@ -178,8 +122,7 @@ async def cache_img(
     本地缓存图片文件，支持 HTTP 缓存，如果启用全局图片缓存，则使用磁盘缓存
     """
     # 如果没有启用全局图片缓存，则不使用磁盘缓存
-    proxy = "doubanio.com" not in url
-    return await fetch_image(url=url, proxy=proxy, use_cache=settings.GLOBAL_IMAGE_CACHE,
+    return await fetch_image(url=url, use_cache=settings.GLOBAL_IMAGE_CACHE,
                              if_none_match=if_none_match)
 
 

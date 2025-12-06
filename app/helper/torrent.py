@@ -6,8 +6,7 @@ from urllib.parse import unquote
 
 from torrentool.api import Torrent
 
-from app.core.cache import FileCache
-from app.core.cache import TTLCache
+from app.core.cache import TTLCache, FileCache
 from app.core.config import settings
 from app.core.context import Context, TorrentInfo, MediaInfo
 from app.core.meta import MetaBase
