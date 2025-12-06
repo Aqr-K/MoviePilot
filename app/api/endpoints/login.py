@@ -10,7 +10,7 @@ from app.core import security
 from app.core.config import settings
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.sites import SitesHelper  # noqa
-from app.helper.wallpaper import WallpaperHelper
+from app.helper.graphics import WallpaperHelper
 from app.schemas.types import SystemConfigKey
 
 router = APIRouter()

@@ -1,10 +1,17 @@
+import io
+from pathlib import Path
 from typing import Optional, List
+
+from PIL import Image
 
 from app.chain.mediaserver import MediaServerChain
 from app.chain.tmdb import TmdbChain
-from app.core.cache import cached
+from app.core.cache import  cached, FileCache, AsyncFileCache
 from app.core.config import settings
-from app.utils.http import RequestUtils
+from app.log import logger
+from app.utils.http import RequestUtils, AsyncRequestUtils
+from app.utils.ip import IpUtils
+from app.utils.security import SecurityUtils
 from app.utils.singleton import Singleton
 
 
@@ -161,3 +168,120 @@ class WallpaperHelper(metaclass=Singleton):
             return wallpaper_list
         else:
             return []
+
+
+class ImageHelper(metaclass=Singleton):
+
+    def __init__(self):
+        _base_path = settings.CACHE_PATH
+        _ttl = settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600
+        self.file_cache = FileCache(base=_base_path, ttl=_ttl)
+        self.async_file_cache = AsyncFileCache(base=_base_path, ttl=_ttl)
+
+    @staticmethod
+    def _prepare_cache_path(url: str) -> str:
+        """缓存路径"""
+        sanitized_path = SecurityUtils.sanitize_url_path(url)
+        cache_path = Path(sanitized_path)
+        if not cache_path.suffix:
+            cache_path = cache_path.with_suffix(".jpg")
+        return cache_path.as_posix()
+
+    @staticmethod
+    def _validate_image(content: bytes) -> bool:
+        """验证图片"""
+        if not content:
+            return False
+        try:
+            Image.open(io.BytesIO(content)).verify()
+            return True
+        except Exception as e:
+            logger.warn(f"Invalid image format: {e}")
+            return False
+
+    def _get_request_params(self, url: str, proxy: Optional[bool], cookies: Optional[str | dict]) -> dict:
+        """获取参数"""
+        referer = "https://movie.douban.com/" if "doubanio.com" in url else None
+        if proxy is None:
+            proxies = settings.PROXY if not (referer or IpUtils.is_internal(url)) else None
+        else:
+            proxies = settings.PROXY if proxy else None
+        return {
+            "ua": settings.NORMAL_USER_AGENT,
+            "proxies": proxies,
+            "referer": referer,
+            "cookies": cookies,
+            "accept_type": "image/avif,image/webp,image/apng,*/*",
+        }
+
+    def fetch_image(
+        self,
+        url: str,
+        proxy: Optional[bool] = None,
+        use_cache: bool = True,
+        cookies: Optional[str | dict] = None) -> Optional[bytes]:
+        """
+        获取图片（同步版本）
+        """
+        if not url:
+            return None
+
+        cache_path = self._prepare_cache_path(url)
+
+        # 检查缓存
+        if use_cache:
+            content = self.file_cache.get(cache_path, region="images")
+            if content:
+                return content
+
+        # 请求远程图片
+        params = self._get_request_params(url, proxy, cookies)
+        response = RequestUtils(**params).get_res(url=url)
+        if not response:
+            logger.warn(f"Failed to fetch image from URL: {url}")
+            return None
+
+        content = response.content
+        # 验证图片
+        if not self._validate_image(content):
+            return None
+
+        # 保存缓存
+        self.file_cache.set(cache_path, content, region="images")
+        return content
+
+    async def async_fetch_image(
+        self,
+        url: str,
+        proxy: Optional[bool] = None,
+        use_cache: bool = True,
+        cookies: Optional[str | dict] = None) -> Optional[bytes]:
+        """
+        获取图片（异步版本）
+        """
+        if not url:
+            return None
+
+        cache_path = self._prepare_cache_path(url)
+
+        # 检查缓存
+        if use_cache:
+            content = await self.async_file_cache.get(cache_path, region="images")
+            if content:
+                return content
+
+        # 请求远程图片
+        params = self._get_request_params(url, proxy, cookies)
+        response = await AsyncRequestUtils(**params).get_res(url=url)
+        if not response:
+            logger.warn(f"Failed to fetch image from URL: {url}")
+            return None
+
+        content = response.content
+        # 验证图片
+        if not self._validate_image(content):
+            return None
+
+        # 保存缓存
+        await self.async_file_cache.set(cache_path, content, region="images")
+        return content

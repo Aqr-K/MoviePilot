@@ -1,26 +1,22 @@
 import asyncio
-import io
 import re
 import threading
-from pathlib import Path
 from typing import Optional, List, Dict, Callable
 from urllib.parse import urljoin
 
-from PIL import Image
 from telebot import TeleBot, apihelper
 from telebot.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegramify_markdown import standardize, telegramify
 from telegramify_markdown.type import ContentTypes, SentType
 
-from app.core.cache import FileCache
 from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
 from app.helper.thread import ThreadHelper
+from app.helper.graphics import ImageHelper
 from app.log import logger
 from app.utils.common import retry
 from app.utils.http import RequestUtils
-from app.utils.security import SecurityUtils
 from app.utils.string import StringUtils
 
 
@@ -537,13 +533,10 @@ class Telegram:
             'reply_markup': reply_markup
         }
 
-        try:
-            # 处理图片
-            image = self.__process_image(image) if image else None
-        except RetryException as e:
-            logger.error(f"{str(e)}, 达到重试次数上限, 仅发送文本消息")
-            image = None
+        # 处理图片
+        image = self.__process_image(image)
 
+        try:
             # 图片消息的标题长度限制为1024，文本消息为4096
             caption_limit = 1024 if image else 4096
             if len(caption) < caption_limit:
@@ -557,42 +550,17 @@ class Telegram:
             logger.error(f"发送Telegram消息失败: {e}")
             return False
 
-    @retry(RetryException, logger=logger)
-    def __process_image(self, image_url: str) -> Optional[bytes]:
+    @staticmethod
+    def __process_image(image_url: Optional[str]) -> Optional[bytes]:
         """
         处理图片URL，获取图片内容
         """
-        # 缓存路径
-        sanitized_path = SecurityUtils.sanitize_url_path(image_url)
-        cache_path = Path("images") / sanitized_path
-        # 没有文件类型，则添加后缀
-        if not cache_path.suffix:
-            cache_path = cache_path.with_suffix(".jpg")
-
-        cache_backend = FileCache(base=settings.CACHE_PATH,
-                                  ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
-
-        content = cache_backend.get(cache_path.as_posix(), region="images")
-        if content:
-            return content
-
-        # 请求远程图片
-        referer = "https://movie.douban.com/" if "doubanio.com" in image_url else None
-        proxies = settings.PROXY if not referer else None
-        res = RequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=proxies, referer=referer).get_res(url=image_url)
-        if not res or not res.content:
-            raise RetryException("获取图片失败")
-
-        try:
-            # 验证内容是否为有效图片
-            Image.open(io.BytesIO(res.content)).verify()
-            # 保存缓存
-            cache_backend.set(cache_path.as_posix(), res.content, region="images")
-            return res.content
-        except Exception as e:
-            logger.error(f"图片验证失败：{str(e)}, 仅发送文本消息")
+        if not image_url:
             return None
-
+        image = ImageHelper().fetch_image(image_url)
+        if not image:
+            logger.warn(f"图片获取失败: {image_url}，仅发送文本消息")
+        return image
 
     @retry(RetryException, logger=logger)
     def __send_short_message(self, image: Optional[bytes], caption: str, **kwargs):
@@ -611,7 +579,7 @@ class Telegram:
                     text=standardize(caption),
                     **kwargs
                 )
-        except Exception as e:
+        except Exception:
             raise RetryException(f"发送{'图片' if image else '文本'}消息失败")
 
     @retry(RetryException, logger=logger)

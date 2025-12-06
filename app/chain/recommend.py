@@ -1,21 +1,17 @@
-import io
-from pathlib import Path
 from typing import List, Optional
 
 import pillow_avif  # noqa 用于自动注册AVIF支持
-from PIL import Image
 
 from app.chain import ChainBase
 from app.chain.bangumi import BangumiChain
 from app.chain.douban import DoubanChain
 from app.chain.tmdb import TmdbChain
-from app.core.cache import cached, FileCache
+from app.core.cache import cached
 from app.core.config import settings, global_vars
+from app.helper.graphics import ImageHelper
 from app.log import logger
 from app.schemas import MediaType
 from app.utils.common import log_execution_time
-from app.utils.http import RequestUtils
-from app.utils.security import SecurityUtils
 from app.utils.singleton import Singleton
 
 
@@ -103,40 +99,7 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         请求并保存图片
         :param url: 图片路径
         """
-        # 生成缓存路径
-        sanitized_path = SecurityUtils.sanitize_url_path(url)
-        cache_path = Path("images") / sanitized_path
-        # 没有文件类型，则添加后缀，在恶意文件类型和实际需求下的折衷选择
-        if not cache_path.suffix:
-            cache_path = cache_path.with_suffix(".jpg")
-
-        # 获取缓存后端，并设置缓存时间为全局配置的缓存天数
-        cache_backend = FileCache(base=settings.CACHE_PATH,
-                                  ttl=settings.GLOBAL_IMAGE_CACHE_DAYS * 24 * 3600)
-
-        # 本地存在缓存图片，则直接跳过
-        if cache_backend.get(cache_path.as_posix(), region="images"):
-            logger.debug(f"Cache hit: Image already exists at {cache_path}")
-            return
-
-        # 请求远程图片
-        referer = "https://movie.douban.com/" if "doubanio.com" in url else None
-        proxies = settings.PROXY if not referer else None
-        response = RequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=proxies, referer=referer).get_res(url=url)
-        if not response:
-            logger.debug(f"Empty response for URL: {url}")
-            return
-
-        # 验证下载的内容是否为有效图片
-        try:
-            Image.open(io.BytesIO(response.content)).verify()
-        except Exception as e:
-            logger.debug(f"Invalid image format for URL {url}: {e}")
-            return
-
-        # 保存缓存
-        cache_backend.set(cache_path.as_posix(), response.content, region="images")
-        logger.debug(f"Successfully cached image at {cache_path} for URL: {url}")
+        ImageHelper().fetch_image(url=url)
 
     @log_execution_time(logger=logger)
     @cached(ttl=recommend_ttl, region=recommend_cache_region)
