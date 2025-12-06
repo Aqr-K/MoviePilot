@@ -25,7 +25,7 @@ class AddDownloadInput(BaseModel):
     downloader: Optional[str] = Field(None,
                                       description="Name of the downloader to use (optional, uses default if not specified)")
     save_path: Optional[str] = Field(None,
-                                     description="Directory path where the downloaded files should be saved (optional, uses default path if not specified)")
+                                     description="Directory path where the downloaded files should be saved. Using `<storage>:<path>` for remote storage. e.g. rclone:/MP, smb:/server/share/Movies. (optional, uses default path if not specified)")
     labels: Optional[str] = Field(None,
                                   description="Comma-separated list of labels/tags to assign to the download (optional, e.g., 'movie,hd,bluray')")
 

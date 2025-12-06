@@ -150,7 +150,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         # 添加任务
         state = server.add_torrent(
             content=content,
-            download_dir=str(download_dir),
+            download_dir= download_dir.as_posix(),
             is_paused=is_paused,
             tag=tags,
             cookie=cookie,

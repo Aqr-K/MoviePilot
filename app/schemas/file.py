@@ -1,15 +1,37 @@
 from typing import Optional
 
+from pathlib import Path
 from pydantic import BaseModel, Field
+from app.schemas.types import StorageSchema
 
 
-class FileItem(BaseModel):
-    # 存储类型
-    storage: Optional[str] = Field(default="local")
-    # 类型 dir/file
-    type: Optional[str] = None
+class FileURI(BaseModel):
     # 文件路径
     path: Optional[str] = "/"
+    # 存储类型
+    storage: Optional[str] = Field(default="local")
+
+    @property
+    def uri(self) -> str:
+        return self.path if self.storage == "local" else f"{self.storage}:{self.path}"
+
+    @classmethod
+    def from_uri(cls, uri: str) -> "FileURI":
+        storage, path = 'local', uri
+        for s in StorageSchema:
+            protocol = f"{s.value}:"
+            if uri.startswith(protocol):
+                path = uri[len(protocol):]
+                storage = s.value
+                break
+        if not path.startswith("/"):
+            path = "/" + path
+        path = Path(path).as_posix()
+        return cls(storage=storage, path=path)
+
+class FileItem(FileURI):
+    # 类型 dir/file
+    type: Optional[str] = None
     # 文件名
     name: Optional[str] = None
     # 文件名
@@ -46,3 +68,4 @@ class StorageUsage(BaseModel):
 class StorageTransType(BaseModel):
     # 传输类型
     transtype: Optional[dict] = Field(default_factory=dict)
+
