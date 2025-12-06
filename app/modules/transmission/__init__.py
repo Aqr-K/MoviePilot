@@ -151,7 +151,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
         # 添加任务
         torrent = server.add_torrent(
             content=content,
-            download_dir=str(download_dir),
+            download_dir=download_dir.as_posix(),
             is_paused=is_paused,
             labels=labels,
             cookie=cookie

@@ -68,6 +68,7 @@ def add(
         tmdbid: Annotated[int | None, Body()] = None,
         doubanid: Annotated[str | None, Body()] = None,
         downloader: Annotated[str | None, Body()] = None,
+        # 保存路径, 支持<storage>:<path>, 如rclone:/MP, smb:/server/share/Movies等
         save_path: Annotated[str | None, Body()] = None,
         current_user: User = Depends(get_current_active_user)) -> Any:
     """
@@ -92,6 +93,7 @@ def add(
         media_info=mediainfo,
         torrent_info=torrentinfo
     )
+
     did = DownloadChain().download_single(context=context, username=current_user.name,
                                           downloader=downloader, save_path=save_path, source="Manual")
     if not did:

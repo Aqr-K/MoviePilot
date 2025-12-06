@@ -16,7 +16,7 @@ class AddDownloadParams(ActionParams):
     添加下载资源参数
     """
     downloader: Optional[str] = Field(default=None, description="下载器")
-    save_path: Optional[str] = Field(default=None, description="保存路径")
+    save_path: Optional[str] = Field(default=None, description="保存路径, 支持<storage>:<path>, 如rclone:/MP, smb:/server/share/Movies等")
     labels: Optional[str] = Field(default=None, description="标签（,分隔）")
     only_lack: Optional[bool] = Field(default=False, description="仅下载缺失的资源")
 
