@@ -6,7 +6,7 @@ from PIL import Image
 
 from app.chain.mediaserver import MediaServerChain
 from app.chain.tmdb import TmdbChain
-from app.core.cache import  cached, FileCache, AsyncFileCache
+from app.core.cache import cached, FileCache, AsyncFileCache
 from app.core.config import settings
 from app.log import logger
 from app.utils.http import RequestUtils, AsyncRequestUtils
