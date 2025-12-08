@@ -11,7 +11,7 @@ from app.core.context import Context
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.modules import _ModuleBase
-from app.schemas.file import FileItem
+from app.schemas.file import FileURI 
 from app.schemas.types import ModuleType, OtherModulesType
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
@@ -65,12 +65,11 @@ class SubtitleModule(_ModuleBase):
     def test(self):
         pass
 
-    def download_added(self, context: Context, download_dir: Path, storage: str, torrent_content: Union[str, bytes] = None):
+    def download_added(self, context: Context, download_dir: Path, torrent_content: Union[str, bytes] = None):
         """
         添加下载任务成功后，从站点下载字幕，保存到下载目录
         :param context:  上下文，包括识别信息、媒体信息、种子信息
         :param download_dir:  下载目录
-        :param storage:  存储类型
         :param torrent_content: 种子内容，如果是种子文件，则为文件内容，否则为种子字符串
         :return: None，该方法可被多个模块同时处理
         """
@@ -93,6 +92,10 @@ class SubtitleModule(_ModuleBase):
         storageChain = StorageChain()
         # 等待目录存在
         working_dir_item = None
+        # split download_dir into storage and path
+        fileURI = FileURI.from_uri(download_dir.as_posix())
+        storage = fileURI.storage
+        download_dir = Path(fileURI.path)
         for _ in range(30):
             found = storageChain.get_file_item(storage,  download_dir / folder_name)
             if found:
