@@ -307,8 +307,8 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
                 storage_path = Path(storage_path.strip()).as_posix()
                 download_path = Path(download_path.strip()).as_posix()
                 if dir.startswith(storage_path):
-                   dir = dir.replace(storage_path, download_path, 1)
-                   break
+                    dir = dir.replace(storage_path, download_path, 1)
+                    break
         # 去掉存储协议前缀 if any, 下载器无法识别
         for s in StorageSchema:
             prefix = f"{s.value}:"
