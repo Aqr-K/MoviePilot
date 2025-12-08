@@ -296,20 +296,20 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
         """
         根据下载器配置和路径映射，规范化下载路径
 
-        :param path: 原始路径
+        :param path: 存储路径
         :param conf: 下载器配置
-        :return: 规范化后的路径
+        :return: 规范化后发送给下载器的路径
         """
         dir = path.as_posix()
         conf = self.get_config(downloader)
         if conf and conf.path_mapping:
-            for (src, dst) in conf.path_mapping:
-                src = Path(src.strip()).as_posix()
-                dst = Path(dst.strip()).as_posix()
-                if dir.startswith(src):
-                   dir = dir.replace(src, dst, 1)
+            for (storage_path, download_path) in conf.path_mapping:
+                storage_path = Path(storage_path.strip()).as_posix()
+                download_path = Path(download_path.strip()).as_posix()
+                if dir.startswith(storage_path):
+                   dir = dir.replace(storage_path, download_path, 1)
                    break
-        # 处理存储协议前缀
+        # 去掉存储协议前缀 if any, 下载器无法识别
         for s in StorageSchema:
             prefix = f"{s.value}:"
             if dir.startswith(prefix):
