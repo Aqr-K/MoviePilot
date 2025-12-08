@@ -297,7 +297,7 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
         根据下载器配置和路径映射，规范化下载路径
 
         :param path: 存储路径
-        :param conf: 下载器配置
+        :param downloader: 下载器名称
         :return: 规范化后发送给下载器的路径
         """
         dir = path.as_posix()
