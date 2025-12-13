@@ -3,8 +3,10 @@
 """
 
 import json
+import uuid
 from typing import Any, Dict, List, Optional
 
+from app.agent import ConversationMemoryManager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.log import logger
 
@@ -21,7 +23,7 @@ class ToolDefinition:
 class MoviePilotToolsManager:
     """MoviePilot工具管理器（用于HTTP API）"""
 
-    def __init__(self, user_id: str = "api_user", session_id: str = "api_session"):
+    def __init__(self, user_id: str = "api_user", session_id: str = uuid.uuid4()):
         """
         初始化工具管理器
         
@@ -32,6 +34,7 @@ class MoviePilotToolsManager:
         self.user_id = user_id
         self.session_id = session_id
         self.tools: List[Any] = []
+        self.memory_manager = ConversationMemoryManager()
         self._load_tools()
 
     def _load_tools(self):
@@ -44,7 +47,8 @@ class MoviePilotToolsManager:
                 channel=None,
                 source="api",
                 username="API Client",
-                callback_handler=None
+                callback_handler=None,
+                memory_mananger=None,
             )
             logger.info(f"成功加载 {len(self.tools)} 个工具")
         except Exception as e:
@@ -121,9 +125,13 @@ class MoviePilotToolsManager:
 
             # 确保返回字符串
             if isinstance(result, str):
-                return result
+                formated_result = result
+            elif isinstance(result, int, float):
+                formated_result = str(result)
             else:
-                return json.dumps(result, ensure_ascii=False, indent=2)
+                formated_result = json.dumps(result, ensure_ascii=False, indent=2)
+
+            return formated_result
         except Exception as e:
             logger.error(f"调用工具 {tool_name} 时发生错误: {e}", exc_info=True)
             error_msg = json.dumps({

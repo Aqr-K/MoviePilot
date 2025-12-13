@@ -186,9 +186,7 @@ class ConversationMemoryManager:
             return []
 
         # 获取所有消息
-        messages = memory.messages
-
-        return messages
+        return memory.messages
 
     async def get_recent_messages(
             self,
