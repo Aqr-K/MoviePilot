@@ -430,9 +430,9 @@ class ConfigModel(BaseModel):
     # 是否启用详细日志
     LLM_VERBOSE: bool = False
     # 最大记忆消息数量
-    LLM_MAX_MEMORY_MESSAGES: int = 50
-    # 记忆保留天数
-    LLM_MEMORY_RETENTION_DAYS: int = 30
+    LLM_MAX_MEMORY_MESSAGES: int = 30
+    # 内存记忆保留天数
+    LLM_MEMORY_RETENTION_DAYS: int = 1
     # Redis记忆保留天数（如果使用Redis）
     LLM_REDIS_MEMORY_RETENTION_DAYS: int = 7
 
