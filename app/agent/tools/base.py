@@ -42,7 +42,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if agent_message:
             # 发送消息
             await self.send_tool_message(agent_message, title="MoviePilot助手")
-            await self.memory_manager.add_memory(
+            await self._memory_manager.add_memory(
                 session_id=self._session_id,
                 user_id=self._user_id,
                 role="agent",
@@ -50,7 +50,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             )
 
         # 记忆工具调用
-        await self.memory_manager.add_memory(
+        await self._memory_manager.add_memory(
             session_id=self.session_id,
             user_id=self.user_id,
             role="tool_call",
@@ -82,7 +82,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             formated_result = str(result)
         else:
             formated_result = json.dumps(result, ensure_ascii=False, indent=2)
-        await self.memory_manager.add_memory(
+        await self._memory_manager.add_memory(
             session_id=self.session_id,
             user_id=self.user_id,
             role="tool_result",
