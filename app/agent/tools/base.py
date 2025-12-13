@@ -42,18 +42,13 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if agent_message:
             # 发送消息
             await self.send_tool_message(agent_message, title="MoviePilot助手")
-            await self._memory_manager.add_memory(
-                session_id=self._session_id,
-                user_id=self._user_id,
-                role="agent",
-                content=agent_message
-            )
 
         # 记忆工具调用
         await self._memory_manager.add_memory(
             session_id=self._session_id,
             user_id=self._user_id,
             role="tool_call",
+            content=agent_message,
             metadata={
                 "call_id": self.__class__.__name__,
                 "tool_name": self.__class__.__name__,
