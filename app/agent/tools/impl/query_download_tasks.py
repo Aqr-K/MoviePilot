@@ -60,7 +60,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
             
             # 如果提供了hash，直接查询该hash的任务（不限制状态）
             if hash:
-                torrents = download_chain.list_torrents(downloader=downloader, hashs=[hash])
+                torrents = download_chain.list_torrents(downloader=downloader, hashs=[hash]) or []
                 if not torrents:
                     return f"未找到hash为 {hash} 的下载任务（该任务可能已完成、已删除或不存在）"
                 # 转换为DownloadingTorrent格式
@@ -110,7 +110,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                 # 根据status决定查询方式
                 if status == "downloading":
                     # 如果status为下载中，使用downloading方法
-                    downloads = download_chain.downloading(name=downloader)
+                    downloads = download_chain.downloading(name=downloader) or []
                     filtered_downloads = []
                     for dl in downloads:
                         if downloader and dl.downloader != downloader:
