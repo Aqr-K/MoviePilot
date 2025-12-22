@@ -43,6 +43,7 @@ cf_clearance~=0.31.0
 torrentool~=1.2.0
 slack-bolt~=1.23.0
 slack-sdk~=3.35.0
+discord.py==2.6.4
 chardet~=5.2.0
 starlette~=0.46.2
 PyVirtualDisplay~=3.0

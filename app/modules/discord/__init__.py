@@ -1,11 +1,17 @@
+import json
 from typing import Optional, Union, List, Tuple, Any
 
 from app.core.context import MediaInfo, Context
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.discord.discord import Discord
 from app.schemas import MessageChannel, CommingMessage, Notification
 from app.schemas.types import ModuleType
+
+try:
+    from app.modules.discord.discord import Discord
+except Exception as err:  # ImportError or other load issues
+    Discord = None
+    logger.error(f"Discord 模块未加载，缺少依赖或初始化错误：{err}")
 
 
 class DiscordModule(_ModuleBase, _MessageBase[Discord]):
@@ -14,6 +20,9 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         """
         初始化模块
         """
+        if not Discord:
+            logger.error("Discord 依赖未就绪（需要安装 discord.py==2.6.4），模块未启动")
+            return
         super().init_service(service_name=Discord.__name__.lower(),
                              service_type=Discord)
         self._channel = MessageChannel.Discord
@@ -59,7 +68,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         for name, client in self.get_instances().items():
             state = client.get_state()
             if not state:
-                return False, f"Discord {name} webhook URL 未配置"
+                return False, f"Discord {name} Bot 未就绪"
         return True, ""
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
@@ -77,8 +86,51 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         :param args: 参数
         :return: 渠道、消息体
         """
-        # Discord 模块暂时不支持接收消息
-        
+        client_config = self.get_config(source)
+        if not client_config:
+            return None
+        try:
+            msg_json: dict = json.loads(body)
+        except Exception as err:
+            logger.debug(f"解析 Discord 消息失败：{str(err)}")
+            return None
+
+        if not msg_json:
+            return None
+
+        msg_type = msg_json.get("type")
+        userid = msg_json.get("userid")
+        username = msg_json.get("username")
+
+        if msg_type == "interaction":
+            callback_data = msg_json.get("callback_data")
+            message_id = msg_json.get("message_id")
+            chat_id = msg_json.get("chat_id")
+            if callback_data and userid:
+                logger.info(f"收到来自 {client_config.name} 的 Discord 按钮回调："
+                            f"userid={userid}, username={username}, callback_data={callback_data}")
+                return CommingMessage(
+                    channel=MessageChannel.Discord,
+                    source=client_config.name,
+                    userid=userid,
+                    username=username,
+                    text=f"CALLBACK:{callback_data}",
+                    is_callback=True,
+                    callback_data=callback_data,
+                    message_id=message_id,
+                    chat_id=str(chat_id) if chat_id else None
+                )
+            return None
+
+        if msg_type == "message":
+            text = msg_json.get("text")
+            chat_id = msg_json.get("chat_id")
+            if text and userid:
+                logger.info(f"收到来自 {client_config.name} 的 Discord 消息："
+                            f"userid={userid}, username={username}, text={text}")
+                return CommingMessage(channel=MessageChannel.Discord, source=client_config.name,
+                                      userid=userid, username=username, text=text,
+                                      chat_id=str(chat_id) if chat_id else None)
         return None
 
     def post_message(self, message: Notification, **kwargs) -> None:
@@ -89,10 +141,17 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
+            targets = message.targets
+            userid = message.userid
+            if not userid and targets is not None:
+                userid = targets.get('discord_userid')
+                if not userid:
+                    logger.warn("用户没有指定 Discord 用户ID，消息无法发送")
+                    return
             client: Discord = self.get_instance(conf.name)
             if client:
                 client.send_msg(title=message.title, text=message.text,
-                                image=message.image, userid=message.userid, link=message.link,
+                                image=message.image, userid=userid, link=message.link,
                                 buttons=message.buttons,
                                 original_message_id=message.original_message_id,
                                 original_chat_id=message.original_chat_id)
@@ -104,8 +163,15 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         :param medias: 媒体信息
         :return: 成功或失败
         """
-        logger.warn("Discord webhooks 不支持")
-        return None
+        for conf in self.get_configs().values():
+            if not self.check_message(message, conf.name):
+                continue
+            client: Discord = self.get_instance(conf.name)
+            if client:
+                client.send_medias_msg(title=message.title, medias=medias, userid=message.userid,
+                                       buttons=message.buttons,
+                                       original_message_id=message.original_message_id,
+                                       original_chat_id=message.original_chat_id)
 
     def post_torrents_message(self, message: Notification, torrents: List[Context]) -> None:
         """
@@ -114,8 +180,15 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         :param torrents: 种子信息
         :return: 成功或失败
         """
-        logger.warn("Discord webhooks 不支持")
-        return False
+        for conf in self.get_configs().values():
+            if not self.check_message(message, conf.name):
+                continue
+            client: Discord = self.get_instance(conf.name)
+            if client:
+                client.send_torrents_msg(title=message.title, torrents=torrents,
+                                         userid=message.userid, buttons=message.buttons,
+                                         original_message_id=message.original_message_id,
+                                         original_chat_id=message.original_chat_id)
 
     def delete_message(self, channel: MessageChannel, source: str,
                        message_id: str, chat_id: Optional[str] = None) -> bool:
@@ -127,5 +200,15 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         :param chat_id: 聊天ID（频道ID）
         :return: 删除是否成功
         """
-        logger.warn("Discord webhooks 不支持")
-        return False
+        success = False
+        for conf in self.get_configs().values():
+            if channel != self._channel:
+                break
+            if source != conf.name:
+                continue
+            client: Discord = self.get_instance(conf.name)
+            if client:
+                result = client.delete_msg(message_id=message_id, chat_id=chat_id)
+                if result:
+                    success = True
+        return success
