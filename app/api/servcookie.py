@@ -127,9 +127,8 @@ async def get_cookie(
 
 @cookie_router.post("/get/{uuid}")
 async def post_cookie(
-    uuid: Annotated[str, Path(min_length=5, pattern="^[a-zA-Z0-9]+$")],
-    request: Optional[schemas.CookiePassword] = Body(None)
-):
+        uuid: Annotated[str, Path(min_length=5, pattern="^[a-zA-Z0-9]+$")],
+        request: Optional[schemas.CookiePassword] = Body(None)):
     """
     POST 下载加密数据
     """
