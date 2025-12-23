@@ -16,11 +16,12 @@ MoviePilot 实现了标准的 **Model Context Protocol (MCP)**，允许 AI 智�
 ### 端点
 **POST** `/api/v1/mcp`
 
-## 3. 会话管理
-
-*   **会话维持**: 在标准 MCP 流程中，通过 HTTP Header `MCP-Session-Id` 识别会话。
-*   **主动终止**: 
-    **DELETE** `/api/v1/mcp` (携带 `MCP-Session-Id` Header)
+### 支持的方法
+- `initialize`: 初始化会话，协商协议版本和能力。
+- `notifications/initialized`: 客户端确认初始化完成。
+- `tools/list`: 获取可用工具列表。
+- `tools/call`: 调用特定工具。
+- `ping`: 连接存活检测。
 
 ---
 
@@ -65,6 +66,7 @@ MoviePilot 实现了标准的 **Model Context Protocol (MCP)**，允许 AI 智�
 | -32700 | Parse error | JSON 格式错误 |
 | -32600 | Invalid Request | 无效的 JSON-RPC 请求 |
 | -32601 | Method not found | 方法不存在 |
+| -32602 | Invalid params | 参数验证失败 |
 | -32002 | Session not found | 会话不存在或已过期 |
 | -32003 | Not initialized | 会话未完成初始化流程 |
 | -32603 | Internal error | 服务器内部错误 |
@@ -203,10 +205,3 @@ MoviePilot 实现了标准的 **Model Context Protocol (MCP)**，允许 AI 智�
   "required": ["title", "year", "media_type"]
 }
 ```
-
-## 7. 注意事项
-
-1. **用户上下文**: API调用会使用当前认证用户的ID作为工具执行的用户上下文
-2. **会话隔离**: 每个API请求使用独立的会话ID
-3. **参数验证**: 工具参数会根据JSON Schema进行验证
-4. **错误日志**: 所有工具调用错误都会记录到MoviePilot日志系统
