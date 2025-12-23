@@ -29,6 +29,13 @@ def login_access_token(
                                                              mfa_code=otp_password)
 
     if not success:
+        # 如果是需要MFA验证，返回特殊标识
+        if user_or_message == "MFA_REQUIRED":
+            raise HTTPException(
+                status_code=401, 
+                detail="需要双重验证",
+                headers={"X-MFA-Required": "true"}
+            )
         raise HTTPException(status_code=401, detail=user_or_message)
 
     # 用户等级

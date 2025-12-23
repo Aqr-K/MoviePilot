@@ -62,6 +62,7 @@ cachetools~=6.1.0
 fast-bencode~=1.1.7
 pystray~=0.19.5
 pyotp~=2.9.0
+webauthn~=2.7.0
 Pinyin2Hanzi~=0.1.1
 pywebpush~=2.0.3
 aiopathlib~=0.6.0

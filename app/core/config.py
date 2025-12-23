@@ -393,6 +393,8 @@ class ConfigModel(BaseModel):
     ])
     # 允许的图片文件后缀格式
     SECURITY_IMAGE_SUFFIXES: list = Field(default=[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"])
+    # PassKey 是否强制用户验证（生物识别等）
+    PASSKEY_REQUIRE_UV: bool = True
 
     # ==================== 工作流配置 ====================
     # 工作流数据共享
