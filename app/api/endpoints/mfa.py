@@ -2,9 +2,8 @@
 MFA (Multi-Factor Authentication) API 端点
 包含 OTP 和 PassKey 相关功能
 """
-import base64
-from datetime import datetime, timedelta
-from typing import Any, Annotated, List, Union
+from datetime import timedelta
+from typing import Any, Annotated, Optional, List, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +24,22 @@ from app.utils.otp import OtpUtils
 
 router = APIRouter()
 
+# ==================== 请求模型 ====================
+
+class OtpVerifyRequest(schemas.BaseModel):
+    """OTP验证请求"""
+    uri: str
+    otpPassword: str
+
+class OtpDisableRequest(schemas.BaseModel):
+    """OTP禁用请求"""
+    password: str
+
+class PassKeyDeleteRequest(schemas.BaseModel):
+    """PassKey删除请求"""
+    passkey_id: int
+    password: str
+
 # ==================== 通用 MFA 接口 ====================
 
 @router.get('/status/{username}', summary='判断用户是否开启双重验证(MFA)', response_model=schemas.Response)
@@ -40,7 +55,7 @@ async def mfa_status(username: str, db: AsyncSession = Depends(get_async_db)) ->
     has_otp = user.is_otp
     
     # 检查是否有PassKey
-    has_passkey = bool(PassKey().get_by_user_id(db=None, user_id=user.id))
+    has_passkey = bool(await PassKey.async_get_by_user_id(db=db, user_id=user.id))
     
     # 只要有任何一种验证方式，就需要双重验证
     return schemas.Response(success=(has_otp or has_passkey))
@@ -59,25 +74,35 @@ def otp_generate(
 
 @router.post('/otp/verify', summary='绑定并验证 OTP', response_model=schemas.Response)
 async def otp_verify(
-    data: dict,
+    data: OtpVerifyRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_user_async)
 ) -> Any:
     """验证用户输入的 OTP 码，验证通过后正式开启 OTP 验证"""
-    uri = data.get("uri")
-    otp_password = data.get("otpPassword")
-    if not OtpUtils.is_legal(uri, otp_password):
+    if not OtpUtils.is_legal(data.uri, data.otpPassword):
         return schemas.Response(success=False, message="验证码错误")
-    await current_user.async_update_otp_by_name(db, current_user.name, True, OtpUtils.get_secret(uri))
+    await current_user.async_update_otp_by_name(db, current_user.name, True, OtpUtils.get_secret(data.uri))
     return schemas.Response(success=True)
 
 
 @router.post('/otp/disable', summary='关闭当前用户的 OTP 验证', response_model=schemas.Response)
 async def otp_disable(
+    data: OtpDisableRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_user_async)
 ) -> Any:
     """关闭当前用户的 OTP 验证功能"""
+    # 安全检查：如果存在 PassKey，不允许关闭 OTP
+    has_passkey = bool(await PassKey.async_get_by_user_id(db=db, user_id=current_user.id))
+    if has_passkey:
+        return schemas.Response(
+            success=False,
+            message="您已注册通行密钥，为了防止域名配置变更导致无法登录，请先删除所有通行密钥再关闭 OTP 验证"
+        )
+
+    # 验证密码
+    if not security.verify_password(data.password, str(current_user.hashed_password)):
+        return schemas.Response(success=False, message="密码错误")
     await current_user.async_update_otp_by_name(db, current_user.name, False, "")
     return schemas.Response(success=True)
 
@@ -98,7 +123,7 @@ class PassKeyRegistrationFinish(schemas.BaseModel):
 
 class PassKeyAuthenticationStart(schemas.BaseModel):
     """PassKey认证开始请求"""
-    username: str | None = None
+    username: Optional[str] = None
 
 
 class PassKeyAuthenticationFinish(schemas.BaseModel):
@@ -122,7 +147,7 @@ def passkey_register_start(
             )
 
         # 获取用户已有的PassKey
-        existing_passkeys = PassKey().get_by_user_id(db=None, user_id=current_user.id)
+        existing_passkeys = PassKey.get_by_user_id(db=None, user_id=current_user.id)
         existing_credentials = [
             {
                 'credential_id': pk.credential_id,
@@ -215,7 +240,7 @@ def passkey_authenticate_start(
                     message="用户不存在"
                 )
             
-            existing_passkeys = PassKey().get_by_user_id(db=None, user_id=user.id)
+            existing_passkeys = PassKey.get_by_user_id(db=None, user_id=user.id)
             if not existing_passkeys:
                 return schemas.Response(
                     success=False,
@@ -265,7 +290,7 @@ def passkey_authenticate_finish(
         credential_id = PassKeyHelper.standardize_credential_id(credential_id_raw)
 
         # 查找PassKey
-        passkey = PassKey().get_by_credential_id(db=None, credential_id=credential_id)
+        passkey = PassKey.get_by_credential_id(db=None, credential_id=credential_id)
         if not passkey:
             raise HTTPException(status_code=401, detail="通行密钥不存在或已失效")
 
@@ -286,7 +311,7 @@ def passkey_authenticate_finish(
             raise HTTPException(status_code=401, detail="通行密钥验证失败")
 
         # 更新使用时间和签名计数
-        passkey.update_last_used(db=None, credential_id=credential_id, sign_count=new_sign_count)
+        passkey.update_last_used(db=None, sign_count=new_sign_count)
 
         logger.info(f"用户 {user.name} 通过PassKey认证成功")
 
@@ -309,7 +334,7 @@ def passkey_authenticate_finish(
             avatar=user.avatar,
             level=level,
             permissions=user.permissions or {},
-            widzard=show_wizard
+            wizard=show_wizard
         )
     except HTTPException:
         raise
@@ -324,7 +349,7 @@ def passkey_list(
 ) -> Any:
     """获取当前用户的所有 PassKey"""
     try:
-        passkeys = PassKey().get_by_user_id(db=None, user_id=current_user.id)
+        passkeys = PassKey.get_by_user_id(db=None, user_id=current_user.id)
         
         passkey_list = [
             {
@@ -350,17 +375,21 @@ def passkey_list(
         )
 
 
-@router.delete("/passkey/{passkey_id}", summary="删除 PassKey", response_model=schemas.Response)
-def passkey_delete(
-    passkey_id: int,
-    current_user: Annotated[User, Depends(get_current_active_user)]
+@router.post("/passkey/delete", summary="删除 PassKey", response_model=schemas.Response)
+async def passkey_delete(
+    data: PassKeyDeleteRequest,
+    current_user: User = Depends(get_current_active_user_async)
 ) -> Any:
     """删除指定的 PassKey"""
     try:
-        success = PassKey().delete_by_id(db=None, passkey_id=passkey_id, user_id=current_user.id)
+        # 验证密码
+        if not security.verify_password(data.password, str(current_user.hashed_password)):
+            return schemas.Response(success=False, message="密码错误")
+
+        success = PassKey.delete_by_id(db=None, passkey_id=data.passkey_id, user_id=current_user.id)
         
         if success:
-            logger.info(f"用户 {current_user.name} 删除了PassKey: {passkey_id}")
+            logger.info(f"用户 {current_user.name} 删除了PassKey: {data.passkey_id}")
             return schemas.Response(
                 success=True,
                 message="通行密钥已删除"
@@ -397,7 +426,7 @@ def passkey_verify_mfa(
         credential_id = PassKeyHelper.standardize_credential_id(credential_id_raw)
 
         # 查找PassKey（必须属于当前用户）
-        passkey = PassKey().get_by_credential_id(db=None, credential_id=credential_id)
+        passkey = PassKey.get_by_credential_id(db=None, credential_id=credential_id)
         if not passkey or passkey.user_id != current_user.id:
             return schemas.Response(
                 success=False,
@@ -419,7 +448,7 @@ def passkey_verify_mfa(
             )
 
         # 更新使用时间和签名计数
-        passkey.update_last_used(db=None, credential_id=credential_id, sign_count=new_sign_count)
+        passkey.update_last_used(db=None, sign_count=new_sign_count)
 
         logger.info(f"用户 {current_user.name} 通过PassKey二次验证成功")
 

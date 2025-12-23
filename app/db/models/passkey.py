@@ -37,14 +37,14 @@ class PassKey(Base):
     @db_query
     def get_by_user_id(cls, db: Session, user_id: int):
         """获取用户的所有PassKey"""
-        return db.query(cls).filter(cls.user_id == user_id, cls.is_active == True).all()
+        return db.query(cls).filter(cls.user_id == user_id, cls.is_active.is_(True)).all()
 
     @classmethod
     @async_db_query
     async def async_get_by_user_id(cls, db: AsyncSession, user_id: int):
         """异步获取用户的所有PassKey"""
         result = await db.execute(
-            select(cls).filter(cls.user_id == user_id, cls.is_active == True)
+            select(cls).filter(cls.user_id == user_id, cls.is_active.is_(True))
         )
         return result.scalars().all()
 
@@ -52,14 +52,14 @@ class PassKey(Base):
     @db_query
     def get_by_credential_id(cls, db: Session, credential_id: str):
         """根据凭证ID获取PassKey"""
-        return db.query(cls).filter(cls.credential_id == credential_id, cls.is_active == True).first()
+        return db.query(cls).filter(cls.credential_id == credential_id, cls.is_active.is_(True)).first()
 
     @classmethod
     @async_db_query
     async def async_get_by_credential_id(cls, db: AsyncSession, credential_id: str):
         """异步根据凭证ID获取PassKey"""
         result = await db.execute(
-            select(cls).filter(cls.credential_id == credential_id, cls.is_active == True)
+            select(cls).filter(cls.credential_id == credential_id, cls.is_active.is_(True))
         )
         return result.scalars().first()
 
@@ -78,25 +78,27 @@ class PassKey(Base):
         )
         return result.scalars().first()
 
+    @classmethod
     @db_update
-    def delete_by_id(self, db: Session, passkey_id: int, user_id: int):
+    def delete_by_id(cls, db: Session, passkey_id: int, user_id: int):
         """删除指定用户的PassKey"""
-        passkey = db.query(PassKey).filter(
-            PassKey.id == passkey_id,
-            PassKey.user_id == user_id
+        passkey = db.query(cls).filter(
+            cls.id == passkey_id,
+            cls.user_id == user_id
         ).first()
         if passkey:
             passkey.delete(db, passkey.id)
             return True
         return False
 
+    @classmethod
     @async_db_update
-    async def async_delete_by_id(self, db: AsyncSession, passkey_id: int, user_id: int):
+    async def async_delete_by_id(cls, db: AsyncSession, passkey_id: int, user_id: int):
         """异步删除指定用户的PassKey"""
         result = await db.execute(
-            select(PassKey).filter(
-                PassKey.id == passkey_id,
-                PassKey.user_id == user_id
+            select(cls).filter(
+                cls.id == passkey_id,
+                cls.user_id == user_id
             )
         )
         passkey = result.scalars().first()
@@ -106,25 +108,19 @@ class PassKey(Base):
         return False
 
     @db_update
-    def update_last_used(self, db: Session, credential_id: str, sign_count: int):
+    def update_last_used(self, db: Session, sign_count: int):
         """更新最后使用时间和签名计数"""
-        passkey = self.get_by_credential_id(db, credential_id)
-        if passkey:
-            passkey.update(db, {
-                'last_used_at': datetime.now(),
-                'sign_count': sign_count
-            })
-            return True
-        return False
+        self.update(db, {
+            'last_used_at': datetime.now(),
+            'sign_count': sign_count
+        })
+        return True
 
     @async_db_update
-    async def async_update_last_used(self, db: AsyncSession, credential_id: str, sign_count: int):
+    async def async_update_last_used(self, db: AsyncSession, sign_count: int):
         """异步更新最后使用时间和签名计数"""
-        passkey = await self.async_get_by_credential_id(db, credential_id)
-        if passkey:
-            await passkey.async_update(db, {
-                'last_used_at': datetime.now(),
-                'sign_count': sign_count
-            })
-            return True
-        return False
+        await self.async_update(db, {
+            'last_used_at': datetime.now(),
+            'sign_count': sign_count
+        })
+        return True
