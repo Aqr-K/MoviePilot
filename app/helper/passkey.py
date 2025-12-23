@@ -3,6 +3,7 @@ PassKey WebAuthn 辅助工具类
 """
 import base64
 import json
+import binascii
 from typing import Optional, Tuple, List, Dict, Any
 from urllib.parse import urlparse
 
@@ -23,10 +24,6 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
     AuthenticatorAttachment,
     ResidentKeyRequirement,
-    PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialRequestOptions,
-    RegistrationCredential,
-    AuthenticationCredential,
     AuthenticatorSelectionCriteria
 )
 from webauthn.helpers.cose import COSEAlgorithmIdentifier
@@ -46,6 +43,14 @@ class PassKeyHelper:
         获取 Relying Party ID
         """
         if settings.APP_DOMAIN:
+            app_domain = settings.APP_DOMAIN.strip()
+            # 确保存在协议前缀，以便 urlparse 正确解析主机和端口
+            if not app_domain.startswith(('http://', 'https://')):
+                app_domain = f'https://{app_domain}'
+            parsed = urlparse(app_domain)
+            host = parsed.hostname
+            if host:
+                return host
             # 从 APP_DOMAIN 中提取域名
             host = settings.APP_DOMAIN.replace('https://', '').replace('http://', '')
             # 移除端口号
@@ -81,7 +86,7 @@ class PassKeyHelper:
             # Base64解码并重新编码以标准化格式
             decoded = base64.urlsafe_b64decode(credential_id + '==')
             return base64.urlsafe_b64encode(decoded).decode('utf-8').rstrip('=')
-        except Exception as e:
+        except (binascii.Error, TypeError, ValueError) as e:
             logger.error(f"标准化凭证ID失败: {e}")
             return credential_id
 
@@ -135,7 +140,7 @@ class PassKeyHelper:
                 user_display_name=display_name or username,
                 exclude_credentials=exclude_credentials if exclude_credentials else None,
                 authenticator_selection=AuthenticatorSelectionCriteria(
-                    authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+                    authenticator_attachment=None,
                     resident_key=ResidentKeyRequirement.REQUIRED,
                     user_verification=uv_requirement,
                 ),

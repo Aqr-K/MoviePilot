@@ -33,7 +33,7 @@ def login_access_token(
         if user_or_message == "MFA_REQUIRED":
             raise HTTPException(
                 status_code=401, 
-                detail="需要双重验证",
+                detail="需要双重验证，请提供验证码或使用通行密钥",
                 headers={"X-MFA-Required": "true"}
             )
         raise HTTPException(status_code=401, detail=user_or_message)
@@ -57,7 +57,7 @@ def login_access_token(
         avatar=user_or_message.avatar,
         level=level,
         permissions=user_or_message.permissions or {},
-        widzard=show_wizard
+        wizard=show_wizard
     )
 
 
