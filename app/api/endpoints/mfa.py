@@ -3,8 +3,9 @@ MFA (Multi-Factor Authentication) API 端点
 包含 OTP 和 PassKey 相关功能
 """
 from datetime import timedelta
-from typing import Any, Annotated, Optional, List, Union
+from typing import Any, Annotated, Optional
 
+from app.helper.sites import SitesHelper
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,10 +15,9 @@ from app.core.config import settings
 from app.db import get_async_db
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
-from app.db.user_oper import get_current_active_user, get_current_active_user_async
 from app.db.systemconfig_oper import SystemConfigOper
+from app.db.user_oper import get_current_active_user, get_current_active_user_async
 from app.helper.passkey import PassKeyHelper
-from app.helper.sites import SitesHelper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.otp import OtpUtils
@@ -134,7 +134,6 @@ class PassKeyAuthenticationFinish(schemas.BaseModel):
 
 @router.post("/passkey/register/start", summary="开始注册 PassKey", response_model=schemas.Response)
 def passkey_register_start(
-    passkey_req: PassKeyRegistrationStart,
     current_user: Annotated[User, Depends(get_current_active_user)]
 ) -> Any:
     """开始注册 PassKey - 生成注册选项"""
@@ -351,7 +350,7 @@ def passkey_list(
     try:
         passkeys = PassKey.get_by_user_id(db=None, user_id=current_user.id)
         
-        passkey_list = [
+        key_list = [
             {
                 'id': pk.id,
                 'name': pk.name,
@@ -365,7 +364,7 @@ def passkey_list(
 
         return schemas.Response(
             success=True,
-            data=passkey_list
+            data=key_list
         )
     except Exception as e:
         logger.error(f"获取PassKey列表失败: {e}")

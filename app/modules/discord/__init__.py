@@ -91,8 +91,8 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             return None
         try:
             msg_json: dict = json.loads(body)
-        except Exception as err:
-            logger.debug(f"解析 Discord 消息失败：{str(err)}")
+        except Exception as e:
+            logger.debug(f"解析 Discord 消息失败：{str(e)}")
             return None
 
         if not msg_json:
