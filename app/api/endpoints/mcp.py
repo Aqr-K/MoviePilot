@@ -2,9 +2,9 @@
 通过HTTP API暴露MoviePilot的智能体工具功能
 """
 
-from typing import List, Any, Dict, Annotated, Optional, Union
+from typing import List, Any, Dict, Annotated, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app import schemas
@@ -28,9 +28,6 @@ MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSIONS[0]  # 默认使用最新版本
 def get_tools_manager() -> MoviePilotToolsManager:
     """
     获取工具管理器实例
-
-    Args:
-        user_id: 用户ID
 
     Returns:
         MoviePilotToolsManager实例

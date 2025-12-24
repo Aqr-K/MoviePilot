@@ -100,7 +100,8 @@ class MoviePilotToolsManager:
                 return tool
         return None
 
-    def _normalize_arguments(self, tool_instance: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _normalize_arguments(tool_instance: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         根据工具的参数schema规范化参数类型
         
