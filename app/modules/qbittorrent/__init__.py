@@ -124,12 +124,12 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             return None, None, None, "下载内容为空"
 
         # 读取种子的名称
-        torrent, content = __get_torrent_info()
+        torrent_from_file, content = __get_torrent_info()
         # 检查是否为磁力链接
         is_magnet = isinstance(content, str) and content.startswith("magnet:") or isinstance(content,
                                                                                              bytes) and content.startswith(
             b"magnet:")
-        if not torrent and not is_magnet:
+        if not torrent_from_file and not is_magnet:
             return None, None, None, f"添加种子任务失败：无法读取种子文件"
 
         # 获取下载器
@@ -170,8 +170,8 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 try:
                     for torrent in torrents:
                         # 名称与大小相等则认为是同一个种子
-                        if torrent.get("name") == torrent.name \
-                                and torrent.get("total_size") == torrent.total_size:
+                        if torrent.get("name") == getattr(torrent_from_file, 'name', '') \
+                                and torrent.get("total_size") == getattr(torrent_from_file, 'total_size', 0):
                             torrent_hash = torrent.get("hash")
                             torrent_tags = [str(tag).strip() for tag in torrent.get("tags").split(',')]
                             logger.warn(f"下载器中已存在该种子任务：{torrent_hash} - {torrent.get('name')}")

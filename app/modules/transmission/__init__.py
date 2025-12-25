@@ -125,12 +125,12 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
             return None, None, None, "下载内容为空"
 
         # 读取种子的名称
-        torrent, content = __get_torrent_info()
+        torrent_from_file, content = __get_torrent_info()
         # 检查是否为磁力链接
         is_magnet = isinstance(content, str) and content.startswith("magnet:") or isinstance(content,
                                                                                              bytes) and content.startswith(
             b"magnet:")
-        if not torrent and not is_magnet:
+        if not torrent_from_file and not is_magnet:
             return None, None, None, f"添加种子任务失败：无法读取种子文件"
 
         # 获取下载器
@@ -149,7 +149,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
         else:
             labels = None
         # 添加任务
-        torrent = server.add_torrent(
+        added_torrent = server.add_torrent(
             content=content,
             download_dir=download_dir.as_posix(),
             is_paused=is_paused,
@@ -159,7 +159,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
         # TR 始终使用原始种子布局, 返回"Original"
         torrent_layout = "Original"
 
-        if not torrent:
+        if not added_torrent:
             # 查询所有下载器的种子
             torrents, error = server.get_torrents()
             if error:
@@ -168,7 +168,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                 try:
                     for torrent in torrents:
                         # 名称与大小相等则认为是同一个种子
-                        if torrent.name == torrent.name and torrent.total_size == torrent.total_size:
+                        if torrent.name == getattr(torrent_from_file, 'name', '') and torrent.total_size == getattr(torrent_from_file, 'total_size', 0):
                             torrent_hash = torrent.hashString
                             logger.warn(f"下载器中已存在该种子任务：{torrent_hash} - {torrent.name}")
                             # 给种子打上标签
@@ -189,7 +189,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                     del torrents
             return None, None, None, f"添加种子任务失败：{content}"
         else:
-            torrent_hash = torrent.hashString
+            torrent_hash = added_torrent.hashString
             if is_paused:
                 # 选择文件
                 torrent_files = server.get_files(torrent_hash)
