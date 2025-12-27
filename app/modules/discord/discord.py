@@ -40,7 +40,10 @@ class Discord:
         intents.messages = True
         intents.guilds = True
 
-        self._client: Optional[discord.Client] = discord.Client(intents=intents)
+        self._client: Optional[discord.Client] = discord.Client(
+            intents=intents,
+            proxy=settings.PROXY_HOST
+        )
         self._tree: Optional[app_commands.CommandTree] = None
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
         self._thread: Optional[threading.Thread] = None
@@ -316,20 +319,55 @@ class Discord:
     @staticmethod
     def _build_embed(title: str, text: Optional[str], image: Optional[str],
                      link: Optional[str]) -> discord.Embed:
-        description = ""
         fields: List[Dict[str, str]] = []
+        desc_lines: List[str] = []
         if text:
+            # 处理上游未反序列化的 "\n" 等转义换行，避免被当成普通字符
+            if "\\n" in text or "\\r" in text:
+                text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+            # 匹配形如 "字段：值" 的片段，字段名不允许包含常见分隔符；
+            # 下一个字段需以顿号/逗号/分号等分隔开，且不能是 URL 协议开头，避免值里出现 URL 的":" 被误拆
+            name_re = r"[A-Za-z0-9\u4e00-\u9fa5_\-]+"
+            pair_pattern = re.compile(
+                rf"({name_re})[：:](.*?)(?=(?:[，,。；;、]+\s*(?!https?://|ftp://|ftps://|magnet:){name_re}[：:])|$)",
+                re.IGNORECASE,
+            )
             for line in text.splitlines():
-                if "：" in line:
-                    name, value = line.split("：", 1)
-                    fields.append({"name": name.strip(), "value": value.strip() or "-", "inline": False})
+                line = line.strip()
+                if not line:
+                    continue
+                matches = list(pair_pattern.finditer(line))
+                if matches:
+                    # 若整行只是 URL/时间等自然包含":"的内容，则不当作字段
+                    url_like_names = {"http", "https", "ftp", "ftps", "magnet"}
+                    if all(m.group(1).lower() in url_like_names or m.group(1).isdigit() for m in matches):
+                        desc_lines.append(line)
+                        continue
+                    last_end = 0
+                    for m in matches:
+                        # 追加匹配前的非空文本到描述
+                        prefix = line[last_end:m.start()].strip()
+                        # 仅当前缀不全是分隔符/空白时才记录
+                        if prefix and prefix.strip(" ，,;；。、"):
+                            desc_lines.append(prefix)
+                        name = m.group(1).strip()
+                        value = m.group(2).strip(" ，,;\t") or "-"
+                        if name:
+                            fields.append({"name": name, "value": value, "inline": False})
+                        last_end = m.end()
+                    # 匹配末尾后的文本
+                    suffix = line[last_end:].strip()
+                    if suffix and suffix.strip(" ，,;；。、"):
+                        desc_lines.append(suffix)
                 else:
-                    description += f"{line}\n"
-        description = description.strip()
+                    desc_lines.append(line)
+        description = "\n".join(desc_lines).strip()
+        if not description and not fields and text:
+            description = text.strip()
         embed = discord.Embed(
             title=title,
             url=link or "https://github.com/jxxghp/MoviePilot",
-            description=description if description else (text or None),
+            description=description if description else None,
             color=0xE67E22
         )
         for field in fields:
