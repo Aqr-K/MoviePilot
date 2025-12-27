@@ -1,7 +1,7 @@
 import asyncio
 import re
 import threading
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Tuple, Union
 
 import discord
 from discord import app_commands
@@ -321,13 +321,34 @@ class Discord:
                      link: Optional[str]) -> discord.Embed:
         fields: List[Dict[str, str]] = []
         desc_lines: List[str] = []
+        def _collect_spans(s: str, left: str, right: str) -> List[Tuple[int, int]]:
+            spans: List[Tuple[int, int]] = []
+            start = 0
+            while True:
+                l_idx = s.find(left, start)
+                if l_idx == -1:
+                    break
+                r_idx = s.find(right, l_idx + 1)
+                if r_idx == -1:
+                    break
+                spans.append((l_idx, r_idx))
+                start = r_idx + 1
+            return spans
+
+        def _find_colon_index(s: str, m: re.Match) -> Optional[int]:
+            segment = s[m.start():m.end()]
+            for i, ch in enumerate(segment):
+                if ch in (":", "："):
+                    return m.start() + i
+            return None
+
         if text:
             # 处理上游未反序列化的 "\n" 等转义换行，避免被当成普通字符
             if "\\n" in text or "\\r" in text:
                 text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
             # 匹配形如 "字段：值" 的片段，字段名不允许包含常见分隔符；
             # 下一个字段需以顿号/逗号/分号等分隔开，且不能是 URL 协议开头，避免值里出现 URL 的":" 被误拆
-            name_re = r"[A-Za-z0-9\u4e00-\u9fa5_\-]+"
+            name_re = r"[A-Za-z0-9\u4e00-\u9fa5_\-&]+"
             pair_pattern = re.compile(
                 rf"({name_re})[：:](.*?)(?=(?:[，,。；;、]+\s*(?!https?://|ftp://|ftps://|magnet:){name_re}[：:])|$)",
                 re.IGNORECASE,
@@ -338,6 +359,17 @@ class Discord:
                     continue
                 matches = list(pair_pattern.finditer(line))
                 if matches:
+                    book_spans = _collect_spans(line, "《", "》") + _collect_spans(line, "【", "】")
+                    if book_spans:
+                        has_book_colon = False
+                        for m in matches:
+                            colon_idx = _find_colon_index(line, m)
+                            if colon_idx is not None and any(l < colon_idx < r for l, r in book_spans):
+                                has_book_colon = True
+                                break
+                        if has_book_colon:
+                            desc_lines.append(line)
+                            continue
                     # 若整行只是 URL/时间等自然包含":"的内容，则不当作字段
                     url_like_names = {"http", "https", "ftp", "ftps", "magnet"}
                     if all(m.group(1).lower() in url_like_names or m.group(1).isdigit() for m in matches):
@@ -346,17 +378,17 @@ class Discord:
                     last_end = 0
                     for m in matches:
                         # 追加匹配前的非空文本到描述
-                        prefix = line[last_end:m.start()].strip()
+                        prefix = line[last_end:m.start()].strip(" ，,;；。、")
                         # 仅当前缀不全是分隔符/空白时才记录
                         if prefix and prefix.strip(" ，,;；。、"):
                             desc_lines.append(prefix)
                         name = m.group(1).strip()
-                        value = m.group(2).strip(" ，,;\t") or "-"
+                        value = m.group(2).strip(" ，,;；。、\t") or "-"
                         if name:
                             fields.append({"name": name, "value": value, "inline": False})
                         last_end = m.end()
                     # 匹配末尾后的文本
-                    suffix = line[last_end:].strip()
+                    suffix = line[last_end:].strip(" ，,;；。、")
                     if suffix and suffix.strip(" ，,;；。、"):
                         desc_lines.append(suffix)
                 else:
