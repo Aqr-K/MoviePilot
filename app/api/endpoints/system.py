@@ -150,7 +150,7 @@ def get_global_setting(token: str):
         "USER_UNIQUE_ID": SubscribeHelper().get_user_uuid(),
         "SUBSCRIBE_SHARE_MANAGE": share_admin,
         "WORKFLOW_SHARE_MANAGE": share_admin,
-        "FRONTEND_VERSION": SystemChain().get_frontend_version(),
+        "FRONTEND_VERSION": SystemChain.get_frontend_version(),
         "BACKEND_VERSION": APP_VERSION
     })
     return schemas.Response(success=True,
