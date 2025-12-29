@@ -267,9 +267,9 @@ class MTorrentSpider:
         base64_str = base64.b64encode(json.dumps(params).encode('utf-8')).decode('utf-8')
         return f"[{base64_str}]{url}"
 
-    def parse_subtitle_links(self, page_url: str) -> List[str]:
+    def get_subtitle_links(self, page_url: str) -> List[str]:
         """
-        解析指定页面的字幕下载链接
+        获取指定页面的字幕下载链接
 
         :param page_url: 种子详情页网址
         :type page_url: str
