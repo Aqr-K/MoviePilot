@@ -30,6 +30,7 @@ class SubtitleModule(_ModuleBase):
     # 站点详情页字幕下载链接识别XPATH
     _SITE_SUBTITLE_XPATH = [
         '//td[@class="rowhead"][text()="字幕"]/following-sibling::td//a/@href',
+        '//div[contains(@class, "font-bold")][text()="字幕"]/following-sibling::div[1]//a[not(@class)]/@href', # 憨憨
     ]
 
     def init_module(self) -> None:
