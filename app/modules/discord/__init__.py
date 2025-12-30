@@ -23,6 +23,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         if not Discord:
             logger.error("Discord 依赖未就绪（需要安装 discord.py==2.6.4），模块未启动")
             return
+        self.stop()
         super().init_service(service_name=Discord.__name__.lower(),
                              service_type=Discord)
         self._channel = MessageChannel.Discord
@@ -154,7 +155,8 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                                 image=message.image, userid=userid, link=message.link,
                                 buttons=message.buttons,
                                 original_message_id=message.original_message_id,
-                                original_chat_id=message.original_chat_id)
+                                original_chat_id=message.original_chat_id,
+                                mtype=message.mtype)
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """
