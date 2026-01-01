@@ -118,24 +118,36 @@ class MTorrentSpider:
                 labels_value = self._labels.get(result.get('labels') or "0") or ""
                 if labels_value:
                     labels = labels_value.split()
+            status = result.get('status', {})
             torrent = {
                 'title': result.get('name'),
                 'description': result.get('smallDescr'),
                 'enclosure': self.__get_download_url(result.get('id')),
                 'pubdate': StringUtils.format_timestamp(result.get('createdDate')),
                 'size': int(result.get('size') or '0'),
-                'seeders': int(result.get('status', {}).get("seeders") or '0'),
-                'peers': int(result.get('status', {}).get("leechers") or '0'),
-                'grabs': int(result.get('status', {}).get("timesCompleted") or '0'),
-                'downloadvolumefactor': self.__get_downloadvolumefactor(result.get('status', {}).get("discount")),
-                'uploadvolumefactor': self.__get_uploadvolumefactor(result.get('status', {}).get("discount")),
+                'seeders': int(status.get("seeders") or '0'),
+                'peers': int(status.get("leechers") or '0'),
+                'grabs': int(status.get("timesCompleted") or '0'),
+                'downloadvolumefactor': self.__get_downloadvolumefactor(status.get("discount")),
+                'uploadvolumefactor': self.__get_uploadvolumefactor(status.get("discount")),
                 'page_url': self._pageurl % (self._url, result.get('id')),
                 'imdbid': self.__find_imdbid(result.get('imdb')),
                 'labels': labels,
                 'category': category
             }
-            if discount_end_time := (result.get('status') or {}).get('discountEndTime'):
+            if discount_end_time := status.get('discountEndTime'):
                 torrent['freedate'] = StringUtils.format_timestamp(discount_end_time)
+            # 解析全站促销时的规则(当前馒头只有下载促销)
+            if promotion_rule := status.get("promotionRule"):
+                discount = promotion_rule.get("discount", "NORMAL")
+                torrent["downloadvolumefactor"] = self.__get_downloadvolumefactor(discount)
+                if end_time := promotion_rule.get("endTime"):
+                    torrent["freedate"] = StringUtils.format_timestamp(end_time)
+            if mall_single_free := status.get("mallSingleFree"):
+                if mall_single_free.get("status") == "ONGOING":
+                    torrent["downloadvolumefactor"] = self.__get_downloadvolumefactor("FREE")
+                    if end_date := mall_single_free.get("endDate"):
+                        torrent["freedate"] = StringUtils.format_timestamp(end_date)
             torrents.append(torrent)
         return torrents
 
