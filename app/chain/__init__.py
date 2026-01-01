@@ -4,6 +4,7 @@ import pickle
 import traceback
 from abc import ABCMeta
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
@@ -849,6 +850,8 @@ class ChainBase(metaclass=ABCMeta):
         :param kwargs:  其他参数(覆盖业务对象属性值)
         :return: 成功或失败
         """
+        # 添加格式化的时间参数
+        kwargs.setdefault('current_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         # 渲染消息
         message = MessageTemplateHelper.render(message=message, meta=meta, mediainfo=mediainfo,
                                                torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
@@ -932,6 +935,8 @@ class ChainBase(metaclass=ABCMeta):
         :param kwargs:  其他参数(覆盖业务对象属性值)
         :return: 成功或失败
         """
+        # 添加格式化的时间参数
+        kwargs.setdefault('current_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         # 渲染消息
         message = MessageTemplateHelper.render(message=message, meta=meta, mediainfo=mediainfo,
                                                torrentinfo=torrentinfo, transferinfo=transferinfo, **kwargs)
