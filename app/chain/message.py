@@ -195,10 +195,14 @@ class MessageChain(ChainBase):
                 if text.isdigit():
                     # 用户选择了具体的条目
                     # 缓存
-                    cache_data: dict = user_cache.get(userid).copy()
+                    cache_data: dict = user_cache.get(userid)
+                    if not cache_data:
+                        # 发送消息
+                        self.post_message(Notification(channel=channel, source=source, title="输入有误！", userid=userid))
+                        return
+                    cache_data = cache_data.copy()
                     # 选择项目
-                    if not cache_data \
-                            or not cache_data.get('items') \
+                    if not cache_data.get('items') \
                             or len(cache_data.get('items')) < int(text):
                         # 发送消息
                         self.post_message(Notification(channel=channel, source=source, title="输入有误！", userid=userid))
@@ -370,12 +374,13 @@ class MessageChain(ChainBase):
                         del cache_data
                 elif text.lower() == "p":
                     # 上一页
-                    cache_data: dict = user_cache.get(userid).copy()
+                    cache_data: dict = user_cache.get(userid)
                     if not cache_data:
                         # 没有缓存
                         self.post_message(Notification(
                             channel=channel, source=source, title="输入有误！", userid=userid))
                         return
+                    cache_data = cache_data.copy()
                     try:
                         if _current_page == 0:
                             # 第一页
@@ -422,12 +427,13 @@ class MessageChain(ChainBase):
                         del cache_data
                 elif text.lower() == "n":
                     # 下一页
-                    cache_data: dict = user_cache.get(userid).copy()
+                    cache_data: dict = user_cache.get(userid)
                     if not cache_data:
                         # 没有缓存
                         self.post_message(Notification(
                             channel=channel, source=source, title="输入有误！", userid=userid))
                         return
+                    cache_data = cache_data.copy()
                     try:
                         cache_type: str = cache_data.get('type')
                         # 产生副本，避免修改原值
