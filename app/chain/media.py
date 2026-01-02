@@ -618,7 +618,7 @@ class MediaChain(ChainBase):
                                 should_scrape = True  # 未知类型默认刮削
 
                             if should_scrape:
-                                image_path = filepath.with_name(image_name)
+                                image_path = filepath / image_name
                                 if overwrite or not storagechain.get_file_item(storage=fileitem.storage,
                                                                                path=image_path):
                                     # 流式下载图片并直接保存
