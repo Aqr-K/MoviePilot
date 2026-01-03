@@ -71,7 +71,7 @@ def MetaInfoPath(path: Path) -> MetaBase:
     file_meta = MetaInfo(title=path.name)
     # 上级目录元数据
     dir_meta = MetaInfo(title=path.parent.name)
-    if file_meta.type == MediaType.TV or dir_meta.type == file_meta.type:
+    if file_meta.type == MediaType.TV or dir_meta.type != MediaType.TV:
         # 合并元数据
         file_meta.merge(dir_meta)
     # 上上级目录元数据
