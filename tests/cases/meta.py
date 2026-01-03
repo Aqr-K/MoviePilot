@@ -1117,4 +1117,19 @@ meta_cases = [{
         "audio_codec": "",
         "tmdbid": 19995
     }
+}, {
+    "path": "/movies/DouBan_IMDB.TOP250.Movies.Mixed.Collection.20240501.FRDS/为奴十二年.12.Years.a.Slave.2013.BluRay.1080p.x265.10bit.2Audio.MNHD-FRDS/12.Years.a.Slave.2013.BluRay.1080p.x265.10bit.2Audio.MNHD-FRDS.mkv",
+    "target": {
+        "type": "未知",
+        "cn_name": "",
+        "en_name": "12 Years A Slave",
+        "year": "2013",
+        "part": "",
+        "season": "",
+        "episode": "",
+        "restype": "BluRay",
+        "pix": "1080p",
+        "video_codec": "x265 10bit",
+        "audio_codec": "2Audio"
+    }
 }]
