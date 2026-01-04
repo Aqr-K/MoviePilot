@@ -85,7 +85,11 @@ class SubtitleModule(_ModuleBase):
                     )
                 # TODO 其它采用API访问的站点
         # 普通站点通过解析网站代码的方式获取
-        request = RequestUtils(cookies=torrent.site_cookie, ua=torrent.site_ua)
+        request = RequestUtils(
+            cookies=torrent.site_cookie,
+            ua=torrent.site_ua,
+            proxies=settings.PROXY if torrent.site_proxy else None,
+        )
         res = request.get_res(torrent.page_url)
         if res and res.status_code == 200:
             if not res.text:
@@ -176,7 +180,11 @@ class SubtitleModule(_ModuleBase):
             logger.warn(f"{torrent.page_url} 页面未找到字幕下载链接")
             return
         # 下载所有字幕文件
-        request = RequestUtils(cookies=torrent.site_cookie, ua=torrent.site_ua)
+        request = RequestUtils(
+            cookies=torrent.site_cookie,
+            ua=torrent.site_ua,
+            proxies=settings.PROXY if torrent.site_proxy else None,
+        )
         for sublink in sublink_list:
             logger.info(f"找到字幕下载链接：{sublink}，开始下载...")
             # 下载
