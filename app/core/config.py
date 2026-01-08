@@ -843,6 +843,18 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         rename_format = re.sub(r'/+', '/', rename_format)
         return rename_format.strip("/")
 
+    def TMDB_IMAGE_URL(self, file_path: str, file_size: str = "original") -> str:
+        """
+        获取TMDB图片网址
+
+        :param file_path: TMDB API返回的xxx_path
+        :param file_size: 图片大小，支持的值包括：'original'和'w500'
+        :return: 图片的完整URL
+        """
+        return (
+            f"https://{self.TMDB_IMAGE_DOMAIN}/t/p/{file_size}/{file_path.removeprefix('/')}"
+        )
+
 
 # 实例化配置
 settings = Settings()

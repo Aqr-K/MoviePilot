@@ -867,19 +867,19 @@ class TheMovieDbModule(_ModuleBase):
             backdrops = images.get("backdrops")
             if backdrops:
                 backdrops = sorted(backdrops, key=lambda x: x.get("vote_average"), reverse=True)
-                mediainfo.backdrop_path = backdrops[0].get("file_path")
+                mediainfo.backdrop_path = settings.TMDB_IMAGE_URL(backdrops[0].get("file_path"))
         # 标志
         if not mediainfo.logo_path:
             logos = images.get("logos")
             if logos:
                 logos = sorted(logos, key=lambda x: x.get("vote_average"), reverse=True)
-                mediainfo.logo_path = logos[0].get("file_path")
+                mediainfo.logo_path = settings.TMDB_IMAGE_URL(logos[0].get("file_path"))
         # 海报
         if not mediainfo.poster_path:
             posters = images.get("posters")
             if posters:
                 posters = sorted(posters, key=lambda x: x.get("vote_average"), reverse=True)
-                mediainfo.poster_path = posters[0].get("file_path")
+                mediainfo.poster_path = settings.TMDB_IMAGE_URL(posters[0].get("file_path"))
         return mediainfo
 
     def obtain_images(self, mediainfo: MediaInfo) -> Optional[MediaInfo]:
@@ -957,7 +957,7 @@ class TheMovieDbModule(_ModuleBase):
                 image_path = seasoninfo.get(image_type.value)
 
         if image_path:
-            return f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/{image_prefix}{image_path}"
+            return settings.TMDB_IMAGE_URL(image_path, image_prefix)
         return None
 
     def tmdb_movie_similar(self, tmdbid: int) -> List[MediaInfo]:

@@ -1635,7 +1635,7 @@ class SubscribeChain(ChainBase):
                     info = schemas.SubscribeEpisodeInfo()
                     info.title = episode.name
                     info.description = episode.overview
-                    info.backdrop = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/w500${episode.still_path}"
+                    info.backdrop = settings.TMDB_IMAGE_URL(episode.still_path, "w500")
                     episodes[episode.episode_number] = info
         elif subscribe.type == MediaType.TV.value:
             # 根据开始结束集计算集信息
