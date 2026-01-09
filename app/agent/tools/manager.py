@@ -151,18 +151,21 @@ class MoviePilotToolsManager:
                     normalized[key] = int(value)
                 except (ValueError, TypeError):
                     logger.warning(f"无法将参数 {key}='{value}' 转换为整数，保持原值")
-                    normalized[key] = value
+                    normalized[key] = None
             elif field_type == "number" and isinstance(value, str):
                 try:
                     normalized[key] = float(value)
                 except (ValueError, TypeError):
                     logger.warning(f"无法将参数 {key}='{value}' 转换为浮点数，保持原值")
-                    normalized[key] = value
-            elif field_type == "boolean" and isinstance(value, str):
-                # 转换字符串为布尔值
-                normalized[key] = value.lower() in ("true", "1", "yes", "on")
+                    normalized[key] = None
+            elif field_type == "boolean":
+                if isinstance(value, str):
+                    normalized[key] = value.lower() in ("true", "1", "yes", "on")
+                elif isinstance(value, (int, float)):
+                    normalized[key] = value != 0
+                else:
+                    normalized[key] = True
             else:
-                # 其他类型保持原样
                 normalized[key] = value
         
         return normalized
@@ -199,7 +202,11 @@ class MoviePilotToolsManager:
             elif isinstance(result, int, float):
                 formated_result = str(result)
             else:
-                formated_result = json.dumps(result, ensure_ascii=False, indent=2)
+                try:
+                    formated_result = json.dumps(result, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    logger.warning(f"结果转换为JSON失败: {e}, 使用字符串表示")
+                    formated_result = str(result)
 
             return formated_result
         except Exception as e:

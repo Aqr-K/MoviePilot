@@ -29,7 +29,8 @@ class QueryDownloadTasksTool(MoviePilotTool):
     description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash or title. Shows download progress, completion status, and task details from configured downloaders."
     args_schema: Type[BaseModel] = QueryDownloadTasksInput
 
-    def _get_all_torrents(self, download_chain: DownloadChain, downloader: Optional[str] = None) -> List[Union[TransferTorrent, DownloadingTorrent]]:
+    @staticmethod
+    def _get_all_torrents(download_chain: DownloadChain, downloader: Optional[str] = None) -> List[Union[TransferTorrent, DownloadingTorrent]]:
         """
         查询所有状态的任务（包括下载中和已完成的任务）
         """
