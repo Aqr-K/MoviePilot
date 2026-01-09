@@ -49,12 +49,13 @@ class RousiSpider(metaclass=SingletonClass):
             self._apikey = indexer.get('apikey')
             self._timeout = indexer.get('timeout') or 15
 
-    def __get_params(self, keyword: str, mtype: MediaType = None, page: Optional[int] = 0) -> dict:
+    def __get_params(self, keyword: str, mtype: MediaType = None, cat: Optional[str] = None, page: Optional[int] = 0) -> dict:
         """
         构建 API 请求参数
 
         :param keyword: 搜索关键词
         :param mtype: 媒体类型 (MOVIE/TV)
+        :param cat: 用户选择的分类 ID（逗号分隔的字符串）
         :param page: 页码（从 0 开始，API 需要从 1 开始）
         :return: 请求参数字典
         """
@@ -65,15 +66,56 @@ class RousiSpider(metaclass=SingletonClass):
         if keyword:
             params["keyword"] = keyword
 
-        # 注意：API 的 category 参数为字符串类型，仅支持单个分类
-        # 这里优先选择主分类，如需多分类搜索需要分别请求
-        if mtype:
+        # API 支持多分类搜索，需要使用数组格式：category[]=xxx&category[]=yyy
+        # 优先使用用户选择的分类，如果用户未选择则根据 mtype 推断
+        if cat:
+            # 用户选择了特定分类，需要将分类 ID 映射回 API 的 category name
+            category_names = self.__get_category_names_by_ids(cat)
+            if category_names:
+                # 如果只有一个分类，使用 category=xxx
+                if len(category_names) == 1:
+                    params["category"] = category_names[0]
+                else:
+                    # 多个分类使用数组格式 category[]=xxx
+                    params["category[]"] = category_names
+        elif mtype:
+            # 用户未选择分类，根据媒体类型推断
             if mtype == MediaType.MOVIE:
                 params["category"] = "movie"
             elif mtype == MediaType.TV:
                 params["category"] = "tv"
 
         return params
+
+    def __get_category_names_by_ids(self, cat: str) -> Optional[list]:
+        """
+        根据用户选择的分类 ID 获取 API 的 category names
+
+        :param cat: 用户选择的分类 ID（逗号分隔的多个ID，如 "1,2,3"）
+        :return: API 的 category names 列表（如 ["movie", "tv", "documentary"]）
+        """
+        if not cat:
+            return None
+
+        # ID 到 category name 的映射
+        id_to_name = {
+            '1': 'movie',
+            '2': 'tv',
+            '3': 'documentary',
+            '4': 'animation',
+            '5': 'variety',
+            '6': 'sports',
+            '7': 'music',
+            '8': 'software',
+            '9': 'ebook',
+            '10': 'other'
+        }
+
+        # 分割多个分类 ID 并映射为 category names
+        cat_ids = [c.strip() for c in cat.split(',') if c.strip()]
+        category_names = [id_to_name.get(cat_id) for cat_id in cat_ids if cat_id in id_to_name]
+
+        return category_names if category_names else None
 
     def __parse_result(self, results: List[dict]) -> List[dict]:
         """
@@ -140,12 +182,13 @@ class RousiSpider(metaclass=SingletonClass):
             torrents.append(torrent)
         return torrents
 
-    def search(self, keyword: str, mtype: MediaType = None, page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
+    def search(self, keyword: str, mtype: MediaType = None, cat: Optional[str] = None, page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
         """
         同步搜索种子
 
         :param keyword: 搜索关键词
         :param mtype: 媒体类型 (MOVIE/TV)
+        :param cat: 用户选择的分类 ID（逗号分隔）
         :param page: 页码（从 0 开始）
         :return: (是否发生错误, 种子列表)
         """
@@ -153,7 +196,7 @@ class RousiSpider(metaclass=SingletonClass):
             logger.warn(f"{self._name} 未配置 API Key (Passkey)")
             return True, []
 
-        params = self.__get_params(keyword, mtype, page)
+        params = self.__get_params(keyword, mtype, cat, page)
         headers = {
             "Authorization": f"Bearer {self._apikey}",
             "Accept": "application/json"
@@ -184,12 +227,13 @@ class RousiSpider(metaclass=SingletonClass):
             logger.warn(f"{self._name} 搜索失败，无法连接 {self._domain}")
             return True, []
 
-    async def async_search(self, keyword: str, mtype: MediaType = None, page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
+    async def async_search(self, keyword: str, mtype: MediaType = None, cat: Optional[str] = None, page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
         """
         异步搜索种子
 
         :param keyword: 搜索关键词
         :param mtype: 媒体类型 (MOVIE/TV)
+        :param cat: 用户选择的分类 ID（逗号分隔）
         :param page: 页码（从 0 开始）
         :return: (是否发生错误, 种子列表)
         """
@@ -197,7 +241,7 @@ class RousiSpider(metaclass=SingletonClass):
             logger.warn(f"{self._name} 未配置 API Key (Passkey)")
             return True, []
 
-        params = self.__get_params(keyword, mtype, page)
+        params = self.__get_params(keyword, mtype, cat, page)
         headers = {
             "Authorization": f"Bearer {self._apikey}",
             "Accept": "application/json"

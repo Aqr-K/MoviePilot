@@ -217,6 +217,7 @@ class IndexerModule(_ModuleBase):
                 error_flag, result = RousiSpider(site).search(
                     keyword=search_word,
                     mtype=mtype,
+                    cat=cat,
                     page=page
                 )
             else:
@@ -311,6 +312,7 @@ class IndexerModule(_ModuleBase):
                 error_flag, result = await RousiSpider(site).async_search(
                     keyword=search_word,
                     mtype=mtype,
+                    cat=cat,
                     page=page
                 )
             else:
