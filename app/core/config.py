@@ -278,7 +278,7 @@ class ConfigModel(BaseModel):
     # 搜索多个名称
     SEARCH_MULTIPLE_NAME: bool = False
     # 最大搜索名称数量
-    MAX_SEARCH_NAME_LIMIT: int = 2
+    MAX_SEARCH_NAME_LIMIT: int = 3
 
     # ==================== 下载配置 ====================
     # 种子标签
