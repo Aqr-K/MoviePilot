@@ -33,7 +33,7 @@ class RousiSpider(metaclass=SingletonClass):
     _timeout = 15
 
     # 分类定义
-    _movie_category = ['movie']
+    _movie_category = ['movie', 'documentary', 'animation']
     _tv_category = ['tv', 'documentary', 'animation', 'variety']
 
     _apikey = None
@@ -166,9 +166,9 @@ class RousiSpider(metaclass=SingletonClass):
 
             if cat_val:
                 cat_val = str(cat_val).lower()
-                if cat_val in ['movie', 'documentary']:
+                if cat_val in self._movie_category:
                     category = MediaType.MOVIE.value
-                elif cat_val in ['tv', 'animation', 'variety', 'sports']:
+                elif cat_val in self._tv_category:
                     category = MediaType.TV.value
 
             # 解析促销信息
