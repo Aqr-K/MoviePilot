@@ -113,6 +113,32 @@ class RousiSpider(metaclass=SingletonClass):
 
         return category_names if category_names else None
 
+    def __process_response(self, res) -> Tuple[bool, List[dict]]:
+        """
+        处理 API 响应
+
+        :param res: 请求响应对象
+        :return: (是否发生错误, 种子列表)
+        """
+        if res and res.status_code == 200:
+            try:
+                data = res.json()
+                if data.get('code') == 0:
+                    results = data.get('data', {}).get('torrents', [])
+                    return False, self.__parse_result(results)
+                else:
+                    logger.warn(f"{self._name} 搜索失败，错误信息：{data.get('message')}")
+                    return True, []
+            except Exception as e:
+                logger.warn(f"{self._name} 解析响应失败：{e}")
+                return True, []
+        elif res is not None:
+            logger.warn(f"{self._name} 搜索失败，HTTP 错误码：{res.status_code}")
+            return True, []
+        else:
+            logger.warn(f"{self._name} 搜索失败，无法连接 {self._domain}")
+            return True, []
+
     def __parse_result(self, results: List[dict]) -> List[dict]:
         """
         解析搜索结果
@@ -204,24 +230,7 @@ class RousiSpider(metaclass=SingletonClass):
             timeout=self._timeout
         ).get_res(url=self._searchurl, params=params)
 
-        if res and res.status_code == 200:
-            try:
-                data = res.json()
-                if data.get('code') == 0:
-                    results = data.get('data', {}).get('torrents', [])
-                    return False, self.__parse_result(results)
-                else:
-                    logger.warn(f"{self._name} 搜索失败，错误信息：{data.get('message')}")
-                    return True, []
-            except Exception as e:
-                logger.warn(f"{self._name} 解析响应失败：{e}")
-                return True, []
-        elif res is not None:
-            logger.warn(f"{self._name} 搜索失败，HTTP 错误码：{res.status_code}")
-            return True, []
-        else:
-            logger.warn(f"{self._name} 搜索失败，无法连接 {self._domain}")
-            return True, []
+        return self.__process_response(res)
 
     async def async_search(self, keyword: str, mtype: MediaType = None, cat: Optional[str] = None, page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
         """
@@ -249,24 +258,7 @@ class RousiSpider(metaclass=SingletonClass):
             timeout=self._timeout
         ).get_res(url=self._searchurl, params=params)
 
-        if res and res.status_code == 200:
-            try:
-                data = res.json()
-                if data.get('code') == 0:
-                    results = data.get('data', {}).get('torrents', [])
-                    return False, self.__parse_result(results)
-                else:
-                    logger.warn(f"{self._name} 搜索失败，错误信息：{data.get('message')}")
-                    return True, []
-            except Exception as e:
-                logger.warn(f"{self._name} 解析响应失败：{e}")
-                return True, []
-        elif res is not None:
-            logger.warn(f"{self._name} 搜索失败，HTTP 错误码：{res.status_code}")
-            return True, []
-        else:
-            logger.warn(f"{self._name} 搜索失败，无法连接 {self._domain}")
-            return True, []
+        return self.__process_response(res)
 
     def __get_download_url(self, torrent_id: int) -> str:
         """
