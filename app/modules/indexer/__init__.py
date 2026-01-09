@@ -12,6 +12,7 @@ from app.modules.indexer.spider import SiteSpider
 from app.modules.indexer.spider.haidan import HaiDanSpider
 from app.modules.indexer.spider.hddolby import HddolbySpider
 from app.modules.indexer.spider.mtorrent import MTorrentSpider
+from app.modules.indexer.spider.rousi import RousiSpider
 from app.modules.indexer.spider.tnode import TNodeSpider
 from app.modules.indexer.spider.torrentleech import TorrentLeech
 from app.modules.indexer.spider.yema import YemaSpider
@@ -212,6 +213,12 @@ class IndexerModule(_ModuleBase):
                     mtype=mtype,
                     page=page
                 )
+            elif site.get('parser') == "RousiPro":
+                error_flag, result = RousiSpider(site).search(
+                    keyword=search_word,
+                    mtype=mtype,
+                    page=page
+                )
             else:
                 error_flag, result = self.__spider_search(
                     search_word=search_word,
@@ -296,6 +303,12 @@ class IndexerModule(_ModuleBase):
                 )
             elif site.get('parser') == "HDDolby":
                 error_flag, result = await HddolbySpider(site).async_search(
+                    keyword=search_word,
+                    mtype=mtype,
+                    page=page
+                )
+            elif site.get('parser') == "RousiPro":
+                error_flag, result = await RousiSpider(site).async_search(
                     keyword=search_word,
                     mtype=mtype,
                     page=page

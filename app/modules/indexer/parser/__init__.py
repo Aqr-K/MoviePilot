@@ -35,6 +35,7 @@ class SiteSchema(Enum):
     HDDolby = "HDDolby"
     Zhixing = "Zhixing"
     Bitpt = "Bitpt"
+    RousiPro = "RousiPro"
 
 
 class SiteParserBase(metaclass=ABCMeta):
