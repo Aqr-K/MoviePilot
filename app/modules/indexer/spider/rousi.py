@@ -32,8 +32,9 @@ class RousiSpider:
     _timeout = 15
 
     # 分类定义
-    _movie_category = ['movie', 'documentary', 'animation']
-    _tv_category = ['tv', 'documentary', 'animation', 'variety']
+    # API 不支持多分类搜索，每次只使用一个分类
+    _movie_category = 'movie'
+    _tv_category = 'tv'
 
     # API KEY
     _apikey = None
@@ -71,20 +72,20 @@ class RousiSpider:
         if keyword:
             params["keyword"] = keyword
 
-        # API 支持多分类搜索，需要使用数组格式：category[]=xxx&category[]=yyy
-        # 优先使用用户选择的分类，如果用户未选择则根据 mtype 推断
+        # API 不支持多分类搜索,只使用单个 category 参数
+        # 优先使用用户选择的分类,如果用户未选择则根据 mtype 推断
         if cat:
-            # 用户选择了特定分类，需要将分类 ID 映射回 API 的 category name
+            # 用户选择了特定分类,需要将分类 ID 映射回 API 的 category name
             category_names = self.__get_category_names_by_ids(cat)
             if category_names:
-                # 使用数组格式 category[]=xxx
-                params["category[]"] = category_names
+                # 如果用户选择了多个分类,只取第一个
+                params["category"] = category_names[0]
         elif mtype:
-            # 用户未选择分类，根据媒体类型推断
+            # 用户未选择分类,根据媒体类型推断
             if mtype == MediaType.MOVIE:
-                params["category[]"] = self._movie_category
+                params["category"] = self._movie_category
             elif mtype == MediaType.TV:
-                params["category[]"] = self._tv_category
+                params["category"] = self._tv_category
 
         return params
 
@@ -166,10 +167,12 @@ class RousiSpider:
 
             if cat_val:
                 cat_val = str(cat_val).lower()
-                if cat_val in self._movie_category:
+                if cat_val == self._movie_category:
                     category = MediaType.MOVIE.value
-                elif cat_val in self._tv_category:
+                elif cat_val == self._tv_category:
                     category = MediaType.TV.value
+                else:
+                    category = MediaType.UNKNOWN.value
 
             # 解析促销信息
             # API 后端已处理全站促销优先级，直接使用返回的 promotion 数据
