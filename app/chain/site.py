@@ -44,6 +44,7 @@ class SiteChain(ChainBase):
             "star-space.net": self.__indexphp_test,
             "yemapt.org": self.__yema_test,
             "hddolby.com": self.__hddolby_test,
+            "rousi.pro": self.__rousi_test,
         }
 
     def refresh_userdata(self, site: dict = None) -> Optional[SiteUserData]:
@@ -244,6 +245,32 @@ class SiteChain(ChainBase):
         if res.status_code == 200:
             user_info = res.json()
             if user_info and user_info.get("status") == 0:
+                return True, "连接成功"
+            return False, "APIKEY已过期"
+        else:
+            return False, f"错误：{res.status_code} {res.reason}"
+
+    @staticmethod
+    def __rousi_test(site: Site) -> Tuple[bool, str]:
+        """
+        判断站点是否已经登陆：rousi
+        """
+        url = f"https://{StringUtils.get_url_domain(site.url)}/api/v1/profile"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {site.apikey}",
+        }
+        res = RequestUtils(
+            headers=headers,
+            proxies=settings.PROXY if site.proxy else None,
+            timeout=site.timeout or 15
+        ).get_res(url=url)
+        if res is None:
+            return False, "无法打开网站！"
+        if res.status_code == 200:
+            user_info = res.json()
+            if user_info and user_info.get("code") == 0:
                 return True, "连接成功"
             return False, "APIKEY已过期"
         else:
