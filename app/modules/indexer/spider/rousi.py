@@ -27,10 +27,15 @@ class RousiSpider(metaclass=SingletonClass):
     _proxy = None
     _cookie = None
     _ua = None
-    _size = 20
+    _size = 100
     _searchurl = "https://%s/api/v1/torrents"
     _downloadurl = "https://%s/api/v1/torrents/%s"
     _timeout = 15
+
+    # 分类定义
+    _movie_category = ['movie']
+    _tv_category = ['tv', 'documentary', 'animation', 'variety']
+
     _apikey = None
 
     def __init__(self, indexer: dict):
@@ -72,18 +77,14 @@ class RousiSpider(metaclass=SingletonClass):
             # 用户选择了特定分类，需要将分类 ID 映射回 API 的 category name
             category_names = self.__get_category_names_by_ids(cat)
             if category_names:
-                # 如果只有一个分类，使用 category=xxx
-                if len(category_names) == 1:
-                    params["category"] = category_names[0]
-                else:
-                    # 多个分类使用数组格式 category[]=xxx
-                    params["category[]"] = category_names
+                # 使用数组格式 category[]=xxx
+                params["category[]"] = category_names
         elif mtype:
             # 用户未选择分类，根据媒体类型推断
             if mtype == MediaType.MOVIE:
-                params["category"] = "movie"
+                params["category[]"] = self._movie_category
             elif mtype == MediaType.TV:
-                params["category"] = "tv"
+                params["category[]"] = self._tv_category
 
         return params
 
@@ -103,12 +104,7 @@ class RousiSpider(metaclass=SingletonClass):
             '2': 'tv',
             '3': 'documentary',
             '4': 'animation',
-            '5': 'variety',
-            '6': 'sports',
-            '7': 'music',
-            '8': 'software',
-            '9': 'ebook',
-            '10': 'other'
+            '6': 'variety'
         }
 
         # 分割多个分类 ID 并映射为 category names
