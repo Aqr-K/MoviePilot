@@ -7,11 +7,10 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas import MediaType
 from app.utils.http import RequestUtils, AsyncRequestUtils
-from app.utils.singleton import SingletonClass
 from app.utils.string import StringUtils
 
 
-class RousiSpider(metaclass=SingletonClass):
+class RousiSpider:
     """
     Rousi.pro API v1 Spider
 
@@ -36,6 +35,7 @@ class RousiSpider(metaclass=SingletonClass):
     _movie_category = ['movie', 'documentary', 'animation']
     _tv_category = ['tv', 'documentary', 'animation', 'variety']
 
+    # API KEY
     _apikey = None
 
     def __init__(self, indexer: dict):
