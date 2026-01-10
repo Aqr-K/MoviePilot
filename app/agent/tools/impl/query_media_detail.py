@@ -15,10 +15,7 @@ class QueryMediaDetailInput(BaseModel):
     """查询媒体详情工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     tmdb_id: int = Field(..., description="TMDB ID of the media (movie or TV series)")
-    media_type: Optional[str] = Field(
-        None, 
-        description="Media type: 'movie' or 'tv'. If unknown or not provided, the system will auto-detect based on TMDB ID."
-    )
+    media_type: str = Field(..., description="Media type: 'movie' or 'tv'")
 
 
 class QueryMediaDetailTool(MoviePilotTool):
@@ -31,7 +28,7 @@ class QueryMediaDetailTool(MoviePilotTool):
         tmdb_id = kwargs.get("tmdb_id")
         return f"正在查询媒体详情: TMDB ID {tmdb_id}"
 
-    async def run(self, tmdb_id: int, media_type: Optional[str] = None, **kwargs) -> str:
+    async def run(self, tmdb_id: int, media_type: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, media_type={media_type}")
 
         try:
