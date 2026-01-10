@@ -15,11 +15,15 @@ class QueryMediaDetailInput(BaseModel):
     """查询媒体详情工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     tmdb_id: int = Field(..., description="TMDB ID of the media (movie or TV series)")
+    media_type: Optional[str] = Field(
+        None, 
+        description="Media type: 'movie' or 'tv'. If unknown or not provided, the system will auto-detect based on TMDB ID."
+    )
 
 
 class QueryMediaDetailTool(MoviePilotTool):
     name: str = "query_media_detail"
-    description: str = "Query detailed media information from TMDB by ID. Returns core metadata including title, year, overview, status, genres, directors, actors, and season count for TV series."
+    description: str = "Query detailed media information from TMDB by ID and media_type. IMPORTANT: Convert search results type: '电影'→'movie', '电视剧'→'tv'. Returns core metadata including title, year, overview, status, genres, directors, actors, and season count for TV series."
     args_schema: Type[BaseModel] = QueryMediaDetailInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -27,15 +31,21 @@ class QueryMediaDetailTool(MoviePilotTool):
         tmdb_id = kwargs.get("tmdb_id")
         return f"正在查询媒体详情: TMDB ID {tmdb_id}"
 
-    async def run(self, tmdb_id: int, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}")
+    async def run(self, tmdb_id: int, media_type: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, media_type={media_type}")
 
         try:
             media_chain = MediaChain()
 
-            # 通过自动媒体类型识别获取媒体信息（电影或电视剧）
-            mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, mtype=None)
+            mtype = None
+            if media_type:
+                if media_type.lower() == 'movie':
+                    mtype = MediaType.MOVIE
+                elif media_type.lower() == 'tv':
+                    mtype = MediaType.TV
 
+            mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, mtype=mtype)
+            
             if not mediainfo:
                 return json.dumps({
                     "success": False,
