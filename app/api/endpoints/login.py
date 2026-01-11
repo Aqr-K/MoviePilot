@@ -32,11 +32,11 @@ def login_access_token(
         # 如果是需要MFA验证，返回特殊标识
         if user_or_message == "MFA_REQUIRED":
             raise HTTPException(
-                status_code=401, 
+                status_code=401,
                 detail="需要双重验证，请提供验证码或使用通行密钥",
                 headers={"X-MFA-Required": "true"}
             )
-        raise HTTPException(status_code=401, detail=user_or_message)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     # 用户等级
     level = SitesHelper().auth_level
