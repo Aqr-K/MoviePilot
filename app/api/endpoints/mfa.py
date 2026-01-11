@@ -24,6 +24,75 @@ from app.utils.otp import OtpUtils
 
 router = APIRouter()
 
+# ==================== 辅助函数 ====================
+
+def _build_credential_list(passkeys: list[PassKey]) -> list[dict[str, Any]]:
+    """
+    构建凭证列表
+
+    :param passkeys: PassKey 列表
+    :return: 凭证字典列表
+    """
+    return [
+        {
+            'credential_id': pk.credential_id,
+            'transports': pk.transports
+        }
+        for pk in passkeys
+    ] if passkeys else []
+
+
+def _extract_and_standardize_credential_id(credential: dict) -> str:
+    """
+    从凭证中提取并标准化 credential_id
+
+    :param credential: 凭证字典
+    :return: 标准化后的 credential_id
+    :raises ValueError: 如果凭证无效
+    """
+    credential_id_raw = credential.get('id') or credential.get('rawId')
+    if not credential_id_raw:
+        raise ValueError("无效的凭证")
+    return PassKeyHelper.standardize_credential_id(credential_id_raw)
+
+
+def _verify_passkey_and_update(
+    credential: dict,
+    challenge: str,
+    passkey: PassKey
+) -> tuple[bool, int]:
+    """
+    验证 PassKey 并更新使用时间和签名计数
+
+    :param credential: 凭证字典
+    :param challenge: 挑战值
+    :param passkey: PassKey 对象
+    :return: (验证是否成功, 新的签名计数)
+    """
+    success, new_sign_count = PassKeyHelper.verify_authentication_response(
+        credential=credential,
+        expected_challenge=challenge,
+        credential_public_key=passkey.public_key,
+        credential_current_sign_count=passkey.sign_count
+    )
+
+    if success:
+        passkey.update_last_used(db=None, sign_count=new_sign_count)
+
+    return success, new_sign_count
+
+
+async def _check_user_has_passkey(db: AsyncSession, user_id: int) -> bool:
+    """
+    检查用户是否有 PassKey
+
+    :param db: 数据库会话
+    :param user_id: 用户 ID
+    :return: 是否有 PassKey
+    """
+    return bool(await PassKey.async_get_by_user_id(db=db, user_id=user_id))
+
+
 # ==================== 请求模型 ====================
 
 class OtpVerifyRequest(schemas.BaseModel):
@@ -55,7 +124,7 @@ async def mfa_status(username: str, db: AsyncSession = Depends(get_async_db)) ->
     has_otp = user.is_otp
     
     # 检查是否有PassKey
-    has_passkey = bool(await PassKey.async_get_by_user_id(db=db, user_id=user.id))
+    has_passkey = await _check_user_has_passkey(db, user.id)
     
     # 只要有任何一种验证方式，就需要双重验证
     return schemas.Response(success=(has_otp or has_passkey))
@@ -93,7 +162,7 @@ async def otp_disable(
 ) -> Any:
     """关闭当前用户的 OTP 验证功能"""
     # 安全检查：如果存在 PassKey，不允许关闭 OTP
-    has_passkey = bool(await PassKey.async_get_by_user_id(db=db, user_id=current_user.id))
+    has_passkey = await _check_user_has_passkey(db, current_user.id)
     if has_passkey:
         return schemas.Response(
             success=False,
@@ -147,13 +216,7 @@ def passkey_register_start(
 
         # 获取用户已有的PassKey
         existing_passkeys = PassKey.get_by_user_id(db=None, user_id=current_user.id)
-        existing_credentials = [
-            {
-                'credential_id': pk.credential_id,
-                'transports': pk.transports
-            }
-            for pk in existing_passkeys
-        ] if existing_passkeys else None
+        existing_credentials = _build_credential_list(existing_passkeys) if existing_passkeys else None
 
         # 生成注册选项
         options_json, challenge = PassKeyHelper.generate_registration_options(
@@ -233,26 +296,15 @@ def passkey_authenticate_start(
         # 如果指定了用户名，只允许该用户的PassKey
         if passkey_req.username:
             user = User.get_by_name(db=None, name=passkey_req.username)
-            if not user:
+            existing_passkeys = PassKey.get_by_user_id(db=None, user_id=user.id) if user else None
+
+            if not user or not existing_passkeys:
                 return schemas.Response(
                     success=False,
-                    message="用户不存在"
+                    message="认证失败"
                 )
-            
-            existing_passkeys = PassKey.get_by_user_id(db=None, user_id=user.id)
-            if not existing_passkeys:
-                return schemas.Response(
-                    success=False,
-                    message="该用户未注册通行密钥"
-                )
-            
-            existing_credentials = [
-                {
-                    'credential_id': pk.credential_id,
-                    'transports': pk.transports
-                }
-                for pk in existing_passkeys
-            ]
+
+            existing_credentials = _build_credential_list(existing_passkeys)
 
         # 生成认证选项
         options_json, challenge = PassKeyHelper.generate_authentication_options(
@@ -270,7 +322,7 @@ def passkey_authenticate_start(
         logger.error(f"生成PassKey认证选项失败: {e}")
         return schemas.Response(
             success=False,
-            message=f"生成认证选项失败: {str(e)}"
+            message="认证失败"
         )
 
 
@@ -280,37 +332,28 @@ def passkey_authenticate_finish(
 ) -> Any:
     """完成 PassKey 认证 - 验证凭证并返回 token"""
     try:
-        # 从credential中提取credential_id
-        credential_id_raw = passkey_req.credential.get('id') or passkey_req.credential.get('rawId')
-        if not credential_id_raw:
-            raise HTTPException(status_code=400, detail="无效的凭证")
+        # 提取并标准化凭证ID
+        try:
+            credential_id = _extract_and_standardize_credential_id(passkey_req.credential)
+        except ValueError as e:
+            logger.warning(f"PassKey认证失败，提供的凭证无效: {e}")
+            raise HTTPException(status_code=401, detail="认证失败")
 
-        # 标准化凭证ID
-        credential_id = PassKeyHelper.standardize_credential_id(credential_id_raw)
-
-        # 查找PassKey
+        # 查找PassKey并获取用户
         passkey = PassKey.get_by_credential_id(db=None, credential_id=credential_id)
-        if not passkey:
-            raise HTTPException(status_code=401, detail="通行密钥不存在或已失效")
+        user = User.get_by_id(db=None, user_id=passkey.user_id) if passkey else None
+        if not passkey or not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="认证失败")
 
-        # 获取用户
-        user = User.get_by_id(db=None, user_id=passkey.user_id)
-        if not user or not user.is_active:
-            raise HTTPException(status_code=401, detail="用户不存在或已禁用")
-
-        # 验证认证响应
-        success, new_sign_count = PassKeyHelper.verify_authentication_response(
+        # 验证认证响应并更新
+        success, _ = _verify_passkey_and_update(
             credential=passkey_req.credential,
-            expected_challenge=passkey_req.challenge,
-            credential_public_key=passkey.public_key,
-            credential_current_sign_count=passkey.sign_count
+            challenge=passkey_req.challenge,
+            passkey=passkey
         )
 
         if not success:
-            raise HTTPException(status_code=401, detail="通行密钥验证失败")
-
-        # 更新使用时间和签名计数
-        passkey.update_last_used(db=None, sign_count=new_sign_count)
+            raise HTTPException(status_code=401, detail="认证失败")
 
         logger.info(f"用户 {user.name} 通过PassKey认证成功")
 
@@ -339,7 +382,7 @@ def passkey_authenticate_finish(
         raise
     except Exception as e:
         logger.error(f"PassKey认证失败: {e}")
-        raise HTTPException(status_code=401, detail=f"认证失败: {str(e)}")
+        raise HTTPException(status_code=401, detail="认证失败")
 
 
 @router.get("/passkey/list", summary="获取当前用户的 PassKey 列表", response_model=schemas.Response)
@@ -413,16 +456,12 @@ def passkey_verify_mfa(
 ) -> Any:
     """使用 PassKey 进行二次验证（MFA）"""
     try:
-        # 从credential中提取credential_id
-        credential_id_raw = passkey_req.credential.get('id') or passkey_req.credential.get('rawId')
-        if not credential_id_raw:
-            return schemas.Response(
-                success=False,
-                message="无效的凭证"
-            )
-
-        # 标准化凭证ID
-        credential_id = PassKeyHelper.standardize_credential_id(credential_id_raw)
+        # 提取并标准化凭证ID
+        try:
+            credential_id = _extract_and_standardize_credential_id(passkey_req.credential)
+        except ValueError as e:
+            logger.warning(f"PassKey二次验证失败，提供的凭证无效: {e}")
+            return schemas.Response(success=False, message="验证失败")
 
         # 查找PassKey（必须属于当前用户）
         passkey = PassKey.get_by_credential_id(db=None, credential_id=credential_id)
@@ -432,12 +471,11 @@ def passkey_verify_mfa(
                 message="通行密钥不存在或不属于当前用户"
             )
 
-        # 验证认证响应
-        success, new_sign_count = PassKeyHelper.verify_authentication_response(
+        # 验证认证响应并更新
+        success, _ = _verify_passkey_and_update(
             credential=passkey_req.credential,
-            expected_challenge=passkey_req.challenge,
-            credential_public_key=passkey.public_key,
-            credential_current_sign_count=passkey.sign_count
+            challenge=passkey_req.challenge,
+            passkey=passkey
         )
 
         if not success:
@@ -445,9 +483,6 @@ def passkey_verify_mfa(
                 success=False,
                 message="通行密钥验证失败"
             )
-
-        # 更新使用时间和签名计数
-        passkey.update_last_used(db=None, sign_count=new_sign_count)
 
         logger.info(f"用户 {current_user.name} 通过PassKey二次验证成功")
 
@@ -459,5 +494,5 @@ def passkey_verify_mfa(
         logger.error(f"PassKey二次验证失败: {e}")
         return schemas.Response(
             success=False,
-            message=f"验证失败: {str(e)}"
+            message="验证失败"
         )
