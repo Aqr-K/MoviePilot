@@ -365,7 +365,8 @@ class Discord:
             else:
                 # 匹配形如 "字段：值" 的片段，字段名不允许包含常见分隔符；
                 # 下一个字段需以顿号/逗号/分号等分隔开，且不能是 URL 协议开头，避免值里出现 URL 的":" 被误拆
-                name_re = r"[A-Za-z0-9\u4e00-\u9fa5_\-&]+"
+                # 字段名允许 emoji 等 Unicode 字符，但排除空白/分隔符/冒号
+                name_re = r"[^\s:：，,。；;、]+"
                 pair_pattern = re.compile(
                     rf"({name_re})[：:](.*?)(?=(?:[，,。；;、]+\s*(?!https?://|ftp://|ftps://|magnet:){name_re}[：:])|$)",
                     re.IGNORECASE,
