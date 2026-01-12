@@ -695,11 +695,13 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
 
         # 全程加锁
         with lock:
+            is_bluray_folder = False
             # 蓝光原盘文件处理
             if __is_bluray_sub(event_path):
                 event_path = __get_bluray_dir(event_path)
                 if not event_path:
                     return
+                is_bluray_folder = True
 
             # TTL缓存控重
             if self._cache.get(str(event_path)):
@@ -708,13 +710,20 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             self._cache[str(event_path)] = True
 
             try:
-                logger.info(f"开始整理文件: {event_path}")
+                if is_bluray_folder:
+                    logger.info(f"开始整理蓝光原盘: {event_path}")
+                else:
+                    logger.info(f"开始整理文件: {event_path}")
                 # 开始整理
                 TransferChain().do_transfer(
                     fileitem=FileItem(
                         storage=storage,
-                        path=event_path.as_posix(),
-                        type="file",
+                        path=(
+                            event_path.as_posix()
+                            if not is_bluray_folder
+                            else event_path.as_posix() + "/"
+                        ),
+                        type="file" if not is_bluray_folder else "dir",
                         name=event_path.name,
                         basename=event_path.stem,
                         extension=event_path.suffix[1:],
