@@ -27,7 +27,7 @@ class BluRayTest(TestCase):
         )
         self.__all = {self.__root.path: self.__root}
 
-        def __build_child(parent: schemas.FileItem, files: list[(str, list | int)]):
+        def __build_child(parent: schemas.FileItem, files: list[tuple[str, list | int]]):
             parent.children = []
             for name, children in files:
                 sep = "" if parent.path.endswith("/") else "/"
