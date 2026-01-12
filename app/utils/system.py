@@ -479,6 +479,8 @@ class SystemUtils:
     def is_bluray_dir(dir_path: Path) -> bool:
         """
         判断是否为蓝光原盘目录
+
+        (该方法已弃用，改用`StorageChain().is_bluray_folder)`
         """
         if not dir_path.is_dir():
             return False

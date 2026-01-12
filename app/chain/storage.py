@@ -133,22 +133,29 @@ class StorageChain(ChainBase):
         """
         return self.run_module("support_transtype", storage=storage)
 
+    def is_bluray_folder(self, fileitem: Optional[schemas.FileItem]) -> bool:
+        """
+        检查是否蓝光目录
+        """
+        if not fileitem or fileitem.type != "dir":
+            return False
+        return self.contains_bluray_subdirectories(self.list_files(fileitem))
+
+    @staticmethod
+    def contains_bluray_subdirectories(fileitems: Optional[List[schemas.FileItem]]) -> bool:
+        """
+        判断是否包含蓝光必备的文件夹
+        """
+        required_files = ("BDMV", "CERTIFICATE")
+        for item in fileitems or []:
+            if item.type == "dir" and item.name in required_files:
+                return True
+        return False
+
     def delete_media_file(self, fileitem: schemas.FileItem, delete_self: bool = True) -> bool:
         """
         删除媒体文件，以及不含媒体文件的目录
         """
-
-        def __is_bluray_dir(_fileitem: schemas.FileItem) -> bool:
-            """
-            检查是否蓝光目录
-            """
-            _dir_files = self.list_files(fileitem=_fileitem, recursion=False)
-            if _dir_files:
-                for _f in _dir_files:
-                    if _f.type == "dir" and _f.name in ["BDMV", "CERTIFICATE"]:
-                        return True
-            return False
-
         media_exts = settings.RMT_MEDIAEXT + settings.DOWNLOAD_TMPEXT
         fileitem_path = Path(fileitem.path) if fileitem.path else Path("")
         if len(fileitem_path.parts) <= 2:
@@ -156,7 +163,7 @@ class StorageChain(ChainBase):
             return False
         if fileitem.type == "dir":
             # 本身是目录
-            if __is_bluray_dir(fileitem):
+            if self.is_bluray_folder(fileitem):
                 logger.warn(f"正在删除蓝光原盘目录：【{fileitem.storage}】{fileitem.path}")
                 if not self.delete_file(fileitem):
                     logger.warn(f"【{fileitem.storage}】{fileitem.path} 删除失败")
