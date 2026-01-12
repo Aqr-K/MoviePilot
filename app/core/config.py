@@ -848,7 +848,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         获取TMDB图片网址
 
         :param file_path: TMDB API返回的xxx_path
-        :param file_size: 图片大小，支持的值包括：'original'和'w500'
+        :param file_size: 图片大小，例如：'original', 'w500' 等
         :return: 图片的完整URL
         """
         return (
