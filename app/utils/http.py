@@ -26,12 +26,14 @@ def cookie_parse(cookies_str: str, array: bool = False) -> Union[list, dict]:
     """
     if not cookies_str:
         return {}
+    from urllib.parse import unquote
     cookie_dict = {}
     cookies = cookies_str.split(";")
     for cookie in cookies:
-        cstr = cookie.split("=")
+        cstr = cookie.split("=", 1)  # 只分割第一个=，因为value可能包含=
         if len(cstr) > 1:
-            cookie_dict[cstr[0].strip()] = cstr[1].strip()
+            # URL解码Cookie值（但保留Cookie名不解码）
+            cookie_dict[cstr[0].strip()] = unquote(cstr[1].strip())
     if array:
         return [{"name": k, "value": v} for k, v in cookie_dict.items()]
     return cookie_dict
@@ -654,7 +656,8 @@ class AsyncRequestUtils:
                     proxy=self._proxies,
                     timeout=self._timeout,
                     verify=False,
-                    follow_redirects=True
+                    follow_redirects=True,
+                    cookies=self._cookies  # 在创建客户端时传入Cookie
             ) as client:
                 return await self._make_request(client, method, url, raise_exception, **kwargs)
         else:
@@ -666,7 +669,8 @@ class AsyncRequestUtils:
         执行实际的异步请求
         """
         kwargs.setdefault("headers", self._headers)
-        kwargs.setdefault("cookies", self._cookies)
+        # Cookie已经在AsyncClient创建时设置，不要在request时再设置，否则会被覆盖
+        # kwargs.setdefault("cookies", self._cookies)
 
         try:
             return await client.request(method, url, **kwargs)
