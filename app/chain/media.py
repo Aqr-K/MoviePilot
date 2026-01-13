@@ -315,21 +315,6 @@ class MediaChain(ChainBase):
             )
         return None
 
-    @staticmethod
-    def is_bluray_folder(fileitem: schemas.FileItem) -> bool:
-        """
-        判断是否为原盘目录
-        """
-        if not fileitem or fileitem.type != "dir":
-            return False
-        # 蓝光原盘目录必备的文件或文件夹
-        required_files = ['BDMV', 'CERTIFICATE']
-        # 检查目录下是否存在所需文件或文件夹
-        for item in StorageChain().list_files(fileitem):
-            if item.name in required_files:
-                return True
-        return False
-
     @eventmanager.register(EventType.MetadataScrape)
     def scrape_metadata_event(self, event: Event):
         """
@@ -370,7 +355,7 @@ class MediaChain(ChainBase):
             else:
                 if file_list:
                     # 如果是BDMV原盘目录，只对根目录进行刮削，不处理子目录
-                    if self.is_bluray_folder(fileitem):
+                    if storagechain.is_bluray_folder(fileitem):
                         logger.info(f"检测到BDMV原盘目录，只对根目录进行刮削：{fileitem.path}")
                         self.scrape_metadata(fileitem=fileitem,
                                              mediainfo=mediainfo,
@@ -563,10 +548,23 @@ class MediaChain(ChainBase):
                     logger.info("电影NFO刮削已关闭，跳过")
             else:
                 # 电影目录
-                if recursive:
-                    # 处理文件
-                    if self.is_bluray_folder(fileitem):
-                        # 原盘目录
+                files = __list_files(_fileitem=fileitem)
+                is_bluray_folder = storagechain.contains_bluray_subdirectories(files)
+                if recursive and not is_bluray_folder:
+                    # 处理非原盘目录内的文件
+                    for file in files:
+                        if file.type == "dir":
+                            # 电影不处理子目录
+                            continue
+                        self.scrape_metadata(fileitem=file,
+                                                mediainfo=mediainfo,
+                                                init_folder=False,
+                                                parent=fileitem,
+                                                overwrite=overwrite)
+                # 生成目录内图片文件
+                if init_folder:
+                    if is_bluray_folder:
+                        # 检查电影NFO开关
                         if scraping_switchs.get('movie_nfo', True):
                             nfo_path = filepath / (filepath.name + ".nfo")
                             if overwrite or not storagechain.get_file_item(storage=fileitem.storage, path=nfo_path):
@@ -581,20 +579,6 @@ class MediaChain(ChainBase):
                                 logger.info(f"已存在nfo文件：{nfo_path}")
                         else:
                             logger.info("电影NFO刮削已关闭，跳过")
-                    else:
-                        # 处理目录内的文件
-                        files = __list_files(_fileitem=fileitem)
-                        for file in files:
-                            if file.type == "dir":
-                                # 电影不处理子目录
-                                continue
-                            self.scrape_metadata(fileitem=file,
-                                                 mediainfo=mediainfo,
-                                                 init_folder=False,
-                                                 parent=fileitem,
-                                                 overwrite=overwrite)
-                # 生成目录内图片文件
-                if init_folder:
                     # 图片
                     image_dict = self.metadata_img(mediainfo=mediainfo)
                     if image_dict:

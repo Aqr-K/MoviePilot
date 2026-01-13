@@ -479,11 +479,11 @@ class MediaInfo:
                 self.episode_groups = info.pop("episode_groups").get("results") or []
 
         # 海报
-        if info.get('poster_path'):
-            self.poster_path = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{info.get('poster_path')}"
+        if path := info.get('poster_path'):
+            self.poster_path = settings.TMDB_IMAGE_URL(path)
         # 背景
-        if info.get('backdrop_path'):
-            self.backdrop_path = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{info.get('backdrop_path')}"
+        if path := info.get('backdrop_path'):
+            self.backdrop_path = settings.TMDB_IMAGE_URL(path)
         # 导演和演员
         self.directors, self.actors = __directors_actors(info)
         # 别名和译名

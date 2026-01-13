@@ -376,7 +376,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
         self._transfer_interval = 15
         # 事件管理器
         self.jobview = JobManager()
-        # 车移成功的文件清单
+        # 转移成功的文件清单
         self._success_target_files: Dict[str, List[str]] = {}
         # 启动整理任务
         self.__init()
@@ -873,7 +873,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
                     state, errmsg = self.do_transfer(
                         fileitem=FileItem(
                             storage="local",
-                            path=file_path.as_posix(),
+                            path=file_path.as_posix() + ("/" if file_path.is_dir() else ""),
                             type="dir" if not file_path.is_file() else "file",
                             name=file_path.name,
                             size=file_path.stat().st_size,
@@ -908,16 +908,6 @@ class TransferChain(ChainBase, metaclass=Singleton):
         """
         storagechain = StorageChain()
 
-        def __contains_bluray_sub(_fileitems: List[FileItem]) -> bool:
-            """
-            判断是否包含蓝光子目录
-            """
-            if _fileitems:
-                for sub in _fileitems:
-                    if sub.type == "dir" and sub.name in ["BDMV", "CERTIFICATE"]:
-                        return True
-            return False
-
         def __is_bluray_sub(_path: str) -> bool:
             """
             判断是否蓝光原盘目录内的子目录或文件
@@ -949,7 +939,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
 
         # 蓝光原盘根目录
         sub_items = storagechain.list_files(fileitem) or []
-        if __contains_bluray_sub(sub_items):
+        if storagechain.contains_bluray_subdirectories(sub_items):
             return [(fileitem, True)]
 
         # 需要整理的文件项列表

@@ -85,10 +85,10 @@ class TmdbScraper:
                     seasoninfo = self.original_tmdb(mediainfo).get_tv_season_detail(mediainfo.tmdb_id, season)
                 if seasoninfo:
                     episodeinfo = self.__get_episode_detail(seasoninfo, episode)
-                    if episodeinfo and episodeinfo.get("still_path"):
+                    if still_path := episodeinfo.get("still_path"):
                         # TMDB集still图片
                         still_name = f"{episode}"
-                        still_url = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{episodeinfo.get('still_path')}"
+                        still_url = settings.TMDB_IMAGE_URL(still_path)
                         images[still_name] = still_url
             else:
                 # 季的图片
@@ -115,7 +115,7 @@ class TmdbScraper:
                 if _mediainfo:
                     for attr_name, attr_value in _mediainfo.items():
                         if attr_name.endswith("_path") and attr_value is not None:
-                            image_url = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{attr_value}"
+                            image_url = settings.TMDB_IMAGE_URL(attr_value)
                             image_name = attr_name.replace("_path", "") + Path(image_url).suffix
                             images[image_name] = image_url
             return images
@@ -127,11 +127,11 @@ class TmdbScraper:
         """
         # TMDB季poster图片
         sea_seq = str(season).rjust(2, '0')
-        if seasoninfo.get("poster_path"):
+        if poster_path := seasoninfo.get("poster_path"):
             # 后缀
-            ext = Path(seasoninfo.get('poster_path')).suffix
+            ext = Path(poster_path).suffix
             # URL
-            url = f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{seasoninfo.get('poster_path')}"
+            url = settings.TMDB_IMAGE_URL(poster_path)
             # S0海报格式不同
             if season == 0:
                 image_name = f"season-specials-poster{ext}"
@@ -190,8 +190,8 @@ class TmdbScraper:
             DomUtils.add_node(doc, xactor, "type", "Actor")
             DomUtils.add_node(doc, xactor, "role", actor.get("character") or actor.get("role") or "")
             DomUtils.add_node(doc, xactor, "tmdbid", actor.get("id") or "")
-            DomUtils.add_node(doc, xactor, "thumb",
-                              f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{actor.get('profile_path')}")
+            if profile_path := actor.get('profile_path'):
+                DomUtils.add_node(doc, xactor, "thumb", settings.TMDB_IMAGE_URL(profile_path))
             DomUtils.add_node(doc, xactor, "profile",
                               f"https://www.themoviedb.org/person/{actor.get('id')}")
         # 风格
@@ -330,8 +330,8 @@ class TmdbScraper:
                 DomUtils.add_node(doc, xactor, "name", actor.get("name") or "")
                 DomUtils.add_node(doc, xactor, "type", "Actor")
                 DomUtils.add_node(doc, xactor, "tmdbid", actor.get("id") or "")
-                DomUtils.add_node(doc, xactor, "thumb",
-                                  f"https://{settings.TMDB_IMAGE_DOMAIN}/t/p/original{actor.get('profile_path')}")
+                if profile_path := actor.get('profile_path'):
+                    DomUtils.add_node(doc, xactor, "thumb", settings.TMDB_IMAGE_URL(profile_path))
                 DomUtils.add_node(doc, xactor, "profile",
                                   f"https://www.themoviedb.org/person/{actor.get('id')}")
         return doc

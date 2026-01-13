@@ -826,7 +826,7 @@ class TmdbApi:
             # 转换多语种标题
             self.__update_tmdbinfo_extra_title(tmdb_info)
             # 转换中文标题
-            if settings.TMDB_LOCALE == "zh":
+            if self.tmdb.language in ("zh", "zh-CN"):
                 self.__update_tmdbinfo_cn_title(tmdb_info)
 
         return tmdb_info
@@ -2134,7 +2134,7 @@ class TmdbApi:
             # 转换多语种标题
             self.__update_tmdbinfo_extra_title(tmdb_info)
             # 转换中文标题
-            if settings.TMDB_LOCALE == "zh":
+            if self.tmdb.language in ("zh", "zh-CN"):
                 self.__update_tmdbinfo_cn_title(tmdb_info)
 
         return tmdb_info

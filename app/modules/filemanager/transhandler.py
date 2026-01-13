@@ -132,6 +132,15 @@ class TransHandler:
                         return self.result.model_copy()
                 else:
                     new_path = target_path / fileitem.name
+                # 在整理目录前先尝试获取原盘大小，避免整理记录出现0字节的情况
+                # TODO 当前只计算STREAM目录内的文件大小，如果需要精确则递归完整目录
+                if stream_fileitem := source_oper.get_item(
+                    Path(fileitem.path) / "BDMV" / "STREAM"
+                ):
+                    fileitem.size = 0
+                    files = source_oper.list(stream_fileitem) or []
+                    for file in files:
+                        fileitem.size += file.size
                 # 整理目录
                 new_diritem, errmsg = self.__transfer_dir(fileitem=fileitem,
                                                           mediainfo=mediainfo,
