@@ -142,19 +142,22 @@ class DirectoryHelper:
         # 计算重命名中的文件夹层数
         rename_list = rename_format.split("/")
         rename_format_level = len(rename_list) - 1
-        # 查找标题参数所在层
-        for level, name in enumerate(rename_list):
+        # 反向查找标题参数所在层
+        for level, name in enumerate(reversed(rename_list)):
+            if level == 0:
+                # 跳过文件名的标题参数
+                continue
             matchs = JINJA2_VAR_PATTERN.findall(name)
             if not matchs:
                 continue
             # 处理特例，有的人重命名的第一层是年份、分辨率
             if any("title" in m for m in matchs):
-                # 找出含标题的这一层作为媒体根目录
-                rename_format_level -= level
+                # 找出最后一层含有标题参数的目录作为媒体根目录
+                rename_format_level = level
                 break
         else:
             # 假定第一层目录是媒体根目录
-            logger.warn(f"重命名格式 {rename_format} 缺少标题参数")
+            logger.warn(f"重命名格式 {rename_format} 缺少标题目录")
         if rename_format_level > len(rename_path.parents):
             # 通常因为路径以/结尾，被Path规范化删除了
             logger.error(f"路径 {rename_path} 不匹配重命名格式 {rename_format}")
