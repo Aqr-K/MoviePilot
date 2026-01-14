@@ -10,6 +10,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.chain.search import SearchChain
 from app.log import logger
 from app.schemas.types import MediaType
+from app.utils.string import StringUtils
 
 
 class SearchTorrentsInput(BaseModel):
@@ -99,7 +100,7 @@ class SearchTorrentsTool(MoviePilotTool):
                     if t.torrent_info:
                         simplified["torrent_info"] = {
                             "title": t.torrent_info.title,
-                            "size": t.torrent_info.size,
+                            "size": StringUtils.format_size(t.torrent_info.size),
                             "seeders": t.torrent_info.seeders,
                             "peers": t.torrent_info.peers,
                             "site_name": t.torrent_info.site_name,

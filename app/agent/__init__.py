@@ -16,6 +16,7 @@ from app.agent.prompt import PromptManager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
+from app.helper.llm import LLMHelper
 from app.helper.message import MessageHelper
 from app.log import logger
 from app.schemas import Notification
@@ -64,57 +65,7 @@ class MoviePilotAgent:
 
     def _initialize_llm(self):
         """初始化LLM模型"""
-        provider = settings.LLM_PROVIDER.lower()
-        api_key = settings.LLM_API_KEY
-
-        if provider == "google":
-            if settings.PROXY_HOST:
-                from langchain_openai import ChatOpenAI
-                return ChatOpenAI(
-                    model=settings.LLM_MODEL,
-                    api_key=api_key,
-                    max_retries=3,
-                    base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-                    temperature=settings.LLM_TEMPERATURE,
-                    streaming=True,
-                    callbacks=[self.callback_handler],
-                    stream_usage=True,
-                    openai_proxy=settings.PROXY_HOST
-                )
-            else:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                return ChatGoogleGenerativeAI(
-                    model=settings.LLM_MODEL,
-                    google_api_key=api_key,
-                    max_retries=3,
-                    temperature=settings.LLM_TEMPERATURE,
-                    streaming=True,
-                    callbacks=[self.callback_handler]
-                )
-        elif provider == "deepseek":
-            from langchain_deepseek import ChatDeepSeek
-            return ChatDeepSeek(
-                model=settings.LLM_MODEL,
-                api_key=api_key,
-                max_retries=3,
-                temperature=settings.LLM_TEMPERATURE,
-                streaming=True,
-                callbacks=[self.callback_handler],
-                stream_usage=True
-            )
-        else:
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                model=settings.LLM_MODEL,
-                api_key=api_key,
-                max_retries=3,
-                base_url=settings.LLM_BASE_URL,
-                temperature=settings.LLM_TEMPERATURE,
-                streaming=True,
-                callbacks=[self.callback_handler],
-                stream_usage=True,
-                openai_proxy=settings.PROXY_HOST
-            )
+        return LLMHelper.get_llm(streaming=True, callbacks=[self.callback_handler])
 
     def _initialize_tools(self) -> List:
         """初始化工具列表"""

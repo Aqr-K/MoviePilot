@@ -243,6 +243,27 @@ class StringUtils:
             return size + "B"
 
     @staticmethod
+    def format_size(size_bytes: int) -> str:
+        """
+        将字节转换为人类可读格式
+        """
+        if not size_bytes or size_bytes == 0:
+            return "0 B"
+
+        units = ["B", "KB", "MB", "GB", "TB", "PB"]
+        size = float(size_bytes)
+        unit_index = 0
+
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+
+        # 保留两位小数
+        if unit_index == 0:
+            return f"{int(size)} {units[unit_index]}"
+        return f"{size:.2f} {units[unit_index]}"
+
+    @staticmethod
     def url_equal(url1: str, url2: str) -> bool:
         """
         比较两个地址是否为同一个网站

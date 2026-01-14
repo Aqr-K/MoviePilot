@@ -130,18 +130,40 @@ async def cache_img(
 def get_global_setting(token: str):
     """
     查询非敏感系统设置（默认鉴权）
+    仅包含登录前UI初始化必需的字段
     """
     if token != "moviepilot":
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    # 白名单模式，仅包含前端业务逻辑必需的字段
+    # 白名单模式，仅包含登录前UI初始化必需的字段
     info = settings.model_dump(
         include={
             "TMDB_IMAGE_DOMAIN",
             "GLOBAL_IMAGE_CACHE",
             "ADVANCED_MODE",
+        }
+    )
+    # 追加版本信息（用于版本检查）
+    info.update({
+        "FRONTEND_VERSION": SystemChain.get_frontend_version(),
+        "BACKEND_VERSION": APP_VERSION
+    })
+    return schemas.Response(success=True,
+                            data=info)
+
+
+@router.get("/global/user", summary="查询用户相关系统设置", response_model=schemas.Response)
+async def get_user_global_setting(_: User = Depends(get_current_active_user_async)):
+    """
+    查询用户相关系统设置（登录后获取）
+    包含业务功能相关的配置和用户权限信息
+    """
+    # 业务功能相关的配置字段
+    info = settings.model_dump(
+        include={
             "RECOGNIZE_SOURCE",
-            "SEARCH_SOURCE"
+            "SEARCH_SOURCE",
+            "AI_RECOMMEND_ENABLED"
         }
     )
     # 追加用户唯一ID和订阅分享管理权限
@@ -150,8 +172,6 @@ def get_global_setting(token: str):
         "USER_UNIQUE_ID": SubscribeHelper().get_user_uuid(),
         "SUBSCRIBE_SHARE_MANAGE": share_admin,
         "WORKFLOW_SHARE_MANAGE": share_admin,
-        "FRONTEND_VERSION": SystemChain.get_frontend_version(),
-        "BACKEND_VERSION": APP_VERSION
     })
     return schemas.Response(success=True,
                             data=info)
