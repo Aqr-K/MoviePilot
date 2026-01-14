@@ -923,9 +923,12 @@ class TransferChain(ChainBase, metaclass=Singleton):
                     return storagechain.get_file_item(storage=_storage, path=p.parent)
             return None
 
-        if not storagechain.get_item(fileitem):
+        latest_fileitem = storagechain.get_item(fileitem)
+        if not latest_fileitem:
             logger.warn(f"目录或文件不存在：{fileitem.path}")
             return []
+        # 确保从历史记录重新整理时 能获得最新的源文件大小、修改日期等
+        fileitem = latest_fileitem
 
         # 蓝光原盘子目录或文件
         if __is_bluray_sub(fileitem.path):
