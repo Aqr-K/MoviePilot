@@ -29,6 +29,7 @@ class SearchChain(ChainBase):
     """
 
     __result_temp_file = "__search_result__"
+    __ai_result_temp_file = "__ai_search_result__"
 
     def search_by_id(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                      mtype: MediaType = None, area: Optional[str] = "title", season: Optional[int] = None,
@@ -97,6 +98,18 @@ class SearchChain(ChainBase):
         异步获取上次搜索结果
         """
         return await self.async_load_cache(self.__result_temp_file)
+
+    async def async_last_ai_results(self) -> Optional[List[Context]]:
+        """
+        异步获取上次AI推荐结果
+        """
+        return await self.async_load_cache(self.__ai_result_temp_file)
+
+    async def async_save_ai_results(self, results: List[Context]):
+        """
+        异步保存AI推荐结果
+        """
+        await self.async_save_cache(results, self.__ai_result_temp_file)
 
     async def async_search_by_id(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                                  mtype: MediaType = None, area: Optional[str] = "title", season: Optional[int] = None,

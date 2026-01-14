@@ -439,6 +439,12 @@ class ConfigModel(BaseModel):
     LLM_MEMORY_RETENTION_DAYS: int = 1
     # Redis记忆保留天数（如果使用Redis）
     LLM_REDIS_MEMORY_RETENTION_DAYS: int = 7
+    # 是否启用AI推荐
+    AI_RECOMMEND_ENABLED: bool = False
+    # AI推荐用户偏好
+    AI_RECOMMEND_USER_PREFERENCE: str = ""
+    # AI推荐条目数量限制
+    AI_RECOMMEND_MAX_ITEMS: int = 50
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):

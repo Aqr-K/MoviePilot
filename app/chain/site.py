@@ -489,20 +489,18 @@ class SiteChain(ChainBase):
             logger.warn(f"站点 {domain} 索引器不存在！")
             return
         # 查询站点图标
-        site_icon = siteoper.get_icon_by_domain(domain)
-        if not site_icon or not site_icon.base64:
-            logger.info(f"开始缓存站点 {indexer.get('name')} 图标 ...")
-            icon_url, icon_base64 = self.__parse_favicon(url=indexer.get("domain"),
-                                                         cookie=cookie,
-                                                         ua=settings.USER_AGENT)
-            if icon_url:
-                siteoper.update_icon(name=indexer.get("name"),
-                                     domain=domain,
-                                     icon_url=icon_url,
-                                     icon_base64=icon_base64)
-                logger.info(f"缓存站点 {indexer.get('name')} 图标成功")
-            else:
-                logger.warn(f"缓存站点 {indexer.get('name')} 图标失败")
+        logger.info(f"开始缓存站点 {indexer.get('name')} 图标 ...")
+        icon_url, icon_base64 = self.__parse_favicon(url=indexer.get("domain"),
+                                                     cookie=cookie,
+                                                     ua=settings.USER_AGENT)
+        if icon_url:
+            siteoper.update_icon(name=indexer.get("name"),
+                                 domain=domain,
+                                 icon_url=icon_url,
+                                 icon_base64=icon_base64)
+            logger.info(f"缓存站点 {indexer.get('name')} 图标成功")
+        else:
+            logger.warn(f"缓存站点 {indexer.get('name')} 图标失败")
 
     @eventmanager.register(EventType.SiteUpdated)
     def clear_site_data(self, event: Event):
