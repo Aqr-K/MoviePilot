@@ -17,6 +17,7 @@ from fastapi.security import OAuth2PasswordBearer, APIKeyHeader, APIKeyQuery, AP
 from passlib.context import CryptContext
 
 from app import schemas
+from app.core.cache import cached
 from app.core.config import settings
 from app.log import logger
 
@@ -66,6 +67,7 @@ def __get_api_key(
     return key_header or key_query # 首选请求头
 
 
+@cached(maxsize=1, ttl=600)
 def __create_superuser_token_payload() -> schemas.TokenPayload:
     """
     创建管理员用户的TokenPayload
