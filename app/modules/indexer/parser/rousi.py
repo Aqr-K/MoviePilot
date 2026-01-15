@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 import json
+from urllib.parse import urljoin
 from typing import Optional, Tuple
 
 from app.log import logger
-from app.modules.indexer.parser import SiteParserBase, SiteSchema
+from app.core.config import settings
+from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
+from app.modules.indexer.parser import SiteParserBase, SiteSchema
 
 
 class RousiSiteUserInfo(SiteParserBase):
@@ -162,3 +165,69 @@ class RousiSiteUserInfo(SiteParserBase):
         :return: (标题, 日期, 内容)
         """
         return None, None, None
+
+    def _pase_unread_msgs(self):
+        """
+        解析所有未读消息标题和内容
+        Rousi.pro API v1 暂未提供消息相关接口，暂时以网页接口实现
+        
+        :return:
+        """
+        if not self.token:
+            logger.warn(f"{self._site_name} 站点未配置 Authorization 请求头，跳过消息解析")
+            return
+        
+        headers = {
+            "User-Agent": self._ua,
+            "Accept": "application/json, text/plain, */*",
+            "Authorization": self.token if self.token.startswith("Bearer ") else f"Bearer {self.token}"
+        }
+        
+        def __get_message_list(page: int):
+            params = {
+                "page": page,
+                "page_size": 100,
+                "unread_only": "true"
+            }
+            res = RequestUtils(
+                headers=headers,
+                timeout=60,
+                proxies=settings.PROXY if self._proxy else None
+            ).get_res(
+                url=urljoin(self._base_url, "api/messages"),
+                params=params
+            )
+            if not res or res.status_code != 200 or not res.text:
+                logger.warn(f"{self._site_name} 站点解析消息失败，状态码: {res.status_code if res else '无响应'}")
+                return {
+                    "messages": [],
+                    "total_pages": 0
+                }
+            return res.json()
+        
+        # 分页获取所有未读消息
+        page = 0
+        res = __get_message_list(page)
+        page += 1
+        messages = res.get("messages", [])
+        total_pages = res.get("total_pages", 0)
+        while page < total_pages:
+            res = __get_message_list(page)
+            messages.extend(res.get("messages", []))
+            page += 1
+        
+        for messsage in messages:
+            head = messsage.get("title")
+            date = StringUtils.unify_datetime_str(messsage.get("created_at"))
+            content = messsage.get("content")
+            logger.debug(f"{self._site_name} 标题 {head} 时间 {date} 内容 {content}")
+            self.message_unread_contents.append((head, date, content))
+            
+        # 更新消息为已读
+        RequestUtils(
+            headers=headers,
+            timeout=60,
+            proxies=settings.PROXY if self._proxy else None
+        ).post_res(
+            url=urljoin(self._base_url, "api/messages/read-all")
+        )
