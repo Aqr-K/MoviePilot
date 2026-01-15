@@ -1,5 +1,3 @@
-"""MoviePilot工具工厂"""
-
 from typing import List, Callable
 
 from app.agent.tools.impl.add_download import AddDownloadTool
@@ -47,13 +45,17 @@ from .base import MoviePilotTool
 
 
 class MoviePilotToolFactory:
-    """MoviePilot工具工厂"""
+    """
+    MoviePilot工具工厂
+    """
 
     @staticmethod
     def create_tools(session_id: str, user_id: str,
                      channel: str = None, source: str = None, username: str = None,
-                     callback_handler: Callable = None, memory_mananger: Callable = None) -> List[MoviePilotTool]:
-        """创建MoviePilot工具列表"""
+                     callback_handler: Callable = None) -> List[MoviePilotTool]:
+        """
+        创建MoviePilot工具列表
+        """
         tools = []
         tool_definitions = [
             SearchMediaTool,
@@ -104,7 +106,6 @@ class MoviePilotToolFactory:
             )
             tool.set_message_attr(channel=channel, source=source, username=username)
             tool.set_callback_handler(callback_handler=callback_handler)
-            tool.set_memory_manager(memory_manager=memory_mananger)
             tools.append(tool)
         
         # 加载插件提供的工具
@@ -127,7 +128,6 @@ class MoviePilotToolFactory:
                     )
                     tool.set_message_attr(channel=channel, source=source, username=username)
                     tool.set_callback_handler(callback_handler=callback_handler)
-                    tool.set_memory_manager(memory_manager=memory_mananger)
                     tools.append(tool)
                     plugin_tools_count += 1
                     logger.debug(f"成功加载插件 {plugin_name}({plugin_id}) 的工具: {ToolClass.__name__}")

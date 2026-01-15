@@ -1,20 +1,17 @@
-"""
-AI智能体初始化器
-"""
-
 import asyncio
 import threading
-from typing import Optional
 
+from app.agent import agent_manager
 from app.core.config import settings
 from app.log import logger
 
 
 class AgentInitializer:
-    """AI智能体初始化器"""
+    """
+    AI智能体初始化器
+    """
     
     def __init__(self):
-        self.agent_manager = None
         self._initialized = False
     
     async def initialize(self) -> bool:
@@ -25,9 +22,6 @@ class AgentInitializer:
             if not settings.AI_AGENT_ENABLE:
                 logger.info("AI智能体功能未启用")
                 return True
-            
-            from app.agent import agent_manager
-            self.agent_manager = agent_manager
             
             await agent_manager.initialize()
             self._initialized = True
@@ -43,10 +37,10 @@ class AgentInitializer:
         清理AI智能体管理器
         """
         try:
-            if not self._initialized or not self.agent_manager:
+            if not self._initialized:
                 return
                 
-            await self.agent_manager.close()
+            await agent_manager.close()
             self._initialized = False
             logger.info("AI智能体管理器已关闭")
             
@@ -78,8 +72,8 @@ def init_agent():
                 else:
                     logger.error("AI智能体管理器初始化失败")
                 return success
-            except Exception as e:
-                logger.error(f"AI智能体管理器初始化失败: {e}")
+            except Exception as err:
+                logger.error(f"AI智能体管理器初始化失败: {err}")
                 return False
             finally:
                 loop.close()

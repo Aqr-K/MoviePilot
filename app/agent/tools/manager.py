@@ -1,18 +1,15 @@
-"""MoviePilot工具管理器
-用于HTTP API调用工具
-"""
-
 import json
 import uuid
 from typing import Any, Dict, List, Optional
 
-from app.agent import ConversationMemoryManager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.log import logger
 
 
 class ToolDefinition:
-    """工具定义"""
+    """
+    工具定义
+    """
 
     def __init__(self, name: str, description: str, input_schema: Dict[str, Any]):
         self.name = name
@@ -21,7 +18,9 @@ class ToolDefinition:
 
 
 class MoviePilotToolsManager:
-    """MoviePilot工具管理器（用于HTTP API）"""
+    """
+    MoviePilot工具管理器（用于HTTP API）
+    """
 
     def __init__(self, user_id: str = "api_user", session_id: str = uuid.uuid4()):
         """
@@ -34,11 +33,12 @@ class MoviePilotToolsManager:
         self.user_id = user_id
         self.session_id = session_id
         self.tools: List[Any] = []
-        self.memory_manager = ConversationMemoryManager()
         self._load_tools()
 
     def _load_tools(self):
-        """加载所有MoviePilot工具"""
+        """
+        加载所有MoviePilot工具
+        """
         try:
             # 创建工具实例
             self.tools = MoviePilotToolFactory.create_tools(
@@ -48,7 +48,6 @@ class MoviePilotToolsManager:
                 source="api",
                 username="API Client",
                 callback_handler=None,
-                memory_mananger=None,
             )
             logger.info(f"成功加载 {len(self.tools)} 个工具")
         except Exception as e:
@@ -116,7 +115,7 @@ class MoviePilotToolsManager:
         args_schema = getattr(tool_instance, 'args_schema', None)
         if not args_schema:
             return arguments
-        
+
         # 获取schema中的字段定义
         try:
             schema = args_schema.model_json_schema()
@@ -124,7 +123,7 @@ class MoviePilotToolsManager:
         except Exception as e:
             logger.warning(f"获取工具schema失败: {e}")
             return arguments
-        
+
         # 规范化参数
         normalized = {}
         for key, value in arguments.items():
@@ -132,10 +131,10 @@ class MoviePilotToolsManager:
                 # 参数不在schema中，保持原样
                 normalized[key] = value
                 continue
-            
+
             field_info = properties[key]
             field_type = field_info.get("type")
-            
+
             # 处理 anyOf 类型（例如 Optional[int] 会生成 anyOf）
             any_of = field_info.get("anyOf")
             if any_of and not field_type:
@@ -144,7 +143,7 @@ class MoviePilotToolsManager:
                     if "type" in type_option and type_option["type"] != "null":
                         field_type = type_option["type"]
                         break
-            
+
             # 根据类型进行转换
             if field_type == "integer" and isinstance(value, str):
                 try:
@@ -167,7 +166,7 @@ class MoviePilotToolsManager:
                     normalized[key] = True
             else:
                 normalized[key] = value
-        
+
         return normalized
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -192,7 +191,7 @@ class MoviePilotToolsManager:
         try:
             # 规范化参数类型
             normalized_arguments = self._normalize_arguments(tool_instance, arguments)
-            
+
             # 调用工具的run方法
             result = await tool_instance.run(**normalized_arguments)
 
@@ -270,3 +269,6 @@ class MoviePilotToolsManager:
             "properties": properties,
             "required": required
         }
+
+
+moviepilot_tool_manager = MoviePilotToolsManager()

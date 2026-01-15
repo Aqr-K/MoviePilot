@@ -1,5 +1,3 @@
-"""MoviePilot AI智能体实现"""
-
 import asyncio
 from typing import Dict, List, Any
 
@@ -11,8 +9,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolCall, ToolMessa
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from app.agent.callback import StreamingCallbackHandler
-from app.agent.memory import ConversationMemoryManager
-from app.agent.prompt import PromptManager
+from app.agent.memory import conversation_manager
+from app.agent.prompt import prompt_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
@@ -27,7 +25,9 @@ class AgentChain(ChainBase):
 
 
 class MoviePilotAgent:
-    """MoviePilot AI智能体"""
+    """
+    MoviePilot AI智能体
+    """
 
     def __init__(self, session_id: str, user_id: str = None,
                  channel: str = None, source: str = None, username: str = None):
@@ -39,12 +39,6 @@ class MoviePilotAgent:
 
         # 消息助手
         self.message_helper = MessageHelper()
-
-        # 记忆管理器
-        self.memory_manager = ConversationMemoryManager()
-
-        # 提示词管理器
-        self.prompt_manager = PromptManager()
 
         # 回调处理器
         self.callback_handler = StreamingCallbackHandler(
@@ -64,30 +58,37 @@ class MoviePilotAgent:
         self.agent_executor = self._create_agent_executor()
 
     def _initialize_llm(self):
-        """初始化LLM模型"""
+        """
+        初始化LLM模型
+        """
         return LLMHelper.get_llm(streaming=True, callbacks=[self.callback_handler])
 
     def _initialize_tools(self) -> List:
-        """初始化工具列表"""
+        """
+        初始化工具列表
+        """
         return MoviePilotToolFactory.create_tools(
             session_id=self.session_id,
             user_id=self.user_id,
             channel=self.channel,
             source=self.source,
             username=self.username,
-            callback_handler=self.callback_handler,
-            memory_mananger=self.memory_manager
+            callback_handler=self.callback_handler
         )
 
     @staticmethod
     def _initialize_session_store() -> Dict[str, InMemoryChatMessageHistory]:
-        """初始化内存存储"""
+        """
+        初始化内存存储
+        """
         return {}
 
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
-        """获取会话历史"""
+        """
+        获取会话历史
+        """
         chat_history = InMemoryChatMessageHistory()
-        messages: List[dict] = self.memory_manager.get_recent_messages_for_agent(
+        messages: List[dict] = conversation_manager.get_recent_messages_for_agent(
             session_id=session_id,
             user_id=self.user_id
         )
@@ -119,7 +120,9 @@ class MoviePilotAgent:
 
     @staticmethod
     def _initialize_prompt() -> ChatPromptTemplate:
-        """初始化提示词模板"""
+        """
+        初始化提示词模板
+        """
         try:
             prompt_template = ChatPromptTemplate.from_messages([
                 ("system", "{system_prompt}"),
@@ -134,7 +137,9 @@ class MoviePilotAgent:
             raise e
 
     def _create_agent_executor(self) -> RunnableWithMessageHistory:
-        """创建Agent执行器"""
+        """
+        创建Agent执行器
+        """
         try:
             agent = create_openai_tools_agent(
                 llm=self.llm,
@@ -161,10 +166,12 @@ class MoviePilotAgent:
             raise e
 
     async def process_message(self, message: str) -> str:
-        """处理用户消息"""
+        """
+        处理用户消息
+        """
         try:
             # 添加用户消息到记忆
-            await self.memory_manager.add_memory(
+            await conversation_manager.add_conversation(
                 self.session_id,
                 user_id=self.user_id,
                 role="user",
@@ -173,7 +180,7 @@ class MoviePilotAgent:
 
             # 构建输入上下文
             input_context = {
-                "system_prompt": self.prompt_manager.get_agent_prompt(channel=self.channel),
+                "system_prompt": prompt_manager.get_agent_prompt(channel=self.channel),
                 "input": message
             }
 
@@ -190,7 +197,7 @@ class MoviePilotAgent:
                 await self.send_agent_message(agent_message)
 
                 # 添加Agent回复到记忆
-                await self.memory_manager.add_memory(
+                await conversation_manager.add_conversation(
                     session_id=self.session_id,
                     user_id=self.user_id,
                     role="agent",
@@ -210,7 +217,9 @@ class MoviePilotAgent:
             return error_message
 
     async def _execute_agent(self, input_context: Dict[str, Any]) -> Dict[str, Any]:
-        """执行LangChain Agent"""
+        """
+        执行LangChain Agent
+        """
         try:
             with get_openai_callback() as cb:
                 result = await self.agent_executor.ainvoke(
@@ -243,7 +252,9 @@ class MoviePilotAgent:
             }
 
     async def send_agent_message(self, message: str, title: str = "MoviePilot助手"):
-        """通过原渠道发送消息给用户"""
+        """
+        通过原渠道发送消息给用户
+        """
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
@@ -256,24 +267,32 @@ class MoviePilotAgent:
         )
 
     async def cleanup(self):
-        """清理智能体资源"""
+        """
+        清理智能体资源
+        """
         logger.info(f"MoviePilot智能体已清理: session_id={self.session_id}")
 
 
 class AgentManager:
-    """AI智能体管理器"""
+    """
+    AI智能体管理器
+    """
 
     def __init__(self):
         self.active_agents: Dict[str, MoviePilotAgent] = {}
-        self.memory_manager = ConversationMemoryManager()
 
-    async def initialize(self):
-        """初始化管理器"""
-        await self.memory_manager.initialize()
+    @staticmethod
+    async def initialize():
+        """
+        初始化管理器
+        """
+        await conversation_manager.initialize()
 
     async def close(self):
-        """关闭管理器"""
-        await self.memory_manager.close()
+        """
+        关闭管理器
+        """
+        await conversation_manager.close()
         # 清理所有活跃的智能体
         for agent in self.active_agents.values():
             await agent.cleanup()
@@ -281,7 +300,9 @@ class AgentManager:
 
     async def process_message(self, session_id: str, user_id: str, message: str,
                               channel: str = None, source: str = None, username: str = None) -> str:
-        """处理用户消息"""
+        """
+        处理用户消息
+        """
         # 获取或创建Agent实例
         if session_id not in self.active_agents:
             logger.info(f"创建新的AI智能体实例，session_id: {session_id}, user_id: {user_id}")
@@ -292,7 +313,6 @@ class AgentManager:
                 source=source,
                 username=username
             )
-            agent.memory_manager = self.memory_manager
             self.active_agents[session_id] = agent
         else:
             agent = self.active_agents[session_id]
@@ -309,12 +329,14 @@ class AgentManager:
         return await agent.process_message(message)
 
     async def clear_session(self, session_id: str, user_id: str):
-        """清空会话"""
+        """
+        清空会话
+        """
         if session_id in self.active_agents:
             agent = self.active_agents[session_id]
             await agent.cleanup()
             del self.active_agents[session_id]
-            await self.memory_manager.clear_memory(session_id, user_id)
+            await conversation_manager.clear_memory(session_id, user_id)
             logger.info(f"会话 {session_id} 的记忆已清空")
 
 

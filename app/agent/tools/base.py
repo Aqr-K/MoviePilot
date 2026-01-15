@@ -1,4 +1,3 @@
-"""MoviePilot工具基类"""
 import json
 from abc import ABCMeta, abstractmethod
 from typing import Any, Optional
@@ -6,7 +5,7 @@ from typing import Any, Optional
 from langchain.tools import BaseTool
 from pydantic import PrivateAttr
 
-from app.agent import StreamingCallbackHandler, ConversationMemoryManager
+from app.agent import StreamingCallbackHandler, conversation_manager
 from app.chain import ChainBase
 from app.log import logger
 from app.schemas import Notification
@@ -17,7 +16,9 @@ class ToolChain(ChainBase):
 
 
 class MoviePilotTool(BaseTool, metaclass=ABCMeta):
-    """MoviePilot专用工具基类"""
+    """
+    MoviePilot专用工具基类
+    """
 
     _session_id: str = PrivateAttr()
     _user_id: str = PrivateAttr()
@@ -25,7 +26,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
     _source: str = PrivateAttr(default=None)
     _username: str = PrivateAttr(default=None)
     _callback_handler: StreamingCallbackHandler = PrivateAttr(default=None)
-    _memory_manager: ConversationMemoryManager = PrivateAttr(default=None)
 
     def __init__(self, session_id: str, user_id: str, **kwargs):
         super().__init__(**kwargs)
@@ -36,7 +36,9 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         pass
 
     async def _arun(self, **kwargs) -> str:
-        """异步运行工具"""
+        """
+        异步运行工具
+        """
         # 发送和记忆工具调用前的信息
         agent_message = await self._callback_handler.get_message()
         if agent_message:
@@ -44,7 +46,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             await self.send_tool_message(agent_message, title="MoviePilot助手")
 
         # 记忆工具调用
-        await self._memory_manager.add_memory(
+        await conversation_manager.add_conversation(
             session_id=self._session_id,
             user_id=self._user_id,
             role="tool_call",
@@ -77,7 +79,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             formated_result = str(result)
         else:
             formated_result = json.dumps(result, ensure_ascii=False, indent=2)
-        await self._memory_manager.add_memory(
+        await conversation_manager.add_conversation(
             session_id=self._session_id,
             user_id=self._user_id,
             role="tool_result",
@@ -106,21 +108,23 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         raise NotImplementedError
 
     def set_message_attr(self, channel: str, source: str, username: str):
-        """设置消息属性"""
+        """
+        设置消息属性
+        """
         self._channel = channel
         self._source = source
         self._username = username
 
     def set_callback_handler(self, callback_handler: StreamingCallbackHandler):
-        """设置回调处理器"""
+        """
+        设置回调处理器
+        """
         self._callback_handler = callback_handler
 
-    def set_memory_manager(self, memory_manager: ConversationMemoryManager):
-        """设置记忆客理器"""
-        self._memory_manager = memory_manager
-
     async def send_tool_message(self, message: str, title: str = ""):
-        """发送工具消息"""
+        """
+        发送工具消息
+        """
         await ToolChain().async_post_message(
             Notification(
                 channel=self._channel,

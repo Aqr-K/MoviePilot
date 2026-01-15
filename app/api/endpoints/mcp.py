@@ -1,14 +1,10 @@
-"""工具API端点
-通过HTTP API暴露MoviePilot的智能体工具功能
-"""
-
 from typing import List, Any, Dict, Annotated, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app import schemas
-from app.agent.tools.manager import MoviePilotToolsManager
+from app.agent.tools.manager import moviepilot_tool_manager
 from app.core.security import verify_apikey
 from app.log import logger
 
@@ -25,18 +21,10 @@ MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"]
 MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSIONS[0]  # 默认使用最新版本
 
 
-def get_tools_manager() -> MoviePilotToolsManager:
-    """
-    获取工具管理器实例
-
-    Returns:
-        MoviePilotToolsManager实例
-    """
-    return MoviePilotToolsManager()
-
-
 def create_jsonrpc_response(request_id: Union[str, int, None], result: Any) -> Dict[str, Any]:
-    """创建 JSON-RPC 成功响应"""
+    """
+    创建 JSON-RPC 成功响应
+    """
     response = {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -45,8 +33,11 @@ def create_jsonrpc_response(request_id: Union[str, int, None], result: Any) -> D
     return response
 
 
-def create_jsonrpc_error(request_id: Union[str, int, None], code: int, message: str, data: Any = None) -> Dict[str, Any]:
-    """创建 JSON-RPC 错误响应"""
+def create_jsonrpc_error(request_id: Union[str, int, None], code: int, message: str, data: Any = None) -> Dict[
+    str, Any]:
+    """
+    创建 JSON-RPC 错误响应
+    """
     error = {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -59,8 +50,6 @@ def create_jsonrpc_error(request_id: Union[str, int, None], code: int, message: 
         error["error"]["data"] = data
     return error
 
-
-# ==================== MCP JSON-RPC 端点 ====================
 
 @router.post("", summary="MCP JSON-RPC 端点", response_model=None)
 async def mcp_jsonrpc(
@@ -146,7 +135,9 @@ async def mcp_jsonrpc(
 
 
 async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
-    """处理初始化请求"""
+    """
+    处理初始化请求
+    """
     protocol_version = params.get("protocolVersion")
     client_info = params.get("clientInfo", {})
 
@@ -161,7 +152,7 @@ async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
     else:
         # 客户端版本不支持，使用服务器默认版本
         logger.warning(f"协议版本不匹配: 客户端={protocol_version}, 使用服务器版本={negotiated_version}")
-    
+
     return {
         "protocolVersion": negotiated_version,
         "capabilities": {
@@ -180,9 +171,10 @@ async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def handle_tools_list() -> Dict[str, Any]:
-    """处理工具列表请求"""
-    manager = get_tools_manager()
-    tools = manager.list_tools()
+    """
+    处理工具列表请求
+    """
+    tools = moviepilot_tool_manager.list_tools()
 
     # 转换为 MCP 工具格式
     mcp_tools = []
@@ -200,18 +192,18 @@ async def handle_tools_list() -> Dict[str, Any]:
 
 
 async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
-    """处理工具调用请求"""
+    """
+    处理工具调用请求
+    """
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
     if not tool_name:
         raise ValueError("Missing tool name")
 
-    manager = get_tools_manager()
-    
     try:
-        result_text = await manager.call_tool(tool_name, arguments)
-        
+        result_text = await moviepilot_tool_manager.call_tool(tool_name, arguments)
+
         return {
             "content": [
                 {
@@ -243,8 +235,6 @@ async def delete_mcp_session(
     return Response(status_code=204)
 
 
-
-
 # ==================== 兼容的 RESTful API 端点 ====================
 
 @router.get("/tools", summary="列出所有可用工具", response_model=List[Dict[str, Any]])
@@ -257,9 +247,8 @@ async def list_tools(
     返回每个工具的名称、描述和参数定义
     """
     try:
-        manager = get_tools_manager()
         # 获取所有工具定义
-        tools = manager.list_tools()
+        tools = moviepilot_tool_manager.list_tools()
 
         # 转换为字典格式
         tools_list = []
@@ -289,11 +278,8 @@ async def call_tool(
         工具执行结果
     """
     try:
-        # 使用当前用户ID创建管理器实例
-        manager = get_tools_manager()
-
         # 调用工具
-        result_text = await manager.call_tool(request.tool_name, request.arguments)
+        result_text = await moviepilot_tool_manager.call_tool(request.tool_name, request.arguments)
 
         return schemas.ToolCallResponse(
             success=True,
@@ -319,9 +305,8 @@ async def get_tool_info(
         工具的详细信息，包括名称、描述和参数定义
     """
     try:
-        manager = get_tools_manager()
         # 获取所有工具
-        tools = manager.list_tools()
+        tools = moviepilot_tool_manager.list_tools()
 
         # 查找指定工具
         for tool in tools:
@@ -352,9 +337,8 @@ async def get_tool_schema(
         工具的JSON Schema定义
     """
     try:
-        manager = get_tools_manager()
         # 获取所有工具
-        tools = manager.list_tools()
+        tools = moviepilot_tool_manager.list_tools()
 
         # 查找指定工具
         for tool in tools:
