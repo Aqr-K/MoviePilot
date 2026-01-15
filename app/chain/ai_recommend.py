@@ -43,12 +43,19 @@ class AIRecommendChain(ChainBase, metaclass=Singleton):
             json.dumps(request_data, sort_keys=True).encode()
         ).hexdigest()
 
+    @property
+    def is_enabled(self) -> bool:
+        """
+        检查AI推荐功能是否已启用。
+        """
+        return settings.AI_AGENT_ENABLE and settings.AI_RECOMMEND_ENABLED
+
     def _build_status(self) -> Dict[str, Any]:
         """
         构建AI推荐状态字典
         :return: 状态字典
         """
-        if not settings.AI_RECOMMEND_ENABLED:
+        if not self.is_enabled:
             return {"status": "disabled"}
 
         if self._ai_recommend_running:
@@ -92,11 +99,7 @@ class AIRecommendChain(ChainBase, metaclass=Singleton):
 
         # 如果请求变化了（筛选条件改变），返回idle状态
         if not is_same_request:
-            return (
-                {"status": "idle"}
-                if settings.AI_RECOMMEND_ENABLED
-                else {"status": "disabled"}
-            )
+            return {"status": "idle"} if self.is_enabled else {"status": "disabled"}
 
         # 请求未变化，返回当前实际状态
         return self._build_status()
@@ -187,6 +190,11 @@ Output Format: Return ONLY a JSON array of "index" numbers (e.g., [0, 3, 1]). Do
         :param search_results_count: 搜索结果总数
         :param results: 搜索结果列表
         """
+        # 防护检查：确保AI推荐功能已启用
+        if not self.is_enabled:
+            logger.warning("AI推荐功能未启用，跳过任务执行")
+            return
+
         # 计算新请求的哈希值
         new_request_hash = self._calculate_request_hash(
             filtered_indices, search_results_count
