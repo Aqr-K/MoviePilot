@@ -214,6 +214,11 @@ async def recommend_search_results(
     
     # 如果是强制模式，先取消并清除旧结果，然后直接启动新任务
     if force:
+        # 检查功能是否启用
+        if not settings.AI_AGENT_ENABLE or not settings.AI_RECOMMEND_ENABLED:
+            return schemas.Response(success=True, data={
+                "status": "disabled"
+            })
         logger.info("收到新推荐请求，清除旧结果并启动新任务")
         recommend_chain.cancel_ai_recommend()
         recommend_chain.start_recommend_task(filtered_indices, len(results), results)

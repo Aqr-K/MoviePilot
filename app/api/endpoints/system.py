@@ -166,6 +166,10 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
             "AI_RECOMMEND_ENABLED"
         }
     )
+    # 智能助手总开关未开启，智能推荐状态强制返回False
+    if not settings.AI_AGENT_ENABLE:
+        info["AI_RECOMMEND_ENABLED"] = False
+
     # 追加用户唯一ID和订阅分享管理权限
     share_admin = SubscribeHelper().is_admin_user()
     info.update({
