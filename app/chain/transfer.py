@@ -560,8 +560,6 @@ class TransferChain(ChainBase, metaclass=Singleton):
         processed_num = 0
         # 失败数量
         fail_num = 0
-        # 已完成文件
-        finished_files = []
 
         progress = ProgressHelper(ProgressKey.FileTransfer)
 
@@ -594,10 +592,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
                     logger.info(__process_msg)
                     progress.update(value=processed_num / total_num * 100,
                                     text=__process_msg,
-                                    data={
-                                        "current": Path(fileitem.path).as_posix(),
-                                        "finished": finished_files
-                                    })
+                                    data={})
                     # 整理
                     state, err_msg = self.__handle_transfer(task=task, callback=item.callback)
                     if not state:
@@ -605,7 +600,6 @@ class TransferChain(ChainBase, metaclass=Singleton):
                         fail_num += 1
                     # 更新进度
                     processed_num += 1
-                    finished_files.append(Path(fileitem.path).as_posix())
                     __process_msg = f"{fileitem.name} 整理完成"
                     logger.info(__process_msg)
                     progress.update(value=(processed_num / total_num) * 100,
