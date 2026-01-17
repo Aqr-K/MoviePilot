@@ -665,7 +665,11 @@ class MediaChain(ChainBase):
                 if recursive:
                     files = __list_files(_fileitem=fileitem)
                     for file in files:
-                        if file.type == "dir" and not file.name.lower().startswith("season"):
+                        if (
+                            file.type == "dir"
+                            and file.name not in settings.RENAME_FORMAT_S0_NAMES
+                            and not file.name.lower().startswith("season")
+                        ):
                             # 电视剧不处理非季子目录
                             continue
                         self.scrape_metadata(fileitem=file,
