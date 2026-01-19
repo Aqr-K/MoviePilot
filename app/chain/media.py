@@ -762,7 +762,7 @@ class MediaChain(ChainBase):
                                         logger.info(f"季图片刮削已关闭，跳过：{image_name}")
                     # 判断当前目录是不是剧集根目录
                     elif season_meta.name:
-                        # 不含季信息（包括特别季）但含有名称的，可以认为是剧集根目录 （原PR#3219对此的判断会遗漏被识别词指定成电视剧的根目录 详见issue#5373）
+                        # 不含季信息（包括特别季）但含有名称的，可以认为是剧集根目录
                         # 检查电视剧NFO开关
                         if scraping_switchs.get('tv_nfo', True):
                             # 是否已存在
