@@ -1080,9 +1080,26 @@ class TransferChain(ChainBase, metaclass=Singleton):
                         err_msgs.append(f"{file_item.name} 已整理过")
                         continue
 
+                # 提前获取下载历史，以便获取自定义识别词
+                download_history = None
+                downloadhis = DownloadHistoryOper()
+                if bluray_dir:
+                    # 蓝光原盘，按目录名查询
+                    download_history = downloadhis.get_by_path(file_path.as_posix())
+                else:
+                    # 按文件全路径查询
+                    download_file = downloadhis.get_file_by_fullpath(file_path.as_posix())
+                    if download_file:
+                        download_history = downloadhis.get_by_hash(download_file.download_hash)
+
+                # 获取自定义识别词
+                custom_words_list = None
+                if download_history and download_history.custom_words:
+                    custom_words_list = download_history.custom_words.split('\n')
+
                 if not meta:
-                    # 文件元数据
-                    file_meta = MetaInfoPath(file_path)
+                    # 文件元数据（传入自定义识别词）
+                    file_meta = MetaInfoPath(file_path, custom_words=custom_words_list)
                 else:
                     file_meta = meta
 
@@ -1107,18 +1124,6 @@ class TransferChain(ChainBase, metaclass=Singleton):
                         file_meta.part = part
                     if end_ep is not None:
                         file_meta.end_episode = end_ep
-
-                # 根据父路径获取下载历史
-                download_history = None
-                downloadhis = DownloadHistoryOper()
-                if bluray_dir:
-                    # 蓝光原盘，按目录名查询
-                    download_history = downloadhis.get_by_path(file_path.as_posix())
-                else:
-                    # 按文件全路径查询
-                    download_file = downloadhis.get_file_by_fullpath(file_path.as_posix())
-                    if download_file:
-                        download_history = downloadhis.get_by_hash(download_file.download_hash)
 
                 # 获取下载Hash
                 if download_history and (not downloader or not download_hash):
