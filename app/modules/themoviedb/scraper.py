@@ -297,7 +297,8 @@ class TmdbScraper:
         uniqueid.setAttribute("type", "tmdb")
         uniqueid.setAttribute("default", "true")
         # tmdbid
-        DomUtils.add_node(doc, root, "tmdbid", str(tmdbid))
+        # 应与uniqueid一致 使用剧集id 否则jellyfin/emby会将此id覆盖上面的uniqueid
+        DomUtils.add_node(doc, root, "tmdbid", str(episodeinfo.get("id")))
         # 标题
         DomUtils.add_node(doc, root, "title", episodeinfo.get("name") or "第 %s 集" % episode)
         # 简介
