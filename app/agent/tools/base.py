@@ -75,7 +75,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 记忆工具调用结果
         if isinstance(result, str):
             formated_result = result
-        elif isinstance(result, int, float):
+        elif isinstance(result, (int, float)):
             formated_result = str(result)
         else:
             formated_result = json.dumps(result, ensure_ascii=False, indent=2)
