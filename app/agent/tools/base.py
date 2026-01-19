@@ -75,7 +75,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 记忆工具调用结果
         if isinstance(result, str):
             formated_result = result
-        elif isinstance(result, int, float):
+        elif isinstance(result, (int, float)):
             formated_result = str(result)
         else:
             formated_result = json.dumps(result, ensure_ascii=False, indent=2)
@@ -83,7 +83,10 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             session_id=self._session_id,
             user_id=self._user_id,
             role="tool_result",
-            content=formated_result
+            content=formated_result,
+            metadata={
+                "call_id": self.__class__.__name__
+            }
         )
 
         return result

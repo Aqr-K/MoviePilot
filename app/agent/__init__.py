@@ -113,7 +113,11 @@ class MoviePilotAgent:
                         )
                     )
                 elif msg.get("role") == "tool_result":
-                    chat_history.add_message(ToolMessage(content=msg.get("content", "")))
+                    metadata = msg.get("metadata", {})
+                    chat_history.add_message(ToolMessage(
+                        content=msg.get("content", ""),
+                        tool_call_id=metadata.get("call_id", "unknown")
+                    ))
                 elif msg.get("role") == "system":
                     chat_history.add_message(SystemMessage(content=msg.get("content", "")))
         return chat_history
