@@ -62,20 +62,21 @@ def MetaInfo(title: str, subtitle: Optional[str] = None, custom_words: List[str]
     return meta
 
 
-def MetaInfoPath(path: Path) -> MetaBase:
+def MetaInfoPath(path: Path, custom_words: List[str] = None) -> MetaBase:
     """
     根据路径识别元数据
     :param path: 路径
+    :param custom_words: 自定义识别词列表
     """
     # 文件元数据，不包含后缀
-    file_meta = MetaInfo(title=path.name)
+    file_meta = MetaInfo(title=path.name, custom_words=custom_words)
     # 上级目录元数据
-    dir_meta = MetaInfo(title=path.parent.name)
+    dir_meta = MetaInfo(title=path.parent.name, custom_words=custom_words)
     if file_meta.type == MediaType.TV or dir_meta.type != MediaType.TV:
         # 合并元数据
         file_meta.merge(dir_meta)
     # 上上级目录元数据
-    root_meta = MetaInfo(title=path.parent.parent.name)
+    root_meta = MetaInfo(title=path.parent.parent.name, custom_words=custom_words)
     if file_meta.type == MediaType.TV or root_meta.type != MediaType.TV:
         # 合并元数据
         file_meta.merge(root_meta)

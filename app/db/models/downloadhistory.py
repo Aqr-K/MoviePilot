@@ -55,6 +55,8 @@ class DownloadHistory(Base):
     media_category = Column(String)
     # 剧集组
     episode_group = Column(String)
+    # 自定义识别词（用于整理时应用）
+    custom_words = Column(String)
 
     @classmethod
     @db_query

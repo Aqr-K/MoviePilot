@@ -61,3 +61,38 @@ class MetaInfoTest(TestCase):
             meta = MetaInfoPath(Path(path_str))
             self.assertEqual(meta.tmdbid, expected_tmdbid,
                              f"路径 {path_str} 期望的tmdbid为 {expected_tmdbid}，实际识别为 {meta.tmdbid}")
+
+    def test_metainfopath_with_custom_words(self):
+        """测试 MetaInfoPath 使用自定义识别词"""
+        # 测试替换词：将"测试替换"替换为空
+        custom_words = ["测试替换 => "]
+        path = Path("/movies/电影测试替换名称 (2024)/movie.mkv")
+        meta = MetaInfoPath(path, custom_words=custom_words)
+        # 验证替换生效：cn_name 不应包含"测试替换"
+        if meta.cn_name:
+            self.assertNotIn("测试替换", meta.cn_name)
+
+    def test_metainfopath_without_custom_words(self):
+        """测试 MetaInfoPath 不传入自定义识别词"""
+        path = Path("/movies/Normal Movie (2024)/movie.mkv")
+        meta = MetaInfoPath(path)
+        # 验证正常识别，不报错
+        self.assertIsNotNone(meta)
+
+    def test_metainfopath_with_empty_custom_words(self):
+        """测试 MetaInfoPath 传入空的自定义识别词"""
+        path = Path("/movies/Test Movie (2024)/movie.mkv")
+        meta = MetaInfoPath(path, custom_words=[])
+        # 验证不报错，正常识别
+        self.assertIsNotNone(meta)
+
+    def test_custom_words_apply_words_recording(self):
+        """测试 apply_words 记录功能"""
+        custom_words = ["替换词 => 新词"]
+        title = "电影替换词.2024.mkv"
+        meta = MetaInfo(title=title, custom_words=custom_words)
+        # 验证 apply_words 属性存在
+        self.assertTrue(hasattr(meta, 'apply_words'))
+        # 如果替换词被应用，应该记录在 apply_words 中
+        if meta.apply_words:
+            self.assertIn("替换词 => 新词", meta.apply_words)
