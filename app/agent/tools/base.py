@@ -83,7 +83,10 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             session_id=self._session_id,
             user_id=self._user_id,
             role="tool_result",
-            content=formated_result
+            content=formated_result,
+            metadata={
+                "call_id": self.__class__.__name__
+            }
         )
 
         return result
