@@ -63,18 +63,15 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 tool_message = explanation
         
         # 合并agent消息和工具执行消息，一起发送
-        merged_message = ""
+        messages = []
         if agent_message:
-            merged_message = agent_message
+            messages.append(agent_message)
         if tool_message:
-            formatted_tool_message = f"⚙️ => {tool_message}"
-            if merged_message:
-                merged_message = f"{merged_message}\n\n{formatted_tool_message}"
-            else:
-                merged_message = formatted_tool_message
+            messages.append(f"⚙️ => {tool_message}")
         
         # 发送合并后的消息
-        if merged_message:
+        if messages:
+            merged_message = "\n\n".join(messages)
             await self.send_tool_message(merged_message, title="MoviePilot助手")
 
         logger.debug(f'Executing tool {self.name} with args: {kwargs}')
