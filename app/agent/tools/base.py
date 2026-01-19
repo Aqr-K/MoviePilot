@@ -39,11 +39,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         """
         异步运行工具
         """
-        # 发送和记忆工具调用前的信息
+        # 获取工具调用前的agent消息
         agent_message = await self._callback_handler.get_message()
-        if agent_message:
-            # 发送消息
-            await self.send_tool_message(agent_message, title="MoviePilot助手")
 
         # 记忆工具调用
         await conversation_manager.add_conversation(
@@ -58,15 +55,27 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             }
         )
 
-        # 发送执行工具说明,优先使用工具自定义的提示消息，如果没有则使用 explanation
+        # 获取执行工具说明,优先使用工具自定义的提示消息，如果没有则使用 explanation
         tool_message = self.get_tool_message(**kwargs)
         if not tool_message:
             explanation = kwargs.get("explanation")
             if explanation:
                 tool_message = explanation
+        
+        # 合并agent消息和工具执行消息，一起发送
+        merged_message = ""
+        if agent_message:
+            merged_message = agent_message
         if tool_message:
-            formatted_message = f"⚙️ => {tool_message}"
-            await self.send_tool_message(formatted_message)
+            formatted_tool_message = f"⚙️ => {tool_message}"
+            if merged_message:
+                merged_message = f"{merged_message}\n\n{formatted_tool_message}"
+            else:
+                merged_message = formatted_tool_message
+        
+        # 发送合并后的消息
+        if merged_message:
+            await self.send_tool_message(merged_message, title="MoviePilot助手")
 
         logger.debug(f'Executing tool {self.name} with args: {kwargs}')
         result = await self.run(**kwargs)
