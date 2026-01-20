@@ -216,6 +216,7 @@ class RousiSiteUserInfo(SiteParserBase):
             messages.extend(res.get("messages", []))
             page += 1
         
+        self.message_unread = len(messages)
         for messsage in messages:
             head = messsage.get("title")
             date = StringUtils.unify_datetime_str(messsage.get("created_at"))
