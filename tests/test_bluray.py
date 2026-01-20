@@ -126,8 +126,9 @@ class BluRayTest(TestCase):
                 "/FOLDER/Pokemon (2028)/Pokemon.2028.mkv",
                 "/FOLDER/Pokemon.2029.mp4",
                 "/FOLDER/Pokemon.2039.mp4",
+                "/FOLDER/Pokemon (2031)/Pokemon (2031).mp4",
             ],
-            __test_do_transfer("/FOLDER"),
+            __test_do_transfer("/"),
         )
 
     def _test_scrape_metadata(self, mock_metadata_nfo):
