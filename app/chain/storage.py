@@ -151,10 +151,10 @@ class StorageChain(ChainBase):
         判断是否包含蓝光必备的文件夹
         """
         required_files = ("BDMV", "CERTIFICATE")
-        for item in fileitems or []:
-            if item.type == "dir" and item.name in required_files:
-                return True
-        return False
+        return any(
+            item.type == "dir" and item.name in required_files
+            for item in fileitems or []
+        )
 
     def delete_media_file(self, fileitem: schemas.FileItem, delete_self: bool = True) -> bool:
         """
