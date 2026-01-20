@@ -332,7 +332,8 @@ class JobManager:
                 return 0
             return sum([
                 task.fileitem.size if task.fileitem.size is not None
-                else (SystemUtils.get_directory_size(Path(task.fileitem.path)) if task.fileitem.storage == "local" else 0)
+                else (
+                    SystemUtils.get_directory_size(Path(task.fileitem.path)) if task.fileitem.storage == "local" else 0)
                 for task in self._job_view[__mediaid__].tasks
                 if task.state == "completed"
             ])
@@ -366,8 +367,10 @@ class TransferChain(ChainBase, metaclass=Singleton):
 
     def __init__(self):
         super().__init__()
-        # 可处理的文件后缀
-        self.all_exts = settings.RMT_MEDIAEXT
+        # 可处理的文件后缀（视频文件、字幕、音频文件）
+        self._allowed_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+        # 附加文件后缀
+        self._extra_exts = settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
         # 待整理任务队列
         self._queue = queue.Queue()
         # 文件整理线程
@@ -990,13 +993,19 @@ class TransferChain(ChainBase, metaclass=Singleton):
         返回：成功标识，错误信息
         """
 
-        def __is_allow_extensions(_ext: str) -> bool:
+        def __is_allowed_file(_ext: str) -> bool:
             """
             判断是否允许的扩展名
             """
-            return True if not self.all_exts or f".{_ext.lower()}" in self.all_exts else False
+            return True if f".{_ext.lower()}" in self._allowed_exts else False
 
-        def __is_allow_filesize(_size: int, _min_filesize: int) -> bool:
+        def __is_extra_file(_ext: str) -> bool:
+            """
+            判断是否额外的扩展名
+            """
+            return True if f".{_ext.lower()}" in self._extra_exts else False
+
+        def __is_allow_filesize(_ext: str, _size: int, _min_filesize: int) -> bool:
             """
             判断是否满足最小文件大小
             """
@@ -1040,9 +1049,13 @@ class TransferChain(ChainBase, metaclass=Singleton):
         if formaterHandler:
             file_items = [f for f in file_items if formaterHandler.match(f[0].name)]
 
-        # 过滤后缀和大小
-        file_items = [f for f in file_items if f[1]  # 蓝光目录不过滤
-                      or __is_allow_extensions(f[0].extension) and __is_allow_filesize(f[0].size, min_filesize)]
+        # 过滤后缀和大小（蓝光目录、附加文件不过滤大小）
+        file_items = [f for f in file_items if f[1] or
+                      __is_extra_file(f[0].extension) or
+                      (__is_allowed_file(f[0].extension) and __is_allow_filesize(_ext=f[0].extension,
+                                                                                     _size=f[0].size or 0,
+                                                                                     _min_filesize=min_filesize))]
+
         if not file_items:
             logger.warn(f"{fileitem.path} 没有找到可整理的媒体文件")
             return False, f"{fileitem.name} 没有找到可整理的媒体文件"
@@ -1469,7 +1482,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
             for file in torrent_files:
                 file_path = save_path / file.name
                 # 如果存在未被屏蔽的媒体文件，则不删除种子
-                if (file_path.suffix in self.all_exts
+                if (file_path.suffix in self._allowed_exts
                         and not self._is_blocked_by_exclude_words(file_path.as_posix(), transfer_exclude_words)
                         and file_path.exists()):
                     return False

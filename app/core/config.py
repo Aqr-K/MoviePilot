@@ -219,7 +219,7 @@ class ConfigModel(BaseModel):
     AUTO_UPDATE_RESOURCE: bool = True
 
     # ==================== 媒体文件格式配置 ====================
-    # 支持的后缀格式
+    # 支持的视频文件后缀格式
     RMT_MEDIAEXT: list = Field(
         default_factory=lambda: ['.mp4', '.mkv', '.ts', '.iso',
                                  '.rmvb', '.avi', '.mov', '.mpeg',
@@ -230,8 +230,6 @@ class ConfigModel(BaseModel):
     # 支持的字幕文件后缀格式
     RMT_SUBEXT: list = Field(default_factory=lambda: ['.srt', '.ass', '.ssa', '.sup'])
     # 支持的音轨文件后缀格式
-    RMT_AUDIO_TRACK_EXT: list = Field(default_factory=lambda: ['.mka'])
-    # 音轨文件后缀格式
     RMT_AUDIOEXT: list = Field(
         default_factory=lambda: ['.aac', '.ac3', '.amr', '.caf', '.cda', '.dsf',
                                  '.dff', '.kar', '.m4a', '.mp1', '.mp2', '.mp3',

@@ -167,7 +167,7 @@ def rename(fileitem: schemas.FileItem,
     # 重命名目录内文件
     if recursive:
         transferchain = TransferChain()
-        media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIO_TRACK_EXT
+        media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
         # 递归修改目录内文件（智能识别命名）
         sub_files: List[schemas.FileItem] = StorageChain().list_files(fileitem)
         if sub_files:
