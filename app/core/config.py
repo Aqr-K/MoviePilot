@@ -393,6 +393,8 @@ class ConfigModel(BaseModel):
     SECURITY_IMAGE_SUFFIXES: list = Field(default=[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"])
     # PassKey 是否强制用户验证（生物识别等）
     PASSKEY_REQUIRE_UV: bool = True
+    # 允许在未启用 OTP 时直接注册 PassKey
+    PASSKEY_ALLOW_REGISTER_WITHOUT_OTP: bool = False
 
     # ==================== 工作流配置 ====================
     # 工作流数据共享

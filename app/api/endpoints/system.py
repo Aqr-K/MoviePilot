@@ -163,7 +163,8 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
         include={
             "RECOGNIZE_SOURCE",
             "SEARCH_SOURCE",
-            "AI_RECOMMEND_ENABLED"
+            "AI_RECOMMEND_ENABLED",
+            "PASSKEY_ALLOW_REGISTER_WITHOUT_OTP"
         }
     )
     # 智能助手总开关未开启，智能推荐状态强制返回False
