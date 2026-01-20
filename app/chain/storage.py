@@ -139,7 +139,11 @@ class StorageChain(ChainBase):
         """
         if not fileitem or fileitem.type != "dir":
             return False
-        return self.contains_bluray_subdirectories(self.list_files(fileitem))
+        if self.get_file_item(storage=fileitem.storage, path=Path(fileitem.path) / "BDMV"):
+            return True
+        if self.get_file_item(storage=fileitem.storage, path=Path(fileitem.path) / "CERTIFICATE"):
+            return True
+        return False
 
     @staticmethod
     def contains_bluray_subdirectories(fileitems: Optional[List[schemas.FileItem]]) -> bool:
