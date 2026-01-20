@@ -230,7 +230,7 @@ class TransHandler:
 
                     # 针对字幕文件，文件名中补充额外标识信息
                     if __is_subtitle_file(fileitem):
-                        new_file = self.__rename_subtitles(new_file)
+                        new_file = self.__rename_subtitles(fileitem, new_file)
 
                     # 文件目录
                     folder_path = DirectoryHelper.get_media_root_path(
