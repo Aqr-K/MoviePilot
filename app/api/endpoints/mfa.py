@@ -207,8 +207,8 @@ def passkey_register_start(
 ) -> Any:
     """开始注册 PassKey - 生成注册选项"""
     try:
-        # 安全检查：必须先启用 OTP
-        if not current_user.is_otp:
+        # 安全检查：默认需要先启用 OTP，除非配置允许在未启用 OTP 时注册
+        if not current_user.is_otp and not settings.PASSKEY_ALLOW_REGISTER_WITHOUT_OTP:
             return schemas.Response(
                 success=False,
                 message="为了确保在域名配置错误时仍能找回访问权限，请先启用 OTP 验证码再注册通行密钥"
