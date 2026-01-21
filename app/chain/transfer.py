@@ -618,7 +618,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 全部整理完成不管成功还是失败
         if self.jobview.is_done(task):
             # 所有任务
-            tasks = self.jobview.all_tasks()
+            tasks = self.jobview.all_tasks(task.mediainfo, task.meta.begin_season)
             for t in tasks:
                 if t.download_hash:
                     # 设置种子状态为已整理
