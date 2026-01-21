@@ -29,7 +29,7 @@ class UpdateSubscribeInput(BaseModel):
     include: Optional[str] = Field(None, description="Include filter as regular expression (optional)")
     exclude: Optional[str] = Field(None, description="Exclude filter as regular expression (optional)")
     filter: Optional[str] = Field(None, description="Filter rule as regular expression (optional)")
-    state: Optional[str] = Field(None, description="Subscription state: 'R' for enabled, 'P' for disabled, 'S' for paused (optional)")
+    state: Optional[str] = Field(None, description="Subscription state: 'R' for enabled, 'P' for pending, 'S' for stoped (optional)")
     sites: Optional[List[int]] = Field(None, description="List of site IDs to search from (optional)")
     downloader: Optional[str] = Field(None, description="Downloader name (optional)")
     save_path: Optional[str] = Field(None, description="Save path for downloaded files (optional)")
