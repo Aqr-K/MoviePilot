@@ -242,13 +242,10 @@ class JobManager:
             )
         else:
             meta_done = True
-        if __mediaid__ != __metaid__:
-            if __mediaid__ in self._job_view:
-                media_done = all(
-                    task.state in ["completed", "failed"] for task in self._job_view[__mediaid__].tasks
-                )
-            else:
-                media_done = False
+        if __mediaid__ in self._job_view:
+            media_done = all(
+                task.state in ["completed", "failed"] for task in self._job_view[__mediaid__].tasks
+            )
         else:
             media_done = True
         return meta_done and media_done
@@ -265,16 +262,13 @@ class JobManager:
             )
         else:
             meta_finished = True
-        if __mediaid__ != __metaid__:
-            if __mediaid__ in self._job_view:
-                tasks = self._job_view[__mediaid__].tasks
-                media_finished = all(
-                    task.state in ["completed", "failed"] for task in tasks
-                ) and any(
-                    task.state == "completed" for task in tasks
-                )
-            else:
-                media_finished = False
+        if __mediaid__ in self._job_view:
+            tasks = self._job_view[__mediaid__].tasks
+            media_finished = all(
+                task.state in ["completed", "failed"] for task in tasks
+            ) and any(
+                task.state == "completed" for task in tasks
+            )
         else:
             media_finished = True
         return meta_finished and media_finished
@@ -291,13 +285,10 @@ class JobManager:
             )
         else:
             meta_success = True
-        if __mediaid__ != __metaid__:
-            if __mediaid__ in self._job_view:
-                media_success = all(
-                    task.state in ["completed"] for task in self._job_view[__mediaid__].tasks
-                )
-            else:
-                media_success = False
+        if __mediaid__ in self._job_view:
+            media_success = all(
+                task.state in ["completed"] for task in self._job_view[__mediaid__].tasks
+            )
         else:
             media_success = True
         return meta_success and media_success
@@ -334,7 +325,7 @@ class JobManager:
 
     def count(self, media: MediaInfo, season: Optional[int] = None) -> int:
         """
-        获取某项任务成功总数
+        获取作业成功总数
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         if __mediaid__ not in self._job_view:
@@ -343,7 +334,7 @@ class JobManager:
 
     def size(self, media: MediaInfo, season: Optional[int] = None) -> int:
         """
-        获取某项任务成功文件总大小
+        获取作业成功文件总大小
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         if __mediaid__ not in self._job_view:
@@ -358,13 +349,13 @@ class JobManager:
 
     def total(self) -> int:
         """
-        获取所有task任务总数
+        获取所有任务总数
         """
         return sum([len(job.tasks) for job in self._job_view.values()])
 
     def list_jobs(self) -> List[TransferJob]:
         """
-        获取任务列表
+        获取所有任务列表
         """
         return list(self._job_view.values())
 
