@@ -45,7 +45,7 @@ class Rclone(StorageBase):
         logger.info(f"【rclone】配置写入文件：{filepath}")
         path = Path(filepath)
         if not path.parent.exists():
-            path.parent.mkdir(parents=True)
+            path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(conf.get('content'), encoding='utf-8')
 
     @staticmethod

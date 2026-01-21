@@ -580,6 +580,11 @@ class TransferChain(ChainBase, metaclass=Singleton):
                 fileitem = task.fileitem
 
                 with task_lock:
+                    # 获取当前最新总数
+                    current_total = self.jobview.total()
+                    # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
+                    self._total_num = max(self._total_num, current_total)
+
                     # 如果当前没有在运行的任务且处理数为0，说明是一个新序列的开始
                     if self._active_tasks == 0 and self._processed_num == 0:
                         logger.info("开始整理队列处理...")
@@ -588,7 +593,6 @@ class TransferChain(ChainBase, metaclass=Singleton):
                         # 重置计数
                         self._processed_num = 0
                         self._fail_num = 0
-                        self._total_num = self.jobview.total()
                         __process_msg = f"开始整理队列处理，当前共 {self._total_num} 个文件 ..."
                         logger.info(__process_msg)
                         self._progress.update(value=0,
@@ -605,6 +609,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
                                               text=__process_msg)
                     # 整理
                     state, err_msg = self.__handle_transfer(task=task, callback=item.callback)
+
                     with task_lock:
                         if not state:
                             # 任务失败

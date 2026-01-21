@@ -126,7 +126,7 @@ class LocalStorage(StorageBase):
             return None
         path_obj = Path(fileitem.path) / name
         if not path_obj.exists():
-            path_obj.mkdir(parents=True)
+            path_obj.mkdir(parents=True, exist_ok=True)
         return self.__get_diritem(path_obj)
 
     def get_folder(self, path: Path) -> Optional[schemas.FileItem]:

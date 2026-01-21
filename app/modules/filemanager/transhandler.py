@@ -19,8 +19,6 @@ from app.schemas import TransferInfo, TmdbEpisode, TransferDirectoryConf, FileIt
 from app.schemas.types import MediaType, ChainEventType
 from app.utils.system import SystemUtils
 
-lock = Lock()
-
 
 class TransHandler:
     """
@@ -383,113 +381,111 @@ class TransHandler:
                 and fileitem.storage != "local" and target_storage != "local"):
             return None, f"不支持 {fileitem.storage} 到 {target_storage} 的文件整理"
 
-        # 加锁
-        with lock:
-            if fileitem.storage == "local" and target_storage == "local":
-                # 创建目录
-                if not target_file.parent.exists():
-                    target_file.parent.mkdir(parents=True)
-                # 本地到本地
-                if transfer_type == "copy":
-                    state = source_oper.copy(fileitem, target_file.parent, target_file.name)
-                elif transfer_type == "move":
-                    state = source_oper.move(fileitem, target_file.parent, target_file.name)
-                elif transfer_type == "link":
-                    state = source_oper.link(fileitem, target_file)
-                elif transfer_type == "softlink":
-                    state = source_oper.softlink(fileitem, target_file)
+        if fileitem.storage == "local" and target_storage == "local":
+            # 创建目录
+            if not target_file.parent.exists():
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+            # 本地到本地
+            if transfer_type == "copy":
+                state = source_oper.copy(fileitem, target_file.parent, target_file.name)
+            elif transfer_type == "move":
+                state = source_oper.move(fileitem, target_file.parent, target_file.name)
+            elif transfer_type == "link":
+                state = source_oper.link(fileitem, target_file)
+            elif transfer_type == "softlink":
+                state = source_oper.softlink(fileitem, target_file)
+            else:
+                return None, f"不支持的整理方式：{transfer_type}"
+            if state:
+                return __get_targetitem(target_file), ""
+            else:
+                return None, f"{fileitem.path} {transfer_type} 失败"
+        elif fileitem.storage == "local" and target_storage != "local":
+            # 本地到网盘
+            filepath = Path(fileitem.path)
+            if not filepath.exists():
+                return None, f"文件 {filepath} 不存在"
+            if transfer_type == "copy":
+                # 复制
+                # 根据目的路径创建文件夹
+                target_fileitem = target_oper.get_folder(target_file.parent)
+                if target_fileitem:
+                    # 上传文件
+                    new_item = target_oper.upload(target_fileitem, filepath, target_file.name)
+                    if new_item:
+                        return new_item, ""
+                    else:
+                        return None, f"{fileitem.path} 上传 {target_storage} 失败"
                 else:
-                    return None, f"不支持的整理方式：{transfer_type}"
-                if state:
+                    return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
+            elif transfer_type == "move":
+                # 移动
+                # 根据目的路径获取文件夹
+                target_fileitem = target_oper.get_folder(target_file.parent)
+                if target_fileitem:
+                    # 上传文件
+                    new_item = target_oper.upload(target_fileitem, filepath, target_file.name)
+                    if new_item:
+                        # 删除源文件
+                        source_oper.delete(fileitem)
+                        return new_item, ""
+                    else:
+                        return None, f"{fileitem.path} 上传 {target_storage} 失败"
+                else:
+                    return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
+        elif fileitem.storage != "local" and target_storage == "local":
+            # 网盘到本地
+            if target_file.exists():
+                logger.warn(f"文件已存在：{target_file}")
+                return __get_targetitem(target_file), ""
+            # 网盘到本地
+            if transfer_type in ["copy", "move"]:
+                # 下载
+                tmp_file = source_oper.download(fileitem=fileitem, path=target_file.parent)
+                if tmp_file:
+                    # 创建目录
+                    if not target_file.parent.exists():
+                        target_file.parent.mkdir(parents=True, exist_ok=True)
+                    # 将tmp_file移动后target_file
+                    SystemUtils.move(tmp_file, target_file)
+                    if transfer_type == "move":
+                        # 删除源文件
+                        source_oper.delete(fileitem)
                     return __get_targetitem(target_file), ""
                 else:
-                    return None, f"{fileitem.path} {transfer_type} 失败"
-            elif fileitem.storage == "local" and target_storage != "local":
-                # 本地到网盘
-                filepath = Path(fileitem.path)
-                if not filepath.exists():
-                    return None, f"文件 {filepath} 不存在"
-                if transfer_type == "copy":
-                    # 复制
-                    # 根据目的路径创建文件夹
-                    target_fileitem = target_oper.get_folder(target_file.parent)
-                    if target_fileitem:
-                        # 上传文件
-                        new_item = target_oper.upload(target_fileitem, filepath, target_file.name)
-                        if new_item:
-                            return new_item, ""
-                        else:
-                            return None, f"{fileitem.path} 上传 {target_storage} 失败"
-                    else:
-                        return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
-                elif transfer_type == "move":
-                    # 移动
-                    # 根据目的路径获取文件夹
-                    target_fileitem = target_oper.get_folder(target_file.parent)
-                    if target_fileitem:
-                        # 上传文件
-                        new_item = target_oper.upload(target_fileitem, filepath, target_file.name)
-                        if new_item:
-                            # 删除源文件
-                            source_oper.delete(fileitem)
-                            return new_item, ""
-                        else:
-                            return None, f"{fileitem.path} 上传 {target_storage} 失败"
-                    else:
-                        return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
-            elif fileitem.storage != "local" and target_storage == "local":
-                # 网盘到本地
-                if target_file.exists():
-                    logger.warn(f"文件已存在：{target_file}")
-                    return __get_targetitem(target_file), ""
-                # 网盘到本地
-                if transfer_type in ["copy", "move"]:
-                    # 下载
-                    tmp_file = source_oper.download(fileitem=fileitem, path=target_file.parent)
-                    if tmp_file:
-                        # 创建目录
-                        if not target_file.parent.exists():
-                            target_file.parent.mkdir(parents=True)
-                        # 将tmp_file移动后target_file
-                        SystemUtils.move(tmp_file, target_file)
-                        if transfer_type == "move":
-                            # 删除源文件
-                            source_oper.delete(fileitem)
-                        return __get_targetitem(target_file), ""
-                    else:
-                        return None, f"{fileitem.path} {fileitem.storage} 下载失败"
-            elif fileitem.storage == target_storage:
-                # 同一网盘
-                if not source_oper.is_support_transtype(transfer_type):
-                    return None, f"存储 {fileitem.storage} 不支持 {transfer_type} 整理方式"
+                    return None, f"{fileitem.path} {fileitem.storage} 下载失败"
+        elif fileitem.storage == target_storage:
+            # 同一网盘
+            if not source_oper.is_support_transtype(transfer_type):
+                return None, f"存储 {fileitem.storage} 不支持 {transfer_type} 整理方式"
 
-                if transfer_type == "copy":
-                    # 复制文件到新目录
-                    target_fileitem = target_oper.get_folder(target_file.parent)
-                    if target_fileitem:
-                        if source_oper.copy(fileitem, Path(target_fileitem.path), target_file.name):
-                            return target_oper.get_item(target_file), ""
-                        else:
-                            return None, f"【{target_storage}】{fileitem.path} 复制文件失败"
-                    else:
-                        return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
-                elif transfer_type == "move":
-                    # 移动文件到新目录
-                    target_fileitem = target_oper.get_folder(target_file.parent)
-                    if target_fileitem:
-                        if source_oper.move(fileitem, Path(target_fileitem.path), target_file.name):
-                            return target_oper.get_item(target_file), ""
-                        else:
-                            return None, f"【{target_storage}】{fileitem.path} 移动文件失败"
-                    else:
-                        return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
-                elif transfer_type == "link":
-                    if source_oper.link(fileitem, target_file):
+            if transfer_type == "copy":
+                # 复制文件到新目录
+                target_fileitem = target_oper.get_folder(target_file.parent)
+                if target_fileitem:
+                    if source_oper.copy(fileitem, Path(target_fileitem.path), target_file.name):
                         return target_oper.get_item(target_file), ""
                     else:
-                        return None, f"【{target_storage}】{fileitem.path} 创建硬链接失败"
+                        return None, f"【{target_storage}】{fileitem.path} 复制文件失败"
                 else:
-                    return None, f"不支持的整理方式：{transfer_type}"
+                    return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
+            elif transfer_type == "move":
+                # 移动文件到新目录
+                target_fileitem = target_oper.get_folder(target_file.parent)
+                if target_fileitem:
+                    if source_oper.move(fileitem, Path(target_fileitem.path), target_file.name):
+                        return target_oper.get_item(target_file), ""
+                    else:
+                        return None, f"【{target_storage}】{fileitem.path} 移动文件失败"
+                else:
+                    return None, f"【{target_storage}】{target_file.parent} 目录获取失败"
+            elif transfer_type == "link":
+                if source_oper.link(fileitem, target_file):
+                    return target_oper.get_item(target_file), ""
+                else:
+                    return None, f"【{target_storage}】{fileitem.path} 创建硬链接失败"
+            else:
+                return None, f"不支持的整理方式：{transfer_type}"
 
         return None, "未知错误"
 
