@@ -219,7 +219,7 @@ class JobManager:
 
     def remove_job(self, task: TransferTask) -> Optional[TransferJob]:
         """
-        移除作业
+        移除任务对应的作业
         """
         with job_lock:
             __mediaid__ = self.__get_media_id(media=task.mediainfo, season=task.meta.begin_season)
@@ -470,7 +470,12 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         整理完成后处理
         """
 
-        def __all_finished():
+        # 状态
+        ret_status = True
+        # 错误信息
+        ret_message = ""
+
+        def __notify():
             """
             完成时发送消息、刮削事件、移除任务等
             """
@@ -492,6 +497,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         se_str = f"{task.meta.season} {StringUtils.format_ep(season_episodes)}"
                     else:
                         se_str = f"{task.meta.season}"
+                # 发送入库成功消息
                 self.send_transfer_message(meta=task.meta,
                                            mediainfo=task.mediainfo,
                                            transferinfo=transferinfo,
@@ -508,12 +514,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'overwrite': False
                 })
 
-            # 移除已完成的任务
-            self.jobview.remove_job(task)
-
         transferhis = TransferHistoryOper()
+
+        # 转移失败
         if not transferinfo.success:
-            # 转移失败
             logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
 
             # 新增转移失败历史记录
@@ -548,83 +552,89 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 link=settings.MP_DOMAIN('#/history')
             ))
 
-            # 整理失败
+            # 设置任务失败
             self.jobview.fail_task(task)
 
             # 全部整理完成且有成功的任务时
             if self.jobview.is_finished(task):
-                # 发送消息、刮削事件、移除任务
-                __all_finished()
+                # 发送消息、刮削事件等
+                __notify()
 
-            return False, transferinfo.message
+            # 返回失败
+            ret_status = False
+            ret_message = transferinfo.message
 
-        # task转移成功
-        self.jobview.finish_task(task)
+        else:
+            # 转移成功
+            logger.info(f"{task.fileitem.name} 入库成功：{transferinfo.target_diritem.path}")
 
-        logger.info(f"{task.fileitem.name} 入库成功：{transferinfo.target_diritem.path}")
+            # 新增task转移成功历史记录
+            transferhis.add_success(
+                fileitem=task.fileitem,
+                mode=transferinfo.transfer_type if transferinfo else '',
+                downloader=task.downloader,
+                download_hash=task.download_hash,
+                meta=task.meta,
+                mediainfo=task.mediainfo,
+                transferinfo=transferinfo
+            )
 
-        # 新增task转移成功历史记录
-        transferhis.add_success(
-            fileitem=task.fileitem,
-            mode=transferinfo.transfer_type if transferinfo else '',
-            downloader=task.downloader,
-            download_hash=task.download_hash,
-            meta=task.meta,
-            mediainfo=task.mediainfo,
-            transferinfo=transferinfo
-        )
+            # task整理完成事件
+            if self.__is_media_file(task.fileitem):
+                self.eventmanager.send_event(EventType.TransferComplete, {
+                    'fileitem': task.fileitem,
+                    'meta': task.meta,
+                    'mediainfo': task.mediainfo,
+                    'transferinfo': transferinfo,
+                    'downloader': task.downloader,
+                    'download_hash': task.download_hash,
+                })
 
-        # task整理完成事件
-        if self.__is_media_file(task.fileitem):
-            self.eventmanager.send_event(EventType.TransferComplete, {
-                'fileitem': task.fileitem,
-                'meta': task.meta,
-                'mediainfo': task.mediainfo,
-                'transferinfo': transferinfo,
-                'downloader': task.downloader,
-                'download_hash': task.download_hash,
-            })
+            # task登记转移成功文件清单
+            target_dir_path = transferinfo.target_diritem.path
+            target_files = transferinfo.file_list_new
+            with job_lock:
+                if self._success_target_files.get(target_dir_path):
+                    self._success_target_files[target_dir_path].extend(target_files)
+                else:
+                    self._success_target_files[target_dir_path] = target_files
 
-        # task登记转移成功文件清单
-        target_dir_path = transferinfo.target_diritem.path
-        target_files = transferinfo.file_list_new
-        with job_lock:
-            if self._success_target_files.get(target_dir_path):
-                self._success_target_files[target_dir_path].extend(target_files)
-            else:
-                self._success_target_files[target_dir_path] = target_files
+            # 设置任务成功
+            self.jobview.finish_task(task)
 
-        # 全部整理成功时
-        if self.jobview.is_success(task):
-            # 移动模式删除空目录
-            if transferinfo.transfer_type in ["move"]:
-                # 所有成功的业务
-                tasks = self.jobview.success_tasks(task.mediainfo, task.meta.begin_season)
-                # 获取整理屏蔽词
-                transfer_exclude_words = SystemConfigOper().get(SystemConfigKey.TransferExcludeWords)
-                for t in tasks:
-                    if t.download_hash and self._can_delete_torrent(t.download_hash, t.downloader,
-                                                                    transfer_exclude_words):
-                        if self.remove_torrents(t.download_hash, downloader=t.downloader):
-                            logger.info(f"移动模式删除种子成功：{t.download_hash}")
-                    if t.fileitem:
-                        StorageChain().delete_media_file(t.fileitem, delete_self=False)
+            # 全部整理成功时
+            if self.jobview.is_success(task):
+                # 移动模式删除空目录
+                if transferinfo.transfer_type in ["move"]:
+                    # 所有成功的业务
+                    tasks = self.jobview.success_tasks(task.mediainfo, task.meta.begin_season)
+                    # 获取整理屏蔽词
+                    transfer_exclude_words = SystemConfigOper().get(SystemConfigKey.TransferExcludeWords)
+                    for t in tasks:
+                        if t.download_hash and self._can_delete_torrent(t.download_hash, t.downloader,
+                                                                        transfer_exclude_words):
+                            if self.remove_torrents(t.download_hash, downloader=t.downloader):
+                                logger.info(f"移动模式删除种子成功：{t.download_hash}")
+                        if t.fileitem:
+                            StorageChain().delete_media_file(t.fileitem, delete_self=False)
 
-        # 全部整理完成且有成功的任务时
-        if self.jobview.is_finished(task):
-            # 发送消息、刮削事件、移除任务
-            __all_finished()
+            # 全部整理完成且有成功的任务时
+            if self.jobview.is_finished(task):
+                # 发送消息、刮削事件
+                __notify()
 
         # 全部整理完成不管成功还是失败
         if self.jobview.is_done(task):
-            # 所有任务
+            # 查询作业中的所有任务
             tasks = self.jobview.all_tasks(task.mediainfo, task.meta.begin_season)
             for t in tasks:
                 if t.download_hash:
                     # 设置种子状态为已整理
                     self.transfer_completed(hashs=t.download_hash, downloader=t.downloader)
+            # 清理作业
+            self.jobview.remove_job(task)
 
-        return True, ""
+        return ret_status, ret_message
 
     def put_to_queue(self, task: TransferTask):
         """
