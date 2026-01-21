@@ -303,6 +303,8 @@ class ConfigModel(BaseModel):
     COOKIECLOUD_BLACKLIST: Optional[str] = None
 
     # ==================== 整理配置 ====================
+    # 文件整理线程数
+    TRANSFER_THREADS: int = 5
     # 电影重命名格式
     MOVIE_RENAME_FORMAT: str = "{{title}}{% if year %} ({{year}}){% endif %}" \
                                "/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if videoFormat %} - {{videoFormat}}{% endif %}" \
