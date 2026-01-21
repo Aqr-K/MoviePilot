@@ -80,7 +80,7 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         # 快照文件缓存
         self._snapshot_cache = FileCache(base=settings.CACHE_PATH / "snapshots")
         # 监控的文件扩展名
-        self.all_exts = settings.RMT_MEDIAEXT
+        self.all_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
         # 启动目录监控和文件整理
         self.init()
 

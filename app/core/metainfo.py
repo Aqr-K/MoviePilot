@@ -25,7 +25,8 @@ def MetaInfo(title: str, subtitle: Optional[str] = None, custom_words: List[str]
     # 获取标题中媒体信息
     title, metainfo = find_metainfo(title)
     # 判断是否处理文件
-    if title and Path(title).suffix.lower() in settings.RMT_MEDIAEXT:
+    media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+    if title and Path(title).suffix.lower() in media_exts:
         isfile = True
         # 去掉后缀
         title = Path(title).stem

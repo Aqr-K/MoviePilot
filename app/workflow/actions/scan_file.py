@@ -65,7 +65,8 @@ class ScanFileAction(BaseAction):
         for file in files:
             if global_vars.is_workflow_stopped(workflow_id):
                 break
-            if not file.extension or f".{file.extension.lower()}" not in settings.RMT_MEDIAEXT:
+            media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+            if not file.extension or f".{file.extension.lower()}" not in media_exts:
                 continue
             # 添加文件到队列，而不是目录
             self._fileitems.append(file)

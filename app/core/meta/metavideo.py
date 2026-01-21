@@ -301,7 +301,8 @@ class MetaVideo(MetaBase):
                 return
             else:
                 # 后缀名不要
-                if ".%s".lower() % token in settings.RMT_MEDIAEXT:
+                media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+                if ".%s".lower() % token in media_exts:
                     return
                 # 英文或者英文+数字，拼装起来
                 if self.en_name:

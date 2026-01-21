@@ -790,7 +790,8 @@ class TransHandler:
                 continue
             if media_file.type != "file":
                 continue
-            if f".{media_file.extension.lower()}" not in settings.RMT_MEDIAEXT:
+            media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+            if f".{media_file.extension.lower()}" not in media_exts:
                 continue
             # 识别文件中的季集信息
             filemeta = MetaInfoPath(media_path)
