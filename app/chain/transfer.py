@@ -739,7 +739,7 @@ class TransferChain(ChainBase, metaclass=Singleton):
                     self.post_message(Notification(
                         mtype=NotificationType.Manual,
                         title=f"{task.fileitem.name} 未识别到媒体信息，无法入库！",
-                        text=f"回复：```\n/redo {his.id} [tmdbid]|[类型]\n``` 手动识别整理。",
+                        text=f"回复：\n```\n/redo {his.id} [tmdbid]|[类型]\n```\n手动识别整理。",
                         username=task.username,
                         link=settings.MP_DOMAIN('#/history')
                     ))
