@@ -307,7 +307,7 @@ class JobManager:
         判断是否有任务正在处理
         """
         if mediainfo:
-            __mediaid__ = self.__get_media_id(media=meta, season=season)
+            __mediaid__ = self.__get_media_id(media=media, season=season)
             if __mediaid__ in self._job_view:
                 return True
 
