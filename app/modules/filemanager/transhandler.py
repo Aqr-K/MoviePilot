@@ -150,10 +150,9 @@ class TransHandler:
                 if stream_fileitem := source_oper.get_item(
                         Path(fileitem.path) / "BDMV" / "STREAM"
                 ):
-                    fileitem.size = 0
-                    files = source_oper.list(stream_fileitem) or []
-                    for file in files:
-                        fileitem.size += file.size
+                    fileitem.size = sum(
+                        file.size for file in source_oper.list(stream_fileitem) or []
+                    )
                 # 整理目录
                 new_diritem, errmsg = self.__transfer_dir(fileitem=fileitem,
                                                           mediainfo=mediainfo,
