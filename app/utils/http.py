@@ -10,12 +10,32 @@ import requests
 import urllib3
 from requests import Response, Session
 from urllib3.exceptions import InsecureRequestWarning
+from urllib.parse import unquote, quote
 
 from app.core.config import settings
 from app.log import logger
 
 urllib3.disable_warnings(InsecureRequestWarning)
 
+
+def _url_decode_if_latin(original: str) -> str:
+    """
+    解码URL编码的字符串，只解码文本，二进程数据保持不变
+    :param original: URL编码字符串
+    :return: 解码后的字符串或原始二进制数据
+    """
+    try:
+        # 先解码
+        decoded = unquote(original, encoding='latin-1')
+        # 再完整编码
+        fully_encoded = quote(decoded, safe='')
+        # 验证
+        decoded_again = unquote(fully_encoded, encoding='latin-1')
+        if decoded_again == decoded:
+            return decoded
+    except Exception as e:
+        logger.error(f"latin-1解码URL编码失败：{e}")
+    return original
 
 def cookie_parse(cookies_str: str, array: bool = False) -> Union[list, dict]:
     """
@@ -26,14 +46,14 @@ def cookie_parse(cookies_str: str, array: bool = False) -> Union[list, dict]:
     """
     if not cookies_str:
         return {}
-    from urllib.parse import unquote
+
     cookie_dict = {}
     cookies = cookies_str.split(";")
     for cookie in cookies:
         cstr = cookie.split("=", 1)  # 只分割第一个=，因为value可能包含=
         if len(cstr) > 1:
             # URL解码Cookie值（但保留Cookie名不解码）
-            cookie_dict[cstr[0].strip()] = unquote(cstr[1].strip())
+            cookie_dict[cstr[0].strip()] = _url_decode_if_latin(cstr[1].strip())
     if array:
         return [{"name": k, "value": v} for k, v in cookie_dict.items()]
     return cookie_dict
