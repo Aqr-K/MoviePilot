@@ -38,8 +38,10 @@ class EventType(Enum):
     SiteUpdated = "site.updated"
     # 站点已刷新
     SiteRefreshed = "site.refreshed"
-    # 转移完成
+    # 整理完成
     TransferComplete = "transfer.complete"
+    # 整理失败
+    TransferFailed = "transfer.failed"
     # 下载已添加
     DownloadAdded = "download.added"
     # 删除历史记录
