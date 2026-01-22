@@ -14,7 +14,7 @@ class QuerySubscribesInput(BaseModel):
     """查询订阅工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     status: Optional[str] = Field("all",
-                                  description="Filter subscriptions by status: 'R' for enabled subscriptions, 'P' for disabled ones, 'all' for all subscriptions")
+                                  description="Filter subscriptions by status: 'R' for enabled subscriptions, 'S' for paused ones, 'all' for all subscriptions")
     media_type: Optional[str] = Field("all",
                                       description="Filter by media type: '电影' for films, '电视剧' for television series, 'all' for all types")
 
@@ -33,7 +33,7 @@ class QuerySubscribesTool(MoviePilotTool):
         
         # 根据状态过滤条件生成提示
         if status != "all":
-            status_map = {"R": "已启用", "P": "已禁用"}
+            status_map = {"R": "已启用", "S": "已暂停"}
             parts.append(f"状态: {status_map.get(status, status)}")
         
         # 根据媒体类型过滤条件生成提示
