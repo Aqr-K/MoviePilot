@@ -294,6 +294,17 @@ class JobManager:
             media_success = True
         return meta_success and media_success
 
+    def get_all_torrent_hashes(self) -> set[str]:
+        """
+        获取所有种子的哈希值集合
+        """
+        with job_lock:
+            return {
+                task.download_hash
+                for job in self._job_view.values()
+                for task in job.tasks
+            }
+
     def is_torrent_done(self, download_hash: str) -> bool:
         """
         检查指定种子的所有任务是否都已完成
@@ -959,7 +970,16 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             logger.info("开始整理下载器中已经完成下载的文件 ...")
 
             # 从下载器获取种子列表
-            torrents: Optional[List[TransferTorrent]] = self.list_torrents(status=TorrentStatus.TRANSFER)
+            if torrents_list := self.list_torrents(status=TorrentStatus.TRANSFER):
+                existing_hashes = self.jobview.get_all_torrent_hashes()
+                torrents = [
+                    torrent
+                    for torrent in torrents_list
+                    if torrent.hash not in existing_hashes
+                ]
+            else:
+                torrents = []
+
             if not torrents:
                 logger.info("没有已完成下载但未整理的任务")
                 return False
@@ -994,20 +1014,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     # 查询下载记录识别情况
                     downloadhis: DownloadHistory = DownloadHistoryOper().get_by_hash(torrent.hash)
                     if downloadhis:
-                        # 获取自定义识别词
-                        custom_words_list = None
-                        if downloadhis.custom_words:
-                            custom_words_list = downloadhis.custom_words.split('\n')
-
                         # 类型
                         try:
                             mtype = MediaType(downloadhis.type)
                         except ValueError:
                             mtype = MediaType.TV
-
-                        # 识别元数据
-                        metainfo = MetaInfoPath(file_path, custom_words=custom_words_list)
-
                         # 识别媒体信息
                         mediainfo = self.recognize_media(mtype=mtype,
                                                          tmdbid=downloadhis.tmdbid,
@@ -1022,13 +1033,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
                     else:
                         # 非MoviePilot下载的任务，按文件识别
-                        metainfo = MetaInfoPath(file_path)
                         mediainfo = None
-
-                    # 检查是否已经有任务处理中，如有则跳过本次整理
-                    if self.jobview.has_tasks(meta=metainfo, mediainfo=mediainfo):
-                        logger.info(f"有任务正在整理中，跳过本次整理 ...")
-                        return False
 
                     # 执行异步整理，匹配源目录
                     self.do_transfer(
