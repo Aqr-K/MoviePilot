@@ -223,7 +223,7 @@ class JobManager:
         移除任务对应的作业
         """
         with job_lock:
-            __mediaid__ = self.__get_media_id(media=task.mediainfo, season=task.meta.begin_season)
+            __mediaid__ = self.__get_id(task)
             if __mediaid__ in self._job_view:
                 # 移除季集信息
                 if __mediaid__ in self._season_episodes:
