@@ -591,11 +591,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 设置任务失败
             self.jobview.fail_task(task)
 
-            # 全部整理完成且有成功的任务时
-            if self.jobview.is_finished(task):
-                # 发送消息、刮削事件等
-                __notify()
-
             # 返回失败
             ret_status = False
             ret_message = transferinfo.message
@@ -638,12 +633,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 设置任务成功
             self.jobview.finish_task(task)
 
-            # 全部整理完成且有成功的任务时
-            if self.jobview.is_finished(task):
-                # 发送消息、刮削事件
-                __notify()
+        # 全部整理完成且有成功的任务时，发送消息和事件
+        if self.jobview.is_finished(task):
+            __notify()
 
-        # 全部整理完成不管成功还是失败
+        # 全部整理完成，设置完成的种子为已整理
         if self.jobview.is_done(task):
             # 查询作业中的所有任务
             tasks = self.jobview.all_tasks(task.mediainfo, task.meta.begin_season)
@@ -656,7 +650,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         # 设置种子状态为已整理
                         self.transfer_completed(hashs=t.download_hash, downloader=t.downloader)
 
-        # 移动模式删除空目录和种子文件
+        # 移动模式，全部成功时删除空目录和种子文件
         if transferinfo.transfer_type in ["move"]:
             # 全部整理成功时
             if self.jobview.is_success(task):
