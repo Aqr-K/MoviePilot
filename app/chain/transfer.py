@@ -46,6 +46,7 @@ task_lock = threading.Lock()
 class JobManager:
     """
     作业管理器
+    task任务负责一个文件的整理，job作业负责一个媒体的整理
     """
 
     # 整理中的作业
@@ -111,7 +112,7 @@ class JobManager:
 
     def add_task(self, task: TransferTask, state: Optional[str] = "waiting"):
         """
-        添加整理任务
+        添加整理任务，自动分组到对应的作业中
         """
         if not any([task, task.meta, task.fileitem]):
             return
@@ -165,7 +166,7 @@ class JobManager:
 
     def finish_task(self, task: TransferTask):
         """
-        设置任务为完成
+        设置任务为完成/成功
         """
         with job_lock:
             __mediaid__ = self.__get_id(task)
@@ -198,7 +199,7 @@ class JobManager:
 
     def remove_task(self, fileitem: FileItem) -> Optional[TransferJobTask]:
         """
-        移除任务
+        根据文件项移除任务
         """
         with job_lock:
             for mediaid in list(self._job_view):
@@ -293,9 +294,21 @@ class JobManager:
             media_success = True
         return meta_success and media_success
 
+    def is_torrent_done(self, download_hash: str) -> bool:
+        """
+        检查指定种子的所有任务是否都已完成
+        """
+        with job_lock:
+            for job in self._job_view.values():
+                for task in job.tasks:
+                    if task.download_hash == download_hash:
+                        if task.state not in ["completed", "failed"]:
+                            return False
+            return True
+
     def has_tasks(self, meta: MetaBase, mediainfo: Optional[MediaInfo] = None, season: Optional[int] = None) -> bool:
         """
-        判断是否有任务正在处理
+        判断作业是否还有任务正在处理
         """
         if mediainfo:
             __mediaid__ = self.__get_media_id(media=mediainfo, season=season)
@@ -303,11 +316,11 @@ class JobManager:
                 return True
 
         __metaid__ = self.__get_meta_id(meta=meta, season=season)
-        return __metaid__ in self._job_view
+        return __metaid__ in self._job_view and len(self._job_view[__metaid__].tasks) > 0
 
     def success_tasks(self, media: MediaInfo, season: Optional[int] = None) -> List[TransferJobTask]:
         """
-        获取某项任务成功的任务
+        获取作业中所有成功的任务
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         if __mediaid__ not in self._job_view:
@@ -316,7 +329,7 @@ class JobManager:
 
     def all_tasks(self, media: MediaInfo, season: Optional[int] = None) -> List[TransferJobTask]:
         """
-        获取全部任务
+        获取作业中全部任务
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         if __mediaid__ not in self._job_view:
@@ -325,7 +338,7 @@ class JobManager:
 
     def count(self, media: MediaInfo, season: Optional[int] = None) -> int:
         """
-        获取作业成功总数
+        获取作业中成功总数
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         if __mediaid__ not in self._job_view:
@@ -334,7 +347,7 @@ class JobManager:
 
     def size(self, media: MediaInfo, season: Optional[int] = None) -> int:
         """
-        获取作业成功文件总大小
+        获取作业中所有成功文件总大小
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         if __mediaid__ not in self._job_view:
@@ -355,13 +368,13 @@ class JobManager:
 
     def list_jobs(self) -> List[TransferJob]:
         """
-        获取所有任务列表
+        获取所有作业的任务列表
         """
         return list(self._job_view.values())
 
     def season_episodes(self, media: MediaInfo, season: Optional[int] = None) -> List[int]:
         """
-        获取季集清单
+        获取作业的季集清单
         """
         __mediaid__ = self.__get_media_id(media=media, season=season)
         return self._season_episodes.get(__mediaid__) or []
@@ -627,10 +640,15 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if self.jobview.is_done(task):
             # 查询作业中的所有任务
             tasks = self.jobview.all_tasks(task.mediainfo, task.meta.begin_season)
+            processed_hashes = set()
             for t in tasks:
-                if t.download_hash:
-                    # 设置种子状态为已整理
-                    self.transfer_completed(hashs=t.download_hash, downloader=t.downloader)
+                if t.download_hash and t.download_hash not in processed_hashes:
+                    # 检查该种子的所有任务（跨作业）是否都已完成
+                    if self.jobview.is_torrent_done(t.download_hash):
+                        # 设置种子状态为已整理
+                        self.transfer_completed(hashs=t.download_hash, downloader=t.downloader)
+                        # 记录已处理的哈希，避免重复处理
+                        processed_hashes.add(t.download_hash)
             # 清理作业
             self.jobview.remove_job(task)
 
