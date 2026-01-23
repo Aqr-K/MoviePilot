@@ -660,9 +660,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         # 删除剩余空目录
                         StorageChain().delete_media_file(t.fileitem, delete_self=False)
 
-        # 清理作业
-        self.jobview.remove_job(task)
-
         return ret_status, ret_message
 
     def put_to_queue(self, task: TransferTask):
