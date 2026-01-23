@@ -1,14 +1,19 @@
 """搜索网络内容工具"""
 
+import asyncio
 import json
 import re
 from typing import Optional, Type
 
+from duckduckgo_search import DDGS
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.core.config import settings
 from app.log import logger
+
+# 搜索超时时间（秒）
+SEARCH_TIMEOUT = 20
 
 
 class SearchWebInput(BaseModel):
@@ -64,6 +69,25 @@ class SearchWebTool(MoviePilotTool):
             return error_message
 
     @staticmethod
+    def _get_proxy_url(proxy_setting) -> Optional[str]:
+        """
+        从代理设置中提取代理URL
+        
+        Args:
+            proxy_setting: 代理设置，可以是字符串或字典
+            
+        Returns:
+            代理URL字符串，如果没有配置则返回None
+        """
+        if not proxy_setting:
+            return None
+        
+        if isinstance(proxy_setting, dict):
+            return proxy_setting.get('http') or proxy_setting.get('https')
+        
+        return proxy_setting
+
+    @staticmethod
     async def _search_duckduckgo(query: str, max_results: int) -> list:
         """
         使用 duckduckgo-search 库进行搜索
@@ -76,27 +100,18 @@ class SearchWebTool(MoviePilotTool):
             搜索结果列表
         """
         try:
-            from duckduckgo_search import DDGS
-            import asyncio
-            
             # duckduckgo-search 是同步库，需要在 executor 中运行
             def sync_search():
                 results = []
                 try:
                     # 使用代理（如果配置了）
                     ddgs_kwargs = {}
-                    if settings.PROXY:
-                        # duckduckgo-search 支持代理配置
-                        if isinstance(settings.PROXY, dict):
-                            proxy_url = settings.PROXY.get('http') or settings.PROXY.get('https')
-                        else:
-                            proxy_url = settings.PROXY
-                        
-                        if proxy_url:
-                            ddgs_kwargs['proxy'] = proxy_url
+                    proxy_url = SearchWebTool._get_proxy_url(settings.PROXY)
+                    if proxy_url:
+                        ddgs_kwargs['proxy'] = proxy_url
                     
                     # 设置超时
-                    ddgs_kwargs['timeout'] = 20
+                    ddgs_kwargs['timeout'] = SEARCH_TIMEOUT
                     
                     with DDGS(**ddgs_kwargs) as ddgs:
                         # 使用 text 方法进行搜索
@@ -120,7 +135,7 @@ class SearchWebTool(MoviePilotTool):
                 return results
             
             # 在线程池中运行同步搜索
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(None, sync_search)
             return results
             
