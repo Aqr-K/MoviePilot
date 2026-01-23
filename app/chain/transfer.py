@@ -968,11 +968,14 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
             # 从下载器获取种子列表
             if torrents_list := self.list_torrents(status=TorrentStatus.TRANSFER):
+                seen = set()
                 existing_hashes = self.jobview.get_all_torrent_hashes()
                 torrents = [
                     torrent
                     for torrent in torrents_list
-                    if torrent.hash not in existing_hashes
+                    if (h := torrent.hash) not in existing_hashes
+                    # 排除多下载器返回的重复种子
+                    and (h not in seen and (seen.add(h) or True))
                 ]
             else:
                 torrents = []
