@@ -1,15 +1,19 @@
 """搜索网络内容工具"""
 
+import asyncio
 import json
 import re
 from typing import Optional, Type
 
+from duckduckgo_search import DDGS
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.core.config import settings
 from app.log import logger
-from app.utils.http import AsyncRequestUtils
+
+# 搜索超时时间（秒）
+SEARCH_TIMEOUT = 20
 
 
 class SearchWebInput(BaseModel):
@@ -47,8 +51,8 @@ class SearchWebTool(MoviePilotTool):
             # 限制最大结果数
             max_results = min(max(1, max_results or 5), 10)
             
-            # 使用DuckDuckGo API进行搜索
-            search_results = await self._search_duckduckgo_api(query, max_results)
+            # 使用 duckduckgo-search 库进行搜索
+            search_results = await self._search_duckduckgo(query, max_results)
             
             if not search_results:
                 return f"未找到与 '{query}' 相关的搜索结果"
@@ -65,9 +69,28 @@ class SearchWebTool(MoviePilotTool):
             return error_message
 
     @staticmethod
-    async def _search_duckduckgo_api(query: str, max_results: int) -> list:
+    def _get_proxy_url(proxy_setting) -> Optional[str]:
         """
-        使用DuckDuckGo API进行搜索
+        从代理设置中提取代理URL
+        
+        Args:
+            proxy_setting: 代理设置，可以是字符串或字典
+            
+        Returns:
+            代理URL字符串，如果没有配置则返回None
+        """
+        if not proxy_setting:
+            return None
+        
+        if isinstance(proxy_setting, dict):
+            return proxy_setting.get('http') or proxy_setting.get('https')
+        
+        return proxy_setting
+
+    @staticmethod
+    async def _search_duckduckgo(query: str, max_results: int) -> list:
+        """
+        使用 duckduckgo-search 库进行搜索
         
         Args:
             query: 搜索查询
@@ -77,71 +100,50 @@ class SearchWebTool(MoviePilotTool):
             搜索结果列表
         """
         try:
-            # DuckDuckGo Instant Answer API
-            api_url = "https://api.duckduckgo.com/"
-            params = {
-                "q": query,
-                "format": "json",
-                "no_html": "1",
-                "skip_disambig": "1"
-            }
-            
-            # 使用代理（如果配置了）
-            http_utils = AsyncRequestUtils(
-                proxies=settings.PROXY,
-                timeout=10
-            )
-            
-            data = await http_utils.get_json(api_url, params=params)
-            
-            results = []
-            
-            if data:
-                # 处理AbstractText（摘要）
-                if data.get("AbstractText"):
-                    results.append({
-                        "title": data.get("Heading", query),
-                        "snippet": data.get("AbstractText", ""),
-                        "url": data.get("AbstractURL", ""),
-                        "source": "DuckDuckGo Abstract"
-                    })
-                
-                # 处理RelatedTopics（相关主题）
-                related_topics = data.get("RelatedTopics", [])
-                for topic in related_topics[:max_results - len(results)]:
-                    if isinstance(topic, dict):
-                        text = topic.get("Text", "")
-                        first_url = topic.get("FirstURL", "")
-                        if text and first_url:
-                            # 提取标题（通常在" - "之前）
-                            title = text.split(" - ")[0] if " - " in text else text[:100]
-                            snippet = text
-                            
+            # duckduckgo-search 是同步库，需要在 executor 中运行
+            def sync_search():
+                results = []
+                try:
+                    # 使用代理（如果配置了）
+                    ddgs_kwargs = {}
+                    proxy_url = SearchWebTool._get_proxy_url(settings.PROXY)
+                    if proxy_url:
+                        ddgs_kwargs['proxy'] = proxy_url
+                    
+                    # 设置超时
+                    ddgs_kwargs['timeout'] = SEARCH_TIMEOUT
+                    
+                    with DDGS(**ddgs_kwargs) as ddgs:
+                        # 使用 text 方法进行搜索
+                        search_results = list(ddgs.text(
+                            keywords=query,
+                            max_results=max_results
+                        ))
+                        
+                        for result in search_results:
                             results.append({
-                                "title": title.strip(),
-                                "snippet": snippet,
-                                "url": first_url,
-                                "source": "DuckDuckGo Related"
+                                'title': result.get('title', ''),
+                                'snippet': result.get('body', ''),
+                                'url': result.get('href', ''),
+                                'source': 'DuckDuckGo'
                             })
+                    
+                except Exception as e:
+                    logger.warning(f"duckduckgo-search 搜索失败: {e}")
+                    raise
                 
-                # 处理Results（搜索结果）
-                api_results = data.get("Results", [])
-                for result in api_results[:max_results - len(results)]:
-                    if isinstance(result, dict):
-                        title = result.get("Text", "")
-                        url = result.get("FirstURL", "")
-                        if title and url:
-                            results.append({
-                                "title": title,
-                                "snippet": result.get("Text", ""),
-                                "url": url,
-                                "source": "DuckDuckGo Results"
-                            })
+                return results
             
-            return results[:max_results]
+            # 在线程池中运行同步搜索
+            loop = asyncio.get_running_loop()
+            results = await loop.run_in_executor(None, sync_search)
+            return results
             
+        except ImportError:
+            logger.error("duckduckgo-search 库未安装，请在 requirements.in 中添加依赖后重新构建")
+            return []
         except Exception as e:
-            logger.warning(f"DuckDuckGo API搜索失败: {e}")
+            logger.warning(f"DuckDuckGo 搜索失败: {e}")
             return []
 
     @staticmethod
