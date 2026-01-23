@@ -145,7 +145,8 @@ class MoviePilotAgent:
             logger.error(f"初始化提示词失败: {e}")
             raise e
 
-    def _token_counter(self, messages: List[Union[HumanMessage, AIMessage, ToolMessage, SystemMessage]]) -> int:
+    @staticmethod
+    def _token_counter(messages: List[Union[HumanMessage, AIMessage, ToolMessage, SystemMessage]]) -> int:
         """
         通用的Token计数器
         """
@@ -257,6 +258,7 @@ class MoviePilotAgent:
 
             # 执行Agent
             logger.info(f"Agent执行推理: session_id={self.session_id}, input={message}")
+
             result = await self._execute_agent(input_context)
 
             # 获取Agent回复
@@ -317,7 +319,7 @@ class MoviePilotAgent:
         except Exception as e:
             logger.error(f"Agent执行失败: {e}")
             return {
-                "output": f"执行过程中发生错误: {str(e)}",
+                "output": str(e),
                 "intermediate_steps": [],
                 "token_usage": {}
             }
