@@ -447,8 +447,12 @@ class ConfigModel(BaseModel):
     AI_RECOMMEND_ENABLED: bool = False
     # AI推荐用户偏好
     AI_RECOMMEND_USER_PREFERENCE: str = ""
+    # Tavily API密钥（用于网络搜索）
+    TAVILY_API_KEY: str = "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"
+
     # AI推荐条目数量限制
     AI_RECOMMEND_MAX_ITEMS: int = 50
+
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
