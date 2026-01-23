@@ -1,4 +1,4 @@
-from datetime import datetime
+import math
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -83,7 +83,7 @@ def list_files(fileitem: schemas.FileItem,
         if sort == "name":
             file_list.sort(key=lambda x: StringUtils.natural_sort_key(x.name or ""))
         else:
-            file_list.sort(key=lambda x: x.modify_time or datetime.min, reverse=True)
+            file_list.sort(key=lambda x: x.modify_time or -math.inf, reverse=True)
     return file_list
 
 
