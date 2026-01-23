@@ -427,6 +427,8 @@ class ConfigModel(BaseModel):
     LLM_API_KEY: Optional[str] = None
     # LLM基础URL（用于自定义API端点）
     LLM_BASE_URL: Optional[str] = "https://api.deepseek.com"
+    # LLM最大上下文Token数量（K）
+    LLM_MAX_CONTEXT_TOKENS: int = 64
     # LLM温度参数
     LLM_TEMPERATURE: float = 0.1
     # LLM最大迭代次数
