@@ -38,8 +38,8 @@ def upgrade() -> None:
         logger.warn(
             f"已删除重复的 SystemConfig 项：key={row.key}, value={row.value}, id={row.id}"
         )
-        delete_stmt = text(f"DELETE FROM SystemConfig WHERE id = {row.id}")
-        connection.execute(delete_stmt)
+        delete_stmt = text("DELETE FROM SystemConfig WHERE id = :id")
+        connection.execute(delete_stmt, {"id": row.id})
 
     logger.info("SystemConfig 表去重操作已完成。")
 
