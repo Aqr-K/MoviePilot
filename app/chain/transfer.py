@@ -637,18 +637,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if self.jobview.is_finished(task):
             __notify()
 
-        # 全部整理完成，设置完成的种子为已整理
-        if self.jobview.is_done(task):
-            # 查询作业中的所有任务
-            tasks = self.jobview.all_tasks(task.mediainfo, task.meta.begin_season)
-            processed_hashes = set()
-            for t in tasks:
-                if t.download_hash and t.download_hash not in processed_hashes:
-                    # 检查该种子的所有任务（跨作业）是否都已完成
-                    if self.jobview.is_torrent_done(t.download_hash):
-                        processed_hashes.add(t.download_hash)
-                        # 设置种子状态为已整理
-                        self.transfer_completed(hashs=t.download_hash, downloader=t.downloader)
+        # 只要该种子的所有任务都已整理完成，则设置种子状态为已整理
+        if task.download_hash and self.jobview.is_torrent_done(task.download_hash):
+            self.transfer_completed(hashs=task.download_hash, downloader=task.downloader)
 
         # 移动模式，全部成功时删除空目录和种子文件
         if transferinfo.transfer_type in ["move"]:
