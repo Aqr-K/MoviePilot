@@ -115,10 +115,10 @@ class SearchWebTool(MoviePilotTool):
                     
                     with DDGS(**ddgs_kwargs) as ddgs:
                         # 使用 text 方法进行搜索
-                        search_results = ddgs.text(
+                        search_results = list(ddgs.text(
                             keywords=query,
                             max_results=max_results
-                        )
+                        ))
                         
                         for result in search_results:
                             results.append({
@@ -140,7 +140,7 @@ class SearchWebTool(MoviePilotTool):
             return results
             
         except ImportError:
-            logger.error("duckduckgo-search 库未安装，请运行: pip install duckduckgo-search")
+            logger.error("duckduckgo-search 库未安装，请在 requirements.in 中添加依赖后重新构建")
             return []
         except Exception as e:
             logger.warning(f"DuckDuckGo 搜索失败: {e}")
