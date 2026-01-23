@@ -6,8 +6,9 @@ Create Date: 2026-01-13 13:02:41.614029
 
 """
 
-from app.db import ScopedSession
-from app.db.models.systemconfig import SystemConfig
+from alembic import op
+from sqlalchemy import text
+
 from app.log import logger
 
 # revision identifiers, used by Alembic.
@@ -19,22 +20,28 @@ depends_on = None
 
 def upgrade() -> None:
     # systemconfig表 去重
-    with ScopedSession() as db:
-        try:
-            seen_keys = set()
-            # 按ID降序查询，以便保留最新的配置
-            for item in db.query(SystemConfig).order_by(SystemConfig.id.desc()).all():
-                if item.key in seen_keys:
-                    logger.warn(
-                        f"已删除重复的SystemConfig项：{item.key} 值:{item.value}"
-                    )
-                    db.delete(item)
-                else:
-                    seen_keys.add(item.key)
-            db.commit()
-        except Exception as e:
-            logger.error(e)
-            db.rollback()
+    connection = op.get_bind()
+
+    select_stmt = text(
+        """
+        SELECT id, key, value
+        FROM SystemConfig
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM SystemConfig
+            GROUP BY key
+        )
+    """
+    )
+    to_delete = connection.execute(select_stmt).fetchall()
+    for row in to_delete:
+        logger.warn(
+            f"已删除重复的 SystemConfig 项：key={row.key}, value={row.value}, id={row.id}"
+        )
+        delete_stmt = text("DELETE FROM SystemConfig WHERE id = :id")
+        connection.execute(delete_stmt, {"id": row.id})
+
+    logger.info("SystemConfig 表去重操作已完成。")
 
 
 def downgrade() -> None:
