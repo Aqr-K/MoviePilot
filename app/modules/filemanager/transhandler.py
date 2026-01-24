@@ -708,7 +708,7 @@ class TransHandler:
         """
         获取目标路径
         """
-        if need_type_folder:
+        if need_type_folder and mediainfo.type:
             target_path = target_path / mediainfo.type.value
         if need_category_folder and mediainfo.category:
             target_path = target_path / mediainfo.category
@@ -728,7 +728,7 @@ class TransHandler:
             need_type_folder = target_dir.library_type_folder
         if need_category_folder is None:
             need_category_folder = target_dir.library_category_folder
-        if not target_dir.media_type and need_type_folder:
+        if not target_dir.media_type and need_type_folder and mediainfo.type:
             # 一级自动分类
             library_dir = Path(target_dir.library_path) / mediainfo.type.value
         elif target_dir.media_type and need_type_folder:
