@@ -249,11 +249,81 @@ class MoviePilotAgent:
             logger.error(f"创建Agent执行器失败: {e}")
             raise e
 
+    async def _summarize_history(self):
+        """
+        总结提炼之前的对话和工具执行情况，并把会话总结变成新的系统提示词取代之前的对话
+        """
+        try:
+            # 获取当前历史记录
+            chat_history = self.get_session_history(self.session_id)
+            messages = chat_history.messages
+            if not messages:
+                return
+
+            logger.info(f"会话 {self.session_id} 历史消息长度已超过 90%，开始总结并重置上下文...")
+
+            # 将消息转换为摘要所需的文本格式
+            history_text = ""
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    history_text += f"用户: {msg.content}\n"
+                elif isinstance(msg, AIMessage):
+                    history_text += f"智能体: {msg.content}\n"
+                    if getattr(msg, "tool_calls", None):
+                        for tool_call in msg.tool_calls:
+                            history_text += f"智能体调用工具: {tool_call.get('name')}，参数: {tool_call.get('args')}\n"
+                elif isinstance(msg, ToolMessage):
+                    history_text += f"工具响应: {msg.content}\n"
+                elif isinstance(msg, SystemMessage):
+                    history_text += f"系统: {msg.content}\n"
+
+            # 摘要提示词
+            summary_prompt = (
+                "Please provide a comprehensive and highly informational summary of the preceding conversation and tool executions. "
+                "Your goal is to condense the history while retaining all critical details for future reference. "
+                "Ensure you include:\n"
+                "1. User's core intents, specific requests, and any mentioned preferences.\n"
+                "2. Names of movies, TV shows, or other key entities discussed.\n"
+                "3. A concise log of tool calls made and their specific results/outcomes.\n"
+                "4. The current status of any tasks and any pending actions.\n"
+                "5. Any important context that would be necessary for the agent to continue the conversation seamlessly.\n"
+                "The summary should be dense with information and serve as the primary context for the next stage of the interaction."
+            )
+
+            # 调用 LLM 进行总结 (非流式)
+            summary_llm = LLMHelper.get_llm(streaming=False)
+            response = await summary_llm.ainvoke([
+                SystemMessage(content=summary_prompt),
+                HumanMessage(content=f"Here is the conversation history to summarize:\n{history_text}")
+            ])
+            summary_content = str(response.content)
+
+            if not summary_content:
+                logger.warning("总结生成失败，跳过重置逻辑。")
+                return
+
+            # 清空原有的会话记录并插入新的系统总结
+            await conversation_manager.clear_memory(self.session_id, self.user_id)
+            await conversation_manager.add_conversation(
+                session_id=self.session_id,
+                user_id=self.user_id,
+                role="system",
+                content=f"<history_summary>\n{summary_content}\n</history_summary>"
+            )
+            logger.info(f"会话 {self.session_id} 历史摘要替换完成。")
+        except Exception as e:
+            logger.error(f"执行会话总结出错: {str(e)}")
+
     async def process_message(self, message: str) -> str:
         """
         处理用户消息
         """
         try:
+            # 检查上下文长度是否超过 90%
+            history = self.get_session_history(self.session_id)
+            if self._token_counter(history.messages) > settings.LLM_MAX_CONTEXT_TOKENS * 1000 * 0.9:
+                await self._summarize_history()
+
             # 添加用户消息到记忆
             await conversation_manager.add_conversation(
                 self.session_id,

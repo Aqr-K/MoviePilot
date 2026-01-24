@@ -40,7 +40,7 @@ class MessageChain(ChainBase):
     # 用户会话信息 {userid: (session_id, last_time)}
     _user_sessions: Dict[Union[str, int], tuple] = {}
     # 会话超时时间（分钟）
-    _session_timeout_minutes: int = 15
+    _session_timeout_minutes: int = 30
 
     @staticmethod
     def __get_noexits_info(
@@ -856,8 +856,8 @@ class MessageChain(ChainBase):
             # 计算时间差
             time_diff = current_time - last_time
 
-            # 如果时间差小于等于15分钟，复用会话ID
-            if time_diff <= timedelta(minutes=MessageChain._session_timeout_minutes):
+            # 如果时间差小于等于xx分钟，复用会话ID
+            if time_diff <= timedelta(minutes=self._session_timeout_minutes):
                 # 更新最后使用时间
                 self._user_sessions[userid] = (session_id, current_time)
                 logger.info(
