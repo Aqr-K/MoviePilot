@@ -219,7 +219,10 @@ class MoviePilotAgent:
             # Check if this is an AIMessage with tool_calls
             if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None):
                 # Extract tool_call IDs (ToolCall is a TypedDict, so it's a dict at runtime)
-                tool_call_ids = {tc.get('id') or tc.get('name') for tc in msg.tool_calls}
+                tool_call_ids = {
+                    tc.get('id') if tc.get('id') is not None else tc.get('name')
+                    for tc in msg.tool_calls
+                }
                 
                 # Find subsequent ToolMessages
                 j = i + 1
@@ -230,6 +233,11 @@ class MoviePilotAgent:
                 
                 # Check if all tool_calls have corresponding ToolMessages
                 found_tool_call_ids = {tm.tool_call_id for tm in found_tool_messages}
+                
+                # Warn if there are extra ToolMessages that don't correspond to any tool_call
+                extra_tool_messages = found_tool_call_ids - tool_call_ids
+                if extra_tool_messages:
+                    logger.warning(f"Found extra ToolMessages that don't correspond to any tool_call: {extra_tool_messages}")
                 
                 if not tool_call_ids.issubset(found_tool_call_ids):
                     # Missing some tool_call responses, skip this AIMessage and all its ToolMessages
