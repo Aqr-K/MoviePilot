@@ -489,6 +489,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         判断是否为主要媒体文件
         """
+        if fileitem.type == "dir":
+            # 蓝光原盘判断
+            return StorageChain().is_bluray_folder(fileitem)
         if not fileitem.extension:
             return False
         return True if f".{fileitem.extension.lower()}" in self._media_exts else False
