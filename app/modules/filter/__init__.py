@@ -7,11 +7,12 @@ from app.helper.rule import RuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
 from app.modules.filter.RuleParser import RuleParser
-from app.schemas.types import ModuleType, OtherModulesType
+from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
 from app.utils.string import StringUtils
 
 
 class FilterModule(_ModuleBase):
+    CONFIG_WATCH = {SystemConfigKey.CustomFilterRules.value}
     # 规则解析器
     parser: RuleParser = None
     # 媒体信息
@@ -44,7 +45,8 @@ class FilterModule(_ModuleBase):
             "include": [
                 r'[中国國繁简](/|\s|\\|\|)?[繁简英粤]|[英简繁](/|\s|\\|\|)?[中繁简]'
                 r'|繁體|简体|[中国國][字配]|国语|國語|中文|中字|简日|繁日|简繁|繁体'
-                r'|([\s,.-\[])(CHT|CHS|cht|chs)(|[\s,.-\]])'],
+                r'|([\s,.-\[])(chs|cht)(|[\s,.-\]])'
+                r'|(?<![a-z0-9])(gb|big5)(?![a-z0-9])'],
             "exclude": [],
             "tmdb": {
                 "original_language": "zh,cn"
@@ -203,8 +205,6 @@ class FilterModule(_ModuleBase):
         if not rule_groups:
             return torrent_list
         self.media = mediainfo
-        # 重新加载自定义规则
-        self.__init_custom_rules()
         # 查询规则表详情
         groups = self.rulehelper.get_rule_group_by_media(media=mediainfo, group_names=rule_groups)
         if groups:
@@ -227,7 +227,7 @@ class FilterModule(_ModuleBase):
         for torrent in torrent_list:
             # 能命中优先级的才返回
             if not self.__get_order(torrent, rule_string):
-                logger.debug(f"种子 {torrent.site_name} - {torrent.title} {torrent.description} "
+                logger.debug(f"种子 {torrent.site_name} - {torrent.title} {torrent.description or ''} "
                              f"不匹配 {rule_name} 过滤规则")
                 continue
             ret_torrents.append(torrent)

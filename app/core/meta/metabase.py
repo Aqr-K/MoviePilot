@@ -535,7 +535,7 @@ class MetaBase(object):
 
     def merge(self, meta: Self):
         """
-        全并Meta信息
+        合并Meta信息
         """
         # 类型
         if self.type == MediaType.UNKNOWN \
