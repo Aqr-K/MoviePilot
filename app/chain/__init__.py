@@ -251,6 +251,7 @@ class ChainBase(metaclass=ABCMeta):
                     # 中止继续执行
                     break
             except Exception as err:
+                logger.error(traceback.format_exc())
                 self.__handle_system_error(err, module_id, module_name, method, **kwargs)
         return result
 
@@ -292,6 +293,7 @@ class ChainBase(metaclass=ABCMeta):
                     # 中止继续执行
                     break
             except Exception as err:
+                logger.error(traceback.format_exc())
                 self.__handle_system_error(err, module_id, module_name, method, **kwargs)
         return result
 
