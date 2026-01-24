@@ -1,4 +1,5 @@
 import json
+import uuid
 from abc import ABCMeta, abstractmethod
 from typing import Any, Optional
 
@@ -42,6 +43,9 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 获取工具调用前的agent消息
         agent_message = await self._callback_handler.get_message()
 
+        # 生成唯一的工具调用ID
+        call_id = f"call_{str(uuid.uuid4())[:16]}"
+
         # 记忆工具调用
         await conversation_manager.add_conversation(
             session_id=self._session_id,
@@ -49,8 +53,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             role="tool_call",
             content=agent_message,
             metadata={
-                "call_id": self.__class__.__name__,
-                "tool_name": self.__class__.__name__,
+                "call_id": call_id,
+                "tool_name": self.name,
                 "parameters": kwargs
             }
         )
@@ -61,21 +65,21 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             explanation = kwargs.get("explanation")
             if explanation:
                 tool_message = explanation
-        
+
         # 合并agent消息和工具执行消息，一起发送
         messages = []
         if agent_message:
             messages.append(agent_message)
         if tool_message:
             messages.append(f"⚙️ => {tool_message}")
-        
+
         # 发送合并后的消息
         if messages:
             merged_message = "\n\n".join(messages)
             await self.send_tool_message(merged_message, title="MoviePilot助手")
 
         logger.debug(f'Executing tool {self.name} with args: {kwargs}')
-        
+
         # 执行工具，捕获异常确保结果总是被存储到记忆中
         try:
             result = await self.run(**kwargs)
@@ -93,13 +97,15 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             formated_result = str(result)
         else:
             formated_result = json.dumps(result, ensure_ascii=False, indent=2)
+
         await conversation_manager.add_conversation(
             session_id=self._session_id,
             user_id=self._user_id,
             role="tool_result",
             content=formated_result,
             metadata={
-                "call_id": self.__class__.__name__
+                "call_id": call_id,
+                "tool_name": self.name,
             }
         )
 

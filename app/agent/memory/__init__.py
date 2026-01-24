@@ -232,7 +232,7 @@ class ConversationMemoryManager:
             return []
 
         # 获取所有消息
-        return memory.messages
+        return memory.messages[:-1]
 
     async def get_recent_messages(
             self,

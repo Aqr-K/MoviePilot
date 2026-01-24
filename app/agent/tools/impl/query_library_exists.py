@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.chain.mediaserver import MediaServerChain
 from app.core.context import MediaInfo
+from app.core.meta import MetaBase
 from app.log import logger
 from app.schemas.types import MediaType
 
@@ -51,47 +52,88 @@ class QueryLibraryExistsTool(MoviePilotTool):
         try:
             if not title:
                 return "请提供媒体标题进行查询"
-            
-            # 创建 MediaInfo 对象
-            mediainfo = MediaInfo()
-            mediainfo.title = title
-            mediainfo.year = year
-            
-            # 转换媒体类型
-            if media_type == "电影":
-                mediainfo.type = MediaType.MOVIE
-            elif media_type == "电视剧":
-                mediainfo.type = MediaType.TV
-            # media_type == "all" 时不设置类型，让媒体服务器自动判断
-            
-            # 调用媒体服务器接口实时查询
+
             media_chain = MediaServerChain()
+
+            # 1. 识别媒体信息（获取 TMDB ID 和各季的总集数等元数据）
+            meta = MetaBase(title=title)
+            if year:
+                meta.year = str(year)
+            if media_type == "电影":
+                meta.type = MediaType.MOVIE
+            elif media_type == "电视剧":
+                meta.type = MediaType.TV
+
+            # 使用识别方法补充信息
+            recognize_info = media_chain.recognize_media(meta=meta)
+            if recognize_info:
+                mediainfo = recognize_info
+            else:
+                # 识别失败，创建基本信息的 MediaInfo
+                mediainfo = MediaInfo()
+                mediainfo.title = title
+                mediainfo.year = year
+                if media_type == "电影":
+                    mediainfo.type = MediaType.MOVIE
+                elif media_type == "电视剧":
+                    mediainfo.type = MediaType.TV
+
+            # 2. 调用媒体服务器接口实时查询存在信息
             existsinfo = media_chain.media_exists(mediainfo=mediainfo)
-            
+
             if not existsinfo:
                 return "媒体库中未找到相关媒体"
-            
-            # 如果找到了，获取详细信息
+
+            # 3. 如果找到了，获取详细信息并组装结果
             result_items = []
             if existsinfo.itemid and existsinfo.server:
                 iteminfo = media_chain.iteminfo(server=existsinfo.server, item_id=existsinfo.itemid)
                 if iteminfo:
                     # 使用 model_dump() 转换为字典格式
                     item_dict = iteminfo.model_dump(exclude_none=True)
+
+                    # 对于电视剧，补充已存在的季集详情及进度统计
+                    if existsinfo.type == MediaType.TV:
+                        # 注入已存在集信息 (Dict[int, list])
+                        item_dict["seasoninfo"] = existsinfo.seasons
+
+                        # 统计库中已存在的季集总数
+                        if existsinfo.seasons:
+                            item_dict["existing_episodes_count"] = sum(len(e) for e in existsinfo.seasons.values())
+                            item_dict["seasons_existing_count"] = {str(s): len(e) for s, e in existsinfo.seasons.items()}
+
+                            # 如果识别到了元数据，补充总计对比和进度概览
+                            if mediainfo.seasons:
+                                item_dict["seasons_total_count"] = {str(s): len(e) for s, e in mediainfo.seasons.items()}
+                                # 进度概览，例如 "Season 1": "3/12"
+                                item_dict["seasons_progress"] = {
+                                    f"第{s}季": f"{len(existsinfo.seasons.get(s, []))}/{len(mediainfo.seasons.get(s, []))} 集"
+                                    for s in mediainfo.seasons.keys() if (s in existsinfo.seasons or s > 0)
+                                }
+
                     result_items.append(item_dict)
-            
+
             if result_items:
                 return json.dumps(result_items, ensure_ascii=False)
-            
-            # 如果找到了但没有详细信息，返回基本信息
+
+            # 如果找到了但没有获取到 iteminfo，返回基本信息
             result_dict = {
+                "title": mediainfo.title,
+                "year": mediainfo.year,
                 "type": existsinfo.type.value if existsinfo.type else None,
                 "server": existsinfo.server,
                 "server_type": existsinfo.server_type,
                 "itemid": existsinfo.itemid,
                 "seasons": existsinfo.seasons if existsinfo.seasons else {}
             }
+            if existsinfo.type == MediaType.TV and existsinfo.seasons:
+                result_dict["existing_episodes_count"] = sum(len(e) for e in existsinfo.seasons.values())
+                result_dict["seasons_existing_count"] = {str(s): len(e) for s, e in existsinfo.seasons.items()}
+                if mediainfo.seasons:
+                    result_dict["seasons_total_count"] = {str(s): len(e) for s, e in mediainfo.seasons.items()}
+
             return json.dumps([result_dict], ensure_ascii=False)
         except Exception as e:
             logger.error(f"查询媒体库失败: {e}", exc_info=True)
             return f"查询媒体库时发生错误: {str(e)}"
+
