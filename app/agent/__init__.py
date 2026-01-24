@@ -127,7 +127,7 @@ class MoviePilotAgent:
                 elif msg.get("role") == "system":
                     loaded_messages.append(SystemMessage(content=msg.get("content", "")))
             
-            # Validate and fix tool call integrity
+            # 验证并修复工具调用的完整性
             validated_messages = self._ensure_tool_call_integrity(loaded_messages)
             for msg in validated_messages:
                 chat_history.add_message(msg)
@@ -202,10 +202,10 @@ class MoviePilotAgent:
     def _ensure_tool_call_integrity(self, messages: List[Union[HumanMessage, AIMessage, ToolMessage, SystemMessage]]) \
             -> List[Union[HumanMessage, AIMessage, ToolMessage, SystemMessage]]:
         """
-        Ensure tool call integrity:
-        1. AIMessage with tool_calls must be followed by corresponding ToolMessages
-        2. Remove incomplete AIMessages (with tool_calls but missing ToolMessage responses) and their partial ToolMessages
-        3. Filter out orphaned ToolMessages that don't correspond to any tool_call
+        确保工具调用的完整性:
+        1. 带有 tool_calls 的 AIMessage 必须后跟相应的 ToolMessages
+        2. 移除不完整的 AIMessages（有 tool_calls 但缺少 ToolMessage 响应）及其部分 ToolMessages
+        3. 过滤掉不对应任何 tool_call 的孤立 ToolMessages
         """
         if not messages:
             return messages
@@ -216,43 +216,43 @@ class MoviePilotAgent:
         while i < len(messages):
             msg = messages[i]
             
-            # Check if this is an AIMessage with tool_calls
+            # 检查这是否是一个带有 tool_calls 的 AIMessage
             if isinstance(msg, AIMessage) and getattr(msg, 'tool_calls', None):
-                # Extract tool_call IDs (ToolCall is a TypedDict, so it's a dict at runtime)
+                # 提取 tool_call IDs（ToolCall 是 TypedDict，在运行时是 dict）
                 tool_call_ids = {
                     tc.get('id') if tc.get('id') is not None else tc.get('name')
                     for tc in msg.tool_calls
                 }
                 
-                # Find subsequent ToolMessages
+                # 查找后续的 ToolMessages
                 j = i + 1
                 found_tool_messages = []
                 while j < len(messages) and isinstance(messages[j], ToolMessage):
                     found_tool_messages.append(messages[j])
                     j += 1
                 
-                # Check if all tool_calls have corresponding ToolMessages
+                # 检查所有 tool_calls 是否都有对应的 ToolMessages
                 found_tool_call_ids = {tm.tool_call_id for tm in found_tool_messages}
                 
-                # Warn if there are extra ToolMessages that don't correspond to any tool_call
+                # 警告：如果存在不对应任何 tool_call 的额外 ToolMessages
                 extra_tool_messages = found_tool_call_ids - tool_call_ids
                 if extra_tool_messages:
                     logger.warning(f"Found extra ToolMessages that don't correspond to any tool_call: {extra_tool_messages}")
                 
                 if not tool_call_ids.issubset(found_tool_call_ids):
-                    # Missing some tool_call responses, skip this AIMessage and all its ToolMessages
+                    # 缺少部分 tool_call 响应，跳过此 AIMessage 及其所有 ToolMessages
                     logger.warning("Removing incomplete tool_call AIMessage and its partial ToolMessages: missing tool_call responses")
-                    i = j  # Skip the AIMessage and all related ToolMessages
+                    i = j  # 跳过此 AIMessage 及其所有相关的 ToolMessages
                     continue
                 else:
-                    # Add the AIMessage and only the ToolMessages that correspond to its tool_calls
+                    # 添加此 AIMessage 及其对应的 ToolMessages
                     validated_messages.append(msg)
                     for tm in found_tool_messages:
                         if tm.tool_call_id in tool_call_ids:
                             validated_messages.append(tm)
                     i = j
                     continue
-            # Skip orphaned ToolMessages (not preceded by an AIMessage with tool_calls)
+            # 跳过孤立的 ToolMessages（前面没有带 tool_calls 的 AIMessage）
             elif isinstance(msg, ToolMessage):
                 logger.warning(f"Skipping orphaned ToolMessage with tool_call_id: {msg.tool_call_id}")
                 i += 1
