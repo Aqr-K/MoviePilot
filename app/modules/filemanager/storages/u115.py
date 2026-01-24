@@ -268,7 +268,7 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
 
         # 返回数据
         ret_data = resp.json()
-        if ret_data.get("code") != 0:
+        if ret_data.get("code") not in (0, 20004):
             error_msg = ret_data.get("message")
             if not no_error_log:
                 logger.warn(f"【115】{method} 请求 {endpoint} 出错：{error_msg}")
@@ -386,7 +386,10 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
         resp = self._request_api(
             "POST",
             "/open/folder/add",
-            data={"pid": int(parent_item.fileid or "0"), "file_name": name},
+            data={
+                "pid": 0 if parent_item.path == "/" else int(parent_item.fileid or 0),
+                "file_name": name,
+            },
         )
         if not resp:
             return None
