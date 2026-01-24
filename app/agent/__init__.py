@@ -204,7 +204,7 @@ class MoviePilotAgent:
         """
         确保工具调用的完整性：
         1. 如果AIMessage包含tool_calls，必须后跟相应的ToolMessage
-        2. 移除孤立的AIMessage（有tool_calls但没有对应的ToolMessage）
+        2. 移除孤立的AIMessage（有tool_calls但没有对应的ToolMessage）及其关联的ToolMessage
         """
         if not messages:
             return messages
@@ -231,9 +231,9 @@ class MoviePilotAgent:
                 found_tool_call_ids = {tm.tool_call_id for tm in found_tool_messages}
                 
                 if not tool_call_ids.issubset(found_tool_call_ids):
-                    # 如果缺少某些tool_call的响应，移除这个AIMessage
-                    logger.warning(f"移除不完整的tool_call AIMessage: 缺少tool_call响应")
-                    i += 1
+                    # 如果缺少某些tool_call的响应，移除这个AIMessage及其相关的ToolMessage
+                    logger.warning(f"移除不完整的tool_call AIMessage及其部分ToolMessage: 缺少tool_call响应")
+                    i = j  # 跳过AIMessage和所有相关的ToolMessage
                     continue
                 else:
                     # 添加AIMessage和所有对应的ToolMessage
