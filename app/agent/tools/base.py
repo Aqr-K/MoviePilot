@@ -82,7 +82,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             logger.debug(f'Tool {self.name} executed with result: {result}')
         except Exception as e:
             # 记录异常详情
-            error_message = f"工具执行异常: {str(e)}"
+            error_message = f"工具执行异常 ({type(e).__name__}): {str(e)}"
             logger.error(f'Tool {self.name} execution failed: {e}', exc_info=True)
             result = error_message
 
