@@ -8,7 +8,7 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage, ToolCall, ToolMessage, SystemMessage, trim_messages
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain.agents.format_scratchpad.openai_tools import format_to_openai_tool_messages
 from langchain.agents.output_parsers.openai_tools import OpenAIToolsAgentOutputParser
@@ -292,7 +292,7 @@ class MoviePilotAgent:
                     )
                 )
                 | self.prompt
-                | validated_trimmer
+                | RunnableLambda(validated_trimmer)
                 | self.llm.bind_tools(self.tools)
                 | OpenAIToolsAgentOutputParser()
             )
