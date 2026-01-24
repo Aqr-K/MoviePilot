@@ -75,8 +75,16 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             await self.send_tool_message(merged_message, title="MoviePilot助手")
 
         logger.debug(f'Executing tool {self.name} with args: {kwargs}')
-        result = await self.run(**kwargs)
-        logger.debug(f'Tool {self.name} executed with result: {result}')
+        
+        # 执行工具，捕获异常确保结果总是被存储到记忆中
+        try:
+            result = await self.run(**kwargs)
+            logger.debug(f'Tool {self.name} executed with result: {result}')
+        except Exception as e:
+            # 记录异常详情
+            error_message = f"工具执行异常 ({type(e).__name__}): {str(e)}"
+            logger.error(f'Tool {self.name} execution failed: {e}', exc_info=True)
+            result = error_message
 
         # 记忆工具调用结果
         if isinstance(result, str):
