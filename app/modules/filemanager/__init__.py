@@ -36,7 +36,7 @@ class FileManagerModule(_ModuleBase):
         self._storage_schemas = ModuleHelper.load('app.modules.filemanager.storages',
                                                   filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
         # 获取存储类型
-        self._support_storages = [storage.schema.value for storage in self._storage_schemas]
+        self._support_storages = [storage.schema.value for storage in self._storage_schemas if storage.schema]
 
     @staticmethod
     def get_name() -> str:

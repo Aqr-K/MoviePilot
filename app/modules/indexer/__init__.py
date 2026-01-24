@@ -434,7 +434,7 @@ class IndexerModule(_ModuleBase):
             获取站点解析器
             """
             for site_schema in self._site_schemas:
-                if site_schema.schema.value == site.get("schema"):
+                if site_schema.schema and site_schema.schema.value == site.get("schema"):
                     return site_schema(
                         site_name=site.get("name"),
                         url=site.get("url"),
