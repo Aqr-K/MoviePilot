@@ -10,6 +10,7 @@ from app import schemas
 from app.chain import ChainBase
 from app.chain.media import MediaChain
 from app.chain.storage import StorageChain
+from app.chain.subscribe import SubscribeChain
 from app.chain.tmdb import TmdbChain
 from app.core.config import settings, global_vars
 from app.core.context import MediaInfo
@@ -1222,7 +1223,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 # 提前获取下载历史，以便获取自定义识别词
                 download_history = None
                 downloadhis = DownloadHistoryOper()
-                if bluray_dir:
+                if download_hash:
+                    # 先按hash查询
+                    download_history = downloadhis.get_by_hash(download_hash)
+                elif bluray_dir:
                     # 蓝光原盘，按目录名查询
                     download_history = downloadhis.get_by_path(file_path.as_posix())
                 else:
@@ -1231,14 +1235,14 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     if download_file:
                         download_history = downloadhis.get_by_hash(download_file.download_hash)
 
-                # 获取自定义识别词
-                custom_words_list = None
-                if download_history and download_history.custom_words:
-                    custom_words_list = download_history.custom_words.split('\n')
-
                 if not meta:
-                    # 文件元数据（传入自定义识别词）
-                    file_meta = MetaInfoPath(file_path, custom_words=custom_words_list)
+                    subscribe_custom_words = None
+                    if download_history and isinstance(download_history.note, dict):
+                        # 使用source动态获取订阅
+                        subscribe = SubscribeChain().get_subscribe_by_source(download_history.note.get("source"))
+                        subscribe_custom_words = subscribe.custom_words.split("\n") if subscribe and subscribe.custom_words else None
+                    # 文件元数据(优先使用订阅识别词)
+                    file_meta = MetaInfoPath(file_path, custom_words=subscribe_custom_words)
                 else:
                     file_meta = meta
 

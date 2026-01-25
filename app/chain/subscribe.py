@@ -1119,6 +1119,19 @@ class SubscribeChain(ChainBase):
             })
             logger.info(f'{subscribe.name} 订阅元数据更新完成')
 
+    def get_subscribe_by_source(self, source: str) -> Optional[Subscribe]:
+        """
+        从来源获取订阅
+        """
+        source_keyword = self.parse_subscribe_source_keyword(source)
+        if not source_keyword:
+            return None
+        # 只保留需要的字段动态获取订阅
+        valid_fields = {k: v for k, v in source_keyword.items()
+                        if k in ["type", "season", "tmdbid", "doubanid", "bangumiid"]}
+        # 暂时不考虑订阅历史, 若有必要再添加
+        return SubscribeOper().get_by(**valid_fields)
+
     @staticmethod
     def follow():
         """
@@ -1828,8 +1841,9 @@ class SubscribeChain(ChainBase):
     def get_subscribe_source_keyword(subscribe: Subscribe) -> str:
         """
         构造用于订阅来源的关键字字符串
+
         :param subscribe: Subscribe 对象
-        :return: 格式化的订阅来源关键字字符串，格式为 "Subscribe|{...}"
+        :return str: 格式化的订阅来源关键字字符串，格式为 "Subscribe|{...}"
         """
         source_keyword = {
             'id': subscribe.id,
@@ -1844,3 +1858,24 @@ class SubscribeChain(ChainBase):
             'bangumiid': subscribe.bangumiid
         }
         return f"Subscribe|{json.dumps(source_keyword, ensure_ascii=False)}"
+
+    @staticmethod
+    def parse_subscribe_source_keyword(source_keyword_str: str) -> Optional[dict]:
+        """
+        解析订阅来源关键字字符串
+
+        :param source_keyword_str: 订阅来源关键字字符串，格式为 "Subscribe|{...}"
+        :return Dict: 如果解析失败则返回None
+        """
+        if not source_keyword_str or not source_keyword_str.startswith("Subscribe|"):
+            return None
+
+        try:
+            # 分割字符串获取JSON部分
+            json_part = source_keyword_str.split("|", 1)[1]
+            # 解析JSON字符串
+            source_keyword = json.loads(json_part)
+            return source_keyword
+        except (IndexError, json.JSONDecodeError, TypeError) as e:
+            logger.error(f"解析订阅来源关键字失败: {e}")
+            return None

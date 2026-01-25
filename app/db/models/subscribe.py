@@ -227,6 +227,66 @@ class Subscribe(Base):
         )
         return result.scalars().first()
 
+    @classmethod
+    @db_query
+    def get_by(cls, db: Session, type: str, season: Optional[str] = None,
+                tmdbid: Optional[int] = None, doubanid: Optional[str] = None, bangumiid: Optional[str] = None):
+        """
+        根据条件查询订阅
+        """
+        # TMDBID
+        if tmdbid:
+            if season is not None:
+                result = db.query(cls).filter(
+                    cls.tmdbid == tmdbid, cls.type == type, cls.season == season
+                )
+            else:
+                result = db.query(cls).filter(cls.tmdbid == tmdbid, cls.type == type)
+        # 豆瓣ID
+        elif doubanid:
+            result = db.query(cls).filter(cls.doubanid == doubanid, cls.type == type)
+        # BangumiID
+        elif bangumiid:
+            result = db.query(cls).filter(cls.bangumiid == bangumiid, cls.type == type)
+        else:
+            return None
+
+        return result.first()
+
+    @classmethod
+    @async_db_query
+    async def async_get_by(cls, db: AsyncSession, type: str, season: Optional[str] = None,
+                tmdbid: Optional[int] = None, doubanid: Optional[str] = None, bangumiid: Optional[str] = None):
+        """
+        根据条件查询订阅
+        """
+        # TMDBID
+        if tmdbid:
+            if season is not None:
+                result = await db.execute(
+                    select(cls).filter(
+                        cls.tmdbid == tmdbid, cls.type == type, cls.season == season
+                    )
+                )
+            else:
+                result = await db.execute(
+                    select(cls).filter(cls.tmdbid == tmdbid, cls.type == type)
+                )
+        # 豆瓣ID
+        elif doubanid:
+            result = await db.execute(
+                select(cls).filter(cls.doubanid == doubanid, cls.type == type)
+            )
+        # BangumiID
+        elif bangumiid:
+            result = await db.execute(
+                select(cls).filter(cls.bangumiid == bangumiid, cls.type == type)
+            )
+        else:
+            return None
+
+        return result.scalars().first()
+
     @db_update
     def delete_by_tmdbid(self, db: Session, tmdbid: int, season: int):
         subscrbies = self.get_by_tmdbid(db, tmdbid, season)
