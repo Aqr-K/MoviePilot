@@ -209,7 +209,7 @@ class DownloadFiles(Base):
     @classmethod
     @db_query
     def get_by_hash(cls, db: Session, download_hash: str, state: Optional[int] = None):
-        if state:
+        if state is not None:
             return db.query(cls).filter(cls.download_hash == download_hash,
                                         cls.state == state).all()
         else:
