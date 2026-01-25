@@ -47,11 +47,11 @@ class CategoryHelper:
             with open(self._config_path, 'w', encoding='utf-8') as f:
                 f.write(HEADER_COMMENTS)
                 yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-            # 触发 themoviedb CategoryHelper 重新加载配置
+            # 触发模块重新加载配置
             themoviedb_module = ModuleManager().get_running_module("TheMovieDbModule")
             if themoviedb_module and hasattr(themoviedb_module, 'category'):
                 themoviedb_module.category.init()
-                logger.info("已触发 CategoryHelper 重新加载配置")
+                logger.info("已触发分类配置重新加载")
             return True
         except Exception as e:
             logger.error(f"Save category config failed: {e}")
