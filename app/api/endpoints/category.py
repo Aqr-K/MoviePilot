@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from app import schemas
 from app.db.models import User
 from app.db.user_oper import get_current_active_superuser, get_current_active_user
-from app.modules.themoviedb.category import CategoryHelper
+from app.helper.category import CategoryHelper
 from app.schemas.category import CategoryConfig
 
 router = APIRouter()
