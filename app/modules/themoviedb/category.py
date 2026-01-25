@@ -1,5 +1,4 @@
 import shutil
-import yaml
 from pathlib import Path
 from typing import Union
 
@@ -19,7 +18,7 @@ class CategoryHelper(metaclass=WeakSingleton):
 
     # 配置文件头部注释
     HEADER_COMMENTS = """####### 配置说明 #######
-# 1. 该配置文件用于配置电影和电视剧的分类策略，配置后程序会按照配置的分类策略名称进行分类，配置文件采用yaml格式，需要严格附合语法规则
+# 1. 该配置文件用于配置电影和电视剧的分类策略，配置后程序会按照配置的分类策略名称进行分类，配置文件采用yaml格式，需要严格符合语法规则
 # 2. 配置文件中的一级分类名称：`movie`、`tv` 为固定名称不可修改，二级名称同时也是目录名称，会按先后顺序匹配，匹配后程序会按这个名称建立二级目录
 # 3. 支持的分类条件：
 #   `original_language` 语种，具体含义参考下方字典
@@ -70,7 +69,8 @@ class CategoryHelper(metaclass=WeakSingleton):
             return config
         try:
             with open(self._category_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
+                yaml_loader = ruamel.yaml.YAML()
+                data = yaml_loader.load(f)
                 if data:
                     config = CategoryConfig(**data)
         except Exception as e:
@@ -85,7 +85,8 @@ class CategoryHelper(metaclass=WeakSingleton):
         try:
             with open(self._category_path, 'w', encoding='utf-8') as f:
                 f.write(self.HEADER_COMMENTS)
-                yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+                yaml_dumper = ruamel.yaml.YAML()
+                yaml_dumper.dump(data, f)
             # 保存后重新加载配置
             self.init()
             return True
