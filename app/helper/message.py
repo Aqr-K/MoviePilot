@@ -539,7 +539,7 @@ class MessageTemplateHelper:
         获取消息模板
         """
         template_dict: dict[str, str] = SystemConfigOper().get(SystemConfigKey.NotificationTemplates)
-        return template_dict.get(f"{message.ctype.value}")
+        return template_dict.get(message.ctype.value)
 
 
 class MessageQueueManager(metaclass=SingletonClass):
