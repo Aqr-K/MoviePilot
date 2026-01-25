@@ -214,9 +214,60 @@ class MoviePilotAgent:
                 if hasattr(messages, "to_messages"):
                     messages = messages.to_messages()
                 trimmed = base_trimmer.invoke(messages)
-                if len(trimmed) < len(messages):
-                    logger.info(f"LangChain消息上下文已裁剪: {len(messages)} -> {len(trimmed)}")
-                return trimmed
+
+                # 二次校验：确保不出现 broken tool chains
+                # 1. AIMessage with tool_calls 必须紧跟着对应的 ToolMessage
+                # 2. ToolMessage 必须有对应的 AIMessage 前置
+                safe_messages = []
+                i = 0
+                while i < len(trimmed):
+                    msg = trimmed[i]
+
+                    if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                        # 检查工具调用序列是否完整
+                        tool_calls = msg.tool_calls
+                        is_valid_sequence = True
+                        tool_results = []
+                        
+                        # 向后查找对应的 ToolMessage
+                        temp_i = i + 1
+                        for tool_call in tool_calls:
+                            if temp_i >= len(trimmed):
+                                is_valid_sequence = False
+                                break
+                            
+                            next_msg = trimmed[temp_i]
+                            if isinstance(next_msg, ToolMessage) and next_msg.tool_call_id == tool_call.get("id"):
+                                tool_results.append(next_msg)
+                                temp_i += 1
+                            else:
+                                is_valid_sequence = False
+                                break
+                        
+                        if is_valid_sequence:
+                            # 序列完整，保留消息
+                            safe_messages.append(msg)
+                            safe_messages.extend(tool_results)
+                            i = temp_i  # 跳过已处理的工具结果
+                        else:
+                            # 序列不完整，丢弃该 AIMessage（后续的孤立 ToolMessage 会在下一次循环被当做 orphaned 处理掉）
+                            logger.warning(f"移除无效的工具调用链: {len(tool_calls)} calls, incomplete results")
+                            i += 1
+                        continue
+
+                    if isinstance(msg, ToolMessage):
+                        # 如果在这里遇到 ToolMessage，说明它没有被上面的逻辑消费，则是孤立的（或者顺序错乱）
+                        logger.warning("移除孤立的 ToolMessage")
+                        i += 1
+                        continue
+
+                    # 其他类型的消息直接保留
+                    safe_messages.append(msg)
+                    i += 1
+
+                if len(safe_messages) < len(messages):
+                    logger.info(f"LangChain消息上下文已裁剪: {len(messages)} -> {len(safe_messages)}")
+                return safe_messages
             
             # 创建Agent执行链
             agent = (
