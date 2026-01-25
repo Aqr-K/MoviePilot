@@ -292,7 +292,7 @@ class SubscribeChain(ChainBase):
             "description": mediainfo.overview
         })
         # 返回结果
-        return sid, ""
+        return sid, err_msg
 
     async def async_add(self, title: str, year: str,
                         mtype: MediaType = None,
@@ -469,7 +469,7 @@ class SubscribeChain(ChainBase):
             "description": mediainfo.overview
         })
         # 返回结果
-        return sid, ""
+        return sid, err_msg
 
     @staticmethod
     def exists(mediainfo: MediaInfo, meta: MetaBase = None):

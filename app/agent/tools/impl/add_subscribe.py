@@ -108,6 +108,9 @@ class AddSubscribeTool(MoviePilotTool):
                 **subscribe_kwargs
             )
             if sid:
+                if message and "已存在" in message:
+                    return f"订阅已存在：{title} ({year})。如需修改参数请先删除旧订阅。"
+
                 result_msg = f"成功添加订阅：{title} ({year})"
                 if subscribe_kwargs:
                     params = []
