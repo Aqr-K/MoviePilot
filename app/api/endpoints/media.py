@@ -11,7 +11,10 @@ from app.core.context import Context
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo, MetaInfoPath
 from app.core.security import verify_token, verify_apitoken
+from app.db.models import User
+from app.db.user_oper import get_current_active_user, get_current_active_superuser
 from app.schemas import MediaType, MediaRecognizeConvertEventData
+from app.schemas.category import CategoryConfig
 from app.schemas.types import ChainEventType
 
 router = APIRouter()
@@ -129,6 +132,26 @@ def scrape(fileitem: schemas.FileItem,
     # 手动刮削 (暂时使用同步版本，可以后续优化为异步)
     chain.scrape_metadata(fileitem=fileitem, meta=meta, mediainfo=mediainfo, overwrite=True)
     return schemas.Response(success=True, message=f"{fileitem.path} 刮削完成")
+
+
+@router.get("/category/config", summary="获取分类策略配置", response_model=schemas.Response)
+def get_category_config(_: User = Depends(get_current_active_user)):
+    """
+    获取分类策略配置
+    """
+    config = MediaChain().category_config()
+    return schemas.Response(success=True, data=config.model_dump())
+
+
+@router.post("/category/config", summary="保存分类策略配置", response_model=schemas.Response)
+def save_category_config(config: CategoryConfig, _: User = Depends(get_current_active_superuser)):
+    """
+    保存分类策略配置
+    """
+    if MediaChain().save_category_config(config):
+        return schemas.Response(success=True, message="保存成功")
+    else:
+        return schemas.Response(success=False, message="保存失败")
 
 
 @router.get("/category", summary="查询自动分类配置", response_model=dict)
