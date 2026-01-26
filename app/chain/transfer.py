@@ -571,7 +571,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
 
             # 新增转移失败历史记录
-            transferhis.add_fail(
+            history = transferhis.add_fail(
                 fileitem=task.fileitem,
                 mode=transferinfo.transfer_type if transferinfo else '',
                 downloader=task.downloader,
@@ -591,6 +591,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'transferinfo': transferinfo,
                     'downloader': task.downloader,
                     'download_hash': task.download_hash,
+                    'transfer_history_id': history.id if history else None,
                 })
             elif self.__is_subtitle_file(task.fileitem):
                 # 字幕整理失败事件
@@ -601,6 +602,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'transferinfo': transferinfo,
                     'downloader': task.downloader,
                     'download_hash': task.download_hash,
+                    'transfer_history_id': history.id if history else None,
                 })
             elif self.__is_audio_file(task.fileitem):
                 # 音频文件整理失败事件
@@ -611,6 +613,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'transferinfo': transferinfo,
                     'downloader': task.downloader,
                     'download_hash': task.download_hash,
+                    'transfer_history_id': history.id if history else None,
                 })
 
             # 发送失败消息
@@ -635,7 +638,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             logger.info(f"{task.fileitem.name} 入库成功：{transferinfo.target_diritem.path}")
 
             # 新增task转移成功历史记录
-            transferhis.add_success(
+            history = transferhis.add_success(
                 fileitem=task.fileitem,
                 mode=transferinfo.transfer_type if transferinfo else '',
                 downloader=task.downloader,
@@ -655,6 +658,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'transferinfo': transferinfo,
                     'downloader': task.downloader,
                     'download_hash': task.download_hash,
+                    'transfer_history_id': history.id if history else None,
                 })
             elif self.__is_subtitle_file(task.fileitem):
                 # 字幕整理完成事件
@@ -665,6 +669,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'transferinfo': transferinfo,
                     'downloader': task.downloader,
                     'download_hash': task.download_hash,
+                    'transfer_history_id': history.id if history else None,
                 })
             elif self.__is_audio_file(task.fileitem):
                 # 音频文件整理完成事件
@@ -675,6 +680,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     'transferinfo': transferinfo,
                     'downloader': task.downloader,
                     'download_hash': task.download_hash,
+                    'transfer_history_id': history.id if history else None,
                 })
 
             # task登记转移成功文件清单
@@ -1030,8 +1036,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     torrent
                     for torrent in torrents_list
                     if (h := torrent.hash) not in existing_hashes
-                    # 排除多下载器返回的重复种子
-                    and (h not in seen and (seen.add(h) or True))
+                       # 排除多下载器返回的重复种子
+                       and (h not in seen and (seen.add(h) or True))
                 ]
             else:
                 torrents = []
@@ -1293,7 +1299,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     if download_history and isinstance(download_history.note, dict):
                         # 使用source动态获取订阅
                         subscribe = SubscribeChain().get_subscribe_by_source(download_history.note.get("source"))
-                        subscribe_custom_words = subscribe.custom_words.split("\n") if subscribe and subscribe.custom_words else None
+                        subscribe_custom_words = subscribe.custom_words.split(
+                            "\n") if subscribe and subscribe.custom_words else None
                     # 文件元数据(优先使用订阅识别词)
                     file_meta = MetaInfoPath(file_path, custom_words=subscribe_custom_words)
                 else:
