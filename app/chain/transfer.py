@@ -417,10 +417,12 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         super().__init__()
         # 主要媒体文件后缀
         self._media_exts = settings.RMT_MEDIAEXT
-        # 附加文件后缀
-        self._extra_exts = settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+        # 字幕文件后缀
+        self._subtitle_exts = settings.RMT_SUBEXT
+        # 音频文件后缀
+        self._audio_exts = settings.RMT_AUDIOEXT
         # 可处理的文件后缀（视频文件、字幕、音频文件）
-        self._allowed_exts = self._media_exts + self._extra_exts
+        self._allowed_exts = self._media_exts + self._audio_exts + self._subtitle_exts
         # 待整理任务队列
         self._queue = queue.Queue()
         # 文件整理线程
@@ -470,21 +472,21 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.__stop()
         self.__init()
 
-    def __is_allowed_file(self, fileitem: FileItem) -> bool:
+    def __is_subtitle_file(self, fileitem: FileItem) -> bool:
         """
-        判断是否允许的扩展名
+        判断是否为字幕文件
         """
         if not fileitem.extension:
             return False
-        return True if f".{fileitem.extension.lower()}" in self._allowed_exts else False
+        return True if f".{fileitem.extension.lower()}" in self._subtitle_exts else False
 
-    def __is_extra_file(self, fileitem: FileItem) -> bool:
+    def __is_audio_file(self, fileitem: FileItem) -> bool:
         """
-        判断是否额外的扩展名
+        判断是否为音频文件
         """
         if not fileitem.extension:
             return False
-        return True if f".{fileitem.extension.lower()}" in self._extra_exts else False
+        return True if f".{fileitem.extension.lower()}" in self._audio_exts else False
 
     def __is_media_file(self, fileitem: FileItem) -> bool:
         """
@@ -496,6 +498,14 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if not fileitem.extension:
             return False
         return True if f".{fileitem.extension.lower()}" in self._media_exts else False
+
+    def __is_allowed_file(self, fileitem: FileItem) -> bool:
+        """
+        判断是否允许的扩展名
+        """
+        if not fileitem.extension:
+            return False
+        return True if f".{fileitem.extension.lower()}" in self._allowed_exts else False
 
     @staticmethod
     def __is_allow_filesize(fileitem: FileItem, min_filesize: int) -> bool:
@@ -573,7 +583,28 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
             # 整理失败事件
             if self.__is_media_file(task.fileitem):
+                # 主要媒体文件整理失败事件
                 self.eventmanager.send_event(EventType.TransferFailed, {
+                    'fileitem': task.fileitem,
+                    'meta': task.meta,
+                    'mediainfo': task.mediainfo,
+                    'transferinfo': transferinfo,
+                    'downloader': task.downloader,
+                    'download_hash': task.download_hash,
+                })
+            elif self.__is_subtitle_file(task.fileitem):
+                # 字幕整理失败事件
+                self.eventmanager.send_event(EventType.SubtitleTransferFailed, {
+                    'fileitem': task.fileitem,
+                    'meta': task.meta,
+                    'mediainfo': task.mediainfo,
+                    'transferinfo': transferinfo,
+                    'downloader': task.downloader,
+                    'download_hash': task.download_hash,
+                })
+            elif self.__is_audio_file(task.fileitem):
+                # 音频文件整理失败事件
+                self.eventmanager.send_event(EventType.AudioTransferFailed, {
                     'fileitem': task.fileitem,
                     'meta': task.meta,
                     'mediainfo': task.mediainfo,
@@ -616,7 +647,28 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
             # task整理完成事件
             if self.__is_media_file(task.fileitem):
+                # 主要媒体文件整理完成事件
                 self.eventmanager.send_event(EventType.TransferComplete, {
+                    'fileitem': task.fileitem,
+                    'meta': task.meta,
+                    'mediainfo': task.mediainfo,
+                    'transferinfo': transferinfo,
+                    'downloader': task.downloader,
+                    'download_hash': task.download_hash,
+                })
+            elif self.__is_subtitle_file(task.fileitem):
+                # 字幕整理完成事件
+                self.eventmanager.send_event(EventType.SubtitleTransferComplete, {
+                    'fileitem': task.fileitem,
+                    'meta': task.meta,
+                    'mediainfo': task.mediainfo,
+                    'transferinfo': transferinfo,
+                    'downloader': task.downloader,
+                    'download_hash': task.download_hash,
+                })
+            elif self.__is_audio_file(task.fileitem):
+                # 音频文件整理完成事件
+                self.eventmanager.send_event(EventType.AudioTransferComplete, {
                     'fileitem': task.fileitem,
                     'meta': task.meta,
                     'mediainfo': task.mediainfo,
@@ -1180,8 +1232,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
         # 过滤后缀和大小（蓝光目录、附加文件不过滤大小）
         file_items = [f for f in file_items if f[1] or
-                      self.__is_extra_file(f[0]) or
-                      (self.__is_allowed_file(f[0]) and self.__is_allow_filesize(f[0], min_filesize))]
+                      self.__is_subtitle_file(f[0]) or
+                      self.__is_audio_file(f[0]) or
+                      (self.__is_media_file(f[0]) and self.__is_allow_filesize(f[0], min_filesize))]
 
         if not file_items:
             logger.warn(f"{fileitem.path} 没有找到可整理的媒体文件")

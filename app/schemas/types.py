@@ -38,10 +38,18 @@ class EventType(Enum):
     SiteUpdated = "site.updated"
     # 站点已刷新
     SiteRefreshed = "site.refreshed"
-    # 整理完成
+    # 媒体文件整理完成
     TransferComplete = "transfer.complete"
-    # 整理失败
+    # 媒体文件整理失败
     TransferFailed = "transfer.failed"
+    # 字幕整理完成
+    SubtitleTransferComplete = "transfer.subtitle.complete"
+    # 字幕整理失败
+    SubtitleTransferFailed = "transfer.subtitle.failed"
+    # 音频文件整理完成
+    AudioTransferComplete = "transfer.audio.complete"
+    # 音频文件整理失败
+    AudioTransferFailed = "transfer.audio.failed"
     # 下载已添加
     DownloadAdded = "download.added"
     # 删除历史记录
@@ -88,6 +96,11 @@ EVENT_TYPE_NAMES = {
     EventType.SiteUpdated: "站点已更新",
     EventType.SiteRefreshed: "站点已刷新",
     EventType.TransferComplete: "整理完成",
+    EventType.TransferFailed: "整理失败",
+    EventType.SubtitleTransferComplete: "字幕整理完成",
+    EventType.SubtitleTransferFailed: "字幕整理失败",
+    EventType.AudioTransferComplete: "音频整理完成",
+    EventType.AudioTransferFailed: "音频整理失败",
     EventType.DownloadAdded: "添加下载",
     EventType.HistoryDeleted: "删除历史记录",
     EventType.DownloadFileDeleted: "删除下载源文件",
