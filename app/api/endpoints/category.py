@@ -13,7 +13,7 @@ def get_category_config(_: User = Depends(get_current_active_user)):
     """
     获取分类策略配置
     """
-    config = TmdbChain().load_category_config()
+    config = TmdbChain().category_config()
     return schemas.Response(success=True, data=config.model_dump())
 
 

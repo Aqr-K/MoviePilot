@@ -5,7 +5,6 @@ from app import schemas
 from app.chain import ChainBase
 from app.core.context import MediaInfo
 from app.schemas import MediaType
-from app.schemas.category import CategoryConfig
 
 
 class TmdbChain(ChainBase):
@@ -321,15 +320,3 @@ class TmdbChain(ChainBase):
         if infos:
             return [info.backdrop_path for info in infos if info and info.backdrop_path][:num]
         return []
-
-    def load_category_config(self) -> CategoryConfig:
-        """
-        加载分类策略配置
-        """
-        return self.run_module("load_category_config")
-
-    def save_category_config(self, config: CategoryConfig) -> bool:
-        """
-        保存分类策略配置
-        """
-        return self.run_module("save_category_config", config=config)

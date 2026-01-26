@@ -26,6 +26,7 @@ from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import TransferInfo, TransferTorrent, ExistMediaInfo, DownloadingTorrent, CommingMessage, Notification, \
     WebhookEventInfo, TmdbEpisode, MediaPerson, FileItem, TransferDirectoryConf
+from app.schemas.category import CategoryConfig
 from app.schemas.types import TorrentStatus, MediaType, MediaImageType, EventType, MessageChannel
 from app.utils.object import ObjectUtils
 
@@ -1061,6 +1062,18 @@ class ChainBase(metaclass=ABCMeta):
         :return: 获取二级分类配置字典项，需包括电影、电视剧
         """
         return self.run_module("media_category")
+
+    def category_config(self) -> CategoryConfig:
+        """
+        获取分类策略配置
+        """
+        return self.run_module("load_category_config")
+
+    def save_category_config(self, config: CategoryConfig) -> bool:
+        """
+        保存分类策略配置
+        """
+        return self.run_module("save_category_config", config=config)
 
     def register_commands(self, commands: Dict[str, dict]) -> None:
         """
