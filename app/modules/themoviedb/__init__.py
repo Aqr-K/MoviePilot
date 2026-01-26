@@ -14,8 +14,10 @@ from app.modules.themoviedb.category import CategoryHelper
 from app.modules.themoviedb.scraper import TmdbScraper
 from app.modules.themoviedb.tmdb_cache import TmdbCache
 from app.modules.themoviedb.tmdbapi import TmdbApi
+from app.schemas.category import CategoryConfig
 from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecognizeType
 from app.utils.http import RequestUtils
+
 
 
 class TheMovieDbModule(_ModuleBase):
@@ -1290,3 +1292,15 @@ class TheMovieDbModule(_ModuleBase):
         self.tmdb.clear_cache()
         self.cache.clear()
         logger.info("TMDB缓存清除完成")
+
+    def load_category_config(self) -> CategoryConfig:
+        """
+        加载分类配置
+        """
+        return self.category.load()
+
+    def save_category_config(self, config: CategoryConfig) -> bool:
+        """
+        保存分类配置
+        """
+        return self.category.save(config)
