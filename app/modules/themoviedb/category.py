@@ -1,5 +1,4 @@
 import shutil
-import yaml
 from pathlib import Path
 from typing import Union
 
@@ -69,7 +68,8 @@ class CategoryHelper(metaclass=WeakSingleton):
             return config
         try:
             with open(self._category_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
+                yaml_loader = ruamel.yaml.YAML()
+                data = yaml_loader.load(f)
                 if data:
                     config = CategoryConfig(**data)
         except Exception as e:
@@ -84,7 +84,8 @@ class CategoryHelper(metaclass=WeakSingleton):
         try:
             with open(self._category_path, 'w', encoding='utf-8') as f:
                 f.write(HEADER_COMMENTS)
-                yaml.dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+                yaml_dumper = ruamel.yaml.YAML()
+                yaml_dumper.dump(data, f)
             # 保存后重新加载配置
             self.init()
             return True
