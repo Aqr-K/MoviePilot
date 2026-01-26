@@ -4,6 +4,7 @@ import jieba
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from pathlib import Path
 
 from app import schemas
 from app.chain.storage import StorageChain
@@ -11,7 +12,7 @@ from app.core.event import eventmanager
 from app.core.security import verify_token
 from app.db import get_async_db, get_db
 from app.db.models import User
-from app.db.models.downloadhistory import DownloadHistory
+from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.transferhistory import TransferHistory
 from app.db.user_oper import get_current_active_superuser_async, get_current_active_superuser
 from app.schemas.types import EventType
@@ -98,6 +99,8 @@ def delete_transfer_history(history_in: schemas.TransferHistory,
         state = StorageChain().delete_media_file(src_fileitem)
         if not state:
             return schemas.Response(success=False, message=f"{src_fileitem.path} 删除失败")
+        # 删除下载记录中关联的文件
+        DownloadFiles.delete_by_fullpath(db, Path(src_fileitem.path).as_posix())
         # 发送事件
         eventmanager.send_event(
             EventType.DownloadFileDeleted,
