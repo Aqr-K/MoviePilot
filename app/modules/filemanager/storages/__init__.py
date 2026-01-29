@@ -57,6 +57,12 @@ class StorageBase(metaclass=ABCMeta):
     def generate_qrcode(self, *args, **kwargs) -> Optional[Tuple[dict, str]]:
         pass
 
+    def generate_auth_url(self, *args, **kwargs) -> Optional[Tuple[dict, str]]:
+        """
+        生成 OAuth2 授权 URL
+        """
+        return {}, "此存储不支持 OAuth2 授权"
+
     def check_login(self, *args, **kwargs) -> Optional[Dict[str, str]]:
         pass
 

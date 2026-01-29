@@ -209,6 +209,8 @@ class ConfigModel(BaseModel):
     # ==================== 云盘配置 ====================
     # 115 AppId
     U115_APP_ID: str = "100196807"
+    # 115 OAuth2 Server 地址
+    U115_AUTH_SERVER: str = "https://movie-pilot.org"
     # Alipan AppId
     ALIPAN_APP_ID: str = "ac1bf04dc9fd4d9aaabb65b4a668d403"
 

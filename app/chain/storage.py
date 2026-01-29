@@ -31,6 +31,12 @@ class StorageChain(ChainBase):
         """
         return self.run_module("generate_qrcode", storage=storage)
 
+    def generate_auth_url(self, storage: str) -> Optional[Tuple[dict, str]]:
+        """
+        生成 OAuth2 授权 URL
+        """
+        return self.run_module("generate_auth_url", storage=storage)
+
     def check_login(self, storage: str, **kwargs) -> Optional[Tuple[dict, str]]:
         """
         登录确认

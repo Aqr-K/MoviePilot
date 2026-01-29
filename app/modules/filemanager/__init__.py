@@ -197,6 +197,16 @@ class FileManagerModule(_ModuleBase):
             return None
         return storage_oper.generate_qrcode()
 
+    def generate_auth_url(self, storage: str) -> Optional[Tuple[dict, str]]:
+        """
+        生成 OAuth2 授权 URL
+        """
+        storage_oper = self.__get_storage_oper(storage, "generate_auth_url")
+        if not storage_oper:
+            logger.error(f"不支持 {storage} 的 OAuth2 授权")
+            return {}, f"不支持 {storage} 的 OAuth2 授权"
+        return storage_oper.generate_auth_url()
+
     def check_login(self, storage: str, **kwargs) -> Optional[Dict[str, str]]:
         """
         登录确认
