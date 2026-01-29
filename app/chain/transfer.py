@@ -851,8 +851,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         try:
             # 识别
             transferhis = TransferHistoryOper()
-            if not task.mediainfo:
-                mediainfo = None
+            mediainfo = task.mediainfo
+            mediainfo_changed = False
+            if not mediainfo:
                 download_history = task.download_history
                 # 下载用户
                 if download_history:
@@ -896,13 +897,17 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     self.jobview.remove_task(task.fileitem)
                     return False, "未识别到媒体信息"
 
-                # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
-                if not settings.SCRAP_FOLLOW_TMDB:
-                    transfer_history = transferhis.get_by_type_tmdbid(tmdbid=mediainfo.tmdb_id,
-                                                                      mtype=mediainfo.type.value)
-                    if transfer_history:
-                        mediainfo.title = transfer_history.title
+                mediainfo_changed = True
 
+            # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
+            if not settings.SCRAP_FOLLOW_TMDB:
+                transfer_history = transferhis.get_by_type_tmdbid(tmdbid=mediainfo.tmdb_id, 
+                                                                  mtype=mediainfo.type.value)
+                if transfer_history and mediainfo.title != transfer_history.title:
+                    mediainfo.title = transfer_history.title
+                    mediainfo_changed = True
+
+            if mediainfo_changed:
                 # 更新任务信息
                 task.mediainfo = mediainfo
                 # 更新队列任务
