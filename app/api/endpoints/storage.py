@@ -31,6 +31,17 @@ def qrcode(name: str, _: schemas.TokenPayload = Depends(verify_token)) -> Any:
     return schemas.Response(success=False, message=errmsg)
 
 
+@router.get("/auth_url/{name}", summary="获取 OAuth2 授权 URL", response_model=schemas.Response)
+def auth_url(name: str, _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    获取 OAuth2 授权 URL
+    """
+    auth_data, errmsg = StorageChain().generate_auth_url(name)
+    if auth_data:
+        return schemas.Response(success=True, data=auth_data)
+    return schemas.Response(success=False, message=errmsg)
+
+
 @router.get("/check/{name}", summary="二维码登录确认", response_model=schemas.Response)
 def check(name: str, ck: Optional[str] = None, t: Optional[str] = None,
           _: schemas.TokenPayload = Depends(verify_token)) -> Any:
