@@ -114,9 +114,9 @@ class JobManager:
     def add_task(self, task: TransferTask, state: Optional[str] = "waiting") -> bool:
         """
         添加整理任务，自动分组到对应的作业中
-        :return: True表示任务已添加，False表示任务已存在（重复）
+        :return: True表示任务已添加，False表示任务无效或已存在（重复）
         """
-        if not any([task, task.meta, task.fileitem]):
+        if not all([task, task.meta, task.fileitem]):
             return False
         with job_lock:
             __mediaid__ = self.__get_id(task)
@@ -731,7 +731,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         添加到待整理队列
         :param task: 任务信息
-        :return: True表示任务已添加到队列，False表示任务已存在（重复）
+        :return: True表示任务已添加到队列，False表示任务无效或已存在（重复）
         """
         if not task:
             return False
@@ -748,7 +748,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     def __put_to_jobview(self, task: TransferTask) -> bool:
         """
         添加到作业视图
-        :return: True表示任务已添加，False表示任务已存在（重复）
+        :return: True表示任务已添加，False表示任务无效或已存在（重复）
         """
         return self.jobview.add_task(task)
 
