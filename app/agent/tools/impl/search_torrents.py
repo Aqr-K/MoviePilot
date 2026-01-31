@@ -80,7 +80,7 @@ class SearchTorrentsTool(MoviePilotTool):
                 if media_type and torrent.media_info:
                     if torrent.media_info.type != MediaType(media_type):
                         continue
-                if season and torrent.meta_info and torrent.meta_info.begin_season != season:
+                if season is not None and torrent.meta_info and torrent.meta_info.begin_season != season:
                     continue
                 # 使用正则表达式过滤标题（分辨率、质量等关键字）
                 if regex_pattern and torrent.torrent_info and torrent.torrent_info.title:

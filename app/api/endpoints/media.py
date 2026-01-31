@@ -195,7 +195,7 @@ async def seasons(mediaid: Optional[str] = None,
             tmdbid = int(mediaid[5:])
             seasons_info = await TmdbChain().async_tmdb_seasons(tmdbid=tmdbid)
             if seasons_info:
-                if season:
+                if season is not None:
                     return [sea for sea in seasons_info if sea.season_number == season]
                 return seasons_info
     if title:
@@ -207,11 +207,11 @@ async def seasons(mediaid: Optional[str] = None,
             if settings.RECOGNIZE_SOURCE == "themoviedb":
                 seasons_info = await TmdbChain().async_tmdb_seasons(tmdbid=mediainfo.tmdb_id)
                 if seasons_info:
-                    if season:
+                    if season is not None:
                         return [sea for sea in seasons_info if sea.season_number == season]
                     return seasons_info
             else:
-                sea = season or 1
+                sea = season if season is not None else 1
                 return [schemas.MediaSeason(
                     season_number=sea,
                     poster_path=mediainfo.poster_path,

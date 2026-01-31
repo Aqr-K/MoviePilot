@@ -958,10 +958,10 @@ class MediaChain(ChainBase):
         year = None
         if tmdbinfo.get('release_date'):
             year = tmdbinfo['release_date'][:4]
-        elif tmdbinfo.get('seasons') and season:
+        elif tmdbinfo.get('seasons') and season is not None:
             for seainfo in tmdbinfo['seasons']:
                 season_number = seainfo.get("season_number")
-                if not season_number:
+                if season_number is None:
                     continue
                 air_date = seainfo.get("air_date")
                 if air_date and season_number == season:

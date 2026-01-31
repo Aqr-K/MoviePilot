@@ -697,7 +697,7 @@ class TmdbApi:
             return {}
         ret_seasons = {}
         for season_info in tv_info.get("seasons") or []:
-            if not season_info.get("season_number"):
+            if season_info.get("season_number") is None:
                 continue
             ret_seasons[season_info.get("season_number")] = season_info
         return ret_seasons

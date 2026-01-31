@@ -21,7 +21,7 @@ class DoubanScraper:
             # 电影元数据文件
             doc = self.__gen_movie_nfo_file(mediainfo=mediainfo)
         else:
-            if season:
+            if season is not None:
                 # 季元数据文件
                 doc = self.__gen_tv_season_nfo_file(mediainfo=mediainfo, season=season)
             else:
@@ -41,7 +41,7 @@ class DoubanScraper:
         :param episode: 集号
         """
         ret_dict = {}
-        if season:
+        if season is not None:
             # 豆瓣无季图片
             return {}
         if episode:

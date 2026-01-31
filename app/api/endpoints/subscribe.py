@@ -199,7 +199,7 @@ async def subscribe_mediaid(
     # 使用名称检查订阅
     if title_check and title:
         meta = MetaInfo(title)
-        if season:
+        if season is not None:
             meta.begin_season = season
         result = await Subscribe.async_get_by_title(db, title=meta.name, season=meta.begin_season)
 
