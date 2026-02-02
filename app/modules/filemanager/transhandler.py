@@ -313,6 +313,9 @@ class TransHandler:
                             logger.info(
                                 f"当前整理覆盖模式设置为 {overwrite_mode}，仅保留最新版本，正在删除已有版本文件 ...")
                             self.__delete_version_files(target_oper, new_file)
+                else:
+                    # 附加文件 总是需要覆盖
+                    overflag = True
 
                 # 整理文件
                 new_item, err_msg = self.__transfer_file(fileitem=fileitem,
@@ -797,8 +800,8 @@ class TransHandler:
                 continue
             if media_file.type != "file":
                 continue
-            media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
-            if f".{media_file.extension.lower()}" not in media_exts:
+            # 当前只有视频文件需要保留最新版本，其余格式无需处理，以避免误删 (issue 5449)
+            if f".{media_file.extension.lower()}" not in settings.RMT_MEDIAEXT:
                 continue
             # 识别文件中的季集信息
             filemeta = MetaInfoPath(media_path)
