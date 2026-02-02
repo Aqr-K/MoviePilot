@@ -93,7 +93,7 @@ class Subscribe(Base):
     def exists(cls, db: Session, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                season: Optional[int] = None):
         if tmdbid:
-            if season:
+            if season is not None:
                 return db.query(cls).filter(cls.tmdbid == tmdbid,
                                             cls.season == season).first()
             return db.query(cls).filter(cls.tmdbid == tmdbid).first()
@@ -106,7 +106,7 @@ class Subscribe(Base):
     async def async_exists(cls, db: AsyncSession, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                            season: Optional[int] = None):
         if tmdbid:
-            if season:
+            if season is not None:
                 result = await db.execute(
                     select(cls).filter(cls.tmdbid == tmdbid, cls.season == season)
                 )
@@ -148,7 +148,7 @@ class Subscribe(Base):
     @classmethod
     @db_query
     def get_by_title(cls, db: Session, title: str, season: Optional[int] = None):
-        if season:
+        if season is not None:
             return db.query(cls).filter(cls.name == title,
                                         cls.season == season).first()
         return db.query(cls).filter(cls.name == title).first()
@@ -156,7 +156,7 @@ class Subscribe(Base):
     @classmethod
     @async_db_query
     async def async_get_by_title(cls, db: AsyncSession, title: str, season: Optional[int] = None):
-        if season:
+        if season is not None:
             result = await db.execute(
                 select(cls).filter(cls.name == title, cls.season == season)
             )
@@ -169,7 +169,7 @@ class Subscribe(Base):
     @classmethod
     @db_query
     def get_by_tmdbid(cls, db: Session, tmdbid: int, season: Optional[int] = None):
-        if season:
+        if season is not None:
             return db.query(cls).filter(cls.tmdbid == tmdbid,
                                         cls.season == season).all()
         else:
@@ -178,7 +178,7 @@ class Subscribe(Base):
     @classmethod
     @async_db_query
     async def async_get_by_tmdbid(cls, db: AsyncSession, tmdbid: int, season: Optional[int] = None):
-        if season:
+        if season is not None:
             result = await db.execute(
                 select(cls).filter(cls.tmdbid == tmdbid, cls.season == season)
             )

@@ -266,14 +266,14 @@ class TransferHistory(Base):
         # TMDBID + 类型
         if tmdbid and mtype:
             # 电视剧某季某集
-            if season and episode:
+            if season is not None and episode:
                 return db.query(cls).filter(cls.tmdbid == tmdbid,
                                             cls.type == mtype,
                                             cls.seasons == season,
                                             cls.episodes == episode,
                                             cls.dest == dest).all()
             # 电视剧某季
-            elif season:
+            elif season is not None:
                 return db.query(cls).filter(cls.tmdbid == tmdbid,
                                             cls.type == mtype,
                                             cls.seasons == season).all()
@@ -290,14 +290,14 @@ class TransferHistory(Base):
         # 标题 + 年份
         elif title and year:
             # 电视剧某季某集
-            if season and episode:
+            if season is not None and episode:
                 return db.query(cls).filter(cls.title == title,
                                             cls.year == year,
                                             cls.seasons == season,
                                             cls.episodes == episode,
                                             cls.dest == dest).all()
             # 电视剧某季
-            elif season:
+            elif season is not None:
                 return db.query(cls).filter(cls.title == title,
                                             cls.year == year,
                                             cls.seasons == season).all()
@@ -312,7 +312,7 @@ class TransferHistory(Base):
                     return db.query(cls).filter(cls.title == title,
                                                 cls.year == year).all()
         # 类型 + 转移路径（emby webhook season无tmdbid场景）
-        elif mtype and season and dest:
+        elif mtype and season is not None and dest:
             # 电视剧某季
             return db.query(cls).filter(cls.type == mtype,
                                         cls.seasons == season,

@@ -99,7 +99,7 @@ class SubscribeHistory(Base):
     def exists(cls, db: Session, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                season: Optional[int] = None):
         if tmdbid:
-            if season:
+            if season is not None:
                 return db.query(cls).filter(cls.tmdbid == tmdbid,
                                             cls.season == season).first()
             return db.query(cls).filter(cls.tmdbid == tmdbid).first()
@@ -112,7 +112,7 @@ class SubscribeHistory(Base):
     async def async_exists(cls, db: AsyncSession, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                            season: Optional[int] = None):
         if tmdbid:
-            if season:
+            if season is not None:
                 result = await db.execute(
                     select(cls).filter(cls.tmdbid == tmdbid, cls.season == season)
                 )
