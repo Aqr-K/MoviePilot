@@ -295,6 +295,7 @@ class TransHandler:
                             elif overwrite_mode == 'never':
                                 # 存在不覆盖
                                 self.__update_result(result=result,
+                                                     success=False,
                                                      message=f"媒体库存在同名文件，当前覆盖模式为不覆盖",
                                                      fileitem=fileitem,
                                                      target_item=target_item,
