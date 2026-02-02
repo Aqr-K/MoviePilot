@@ -45,7 +45,8 @@ class CookieHelper:
             '//button[@type="submit"]',
             '//button[@lay-filter="login"]',
             '//button[@lay-filter="formLogin"]',
-            '//input[@type="button"][@value="登录"]'
+            '//input[@type="button"][@value="登录"]',
+            '//input[@id="submit-btn"]'
         ],
         "error": [
             "//table[@class='main']//td[@class='text']/text()"
