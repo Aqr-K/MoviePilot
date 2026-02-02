@@ -798,7 +798,7 @@ class TheMovieDbModule(_ModuleBase):
         if not tmdb_info:
             return []
         return [schemas.TmdbSeason(**sea)
-                for sea in tmdb_info.get("seasons", []) if sea.get("season_number")]
+                for sea in tmdb_info.get("seasons", []) if sea.get("season_number") is not None]
 
     def tmdb_group_seasons(self, group_id: str) -> List[schemas.TmdbSeason]:
         """
@@ -1168,7 +1168,7 @@ class TheMovieDbModule(_ModuleBase):
         if not tmdb_info:
             return []
         return [schemas.TmdbSeason(**sea)
-                for sea in tmdb_info.get("seasons", []) if sea.get("season_number")]
+                for sea in tmdb_info.get("seasons", []) if sea.get("season_number") is not None]
 
     async def async_tmdb_group_seasons(self, group_id: str) -> List[schemas.TmdbSeason]:
         """
