@@ -428,6 +428,12 @@ class SiteSpider:
         if pubdate_str:
             pubdate_str = pubdate_str.replace('\n', ' ').strip()
         self.torrents_info['pubdate'] = self.__filter_text(pubdate_str, selector.get('filters'))
+        if self.torrents_info.get('pubdate'):
+            try:
+                if not isinstance(self.torrents_info['pubdate'], datetime.datetime):
+                    datetime.datetime.strptime(str(self.torrents_info['pubdate']), '%Y-%m-%d %H:%M:%S')
+            except (ValueError, TypeError):
+                self.torrents_info['pubdate'] = StringUtils.unify_datetime_str(str(self.torrents_info['pubdate']))
 
     def __get_date_elapsed(self, torrent: Any):
         # torrent date elapsed text

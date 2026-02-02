@@ -382,7 +382,10 @@ class RssHelper:
                                     size = int(size_attr)
 
                             # 发布日期
-                            pubdate_nodes = item.xpath('.//pubDate | .//published | .//updated')
+                            pubdate_nodes = item.xpath('./pubDate | ./published | ./updated')
+                            if not pubdate_nodes:
+                                pubdate_nodes = item.xpath('.//*[local-name()="pubDate"] | .//*[local-name()="published"] | .//*[local-name()="updated"]')
+
                             pubdate = ""
                             if pubdate_nodes and pubdate_nodes[0].text:
                                 pubdate = StringUtils.get_time(pubdate_nodes[0].text)
