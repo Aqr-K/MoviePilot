@@ -465,7 +465,7 @@ class MediaInfo:
                 for seainfo in info.get('seasons'):
                     # 季
                     season = seainfo.get("season_number")
-                    if not season:
+                    if season is None:
                         continue
                     # 集
                     episode_count = seainfo.get("episode_count")

@@ -101,7 +101,7 @@ def not_exists(media_in: schemas.MediaInfo,
     mtype = MediaType(media_in.type) if media_in.type else None
     if mtype:
         meta.type = mtype
-    if media_in.season:
+    if media_in.season is not None:
         meta.begin_season = media_in.season
         meta.type = MediaType.TV
     if media_in.year:
