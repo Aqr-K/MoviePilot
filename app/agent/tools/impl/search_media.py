@@ -63,7 +63,7 @@ class SearchMediaTool(MoviePilotTool):
                     if media_type:
                         if result.type != MediaType(media_type):
                             continue
-                    if season and result.season != season:
+                    if season is not None and result.season != season:
                         continue
                     filtered_results.append(result)
 
