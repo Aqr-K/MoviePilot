@@ -54,7 +54,7 @@ async def exists_local(title: Optional[str] = None,
     判断本地是否存在
     """
     meta = MetaInfo(title)
-    if not season:
+    if season is None:
         season = meta.begin_season
     # 返回对象
     ret_info = {}
@@ -83,7 +83,7 @@ def exists(media_in: schemas.MediaInfo,
     existsinfo: schemas.ExistMediaInfo = MediaServerChain().media_exists(mediainfo=mediainfo)
     if not existsinfo:
         return {}
-    if media_in.season:
+    if media_in.season is not None:
         return {
             media_in.season: existsinfo.seasons.get(media_in.season) or []
         }
@@ -101,7 +101,7 @@ def not_exists(media_in: schemas.MediaInfo,
     mtype = MediaType(media_in.type) if media_in.type else None
     if mtype:
         meta.type = mtype
-    if media_in.season:
+    if media_in.season is not None:
         meta.begin_season = media_in.season
         meta.type = MediaType.TV
     if media_in.year:

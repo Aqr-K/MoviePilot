@@ -465,7 +465,7 @@ class MediaInfo:
                 for seainfo in info.get('seasons'):
                     # 季
                     season = seainfo.get("season_number")
-                    if not season:
+                    if season is None:
                         continue
                     # 集
                     episode_count = seainfo.get("episode_count")
@@ -545,9 +545,9 @@ class MediaInfo:
         # 识别标题中的季
         meta = MetaInfo(info.get("title"))
         # 季
-        if not self.season:
+        if self.season is None:
             self.season = meta.begin_season
-            if self.season:
+            if self.season is not None:
                 self.type = MediaType.TV
             elif not self.type:
                 self.type = MediaType.MOVIE
@@ -607,13 +607,13 @@ class MediaInfo:
         # 剧集
         if self.type == MediaType.TV and not self.seasons:
             meta = MetaInfo(info.get("title"))
-            season = meta.begin_season or 1
+            season = meta.begin_season if meta.begin_season is not None else 1
             episodes_count = info.get("episodes_count")
             if episodes_count:
                 self.seasons[season] = list(range(1, episodes_count + 1))
         # 季年份
         if self.type == MediaType.TV and not self.season_years:
-            season = self.season or 1
+            season = self.season if self.season is not None else 1
             self.season_years = {
                 season: self.year
             }
@@ -667,7 +667,7 @@ class MediaInfo:
         # 识别标题中的季
         meta = MetaInfo(self.title)
         # 季
-        if not self.season:
+        if self.season is None:
             self.season = meta.begin_season
         # 评分
         if not self.vote_average:
@@ -703,7 +703,7 @@ class MediaInfo:
         # 剧集
         if self.type == MediaType.TV and not self.seasons:
             meta = MetaInfo(self.title)
-            season = meta.begin_season or 1
+            season = meta.begin_season if meta.begin_season is not None else 1
             episodes_count = info.get("total_episodes")
             if episodes_count:
                 self.seasons[season] = list(range(1, episodes_count + 1))

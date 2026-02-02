@@ -49,7 +49,7 @@ class MediaServerOper(DbOper):
         if not item:
             return None
 
-        if kwargs.get("season"):
+        if kwargs.get("season") is not None:
             # 判断季是否存在
             if not item.seasoninfo:
                 return None
@@ -75,7 +75,7 @@ class MediaServerOper(DbOper):
         if not item:
             return None
 
-        if kwargs.get("season"):
+        if kwargs.get("season") is not None:
             # 判断季是否存在
             if not item.seasoninfo:
                 return None

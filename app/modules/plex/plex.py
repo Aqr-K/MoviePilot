@@ -287,7 +287,7 @@ class Plex:
         episodes = videos.episodes()
         season_episodes = {}
         for episode in episodes:
-            if season and episode.seasonNumber != int(season):
+            if season is not None and episode.seasonNumber != int(season):
                 continue
             if episode.seasonNumber not in season_episodes:
                 season_episodes[episode.seasonNumber] = []

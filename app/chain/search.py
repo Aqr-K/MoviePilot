@@ -49,7 +49,7 @@ class SearchChain(ChainBase):
             logger.error(f'{tmdbid} 媒体信息识别失败！')
             return []
         no_exists = None
-        if season:
+        if season is not None:
             no_exists = {
                 tmdbid or doubanid: {
                     season: NotExistMediaInfo(episodes=[])
@@ -129,7 +129,7 @@ class SearchChain(ChainBase):
             logger.error(f'{tmdbid} 媒体信息识别失败！')
             return []
         no_exists = None
-        if season:
+        if season is not None:
             no_exists = {
                 tmdbid or doubanid: {
                     season: NotExistMediaInfo(episodes=[])
@@ -181,7 +181,7 @@ class SearchChain(ChainBase):
             # 过滤剧集
             season_episodes = {sea: info.episodes
                                for sea, info in no_exists[mediakey].items()}
-        elif mediainfo.season:
+        elif mediainfo.season is not None:
             # 豆瓣只搜索当前季
             season_episodes = {mediainfo.season: []}
         else:

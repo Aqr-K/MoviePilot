@@ -421,7 +421,7 @@ class Emby:
                 if str(tmdb_id) != str(item_info.tmdbid):
                     return None, {}
         # 查集的信息
-        if not season:
+        if season is None:
             season = None
         try:
             url = f"{self._host}emby/Shows/{item_id}/Episodes"
@@ -437,12 +437,12 @@ class Emby:
                 season_episodes = {}
                 for res_item in res_items:
                     season_index = res_item.get("ParentIndexNumber")
-                    if not season_index:
+                    if season_index is None:
                         continue
-                    if season and season != season_index:
+                    if season is not None and season != season_index:
                         continue
                     episode_index = res_item.get("IndexNumber")
-                    if not episode_index:
+                    if episode_index is None:
                         continue
                     if season_index not in season_episodes:
                         season_episodes[season_index] = []
