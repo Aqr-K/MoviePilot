@@ -1380,8 +1380,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
                 # 获取下载Hash
                 if download_history and (not downloader or not download_hash):
-                    downloader = download_history.downloader
-                    download_hash = download_history.download_hash
+                    _downloader = download_history.downloader
+                    _download_hash = download_history.download_hash
+                else:
+                    _downloader = downloader
+                    _download_hash = download_hash
 
                 # 后台整理
                 transfer_task = TransferTask(
@@ -1395,8 +1398,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     scrape=scrape,
                     library_type_folder=library_type_folder,
                     library_category_folder=library_category_folder,
-                    downloader=downloader,
-                    download_hash=download_hash,
+                    downloader=_downloader,
+                    download_hash=_download_hash,
                     download_history=download_history,
                     manual=manual,
                     background=background
