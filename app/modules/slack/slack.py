@@ -1,6 +1,7 @@
 import re
 from threading import Lock
 from typing import List, Optional
+from urllib.parse import quote
 
 import requests
 from slack_bolt import App
@@ -42,7 +43,9 @@ class Slack:
 
         # 标记消息来源
         if kwargs.get("name"):
-            self._ds_url = f"{self._ds_url}&source={kwargs.get('name')}"
+            # URL encode the source name to handle special characters
+            encoded_name = quote(kwargs.get('name'), safe='')
+            self._ds_url = f"{self._ds_url}&source={encoded_name}"
 
         # 注册消息响应
         @slack_app.event("message")

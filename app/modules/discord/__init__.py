@@ -139,9 +139,23 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         发送通知消息
         :param message: 消息通知对象
         """
-        for conf in self.get_configs().values():
+        # DEBUG: Log entry and configs
+        configs = self.get_configs()
+        logger.debug(f"[Discord] post_message 被调用，message.source={message.source}, "
+                     f"message.userid={message.userid}, message.channel={message.channel}")
+        logger.debug(f"[Discord] 当前配置数量: {len(configs)}, 配置名称: {list(configs.keys())}")
+        logger.debug(f"[Discord] 当前实例数量: {len(self.get_instances())}, 实例名称: {list(self.get_instances().keys())}")
+
+        if not configs:
+            logger.warning("[Discord] get_configs() 返回空，没有可用的 Discord 配置")
+            return
+
+        for conf in configs.values():
+            logger.debug(f"[Discord] 检查配置: name={conf.name}, type={conf.type}, enabled={conf.enabled}")
             if not self.check_message(message, conf.name):
+                logger.debug(f"[Discord] check_message 返回 False，跳过配置: {conf.name}")
                 continue
+            logger.debug(f"[Discord] check_message 通过，准备发送到: {conf.name}")
             targets = message.targets
             userid = message.userid
             if not userid and targets is not None:
@@ -150,13 +164,18 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                     logger.warn("用户没有指定 Discord 用户ID，消息无法发送")
                     return
             client: Discord = self.get_instance(conf.name)
+            logger.debug(f"[Discord] get_instance('{conf.name}') 返回: {client is not None}")
             if client:
-                client.send_msg(title=message.title, text=message.text,
+                logger.debug(f"[Discord] 调用 client.send_msg, userid={userid}, title={message.title[:50] if message.title else None}...")
+                result = client.send_msg(title=message.title, text=message.text,
                                 image=message.image, userid=userid, link=message.link,
                                 buttons=message.buttons,
                                 original_message_id=message.original_message_id,
                                 original_chat_id=message.original_chat_id,
                                 mtype=message.mtype)
+                logger.debug(f"[Discord] send_msg 返回结果: {result}")
+            else:
+                logger.warning(f"[Discord] 未找到配置 '{conf.name}' 对应的 Discord 客户端实例")
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         """

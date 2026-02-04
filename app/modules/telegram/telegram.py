@@ -2,7 +2,7 @@ import asyncio
 import re
 import threading
 from typing import Optional, List, Dict, Callable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote
 
 from telebot import TeleBot, apihelper
 from telebot.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
@@ -65,7 +65,9 @@ class Telegram:
 
             # 标记渠道来源
             if kwargs.get("name"):
-                self._ds_url = f"{self._ds_url}&source={kwargs.get('name')}"
+                # URL encode the source name to handle special characters
+                encoded_name = quote(kwargs.get('name'), safe='')
+                self._ds_url = f"{self._ds_url}&source={encoded_name}"
 
             @_bot.message_handler(commands=['start', 'help'])
             def send_welcome(message):
