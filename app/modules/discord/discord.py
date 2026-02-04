@@ -2,6 +2,7 @@ import asyncio
 import re
 import threading
 from typing import Optional, List, Dict, Any, Tuple, Union
+from urllib.parse import quote
 
 import discord
 from discord import app_commands
@@ -47,7 +48,9 @@ class Discord:
         base_ds_url = f"http://127.0.0.1:{settings.PORT}/api/v1/message/"
         self._ds_url = f"{base_ds_url}?token={settings.API_TOKEN}"
         if kwargs.get("name"):
-            self._ds_url = f"{self._ds_url}&source={kwargs.get('name')}"
+            # URL encode the source name to handle special characters in config names
+            encoded_name = quote(kwargs.get('name'), safe='')
+            self._ds_url = f"{self._ds_url}&source={encoded_name}"
         logger.debug(f"[Discord] 消息回调 URL: {self._ds_url}")
 
         intents = discord.Intents.default()
@@ -548,10 +551,11 @@ class Discord:
         """
         Resolve the channel to send messages to.
         Priority order:
-        1. chat_id (original channel where user sent the message) - for contextual replies
-        2. userid (DM) - for private conversations
-        3. Configured _channel_id (broadcast channel) - for system notifications
+        1. `chat_id` (original channel where user sent the message) - for contextual replies
+        2. `userid` mapping (channel where user last sent a message) - for contextual replies
+        3. Configured `_channel_id` (broadcast channel) - for system notifications
         4. Any available text channel in configured guild - fallback
+        5. `userid` (DM) - for private conversations as a final fallback
         """
         logger.debug(f"[Discord] _resolve_channel: userid={userid}, chat_id={chat_id}, "
                      f"_channel_id={self._channel_id}, _guild_id={self._guild_id}")
