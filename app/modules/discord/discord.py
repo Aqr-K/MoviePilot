@@ -64,6 +64,7 @@ class Discord:
         self._thread: Optional[threading.Thread] = None
         self._ready_event = threading.Event()
         self._user_dm_cache: Dict[str, discord.DMChannel] = {}
+        self._user_chat_mapping: Dict[str, str] = {}  # userid -> chat_id mapping for reply targeting
         self._broadcast_channel = None
         self._bot_user_id: Optional[int] = None
 
@@ -91,6 +92,9 @@ class Discord:
             if not self._should_process_message(message):
                 return
 
+            # Update user-chat mapping for reply targeting
+            self._update_user_chat_mapping(str(message.author.id), str(message.channel.id))
+
             cleaned_text = self._clean_bot_mention(message.content or "")
             username = message.author.display_name or message.author.global_name or message.author.name
             payload = {
@@ -116,6 +120,10 @@ class Discord:
                     await interaction.response.defer(ephemeral=True)
                 except Exception as e:
                     logger.error(f"处理 Discord 交互响应失败：{e}")
+
+                # Update user-chat mapping for reply targeting
+                if interaction.user and interaction.channel:
+                    self._update_user_chat_mapping(str(interaction.user.id), str(interaction.channel.id))
 
                 username = (interaction.user.display_name or interaction.user.global_name or interaction.user.name) \
                     if interaction.user else None
@@ -537,11 +545,20 @@ class Discord:
         return view
 
     async def _resolve_channel(self, userid: Optional[str] = None, chat_id: Optional[str] = None):
+        """
+        Resolve the channel to send messages to.
+        Priority order:
+        1. chat_id (original channel where user sent the message) - for contextual replies
+        2. userid (DM) - for private conversations
+        3. Configured _channel_id (broadcast channel) - for system notifications
+        4. Any available text channel in configured guild - fallback
+        """
         logger.debug(f"[Discord] _resolve_channel: userid={userid}, chat_id={chat_id}, "
                      f"_channel_id={self._channel_id}, _guild_id={self._guild_id}")
-        # 优先使用明确的聊天 ID
+
+        # Priority 1: Use explicit chat_id (reply to the same channel where user sent message)
         if chat_id:
-            logger.debug(f"[Discord] 尝试通过 chat_id={chat_id} 获取频道")
+            logger.debug(f"[Discord] 尝试通过 chat_id={chat_id} 获取原始频道")
             channel = self._client.get_channel(int(chat_id))
             if channel:
                 logger.debug(f"[Discord] 通过 get_channel 找到频道: {channel}")
@@ -553,17 +570,23 @@ class Discord:
             except Exception as err:
                 logger.warn(f"通过 chat_id 获取 Discord 频道失败：{err}")
 
-        # 私聊
+        # Priority 2: Use user-chat mapping (reply to where the user last sent a message)
         if userid:
-            logger.debug(f"[Discord] 尝试通过 userid={userid} 获取私聊频道")
-            dm = await self._get_dm_channel(str(userid))
-            if dm:
-                logger.debug(f"[Discord] 获取到私聊频道: {dm}")
-                return dm
-            else:
-                logger.debug(f"[Discord] 无法获取用户 {userid} 的私聊频道")
+            mapped_chat_id = self._get_user_chat_id(str(userid))
+            if mapped_chat_id:
+                logger.debug(f"[Discord] 从用户映射获取 chat_id={mapped_chat_id}")
+                channel = self._client.get_channel(int(mapped_chat_id))
+                if channel:
+                    logger.debug(f"[Discord] 通过映射找到频道: {channel}")
+                    return channel
+                try:
+                    channel = await self._client.fetch_channel(int(mapped_chat_id))
+                    logger.debug(f"[Discord] 通过 fetch_channel 找到映射频道: {channel}")
+                    return channel
+                except Exception as err:
+                    logger.warn(f"通过映射的 chat_id 获取 Discord 频道失败：{err}")
 
-        # 配置的广播频道
+        # Priority 3: Use configured broadcast channel (for system notifications)
         if self._broadcast_channel:
             logger.debug(f"[Discord] 使用缓存的广播频道: {self._broadcast_channel}")
             return self._broadcast_channel
@@ -581,7 +604,7 @@ class Discord:
                 logger.debug(f"[Discord] 通过配置的频道ID找到频道: {channel}")
                 return channel
 
-        # 按 Guild 寻找一个可用文本频道
+        # Priority 4: Find any available text channel in guild (fallback)
         logger.debug(f"[Discord] 尝试在 Guild 中寻找可用频道")
         target_guilds = []
         if self._guild_id:
@@ -595,8 +618,20 @@ class Discord:
         for guild in target_guilds:
             for channel in guild.text_channels:
                 if guild.me and channel.permissions_for(guild.me).send_messages:
+                    logger.debug(f"[Discord] 在 Guild 中找到可用频道: {channel}")
                     self._broadcast_channel = channel
                     return channel
+
+        # Priority 5: Fallback to DM (only if no channel available)
+        if userid:
+            logger.debug(f"[Discord] 回退到私聊: userid={userid}")
+            dm = await self._get_dm_channel(str(userid))
+            if dm:
+                logger.debug(f"[Discord] 获取到私聊频道: {dm}")
+                return dm
+            else:
+                logger.debug(f"[Discord] 无法获取用户 {userid} 的私聊频道")
+
         return None
 
     async def _get_dm_channel(self, userid: str) -> Optional[discord.DMChannel]:
@@ -625,6 +660,25 @@ class Discord:
         except Exception as err:
             logger.error(f"获取 Discord 私聊失败：{err}")
             return None
+
+    def _update_user_chat_mapping(self, userid: str, chat_id: str) -> None:
+        """
+        Update user-chat mapping for reply targeting.
+        This ensures replies go to the same channel where the user sent the message.
+        :param userid: User ID
+        :param chat_id: Channel/Chat ID where the user sent the message
+        """
+        if userid and chat_id:
+            self._user_chat_mapping[userid] = chat_id
+            logger.debug(f"[Discord] 更新用户频道映射: userid={userid} -> chat_id={chat_id}")
+
+    def _get_user_chat_id(self, userid: str) -> Optional[str]:
+        """
+        Get the chat ID where the user last sent a message.
+        :param userid: User ID
+        :return: Chat ID or None if not found
+        """
+        return self._user_chat_mapping.get(userid)
 
     def _should_process_message(self, message: discord.Message) -> bool:
         if isinstance(message.channel, discord.DMChannel):
