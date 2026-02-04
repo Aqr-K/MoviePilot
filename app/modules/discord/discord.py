@@ -33,6 +33,9 @@ class Discord:
                  DISCORD_GUILD_ID: Optional[Union[str, int]] = None,
                  DISCORD_CHANNEL_ID: Optional[Union[str, int]] = None,
                  **kwargs):
+        logger.debug(f"[Discord] 初始化 Discord 实例: name={kwargs.get('name')}, "
+                     f"GUILD_ID={DISCORD_GUILD_ID}, CHANNEL_ID={DISCORD_CHANNEL_ID}, "
+                     f"TOKEN={'已配置' if DISCORD_BOT_TOKEN else '未配置'}")
         if not DISCORD_BOT_TOKEN:
             logger.error("Discord Bot Token 未配置！")
             return
@@ -40,10 +43,12 @@ class Discord:
         self._token = DISCORD_BOT_TOKEN
         self._guild_id = self._to_int(DISCORD_GUILD_ID)
         self._channel_id = self._to_int(DISCORD_CHANNEL_ID)
+        logger.debug(f"[Discord] 解析后的 ID: _guild_id={self._guild_id}, _channel_id={self._channel_id}")
         base_ds_url = f"http://127.0.0.1:{settings.PORT}/api/v1/message/"
         self._ds_url = f"{base_ds_url}?token={settings.API_TOKEN}"
         if kwargs.get("name"):
             self._ds_url = f"{self._ds_url}&source={kwargs.get('name')}"
+        logger.debug(f"[Discord] 消息回调 URL: {self._ds_url}")
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -168,13 +173,19 @@ class Discord:
                  original_message_id: Optional[Union[int, str]] = None,
                  original_chat_id: Optional[str] = None,
                  mtype: Optional['NotificationType'] = None) -> Optional[bool]:
+        logger.debug(f"[Discord] send_msg 被调用: userid={userid}, title={title[:50] if title else None}...")
+        logger.debug(f"[Discord] get_state() = {self.get_state()}, "
+                     f"_ready_event.is_set() = {self._ready_event.is_set()}, "
+                     f"_client = {self._client is not None}")
         if not self.get_state():
+            logger.warning("[Discord] get_state() 返回 False，Bot 未就绪，无法发送消息")
             return False
         if not title and not text:
             logger.warn("标题和内容不能同时为空")
             return False
 
         try:
+            logger.debug(f"[Discord] 准备异步发送消息...")
             future = asyncio.run_coroutine_threadsafe(
                 self._send_message(title=title, text=text, image=image, userid=userid,
                                    link=link, buttons=buttons,
@@ -182,7 +193,9 @@ class Discord:
                                    original_chat_id=original_chat_id,
                                    mtype=mtype),
                 self._loop)
-            return future.result(timeout=30)
+            result = future.result(timeout=30)
+            logger.debug(f"[Discord] 异步发送完成，结果: {result}")
+            return result
         except Exception as err:
             logger.error(f"发送 Discord 消息失败：{err}")
             return False
@@ -254,7 +267,9 @@ class Discord:
                             original_message_id: Optional[Union[int, str]],
                             original_chat_id: Optional[str],
                             mtype: Optional['NotificationType'] = None) -> bool:
+        logger.debug(f"[Discord] _send_message: userid={userid}, original_chat_id={original_chat_id}")
         channel = await self._resolve_channel(userid=userid, chat_id=original_chat_id)
+        logger.debug(f"[Discord] _resolve_channel 返回: {channel}, type={type(channel)}")
         if not channel:
             logger.error("未找到可用的 Discord 频道或私聊")
             return False
@@ -264,11 +279,18 @@ class Discord:
         content = None
 
         if original_message_id and original_chat_id:
+            logger.debug(f"[Discord] 编辑现有消息: message_id={original_message_id}")
             return await self._edit_message(chat_id=original_chat_id, message_id=original_message_id,
                                             content=content, embed=embed, view=view)
 
-        await channel.send(content=content, embed=embed, view=view)
-        return True
+        logger.debug(f"[Discord] 发送新消息到频道: {channel}")
+        try:
+            await channel.send(content=content, embed=embed, view=view)
+            logger.debug("[Discord] 消息发送成功")
+            return True
+        except Exception as e:
+            logger.error(f"[Discord] 发送消息到频道失败: {e}")
+            return False
 
     async def _send_list_message(self, embeds: List[discord.Embed],
                                  userid: Optional[str],
@@ -515,26 +537,38 @@ class Discord:
         return view
 
     async def _resolve_channel(self, userid: Optional[str] = None, chat_id: Optional[str] = None):
+        logger.debug(f"[Discord] _resolve_channel: userid={userid}, chat_id={chat_id}, "
+                     f"_channel_id={self._channel_id}, _guild_id={self._guild_id}")
         # 优先使用明确的聊天 ID
         if chat_id:
+            logger.debug(f"[Discord] 尝试通过 chat_id={chat_id} 获取频道")
             channel = self._client.get_channel(int(chat_id))
             if channel:
+                logger.debug(f"[Discord] 通过 get_channel 找到频道: {channel}")
                 return channel
             try:
-                return await self._client.fetch_channel(int(chat_id))
+                channel = await self._client.fetch_channel(int(chat_id))
+                logger.debug(f"[Discord] 通过 fetch_channel 找到频道: {channel}")
+                return channel
             except Exception as err:
                 logger.warn(f"通过 chat_id 获取 Discord 频道失败：{err}")
 
         # 私聊
         if userid:
+            logger.debug(f"[Discord] 尝试通过 userid={userid} 获取私聊频道")
             dm = await self._get_dm_channel(str(userid))
             if dm:
+                logger.debug(f"[Discord] 获取到私聊频道: {dm}")
                 return dm
+            else:
+                logger.debug(f"[Discord] 无法获取用户 {userid} 的私聊频道")
 
         # 配置的广播频道
         if self._broadcast_channel:
+            logger.debug(f"[Discord] 使用缓存的广播频道: {self._broadcast_channel}")
             return self._broadcast_channel
         if self._channel_id:
+            logger.debug(f"[Discord] 尝试通过配置的 _channel_id={self._channel_id} 获取频道")
             channel = self._client.get_channel(self._channel_id)
             if not channel:
                 try:
@@ -544,9 +578,11 @@ class Discord:
                     channel = None
             self._broadcast_channel = channel
             if channel:
+                logger.debug(f"[Discord] 通过配置的频道ID找到频道: {channel}")
                 return channel
 
         # 按 Guild 寻找一个可用文本频道
+        logger.debug(f"[Discord] 尝试在 Guild 中寻找可用频道")
         target_guilds = []
         if self._guild_id:
             guild = self._client.get_guild(self._guild_id)
@@ -554,6 +590,7 @@ class Discord:
                 target_guilds.append(guild)
         else:
             target_guilds = list(self._client.guilds)
+        logger.debug(f"[Discord] 目标 Guilds 数量: {len(target_guilds)}")
 
         for guild in target_guilds:
             for channel in guild.text_channels:
@@ -563,13 +600,25 @@ class Discord:
         return None
 
     async def _get_dm_channel(self, userid: str) -> Optional[discord.DMChannel]:
+        logger.debug(f"[Discord] _get_dm_channel: userid={userid}")
         if userid in self._user_dm_cache:
+            logger.debug(f"[Discord] 从缓存获取私聊频道: {self._user_dm_cache.get(userid)}")
             return self._user_dm_cache.get(userid)
         try:
-            user_obj = self._client.get_user(int(userid)) or await self._client.fetch_user(int(userid))
+            logger.debug(f"[Discord] 尝试获取/创建用户 {userid} 的私聊频道")
+            user_obj = self._client.get_user(int(userid))
+            logger.debug(f"[Discord] get_user 结果: {user_obj}")
             if not user_obj:
+                user_obj = await self._client.fetch_user(int(userid))
+                logger.debug(f"[Discord] fetch_user 结果: {user_obj}")
+            if not user_obj:
+                logger.debug(f"[Discord] 无法找到用户 {userid}")
                 return None
-            dm = user_obj.dm_channel or await user_obj.create_dm()
+            dm = user_obj.dm_channel
+            logger.debug(f"[Discord] 用户现有 dm_channel: {dm}")
+            if not dm:
+                dm = await user_obj.create_dm()
+                logger.debug(f"[Discord] 创建新的 dm_channel: {dm}")
             if dm:
                 self._user_dm_cache[userid] = dm
             return dm
