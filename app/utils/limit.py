@@ -98,8 +98,14 @@ class ExponentialBackoffRateLimiter(BaseRateLimiter):
     每次触发限流时，等待时间会成倍增加，直到达到最大等待时间
     """
 
-    def __init__(self, base_wait: float = 60.0, max_wait: float = 600.0, backoff_factor: float = 2.0,
-                 source: str = "", enable_logging: bool = True):
+    def __init__(
+        self,
+        base_wait: float = 60.0,
+        max_wait: float = 600.0,
+        backoff_factor: float = 2.0,
+        source: str = "",
+        enable_logging: bool = True,
+    ):
         """
         初始化 ExponentialBackoffRateLimiter 实例
         :param base_wait: 基础等待时间（秒），默认值为 60 秒（1 分钟）
@@ -156,7 +162,9 @@ class ExponentialBackoffRateLimiter(BaseRateLimiter):
         current_time = time.time()
         with self.lock:
             self.next_allowed_time = current_time + self.current_wait
-            self.current_wait = min(self.current_wait * self.backoff_factor, self.max_wait)
+            self.current_wait = min(
+                self.current_wait * self.backoff_factor, self.max_wait
+            )
             wait_time = self.next_allowed_time - current_time
             self.log_warning(f"触发限流，将在 {wait_time:.2f} 秒后允许继续调用")
 
@@ -168,8 +176,13 @@ class WindowRateLimiter(BaseRateLimiter):
     如果超过允许的最大调用次数，则限流直到窗口期结束
     """
 
-    def __init__(self, max_calls: int, window_seconds: float,
-                 source: str = "", enable_logging: bool = True):
+    def __init__(
+        self,
+        max_calls: int,
+        window_seconds: float,
+        source: str = "",
+        enable_logging: bool = True,
+    ):
         """
         初始化 WindowRateLimiter 实例
         :param max_calls: 在时间窗口内允许的最大调用次数
@@ -190,7 +203,10 @@ class WindowRateLimiter(BaseRateLimiter):
         current_time = time.time()
         with self.lock:
             # 清理超出时间窗口的调用记录
-            while self.call_times and current_time - self.call_times[0] > self.window_seconds:
+            while (
+                self.call_times
+                and current_time - self.call_times[0] > self.window_seconds
+            ):
                 self.call_times.popleft()
 
             if len(self.call_times) < self.max_calls:
@@ -225,8 +241,12 @@ class CompositeRateLimiter(BaseRateLimiter):
     当任意一个限流策略触发限流时，都会阻止调用
     """
 
-    def __init__(self, limiters: List[BaseRateLimiter], source: str = "", enable_logging: bool = True):
-
+    def __init__(
+        self,
+        limiters: List[BaseRateLimiter],
+        source: str = "",
+        enable_logging: bool = True,
+    ):
         """
         初始化 CompositeRateLimiter 实例
         :param limiters: 要组合的限流器列表
@@ -263,7 +283,9 @@ class CompositeRateLimiter(BaseRateLimiter):
 
 
 # 通用装饰器：自定义限流器实例
-def rate_limit_handler(limiter: BaseRateLimiter, raise_on_limit: bool = False) -> Callable:
+def rate_limit_handler(
+    limiter: BaseRateLimiter, raise_on_limit: bool = False
+) -> Callable:
     """
     通用装饰器，允许用户传递自定义的限流器实例，用于处理限流逻辑
     该装饰器可灵活支持任意继承自 BaseRateLimiter 的限流器
@@ -344,8 +366,14 @@ def rate_limit_handler(limiter: BaseRateLimiter, raise_on_limit: bool = False) -
 
 
 # 装饰器：指数退避限流
-def rate_limit_exponential(base_wait: float = 60.0, max_wait: float = 600.0, backoff_factor: float = 2.0,
-                           raise_on_limit: bool = False, source: str = "", enable_logging: bool = True) -> Callable:
+def rate_limit_exponential(
+    base_wait: float = 60.0,
+    max_wait: float = 600.0,
+    backoff_factor: float = 2.0,
+    raise_on_limit: bool = False,
+    source: str = "",
+    enable_logging: bool = True,
+) -> Callable:
     """
     装饰器，用于应用指数退避限流策略
     通过逐渐增加调用等待时间控制调用频率。每次触发限流时，等待时间会成倍增加，直到达到最大等待时间
@@ -359,14 +387,21 @@ def rate_limit_exponential(base_wait: float = 60.0, max_wait: float = 600.0, bac
     :return: 装饰器函数
     """
     # 实例化 ExponentialBackoffRateLimiter，并传入相关参数
-    limiter = ExponentialBackoffRateLimiter(base_wait, max_wait, backoff_factor, source, enable_logging)
+    limiter = ExponentialBackoffRateLimiter(
+        base_wait, max_wait, backoff_factor, source, enable_logging
+    )
     # 使用通用装饰器逻辑包装该限流器
     return rate_limit_handler(limiter, raise_on_limit)
 
 
 # 装饰器：时间窗口限流
-def rate_limit_window(max_calls: int, window_seconds: float,
-                      raise_on_limit: bool = False, source: str = "", enable_logging: bool = True) -> Callable:
+def rate_limit_window(
+    max_calls: int,
+    window_seconds: float,
+    raise_on_limit: bool = False,
+    source: str = "",
+    enable_logging: bool = True,
+) -> Callable:
     """
     装饰器，用于应用时间窗口限流策略
     在固定的时间窗口内限制调用次数，当调用次数超过最大值时，触发限流，直到时间窗口结束
@@ -407,3 +442,63 @@ class QpsRateLimiter:
             self.next_call_time = max(now, self.next_call_time) + self.interval
         if sleep_duration > 0:
             time.sleep(sleep_duration)
+
+
+class RateStats:
+    """
+    请求速率统计：记录时间戳，计算 QPS / QPM / QPH
+    """
+
+    def __init__(self, window_seconds: float = 7200, source: str = ""):
+        """
+        :param window_seconds: 统计窗口（秒），默认 2 小时，用于计算 QPH
+        :param source: 日志来源标识
+        """
+        self._window = window_seconds
+        self._source = source
+        self._lock = threading.Lock()
+        self._timestamps: deque = deque()
+
+    def record(self) -> None:
+        """
+        记录一次请求
+        """
+        t = time.time()
+        with self._lock:
+            self._timestamps.append(t)
+            while self._timestamps and t - self._timestamps[0] > self._window:
+                self._timestamps.popleft()
+
+    def _count_since(self, seconds: float) -> int:
+        t = time.time()
+        with self._lock:
+            return sum(1 for ts in self._timestamps if t - ts <= seconds)
+
+    def get_qps(self) -> float:
+        """
+        最近 1 秒内请求数
+        """
+        return self._count_since(1.0)
+
+    def get_qpm(self) -> float:
+        """
+        最近 1 分钟内请求数
+        """
+        return self._count_since(60.0)
+
+    def get_qph(self) -> float:
+        """
+        最近 1 小时内请求数
+        """
+        return self._count_since(3600.0)
+
+    def log_stats(self, level: str = "info") -> None:
+        """
+        输出当前 QPS/QPM/QPH
+        """
+        qps, qpm, qph = self.get_qps(), self.get_qpm(), self.get_qph()
+        msg = f"QPS={qps} QPM={qpm} QPH={qph}"
+        if self._source:
+            msg = f"[{self._source}] {msg}"
+        log_fn = getattr(logger, level, logger.info)
+        log_fn(msg)
