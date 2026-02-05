@@ -19,41 +19,42 @@ class CookieHelper:
         "username": [
             '//input[@name="username"]',
             '//input[@id="form_item_username"]',
-            '//input[@id="username"]'
+            '//input[@id="username"]',
         ],
         "password": [
             '//input[@name="password"]',
             '//input[@id="form_item_password"]',
             '//input[@id="password"]',
-            '//input[@type="password"]'
+            '//input[@type="password"]',
         ],
         "captcha": [
             '//input[@name="imagestring"]',
             '//input[@name="captcha"]',
             '//input[@id="form_item_captcha"]',
-            '//input[@placeholder="驗證碼"]'
+            '//input[@placeholder="驗證碼"]',
         ],
         "captcha_img": [
             '//img[@alt="captcha"]/@src',
             '//img[@alt="CAPTCHA"]/@src',
             '//img[@alt="SECURITY CODE"]/@src',
             '//img[@id="LAY-user-get-vercode"]/@src',
-            '//img[contains(@src,"/api/getCaptcha")]/@src'
+            '//img[contains(@src,"/api/getCaptcha")]/@src',
         ],
         "submit": [
             '//input[@type="submit"]',
             '//button[@type="submit"]',
             '//button[@lay-filter="login"]',
             '//button[@lay-filter="formLogin"]',
-            '//input[@type="button"][@value="登录"]'
+            '//input[@type="button"][@value="登录"]',
+            '//input[@id="submit-btn"]',
         ],
         "error": [
-            "//table[@class='main']//td[@class='text']/text()"
+            "//table[@class='main']//td[@class='text']/text()",
         ],
         "twostep": [
             '//input[@name="two_step_code"]',
             '//input[@name="2fa_secret"]',
-            '//input[@name="otp"]'
+            '//input[@name="otp"]',
         ]
     }
 
