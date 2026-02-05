@@ -95,12 +95,11 @@ class FileManagerModule(_ModuleBase):
                 return False, f"{d.name} 的下载目录 {download_path} 与媒体库目录 {library_path} 不在同一磁盘，无法硬链接"
             # 存储
             storage_oper = self.__get_storage_oper(d.storage)
-            if not storage_oper:
-                return False, f"{d.name} 的存储类型 {d.storage} 不支持"
-            if not storage_oper.check():
-                return False, f"{d.name} 的存储测试不通过"
-            if d.transfer_type and d.transfer_type not in storage_oper.support_transtype():
-                return False, f"{d.name} 的存储不支持 {d.transfer_type} 整理方式"
+            if storage_oper:
+                if not storage_oper.check():
+                    return False, f"{d.name} 的存储测试不通过"
+                if d.transfer_type and d.transfer_type not in storage_oper.support_transtype():
+                    return False, f"{d.name} 的存储不支持 {d.transfer_type} 整理方式"
 
         return True, ""
 
