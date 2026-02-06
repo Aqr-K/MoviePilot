@@ -29,3 +29,10 @@ class RateLimitExceededException(LimitException):
     这个异常通常用于本地限流逻辑（例如 RateLimiter），当系统检测到函数调用频率过高时，触发限流并抛出该异常。
     """
     pass
+
+
+class OperationInterrupted(KeyboardInterrupt):
+    """
+    用于表示操作被中断
+    """
+    pass
