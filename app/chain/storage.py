@@ -156,7 +156,7 @@ class StorageChain(ChainBase):
         """
         判断是否包含蓝光必备的文件夹
         """
-        required_files = ("BDMV", "CERTIFICATE")
+        required_files = {"BDMV", "CERTIFICATE"}
         return any(
             item.type == "dir" and item.name in required_files
             for item in fileitems or []
