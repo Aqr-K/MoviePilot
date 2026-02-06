@@ -166,8 +166,10 @@ class SystemUtils:
         移动
         """
         try:
-            # 直接移动到目标路径，避免中间改名步骤触发目录监控
-            shutil.move(src, dest)
+            # 当前目录改名
+            temp = src.replace(src.parent / dest.name)
+            # 移动到目标目录
+            shutil.move(temp, dest)
             return 0, ""
         except Exception as err:
             return -1, str(err)
