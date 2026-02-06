@@ -125,7 +125,7 @@ class TransferHistoryOper(DbOper):
         """
         新增转移成功历史记录
         """
-        self.add_force(
+        return self.add_force(
             src=fileitem.path,
             src_storage=fileitem.storage,
             src_fileitem=fileitem.model_dump(),
