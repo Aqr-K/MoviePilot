@@ -290,3 +290,11 @@ class BangumiModule(_ModuleBase):
         if infos:
             return [MediaInfo(bangumi_info=info) for info in infos]
         return []
+
+    def clear_cache(self):
+        """
+        清除缓存
+        """
+        logger.info(f"开始清除{self.get_name()}缓存 ...")
+        self.bangumiapi.clear_cache()
+        logger.info(f"{self.get_name()}缓存清除完成")

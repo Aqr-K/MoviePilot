@@ -154,7 +154,6 @@ class DoubanApi(metaclass=WeakSingleton):
     _api_url = "https://api.douban.com/v2"
 
     def __init__(self):
-        self.__clear_async_cache__ = False
         self._session = requests.Session()
 
     @classmethod
@@ -225,7 +224,7 @@ class DoubanApi(metaclass=WeakSingleton):
         """
         return resp.json() if resp is not None else None
 
-    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True)
+    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True, shared_key="get")
     def __invoke(self, url: str, **kwargs) -> dict:
         """
         GET请求
@@ -237,14 +236,11 @@ class DoubanApi(metaclass=WeakSingleton):
         ).get_res(url=req_url, params=params)
         return self._handle_response(resp)
 
-    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True)
+    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True, shared_key="get")
     async def __async_invoke(self, url: str, **kwargs) -> dict:
         """
         GET请求（异步版本）
         """
-        if self.__clear_async_cache__:
-            self.__clear_async_cache__ = False
-            await self.__async_invoke.cache_clear()
         req_url, params = self._prepare_get_request(url, **kwargs)
         resp = await AsyncRequestUtils(
             ua=choice(self._user_agents)
@@ -263,7 +259,7 @@ class DoubanApi(metaclass=WeakSingleton):
             params.pop('_ts')
         return req_url, params
 
-    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True)
+    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True, shared_key="post")
     def __post(self, url: str, **kwargs) -> dict:
         """
         POST请求
@@ -285,7 +281,7 @@ class DoubanApi(metaclass=WeakSingleton):
         ).post_res(url=req_url, data=params)
         return self._handle_response(resp)
 
-    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True)
+    @cached(maxsize=settings.CONF.douban, ttl=settings.CONF.meta, skip_none=True, shared_key="post")
     async def __async_post(self, url: str, **kwargs) -> dict:
         """
         POST请求（异步版本）
@@ -865,7 +861,7 @@ class DoubanApi(metaclass=WeakSingleton):
         清空LRU缓存
         """
         self.__invoke.cache_clear()
-        self.__clear_async_cache__ = True
+        self.__post.cache_clear()
 
     def close(self):
         if self._session:

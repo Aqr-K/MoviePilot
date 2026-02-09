@@ -162,3 +162,12 @@ class TheTvDbModule(_ModuleBase):
         except Exception as err:
             logger.error(f"用标题搜索TVDB剧集失败 ({title}): {str(err)}")
             return []
+
+    def clear_cache(self):
+        """
+        清除缓存
+        """
+        logger.info(f"开始清除{self.get_name()}缓存 ...")
+        if tvdb := self.tvdb:
+            tvdb.clear_cache()
+        logger.info(f"{self.get_name()}缓存清除完成")

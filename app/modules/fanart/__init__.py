@@ -440,7 +440,7 @@ class FanartModule(_ModuleBase):
         return result
 
     @classmethod
-    @cached(maxsize=settings.CONF.fanart, ttl=settings.CONF.meta)
+    @cached(maxsize=settings.CONF.fanart, ttl=settings.CONF.meta, shared_key="get")
     def __request_fanart(cls, media_type: MediaType, queryid: Union[str, int]) -> Optional[dict]:
         if media_type == MediaType.MOVIE:
             image_url = cls._movie_url % queryid
@@ -456,3 +456,11 @@ class FanartModule(_ModuleBase):
         except Exception as err:
             logger.error(f"获取{queryid}的Fanart图片失败：{str(err)}")
             return None
+
+    def clear_cache(self):
+        """
+        清除缓存
+        """
+        logger.info(f"开始清除{self.get_name()}缓存 ...")
+        self.__request_fanart.cache_clear()
+        logger.info(f"{self.get_name()}缓存清除完成")
