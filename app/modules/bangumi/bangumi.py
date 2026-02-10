@@ -31,7 +31,7 @@ class BangumiApi(object):
         self._req = RequestUtils(ua=settings.NORMAL_USER_AGENT, session=self._session)
         self._async_req = AsyncRequestUtils(ua=settings.NORMAL_USER_AGENT)
 
-    @cached(maxsize=settings.CONF.bangumi, ttl=settings.CONF.meta)
+    @cached(maxsize=settings.CONF.bangumi, ttl=settings.CONF.meta, shared_key="get")
     def __invoke(self, url, key: Optional[str] = None, **kwargs):
         req_url = self._base_url + url
         params = {}
@@ -47,7 +47,7 @@ class BangumiApi(object):
             print(e)
             return None
 
-    @cached(maxsize=settings.CONF.bangumi, ttl=settings.CONF.meta)
+    @cached(maxsize=settings.CONF.bangumi, ttl=settings.CONF.meta, shared_key="get")
     async def __async_invoke(self, url, key: Optional[str] = None, **kwargs):
         req_url = self._base_url + url
         params = {}
@@ -299,6 +299,12 @@ class BangumiApi(object):
         return await self.__async_invoke(self._urls["discover"],
                                          key="data",
                                          _ts=datetime.strftime(datetime.now(), '%Y%m%d'), **kwargs)
+
+    def clear_cache(self):
+        """
+        清除缓存
+        """
+        self.__invoke.cache_clear()
 
     def close(self):
         if self._session:

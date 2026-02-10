@@ -29,7 +29,7 @@ class TNodeSpider(metaclass=SingletonClass):
             self._ua = indexer.get('ua')
             self._timeout = indexer.get('timeout') or 15
 
-    @cached(region="indexer_spider", maxsize=1, ttl=60 * 60 * 24, skip_empty=True)
+    @cached(region="indexer_spider", maxsize=1, ttl=60 * 60 * 24, skip_empty=True, shared_key="get_token")
     def __get_token(self) -> Optional[str]:
         if not self._domain:
             return
@@ -43,7 +43,7 @@ class TNodeSpider(metaclass=SingletonClass):
                 return csrf_token.group(1)
         return None
 
-    @cached(region="indexer_spider", maxsize=1, ttl=60 * 60 * 24, skip_empty=True)
+    @cached(region="indexer_spider", maxsize=1, ttl=60 * 60 * 24, skip_empty=True, shared_key="get_token")
     async def __async_get_token(self) -> Optional[str]:
         if not self._domain:
             return

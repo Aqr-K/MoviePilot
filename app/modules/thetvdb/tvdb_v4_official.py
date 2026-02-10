@@ -618,3 +618,9 @@ class TVDB:
         """
         url = self.url.construct('user/favorites')
         return self.request.make_request(url)
+
+    def clear_cache(self):
+        """
+        清除缓存
+        """
+        self.request.make_request.cache_clear()

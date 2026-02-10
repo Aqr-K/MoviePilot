@@ -1625,6 +1625,9 @@ class TmdbApi:
         """
         清除缓存
         """
+        self.match_web.cache_clear()
+        self.discover.discover_movies.cache_clear()
+        self.discover.discover_tv_shows.cache_clear()
         self.tmdb.cache_clear()
 
     # 私有异步方法

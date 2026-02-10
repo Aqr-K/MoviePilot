@@ -40,8 +40,6 @@ class TMDb(object):
         self._reset = None
         self._timeout = 15
 
-        self.__clear_async_cache__ = False
-
     @property
     def page(self):
         return self._page
@@ -129,7 +127,6 @@ class TMDb(object):
         return req
 
     def cache_clear(self):
-        self.__clear_async_cache__ = True
         return self.request.cache_clear()
 
     def _validate_api_key(self):
@@ -200,7 +197,7 @@ class TMDb(object):
         if rate_limit_result:
             logger.warning("达到请求频率限制，将在 %d 秒后重试..." % rate_limit_result)
             time.sleep(rate_limit_result)
-            return self._request_obj(action, params, call_cached, method, data, json, key)
+            return self._request_obj(action, params, False, method, data, json, key)
 
         json_data = req.json()
         self._process_json_response(json_data, is_async=False)
@@ -215,10 +212,6 @@ class TMDb(object):
         self._validate_api_key()
         url = self._build_url(action, params)
 
-        if self.__clear_async_cache__:
-            self.__clear_async_cache__ = False
-            await self.async_request.cache_clear()
-
         async with async_fresh(not call_cached or method == "POST"):
             req = await self.async_request(method, url, data, json,
                                            _ts=datetime.strftime(datetime.now(), '%Y%m%d'))
@@ -232,7 +225,7 @@ class TMDb(object):
         if rate_limit_result:
             logger.warning("达到请求频率限制，将在 %d 秒后重试..." % rate_limit_result)
             await asyncio.sleep(rate_limit_result)
-            return await self._async_request_obj(action, params, call_cached, method, data, json, key)
+            return await self._async_request_obj(action, params, False, method, data, json, key)
 
         json_data = req.json()
         self._process_json_response(json_data, is_async=True)
