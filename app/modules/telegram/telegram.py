@@ -237,10 +237,14 @@ class Telegram:
             return False
 
         try:
-            if title and text:
-                caption = f"**{title}**\n{text}"
-            elif title:
-                caption = f"**{title}**"
+            # 标准化标题后再加粗，避免**符号被显示为文本
+            bold_title = (
+                f"**{standardize(title).removesuffix('\n')}**" if title else None
+            )
+            if bold_title and text:
+                caption = f"{bold_title}\n{text}"
+            elif bold_title:
+                caption = bold_title
             elif text:
                 caption = text
             else:
