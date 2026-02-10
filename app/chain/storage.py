@@ -166,7 +166,7 @@ class StorageChain(ChainBase):
         """
         删除媒体文件，以及不含媒体文件的目录
         """
-        media_exts = settings.RMT_MEDIAEXT + settings.DOWNLOAD_TMPEXT
+        media_exts = settings.RMT_MEDIAEXT + settings.DOWNLOAD_TMPEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
         fileitem_path = Path(fileitem.path) if fileitem.path else Path("")
         if len(fileitem_path.parts) <= 2:
             logger.warn(f"【{fileitem.storage}】{fileitem.path} 根目录或一级目录不允许删除")
