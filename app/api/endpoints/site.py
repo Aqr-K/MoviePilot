@@ -92,10 +92,14 @@ async def update_site(
     # 校正地址格式
     _scheme, _netloc = StringUtils.get_url_netloc(site_in.url)
     site_in.url = f"{_scheme}://{_netloc}/"
+    site_in.domain = StringUtils.get_url_domain(site_in.url)
     await site.async_update(db, site_in.model_dump())
     # 通知站点更新
     await eventmanager.async_send_event(EventType.SiteUpdated, {
-        "domain": site_in.domain
+        "site_id": site_in.id,
+        "domain": site_in.domain,
+        "name": site_in.name,
+        "site_url": site_in.url
     })
     return schemas.Response(success=True)
 
