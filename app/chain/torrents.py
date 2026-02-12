@@ -265,6 +265,9 @@ class TorrentsChain(ChainBase):
                     for torrent in torrents:
                         if global_vars.is_system_stopped:
                             break
+                        if not torrent.enclosure:
+                            logger.warn(f"缺少种子链接，忽略处理: {torrent.title}")
+                            continue
                         logger.info(f'处理资源：{torrent.title} ...')
                         # 识别
                         meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
