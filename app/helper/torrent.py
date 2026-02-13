@@ -25,7 +25,7 @@ class TorrentHelper:
     """
 
     def __init__(self):
-        self._invalid_torrents = TTLCache(maxsize=128, ttl=3600 * 24)
+        self._invalid_torrents = TTLCache(region="invalid_torrents", maxsize=128, ttl=3600 * 24)
 
     def download_torrent(self, url: str,
                          cookie: Optional[str] = None,
@@ -340,11 +340,11 @@ class TorrentHelper:
             episodes = list(set(episodes).union(set(meta.episode_list)))
         return episodes
 
-    def is_invalid(self, url: str) -> bool:
+    def is_invalid(self, url: Optional[str]) -> bool:
         """
         判断种子是否是无效种子
         """
-        return url in self._invalid_torrents
+        return url in self._invalid_torrents if url else True
 
     def add_invalid(self, url: str):
         """
