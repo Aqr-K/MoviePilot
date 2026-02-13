@@ -756,15 +756,18 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             if self.jobview.is_success(task):
                 # 所有成功的业务
                 tasks = self.jobview.success_tasks(task.mediainfo, task.meta.begin_season)
+                # 获取整理屏蔽词
+                transfer_exclude_words = SystemConfigOper().get(SystemConfigKey.TransferExcludeWords)
                 processed_hashes = set()
                 for t in tasks:
                     if t.download_hash and t.download_hash not in processed_hashes:
                         # 检查该种子的所有任务（跨作业）是否都已成功
                         if self.jobview.is_torrent_success(t.download_hash):
                             processed_hashes.add(t.download_hash)
-                            # 移除种子及文件
-                            if self.remove_torrents(t.download_hash, downloader=t.downloader):
-                                logger.info(f"移动模式删除种子成功：{t.download_hash}")
+                            if self._can_delete_torrent(t.download_hash, t.downloader, transfer_exclude_words):
+                                # 移除种子及文件
+                                if self.remove_torrents(t.download_hash, downloader=t.downloader):
+                                    logger.info(f"移动模式删除种子成功：{t.download_hash}")
                     if not t.download_hash and t.fileitem:
                         # 删除剩余空目录
                         StorageChain().delete_media_file(t.fileitem, delete_self=False)
@@ -1740,3 +1743,46 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 logger.warn(f"{file_path} 命中屏蔽词 {keyword}")
                 return True
         return False
+
+    def _can_delete_torrent(self, download_hash: str, downloader: str, transfer_exclude_words) -> bool:
+        """
+        检查是否可以删除种子文件
+        :param download_hash: 种子Hash
+        :param downloader: 下载器名称
+        :param transfer_exclude_words: 整理屏蔽词
+        :return: 如果可以删除返回True，否则返回False
+        """
+        try:
+            # 获取种子信息
+            torrents = self.list_torrents(hashs=download_hash, downloader=downloader)
+            if not torrents:
+                return False
+
+            # 未下载完成
+            if torrents[0].progress < 100:
+                return False
+
+            # 获取种子文件列表
+            torrent_files = self.torrent_files(download_hash, downloader)
+            if not torrent_files:
+                return False
+
+            if not isinstance(torrent_files, list):
+                torrent_files = torrent_files.data
+
+            # 检查是否有媒体文件未被屏蔽且存在
+            save_path = torrents[0].path.parent
+            for file in torrent_files:
+                file_path = save_path / file.name
+                # 如果存在未被屏蔽的媒体文件，则不删除种子
+                if (file_path.suffix in self._allowed_exts
+                        and not self._is_blocked_by_exclude_words(file_path.as_posix(), transfer_exclude_words)
+                        and file_path.exists()):
+                    return False
+
+            # 所有媒体文件都被屏蔽或不存在，可以删除种子
+            return True
+
+        except Exception as e:
+            logger.error(f"检查种子 {download_hash} 是否需要删除失败：{e}")
+            return False
