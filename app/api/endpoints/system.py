@@ -615,7 +615,10 @@ def run_scheduler(jobid: str,
     """
     if not jobid:
         return schemas.Response(success=False, message="命令不能为空！")
-    Scheduler().start(jobid)
+    if jobid in {"recommend_refresh", "cookiecloud"}:
+        Scheduler().start(jobid, manual=True)
+    else:
+        Scheduler().start(jobid)
     return schemas.Response(success=True)
 
 
@@ -628,5 +631,8 @@ def run_scheduler2(jobid: str,
     if not jobid:
         return schemas.Response(success=False, message="命令不能为空！")
 
-    Scheduler().start(jobid)
+    if jobid in {"recommend_refresh", "cookiecloud"}:
+        Scheduler().start(jobid, manual=True)
+    else:
+        Scheduler().start(jobid)
     return schemas.Response(success=True)

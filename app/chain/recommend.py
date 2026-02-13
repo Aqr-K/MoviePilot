@@ -6,7 +6,7 @@ from app.chain import ChainBase
 from app.chain.bangumi import BangumiChain
 from app.chain.douban import DoubanChain
 from app.chain.tmdb import TmdbChain
-from app.core.cache import cached
+from app.core.cache import cached, fresh
 from app.core.config import settings, global_vars
 from app.helper.image import ImageHelper
 from app.log import logger
@@ -27,9 +27,11 @@ class RecommendChain(ChainBase, metaclass=Singleton):
     # 推荐缓存区域
     recommend_cache_region = "recommend"
 
-    def refresh_recommend(self):
+    def refresh_recommend(self, manual: bool = False):
         """
         刷新推荐
+
+        :param manual: 手动触发
         """
         logger.debug("Starting to refresh Recommend data.")
 
@@ -62,7 +64,9 @@ class RecommendChain(ChainBase, metaclass=Singleton):
                 if method in methods_finished:
                     continue
                 logger.debug(f"Fetch {method.__name__} data for page {page}.")
-                data = method(page=page)
+                # 手动触发的刷新，总是需要获取最新数据
+                with fresh(manual):
+                    data = method(page=page)
                 if not data:
                     logger.debug("All recommendation methods have finished fetching data. Ending pagination early.")
                     methods_finished.add(method)
@@ -90,7 +94,6 @@ class RecommendChain(ChainBase, metaclass=Singleton):
             poster_path = data.get("poster_path")
             if poster_path:
                 poster_url = poster_path.replace("original", "w500")
-                logger.debug(f"Caching poster image: {poster_url}")
                 self.__fetch_and_save_image(poster_url)
 
     @staticmethod
