@@ -402,9 +402,12 @@ class Rtorrent:
             logger.error(f"设置种子文件状态出错：{str(err)}")
             return False
 
-    def set_torrents_tag(self, ids: Union[str, list], tags: List[str]) -> bool:
+    def set_torrents_tag(self, ids: Union[str, list], tags: List[str], overwrite: bool = False) -> bool:
         """
         设置种子标签（使用d.custom1）
+        :param ids: 种子Hash
+        :param tags: 标签列表
+        :param overwrite: 是否覆盖现有标签，默认为合并
         """
         if not self._proxy:
             return False
@@ -414,12 +417,16 @@ class Rtorrent:
             if isinstance(ids, str):
                 ids = [ids]
             for tid in ids:
-                # 获取现有标签
-                existing = self._proxy.d.custom1(tid)
-                existing_tags = [t.strip() for t in existing.split(",") if t.strip()] if existing else []
-                # 合并标签
-                merged = list(set(existing_tags + tags))
-                self._proxy.d.custom1.set(tid, ",".join(merged))
+                if overwrite:
+                    # 直接覆盖标签
+                    self._proxy.d.custom1.set(tid, ",".join(tags))
+                else:
+                    # 获取现有标签
+                    existing = self._proxy.d.custom1(tid)
+                    existing_tags = [t.strip() for t in existing.split(",") if t.strip()] if existing else []
+                    # 合并标签
+                    merged = list(set(existing_tags + tags))
+                    self._proxy.d.custom1.set(tid, ",".join(merged))
             return True
         except Exception as err:
             logger.error(f"设置种子Tag出错：{str(err)}")

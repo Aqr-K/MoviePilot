@@ -196,7 +196,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
                     # 不需要的文件ID
                     file_ids = []
                     # 需要的集清单
-                    sucess_epidised = []
+                    sucess_epidised = set()
                     try:
                         for torrent_file in torrent_files:
                             file_id = torrent_file.get("id")
@@ -206,10 +206,11 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
                                     or not set(meta_info.episode_list).issubset(episodes):
                                 file_ids.append(file_id)
                             else:
-                                sucess_epidised = list(set(sucess_epidised).union(set(meta_info.episode_list)))
+                                sucess_epidised.update(meta_info.episode_list)
                     finally:
                         torrent_files.clear()
                         del torrent_files
+                    sucess_epidised = list(sucess_epidised)
                     if sucess_epidised and file_ids:
                         # 设置不需要的文件优先级为0（不下载）
                         server.set_files(torrent_hash=torrent_hash, file_ids=file_ids, priority=0)
@@ -321,7 +322,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
             return None
         return ret_torrents  # noqa
 
-    def transfer_completed(self, hashs: str, downloader: Optional[str] = None) -> None:
+    def transfer_completed(self, hashs: Union[str, list], downloader: Optional[str] = None) -> None:
         """
         转移完成后的处理
         :param hashs:  种子Hash
@@ -338,15 +339,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
         else:
             tags = ['已整理']
         # 直接设置完整标签（覆盖）
-        if isinstance(hashs, str):
-            hashs_list = [hashs]
-        else:
-            hashs_list = hashs
-        for tid in hashs_list:
-            try:
-                server._proxy.d.custom1.set(tid, ",".join(tags))
-            except Exception:
-                pass
+        server.set_torrents_tag(ids=hashs, tags=tags, overwrite=True)
         return None
 
     def remove_torrents(self, hashs: Union[str, list], delete_file: Optional[bool] = True,
