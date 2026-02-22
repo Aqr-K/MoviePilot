@@ -293,6 +293,8 @@ class DownloaderType(Enum):
     Qbittorrent = "Qbittorrent"
     # Transmission
     Transmission = "Transmission"
+    # Rtorrent
+    Rtorrent = "Rtorrent"
     # Aria2
     # Aria2 = "Aria2"
 
