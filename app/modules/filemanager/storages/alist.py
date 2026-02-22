@@ -17,8 +17,9 @@ from app.utils.url import UrlUtils
 
 class Alist(StorageBase, metaclass=WeakSingleton):
     """
-    Alist相关操作
-    api文档：https://oplist.org/zh/
+    Openlist相关操作
+
+    API 文档：https://fox.oplist.org/
     """
 
     # 存储类型
@@ -42,13 +43,19 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         """
         self.__generate_token.cache_clear()  # noqa
 
-    def _delay_get_item(self, path: Path) -> Optional[schemas.FileItem]:
+    def _delay_get_item(
+        self, path: Path, /, refresh: bool = False
+    ) -> Optional[schemas.FileItem]:
         """
         自动延迟重试 get_item 模块
+
+        :param path: 文件路径
+        :param refresh: 是否刷新
+        :return: 文件项
         """
         for _ in range(2):
             time.sleep(2)
-            fileitem = self.get_item(path)
+            fileitem = self.get_item(path=path, refresh=refresh)
             if fileitem:
                 return fileitem
         return None
@@ -66,6 +73,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
     def __get_api_url(self, path: str) -> str:
         """
         获取API URL
+
+        :param path: API路径
+        :return: API URL
         """
         return UrlUtils.adapt_request_url(self.__get_base_url, path)
 
@@ -88,14 +98,14 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         token = conf.get("token")
         if token:
             return str(token)
-        resp = RequestUtils(headers={
-            'Content-Type': 'application/json'
-        }).post_res(
+        resp = RequestUtils(headers={"Content-Type": "application/json"}).post_res(
             self.__get_api_url("/api/auth/login"),
-            data=json.dumps({
-                "username": conf.get("username"),
-                "password": conf.get("password"),
-            }),
+            data=json.dumps(
+                {
+                    "username": conf.get("username"),
+                    "password": conf.get("password"),
+                }
+            ),
         )
         """
         {
@@ -117,13 +127,15 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             return ""
 
         if resp.status_code != 200:
-            logger.warning(f"【OpenList】更新令牌请求发送失败，状态码：{resp.status_code}")
+            logger.warning(
+                f"【OpenList】更新令牌请求发送失败，状态码：{resp.status_code}"
+            )
             return ""
 
         result = resp.json()
 
         if result["code"] != 200:
-            logger.critical(f'【OpenList】更新令牌，错误信息：{result["message"]}')
+            logger.critical(f"【OpenList】更新令牌，错误信息：{result['message']}")
             return ""
 
         logger.debug("【OpenList】AList获取令牌成功")
@@ -142,12 +154,12 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         return True if self.__generate_token() else False
 
     def list(
-            self,
-            fileitem: schemas.FileItem,
-            password: Optional[str] = "",
-            page: int = 1,
-            per_page: int = 0,
-            refresh: bool = False,
+        self,
+        fileitem: schemas.FileItem,
+        password: Optional[str] = "",
+        page: int = 1,
+        per_page: int = 0,
+        refresh: bool = False,
     ) -> List[schemas.FileItem]:
         """
         浏览文件
@@ -156,15 +168,14 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         :param page: 页码
         :param per_page: 每页数量
         :param refresh: 是否刷新
+        :return: 文件列表
         """
         if fileitem.type == "file":
             item = self.get_item(Path(fileitem.path))
             if item:
                 return [item]
             return []
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/list"),
             json={
                 "path": fileitem.path,
@@ -211,7 +222,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         """
 
         if resp is None:
-            logger.warn(f"【OpenList】请求获取目录 {fileitem.path} 的文件列表失败，无法连接alist服务")
+            logger.warn(
+                f"【OpenList】请求获取目录 {fileitem.path} 的文件列表失败，无法连接alist服务"
+            )
             return []
         if resp.status_code != 200:
             logger.warn(
@@ -223,7 +236,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
 
         if result["code"] != 200:
             logger.warn(
-                f'【OpenList】获取目录 {fileitem.path} 的文件列表失败，错误信息：{result["message"]}'
+                f"【OpenList】获取目录 {fileitem.path} 的文件列表失败，错误信息：{result['message']}"
             )
             return []
 
@@ -231,7 +244,8 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             schemas.FileItem(
                 storage=self.schema.value,
                 type="dir" if item["is_dir"] else "file",
-                path=(Path(fileitem.path) / item["name"]).as_posix() + ("/" if item["is_dir"] else ""),
+                path=(Path(fileitem.path) / item["name"]).as_posix()
+                + ("/" if item["is_dir"] else ""),
                 name=item["name"],
                 basename=Path(item["name"]).stem,
                 extension=Path(item["name"]).suffix[1:] if not item["is_dir"] else None,
@@ -243,17 +257,16 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         ]
 
     def create_folder(
-            self, fileitem: schemas.FileItem, name: str
+        self, fileitem: schemas.FileItem, name: str
     ) -> Optional[schemas.FileItem]:
         """
         创建目录
         :param fileitem: 父目录
         :param name: 目录名
+        :return: 目录项
         """
         path = Path(fileitem.path) / name
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/mkdir"),
             json={"path": path.as_posix()},
         )
@@ -272,40 +285,50 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             logger.warn(f"【OpenList】请求创建目录 {path} 失败，无法连接alist服务")
             return None
         if resp.status_code != 200:
-            logger.warn(f"【OpenList】请求创建目录 {path} 失败，状态码：{resp.status_code}")
+            logger.warn(
+                f"【OpenList】请求创建目录 {path} 失败，状态码：{resp.status_code}"
+            )
             return None
 
         result = resp.json()
         if result["code"] != 200:
-            logger.warn(f'【OpenList】创建目录 {path} 失败，错误信息：{result["message"]}')
+            logger.warn(
+                f"【OpenList】创建目录 {path} 失败，错误信息：{result['message']}"
+            )
             return None
 
-        return self._delay_get_item(path)
+        return self._delay_get_item(path, refresh=True)
 
     def get_folder(self, path: Path) -> Optional[schemas.FileItem]:
         """
         获取目录，如目录不存在则创建
+
+        :param path: 目录路径
+        :return: 目录项
         """
         folder = self.get_item(path)
         if folder:
             return folder
         if not folder:
-            folder = self.create_folder(schemas.FileItem(
-                storage=self.schema.value,
-                type="dir",
-                path=path.parent.as_posix(),
-                name=path.name,
-                basename=path.stem
-            ), path.name)
+            folder = self.create_folder(
+                schemas.FileItem(
+                    storage=self.schema.value,
+                    type="dir",
+                    path=path.parent.as_posix(),
+                    name=path.name,
+                    basename=path.stem,
+                ),
+                path.name,
+            )
         return folder
 
     def get_item(
-            self,
-            path: Path,
-            password: Optional[str] = "",
-            page: int = 1,
-            per_page: int = 0,
-            refresh: bool = False,
+        self,
+        path: Path,
+        password: Optional[str] = "",
+        page: int = 1,
+        per_page: int = 0,
+        refresh: bool = False,
     ) -> Optional[schemas.FileItem]:
         """
         获取文件或目录，不存在返回None
@@ -314,10 +337,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         :param page: 页码
         :param per_page: 每页数量
         :param refresh: 是否刷新
+        :return: 文件项
         """
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/get"),
             json={
                 "path": path.as_posix(),
@@ -362,12 +384,16 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             logger.warn(f"【OpenList】请求获取文件 {path} 失败，无法连接alist服务")
             return None
         if resp.status_code != 200:
-            logger.warn(f"【OpenList】请求获取文件 {path} 失败，状态码：{resp.status_code}")
+            logger.warn(
+                f"【OpenList】请求获取文件 {path} 失败，状态码：{resp.status_code}"
+            )
             return None
 
         result = resp.json()
         if result["code"] != 200:
-            logger.debug(f'【OpenList】获取文件 {path} 失败，错误信息：{result["message"]}')
+            logger.debug(
+                f"【OpenList】获取文件 {path} 失败，错误信息：{result['message']}"
+            )
             return None
 
         return schemas.FileItem(
@@ -385,12 +411,18 @@ class Alist(StorageBase, metaclass=WeakSingleton):
     def get_parent(self, fileitem: schemas.FileItem) -> Optional[schemas.FileItem]:
         """
         获取父目录
+
+        :param fileitem: 文件项
+        :return: 父目录项
         """
         return self.get_folder(Path(fileitem.path).parent)
 
     def __is_empty_dir(self, fileitem: schemas.FileItem) -> bool:
         """
         判断目录是否为空
+
+        :param fileitem: 文件项
+        :return: 是否为空目录
         """
         if fileitem.type != "dir":
             return False
@@ -401,19 +433,22 @@ class Alist(StorageBase, metaclass=WeakSingleton):
     def delete(self, fileitem: schemas.FileItem) -> bool:
         """
         删除文件或目录，空目录用专用API
+
+        :param fileitem: 文件项
+        :return: 是否删除成功
         """
         # 如果是空目录，优先用 remove_empty_directory
         if fileitem.type == "dir" and self.__is_empty_dir(fileitem):
-            resp = RequestUtils(
-                headers=self.__get_header_with_token()
-            ).post_res(
+            resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
                 self.__get_api_url("/api/fs/remove_empty_directory"),
                 json={
                     "src_dir": fileitem.path,
                 },
             )
             if resp is None:
-                logger.warn(f"【OpenList】请求删除空目录 {fileitem.path} 失败，无法连接alist服务")
+                logger.warn(
+                    f"【OpenList】请求删除空目录 {fileitem.path} 失败，无法连接alist服务"
+                )
                 return False
             if resp.status_code != 200:
                 logger.warn(
@@ -423,14 +458,12 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             result = resp.json()
             if result["code"] != 200:
                 logger.warn(
-                    f'【OpenList】删除空目录 {fileitem.path} 失败，错误信息：{result["message"]}'
+                    f"【OpenList】删除空目录 {fileitem.path} 失败，错误信息：{result['message']}"
                 )
                 return False
             return True
         # 其它情况（文件或非空目录）
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/remove"),
             json={
                 "dir": Path(fileitem.path).parent.as_posix(),
@@ -438,7 +471,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             },
         )
         if resp is None:
-            logger.warn(f"【OpenList】请求删除文件 {fileitem.path} 失败，无法连接alist服务")
+            logger.warn(
+                f"【OpenList】请求删除文件 {fileitem.path} 失败，无法连接alist服务"
+            )
             return False
         if resp.status_code != 200:
             logger.warn(
@@ -448,7 +483,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         result = resp.json()
         if result["code"] != 200:
             logger.warn(
-                f'【OpenList】删除文件 {fileitem.path} 失败，错误信息：{result["message"]}'
+                f"【OpenList】删除文件 {fileitem.path} 失败，错误信息：{result['message']}"
             )
             return False
         return True
@@ -456,10 +491,12 @@ class Alist(StorageBase, metaclass=WeakSingleton):
     def rename(self, fileitem: schemas.FileItem, name: str) -> bool:
         """
         重命名文件
+
+        :param fileitem: 文件项
+        :param name: 新文件名
+        :return: 是否重命名成功
         """
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/rename"),
             json={
                 "name": name,
@@ -479,7 +516,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         }
         """
         if not resp:
-            logger.warn(f"【OpenList】请求重命名文件 {fileitem.path} 失败，无法连接alist服务")
+            logger.warn(
+                f"【OpenList】请求重命名文件 {fileitem.path} 失败，无法连接alist服务"
+            )
             return False
         if resp.status_code != 200:
             logger.warn(
@@ -490,27 +529,26 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         result = resp.json()
         if result["code"] != 200:
             logger.warn(
-                f'【OpenList】重命名文件 {fileitem.path} 失败，错误信息：{result["message"]}'
+                f"【OpenList】重命名文件 {fileitem.path} 失败，错误信息：{result['message']}"
             )
             return False
 
         return True
 
     def download(
-            self,
-            fileitem: schemas.FileItem,
-            path: Path = None,
-            password: Optional[str] = "",
+        self,
+        fileitem: schemas.FileItem,
+        path: Path = None,
+        password: Optional[str] = "",
     ) -> Optional[Path]:
         """
         下载文件，保存到本地，返回本地临时文件地址
         :param fileitem: 文件项
         :param path: 文件保存路径
         :param password: 文件密码
+        :return: 本地临时文件地址
         """
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/get"),
             json={
                 "path": fileitem.path,
@@ -547,18 +585,24 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             logger.warn(f"【OpenList】请求获取文件 {path} 失败，无法连接alist服务")
             return None
         if resp.status_code != 200:
-            logger.warn(f"【OpenList】请求获取文件 {path} 失败，状态码：{resp.status_code}")
+            logger.warn(
+                f"【OpenList】请求获取文件 {path} 失败，状态码：{resp.status_code}"
+            )
             return None
 
         result = resp.json()
         if result["code"] != 200:
-            logger.warn(f'【OpenList】获取文件 {path} 失败，错误信息：{result["message"]}')
+            logger.warn(
+                f"【OpenList】获取文件 {path} 失败，错误信息：{result['message']}"
+            )
             return None
 
         if result["data"]["raw_url"]:
             download_url = result["data"]["raw_url"]
         else:
-            download_url = UrlUtils.adapt_request_url(self.__get_base_url, f"/d{fileitem.path}")
+            download_url = UrlUtils.adapt_request_url(
+                self.__get_base_url, f"/d{fileitem.path}"
+            )
             if result["data"]["sign"]:
                 download_url = download_url + "?sign=" + result["data"]["sign"]
 
@@ -585,7 +629,11 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         return local_path
 
     def upload(
-            self, fileitem: schemas.FileItem, path: Path, new_name: Optional[str] = None, task: bool = False
+        self,
+        fileitem: schemas.FileItem,
+        path: Path,
+        new_name: Optional[str] = None,
+        task: bool = False,
     ) -> Optional[schemas.FileItem]:
         """
         上传文件（带进度）
@@ -593,6 +641,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         :param path: 本地文件路径
         :param new_name: 上传后文件名
         :param task: 是否为任务，默认为False避免未完成上传时对文件进行操作
+        :return: 上传后的文件项
         """
         try:
             # 获取文件大小
@@ -612,7 +661,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             # 创建自定义的文件流，支持进度回调
             class ProgressFileReader:
                 def __init__(self, file_path: Path, callback):
-                    self.file = open(file_path, 'rb')
+                    self.file = open(file_path, "rb")
                     self.callback = callback
                     self.uploaded_size = 0
                     self.file_size = file_path.stat().st_size
@@ -638,7 +687,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             # 使用自定义文件流上传
             progress_reader = ProgressFileReader(path, progress_callback)
             try:
-                resp = RequestUtils(headers=headers).put_res(
+                resp = RequestUtils(headers=headers, timeout=6000).put_res(
                     self.__get_api_url("/api/fs/put"),
                     data=progress_reader,
                 )
@@ -649,17 +698,21 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                 logger.warn(f"【OpenList】请求上传文件 {path} 失败")
                 return None
             if resp.status_code != 200:
-                logger.warn(f"【OpenList】请求上传文件 {path} 失败，状态码：{resp.status_code}")
+                logger.warn(
+                    f"【OpenList】请求上传文件 {path} 失败，状态码：{resp.status_code}"
+                )
                 return None
 
             # 完成上传
             progress_callback(100)
 
             # 获取上传后的文件项
-            new_item = self._delay_get_item(target_path)
+            new_item = self._delay_get_item(target_path, refresh=True)
             if new_item and new_name and new_name != path.name:
                 if self.rename(new_item, new_name):
-                    return self._delay_get_item(Path(new_item.path).with_name(new_name))
+                    return self._delay_get_item(
+                        Path(new_item.path).with_name(new_name), refresh=True
+                    )
 
             return new_item
 
@@ -679,10 +732,9 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         :param fileitem: 文件项
         :param path: 目标目录
         :param new_name: 新文件名
+        :return: 是否复制成功
         """
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/copy"),
             json={
                 "src_dir": Path(fileitem.path).parent.as_posix(),
@@ -719,12 +771,12 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         result = resp.json()
         if result["code"] != 200:
             logger.warn(
-                f'【OpenList】复制文件 {fileitem.path} 失败，错误信息：{result["message"]}'
+                f"【OpenList】复制文件 {fileitem.path} 失败，错误信息：{result['message']}"
             )
             return False
         # 重命名
         if fileitem.name != new_name:
-            new_item = self._delay_get_item(path / fileitem.name)
+            new_item = self._delay_get_item(path / fileitem.name, refresh=True)
             if new_item:
                 self.rename(new_item, new_name)
         return True
@@ -735,13 +787,12 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         :param fileitem: 文件项
         :param path: 目标目录
         :param new_name: 新文件名
+        :return: 是否移动成功
         """
         # 先重命名
         if fileitem.name != new_name:
             self.rename(fileitem, new_name)
-        resp = RequestUtils(
-            headers=self.__get_header_with_token()
-        ).post_res(
+        resp = RequestUtils(headers=self.__get_header_with_token()).post_res(
             self.__get_api_url("/api/fs/move"),
             json={
                 "src_dir": Path(fileitem.path).parent.as_posix(),
@@ -778,7 +829,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
         result = resp.json()
         if result["code"] != 200:
             logger.warn(
-                f'【OpenList】移动文件 {fileitem.path} 失败，错误信息：{result["message"]}'
+                f"【OpenList】移动文件 {fileitem.path} 失败，错误信息：{result['message']}"
             )
             return False
         return True
