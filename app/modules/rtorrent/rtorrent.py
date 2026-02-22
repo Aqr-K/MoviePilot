@@ -16,7 +16,9 @@ class SCGITransport(xmlrpc.client.Transport):
     def single_request(self, host, handler, request_body, verbose=False):
         # 建立socket连接
         parsed = urlparse(f"scgi://{host}")
-        sock = socket.create_connection((parsed.hostname, parsed.port or 5000), timeout=60)
+        sock = socket.create_connection(
+            (parsed.hostname, parsed.port or 5000), timeout=60
+        )
         try:
             # 构造SCGI请求头
             headers = (
@@ -42,7 +44,7 @@ class SCGITransport(xmlrpc.client.Transport):
         # 跳过HTTP响应头
         header_end = response.find(b"\r\n\r\n")
         if header_end != -1:
-            response = response[header_end + 4:]
+            response = response[header_end + 4 :]
 
         # 解析XML-RPC响应
         return self.parse_response(self._build_response(response))
@@ -70,9 +72,14 @@ class Rtorrent:
     rTorrent下载器
     """
 
-    def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
-                 username: Optional[str] = None, password: Optional[str] = None,
-                 **kwargs):
+    def __init__(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        **kwargs,
+    ):
         self._proxy = None
         if host and port:
             self._host = f"{host}:{port}"
@@ -97,10 +104,7 @@ class Rtorrent:
                 # SCGI直连模式
                 parsed = urlparse(url)
                 logger.info(f"正在通过SCGI连接 rTorrent：{url}")
-                proxy = xmlrpc.client.ServerProxy(
-                    url,
-                    transport=SCGITransport()
-                )
+                proxy = xmlrpc.client.ServerProxy(url, transport=SCGITransport())
             else:
                 # HTTP模式 (通过nginx/ruTorrent代理)
                 if not url.startswith("http"):
@@ -112,14 +116,18 @@ class Rtorrent:
                     if parsed.port:
                         url += f":{parsed.port}"
                     url += parsed.path or "/RPC2"
-                logger.info(f"正在通过HTTP连接 rTorrent：{url.split('@')[-1] if '@' in url else url}")
+                logger.info(
+                    f"正在通过HTTP连接 rTorrent：{url.split('@')[-1] if '@' in url else url}"
+                )
                 proxy = xmlrpc.client.ServerProxy(url)
 
             # 测试连接
             proxy.system.client_version()
             return proxy
         except Exception as err:
-            stack_trace = "".join(traceback.format_exception(None, err, err.__traceback__))[:2000]
+            stack_trace = "".join(
+                traceback.format_exception(None, err, err.__traceback__)
+            )[:2000]
             logger.error(f"rTorrent 连接出错：{str(err)}\n{stack_trace}")
             return None
 
@@ -137,9 +145,12 @@ class Rtorrent:
         """
         self._proxy = self.__login_rtorrent()
 
-    def get_torrents(self, ids: Optional[Union[str, list]] = None,
-                     status: Optional[str] = None,
-                     tags: Optional[Union[str, list]] = None) -> Tuple[List[Dict], bool]:
+    def get_torrents(
+        self,
+        ids: Optional[Union[str, list]] = None,
+        status: Optional[str] = None,
+        tags: Optional[Union[str, list]] = None,
+    ) -> Tuple[List[Dict], bool]:
         """
         获取种子列表
         :return: 种子列表, 是否发生异常
@@ -175,10 +186,10 @@ class Rtorrent:
                     "completed": r[3],
                     "dlspeed": r[4],
                     "upspeed": r[5],
-                    "state": r[6],          # 0=stopped, 1=started
-                    "complete": r[7],       # 0=incomplete, 1=complete
+                    "state": r[6],  # 0=stopped, 1=started
+                    "complete": r[7],  # 0=incomplete, 1=complete
                     "save_path": r[8],
-                    "tags": r[9],           # d.custom1 用于标签
+                    "tags": r[9],  # d.custom1 用于标签
                     "is_active": r[10],
                     "is_open": r[11],
                     "ratio": int(r[12]) / 1000.0 if r[12] else 0,
@@ -186,7 +197,9 @@ class Rtorrent:
                 }
                 # 计算进度
                 if torrent["total_size"] > 0:
-                    torrent["progress"] = torrent["completed"] / torrent["total_size"] * 100
+                    torrent["progress"] = (
+                        torrent["completed"] / torrent["total_size"] * 100
+                    )
                 else:
                     torrent["progress"] = 0
 
@@ -201,7 +214,9 @@ class Rtorrent:
 
                 # 标签过滤
                 if tags:
-                    torrent_tags = [t.strip() for t in torrent["tags"].split(",") if t.strip()]
+                    torrent_tags = [
+                        t.strip() for t in torrent["tags"].split(",") if t.strip()
+                    ]
                     if isinstance(tags, str):
                         tags_list = [t.strip() for t in tags.split(",")]
                     else:
@@ -215,8 +230,9 @@ class Rtorrent:
             logger.error(f"获取种子列表出错：{str(err)}")
             return [], True
 
-    def get_completed_torrents(self, ids: Union[str, list] = None,
-                               tags: Union[str, list] = None) -> Optional[List[Dict]]:
+    def get_completed_torrents(
+        self, ids: Union[str, list] = None, tags: Union[str, list] = None
+    ) -> Optional[List[Dict]]:
         """
         获取已完成的种子
         """
@@ -227,8 +243,9 @@ class Rtorrent:
             return None
         return [t for t in torrents if t.get("complete") == 1]
 
-    def get_downloading_torrents(self, ids: Union[str, list] = None,
-                                 tags: Union[str, list] = None) -> Optional[List[Dict]]:
+    def get_downloading_torrents(
+        self, ids: Union[str, list] = None, tags: Union[str, list] = None
+    ) -> Optional[List[Dict]]:
         """
         获取正在下载的种子
         """
@@ -239,13 +256,15 @@ class Rtorrent:
             return None
         return [t for t in torrents if t.get("complete") == 0]
 
-    def add_torrent(self,
-                    content: Union[str, bytes],
-                    is_paused: Optional[bool] = False,
-                    download_dir: Optional[str] = None,
-                    tags: Optional[List[str]] = None,
-                    cookie: Optional[str] = None,
-                    **kwargs) -> bool:
+    def add_torrent(
+        self,
+        content: Union[str, bytes],
+        is_paused: Optional[bool] = False,
+        download_dir: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        cookie: Optional[str] = None,
+        **kwargs,
+    ) -> bool:
         """
         添加种子
         :param content: 种子内容（bytes）或磁力链接/URL（str）
@@ -340,6 +359,7 @@ class Rtorrent:
                         self._proxy.d.erase(tid)
                         if base_path:
                             import shutil
+
                             path = Path(base_path)
                             if path.is_dir():
                                 shutil.rmtree(str(path), ignore_errors=True)
@@ -364,27 +384,34 @@ class Rtorrent:
         if not tid:
             return None
         try:
-            files = self._proxy.f.multicall(tid, "",
-                                            "f.path=",
-                                            "f.size_bytes=",
-                                            "f.priority=",
-                                            "f.completed_chunks=",
-                                            "f.size_chunks=")
+            files = self._proxy.f.multicall(
+                tid,
+                "",
+                "f.path=",
+                "f.size_bytes=",
+                "f.priority=",
+                "f.completed_chunks=",
+                "f.size_chunks=",
+            )
             result = []
             for idx, f in enumerate(files):
-                result.append({
-                    "id": idx,
-                    "name": f[0],
-                    "size": f[1],
-                    "priority": f[2],
-                    "progress": int(f[3]) / int(f[4]) * 100 if int(f[4]) > 0 else 0
-                })
+                result.append(
+                    {
+                        "id": idx,
+                        "name": f[0],
+                        "size": f[1],
+                        "priority": f[2],
+                        "progress": int(f[3]) / int(f[4]) * 100 if int(f[4]) > 0 else 0,
+                    }
+                )
             return result
         except Exception as err:
             logger.error(f"获取种子文件列表出错：{str(err)}")
             return None
 
-    def set_files(self, torrent_hash: str = None, file_ids: list = None, priority: int = 0) -> bool:
+    def set_files(
+        self, torrent_hash: str = None, file_ids: list = None, priority: int = 0
+    ) -> bool:
         """
         设置下载文件的优先级，priority为0为不下载，priority为1为普通
         """
@@ -402,7 +429,9 @@ class Rtorrent:
             logger.error(f"设置种子文件状态出错：{str(err)}")
             return False
 
-    def set_torrents_tag(self, ids: Union[str, list], tags: List[str], overwrite: bool = False) -> bool:
+    def set_torrents_tag(
+        self, ids: Union[str, list], tags: List[str], overwrite: bool = False
+    ) -> bool:
         """
         设置种子标签（使用d.custom1）
         :param ids: 种子Hash
@@ -423,7 +452,11 @@ class Rtorrent:
                 else:
                     # 获取现有标签
                     existing = self._proxy.d.custom1(tid)
-                    existing_tags = [t.strip() for t in existing.split(",") if t.strip()] if existing else []
+                    existing_tags = (
+                        [t.strip() for t in existing.split(",") if t.strip()]
+                        if existing
+                        else []
+                    )
                     # 合并标签
                     merged = list(set(existing_tags + tags))
                     self._proxy.d.custom1.set(tid, ",".join(merged))
@@ -447,7 +480,11 @@ class Rtorrent:
                 tag = [tag]
             for tid in ids:
                 existing = self._proxy.d.custom1(tid)
-                existing_tags = [t.strip() for t in existing.split(",") if t.strip()] if existing else []
+                existing_tags = (
+                    [t.strip() for t in existing.split(",") if t.strip()]
+                    if existing
+                    else []
+                )
                 new_tags = [t for t in existing_tags if t not in tag]
                 self._proxy.d.custom1.set(tid, ",".join(new_tags))
             return True
@@ -463,17 +500,23 @@ class Rtorrent:
             return []
         try:
             existing = self._proxy.d.custom1(ids)
-            return [t.strip() for t in existing.split(",") if t.strip()] if existing else []
+            return (
+                [t.strip() for t in existing.split(",") if t.strip()]
+                if existing
+                else []
+            )
         except Exception as err:
             logger.error(f"获取种子标签出错：{str(err)}")
             return []
 
-    def get_torrent_id_by_tag(self, tags: Union[str, list],
-                              status: Optional[str] = None) -> Optional[str]:
+    def get_torrent_id_by_tag(
+        self, tags: Union[str, list], status: Optional[str] = None
+    ) -> Optional[str]:
         """
         通过标签多次尝试获取刚添加的种子ID，并移除标签
         """
         import time
+
         if isinstance(tags, str):
             tags = [tags]
         torrent_id = None
