@@ -435,7 +435,7 @@ class MediaChain(ChainBase):
             """
             列出下级文件
             """
-            return storagechain.list_files(fileitem=_fileitem)
+            return storagechain.list_files(fileitem=_fileitem) or []
 
         def __save_file(_fileitem: schemas.FileItem, _path: Path, _content: Union[bytes, str]):
             """
@@ -668,7 +668,7 @@ class MediaChain(ChainBase):
                         if (
                             file.type == "dir"
                             and file.name not in settings.RENAME_FORMAT_S0_NAMES
-                            and not file.name.lower().startswith("season")
+                            and MetaInfo(file.name).begin_season is None
                         ):
                             # 电视剧不处理非季子目录
                             continue
@@ -689,9 +689,13 @@ class MediaChain(ChainBase):
                     if filepath.name in settings.RENAME_FORMAT_S0_NAMES:
                         season_meta.begin_season = 0
                     elif season_meta.name and season_meta.begin_season is not None:
-                        # 当前目录含有非季目录的名称，但却有季信息(通常是被辅助识别词指定了)
-                        # 这种情况应该是剧集根目录，不能按季目录刮削，否则会导致`season_poster`的路径错误 详见issue#5373
-                        season_meta.begin_season = None
+                        # 目录含剧名且包含季号，需排除辅助词重新识别元数据，避免误判根目录 (issue 5501)
+                        season_meta_no_custom = MetaInfo(
+                            filepath.name, custom_words=["#"]
+                        )
+                        if season_meta_no_custom.begin_season is None:
+                            # 季号是由辅助词指定的，按剧集根目录处理，避免`season_poster`路径错误 (issue 5373)
+                            season_meta.begin_season = None
                     if season_meta.begin_season is not None:
                         # 检查季NFO开关
                         if scraping_switchs.get('season_nfo', True):
@@ -812,6 +816,8 @@ class MediaChain(ChainBase):
                                         logger.info(f"已存在图片文件：{image_path}")
                                 else:
                                     logger.info(f"电视剧图片刮削已关闭，跳过：{image_name}")
+                    else:
+                        logger.warn("无法识别元数据，跳过")
         logger.info(f"{filepath.name} 刮削完成")
 
     async def async_recognize_by_meta(self, metainfo: MetaBase,
