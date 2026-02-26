@@ -414,6 +414,8 @@ class ConfigModel(BaseModel):
     RCLONE_SNAPSHOT_CHECK_FOLDER_MODTIME: bool = True
     # 对OpenList进行快照对比时，是否检查文件夹的修改时间
     OPENLIST_SNAPSHOT_CHECK_FOLDER_MODTIME: bool = True
+    # 对阿里云盘进行快照对比时，是否检查文件夹的修改时间（默认关闭，因为阿里云盘目录时间不随子文件变更而更新）
+    ALIPAN_SNAPSHOT_CHECK_FOLDER_MODTIME: bool = False
 
     # ==================== Docker配置 ====================
     # Docker Client API地址
