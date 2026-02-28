@@ -4,7 +4,7 @@ import json
 import re
 from typing import List, Optional, Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.search import SearchChain
@@ -27,6 +27,28 @@ class SearchTorrentsInput(BaseModel):
                                        description="Array of specific site IDs to search on (optional, if not provided searches all configured sites)")
     filter_pattern: Optional[str] = Field(None,
                                           description="Regular expression pattern to filter torrent titles by resolution, quality, or other keywords (e.g., '4K|2160p|UHD' for 4K content, '1080p|BluRay' for 1080p BluRay)")
+
+    @field_validator("sites", mode="before")
+    @classmethod
+    def normalize_sites(cls, value):
+        """兼容字符串格式的站点列表（如 "[28]"、"28,30"）"""
+        if value is None:
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+            if "," in value:
+                return [v.strip() for v in value.split(",") if v.strip()]
+            if value.isdigit():
+                return [value]
+        return value
 
 
 class SearchTorrentsTool(MoviePilotTool):
