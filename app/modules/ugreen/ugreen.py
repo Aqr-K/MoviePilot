@@ -26,6 +26,7 @@ class Ugreen:
     _library_paths: dict[str, str] = {}
     _sync_libraries: List[str] = []
     _scan_type: int = 2
+    _verify_ssl: bool = True
 
     _api: Optional[Api] = None
 
@@ -38,6 +39,7 @@ class Ugreen:
         sync_libraries: Optional[list] = None,
         scan_mode: Optional[Union[str, int]] = None,
         scan_type: Optional[Union[str, int]] = None,
+        verify_ssl: Optional[Union[bool, str, int]] = True,
         **kwargs,
     ):
         if not host or not username or not password:
@@ -51,6 +53,8 @@ class Ugreen:
         # 绿联媒体库扫描模式：
         # 1 新添加和修改、2 补充缺失、3 覆盖扫描
         self._scan_type = self.__resolve_scan_type(scan_mode=scan_mode, scan_type=scan_type)
+        # HTTPS 证书校验开关：默认开启，仅兼容自签证书等场景下可关闭。
+        self._verify_ssl = self.__resolve_verify_ssl(verify_ssl)
 
         if play_host:
             self._playhost = UrlUtils.standardize_base_url(play_host).rstrip("/")
@@ -144,7 +148,7 @@ class Ugreen:
             self.__remove_persisted_session()
             return False
 
-        api = Api(host=self._host)
+        api = Api(host=self._host, verify_ssl=self._verify_ssl)
         if not api.import_session_state(cached):
             api.close()
             self.__remove_persisted_session()
@@ -174,7 +178,7 @@ class Ugreen:
             self.get_librarys()
             return True
 
-        self._api = Api(host=self._host)
+        self._api = Api(host=self._host, verify_ssl=self._verify_ssl)
         if self._api.login(self._username, self._password) is None:
             self.__remove_persisted_session()
             return False
@@ -454,6 +458,19 @@ class Ugreen:
         }
         return mode_map.get(mode, 2)
 
+    @staticmethod
+    def __resolve_verify_ssl(verify_ssl: Optional[Union[bool, str, int]]) -> bool:
+        if isinstance(verify_ssl, bool):
+            return verify_ssl
+        if verify_ssl is None:
+            return True
+        value = str(verify_ssl).strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+        return True
+
     def __scan_library(self, library_id: str, scan_type: Optional[int] = None) -> bool:
         if not self._api:
             return False
@@ -561,7 +578,7 @@ class Ugreen:
         if not username or not password or not self._host:
             return None
 
-        api = Api(self._host)
+        api = Api(self._host, verify_ssl=self._verify_ssl)
         try:
             return api.login(username, password)
         finally:

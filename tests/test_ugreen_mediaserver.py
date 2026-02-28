@@ -121,6 +121,18 @@ class UgreenScanModeTest(unittest.TestCase):
         self.assertEqual(resolve(), 2)
 
 
+class UgreenVerifySslTest(unittest.TestCase):
+    def test_resolve_verify_ssl(self):
+        resolve = Ugreen._Ugreen__resolve_verify_ssl
+        self.assertEqual(resolve(True), True)
+        self.assertEqual(resolve(False), False)
+        self.assertEqual(resolve("true"), True)
+        self.assertEqual(resolve("1"), True)
+        self.assertEqual(resolve("false"), False)
+        self.assertEqual(resolve("0"), False)
+        self.assertEqual(resolve(None), True)
+
+
 class UgreenStatisticTest(unittest.TestCase):
     def test_get_medias_count_episode_is_none(self):
         ugreen = Ugreen.__new__(Ugreen)
