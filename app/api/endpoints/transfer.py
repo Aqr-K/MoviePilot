@@ -138,8 +138,14 @@ def manual_transfer(transer_item: ManualTransferItem,
     else:
         return schemas.Response(success=False, message=f"缺少参数")
 
-    # 类型
-    mtype = MediaType(transer_item.type_name) if transer_item.type_name else None
+    # 类型（“自动/auto/none”按未指定处理）
+    mtype = None
+    type_name = str(transer_item.type_name).strip() if transer_item.type_name else ""
+    if type_name and type_name.lower() not in {"自动", "auto", "none"}:
+        try:
+            mtype = MediaType(type_name)
+        except ValueError:
+            return schemas.Response(success=False, message=f"不支持的媒体类型：{type_name}")
     # 自定义格式
     epformat = None
     if transer_item.episode_offset or transer_item.episode_part \
