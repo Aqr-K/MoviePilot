@@ -112,8 +112,8 @@ class MessageChain(ChainBase):
         channel = info.channel
         # 用户ID
         userid = info.userid
-        # 用户名
-        username = info.username or userid
+        # 用户名（当渠道未提供公开用户名时，回退为 userid 的字符串，避免后续类型校验异常）
+        username = str(info.username) if info.username not in (None, "") else str(userid)
         if userid is None or userid == '':
             logger.debug(f'未识别到用户ID：{body}{form}{args}')
             return
