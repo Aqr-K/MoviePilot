@@ -184,6 +184,14 @@ class UgreenCrypto:
         encrypt_token: bool = True,
         encrypt_body: bool = True,
     ) -> UgreenEncryptedRequest:
+        """
+        构建绿联加密请求。
+
+        关键点：
+        - 传入的是明文 `params`；
+        - 方法内部会将其序列化并加密成 `encrypt_query`；
+        - 业务侧不需要、也不应该手工拼接 `encrypt_query`。
+        """
         parsed = urlsplit(url)
         clean_url = urlunsplit(
             (parsed.scheme, parsed.netloc, parsed.path, "", parsed.fragment)
@@ -214,6 +222,7 @@ class UgreenCrypto:
         return UgreenEncryptedRequest(
             url=clean_url,
             headers=headers,
+            # 绿联接口约定：查询参数统一透传为 encrypt_query
             params={"encrypt_query": encrypted_query},
             json=req_json,
             aes_key=aes_key,
@@ -231,4 +240,3 @@ class UgreenCrypto:
             return json.loads(plain)
         except json.JSONDecodeError:
             return plain
-
