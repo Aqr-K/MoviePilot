@@ -1,4 +1,5 @@
 import hashlib
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Mapping, Optional, Union
@@ -767,12 +768,12 @@ class Ugreen:
         if not self._api or not root_path:
             return
 
-        queue: List[str] = [root_path]
+        queue = deque([root_path])
         visited: set[str] = set()
         max_paths = 20000
 
         while queue and len(visited) < max_paths:
-            current_path = queue.pop(0)
+            current_path = queue.popleft()
             if current_path in visited:
                 continue
             visited.add(current_path)
