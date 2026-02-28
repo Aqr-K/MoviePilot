@@ -81,18 +81,19 @@ class FileManagerModule(_ModuleBase):
                 return False, f"{d.name} 的下载目录未设置"
             if d.storage == "local" and not Path(download_path).exists():
                 return False, f"{d.name} 的下载目录 {download_path} 不存在"
-            # 媒体库目录
+            # 仅在启用整理时检查媒体库目录
             library_path = d.library_path
-            if not library_path:
-                return False, f"{d.name} 的媒体库目录未设置"
-            if d.library_storage == "local" and not Path(library_path).exists():
-                return False, f"{d.name} 的媒体库目录 {library_path} 不存在"
-            # 硬链接
-            if d.transfer_type == "link" \
-                    and d.storage == "local" \
-                    and d.library_storage == "local" \
-                    and not SystemUtils.is_same_disk(Path(download_path), Path(library_path)):
-                return False, f"{d.name} 的下载目录 {download_path} 与媒体库目录 {library_path} 不在同一磁盘，无法硬链接"
+            if d.transfer_type:
+                if not library_path:
+                    return False, f"{d.name} 的媒体库目录未设置"
+                if d.library_storage == "local" and not Path(library_path).exists():
+                    return False, f"{d.name} 的媒体库目录 {library_path} 不存在"
+                # 硬链接
+                if d.transfer_type == "link" \
+                        and d.storage == "local" \
+                        and d.library_storage == "local" \
+                        and not SystemUtils.is_same_disk(Path(download_path), Path(library_path)):
+                    return False, f"{d.name} 的下载目录 {download_path} 与媒体库目录 {library_path} 不在同一磁盘，无法硬链接"
             # 存储
             storage_oper = self.__get_storage_oper(d.storage)
             if storage_oper:
