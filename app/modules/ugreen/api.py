@@ -48,6 +48,7 @@ class Api:
         "_language",
         "_ug_agent",
         "_timeout",
+        "_verify_ssl",
     )
 
     def __init__(
@@ -57,6 +58,7 @@ class Api:
         language: str = "zh-CN",
         ug_agent: str = "PC/WEB",
         timeout: int = 20,
+        verify_ssl: bool = True,
     ):
         self._host = self._normalize_base_url(host)
         self._session = Session()
@@ -73,6 +75,8 @@ class Api:
         self._language = language
         self._ug_agent = ug_agent
         self._timeout = timeout
+        # 是否校验证书，默认开启；仅在用户明确配置时才应关闭。
+        self._verify_ssl = bool(verify_ssl)
 
     @property
     def host(self) -> str:
@@ -167,7 +171,7 @@ class Api:
                     params=params,
                     json=json_data,
                     timeout=self._timeout,
-                    verify=False,
+                    verify=self._verify_ssl,
                 )
             else:
                 resp = self._session.get(
@@ -175,7 +179,7 @@ class Api:
                     headers=headers,
                     params=params,
                     timeout=self._timeout,
-                    verify=False,
+                    verify=self._verify_ssl,
                 )
             return resp.json()
         except Exception as err:
@@ -219,7 +223,7 @@ class Api:
                 headers=headers,
                 json={"username": username},
                 timeout=self._timeout,
-                verify=False,
+                verify=self._verify_ssl,
             )
             check_json = check_resp.json()
         except Exception as err:
@@ -378,7 +382,7 @@ class Api:
                 headers=req.headers,
                 params=req.params,
                 timeout=self._timeout,
-                verify=False,
+                verify=self._verify_ssl,
             )
         except Exception:
             pass
