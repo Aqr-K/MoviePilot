@@ -78,21 +78,12 @@ def add(
     # 元数据
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
-    mediainfo: MediaInfo = None
-    plugin_available = eventmanager.check(ChainEventType.NameRecognize)
-    # 定义识别函数
-    native_recognize = lambda: MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid)
-    plugin_recognize = lambda: MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
-    if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
-        # 插件优先
-        mediainfo = plugin_recognize()
-        if not mediainfo:
-            mediainfo = native_recognize()
-    else:
-        # 原生优先
-        mediainfo = native_recognize()
-        if not mediainfo and plugin_available:
-            mediainfo = plugin_recognize()
+    mediainfo = MediaChain().select_recognize_source(
+                    log_name=torrent_in.title,
+                    log_context=torrent_in.title,
+                    native_fn=lambda: MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid),
+                    plugin_fn=lambda: MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
+                )
     if not mediainfo:
         return schemas.Response(success=False, message="无法识别媒体信息")
     # 种子信息

@@ -85,7 +85,7 @@ class MediaChain(ChainBase):
         """
         return self.run_module("metadata_nfo", meta=meta, mediainfo=mediainfo, season=season, episode=episode)
 
-    def _select_recognize_source(self, log_name: str, log_context: str,
+    def select_recognize_source(self, log_name: str, log_context: str,
                                  native_fn, plugin_fn) -> Optional[MediaInfo]:
         """
         选择识别模式，插件优先或原生优先
@@ -118,7 +118,7 @@ class MediaChain(ChainBase):
         """
         title = metainfo.title
          # 按 config 中设置的识别顺序识别
-        mediainfo = self._select_recognize_source(
+        mediainfo = self.select_recognize_source(
                         log_name=title,
                         log_context=title,
                         native_fn=lambda: self.recognize_media(meta=metainfo, episode_group=episode_group),
@@ -191,7 +191,7 @@ class MediaChain(ChainBase):
         # 元数据
         file_meta = MetaInfoPath(file_path)
          # 按 config 中设置的识别顺序识别
-        mediainfo = self._select_recognize_source(
+        mediainfo = self.select_recognize_source(
                         log_name=file_path.name,
                         log_context=path,
                         native_fn=lambda: self.recognize_media(meta=file_meta, episode_group=episode_group),
@@ -847,7 +847,7 @@ class MediaChain(ChainBase):
                         logger.warn("无法识别元数据，跳过")
         logger.info(f"{filepath.name} 刮削完成")
 
-    async def _async_select_recognize_source(self, log_name: str, log_context: str,
+    async def async_select_recognize_source(self, log_name: str, log_context: str,
                                              native_fn, plugin_fn) -> Optional[MediaInfo]:
         """
         选择识别模式，插件优先或原生优先（异步版本）
@@ -886,7 +886,7 @@ class MediaChain(ChainBase):
         async def plugin_recognize():
             return await self.async_recognize_help(title=title, org_meta=metainfo)
         # 按 config 中设置的识别顺序识别
-        mediainfo = await self._async_select_recognize_source(
+        mediainfo = await self.async_select_recognize_source(
                               log_name=title,
                               log_context=title,
                               native_fn=native_recognize,
@@ -964,7 +964,7 @@ class MediaChain(ChainBase):
         async def plugin_recognize():
             return await self.async_recognize_help(title=path, org_meta=file_meta)
         # 按 config 中设置的识别顺序识别
-        mediainfo = await self._async_select_recognize_source(
+        mediainfo = await self.async_select_recognize_source(
                               log_name=file_path.name,
                               log_context=path,
                               native_fn=native_recognize,
