@@ -79,23 +79,22 @@ def add(
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
     mediainfo: MediaInfo = None
-    if settings.RECOGNIZE_PLUGIN_FIRST and eventmanager.check(ChainEventType.NameRecognize):
-        # 插件优先模式：优先使用辅助识别
-        mediainfo = MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
+    plugin_available = eventmanager.check(ChainEventType.NameRecognize)
+    # 定义识别函数
+    native_recognize = lambda: MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid)
+    plugin_recognize = lambda: MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
+    if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
+        # 插件优先
+        mediainfo = plugin_recognize()
         if not mediainfo:
-            # 尝试使用原生识别
-            mediainfo = MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid)
-            if not mediainfo:
-                return schemas.Response(success=False, message="无法识别媒体信息")
+            mediainfo = native_recognize()
     else:
-        # 标准模式：优先使用原生识别
-        mediainfo = MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid)
-        if not mediainfo:
-            # 尝试使用辅助识别，如果有注册响应事件的话
-            if eventmanager.check(ChainEventType.NameRecognize):
-                mediainfo = MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
-            if not mediainfo:
-                return schemas.Response(success=False, message="无法识别媒体信息")
+        # 原生优先
+        mediainfo = native_recognize()
+        if not mediainfo and plugin_available:
+            mediainfo = plugin_recognize()
+    if not mediainfo:
+        return schemas.Response(success=False, message="无法识别媒体信息")
     # 种子信息
     torrentinfo = TorrentInfo()
     torrentinfo.from_dict(torrent_in.model_dump())
