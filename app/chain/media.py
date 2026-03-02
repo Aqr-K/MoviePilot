@@ -85,30 +85,45 @@ class MediaChain(ChainBase):
         """
         return self.run_module("metadata_nfo", meta=meta, mediainfo=mediainfo, season=season, episode=episode)
 
+    def _select_recognize_source(self, log_name: str, log_context: str,
+                                 native_fn, plugin_fn) -> Optional[MediaInfo]:
+        """
+        选择识别模式，插件优先或原生优先
+        :param log_name: 用于日志“标题：...”处的名称（如 file_path.name 或 title）
+        :param log_context: 用于日志“未识别到...的媒体信息”处的上下文（如 path 或 title）
+        :param native_fn: 原生识别函数
+        :param plugin_fn: 插件识别函数
+        """
+        mediainfo = None
+        plugin_available = eventmanager.check(ChainEventType.NameRecognize)
+        if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
+            # 插件优先
+            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{log_name} ...")
+            mediainfo = plugin_fn()
+            if not mediainfo:
+                logger.info(f'辅助识别未识别到 {log_context} 的媒体信息，尝试使用原生识别')
+                mediainfo = native_fn()
+        else:
+            # 原生优先
+            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{log_name} ...")
+            mediainfo = native_fn()
+            if not mediainfo and plugin_available:
+                logger.info(f'原生识别未识别到 {log_context} 的媒体信息，尝试使用辅助识别')
+                mediainfo = plugin_fn()    
+        return mediainfo
+
     def recognize_by_meta(self, metainfo: MetaBase, episode_group: Optional[str] = None) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息
         """
         title = metainfo.title
-        mediainfo: MediaInfo = None
-        plugin_available = eventmanager.check(ChainEventType.NameRecognize)
-        # 定义识别函数
-        native_recognize = lambda: self.recognize_media(meta=metainfo, episode_group=episode_group)
-        plugin_recognize = lambda: self.recognize_help(title=title, org_meta=metainfo)
-        if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
-            # 插件优先
-            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{title} ...")
-            mediainfo = plugin_recognize()
-            if not mediainfo:
-                logger.info(f'辅助识别未识别到 {title} 的媒体信息，尝试使用原生识别')
-                mediainfo = native_recognize()
-        else:
-            # 原生优先
-            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{title} ...")
-            mediainfo = native_recognize()
-            if not mediainfo and plugin_available:
-                logger.info(f'原生识别未识别到 {title} 的媒体信息，尝试使用辅助识别')
-                mediainfo = plugin_recognize()
+         # 按 config 中设置的识别顺序识别
+        mediainfo = self._select_recognize_source(
+                        log_name=title,
+                        log_context=title,
+                        native_fn=lambda: self.recognize_media(meta=metainfo, episode_group=episode_group),
+                        plugin_fn=lambda: self.recognize_help(title=title, org_meta=metainfo)
+                    )
         if not mediainfo:
             logger.warn(f'{title} 未识别到媒体信息')
             return None
@@ -175,25 +190,13 @@ class MediaChain(ChainBase):
         file_path = Path(path)
         # 元数据
         file_meta = MetaInfoPath(file_path)
-        mediainfo: MediaInfo = None
-        plugin_available = eventmanager.check(ChainEventType.NameRecognize)
-        # 定义识别函数
-        native_recognize = lambda: self.recognize_media(meta=file_meta, episode_group=episode_group)
-        plugin_recognize = lambda: self.recognize_help(title=path, org_meta=file_meta)
-        if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
-            # 插件优先
-            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{file_path.name} ...")
-            mediainfo = plugin_recognize()
-            if not mediainfo:
-                logger.info(f'辅助识别未识别到 {path} 的媒体信息，尝试使用原生识别')
-                mediainfo = native_recognize()
-        else:
-            # 原生优先
-            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{file_path.name} ...")
-            mediainfo = native_recognize()
-            if not mediainfo and plugin_available:
-                logger.info(f'原生识别未识别到 {path} 的媒体信息，尝试使用辅助识别')
-                mediainfo = plugin_recognize()
+         # 按 config 中设置的识别顺序识别
+        mediainfo = self._select_recognize_source(
+                        log_name=file_path.name,
+                        log_context=path,
+                        native_fn=lambda: self.recognize_media(meta=file_meta, episode_group=episode_group),
+                        plugin_fn=lambda: self.recognize_help(title=path, org_meta=file_meta)
+                    )
         if not mediainfo:
             logger.warn(f'{path} 未识别到媒体信息')
             return Context(meta_info=file_meta)
@@ -844,33 +847,51 @@ class MediaChain(ChainBase):
                         logger.warn("无法识别元数据，跳过")
         logger.info(f"{filepath.name} 刮削完成")
 
+    async def _async_select_recognize_source(self, log_name: str, log_context: str,
+                                             native_fn, plugin_fn) -> Optional[MediaInfo]:
+        """
+        选择识别模式，插件优先或原生优先（异步版本）
+        :param log_name: 用于日志“标题：...”处的名称（如 file_path.name 或 title）
+        :param log_context: 用于日志“未识别到...的媒体信息”处的上下文（如 path 或 title）
+        :param native_fn: 原生识别函数
+        :param plugin_fn: 插件识别函数
+        """
+        mediainfo = None
+        plugin_available = eventmanager.check(ChainEventType.NameRecognize)
+        if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
+            # 插件优先
+            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{log_name} ...")
+            mediainfo = await plugin_fn()
+            if not mediainfo:
+                logger.info(f'辅助识别未识别到 {log_context} 的媒体信息，尝试使用原生识别')
+                mediainfo = await native_fn()
+        else:
+            # 原生优先
+            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{log_name} ...")
+            mediainfo = await native_fn()
+            if not mediainfo and plugin_available:
+                logger.info(f'原生识别未识别到 {log_context} 的媒体信息，尝试使用辅助识别')
+                mediainfo = await plugin_fn()    
+        return mediainfo
+    
     async def async_recognize_by_meta(self, metainfo: MetaBase,
                                       episode_group: Optional[str] = None) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息（异步版本）
         """
         title = metainfo.title
-        mediainfo: MediaInfo = None
-        plugin_available = eventmanager.check(ChainEventType.NameRecognize)
         # 定义识别函数
         async def native_recognize():
             return await self.async_recognize_media(meta=metainfo, episode_group=episode_group)
         async def plugin_recognize():
             return await self.async_recognize_help(title=title, org_meta=metainfo)
-        if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
-            # 插件优先
-            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{title} ...")
-            mediainfo = await plugin_recognize()
-            if not mediainfo:
-                logger.info(f'辅助识别未识别到 {title} 的媒体信息，尝试使用原生识别')
-                mediainfo = await native_recognize()
-        else:
-            # 原生优先
-            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{title} ...")
-            mediainfo = await native_recognize()
-            if not mediainfo and plugin_available:
-                logger.info(f'原生识别未识别到 {title} 的媒体信息，尝试使用辅助识别')
-                mediainfo = await plugin_recognize()
+        # 按 config 中设置的识别顺序识别
+        mediainfo = await self._async_select_recognize_source(
+                              log_name=title,
+                              log_context=title,
+                              native_fn=native_recognize,
+                              plugin_fn=plugin_recognize
+                          )
         if not mediainfo:
             logger.warn(f'{title} 未识别到媒体信息')
             return None
@@ -937,27 +958,18 @@ class MediaChain(ChainBase):
         file_path = Path(path)
         # 元数据
         file_meta = MetaInfoPath(file_path)
-        mediainfo: MediaInfo = None
-        plugin_available = eventmanager.check(ChainEventType.NameRecognize)
         # 定义识别函数
         async def native_recognize():
             return await self.async_recognize_media(meta=file_meta, episode_group=episode_group)
         async def plugin_recognize():
             return await self.async_recognize_help(title=path, org_meta=file_meta)
-        if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
-            # 插件优先
-            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{file_path.name} ...")
-            mediainfo = await plugin_recognize()
-            if not mediainfo:
-                logger.info(f'辅助识别未识别到 {path} 的媒体信息，尝试使用原生识别')
-                mediainfo = await native_recognize()
-        else:
-            # 原生优先
-            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{file_path.name} ...")
-            mediainfo = await native_recognize()
-            if not mediainfo and plugin_available:
-                logger.info(f'原生识别未识别到 {path} 的媒体信息，尝试使用辅助识别')
-                mediainfo = await plugin_recognize()
+        # 按 config 中设置的识别顺序识别
+        mediainfo = await self._async_select_recognize_source(
+                              log_name=file_path.name,
+                              log_context=path,
+                              native_fn=native_recognize,
+                              plugin_fn=plugin_recognize
+                          )
         if not mediainfo:
             logger.warn(f'{path} 未识别到媒体信息')
             return Context(meta_info=file_meta)
