@@ -860,17 +860,17 @@ class MediaChain(ChainBase):
         if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
             # 插件优先
             logger.info(f"插件优先模式已开启。请求辅助识别，标题：{title} ...")
-            mediainfo = plugin_recognize()
+            mediainfo = await plugin_recognize()
             if not mediainfo:
                 logger.info(f'辅助识别未识别到 {title} 的媒体信息，尝试使用原生识别')
-                mediainfo = native_recognize()
+                mediainfo = await native_recognize()
         else:
             # 原生优先
             logger.info(f"插件优先模式未开启。尝试原生识别，标题：{title} ...")
-            mediainfo = native_recognize()
+            mediainfo = await native_recognize()
             if not mediainfo and plugin_available:
                 logger.info(f'原生识别未识别到 {title} 的媒体信息，尝试使用辅助识别')
-                mediainfo = plugin_recognize()
+                mediainfo = await plugin_recognize()
         if not mediainfo:
             logger.warn(f'{title} 未识别到媒体信息')
             return None
@@ -947,17 +947,17 @@ class MediaChain(ChainBase):
         if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
             # 插件优先
             logger.info(f"插件优先模式已开启。请求辅助识别，标题：{file_path.name} ...")
-            mediainfo = plugin_recognize()
+            mediainfo = await plugin_recognize()
             if not mediainfo:
                 logger.info(f'辅助识别未识别到 {path} 的媒体信息，尝试使用原生识别')
-                mediainfo = native_recognize()
+                mediainfo = await native_recognize()
         else:
             # 原生优先
             logger.info(f"插件优先模式未开启。尝试原生识别，标题：{file_path.name} ...")
-            mediainfo = native_recognize()
+            mediainfo = await native_recognize()
             if not mediainfo and plugin_available:
                 logger.info(f'原生识别未识别到 {path} 的媒体信息，尝试使用辅助识别')
-                mediainfo = plugin_recognize()
+                mediainfo = await plugin_recognize()
         if not mediainfo:
             logger.warn(f'{path} 未识别到媒体信息')
             return Context(meta_info=file_meta)
