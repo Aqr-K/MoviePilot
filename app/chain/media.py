@@ -90,16 +90,29 @@ class MediaChain(ChainBase):
         根据主副标题识别媒体信息
         """
         title = metainfo.title
-        # 识别媒体信息
-        mediainfo: MediaInfo = self.recognize_media(meta=metainfo, episode_group=episode_group)
-        if not mediainfo:
-            # 尝试使用辅助识别，如果有注册响应事件的话
-            if eventmanager.check(ChainEventType.NameRecognize):
-                logger.info(f'请求辅助识别，标题：{title} ...')
-                mediainfo = self.recognize_help(title=title, org_meta=metainfo)
+        mediainfo: MediaInfo = None
+        if settings.RECOGNIZE_PLUGIN_FIRST and eventmanager.check(ChainEventType.NameRecognize):
+            # 插件优先模式：优先使用辅助识别
+            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{title} ...")
+            mediainfo = self.recognize_help(title=title, org_meta=metainfo)
             if not mediainfo:
-                logger.warn(f'{title} 未识别到媒体信息')
-                return None
+                # 尝试使用原生识别
+                logger.info(f'辅助识别未识别到 {title} 的媒体信息，尝试使用原生识别')
+                mediainfo = self.recognize_media(meta=metainfo, episode_group=episode_group)
+                if not mediainfo:
+                    logger.warn(f'{title} 未识别到媒体信息')
+                    return None
+        else:
+            # 标准模式：优先使用原生识别
+            mediainfo = self.recognize_media(meta=metainfo, episode_group=episode_group)
+            if not mediainfo:
+                # 尝试使用辅助识别，如果有注册响应事件的话
+                if eventmanager.check(ChainEventType.NameRecognize):
+                    logger.info(f'请求辅助识别，标题：{title} ...')
+                    mediainfo = self.recognize_help(title=title, org_meta=metainfo)
+                if not mediainfo:
+                    logger.warn(f'{title} 未识别到媒体信息')
+                    return None
         # 识别成功
         logger.info(f'{title} 识别到媒体信息：{mediainfo.type.value} {mediainfo.title_year}')
         # 更新媒体图片
@@ -163,16 +176,29 @@ class MediaChain(ChainBase):
         file_path = Path(path)
         # 元数据
         file_meta = MetaInfoPath(file_path)
-        # 识别媒体信息
-        mediainfo = self.recognize_media(meta=file_meta, episode_group=episode_group)
-        if not mediainfo:
-            # 尝试使用辅助识别，如果有注册响应事件的话
-            if eventmanager.check(ChainEventType.NameRecognize):
-                logger.info(f'请求辅助识别，标题：{file_path.name} ...')
-                mediainfo = self.recognize_help(title=path, org_meta=file_meta)
+        mediainfo: MediaInfo = None
+        if settings.RECOGNIZE_PLUGIN_FIRST and eventmanager.check(ChainEventType.NameRecognize):
+            # 插件优先模式：优先使用辅助识别
+            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{file_path.name} ...")
+            mediainfo = self.recognize_help(title=path, org_meta=file_meta)
             if not mediainfo:
-                logger.warn(f'{path} 未识别到媒体信息')
-                return Context(meta_info=file_meta)
+                # 尝试使用原生识别
+                logger.info(f'辅助识别未识别到 {path} 的媒体信息，尝试使用原生识别')
+                mediainfo = self.recognize_media(meta=file_meta, episode_group=episode_group)
+                if not mediainfo:
+                    logger.warn(f'{path} 未识别到媒体信息')
+                    return Context(meta_info=file_meta)
+        else:
+            # 标准模式：优先使用原生识别
+            mediainfo = self.recognize_media(meta=file_meta, episode_group=episode_group)
+            if not mediainfo:
+                # 尝试使用辅助识别，如果有注册响应事件的话
+                if eventmanager.check(ChainEventType.NameRecognize):
+                    logger.info(f'请求辅助识别，标题：{file_path.name} ...')
+                    mediainfo = self.recognize_help(title=path, org_meta=file_meta)
+                if not mediainfo:
+                    logger.warn(f'{path} 未识别到媒体信息')
+                    return Context(meta_info=file_meta)
         logger.info(f'{path} 识别到媒体信息：{mediainfo.type.value} {mediainfo.title_year}')
         # 更新媒体图片
         self.obtain_images(mediainfo=mediainfo)
@@ -826,16 +852,29 @@ class MediaChain(ChainBase):
         根据主副标题识别媒体信息（异步版本）
         """
         title = metainfo.title
-        # 识别媒体信息
-        mediainfo: MediaInfo = await self.async_recognize_media(meta=metainfo, episode_group=episode_group)
-        if not mediainfo:
-            # 尝试使用辅助识别，如果有注册响应事件的话
-            if eventmanager.check(ChainEventType.NameRecognize):
-                logger.info(f'请求辅助识别，标题：{title} ...')
-                mediainfo = await self.async_recognize_help(title=title, org_meta=metainfo)
+        mediainfo: MediaInfo = None
+        if settings.RECOGNIZE_PLUGIN_FIRST and eventmanager.check(ChainEventType.NameRecognize):
+            # 插件优先模式：优先使用辅助识别
+            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{title} ...")
+            mediainfo = await self.async_recognize_help(title=title, org_meta=metainfo)
             if not mediainfo:
-                logger.warn(f'{title} 未识别到媒体信息')
-                return None
+                # 尝试使用原生识别
+                logger.info(f'辅助识别未识别到 {title} 的媒体信息，尝试使用原生识别')
+                mediainfo = await self.async_recognize_media(meta=metainfo, episode_group=episode_group)
+                if not mediainfo:
+                    logger.warn(f'{title} 未识别到媒体信息')
+                    return None
+        else:
+            # 标准模式：优先使用原生识别
+            mediainfo = await self.async_recognize_media(meta=metainfo, episode_group=episode_group)
+            if not mediainfo:
+                # 尝试使用辅助识别，如果有注册响应事件的话
+                if eventmanager.check(ChainEventType.NameRecognize):
+                    logger.info(f'请求辅助识别，标题：{title} ...')
+                    mediainfo = await self.async_recognize_help(title=title, org_meta=metainfo)
+                if not mediainfo:
+                    logger.warn(f'{title} 未识别到媒体信息')
+                    return None
         # 识别成功
         logger.info(f'{title} 识别到媒体信息：{mediainfo.type.value} {mediainfo.title_year}')
         # 更新媒体图片
@@ -899,16 +938,29 @@ class MediaChain(ChainBase):
         file_path = Path(path)
         # 元数据
         file_meta = MetaInfoPath(file_path)
-        # 识别媒体信息
-        mediainfo = await self.async_recognize_media(meta=file_meta, episode_group=episode_group)
-        if not mediainfo:
-            # 尝试使用辅助识别，如果有注册响应事件的话
-            if eventmanager.check(ChainEventType.NameRecognize):
-                logger.info(f'请求辅助识别，标题：{file_path.name} ...')
-                mediainfo = await self.async_recognize_help(title=path, org_meta=file_meta)
+        mediainfo: MediaInfo = None
+        if settings.RECOGNIZE_PLUGIN_FIRST and eventmanager.check(ChainEventType.NameRecognize):
+            # 插件优先模式：优先使用辅助识别
+            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{file_path.name} ...")
+            mediainfo = await self.async_recognize_help(title=path, org_meta=file_meta)
             if not mediainfo:
-                logger.warn(f'{path} 未识别到媒体信息')
-                return Context(meta_info=file_meta)
+                # 尝试使用原生识别
+                logger.info(f'辅助识别未识别到 {path} 的媒体信息，尝试使用原生识别')
+                mediainfo = await self.async_recognize_media(meta=file_meta, episode_group=episode_group)
+                if not mediainfo:
+                    logger.warn(f'{path} 未识别到媒体信息')
+                    return Context(meta_info=file_meta)
+        else:
+            # 标准模式：优先使用原生识别
+            mediainfo = await self.async_recognize_media(meta=file_meta, episode_group=episode_group)
+            if not mediainfo:
+                # 尝试使用辅助识别，如果有注册响应事件的话
+                if eventmanager.check(ChainEventType.NameRecognize):
+                    logger.info(f'请求辅助识别，标题：{file_path.name} ...')
+                    mediainfo = await self.async_recognize_help(title=path, org_meta=file_meta)
+                if not mediainfo:
+                    logger.warn(f'{path} 未识别到媒体信息')
+                    return Context(meta_info=file_meta)
         logger.info(f'{path} 识别到媒体信息：{mediainfo.type.value} {mediainfo.title_year}')
         # 更新媒体图片
         await self.async_obtain_images(mediainfo=mediainfo)
