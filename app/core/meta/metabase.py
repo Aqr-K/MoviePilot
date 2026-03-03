@@ -452,11 +452,11 @@ class MetaBase(object):
         return self.audio_encode or ""
 
     @property
-    def frame_rate(self) -> str:
+    def frame_rate(self) -> int:
         """
         返回帧率信息
         """
-        return self.fps or ""
+        return self.fps or None
 
     def is_in_season(self, season: Union[list, int, str]) -> bool:
         """
