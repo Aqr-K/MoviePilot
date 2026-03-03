@@ -66,6 +66,9 @@ class MetaBase(object):
     # 附加信息
     tmdbid: int = None
     doubanid: str = None
+    # 帧率信息（纯数值）
+    fps: Optional[int] = None
+
 
     # 副标题解析
     _subtitle_flag = False
@@ -448,6 +451,13 @@ class MetaBase(object):
         """
         return self.audio_encode or ""
 
+    @property
+    def frame_rate(self) -> int:
+        """
+        返回帧率信息
+        """
+        return self.fps or None
+
     def is_in_season(self, season: Union[list, int, str]) -> bool:
         """
         是否包含季
@@ -581,6 +591,9 @@ class MetaBase(object):
         # 音频编码
         if not self.audio_encode:
             self.audio_encode = meta.audio_encode
+        # 帧率信息
+        if not self.fps:
+            self.fps = meta.fps
         # Part
         if not self.part:
             self.part = meta.part

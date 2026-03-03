@@ -17,6 +17,7 @@ class MetaAnime(MetaBase):
     """
     _anime_no_words = ['CHS&CHT', 'MP4', 'GB MP4', 'WEB-DL']
     _name_nostring_re = r"S\d{2}\s*-\s*S\d{2}|S\d{2}|\s+S\d{1,2}|EP?\d{2,4}\s*-\s*EP?\d{2,4}|EP?\d{2,4}|\s+EP?\d{1,4}|\s+GB"
+    _fps_re = r"(\d{2,3})(?=FPS)"
 
     def __init__(self, title: str, subtitle: str = None, isfile: bool = False):
         super().__init__(title, subtitle, isfile)
@@ -173,6 +174,8 @@ class MetaAnime(MetaBase):
                 self.audio_encode = anitopy_info.get("audio_term")
                 if isinstance(self.audio_encode, list):
                     self.audio_encode = self.audio_encode[0]
+                # 帧率信息
+                self.__init_anime_fps(anitopy_info, original_title)
                 # 解析副标题，只要季和集
                 self.init_subtitle(self.org_string)
                 if not self._subtitle_flag and self.subtitle:
@@ -181,6 +184,20 @@ class MetaAnime(MetaBase):
                 self.type = MediaType.TV
         except Exception as e:
             logger.error(f"解析动漫信息失败：{str(e)} - {traceback.format_exc()}")
+
+    def __init_anime_fps(self, anitopy_info: dict, original_title: str):
+        """
+        从原始标题中提取帧率信息，与MetaVideo保持完全一致的实现
+        """
+        re_res = re.search(rf"({self._fps_re})", original_title, re.IGNORECASE)
+        if re_res:
+            fps_value = None
+            if re_res.group(1):  # FPS格式
+                fps_value = re_res.group(1)
+                    
+            if fps_value and fps_value.isdigit():
+                # 只存储纯数值
+                self.fps = int(fps_value)
 
     @staticmethod
     def __prepare_title(title: str):
