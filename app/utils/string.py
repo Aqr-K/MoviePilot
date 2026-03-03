@@ -23,6 +23,17 @@ _special_domains = [
 _version_map = {"stable": -1, "rc": -2, "beta": -3, "alpha": -4}
 # 不符合的版本号
 _other_version = -5
+_max_media_title_words = 10
+_min_media_title_length = 2
+_non_media_title_pattern = re.compile(r"^#|^请[问帮你]|[?？]$|^继续$")
+_chat_intent_pattern = re.compile(r"帮我|请问|怎么|如何|为什么|可以|能否|推荐|介绍|谢谢|想看|找一下|搜一下")
+_media_feature_pattern = re.compile(
+    r"第\s*[0-9一二三四五六七八九十百零]+\s*[季集]|S\d{1,2}(?:E\d{1,4})?|E\d{1,4}|(?:19|20)\d{2}",
+    re.IGNORECASE
+)
+_media_separator_pattern = re.compile(r"[\s\-_.:：·'\"()\[\]【】]+")
+_media_sentence_punctuation_pattern = re.compile(r"[，。！？!?,；;]")
+_media_title_char_pattern = re.compile(r"[\u4e00-\u9fffA-Za-z]")
 
 
 class StringUtils:
@@ -530,6 +541,31 @@ class StringUtils:
         english_count = len(english_words)
 
         return chinese_count + english_count
+
+    @staticmethod
+    def is_media_title_like(text: str) -> bool:
+        """
+        判断文本是否像影视剧名称
+        """
+        if not text:
+            return False
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            return False
+        if _non_media_title_pattern.search(text) \
+                or StringUtils.count_words(text) > _max_media_title_words:
+            return False
+        if "://" in text or text.startswith("magnet:?"):
+            return False
+        if _chat_intent_pattern.search(text):
+            return False
+        if _media_sentence_punctuation_pattern.search(text):
+            return False
+
+        # 先移除季/集/年份等媒体特征，再移除分隔符，只保留核心名称用于最终判定
+        candidate = _media_feature_pattern.sub("", text)
+        candidate = _media_separator_pattern.sub("", candidate)
+        return len(candidate) >= _min_media_title_length and _media_title_char_pattern.search(candidate) is not None
 
     @staticmethod
     def split_text(text: str, max_length: int) -> Generator:

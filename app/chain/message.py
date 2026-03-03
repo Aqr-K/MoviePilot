@@ -490,18 +490,14 @@ class MessageChain(ChainBase):
                         # 重新搜索/下载
                         content = re.sub(r"(搜索|下载)[:：\s]*", "", text)
                         action = "ReSearch"
-                    elif text.startswith("#") \
-                            or re.search(r"^请[问帮你]", text) \
-                            or re.search(r"[?？]$", text) \
-                            or StringUtils.count_words(text) > 10 \
-                            or text.find("继续") != -1:
-                        # 聊天
-                        content = text
-                        action = "Chat"
                     elif StringUtils.is_link(text):
                         # 链接
                         content = text
                         action = "Link"
+                    elif not StringUtils.is_media_title_like(text):
+                        # 聊天
+                        content = text
+                        action = "Chat"
                     else:
                         # 搜索
                         content = text
