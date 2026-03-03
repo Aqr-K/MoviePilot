@@ -53,7 +53,7 @@ class MetaVideo(MetaBase):
     _resources_pix_re2 = r"(^[248]+K)"
     _video_encode_re = r"^(H26[45])$|^(x26[45])$|^AVC$|^HEVC$|^VC\d?$|^MPEG\d?$|^Xvid$|^DivX$|^AV1$|^HDR\d*$|^AVS(\+|[23])$"
     _audio_encode_re = r"^DTS\d?$|^DTSHD$|^DTSHDMA$|^Atmos$|^TrueHD\d?$|^AC3$|^\dAudios?$|^DDP\d?$|^DD\+\d?$|^DD\d?$|^LPCM\d?$|^AAC\d?$|^FLAC\d?$|^HD\d?$|^MA\d?$|^HR\d?$|^Opus\d?$|^Vorbis\d?$|^AV[3S]A$"
-
+    _fps_re = r"(\d{2,3})(?=FPS)"
     def __init__(self, title: str, subtitle: str = None, isfile: bool = False):
         """
         初始化
@@ -129,6 +129,9 @@ class MetaVideo(MetaBase):
             # 音频编码
             if self._continue_flag:
                 self.__init_audio_encode(token)
+            # 帧率
+            if self._continue_flag:
+                self.__init_fps(token)
             # 取下一个，直到没有为卡
             token = tokens.get_next()
             self._continue_flag = True
@@ -716,3 +719,25 @@ class MetaVideo(MetaBase):
                 else:
                     self.audio_encode = "%s %s" % (self.audio_encode, token)
             self._last_token = token
+
+    def __init_fps(self, token: str):
+        """
+        识别帧率
+        """
+        if not self.name:
+            return
+
+        re_res = re.search(rf"({self._fps_re})", token, re.IGNORECASE)
+        if re_res:
+            self._continue_flag = False
+            self._stop_name_flag = True
+            self._last_token_type = "fps"
+            # 提取帧率数值
+            fps_value = None
+            if re_res.group(1):  # FPS格式
+                fps_value = re_res.group(1)
+            
+            if fps_value and fps_value.isdigit():
+                # 只存储纯数值
+                self.fps = int(fps_value)
+                self._last_token = f"{self.fps}FPS"

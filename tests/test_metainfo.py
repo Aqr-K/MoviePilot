@@ -30,7 +30,8 @@ class MetaInfoTest(TestCase):
                 "restype": meta_info.edition,
                 "pix": meta_info.resource_pix or "",
                 "video_codec": meta_info.video_encode or "",
-                "audio_codec": meta_info.audio_encode or ""
+                "audio_codec": meta_info.audio_encode or "",
+                "fps": meta_info.fps or None
             }
 
             # 检查tmdbid
