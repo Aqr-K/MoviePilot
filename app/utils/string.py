@@ -532,6 +532,38 @@ class StringUtils:
         return chinese_count + english_count
 
     @staticmethod
+    def is_media_title_like(text: str) -> bool:
+        """
+        判断文本是否像影视剧名称
+        """
+        if not text:
+            return False
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            return False
+        if text.startswith("#") \
+                or re.search(r"^请[问帮你]", text) \
+                or re.search(r"[?？]$", text) \
+                or StringUtils.count_words(text) > 10 \
+                or "继续" in text:
+            return False
+        if StringUtils.is_link(text):
+            return False
+        if re.search(r"(帮我|请问|怎么|如何|为什么|可以|能否|推荐|介绍|谢谢|想看|找一下|搜一下)", text):
+            return False
+        if re.search(r"[，。！？!?,；;]", text):
+            return False
+
+        candidate = re.sub(
+            r"第\s*[0-9一二三四五六七八九十百零]+\s*[季集]|S\d{1,2}(?:E\d{1,4})?|E\d{1,4}|(?:19|20)\d{2}",
+            "",
+            text,
+            flags=re.IGNORECASE
+        )
+        candidate = re.sub(r"[\s\-_.:：·'\"()\[\]【】]+", "", candidate)
+        return len(candidate) >= 2 and bool(re.search(r"[\u4e00-\u9fffA-Za-z]", candidate))
+
+    @staticmethod
     def split_text(text: str, max_length: int) -> Generator:
         """
         把文本拆分为固定字节长度的数组，优先按换行拆分，避免单词内拆分
