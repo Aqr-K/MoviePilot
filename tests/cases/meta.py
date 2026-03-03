@@ -1137,6 +1137,38 @@ meta_cases = [{
         "fps": None
     }
 }, {
+    "path": "/movies/Breaking Bad (2008) [tmdb=1396]/Season 2/",
+    "target": {
+        "type": "电视剧",
+        "cn_name": "",
+        "en_name": "Breaking Bad",
+        "year": "2008",
+        "part": "",
+        "season": "S02",
+        "episode": "",
+        "restype": "",
+        "pix": "",
+        "video_codec": "",
+        "audio_codec": "",
+        "tmdbid": 1396
+    }
+}, {
+    "path": "/movies/Breaking Bad (2008) [tmdb=1396]/S2/",
+    "target": {
+        "type": "电视剧",
+        "cn_name": "",
+        "en_name": "Breaking Bad",
+        "year": "2008",
+        "part": "",
+        "season": "S02",
+        "episode": "",
+        "restype": "",
+        "pix": "",
+        "video_codec": "",
+        "audio_codec": "",
+        "tmdbid": 1396
+    }
+}, {
     "path": "/movies/Breaking Bad (2008) [tmdb=1396]/Season 1/Breaking.Bad.S01E01.1080p.mkv",
     "target": {
         "type": "电视剧",

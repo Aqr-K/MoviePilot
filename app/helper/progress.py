@@ -3,10 +3,9 @@ from typing import Union, Optional
 
 from app.core.cache import TTLCache
 from app.schemas.types import ProgressKey
-from app.utils.singleton import WeakSingleton
 
 
-class ProgressHelper(metaclass=WeakSingleton):
+class ProgressHelper:
     """
     处理进度辅助类
     """
