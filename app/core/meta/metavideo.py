@@ -76,7 +76,7 @@ class MetaVideo(MetaBase):
             self.type = MediaType.TV
             return
         # 全名为Season xx 及 Sxx 直接返回
-        season_full_res = re.search(r"^Season\s+(\d{1,3})$|^S(\d{1,3})$", title)
+        season_full_res = re.search(r"^(?:Season\s+|S)(\d{1,3})$", title, re.IGNORECASE)
         if season_full_res:
             self.type = MediaType.TV
             season = season_full_res.group(1)

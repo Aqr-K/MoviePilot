@@ -261,13 +261,12 @@ class StorageBase(metaclass=ABCMeta):
                     for sub_file in sub_files:
                         __snapshot_file(sub_file, current_depth + 1)
                 else:
-                    # 记录文件的完整信息用于比对
-                    if getattr(_fileitm, 'modify_time', 0) > last_snapshot_time:
-                        files_info[_fileitm.path] = {
-                            'size': _fileitm.size or 0,
-                            'modify_time': getattr(_fileitm, 'modify_time', 0),
-                            'type': _fileitm.type
-                        }
+                    # 记录文件的完整信息用于比对（始终包含所有文件，由 compare_snapshots 负责检测变化）
+                    files_info[_fileitm.path] = {
+                        'size': _fileitm.size or 0,
+                        'modify_time': getattr(_fileitm, 'modify_time', 0),
+                        'type': _fileitm.type
+                    }
 
             except Exception as e:
                 logger.debug(f"Snapshot error for {_fileitm.path}: {e}")

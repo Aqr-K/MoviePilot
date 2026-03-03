@@ -26,11 +26,17 @@ def statistic(name: Optional[str] = None, _: schemas.TokenPayload = Depends(veri
     if media_statistics:
         # 汇总各媒体库统计信息
         ret_statistic = schemas.Statistic()
+        has_episode_count = False
         for media_statistic in media_statistics:
-            ret_statistic.movie_count += media_statistic.movie_count
-            ret_statistic.tv_count += media_statistic.tv_count
-            ret_statistic.episode_count += media_statistic.episode_count
-            ret_statistic.user_count += media_statistic.user_count
+            ret_statistic.movie_count += media_statistic.movie_count or 0
+            ret_statistic.tv_count += media_statistic.tv_count or 0
+            ret_statistic.user_count += media_statistic.user_count or 0
+            if media_statistic.episode_count is not None:
+                ret_statistic.episode_count += media_statistic.episode_count or 0
+                has_episode_count = True
+        if not has_episode_count:
+            # 所有媒体服务都未提供剧集统计时，返回 None 供前端展示“未获取”。
+            ret_statistic.episode_count = None
         return ret_statistic
     else:
         return schemas.Statistic()
