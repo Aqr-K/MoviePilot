@@ -13,7 +13,7 @@ class FilterMediasParams(ActionParams):
     过滤媒体数据参数
     """
     type: Optional[str] = Field(default=None, description="媒体类型 (电影/电视剧)")
-    vote: Optional[int] = Field(default=0, description="评分")
+    vote: Optional[float] = Field(default=None, description="评分（支持小数）")
     year: Optional[str] = Field(default=None, description="年份")
 
 
@@ -55,7 +55,7 @@ class FilterMediasAction(BaseAction):
                 break
             if params.type and media.type != params.type:
                 continue
-            if params.vote and media.vote_average < params.vote:
+            if params.vote is not None and media.vote_average < params.vote:
                 continue
             if params.year and media.year != params.year:
                 continue
