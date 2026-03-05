@@ -3,6 +3,7 @@ import json
 import re
 from typing import Optional
 
+from app.log import logger
 from app.modules.indexer.parser import SiteParserBase, SiteSchema
 from app.utils.string import StringUtils
 
@@ -63,7 +64,16 @@ class TNodeSiteUserInfo(SiteParserBase):
         """
         解析用户做种信息
         """
-        seeding_info = json.loads(html_text)
+        try:
+            seeding_info = json.loads(html_text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"{self._site_name}: Failed to decode seeding info JSON: {e}")
+            return None
+
+        if not isinstance(seeding_info, dict):
+            logger.warning(f"{self._site_name}: Seeding info payload is not a dictionary")
+            return None
+
         if seeding_info.get("status") != 200:
             return None
 
