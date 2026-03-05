@@ -63,7 +63,14 @@ class TNodeSiteUserInfo(SiteParserBase):
         """
         解析用户做种信息
         """
-        seeding_info = json.loads(html_text)
+        try:
+            seeding_info = json.loads(html_text)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(seeding_info, dict):
+            return None
+
         if seeding_info.get("status") != 200:
             return None
 
