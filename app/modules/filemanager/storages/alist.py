@@ -9,6 +9,7 @@ from app.core.cache import cached
 from app.core.config import settings, global_vars
 from app.log import logger
 from app.modules.filemanager.storages import StorageBase, transfer_process
+from app.schemas.exception import OperationInterrupted
 from app.schemas.types import StorageSchema
 from app.utils.http import RequestUtils
 from app.utils.singleton import WeakSingleton
@@ -672,7 +673,7 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                 def read(self, size=-1):
                     if global_vars.is_transfer_stopped(path.as_posix()):
                         logger.info(f"【OpenList】{path} 上传已取消！")
-                        return None
+                        raise OperationInterrupted(f"Upload cancelled: {path}")
                     chunk = self.file.read(size)
                     if chunk:
                         self.uploaded_size += len(chunk)
@@ -691,6 +692,8 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                     self.__get_api_url("/api/fs/put"),
                     data=progress_reader,
                 )
+            except OperationInterrupted:
+                return None
             finally:
                 progress_reader.close()
 
