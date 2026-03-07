@@ -4,9 +4,12 @@ QQ Bot 通知客户端
 """
 
 import hashlib
+import io
 import pickle
 import threading
-from typing import Optional, List
+from typing import Optional, List, Tuple
+
+from PIL import Image
 
 from app.chain.message import MessageChain
 from app.core.cache import FileCache
@@ -20,7 +23,11 @@ from app.modules.qqbot.api import (
     send_proactive_group_message,
 )
 from app.modules.qqbot.gateway import run_gateway
+from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
+
+# QQ Markdown 图片默认尺寸（获取失败时使用，与 OpenClaw 对齐）
+_DEFAULT_IMAGE_SIZE: Tuple[int, int] = (512, 512)
 
 
 class QQBot:
@@ -195,6 +202,74 @@ class QQBot:
         """获取广播目标列表（曾发过消息的用户/群）"""
         return list(self._known_targets)
 
+    @staticmethod
+    def _get_image_size(url: str) -> Optional[Tuple[int, int]]:
+        """
+        从图片 URL 获取尺寸，只下载前 64KB 解析文件头（参考 OpenClaw）
+        :return: (width, height) 或 None
+        """
+        try:
+            resp = RequestUtils(timeout=5).get_res(
+                url,
+                headers={"Range": "bytes=0-65535", "User-Agent": "QQBot-Image-Size-Detector/1.0"},
+            )
+            if not resp or not resp.content:
+                return None
+            data = resp.content[:65536] if len(resp.content) > 65536 else resp.content
+            with Image.open(io.BytesIO(data)) as img:
+                return (img.width, img.height)
+        except Exception as e:
+            logger.debug(f"QQ Bot 获取图片尺寸失败 ({url[:60]}...): {e}")
+            return None
+
+    @staticmethod
+    def _escape_markdown(text: str) -> str:
+        """转义 Markdown 特殊字符，避免破坏格式。不转义 ()，QQ 会误解析 \\( \\) 导致括号丢失或乱码"""
+        if not text:
+            return ""
+        text = text.replace("\\", "\\\\")
+        for char in ("*", "_", "[", "]", "`"):
+            text = text.replace(char, f"\\{char}")
+        return text
+
+    @staticmethod
+    def _format_message_markdown(
+        title: Optional[str] = None,
+        text: Optional[str] = None,
+        image: Optional[str] = None,
+        link: Optional[str] = None,
+    ) -> tuple:
+        """
+        将消息格式化为 QQ Markdown，类似 Telegram 处理方式
+        :return: (content, use_markdown)
+        """
+        parts = []
+        if title:
+            # 标题加粗，移除可能破坏格式的换行
+            safe_title = (title or "").replace("\n", " ").strip()
+            if safe_title:
+                parts.append(f"**{QQBot._escape_markdown(safe_title)}**")
+        if text:
+            parts.append(QQBot._escape_markdown((text or "").strip()))
+        if image:
+            # QQ Markdown 图片需带尺寸才能正确渲染，格式: ![#宽px #高px](url)，否则会显示为 [图片] 文本
+            # 参考 OpenClaw，先获取图片真实尺寸，失败则用默认 512x512
+            img_url = (image or "").strip()
+            if img_url and (img_url.startswith("http://") or img_url.startswith("https://")):
+                size = QQBot._get_image_size(img_url)
+                w, h = size if size else _DEFAULT_IMAGE_SIZE
+                if size:
+                    logger.debug(f"QQ Bot 图片尺寸: {w}x{h} - {img_url[:60]}...")
+                parts.append(f"![#{w}px #{h}px]({img_url})")
+            elif img_url:
+                parts.append(img_url)
+        if link:
+            link_url = (link or "").strip()
+            if link_url:
+                parts.append(f"[查看详情]({link_url})")
+        content = "\n\n".join(p for p in parts if p).strip()
+        return content, bool(content)
+
     def send_msg(
         self,
         title: str,
@@ -231,17 +306,9 @@ class QQBot:
                 logger.warn("QQ Bot: 未指定接收者且无互动用户，请在配置中设置 QQ_OPENID/QQ_GROUP_OPENID 或先让用户发消息")
                 return False
 
-        # 拼接消息内容
-        parts = []
-        if title:
-            parts.append(f"【{title}】")
-        if text:
-            parts.append(text)
-        if image:
-            parts.append(image)
-        if link:
-            parts.append(link)
-        content = "\n".join(parts).strip()
+        # 使用 Markdown 格式发送（类似 Telegram）
+        content, use_markdown = self._format_message_markdown(title=title, text=text, image=image, link=link)
+        logger.info(f"QQ Bot 发送内容 (use_markdown={use_markdown}):\n{content}")
 
         if not content:
             logger.warn("QQ Bot: 消息内容为空")
@@ -252,14 +319,30 @@ class QQBot:
             token = get_access_token(self._app_id, self._app_secret)
             for tgt, tgt_is_group in targets_to_send:
                 try:
-                    if tgt_is_group:
-                        send_proactive_group_message(token, tgt, content)
-                    else:
-                        send_proactive_c2c_message(token, tgt, content)
+                    send_fn = send_proactive_group_message if tgt_is_group else send_proactive_c2c_message
+                    send_fn(token, tgt, content, use_markdown=use_markdown)
                     success_count += 1
                     logger.debug(f"QQ Bot: 消息已发送到 {'群' if tgt_is_group else '用户'} {tgt}")
                 except Exception as e:
-                    logger.error(f"QQ Bot 发送失败 ({tgt}): {e}")
+                    err_msg = str(e)
+                    if use_markdown and ("markdown" in err_msg.lower() or "11244" in err_msg or "权限" in err_msg):
+                        # Markdown 未开通时回退为纯文本
+                        plain_parts = []
+                        if title:
+                            plain_parts.append(f"【{title}】")
+                        if text:
+                            plain_parts.append(text)
+                        if image:
+                            plain_parts.append(image)
+                        if link:
+                            plain_parts.append(link)
+                        plain_content = "\n".join(plain_parts).strip()
+                        if plain_content:
+                            send_fn(token, tgt, plain_content, use_markdown=False)
+                            success_count += 1
+                            logger.debug(f"QQ Bot: Markdown 不可用，已回退纯文本发送至 {tgt}")
+                    else:
+                        logger.error(f"QQ Bot 发送失败 ({tgt}): {e}")
             return success_count > 0
         except Exception as e:
             logger.error(f"QQ Bot 发送失败: {e}")

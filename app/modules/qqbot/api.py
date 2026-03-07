@@ -99,14 +99,17 @@ def send_proactive_c2c_message(
     access_token: str,
     openid: str,
     content: str,
+    use_markdown: bool = False,
 ) -> dict:
     """
     主动发送 C2C 单聊消息（不需要 msg_id）
     注意：每月限 4 条/用户，且用户必须曾与机器人交互过
+    :param use_markdown: 是否使用 Markdown 格式（需机器人开通 Markdown 能力）
     """
     if not content or not content.strip():
         raise ValueError("主动消息内容不能为空")
-    body = {"content": content.strip(), "msg_type": 0}
+    content = content.strip()
+    body = {"markdown": {"content": content}, "msg_type": 2} if use_markdown else {"content": content, "msg_type": 0}
     return _api_request(
         access_token, "POST", f"/v2/users/{openid}/messages", body
     )
@@ -116,14 +119,17 @@ def send_proactive_group_message(
     access_token: str,
     group_openid: str,
     content: str,
+    use_markdown: bool = False,
 ) -> dict:
     """
     主动发送群聊消息（不需要 msg_id）
     注意：每月限 4 条/群，且群必须曾与机器人交互过
+    :param use_markdown: 是否使用 Markdown 格式（需机器人开通 Markdown 能力）
     """
     if not content or not content.strip():
         raise ValueError("主动消息内容不能为空")
-    body = {"content": content.strip(), "msg_type": 0}
+    content = content.strip()
+    body = {"markdown": {"content": content}, "msg_type": 2} if use_markdown else {"content": content, "msg_type": 0}
     return _api_request(
         access_token, "POST", f"/v2/groups/{group_openid}/messages", body
     )
