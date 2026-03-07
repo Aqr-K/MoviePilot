@@ -287,6 +287,7 @@ class MessageChannel(Enum):
     VoceChat = "VoceChat"
     Web = "Web"
     WebPush = "WebPush"
+    QQ = "QQ"
 
 
 # 下载器类型

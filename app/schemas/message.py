@@ -114,6 +114,8 @@ class NotificationSwitch(BaseModel):
     vocechat: Optional[bool] = False
     # WebPush开关
     webpush: Optional[bool] = False
+    # QQ开关
+    qq: Optional[bool] = False
 
 
 class Subscription(BaseModel):
@@ -264,6 +266,15 @@ class ChannelCapabilityManager:
         ),
         MessageChannel.Web: ChannelCapabilities(
             channel=MessageChannel.Web,
+            capabilities={
+                ChannelCapability.RICH_TEXT,
+                ChannelCapability.IMAGES,
+                ChannelCapability.LINKS
+            },
+            fallback_enabled=True
+        ),
+        MessageChannel.QQ: ChannelCapabilities(
+            channel=MessageChannel.QQ,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
