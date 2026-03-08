@@ -80,6 +80,11 @@ class Telegram:
 
                 # Check if we should process this message
                 if self._should_process_message(message):
+                    # 发送正在输入状态
+                    try:
+                        _bot.send_chat_action(message.chat.id, 'typing')
+                    except Exception as e:
+                        logger.error(f"发送Telegram正在输入状态失败：{e}")
                     RequestUtils(timeout=15).post_res(self._ds_url, json=message.json)
 
             @_bot.callback_query_handler(func=lambda call: True)
@@ -114,6 +119,12 @@ class Telegram:
 
                     # 先确认回调，避免用户看到loading状态
                     _bot.answer_callback_query(call.id)
+
+                    # 发送正在输入状态
+                    try:
+                        _bot.send_chat_action(call.message.chat.id, 'typing')
+                    except Exception as e:
+                        logger.error(f"发送Telegram正在输入状态失败：{e}")
 
                     # 发送给主程序处理
                     RequestUtils(timeout=15).post_res(self._ds_url, json=callback_json)
