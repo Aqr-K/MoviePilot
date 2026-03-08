@@ -102,7 +102,6 @@ class Rtorrent:
             url = self._host
             if url.startswith("scgi://"):
                 # SCGI直连模式
-                parsed = urlparse(url)
                 logger.info(f"正在通过SCGI连接 rTorrent：{url}")
                 proxy = xmlrpc.client.ServerProxy(url, transport=SCGITransport())
             else:

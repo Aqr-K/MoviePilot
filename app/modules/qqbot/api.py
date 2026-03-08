@@ -104,6 +104,9 @@ def send_proactive_c2c_message(
     """
     主动发送 C2C 单聊消息（不需要 msg_id）
     注意：每月限 4 条/用户，且用户必须曾与机器人交互过
+    :param access_token: 访问令牌
+    :param openid: 用户 openid
+    :param content: 消息内容
     :param use_markdown: 是否使用 Markdown 格式（需机器人开通 Markdown 能力）
     """
     if not content or not content.strip():
@@ -124,6 +127,9 @@ def send_proactive_group_message(
     """
     主动发送群聊消息（不需要 msg_id）
     注意：每月限 4 条/群，且群必须曾与机器人交互过
+    :param access_token: 访问令牌
+    :param group_openid: 群聊 openid
+    :param content: 消息内容
     :param use_markdown: 是否使用 Markdown 格式（需机器人开通 Markdown 能力）
     """
     if not content or not content.strip():
@@ -185,6 +191,7 @@ def send_message(
 ) -> dict:
     """
     统一发送接口
+    :param access_token: 访问令牌
     :param target: openid（c2c）或 group_openid（group）
     :param content: 消息内容
     :param msg_type: c2c 单聊 / group 群聊

@@ -217,7 +217,7 @@ class QQBot:
                 return None
             data = resp.content[:65536] if len(resp.content) > 65536 else resp.content
             with Image.open(io.BytesIO(data)) as img:
-                return (img.width, img.height)
+                return img.width, img.height
         except Exception as e:
             logger.debug(f"QQ Bot 获取图片尺寸失败 ({url[:60]}...): {e}")
             return None
@@ -318,8 +318,8 @@ class QQBot:
         try:
             token = get_access_token(self._app_id, self._app_secret)
             for tgt, tgt_is_group in targets_to_send:
+                send_fn = send_proactive_group_message if tgt_is_group else send_proactive_c2c_message
                 try:
-                    send_fn = send_proactive_group_message if tgt_is_group else send_proactive_c2c_message
                     send_fn(token, tgt, content, use_markdown=use_markdown)
                     success_count += 1
                     logger.debug(f"QQ Bot: 消息已发送到 {'群' if tgt_is_group else '用户'} {tgt}")

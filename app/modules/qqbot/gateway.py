@@ -49,8 +49,8 @@ def run_gateway(
                 payload = {"op": 1, "d": last_seq}
                 ws_ref[0].send(json.dumps(payload))
                 logger.debug(f"[QQ Gateway:{config_name}] Heartbeat sent, seq={last_seq}")
-        except Exception as e:
-            logger.debug(f"[QQ Gateway:{config_name}] Heartbeat error: {e}")
+        except Exception as err:
+            logger.debug(f"[QQ Gateway:{config_name}] Heartbeat error: {err}")
         if heartbeat_interval_ms and not stop_event.is_set():
             heartbeat_timer = threading.Timer(heartbeat_interval_ms / 1000.0, send_heartbeat)
             heartbeat_timer.daemon = True
@@ -60,8 +60,8 @@ def run_gateway(
         nonlocal last_seq, heartbeat_interval_ms, heartbeat_timer
         try:
             payload = json.loads(message)
-        except json.JSONDecodeError as e:
-            logger.error(f"[QQ Gateway:{config_name}] Invalid JSON: {e}")
+        except json.JSONDecodeError as err:
+            logger.error(f"[QQ Gateway:{config_name}] Invalid JSON: {err}")
             return
 
         op = payload.get("op")
@@ -77,9 +77,6 @@ def run_gateway(
         if op == 10:  # Hello
             heartbeat_interval_ms = d.get("heartbeat_interval", 30000)
             logger.info(f"[QQ Gateway:{config_name}] Hello received, heartbeat_interval={heartbeat_interval_ms}")
-
-            token = get_token_fn(app_id, app_secret)
-            gateway_url = get_gateway_url_fn(token)
 
             # Identify
             identify = {

@@ -395,7 +395,8 @@ class Ugreen:
             use_cookies=False,
         )
 
-    def __infer_library_type(self, name: str, path: Optional[str]) -> str:
+    @staticmethod
+    def __infer_library_type(name: str, path: Optional[str]) -> str:
         name = name or ""
         path = path or ""
         if "电视剧" in path or any(key in name for key in ["剧", "综艺", "动漫", "纪录片"]):
@@ -497,7 +498,7 @@ class Ugreen:
                 if lib_id is not None and lib_path:
                     paths[str(lib_id)] = str(lib_path)
 
-            if data.get("is_last_page") is True:
+            if data.get("is_last_page"):
                 break
             page += 1
 
@@ -585,7 +586,8 @@ class Ugreen:
             api.logout()
             api.close()
 
-    def __extract_video_info_list(self, bucket: Any) -> list[dict]:
+    @staticmethod
+    def __extract_video_info_list(bucket: Any) -> list[dict]:
         if not isinstance(bucket, Mapping):
             return []
         video_arr = bucket.get("video_arr")
@@ -764,7 +766,8 @@ class Ugreen:
 
         return True
 
-    def get_webhook_message(self, body: Any) -> Optional[schemas.WebhookEventInfo]:
+    @staticmethod
+    def get_webhook_message(body: Any) -> Optional[schemas.WebhookEventInfo]:
         return None
 
     def get_iteminfo(self, itemid: str) -> Optional[schemas.MediaServerItem]:
@@ -818,7 +821,7 @@ class Ugreen:
                     if sub_path and sub_path not in visited:
                         queue.append(str(sub_path))
 
-                if data.get("is_last_page") is True:
+                if data.get("is_last_page"):
                     break
                 page += 1
 
@@ -957,6 +960,7 @@ class Ugreen:
 
         return images
 
-    def get_image_cookies(self, image_url: str):
+    @staticmethod
+    def get_image_cookies(image_url: str):
         # 绿联图片流接口依赖加密鉴权头，当前图片代理仅支持Cookie注入。
         return None
