@@ -52,6 +52,7 @@ class ReleaseGroupsMatcher(metaclass=Singleton):
         "nicept": [],
         "oshen": [],
         "ourbits": ['Our(?:Bits|TV)', 'FLTTH', 'Ao', 'PbK', 'MGs', 'iLove(?:HD|TV)'],
+        "panda": ['Panda', 'AilMWeb'],
         "piggo": ['PiGo(?:NF|(?:H|WE)B)'],
         "ptchina": [],
         "pterclub": ['PTer(?:DIY|Game|(?:M|T)V|WEB|)'],
@@ -105,7 +106,7 @@ class ReleaseGroupsMatcher(metaclass=Singleton):
             else:
                 groups = self.__release_groups
         title = f"{title} "
-        groups_re = re.compile(r"(?<=[-@\[￡【&])(?:(?:%s))(?=[@.\s\S\]\[】&])" % groups, re.I)
+        groups_re = re.compile(r"(?<=[-@\[￡【&])(?:(?:%s))(?=$|[@.\s\]\[】&])" % groups, re.I)
         unique_groups = []
         for item in re.findall(groups_re, title):
             item_str = item[0] if isinstance(item, tuple) else item
