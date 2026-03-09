@@ -5,6 +5,7 @@ import concurrent.futures
 import importlib.util
 import inspect
 import os
+import posixpath
 import sys
 import threading
 import time
@@ -775,11 +776,19 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         :param dist_path: 插件的分发路径
         :return: 远程入口地址
         """
-        if dist_path.startswith("/"):
-            dist_path = dist_path[1:]
-        if dist_path.endswith("/"):
-            dist_path = dist_path[:-1]
-        return f"{settings.API_V1_STR}/plugin/file/{plugin_id.lower()}/{dist_path}/remoteEntry.js"
+        dist_path = dist_path.strip("/")
+        api_prefix = settings.API_V1_STR.rstrip("/")
+        path = posixpath.join(
+            api_prefix,
+            "plugin",
+            "file",
+            plugin_id.lower(),
+            dist_path,
+            "remoteEntry.js",
+        )
+        if not path.startswith("/"):
+            path = "/" + path
+        return path
 
     def get_plugin_remotes(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
         """
