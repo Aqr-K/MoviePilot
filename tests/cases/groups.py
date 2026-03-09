@@ -235,6 +235,14 @@ release_group_cases = [
             {"title": "Bluey S03 2021 2160p WEB-DL H.265 AAC 2.0-iLoveTV", "group": "iLoveTV"}
         ]
     },
+    # panda 组
+    {
+        "domain": "panda",
+        "groups": [
+            {"title": "Bluey S03 2021 2160p WEB-DL H.265 AAC 2.0-Panda", "group": "Panda"},
+            {"title": "Bluey S03 2021 2160p WEB-DL H.265 AAC 2.0-AilMWeb", "group": "AilMWeb"}
+        ]
+    },
     # piggo 组
     {
         "domain": "piggo",
