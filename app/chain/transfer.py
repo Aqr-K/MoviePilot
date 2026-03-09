@@ -1634,7 +1634,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         library_type_folder: Optional[bool] = None,
                         library_category_folder: Optional[bool] = None,
                         force: Optional[bool] = False,
-                        background: Optional[bool] = False) -> Tuple[bool, Union[str, list]]:
+                        background: Optional[bool] = False,
+                        downloader: Optional[str] = None,
+                        download_hash: Optional[str] = None) -> Tuple[bool, Union[str, list]]:
         """
         手动整理，支持复杂条件，带进度显示
         :param fileitem: 文件项
@@ -1653,6 +1655,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param library_category_folder: 是否按类别建立目录
         :param force: 是否强制整理
         :param background: 是否后台运行
+        :param downloader: 下载器名称
+        :param download_hash: 下载任务哈希
         """
         logger.info(f"手动整理：{fileitem.path} ...")
         if tmdbid or doubanid:
@@ -1682,7 +1686,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 library_category_folder=library_category_folder,
                 force=force,
                 background=background,
-                manual=True
+                manual=True,
+                downloader=downloader,
+                download_hash=download_hash
             )
             if not state:
                 return False, errmsg
@@ -1703,7 +1709,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                                              library_category_folder=library_category_folder,
                                              force=force,
                                              background=background,
-                                             manual=True)
+                                             manual=True,
+                                             downloader=downloader,
+                                             download_hash=download_hash)
             return state, errmsg
 
     def send_transfer_message(self, meta: MetaBase, mediainfo: MediaInfo,

@@ -93,6 +93,8 @@ def manual_transfer(transer_item: ManualTransferItem,
     :param _: Token校验
     """
     force = False
+    downloader = None
+    download_hash = None
     target_path = Path(transer_item.target_path) if transer_item.target_path else None
     if transer_item.logid:
         # 查询历史记录
@@ -101,6 +103,8 @@ def manual_transfer(transer_item: ManualTransferItem,
             return schemas.Response(success=False, message=f"整理记录不存在，ID：{transer_item.logid}")
         # 强制转移
         force = True
+        downloader = history.downloader
+        download_hash = history.download_hash
         if history.status and ("move" in history.mode):
             # 重新整理成功的转移，则使用成功的 dest 做 in_path
             src_fileitem = FileItem(**history.dest_fileitem)
@@ -121,6 +125,7 @@ def manual_transfer(transer_item: ManualTransferItem,
             transer_item.tmdbid = int(history.tmdbid) if history.tmdbid else transer_item.tmdbid
             transer_item.doubanid = str(history.doubanid) if history.doubanid else transer_item.doubanid
             transer_item.season = int(str(history.seasons).replace("S", "")) if history.seasons else transer_item.season
+            transer_item.episode_group = history.episode_group or transer_item.episode_group
             if history.episodes:
                 if "-" in str(history.episodes):
                     # E01-E03多集合并
@@ -167,7 +172,9 @@ def manual_transfer(transer_item: ManualTransferItem,
         library_type_folder=transer_item.library_type_folder,
         library_category_folder=transer_item.library_category_folder,
         force=force,
-        background=background
+        background=background,
+        downloader=downloader,
+        download_hash=download_hash
     )
     # 失败
     if not state:
