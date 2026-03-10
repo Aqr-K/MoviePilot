@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Body
 from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
+from app.core.config import settings
 from app.core.context import MediaInfo, Context, TorrentInfo
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
@@ -77,13 +78,14 @@ def add(
     # 元数据
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
-    mediainfo = MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid)
+    mediainfo = MediaChain().select_recognize_source(
+                    log_name=torrent_in.title,
+                    log_context=torrent_in.title,
+                    native_fn=lambda: MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid),
+                    plugin_fn=lambda: MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
+                )
     if not mediainfo:
-        # 尝试使用辅助识别，如果有注册响应事件的话
-        if eventmanager.check(ChainEventType.NameRecognize):
-            mediainfo = MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
-        if not mediainfo:
-            return schemas.Response(success=False, message="无法识别媒体信息")
+        return schemas.Response(success=False, message="无法识别媒体信息")
     # 种子信息
     torrentinfo = TorrentInfo()
     torrentinfo.from_dict(torrent_in.model_dump())
