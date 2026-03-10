@@ -50,7 +50,7 @@ class NexusHhanclubSiteUserInfo(NexusPhpSiteUserInfo):
             if not StringUtils.is_valid_html_element(html):
                 return
             # 加入时间
-            join_at_text = html.xpath('//div[@class="grid grid-cols-3 justify-items-start gap-4 leading-6 text-base"][2]/div[4]/span[2]/span/@title')
+            join_at_text = html.xpath('//span[contains(text(), "加入日期")]/following-sibling::span/span/@title')
             if join_at_text:
                 self.join_at = StringUtils.unify_datetime_str(join_at_text[0].strip())
         finally:
@@ -59,6 +59,6 @@ class NexusHhanclubSiteUserInfo(NexusPhpSiteUserInfo):
 
     def _get_user_level(self, html):
         super()._get_user_level(html)
-        user_level_path = html.xpath('//b[@class="User_Name"]/text()')
+        user_level_path = html.xpath('//b[contains(@class, "_Name")]/text()')
         if user_level_path:
             self.user_level = user_level_path[0]
