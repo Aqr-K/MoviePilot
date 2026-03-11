@@ -13,9 +13,10 @@ import aiofiles
 import aioshutil
 import httpx
 from anyio import Path as AsyncPath
+from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet, InvalidSpecifier
 from packaging.version import Version, InvalidVersion
-from pkg_resources import Requirement, working_set
+from importlib.metadata import distributions
 from requests import Response
 
 from app.core.cache import cached
@@ -729,18 +730,26 @@ class PluginHelper(metaclass=WeakSingleton):
     def __get_installed_packages(self) -> Dict[str, Version]:
         """
         获取已安装的包及其版本
-        使用 pkg_resources 获取当前环境中已安装的包，标准化包名并转换版本信息
+        使用 importlib.metadata 获取当前环境中已安装的包，标准化包名并转换版本信息
         对于无法解析的版本，记录警告日志并跳过
         :return: 已安装包的字典，格式为 {package_name: Version}
         """
         installed_packages = {}
         try:
-            for dist in working_set:
-                pkg_name = self.__standardize_pkg_name(dist.project_name)
+            for dist in distributions():
+                name = dist.metadata.get("Name")
+                if not name:
+                    continue
+                pkg_name = self.__standardize_pkg_name(name)
+                version_str = dist.metadata.get("Version") or getattr(dist, "version", None)
+                if not version_str:
+                    continue
                 try:
-                    installed_packages[pkg_name] = Version(dist.version)
+                    v = Version(version_str)
+                    if pkg_name not in installed_packages or v > installed_packages[pkg_name]:
+                        installed_packages[pkg_name] = v
                 except InvalidVersion:
-                    logger.debug(f"无法解析已安装包 '{pkg_name}' 的版本：{dist.version}")
+                    logger.debug(f"无法解析已安装包 '{pkg_name}' 的版本：{version_str}")
                     continue
             return installed_packages
         except Exception as e:
@@ -844,12 +853,14 @@ class PluginHelper(metaclass=WeakSingleton):
     @staticmethod
     def __standardize_pkg_name(name: str) -> str:
         """
-        标准化包名，将包名转换为小写并将连字符替换为下划线
+        标准化包名，将包名转换为小写，连字符与点替换为下划线（与 PEP 503 归一化风格一致）
 
         :param name: 原始包名
         :return: 标准化后的包名
         """
-        return name.lower().replace("-", "_") if name else name
+        if not name:
+            return name
+        return name.lower().replace("-", "_").replace(".", "_")
 
     async def async_get_plugin_package_version(self, pid: str, repo_url: str,
                                                package_version: Optional[str] = None) -> Optional[str]:
