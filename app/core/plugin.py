@@ -777,9 +777,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         :return: 远程入口地址
         """
         dist_path = dist_path.strip("/")
-        api_prefix = settings.API_V1_STR.rstrip("/")
         path = posixpath.join(
-            api_prefix,
             "plugin",
             "file",
             plugin_id.lower(),
