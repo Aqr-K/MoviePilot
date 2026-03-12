@@ -280,7 +280,7 @@ class SearchChain(ChainBase):
                     logger.info(f"种子名称应用识别词后发生改变：{torrent.title} => {torrent_meta.org_string}")
                 # 季集数过滤
                 if season_episodes \
-                        and not torrenthelper.match_season_episodes(torrent=torrent,
+                        and not TorrentHelper.match_season_episodes(torrent=torrent,
                                                                     meta=torrent_meta,
                                                                     season_episodes=season_episodes):
                     continue
