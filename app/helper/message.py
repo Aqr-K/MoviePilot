@@ -164,6 +164,8 @@ class TemplateContextBuilder:
             "part": meta.part,
             # 自定义占位符
             "customization": meta.customization,
+            # fps
+            "fps": meta.fps,
         }
 
         tech_metadata = {
