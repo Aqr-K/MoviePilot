@@ -210,11 +210,12 @@ class TorrentsChain(ChainBase):
 
         # 读取缓存
         torrents_cache = self.get_torrents()
+        torrenthelper = TorrentHelper()
 
         # 缓存过滤掉无效种子
         for _domain, _torrents in torrents_cache.items():
             torrents_cache[_domain] = [_torrent for _torrent in _torrents
-                                       if not TorrentHelper().is_invalid(_torrent.torrent_info.enclosure)]
+                                       if not torrenthelper.is_invalid(_torrent.torrent_info.enclosure)]
 
         # 需要刷新的站点domain
         domains = []

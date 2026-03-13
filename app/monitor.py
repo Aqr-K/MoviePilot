@@ -384,7 +384,7 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         self.stop()
 
         # 读取目录配置
-        monitor_dirs = DirectoryHelper().get_download_dirs()
+        monitor_dirs = DirectoryHelper.get_download_dirs()
         if not monitor_dirs:
             logger.info("未找到任何目录监控配置")
             return

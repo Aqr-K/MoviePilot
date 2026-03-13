@@ -274,7 +274,7 @@ class MessageChain(ChainBase):
                                         userid=userid))
                                     return
                                 # 搜索结果排序
-                                contexts = TorrentHelper().sort_torrents(contexts)
+                                contexts = TorrentHelper.sort_torrents(contexts)
                                 try:
                                     # 判断是否设置自动下载
                                     auto_download_user = settings.AUTO_DOWNLOAD_USER

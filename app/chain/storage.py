@@ -196,7 +196,7 @@ class StorageChain(ChainBase):
         associated_dir = max(
             (
                 Path(p)
-                for d in DirectoryHelper().get_dirs()
+                for d in DirectoryHelper.get_dirs()
                 for p in (d.download_path, d.library_path)
                 if p and fileitem_path.is_relative_to(p)
             ),
