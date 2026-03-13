@@ -145,7 +145,8 @@ class TorrentHelper:
             self.add_invalid(url)
             return cache_path, None, "", [], f"下载种子出错，状态码：{req.status_code}"
 
-    def get_torrent_info(self, torrent_path: Path) -> Tuple[str, List[str]]:
+    @staticmethod
+    def get_torrent_info(torrent_path: Path) -> Tuple[str, List[str]]:
         """
         获取种子文件的文件夹名和文件清单
         :param torrent_path: 种子文件路径
@@ -156,7 +157,7 @@ class TorrentHelper:
         try:
             torrentinfo = Torrent.from_file(torrent_path)
             # 获取文件清单
-            return self.get_fileinfo_from_torrent(torrentinfo)
+            return TorrentHelper.get_fileinfo_from_torrent(torrentinfo)
         except Exception as err:
             logger.error(f"种子文件解析失败：{str(err)}")
             return "", []
@@ -192,7 +193,8 @@ class TorrentHelper:
         logger.debug(f"解析种子：{torrent.name} => 目录：{folder_name}，文件清单：{file_list}")
         return folder_name, file_list
 
-    def get_fileinfo_from_torrent_content(self, torrent_content: Union[str, bytes]) -> Tuple[str, List[str]]:
+    @staticmethod
+    def get_fileinfo_from_torrent_content(torrent_content: Union[str, bytes]) -> Tuple[str, List[str]]:
         """
         从种子内容中获取文件夹名和文件清单
         :param torrent_content: 种子内容
@@ -210,7 +212,7 @@ class TorrentHelper:
             # 解析种子内容
             torrentinfo = Torrent.from_string(torrent_content)
             # 获取文件清单
-            return self.get_fileinfo_from_torrent(torrentinfo)
+            return TorrentHelper.get_fileinfo_from_torrent(torrentinfo)
         except Exception as err:
             logger.error(f"种子内容解析失败：{str(err)}")
             return "", []
@@ -292,7 +294,8 @@ class TorrentHelper:
         # 排序
         return sorted(torrent_list, key=lambda x: get_sort_str(x), reverse=True)
 
-    def sort_group_torrents(self, torrent_list: List[Context]) -> List[Context]:
+    @staticmethod
+    def sort_group_torrents(torrent_list: List[Context]) -> List[Context]:
         """
         对媒体信息进行排序、去重
         """
@@ -300,7 +303,7 @@ class TorrentHelper:
             return []
 
         # 排序
-        torrent_list = self.sort_torrents(torrent_list)
+        torrent_list = TorrentHelper.sort_torrents(torrent_list)
 
         # 控重
         result = []

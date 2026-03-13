@@ -236,7 +236,7 @@ class SearchChain(ChainBase):
         # 匹配订阅附加参数
         if filter_params:
             logger.info(f'开始附加参数过滤，附加参数：{filter_params} ...')
-            torrents = [torrent for torrent in torrents if TorrentHelper().filter_torrent(torrent, filter_params)]
+            torrents = [torrent for torrent in torrents if TorrentHelper.filter_torrent(torrent, filter_params)]
         # 开始过滤规则过滤
         if rule_groups is None:
             # 取搜索过滤规则
@@ -259,7 +259,6 @@ class SearchChain(ChainBase):
 
         # 开始匹配
         _match_torrents = []
-        torrenthelper = TorrentHelper()
         try:
             # 英文标题应该在别名/原标题中，不需要再匹配
             logger.info(f"开始匹配结果 标题：{mediainfo.title}，原标题：{mediainfo.original_title}，别名：{mediainfo.names}")
@@ -293,7 +292,7 @@ class SearchChain(ChainBase):
                     continue
 
                 # 比对种子
-                if torrenthelper.match_torrent(mediainfo=mediainfo,
+                if TorrentHelper.match_torrent(mediainfo=mediainfo,
                                                torrent_meta=torrent_meta,
                                                torrent=torrent):
                     # 匹配成功
@@ -319,7 +318,7 @@ class SearchChain(ChainBase):
         # 排序
         progress.update(value=99,
                         text=f'正在对 {len(contexts)} 个资源进行排序，请稍候...')
-        contexts = torrenthelper.sort_torrents(contexts)
+        contexts = TorrentHelper.sort_torrents(contexts)
 
         # 结束进度
         logger.info(f'搜索完成，共 {len(contexts)} 个资源')

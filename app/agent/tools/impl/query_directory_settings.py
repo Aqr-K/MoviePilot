@@ -31,20 +31,20 @@ class QueryDirectorySettingsTool(MoviePilotTool):
         directory_type = kwargs.get("directory_type", "all")
         storage_type = kwargs.get("storage_type", "all")
         name = kwargs.get("name")
-        
+
         parts = ["正在查询目录配置"]
-        
+
         if directory_type != "all":
             type_map = {"download": "下载目录", "library": "媒体库目录"}
             parts.append(f"类型: {type_map.get(directory_type, directory_type)}")
-        
+
         if storage_type != "all":
             storage_map = {"local": "本地存储", "remote": "远程存储"}
             parts.append(f"存储: {storage_map.get(storage_type, storage_type)}")
-        
+
         if name:
             parts.append(f"名称: {name}")
-        
+
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
     async def run(self, directory_type: Optional[str] = "all",
@@ -53,16 +53,14 @@ class QueryDirectorySettingsTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: directory_type={directory_type}, storage_type={storage_type}, name={name}")
 
         try:
-            directory_helper = DirectoryHelper()
-            
             # 根据目录类型获取目录列表
             if directory_type == "download":
-                dirs = directory_helper.get_download_dirs()
+                dirs = DirectoryHelper.get_download_dirs()
             elif directory_type == "library":
-                dirs = directory_helper.get_library_dirs()
+                dirs = DirectoryHelper.get_library_dirs()
             else:
-                dirs = directory_helper.get_dirs()
-            
+                dirs = DirectoryHelper.get_dirs()
+
             # 按存储类型过滤
             filtered_dirs = []
             for d in dirs:
@@ -91,13 +89,13 @@ class QueryDirectorySettingsTool(MoviePilotTool):
                             continue
                         if d.library_path and d.library_storage == "local":
                             continue
-                
+
                 # 按名称过滤（部分匹配）
                 if name and d.name and name.lower() not in d.name.lower():
                     continue
-                
+
                 filtered_dirs.append(d)
-            
+
             if filtered_dirs:
                 # 转换为字典格式，只保留关键信息
                 simplified_dirs = []
@@ -124,7 +122,7 @@ class QueryDirectorySettingsTool(MoviePilotTool):
                         "library_category_folder": d.library_category_folder
                     }
                     simplified_dirs.append(simplified)
-                
+
                 result_json = json.dumps(simplified_dirs, ensure_ascii=False, indent=2)
                 return result_json
             return "未找到相关目录配置"

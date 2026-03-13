@@ -338,10 +338,9 @@ class LocalStorage(StorageBase):
         """
         存储使用情况
         """
-        directory_helper = DirectoryHelper()
         total_storage, free_storage = SystemUtils.space_usage(
-            [Path(d.download_path) for d in directory_helper.get_local_download_dirs() if d.download_path] +
-            [Path(d.library_path) for d in directory_helper.get_local_library_dirs() if d.library_path]
+            [Path(d.download_path) for d in DirectoryHelper.get_local_download_dirs() if d.download_path] +
+            [Path(d.library_path) for d in DirectoryHelper.get_local_library_dirs() if d.library_path]
         )
         return schemas.StorageUsage(
             total=total_storage,

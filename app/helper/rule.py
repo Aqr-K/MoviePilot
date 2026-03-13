@@ -21,22 +21,24 @@ class RuleHelper:
             return []
         return [FilterRuleGroup(**group) for group in rule_groups]
 
-    def get_rule_group(self, group_name: str) -> Optional[FilterRuleGroup]:
+    @staticmethod
+    def get_rule_group(group_name: str) -> Optional[FilterRuleGroup]:
         """
         获取规则组
         """
-        rule_groups = self.get_rule_groups()
+        rule_groups = RuleHelper.get_rule_groups()
         for group in rule_groups:
             if group.name == group_name:
                 return group
         return None
 
-    def get_rule_group_by_media(self, media: MediaInfo = None, group_names: list = None) -> List[FilterRuleGroup]:
+    @staticmethod
+    def get_rule_group_by_media(media: MediaInfo = None, group_names: list = None) -> List[FilterRuleGroup]:
         """
         根据媒体信息获取规则组
         """
         ret_groups = []
-        rule_groups = self.get_rule_groups()
+        rule_groups = RuleHelper.get_rule_groups()
         if group_names:
             rule_groups = [group for group in rule_groups if group.name in group_names]
         for group in rule_groups:
@@ -58,11 +60,12 @@ class RuleHelper:
             return []
         return [CustomRule(**rule) for rule in rules]
 
-    def get_custom_rule(self, rule_id: str) -> Optional[CustomRule]:
+    @staticmethod
+    def get_custom_rule(rule_id: str) -> Optional[CustomRule]:
         """
         获取自定义规则
         """
-        rules = self.get_custom_rules()
+        rules = RuleHelper.get_custom_rules()
         for rule in rules:
             if rule.id == rule_id:
                 return rule

@@ -141,10 +141,6 @@ class FilterModule(_ModuleBase):
         },
     }
 
-    def __init__(self):
-        super().__init__()
-        self.rulehelper = RuleHelper()
-
     def init_module(self) -> None:
         self.parser = RuleParser()
         self.__init_custom_rules()
@@ -153,7 +149,7 @@ class FilterModule(_ModuleBase):
         """
         加载用户自定义规则，如跟内置规则冲突，以用户自定义规则为准
         """
-        custom_rules = self.rulehelper.get_custom_rules()
+        custom_rules = RuleHelper.get_custom_rules()
         for rule in custom_rules:
             logger.info(f"加载自定义规则 {rule.id} - {rule.name}")
             self.rule_set[rule.id] = rule.model_dump()

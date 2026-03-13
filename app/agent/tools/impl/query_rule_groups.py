@@ -26,17 +26,16 @@ class QueryRuleGroupsTool(MoviePilotTool):
 
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
-        
+
         try:
-            rule_helper = RuleHelper()
-            rule_groups = rule_helper.get_rule_groups()
-            
+            rule_groups = RuleHelper.get_rule_groups()
+
             if not rule_groups:
                 return json.dumps({
                     "message": "未找到任何规则组",
                     "rule_groups": []
                 }, ensure_ascii=False, indent=2)
-            
+
             # 精简字段，过滤掉 rule_string 避免结果过大
             simplified_groups = []
             for group in rule_groups:
@@ -46,14 +45,14 @@ class QueryRuleGroupsTool(MoviePilotTool):
                     "category": group.category
                 }
                 simplified_groups.append(simplified)
-            
+
             result = {
                 "message": f"找到 {len(simplified_groups)} 个规则组",
                 "rule_groups": simplified_groups
             }
-            
+
             return json.dumps(result, ensure_ascii=False, indent=2)
-            
+
         except Exception as e:
             error_message = f"查询规则组失败: {str(e)}"
             logger.error(f"查询规则组失败: {e}", exc_info=True)
