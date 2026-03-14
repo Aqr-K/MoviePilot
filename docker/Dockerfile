@@ -13,8 +13,7 @@ ENV LANG="C.UTF-8" \
     PUID=0 \
     PGID=0 \
     UMASK=000 \
-    VENV_PATH="/opt/venv" \
-    LD_PRELOAD="/usr/local/lib/libjemalloc.so"
+    VENV_PATH="/opt/venv"
 
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
@@ -92,6 +91,8 @@ RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/
 # final 阶段: 安装运行时依赖和配置最终镜像
 FROM prepare_package AS final
 
+ENV LD_PRELOAD="/usr/local/lib/libjemalloc.so"
+
 # python 环境
 COPY --from=prepare_venv --chmod=777 ${VENV_PATH} ${VENV_PATH}
 
@@ -124,6 +125,7 @@ RUN cp -f /app/docker/nginx.common.conf /etc/nginx/common.conf \
     && echo "/app/" > ${VENV_PATH}/lib/python${python_ver%.*}/site-packages/app.pth \
     && echo 'fs.inotify.max_user_watches=5242880' >> /etc/sysctl.conf \
     && echo 'fs.inotify.max_user_instances=5242880' >> /etc/sysctl.conf \
+    && echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen \
     && locale-gen zh_CN.UTF-8
 
 EXPOSE 3000
