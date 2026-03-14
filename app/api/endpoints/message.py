@@ -86,7 +86,10 @@ def wechat_verify(echostr: str, msg_signature: str, timestamp: Union[str, int], 
     if not client_configs:
         return "未找到对应的消息配置"
     client_config = next((config for config in client_configs if
-                          config.type == "wechat" and config.enabled and (not source or config.name == source)), None)
+                          config.type == "wechat"
+                          and config.enabled
+                          and config.config.get("WECHAT_MODE", "app") != "bot"
+                          and (not source or config.name == source)), None)
     if not client_config:
         return "未找到对应的消息配置"
     try:

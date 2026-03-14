@@ -8,6 +8,7 @@ from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
 from app.modules.wechat.WXBizMsgCrypt3 import WXBizMsgCrypt
 from app.modules.wechat.wechat import WeChat
+from app.modules.wechat.wechatbot import WeChatBot
 from app.schemas import MessageChannel, CommingMessage, Notification, CommandRegisterEventData
 from app.schemas.types import ModuleType, ChainEventType
 from app.utils.dom import DomUtils
@@ -20,8 +21,9 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
         """
         初始化模块
         """
+        self.stop()
         super().init_service(service_name=WeChat.__name__.lower(),
-                             service_type=WeChat)
+                             service_type=self._create_client)
         self._channel = MessageChannel.Wechat
 
     @staticmethod
@@ -50,7 +52,22 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
         return 1
 
     def stop(self):
-        pass
+        for client in self.get_instances().values():
+            if hasattr(client, "stop"):
+                try:
+                    client.stop()
+                except Exception as err:
+                    logger.error(f"停止微信模块实例失败：{err}")
+
+    @staticmethod
+    def _is_bot_mode(config: dict) -> bool:
+        return (config or {}).get("WECHAT_MODE", "app") == "bot"
+
+    @classmethod
+    def _create_client(cls, conf):
+        if cls._is_bot_mode(conf.config):
+            return WeChatBot(name=conf.name, **conf.config)
+        return WeChat(name=conf.name, **conf.config)
 
     def test(self) -> Optional[Tuple[bool, str]]:
         """
@@ -84,6 +101,8 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             # 获取服务配置
             client_config = self.get_config(source)
             if not client_config:
+                return None
+            if self._is_bot_mode(client_config.config):
                 return None
             client: WeChat = self.get_instance(client_config.name)
             # URL参数
@@ -229,6 +248,9 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
         :param commands: 命令字典
         """
         for client_config in self.get_configs().values():
+            if self._is_bot_mode(client_config.config):
+                logger.debug(f"{client_config.name} 为智能机器人模式，跳过传统菜单初始化")
+                continue
             # 如果没有配置消息解密相关参数，则也没有必要进行菜单初始化
             if not client_config.config.get("WECHAT_ENCODING_AESKEY") or not client_config.config.get("WECHAT_TOKEN"):
                 logger.debug(f"{client_config.name} 缺少消息解密参数，跳过后续菜单初始化")
