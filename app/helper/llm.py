@@ -71,13 +71,14 @@ class LLMHelper:
                 openai_proxy=settings.PROXY_HOST
             )
 
-    def get_models(self, provider: str, api_key: str, base_url: str = None) -> List[str]:
+    @staticmethod
+    def get_models(provider: str, api_key: str, base_url: str = None) -> List[str]:
         """获取模型列表"""
         logger.info(f"获取 {provider} 模型列表...")
         if provider == "google":
-            return self._get_google_models(api_key)
+            return LLMHelper._get_google_models(api_key)
         else:
-            return self._get_openai_compatible_models(provider, api_key, base_url)
+            return LLMHelper._get_openai_compatible_models(provider, api_key, base_url)
 
     @staticmethod
     def _get_google_models(api_key: str) -> List[str]:
