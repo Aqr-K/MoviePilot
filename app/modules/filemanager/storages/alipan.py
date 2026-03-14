@@ -558,7 +558,7 @@ class AliPan(StorageBase, metaclass=WeakSingleton):
         """
         上传单个分片
         """
-        return requests.put(upload_url, data=data)
+        return requests.put(upload_url, data=data, timeout=60.0)
 
     def _list_uploaded_parts(self, drive_id: str, file_id: str, upload_id: str) -> dict:
         """
