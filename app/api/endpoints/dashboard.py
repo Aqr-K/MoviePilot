@@ -56,7 +56,7 @@ def storage(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     查询本地存储空间信息
     """
     total, available = 0, 0
-    dirs = DirectoryHelper.get_dirs()
+    dirs = DirectoryHelper().get_dirs()
     if not dirs:
         return schemas.Storage(total_storage=total, used_storage=total - available)
     storages = set([d.library_storage for d in dirs if d.library_storage])
@@ -93,7 +93,7 @@ def downloader(name: Optional[str] = None, _: schemas.TokenPayload = Depends(ver
     查询下载器信息
     """
     # 下载目录空间
-    download_dirs = DirectoryHelper.get_local_download_dirs()
+    download_dirs = DirectoryHelper().get_local_download_dirs()
     _, free_space = SystemUtils.space_usage([Path(d.download_path) for d in download_dirs])
     # 下载器信息
     downloader_info = schemas.DownloaderInfo()

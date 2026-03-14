@@ -230,7 +230,7 @@ class DownloadChain(ChainBase):
             return None
 
         # 获取种子文件的文件夹名和文件清单
-        _folder_name, _file_list = TorrentHelper.get_fileinfo_from_torrent_content(torrent_content)
+        _folder_name, _file_list = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
 
         storage = 'local'
         # 下载目录
@@ -238,7 +238,7 @@ class DownloadChain(ChainBase):
             download_dir = Path(save_path)
         else:
             # 根据媒体信息查询下载目录配置
-            dir_info = DirectoryHelper.get_dir(_media, include_unsorted=True)
+            dir_info = DirectoryHelper().get_dir(_media, include_unsorted=True)
             storage = dir_info.storage if dir_info else storage
             # 拼装子目录
             if dir_info:
@@ -487,7 +487,7 @@ class DownloadChain(ChainBase):
                 contexts = event_data.updated_contexts
 
         # 分组排序
-        contexts = TorrentHelper.sort_group_torrents(contexts)
+        contexts = TorrentHelper().sort_group_torrents(contexts)
 
         # 如果是电影，直接下载
         for context in contexts:
@@ -557,7 +557,7 @@ class DownloadChain(ChainBase):
                                 if isinstance(content, str):
                                     logger.warn(f"{meta.org_string} 下载地址是磁力链，无法确定种子文件集数")
                                     continue
-                                torrent_episodes = TorrentHelper.get_torrent_episodes(torrent_files)
+                                torrent_episodes = TorrentHelper().get_torrent_episodes(torrent_files)
                                 logger.info(f"{meta.org_string} 解析种子文件集数为 {torrent_episodes}")
                                 if not torrent_episodes:
                                     continue
@@ -731,7 +731,7 @@ class DownloadChain(ChainBase):
                                 logger.warn(f"{meta.org_string} 下载地址是磁力链，无法解析种子文件集数")
                                 continue
                             # 种子全部集
-                            torrent_episodes = TorrentHelper.get_torrent_episodes(torrent_files)
+                            torrent_episodes = TorrentHelper().get_torrent_episodes(torrent_files)
                             logger.info(f"{torrent.site_name} - {meta.org_string} 解析种子文件集数：{torrent_episodes}")
                             # 选中的集
                             selected_episodes = set(torrent_episodes).intersection(set(need_episodes))

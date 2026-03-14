@@ -474,7 +474,7 @@ def ruletest(title: str,
         description=subtitle,
     )
     # 查询规则组详情
-    rulegroup = RuleHelper.get_rule_group(rulegroup_name)
+    rulegroup = RuleHelper().get_rule_group(rulegroup_name)
     if not rulegroup:
         return schemas.Response(success=False, message=f"过滤规则组 {rulegroup_name} 不存在！")
 

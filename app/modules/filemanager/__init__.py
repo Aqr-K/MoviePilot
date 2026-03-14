@@ -533,7 +533,7 @@ class FileManagerModule(_ModuleBase):
         handler = TransHandler()
         ret_fileitems = []
         # 检查本地媒体库
-        dest_dirs = DirectoryHelper.get_library_dirs()
+        dest_dirs = DirectoryHelper().get_library_dirs()
         # 检查每一个媒体库目录
         for dest_dir in dest_dirs:
             # 存储

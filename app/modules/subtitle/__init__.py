@@ -145,7 +145,7 @@ class SubtitleModule(_ModuleBase):
         # 字幕下载目录
         logger.info("开始从站点下载字幕：%s" % torrent.page_url)
         # 获取种子信息
-        folder_name, _ = TorrentHelper.get_fileinfo_from_torrent_content(torrent_content)
+        folder_name, _ = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
         # 文件保存目录，如果是单文件种子，则folder_name是空，此时文件保存目录就是下载目录
         storageChain = StorageChain()
         # 等待目录存在

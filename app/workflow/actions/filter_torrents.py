@@ -58,7 +58,7 @@ class FilterTorrentsAction(BaseAction):
         for torrent in context.torrents:
             if global_vars.is_workflow_stopped(workflow_id):
                 break
-            if TorrentHelper.filter_torrent(
+            if TorrentHelper().filter_torrent(
                     torrent_info=torrent.torrent_info,
                     filter_params={
                         "quality": params.quality,

@@ -875,6 +875,7 @@ class SubscribeChain(ChainBase):
 
                     # 遍历预识别后的种子
                     _match_context = []
+                    torrenthelper = TorrentHelper()
                     systemconfig = SystemConfigOper()
                     wordsmatcher = WordsMatcher()
                     for domain, contexts in processed_torrents.items():
@@ -925,7 +926,7 @@ class SubscribeChain(ChainBase):
                                     not torrent_mediainfo.tmdb_id and not torrent_mediainfo.douban_id):
                                 logger.debug(
                                     f'{torrent_info.site_name} - {torrent_info.title} 重新识别失败，尝试通过标题匹配...')
-                                if TorrentHelper.match_torrent(mediainfo=mediainfo,
+                                if torrenthelper.match_torrent(mediainfo=mediainfo,
                                                                torrent_meta=torrent_meta,
                                                                torrent=torrent_info):
                                     # 匹配成功
@@ -991,7 +992,7 @@ class SubscribeChain(ChainBase):
                                             continue
 
                             # 匹配订阅附加参数
-                            if not TorrentHelper.filter_torrent(torrent_info=torrent_info,
+                            if not torrenthelper.filter_torrent(torrent_info=torrent_info,
                                                                 filter_params=self.get_params(subscribe)):
                                 continue
 
