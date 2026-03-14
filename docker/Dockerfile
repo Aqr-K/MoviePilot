@@ -13,7 +13,8 @@ ENV LANG="C.UTF-8" \
     PUID=0 \
     PGID=0 \
     UMASK=000 \
-    VENV_PATH="/opt/venv"
+    VENV_PATH="/opt/venv" \
+    LD_PRELOAD="/usr/local/lib/libjemalloc.so"
 
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
@@ -33,8 +34,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     ffmpeg \
     nano \
+    libjemalloc2 \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && curl https://rclone.org/install.sh | bash \
+    && ln -s /usr/lib/*-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf \
