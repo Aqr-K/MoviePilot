@@ -360,7 +360,18 @@ async def plugin_static_file(plugin_id: str, filepath: str):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     plugin_base_dir = AsyncPath(settings.ROOT_PATH) / "app" / "plugins" / plugin_id.lower()
-    plugin_file_path = plugin_base_dir / filepath
+    plugin_file_path = plugin_base_dir / filepath.lstrip('/')
+
+    try:
+        resolved_base = await plugin_base_dir.resolve()
+        resolved_file = await plugin_file_path.resolve()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path")
+
+    if not resolved_file.is_relative_to(resolved_base):
+        logger.warning(f"Static File API: Path traversal attempt detected: {plugin_id}/{filepath}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
     if not await plugin_file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{plugin_file_path} 不存在")
     if not await plugin_file_path.is_file():
