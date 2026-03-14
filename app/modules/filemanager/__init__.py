@@ -7,6 +7,7 @@ from app.core.context import MediaInfo
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.helper.directory import DirectoryHelper
+from app.helper.message import MessageHelper
 from app.helper.module import ModuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
@@ -24,6 +25,11 @@ class FileManagerModule(_ModuleBase):
 
     _storage_schemas = []
     _support_storages = []
+
+    def __init__(self):
+        super().__init__()
+        self.directoryhelper = DirectoryHelper()
+        self.messagehelper = MessageHelper()
 
     def init_module(self) -> None:
         # 加载模块
@@ -65,7 +71,7 @@ class FileManagerModule(_ModuleBase):
         测试模块连接性
         """
         # 检查目录
-        dirs = DirectoryHelper.get_dirs()
+        dirs = self.directoryhelper.get_dirs()
         if not dirs:
             return False, "未设置任何目录"
         for d in dirs:
@@ -132,6 +138,7 @@ class FileManagerModule(_ModuleBase):
         :param mediainfo: 媒体信息
         :return: 重命名后的名称（含目录）
         """
+        handler = TransHandler()
         # 重命名格式
         rename_format = settings.RENAME_FORMAT(mediainfo.type)
         # 获取集信息
@@ -151,9 +158,9 @@ class FileManagerModule(_ModuleBase):
                 episode_group=mediainfo.episode_group,
             )
         # 获取重命名后的名称
-        path = TransHandler.get_rename_path(
+        path = handler.get_rename_path(
             template_string=rename_format,
-            rename_dict=TransHandler.get_naming_dict(meta=meta,
+            rename_dict=handler.get_naming_dict(meta=meta,
                                                 mediainfo=mediainfo,
                                                 episodes_info=episodes_info,
                                                 file_ext=Path(meta.title).suffix)
@@ -417,6 +424,7 @@ class FileManagerModule(_ModuleBase):
         :param target_oper: 目标存储操作对象
         :return: {path, target_path, message}
         """
+        handler = TransHandler()
         # 检查目录路径
         if fileitem.storage == "local" and not Path(fileitem.path).exists():
             return TransferInfo(success=False,
@@ -451,7 +459,7 @@ class FileManagerModule(_ModuleBase):
             # 是否需要刮削
             need_scrape = target_directory.scraping if scrape is None else scrape
             # 拼装媒体库一、二级子目录
-            target_path = TransHandler.get_dest_dir(mediainfo=mediainfo, target_dir=target_directory,
+            target_path = handler.get_dest_dir(mediainfo=mediainfo, target_dir=target_directory,
                                                need_type_folder=library_type_folder,
                                                need_category_folder=library_category_folder)
         elif target_path:
@@ -460,7 +468,7 @@ class FileManagerModule(_ModuleBase):
             need_notify = False
             overwrite_mode = "never"
             # 手动整理的场景，有自定义目标路径
-            target_path = TransHandler.get_dest_path(mediainfo=mediainfo, target_path=target_path,
+            target_path = handler.get_dest_path(mediainfo=mediainfo, target_path=target_path,
                                                 need_type_folder=library_type_folder,
                                                 need_category_folder=library_category_folder)
         else:
@@ -503,7 +511,7 @@ class FileManagerModule(_ModuleBase):
 
         # 整理
         logger.info(f"获取整理目标路径：【{target_storage}】{target_path}")
-        return TransHandler.transfer_media(fileitem=fileitem,
+        return handler.transfer_media(fileitem=fileitem,
                                       in_meta=meta,
                                       mediainfo=mediainfo,
                                       target_storage=target_storage,
@@ -522,6 +530,7 @@ class FileManagerModule(_ModuleBase):
         获取对应媒体的媒体库文件列表
         :param mediainfo: 媒体信息
         """
+        handler = TransHandler()
         ret_fileitems = []
         # 检查本地媒体库
         dest_dirs = DirectoryHelper.get_library_dirs()
@@ -532,7 +541,7 @@ class FileManagerModule(_ModuleBase):
             if not storage_oper:
                 continue
             # 媒体分类路径
-            dir_path = TransHandler.get_dest_dir(mediainfo=mediainfo, target_dir=dest_dir)
+            dir_path = handler.get_dest_dir(mediainfo=mediainfo, target_dir=dest_dir)
             # 重命名格式
             rename_format = settings.RENAME_FORMAT(mediainfo.type)
             # 元数据补上常用属性，尽可能确保重命名后的路径不出现空白
@@ -546,10 +555,10 @@ class FileManagerModule(_ModuleBase):
             if meta.begin_episode is None:
                 meta.begin_episode = 1
             # 获取路径（重命名路径）
-            target_path = TransHandler.get_rename_path(
+            target_path = handler.get_rename_path(
                 path=dir_path,
                 template_string=rename_format,
-                rename_dict=TransHandler.get_naming_dict(meta=meta,
+                rename_dict=handler.get_naming_dict(meta=meta,
                                                     mediainfo=mediainfo)
             )
             # 获取重命名后的媒体文件根路径

@@ -317,7 +317,7 @@ async def get_llm_models(provider: str, api_key: str, base_url: Optional[str] = 
     获取LLM模型列表
     """
     try:
-        models = LLMHelper.get_models(provider, api_key, base_url)
+        models = LLMHelper().get_models(provider, api_key, base_url)
         return schemas.Response(success=True, data=models)
     except Exception as e:
         return schemas.Response(success=False, message=str(e))

@@ -44,6 +44,9 @@ class StorageBase(metaclass=ABCMeta):
     transtype = {}
     snapshot_check_folder_modtime = True
 
+    def __init__(self):
+        self.storagehelper = StorageHelper()
+
     @abstractmethod
     def init_storage(self):
         """
@@ -67,7 +70,7 @@ class StorageBase(metaclass=ABCMeta):
         """
         获取配置
         """
-        return StorageHelper.get_storage(self.schema.value)
+        return self.storagehelper.get_storage(self.schema.value)
 
     def get_conf(self) -> dict:
         """
@@ -80,7 +83,7 @@ class StorageBase(metaclass=ABCMeta):
         """
         设置配置
         """
-        StorageHelper.set_storage(self.schema.value, conf)
+        self.storagehelper.set_storage(self.schema.value, conf)
         self.init_storage()
 
     def support_transtype(self) -> dict:
@@ -99,7 +102,7 @@ class StorageBase(metaclass=ABCMeta):
         """
         重置置配置
         """
-        StorageHelper.reset_storage(self.schema.value)
+        self.storagehelper.reset_storage(self.schema.value)
         self.init_storage()
 
     @abstractmethod
