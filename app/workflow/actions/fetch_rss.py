@@ -21,7 +21,7 @@ class FetchRssParams(ActionParams):
     content_type: Optional[str] = Field(default=None, description="Content-Type")
     referer: Optional[str] = Field(default=None, description="Referer")
     ua: Optional[str] = Field(default=None, description="User-Agent")
-    match_media: Optional[str] = Field(default=None, description="匹配媒体信息")
+    match_media: Optional[bool] = Field(default=False, description="匹配媒体信息")
 
 
 class FetchRssAction(BaseAction):
