@@ -26,6 +26,11 @@
 
 官方Wiki：https://wiki.movie-pilot.org
 
+### 为 AI Agent 添加 Skills
+```shell
+npx skills add https://github.com/jxxghp/MoviePilot
+```
+
 ## 参与开发
 
 API文档：https://api.movie-pilot.org

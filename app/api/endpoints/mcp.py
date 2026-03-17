@@ -19,6 +19,17 @@ router = APIRouter()
 # MCP 协议版本
 MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"]
 MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSIONS[0]  # 默认使用最新版本
+MCP_HIDDEN_TOOLS = {"execute_command", "search_web"}
+
+
+def list_exposed_tools():
+    """
+    获取 MCP 可见工具列表
+    """
+    return [
+        tool for tool in moviepilot_tool_manager.list_tools()
+        if tool.name not in MCP_HIDDEN_TOOLS
+    ]
 
 
 def create_jsonrpc_response(request_id: Union[str, int, None], result: Any) -> Dict[str, Any]:
@@ -174,7 +185,7 @@ async def handle_tools_list() -> Dict[str, Any]:
     """
     处理工具列表请求
     """
-    tools = moviepilot_tool_manager.list_tools()
+    tools = list_exposed_tools()
 
     # 转换为 MCP 工具格式
     mcp_tools = []
@@ -202,6 +213,9 @@ async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("Missing tool name")
 
     try:
+        if tool_name in MCP_HIDDEN_TOOLS:
+            raise ValueError(f"工具 '{tool_name}' 未找到")
+
         result_text = await moviepilot_tool_manager.call_tool(tool_name, arguments)
 
         return {
@@ -248,7 +262,7 @@ async def list_tools(
     """
     try:
         # 获取所有工具定义
-        tools = moviepilot_tool_manager.list_tools()
+        tools = list_exposed_tools()
 
         # 转换为字典格式
         tools_list = []
@@ -278,7 +292,9 @@ async def call_tool(
         工具执行结果
     """
     try:
-        # 调用工具
+        if request.tool_name in MCP_HIDDEN_TOOLS:
+            raise ValueError(f"工具 '{request.tool_name}' 未找到")
+
         result_text = await moviepilot_tool_manager.call_tool(request.tool_name, request.arguments)
 
         return schemas.ToolCallResponse(
@@ -306,7 +322,7 @@ async def get_tool_info(
     """
     try:
         # 获取所有工具
-        tools = moviepilot_tool_manager.list_tools()
+        tools = list_exposed_tools()
 
         # 查找指定工具
         for tool in tools:
@@ -338,7 +354,7 @@ async def get_tool_schema(
     """
     try:
         # 获取所有工具
-        tools = moviepilot_tool_manager.list_tools()
+        tools = list_exposed_tools()
 
         # 查找指定工具
         for tool in tools:

@@ -1,25 +1,33 @@
 """添加下载工具"""
 
+import re
 from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool, ToolChain
+from app.chain.search import SearchChain
 from app.chain.download import DownloadChain
 from app.core.context import Context
 from app.core.metainfo import MetaInfo
 from app.db.site_oper import SiteOper
 from app.log import logger
 from app.schemas import TorrentInfo
+from app.utils.crypto import HashUtils
 
 
 class AddDownloadInput(BaseModel):
     """添加下载工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    site_name: str = Field(..., description="Name of the torrent site/source (e.g., 'The Pirate Bay')")
-    torrent_title: str = Field(...,
-                               description="The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')")
-    torrent_url: str = Field(..., description="Direct URL to the torrent file (.torrent) or magnet link")
+    site_name: Optional[str] = Field(None, description="Name of the torrent site/source (e.g., 'The Pirate Bay')")
+    torrent_title: Optional[str] = Field(
+        None,
+        description="The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')"
+    )
+    torrent_url: str = Field(
+        ...,
+        description="Torrent download link, magnet URI, or search result reference returned by search_torrents"
+    )
     torrent_description: Optional[str] = Field(None,
                                                   description="Brief description of the torrent content (optional)")
     downloader: Optional[str] = Field(None,
@@ -38,10 +46,11 @@ class AddDownloadTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据下载参数生成友好的提示消息"""
         torrent_title = kwargs.get("torrent_title", "")
+        torrent_url = kwargs.get("torrent_url")
         site_name = kwargs.get("site_name", "")
         downloader = kwargs.get("downloader")
         
-        message = f"正在添加下载任务: {torrent_title}"
+        message = f"正在添加下载任务: {torrent_title or f'资源 {torrent_url}'}"
         if site_name:
             message += f" (来源: {site_name})"
         if downloader:
@@ -49,14 +58,71 @@ class AddDownloadTool(MoviePilotTool):
         
         return message
 
-    async def run(self, site_name: str, torrent_title: str, torrent_url: str, torrent_description: Optional[str] = None,
+    @staticmethod
+    def _build_torrent_ref(context: Context) -> str:
+        """生成用于校验缓存项的短引用"""
+        if not context or not context.torrent_info:
+            return ""
+        return HashUtils.sha1(context.torrent_info.enclosure or "")[:7]
+
+    @staticmethod
+    def _is_torrent_ref(torrent_ref: Optional[str]) -> bool:
+        """判断是否为内部搜索结果引用"""
+        if not torrent_ref:
+            return False
+        return bool(re.fullmatch(r"[0-9a-f]{7}:\d+", str(torrent_ref).strip()))
+
+    @classmethod
+    def _resolve_cached_context(cls, torrent_ref: str) -> Optional[Context]:
+        """从最近一次搜索缓存中解析种子上下文，仅支持 hash:id 格式"""
+        ref = str(torrent_ref).strip()
+        if ":" not in ref:
+            return None
+        try:
+            ref_hash, ref_index = ref.split(":", 1)
+            index = int(ref_index)
+        except (TypeError, ValueError):
+            return None
+
+        if index < 1:
+            return None
+
+        results = SearchChain().last_search_results() or []
+        if index > len(results):
+            return None
+        context = results[index - 1]
+        if not ref_hash or cls._build_torrent_ref(context) != ref_hash:
+            return None
+        return context
+
+    async def run(self, site_name: Optional[str] = None, torrent_title: Optional[str] = None,
+                  torrent_url: Optional[str] = None,
+                  torrent_description: Optional[str] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: site_name={site_name}, torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
 
         try:
-            if not torrent_title or not torrent_url:
+            cached_context = None
+            if torrent_url:
+                is_torrent_ref = self._is_torrent_ref(torrent_url)
+                cached_context = self._resolve_cached_context(torrent_url)
+                if is_torrent_ref and (not cached_context or not cached_context.torrent_info):
+                    return "错误：torrent_url 无效，请重新使用 search_torrents 搜索"
+                if not cached_context or not cached_context.torrent_info:
+                    cached_context = None
+
+            if cached_context and cached_context.torrent_info:
+                cached_torrent = cached_context.torrent_info
+                site_name = site_name or cached_torrent.site_name
+                torrent_title = torrent_title or cached_torrent.title
+                torrent_url = cached_torrent.enclosure
+                torrent_description = torrent_description or cached_torrent.description
+
+            if not torrent_title:
+                return "错误：必须提供种子标题和下载链接"
+            if not torrent_url:
                 return "错误：必须提供种子标题和下载链接"
 
             # 使用DownloadChain添加下载
@@ -82,7 +148,9 @@ class AddDownloadTool(MoviePilotTool):
                 site_downloader=siteinfo.downloader
             )
             meta_info = MetaInfo(title=torrent_title, subtitle=torrent_description)
-            media_info = await ToolChain().async_recognize_media(meta=meta_info)
+            media_info = cached_context.media_info if cached_context and cached_context.media_info else None
+            if not media_info:
+                media_info = await ToolChain().async_recognize_media(meta=meta_info)
             if not media_info:
                 return "错误：无法识别媒体信息，无法添加下载任务"
             context = Context(
