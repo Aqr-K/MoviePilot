@@ -129,6 +129,26 @@ function normalizeItemType(schema = {}) {
   return null;
 }
 
+function normalizeCommand(tool = {}) {
+  const properties = tool?.inputSchema?.properties || {};
+  const required = Array.isArray(tool?.inputSchema?.required) ? tool.inputSchema.required : [];
+  const fields = Object.entries(properties)
+    .filter(([fieldName]) => fieldName !== 'explanation')
+    .map(([fieldName, schema]) => ({
+      name: fieldName,
+      type: normalizeType(schema),
+      description: schema?.description || '',
+      required: required.includes(fieldName),
+      item_type: normalizeItemType(schema),
+    }));
+
+  return {
+    name: tool?.name,
+    description: tool?.description || '',
+    fields,
+  };
+}
+
 function request(method, targetUrl, headers = {}, body) {
   return new Promise((resolve, reject) => {
     let url;
@@ -192,29 +212,36 @@ async function loadCommandsJson() {
   }
 
   commandsJson = Array.isArray(response)
-    ? response
-        .map((tool) => {
-          const properties = tool?.inputSchema?.properties || {};
-          const required = Array.isArray(tool?.inputSchema?.required) ? tool.inputSchema.required : [];
-          const fields = Object.entries(properties)
-            .filter(([fieldName]) => fieldName !== 'explanation')
-            .map(([fieldName, schema]) => ({
-              name: fieldName,
-              type: normalizeType(schema),
-              description: schema?.description || '',
-              required: required.includes(fieldName),
-              item_type: normalizeItemType(schema),
-            }));
-
-          return {
-            name: tool?.name,
-            description: tool?.description || '',
-            fields,
-          };
-        })
+    ? response.map((tool) => normalizeCommand(tool))
     : [];
 
   commandsLoaded = true;
+}
+
+async function loadCommandJson(commandName) {
+  const { statusCode, body } = await request('GET', `${mpHost}/api/v1/mcp/tools/${commandName}`, {
+    'X-API-KEY': mpApiKey,
+  });
+
+  if (statusCode === '404') {
+    console.error(`Error: command '${commandName}' not found`);
+    console.error(`Run '${SCRIPT_NAME} list' to see available commands`);
+    process.exit(1);
+  }
+
+  if (statusCode !== '200') {
+    console.error(`Error: failed to load command definition (HTTP ${statusCode || 'unknown'})`);
+    process.exit(1);
+  }
+
+  let response;
+  try {
+    response = JSON.parse(body);
+  } catch {
+    fail(`Error: backend returned invalid JSON for command '${commandName}'`);
+  }
+
+  return normalizeCommand(response);
 }
 
 function ensureConfig() {
@@ -246,69 +273,76 @@ function printValue(value) {
     return;
   }
 
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+function formatUsageValue(field) {
+  if (field?.type === 'array') {
+    return "'<value1>,<value2>'";
+  }
+  return '<value>';
 }
 
 async function cmdList() {
   await loadCommandsJson();
-  for (const command of commandsJson) {
-    process.stdout.write(`- ${command.name}${spacePad(command.name)}${command.description}\n`);
+  const sortedCommands = [...commandsJson].sort((left, right) => left.name.localeCompare(right.name));
+  for (const command of sortedCommands) {
+    process.stdout.write(`${command.name}\n`);
   }
 }
 
 async function cmdShow(commandName) {
-  await loadCommandsJson();
-
   if (!commandName) {
     fail(`Usage: ${SCRIPT_NAME} show <command>`);
   }
 
-  const command = commandsJson.find((item) => item.name === commandName);
-  if (!command) {
-    console.error(`Error: command '${commandName}' not found`);
-    console.error(`Run '${SCRIPT_NAME} list' to see available commands`);
-    process.exit(1);
-  }
+  const command = await loadCommandJson(commandName);
 
   const commandLabel = 'Command:';
+  const descriptionLabel = 'Description:';
   const paramsLabel = 'Parameters:';
-  const usageLabel = 'Usage example:';
-  const detailLabelWidth = Math.max(commandLabel.length, paramsLabel.length, usageLabel.length);
+  const usageLabel = 'Usage:';
+  const detailLabelWidth = Math.max(
+    commandLabel.length,
+    descriptionLabel.length,
+    paramsLabel.length,
+    usageLabel.length
+  );
 
-  process.stdout.write(`${commandLabel} ${command.name}\n\n`);
+  process.stdout.write(`${commandLabel} ${command.name}\n`);
+  process.stdout.write(`${descriptionLabel} ${command.description || '(none)'}\n\n`);
 
   if (command.fields.length === 0) {
     process.stdout.write(`${paramsLabel}${spacePad(paramsLabel, detailLabelWidth)}(none)\n`);
   } else {
     const fieldLines = command.fields.map((field) => [
-      field.name,
+      field.required ? `${field.name}*` : field.name,
       field.type,
-      field.required ? '[required]' : '[optional]',
       field.description,
     ]);
 
     const nameWidth = Math.max(...fieldLines.map(([name]) => name.length), 0);
     const typeWidth = Math.max(...fieldLines.map(([, type]) => type.length), 0);
-    const reqWidth = Math.max(...fieldLines.map(([, , required]) => required.length), 0);
 
     process.stdout.write(`${paramsLabel}\n`);
-    for (const [fieldName, fieldType, fieldRequired, fieldDesc] of fieldLines) {
+    for (const [fieldName, fieldType, fieldDesc] of fieldLines) {
       process.stdout.write(
-        `  ${fieldName}${spacePad(fieldName, nameWidth)}${fieldType}${spacePad(fieldType, typeWidth)}${fieldRequired}${spacePad(fieldRequired, reqWidth)}${fieldDesc}\n`
+        `  ${fieldName}${spacePad(fieldName, nameWidth)}${fieldType}${spacePad(fieldType, typeWidth)}${fieldDesc}\n`
       );
     }
   }
 
-  const usageLine = `${SCRIPT_NAME} ${command.name}`;
-  const reqPart = command.fields.filter((field) => field.required).map((field) => ` ${field.name}=<value>`).join('');
+  const usageLine = `${command.name}`;
+  const reqPart = command.fields
+    .filter((field) => field.required)
+    .map((field) => ` ${field.name}=${formatUsageValue(field)}`)
+    .join('');
   const optPart = command.fields
     .filter((field) => !field.required)
-    .map((field) => ` [${field.name}=<value>]`)
+    .map((field) => ` [${field.name}=${formatUsageValue(field)}]`)
     .join('');
 
-  process.stdout.write(
-    `\n${usageLabel}${spacePad(usageLabel, detailLabelWidth)}${usageLine}${reqPart}${optPart}\n`
-  );
+  process.stdout.write(`\n${usageLabel} ${usageLine}${reqPart}${optPart}\n`);
 }
 
 function parseBoolean(value) {
@@ -420,7 +454,7 @@ async function cmdRun(commandName, pairs) {
   const command = commandsJson.find((item) => item.name === commandName);
   if (!command) {
     console.error(`Error: command '${commandName}' not found`);
-    console.error(`Run '${SCRIPT_NAME} list' to see available commands`);
+    console.error(`Run 'node ${SCRIPT_NAME} list' to see available commands`);
     process.exit(1);
   }
 
@@ -446,12 +480,17 @@ async function cmdRun(commandName, pairs) {
 
   try {
     const parsed = JSON.parse(body);
+    if (Object.prototype.hasOwnProperty.call(parsed, 'error') && parsed.error) {
+      printValue(parsed);
+      return;
+    }
+
     if (Object.prototype.hasOwnProperty.call(parsed, 'result')) {
       if (typeof parsed.result === 'string') {
         try {
           printValue(JSON.parse(parsed.result));
         } catch {
-          printValue(parsed.result);
+          printValue({ result: parsed.result });
         }
       } else {
         printValue(parsed.result);

@@ -14,7 +14,7 @@ from app.log import logger
 class QuerySubscribeHistoryInput(BaseModel):
     """查询订阅历史工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    media_type: Optional[str] = Field("all", description="Filter by media type: '电影' for films, '电视剧' for television series, 'all' for all types (default: 'all')")
+    media_type: Optional[str] = Field("all", description="Allowed values: movie, tv, all")
     name: Optional[str] = Field(None, description="Filter by media name (partial match, optional)")
 
 
@@ -42,6 +42,9 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, name={name}")
 
         try:
+            if media_type not in ["all", "movie", "tv"]:
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
+
             # 获取数据库会话
             async with AsyncSessionFactory() as db:
                 # 根据类型查询

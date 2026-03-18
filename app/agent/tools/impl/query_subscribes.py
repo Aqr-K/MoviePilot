@@ -16,7 +16,7 @@ class QuerySubscribesInput(BaseModel):
     status: Optional[str] = Field("all",
                                   description="Filter subscriptions by status: 'R' for enabled subscriptions, 'S' for paused ones, 'all' for all subscriptions")
     media_type: Optional[str] = Field("all",
-                                      description="Filter by media type: '电影' for films, '电视剧' for television series, 'all' for all types")
+                                      description="Allowed values: movie, tv, all")
 
 
 class QuerySubscribesTool(MoviePilotTool):
@@ -45,6 +45,9 @@ class QuerySubscribesTool(MoviePilotTool):
     async def run(self, status: Optional[str] = "all", media_type: Optional[str] = "all", **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}")
         try:
+            if media_type not in ["all", "movie", "tv"]:
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
+
             subscribe_oper = SubscribeOper()
             subscribes = await subscribe_oper.async_list()
             filtered_subscribes = []

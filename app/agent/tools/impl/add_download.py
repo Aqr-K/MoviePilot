@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool, ToolChain
 from app.chain.search import SearchChain
 from app.chain.download import DownloadChain
+from app.core.config import settings
 from app.core.context import Context
 from app.core.metainfo import MetaInfo
 from app.db.site_oper import SiteOper
@@ -19,17 +20,10 @@ from app.utils.crypto import HashUtils
 class AddDownloadInput(BaseModel):
     """添加下载工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    site_name: Optional[str] = Field(None, description="Name of the torrent site/source (e.g., 'The Pirate Bay')")
-    torrent_title: Optional[str] = Field(
-        None,
-        description="The display name/title of the torrent (e.g., 'The.Matrix.1999.1080p.BluRay.x264')"
-    )
     torrent_url: str = Field(
         ...,
-        description="Torrent download link, magnet URI, or search result reference returned by search_torrents"
+        description="torrent_url in hash:id format (can be obtained from search_torrents tool)"
     )
-    torrent_description: Optional[str] = Field(None,
-                                                  description="Brief description of the torrent content (optional)")
     downloader: Optional[str] = Field(None,
                                       description="Name of the downloader to use (optional, uses default if not specified)")
     save_path: Optional[str] = Field(None,
@@ -40,19 +34,15 @@ class AddDownloadInput(BaseModel):
 
 class AddDownloadTool(MoviePilotTool):
     name: str = "add_download"
-    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.). Downloads the torrent file and starts the download process with specified settings."
+    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.) using torrent_url reference from search_torrents results."
     args_schema: Type[BaseModel] = AddDownloadInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据下载参数生成友好的提示消息"""
-        torrent_title = kwargs.get("torrent_title", "")
         torrent_url = kwargs.get("torrent_url")
-        site_name = kwargs.get("site_name", "")
         downloader = kwargs.get("downloader")
         
-        message = f"正在添加下载任务: {torrent_title or f'资源 {torrent_url}'}"
-        if site_name:
-            message += f" (来源: {site_name})"
+        message = f"正在添加下载任务: 资源 {torrent_url}"
         if downloader:
             message += f" [下载器: {downloader}]"
         
@@ -95,35 +85,36 @@ class AddDownloadTool(MoviePilotTool):
             return None
         return context
 
-    async def run(self, site_name: Optional[str] = None, torrent_title: Optional[str] = None,
-                  torrent_url: Optional[str] = None,
-                  torrent_description: Optional[str] = None,
+    @staticmethod
+    def _merge_labels_with_system_tag(labels: Optional[str]) -> Optional[str]:
+        """合并用户标签与系统默认标签，确保任务可被系统管理"""
+        system_tag = (settings.TORRENT_TAG or "").strip()
+        user_labels = [item.strip() for item in (labels or "").split(",") if item.strip()]
+
+        if system_tag and system_tag not in user_labels:
+            user_labels.append(system_tag)
+
+        return ",".join(user_labels) if user_labels else None
+
+    async def run(self, torrent_url: Optional[str] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: site_name={site_name}, torrent_title={torrent_title}, torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
+            f"执行工具: {self.name}, 参数: torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
 
         try:
-            cached_context = None
-            if torrent_url:
-                is_torrent_ref = self._is_torrent_ref(torrent_url)
-                cached_context = self._resolve_cached_context(torrent_url)
-                if is_torrent_ref and (not cached_context or not cached_context.torrent_info):
-                    return "错误：torrent_url 无效，请重新使用 search_torrents 搜索"
-                if not cached_context or not cached_context.torrent_info:
-                    cached_context = None
+            if not torrent_url or not self._is_torrent_ref(torrent_url):
+                return "错误：torrent_url 必须是 search_torrents 返回的 hash:id 引用，请重新搜索后选择。"
 
-            if cached_context and cached_context.torrent_info:
-                cached_torrent = cached_context.torrent_info
-                site_name = site_name or cached_torrent.site_name
-                torrent_title = torrent_title or cached_torrent.title
-                torrent_url = cached_torrent.enclosure
-                torrent_description = torrent_description or cached_torrent.description
+            cached_context = self._resolve_cached_context(torrent_url)
+            if not cached_context or not cached_context.torrent_info:
+                return "错误：torrent_url 无效，请重新使用 search_torrents 搜索"
 
-            if not torrent_title:
-                return "错误：必须提供种子标题和下载链接"
-            if not torrent_url:
-                return "错误：必须提供种子标题和下载链接"
+            cached_torrent = cached_context.torrent_info
+            site_name = cached_torrent.site_name
+            torrent_title = cached_torrent.title
+            torrent_description = cached_torrent.description
+            torrent_url = cached_torrent.enclosure
 
             # 使用DownloadChain添加下载
             download_chain = DownloadChain()
@@ -159,11 +150,13 @@ class AddDownloadTool(MoviePilotTool):
                 media_info=media_info
             )
 
+            merged_labels = self._merge_labels_with_system_tag(labels)
+
             did = download_chain.download_single(
                 context=context,
                 downloader=downloader,
                 save_path=save_path,
-                label=labels
+                label=merged_labels
             )
             if did:
                 return f"成功添加下载任务：{torrent_title}"

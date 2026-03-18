@@ -15,7 +15,7 @@ from app.log import logger
 class QuerySiteUserdataInput(BaseModel):
     """查询站点用户数据工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    site_id: int = Field(..., description="The ID of the site to query user data for")
+    site_id: int = Field(..., description="The ID of the site to query user data for (can be obtained from query_sites tool)")
     workdate: Optional[str] = Field(None, description="Work date to query (optional, format: 'YYYY-MM-DD', if not specified returns latest data)")
 
 

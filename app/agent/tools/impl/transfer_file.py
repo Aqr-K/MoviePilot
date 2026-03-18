@@ -18,7 +18,7 @@ class TransferFileInput(BaseModel):
     storage: Optional[str] = Field("local", description="Storage type of the source file (default: 'local', can be 'smb', 'alist', etc.)")
     target_path: Optional[str] = Field(None, description="Target path for the transferred file/directory (optional, uses default library path if not specified)")
     target_storage: Optional[str] = Field(None, description="Target storage type (optional, uses default storage if not specified)")
-    media_type: Optional[str] = Field(None, description="Media type: '电影' for films, '电视剧' for television series (optional, will be auto-detected if not specified)")
+    media_type: Optional[str] = Field(None, description="Allowed values: movie, tv")
     tmdbid: Optional[int] = Field(None, description="TMDB ID for precise media identification (optional but recommended for accuracy)")
     doubanid: Optional[str] = Field(None, description="Douban ID for media identification (optional)")
     season: Optional[int] = Field(None, description="Season number for TV shows (optional)")
@@ -91,11 +91,14 @@ class TransferFileTool(MoviePilotTool):
                 target_path_obj = Path(target_path)
             
             # 处理媒体类型
-            mtype = None
+            media_type_enum = None
             if media_type:
-                try:
-                    mtype = MediaType(media_type)
-                except ValueError:
+                media_type_key = media_type.strip().lower()
+                if media_type_key == "movie":
+                    media_type_enum = MediaType.MOVIE
+                elif media_type_key == "tv":
+                    media_type_enum = MediaType.TV
+                else:
                     return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
             
             # 调用整理方法
@@ -106,7 +109,7 @@ class TransferFileTool(MoviePilotTool):
                 target_path=target_path_obj,
                 tmdbid=tmdbid,
                 doubanid=doubanid,
-                mtype=mtype,
+                mtype=media_type_enum,
                 season=season,
                 transfer_type=transfer_type,
                 background=background

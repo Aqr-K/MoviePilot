@@ -1,6 +1,7 @@
 """获取搜索结果工具"""
 
 import json
+import re
 from typing import List, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -18,17 +19,18 @@ from ._torrent_search_utils import (
 class GetSearchResultsInput(BaseModel):
     """获取搜索结果工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    site: Optional[List[str]] = Field(None, description="Filter by site name, supports multiple values")
-    season: Optional[List[str]] = Field(None, description="Filter by season/episode label, supports multiple values")
-    free_state: Optional[List[str]] = Field(None, description="Filter by promotion state, supports multiple values")
-    video_code: Optional[List[str]] = Field(None, description="Filter by video codec, supports multiple values")
-    edition: Optional[List[str]] = Field(None, description="Filter by edition/quality, supports multiple values")
-    resolution: Optional[List[str]] = Field(None, description="Filter by resolution, supports multiple values")
-    release_group: Optional[List[str]] = Field(None, description="Filter by release group, supports multiple values")
+    site: Optional[List[str]] = Field(None, description="Site name filters")
+    season: Optional[List[str]] = Field(None, description="Season or episode filters")
+    free_state: Optional[List[str]] = Field(None, description="Promotion state filters")
+    video_code: Optional[List[str]] = Field(None, description="Video codec filters")
+    edition: Optional[List[str]] = Field(None, description="Edition filters")
+    resolution: Optional[List[str]] = Field(None, description="Resolution filters")
+    release_group: Optional[List[str]] = Field(None, description="Release group filters")
+    title_pattern: Optional[str] = Field(None, description="Regular expression pattern to filter torrent titles (e.g., '4K|2160p|UHD', '1080p.*BluRay')")
 
 class GetSearchResultsTool(MoviePilotTool):
     name: str = "get_search_results"
-    description: str = "Get torrent search results from the most recent search_torrents call, with optional frontend-style filters such as site, season, promotion state, codec, quality, resolution, and release group. Returns at most the first 50 matching results."
+    description: str = "Get cached torrent search results from search_torrents with optional filters. Returns at most the first 50 matches."
     args_schema: Type[BaseModel] = GetSearchResultsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -37,9 +39,18 @@ class GetSearchResultsTool(MoviePilotTool):
     async def run(self, site: Optional[List[str]] = None, season: Optional[List[str]] = None,
                   free_state: Optional[List[str]] = None, video_code: Optional[List[str]] = None,
                   edition: Optional[List[str]] = None, resolution: Optional[List[str]] = None,
-                  release_group: Optional[List[str]] = None, **kwargs) -> str:
+                  release_group: Optional[List[str]] = None, title_pattern: Optional[str] = None,
+                  **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: site={site}, season={season}, free_state={free_state}, video_code={video_code}, edition={edition}, resolution={resolution}, release_group={release_group}")
+            f"执行工具: {self.name}, 参数: site={site}, season={season}, free_state={free_state}, video_code={video_code}, edition={edition}, resolution={resolution}, release_group={release_group}, title_pattern={title_pattern}")
+
+        regex_pattern = None
+        if title_pattern:
+            try:
+                regex_pattern = re.compile(title_pattern, re.IGNORECASE)
+            except re.error as e:
+                logger.warning(f"正则表达式编译失败: {title_pattern}, 错误: {e}")
+                return f"正则表达式格式错误: {str(e)}"
 
         try:
             items = await SearchChain().async_last_search_results() or []
@@ -56,6 +67,12 @@ class GetSearchResultsTool(MoviePilotTool):
                 resolution=resolution,
                 release_group=release_group,
             )
+            if regex_pattern:
+                filtered_items = [
+                    item for item in filtered_items
+                    if item.torrent_info and item.torrent_info.title
+                    and regex_pattern.search(item.torrent_info.title)
+                ]
             if not filtered_items:
                 return "没有符合筛选条件的搜索结果，请调整筛选条件"
 

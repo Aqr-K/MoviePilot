@@ -30,7 +30,7 @@ class GetRecommendationsInput(BaseModel):
                                   "'douban_tv_animation' for Douban popular animation, "
                                   "'bangumi_calendar' for Bangumi anime calendar")
     media_type: Optional[str] = Field("all",
-                                      description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
+                                      description="Allowed values: movie, tv, all")
     limit: Optional[int] = Field(20,
                                  description="Maximum number of recommendations to return (default: 20, maximum: 100)")
 
@@ -75,6 +75,9 @@ class GetRecommendationsTool(MoviePilotTool):
                   media_type: Optional[str] = "all", limit: Optional[int] = 20, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: source={source}, media_type={media_type}, limit={limit}")
         try:
+            if media_type not in ["all", "movie", "tv"]:
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
+
             recommend_chain = RecommendChain()
             results = []
             if source == "tmdb_trending":

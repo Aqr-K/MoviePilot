@@ -16,7 +16,7 @@ from app.schemas.types import MediaType
 class QueryPopularSubscribesInput(BaseModel):
     """查询热门订阅工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    stype: str = Field(..., description="Media type: '电影' for films, '电视剧' for television series")
+    media_type: str = Field(..., description="Allowed values: movie, tv")
     page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")
     count: Optional[int] = Field(30, description="Number of items per page (default: 30)")
     min_sub: Optional[int] = Field(None, description="Minimum number of subscribers filter (optional, e.g., 5)")
@@ -33,13 +33,13 @@ class QueryPopularSubscribesTool(MoviePilotTool):
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""
-        stype = kwargs.get("stype", "")
+        media_type = kwargs.get("media_type", "")
         page = kwargs.get("page", 1)
         min_sub = kwargs.get("min_sub")
         min_rating = kwargs.get("min_rating")
         max_rating = kwargs.get("max_rating")
         
-        parts = [f"正在查询热门订阅 [{stype}]"]
+        parts = [f"正在查询热门订阅 [{media_type}]"]
         
         if min_sub:
             parts.append(f"最少订阅: {min_sub}")
@@ -52,7 +52,7 @@ class QueryPopularSubscribesTool(MoviePilotTool):
         
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
-    async def run(self, stype: str,
+    async def run(self, media_type: str,
                   page: Optional[int] = 1,
                   count: Optional[int] = 30,
                   min_sub: Optional[int] = None,
@@ -61,7 +61,7 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                   max_rating: Optional[float] = None,
                   sort_type: Optional[str] = None, **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: stype={stype}, page={page}, count={count}, min_sub={min_sub}, "
+            f"执行工具: {self.name}, 参数: media_type={media_type}, page={page}, count={count}, min_sub={min_sub}, "
             f"genre_id={genre_id}, min_rating={min_rating}, max_rating={max_rating}, sort_type={sort_type}")
 
         try:
@@ -69,10 +69,12 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                 page = 1
             if count is None or count < 1:
                 count = 30
+            if media_type not in ["movie", "tv"]:
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             subscribe_helper = SubscribeHelper()
             subscribes = await subscribe_helper.async_get_statistic(
-                stype=stype,
+                stype=media_type,
                 page=page,
                 count=count,
                 genre_id=genre_id,
@@ -94,7 +96,15 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                     continue
 
                 media = MediaInfo()
-                media.type = MediaType(sub.get("type"))
+                raw_type = str(sub.get("type") or "").strip().lower()
+                if raw_type in ["movie", "电影"]:
+                    media.type = MediaType.MOVIE
+                elif raw_type in ["tv", "电视剧"]:
+                    media.type = MediaType.TV
+                else:
+                    # 跳过无法识别类型的数据，避免单条脏数据导致整批失败
+                    logger.warning(f"跳过未知媒体类型: {sub.get('type')}")
+                    continue
                 media.tmdb_id = sub.get("tmdbid")
                 # 处理标题
                 title = sub.get("name")

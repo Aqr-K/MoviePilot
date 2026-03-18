@@ -14,13 +14,13 @@ from app.schemas import MediaType
 class QueryMediaDetailInput(BaseModel):
     """查询媒体详情工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    tmdb_id: int = Field(..., description="TMDB ID of the media (movie or TV series)")
-    media_type: str = Field(..., description="Media type: 'movie' or 'tv'")
+    tmdb_id: int = Field(..., description="TMDB ID of the media (movie or TV series, can be obtained from search_media tool)")
+    media_type: str = Field(..., description="Allowed values: movie, tv")
 
 
 class QueryMediaDetailTool(MoviePilotTool):
     name: str = "query_media_detail"
-    description: str = "Query detailed media information from TMDB by ID and media_type. IMPORTANT: Convert search results type: '电影'→'movie', '电视剧'→'tv'. Returns core metadata including title, year, overview, status, genres, directors, actors, and season count for TV series."
+    description: str = "Query supplementary media details from TMDB by ID and media_type. media_type accepts 'movie' or 'tv'. Returns non-duplicated detail fields such as status, genres, directors, actors, and season info for TV series."
     args_schema: Type[BaseModel] = QueryMediaDetailInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -34,14 +34,16 @@ class QueryMediaDetailTool(MoviePilotTool):
         try:
             media_chain = MediaChain()
 
-            mtype = None
-            if media_type:
-                if media_type.lower() == 'movie':
-                    mtype = MediaType.MOVIE
-                elif media_type.lower() == 'tv':
-                    mtype = MediaType.TV
+            media_type_key = (media_type or "").strip().lower()
+            if media_type_key not in ["movie", "tv"]:
+                return json.dumps({
+                    "success": False,
+                    "message": f"无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
+                }, ensure_ascii=False)
 
-            mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, mtype=mtype)
+            media_type_enum = MediaType.MOVIE if media_type_key == "movie" else MediaType.TV
+
+            mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, mtype=media_type_enum)
             
             if not mediainfo:
                 return json.dumps({
@@ -74,12 +76,6 @@ class QueryMediaDetailTool(MoviePilotTool):
 
             # 构建基础媒体详情信息
             result = {
-                "success": True,
-                "tmdb_id": tmdb_id,
-                "type": mediainfo.type.value if mediainfo.type else None,
-                "title": mediainfo.title,
-                "year": mediainfo.year,
-                "overview": mediainfo.overview,
                 "status": mediainfo.status,
                 "genres": genres,
                 "directors": directors,
