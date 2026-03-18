@@ -131,13 +131,13 @@ class MoviePilotToolsManager:
             try:
                 return int(value)
             except (ValueError, TypeError):
-                logger.warning(f"无法将参数 {key}='{value}' 转换为整数，保持原值")
+                logger.warning(f"无法将参数 {key}='{value}' 转换为整数，返回 None")
                 return None
         if field_type == "number" and isinstance(value, str):
             try:
                 return float(value)
             except (ValueError, TypeError):
-                logger.warning(f"无法将参数 {key}='{value}' 转换为浮点数，保持原值")
+                logger.warning(f"无法将参数 {key}='{value}' 转换为浮点数，返回 None")
                 return None
         if field_type == "boolean":
             if isinstance(value, str):

@@ -22,7 +22,7 @@ class AddDownloadInput(BaseModel):
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     torrent_url: str = Field(
         ...,
-        description="torrent_url in hash:id format (can be obtained from search_torrents tool)"
+        description="torrent_url in hash:id format (obtainable from get_search_results tool per-item results)"
     )
     downloader: Optional[str] = Field(None,
                                       description="Name of the downloader to use (optional, uses default if not specified)")
@@ -34,7 +34,7 @@ class AddDownloadInput(BaseModel):
 
 class AddDownloadTool(MoviePilotTool):
     name: str = "add_download"
-    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.) using torrent_url reference from search_torrents results."
+    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.) using torrent_url reference from get_search_results results."
     args_schema: Type[BaseModel] = AddDownloadInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -104,7 +104,7 @@ class AddDownloadTool(MoviePilotTool):
 
         try:
             if not torrent_url or not self._is_torrent_ref(torrent_url):
-                return "错误：torrent_url 必须是 search_torrents 返回的 hash:id 引用，请重新搜索后选择。"
+                return "错误：torrent_url 必须是 get_search_results 返回的 hash:id 引用，请先使用 search_torrents 搜索，再通过 get_search_results 筛选后选择。"
 
             cached_context = self._resolve_cached_context(torrent_url)
             if not cached_context or not cached_context.torrent_info:

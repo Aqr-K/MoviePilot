@@ -36,6 +36,7 @@ Always run `show <command>` before calling a command. Do not guess parameter nam
 - **Omitting `sites` uses the user's configured default sites**, not all available sites. Only call `query_sites` and pass `sites=` when the user explicitly asks for a specific site.
 - **TMDB season numbers don't always match fan-labeled seasons.** Anime and long-running shows often split one TMDB season into parts. Always validate with `query_media_detail` when the user mentions a specific season.
 - **`add_download` is irreversible without manual cleanup.** Always present torrent details and wait for explicit confirmation before calling it.
+- **`get_search_results` filter params are ANDed.** Combining multiple fields can silently exclude valid results. If results come back empty, drop the most restrictive filter and retry before reporting failure.
 - **`volume_factor` and `freedate_diff` indicate promotional status.** `volume_factor` describes the discount type (e.g. `免费` = free download, `2X` = double upload only, `2X免费` = free download + double upload, `普通` = no discount). `freedate_diff` is the remaining free window (e.g. `2天3小时`); empty means no active promotion. Always include both fields when presenting results — they are critical for the user to pick the best-value torrent.
 
 ## Common Workflows
@@ -56,15 +57,27 @@ node scripts/mp-cli.js query_sites                                              
 node scripts/mp-cli.js search_torrents tmdb_id=791373 media_type="movie"               # use user's default sites
 node scripts/mp-cli.js search_torrents tmdb_id=791373 media_type="movie" sites='1,3'   # override with specific sites
 
-# 3. Present available filter options to the user and ask for their preferences
-#    e.g. "Available resolutions: 1080p, 2160p. Release groups: CMCT, PTer. Which do you prefer?"
+# 3. Present ALL available filter_options to the user and ask which ones to apply
+#    Show every field and its values — do not pre-select or omit any
+#    e.g. "分辨率: 1080p, 2160p；字幕组: CMCT, PTer；请问需要筛选哪些条件？"
 
-# 4. Filter cached results using the user's selected preferences
-node scripts/mp-cli.js get_search_results resolution='2160p'
+# 4. Filter cached results based on user preferences and your own judgment
+#    Filter params are ANDed — if results come back empty, drop the most restrictive field and retry
+node scripts/mp-cli.js get_search_results resolution='1080p'
+
+# [Optional] Re-check available filter options from cached results (same shape as search_torrents; returns filter options only)
+node scripts/mp-cli.js get_search_results show_filter_options=true
 
 # 5. Present ALL filtered results as a numbered list — do not pre-select or discard any
 #    Show for each: index, title, size, seeders, resolution, release group, volume_factor, freedate_diff
-#    Let the user pick by number; only then call add_download
+#    Let the user pick by number; only then proceed to step 6
+
+# 6. After user confirms selection, check library and subscriptions before downloading
+node scripts/mp-cli.js query_library_exists tmdb_id=123456 media_type="movie"
+node scripts/mp-cli.js query_subscribes tmdb_id=123456
+# If already in library or subscribed, warn the user and ask for confirmation to proceed
+
+# 7. Add download
 node scripts/mp-cli.js add_download torrent_url="..."
 ```
 
@@ -112,8 +125,8 @@ Use `air_date` to find a block of recently-aired episodes that likely correspond
 
 ## Error Handling
 
-| Error                 | Resolution                                                                                                                                                                                                  |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No search results     | Retry with an alternative title (e.g. English title). If still empty, ask the user to confirm the title or provide the TMDB ID directly.                                                                    |
-| Download failure      | Check downloader status with `query_downloaders`; advise the user to verify storage or downloader health. If these are normal, mention it could be a network error and suggest retrying later.              |
-| Missing configuration | Ask the user for the backend host and API key. Once provided, run `node scripts/mp-cli.js -h <HOST> -k <KEY>` (no command) to save the config persistently — subsequent commands will use it automatically. |
+| Error                 | Resolution                                                                                                                                                                                                                                                                                           |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No search results     | Retry with an alternative title (e.g. English title). If still empty, ask the user to confirm the title or provide the TMDB ID directly.                                                                                                                                                             |
+| Download failure      | Run `query_downloaders` to check downloader health, then `query_download_tasks` to check if the task already exists (duplicate tasks are rejected). If both are normal, report findings to the user, suggest checking storage space, and mention it may be a network error — suggest retrying later. |
+| Missing configuration | Ask the user for the backend host and API key. Once provided, run `node scripts/mp-cli.js -h <HOST> -k <KEY>` (no command) to save the config persistently — subsequent commands will use it automatically.                                                                                          |

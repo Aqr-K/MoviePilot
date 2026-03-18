@@ -11,6 +11,7 @@ from app.chain.search import SearchChain
 from app.log import logger
 from ._torrent_search_utils import (
     TORRENT_RESULT_LIMIT,
+    build_filter_options,
     filter_contexts,
     simplify_search_result,
 )
@@ -27,6 +28,7 @@ class GetSearchResultsInput(BaseModel):
     resolution: Optional[List[str]] = Field(None, description="Resolution filters")
     release_group: Optional[List[str]] = Field(None, description="Release group filters")
     title_pattern: Optional[str] = Field(None, description="Regular expression pattern to filter torrent titles (e.g., '4K|2160p|UHD', '1080p.*BluRay')")
+    show_filter_options: Optional[bool] = Field(False, description="Whether to return only optional filter options for re-checking available conditions")
 
 class GetSearchResultsTool(MoviePilotTool):
     name: str = "get_search_results"
@@ -40,22 +42,30 @@ class GetSearchResultsTool(MoviePilotTool):
                   free_state: Optional[List[str]] = None, video_code: Optional[List[str]] = None,
                   edition: Optional[List[str]] = None, resolution: Optional[List[str]] = None,
                   release_group: Optional[List[str]] = None, title_pattern: Optional[str] = None,
+                  show_filter_options: bool = False,
                   **kwargs) -> str:
         logger.info(
-            f"执行工具: {self.name}, 参数: site={site}, season={season}, free_state={free_state}, video_code={video_code}, edition={edition}, resolution={resolution}, release_group={release_group}, title_pattern={title_pattern}")
-
-        regex_pattern = None
-        if title_pattern:
-            try:
-                regex_pattern = re.compile(title_pattern, re.IGNORECASE)
-            except re.error as e:
-                logger.warning(f"正则表达式编译失败: {title_pattern}, 错误: {e}")
-                return f"正则表达式格式错误: {str(e)}"
+            f"执行工具: {self.name}, 参数: site={site}, season={season}, free_state={free_state}, video_code={video_code}, edition={edition}, resolution={resolution}, release_group={release_group}, title_pattern={title_pattern}, show_filter_options={show_filter_options}")
 
         try:
             items = await SearchChain().async_last_search_results() or []
             if not items:
                 return "没有可用的搜索结果，请先使用 search_torrents 搜索"
+
+            if show_filter_options:
+                payload = {
+                    "total_count": len(items),
+                    "filter_options": build_filter_options(items),
+                }
+                return json.dumps(payload, ensure_ascii=False, indent=2)
+
+            regex_pattern = None
+            if title_pattern:
+                try:
+                    regex_pattern = re.compile(title_pattern, re.IGNORECASE)
+                except re.error as e:
+                    logger.warning(f"正则表达式编译失败: {title_pattern}, 错误: {e}")
+                    return f"正则表达式格式错误: {str(e)}"
 
             filtered_items = filter_contexts(
                 items=items,
