@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
 from app.log import logger
-from app.schemas import MediaType
+from app.schemas.types import MediaType
 
 
 class QueryMediaDetailInput(BaseModel):
@@ -34,14 +34,12 @@ class QueryMediaDetailTool(MoviePilotTool):
         try:
             media_chain = MediaChain()
 
-            media_type_key = (media_type or "").strip().lower()
-            if media_type_key not in ["movie", "tv"]:
+            media_type_enum = MediaType.from_agent(media_type)
+            if not media_type_enum:
                 return json.dumps({
                     "success": False,
                     "message": f"无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
                 }, ensure_ascii=False)
-
-            media_type_enum = MediaType.MOVIE if media_type_key == "movie" else MediaType.TV
 
             mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, mtype=media_type_enum)
             

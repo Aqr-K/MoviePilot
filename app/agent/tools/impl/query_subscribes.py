@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class QuerySubscribesInput(BaseModel):
@@ -47,17 +48,16 @@ class QuerySubscribesTool(MoviePilotTool):
                   tmdb_id: Optional[int] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}, tmdb_id={tmdb_id}")
         try:
-            if media_type not in ["all", "movie", "tv"]:
+            if media_type != "all" and not MediaType.from_agent(media_type):
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
 
-            media_type_map = {"movie": "电影", "tv": "电视剧"}
             subscribe_oper = SubscribeOper()
             subscribes = await subscribe_oper.async_list()
             filtered_subscribes = []
             for sub in subscribes:
                 if status != "all" and sub.state != status:
                     continue
-                if media_type != "all" and sub.type != media_type_map.get(media_type):
+                if media_type != "all" and sub.type != MediaType.from_agent(media_type).value:
                     continue
                 if tmdb_id is not None and sub.tmdbid != tmdb_id:
                     continue
@@ -73,7 +73,7 @@ class QuerySubscribesTool(MoviePilotTool):
                         "id": s.id,
                         "name": s.name,
                         "year": s.year,
-                        "type": s.type,
+                        "type": media_type_to_agent(s.type),
                         "season": s.season,
                         "tmdbid": s.tmdbid,
                         "doubanid": s.doubanid,

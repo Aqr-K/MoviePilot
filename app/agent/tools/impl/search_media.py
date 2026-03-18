@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
 from app.log import logger
-from app.schemas.types import MediaType
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class SearchMediaInput(BaseModel):
@@ -58,12 +58,8 @@ class SearchMediaTool(MoviePilotTool):
             if results:
                 media_type_enum = None
                 if media_type:
-                    media_type_key = media_type.strip().lower()
-                    if media_type_key == "movie":
-                        media_type_enum = MediaType.MOVIE
-                    elif media_type_key == "tv":
-                        media_type_enum = MediaType.TV
-                    else:
+                    media_type_enum = MediaType.from_agent(media_type)
+                    if not media_type_enum:
                         return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
                 filtered_results = []
@@ -87,7 +83,7 @@ class SearchMediaTool(MoviePilotTool):
                             "title": r.title,
                             "en_title": r.en_title,
                             "year": r.year,
-                            "type": r.type.value if r.type else None,
+                            "type": media_type_to_agent(r.type),
                             "season": r.season,
                             "tmdb_id": r.tmdb_id,
                             "imdb_id": r.imdb_id,

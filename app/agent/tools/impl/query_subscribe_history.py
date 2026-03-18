@@ -9,6 +9,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.db import AsyncSessionFactory
 from app.db.models.subscribehistory import SubscribeHistory
 from app.log import logger
+from app.schemas.types import media_type_to_agent
 
 
 class QuerySubscribeHistoryInput(BaseModel):
@@ -83,7 +84,7 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
                         "id": record.id,
                         "name": record.name,
                         "year": record.year,
-                        "type": record.type,
+                        "type": media_type_to_agent(record.type),
                         "season": record.season,
                         "tmdbid": record.tmdbid,
                         "doubanid": record.doubanid,

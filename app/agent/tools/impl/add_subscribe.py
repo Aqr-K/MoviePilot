@@ -73,12 +73,8 @@ class AddSubscribeTool(MoviePilotTool):
 
         try:
             subscribe_chain = SubscribeChain()
-            media_type_key = media_type.strip().lower()
-            if media_type_key == "movie":
-                media_type_enum = MediaType.MOVIE
-            elif media_type_key == "tv":
-                media_type_enum = MediaType.TV
-            else:
+            media_type_enum = MediaType.from_agent(media_type)
+            if not media_type_enum:
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             # 构建额外的订阅参数

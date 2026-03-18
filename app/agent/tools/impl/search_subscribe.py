@@ -10,6 +10,7 @@ from app.chain.subscribe import SubscribeChain
 from app.core.config import global_vars
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
+from app.schemas.types import media_type_to_agent
 
 
 class SearchSubscribeInput(BaseModel):
@@ -58,7 +59,7 @@ class SearchSubscribeTool(MoviePilotTool):
                 "id": subscribe.id,
                 "name": subscribe.name,
                 "year": subscribe.year,
-                "type": subscribe.type,
+                "type": media_type_to_agent(subscribe.type),
                 "season": subscribe.season,
                 "state": subscribe.state,
                 "total_episode": subscribe.total_episode,

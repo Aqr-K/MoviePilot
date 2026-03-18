@@ -10,7 +10,7 @@ from app.chain.download import DownloadChain
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.log import logger
 from app.schemas import TransferTorrent, DownloadingTorrent
-from app.schemas.types import TorrentStatus
+from app.schemas.types import TorrentStatus, media_type_to_agent
 
 
 class QueryDownloadTasksInput(BaseModel):
@@ -208,7 +208,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     if d.media:
                         simplified["media"] = {
                             "tmdbid": d.media.get("tmdbid"),
-                            "type": d.media.get("type"),
+                            "type": media_type_to_agent(d.media.get("type")),
                             "title": d.media.get("title"),
                             "season": d.media.get("season"),
                             "episode": d.media.get("episode")

@@ -10,7 +10,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.core.context import MediaInfo
 from app.helper.subscribe import SubscribeHelper
 from app.log import logger
-from app.schemas.types import MediaType
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class QueryPopularSubscribesInput(BaseModel):
@@ -69,12 +69,13 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                 page = 1
             if count is None or count < 1:
                 count = 30
-            if media_type not in ["movie", "tv"]:
+            media_type_enum = MediaType.from_agent(media_type)
+            if not media_type_enum:
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             subscribe_helper = SubscribeHelper()
             subscribes = await subscribe_helper.async_get_statistic(
-                stype=media_type,
+                stype=media_type_enum.to_agent(),
                 page=page,
                 count=count,
                 genre_id=genre_id,
@@ -134,7 +135,7 @@ class QueryPopularSubscribesTool(MoviePilotTool):
             for media in ret_medias:
                 media_dict = media.to_dict()
                 simplified = {
-                    "type": media_dict.get("type"),
+                    "type": media_type_to_agent(media_dict.get("type")),
                     "title": media_dict.get("title"),
                     "year": media_dict.get("year"),
                     "tmdb_id": media_dict.get("tmdb_id"),

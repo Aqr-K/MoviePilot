@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Optional
 
 
 # 媒体类型
@@ -7,6 +8,26 @@ class MediaType(Enum):
     TV = '电视剧'
     COLLECTION = '系列'
     UNKNOWN = '未知'
+
+    @staticmethod
+    def from_agent(key: str) -> Optional["MediaType"]:
+        """'movie' -> MediaType.MOVIE, 'tv' -> MediaType.TV, 否则 None"""
+        _map = {"movie": MediaType.MOVIE, "tv": MediaType.TV}
+        return _map.get(key.strip().lower() if key else "")
+
+    def to_agent(self) -> str:
+        """MediaType.MOVIE -> 'movie', MediaType.TV -> 'tv', 其他返回 .value"""
+        return {MediaType.MOVIE: "movie", MediaType.TV: "tv"}.get(self, self.value)
+
+
+def media_type_to_agent(value) -> Optional[str]:
+    """将 MediaType 枚举或中文字符串统一转为 'movie'/'tv'"""
+    if isinstance(value, MediaType):
+        return value.to_agent()
+    if isinstance(value, str):
+        mt = MediaType.from_agent(value)
+        return mt.to_agent() if mt else value
+    return None
 
 
 # 排序类型枚举

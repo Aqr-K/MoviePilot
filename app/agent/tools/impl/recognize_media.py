@@ -10,6 +10,7 @@ from app.chain.media import MediaChain
 from app.core.context import Context
 from app.core.metainfo import MetaInfo
 from app.log import logger
+from app.schemas.types import media_type_to_agent
 
 
 class RecognizeMediaInput(BaseModel):
@@ -124,7 +125,7 @@ class RecognizeMediaTool(MoviePilotTool):
                 "title": media_info.get("title"),
                 "en_title": media_info.get("en_title"),
                 "year": media_info.get("year"),
-                "type": media_info.get("type"),
+                "type": media_type_to_agent(media_info.get("type")),
                 "season": media_info.get("season"),
                 "tmdb_id": media_info.get("tmdb_id"),
                 "imdb_id": media_info.get("imdb_id"),
@@ -145,7 +146,7 @@ class RecognizeMediaTool(MoviePilotTool):
                 "name": meta_info.get("name"),
                 "title": meta_info.get("title"),
                 "year": meta_info.get("year"),
-                "type": meta_info.get("type"),
+                "type": media_type_to_agent(meta_info.get("type")),
                 "begin_season": meta_info.get("begin_season"),
                 "end_season": meta_info.get("end_season"),
                 "begin_episode": meta_info.get("begin_episode"),

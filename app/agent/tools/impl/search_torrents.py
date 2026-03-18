@@ -63,12 +63,8 @@ class SearchTorrentsTool(MoviePilotTool):
             search_chain = SearchChain()
             media_type_enum = None
             if media_type:
-                media_type_key = media_type.strip().lower()
-                if media_type_key == "movie":
-                    media_type_enum = MediaType.MOVIE
-                elif media_type_key == "tv":
-                    media_type_enum = MediaType.TV
-                else:
+                media_type_enum = MediaType.from_agent(media_type)
+                if not media_type_enum:
                     return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             filtered_torrents = await search_chain.async_search_by_id(
