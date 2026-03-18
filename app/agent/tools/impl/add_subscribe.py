@@ -21,6 +21,8 @@ class AddSubscribeInput(BaseModel):
                                   description="Season number for TV shows (optional, if not specified will subscribe to all seasons)")
     tmdb_id: Optional[int] = Field(None,
                                    description="TMDB database ID for precise media identification (optional, can be obtained from search_media tool)")
+    douban_id: Optional[str] = Field(None,
+                                     description="Douban ID for precise media identification (optional, alternative to tmdb_id)")
     start_episode: Optional[int] = Field(None,
                                           description="Starting episode number for TV shows (optional, defaults to 1 if not specified)")
     total_episode: Optional[int] = Field(None,
@@ -61,13 +63,14 @@ class AddSubscribeTool(MoviePilotTool):
 
     async def run(self, title: str, year: str, media_type: str,
                   season: Optional[int] = None, tmdb_id: Optional[int] = None,
+                  douban_id: Optional[str] = None,
                   start_episode: Optional[int] = None, total_episode: Optional[int] = None,
                   quality: Optional[str] = None, resolution: Optional[str] = None,
                   effect: Optional[str] = None, filter_groups: Optional[List[str]] = None,
                   sites: Optional[List[int]] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, "
-            f"season={season}, tmdb_id={tmdb_id}, start_episode={start_episode}, "
+            f"season={season}, tmdb_id={tmdb_id}, douban_id={douban_id}, start_episode={start_episode}, "
             f"total_episode={total_episode}, quality={quality}, resolution={resolution}, "
             f"effect={effect}, filter_groups={filter_groups}, sites={sites}")
 
@@ -99,6 +102,7 @@ class AddSubscribeTool(MoviePilotTool):
                 title=title,
                 year=year,
                 tmdbid=tmdb_id,
+                doubanid=douban_id,
                 season=season,
                 username=self._user_id,
                 **subscribe_kwargs

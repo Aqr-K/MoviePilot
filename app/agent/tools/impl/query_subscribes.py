@@ -19,6 +19,7 @@ class QuerySubscribesInput(BaseModel):
     media_type: Optional[str] = Field("all",
                                       description="Allowed values: movie, tv, all")
     tmdb_id: Optional[int] = Field(None, description="Filter by TMDB ID to check if a specific media is already subscribed")
+    douban_id: Optional[str] = Field(None, description="Filter by Douban ID to check if a specific media is already subscribed")
 
 
 class QuerySubscribesTool(MoviePilotTool):
@@ -45,8 +46,8 @@ class QuerySubscribesTool(MoviePilotTool):
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
     async def run(self, status: Optional[str] = "all", media_type: Optional[str] = "all",
-                  tmdb_id: Optional[int] = None, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}, tmdb_id={tmdb_id}")
+                  tmdb_id: Optional[int] = None, douban_id: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}, tmdb_id={tmdb_id}, douban_id={douban_id}")
         try:
             if media_type != "all" and not MediaType.from_agent(media_type):
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
@@ -60,6 +61,8 @@ class QuerySubscribesTool(MoviePilotTool):
                 if media_type != "all" and sub.type != MediaType.from_agent(media_type).value:
                     continue
                 if tmdb_id is not None and sub.tmdbid != tmdb_id:
+                    continue
+                if douban_id is not None and sub.doubanid != douban_id:
                     continue
                 filtered_subscribes.append(sub)
             if filtered_subscribes:
