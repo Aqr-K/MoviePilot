@@ -8,45 +8,56 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
 from app.log import logger
-from app.schemas import MediaType
+from app.schemas.types import MediaType
 
 
 class QueryMediaDetailInput(BaseModel):
     """查询媒体详情工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    tmdb_id: int = Field(..., description="TMDB ID of the media (movie or TV series)")
-    media_type: str = Field(..., description="Media type: 'movie' or 'tv'")
+    tmdb_id: Optional[int] = Field(None, description="TMDB ID of the media (movie or TV series, can be obtained from search_media tool)")
+    douban_id: Optional[str] = Field(None, description="Douban ID of the media (alternative to tmdb_id)")
+    media_type: str = Field(..., description="Allowed values: movie, tv")
 
 
 class QueryMediaDetailTool(MoviePilotTool):
     name: str = "query_media_detail"
-    description: str = "Query detailed media information from TMDB by ID and media_type. IMPORTANT: Convert search results type: '电影'→'movie', '电视剧'→'tv'. Returns core metadata including title, year, overview, status, genres, directors, actors, and season count for TV series."
+    description: str = "Query supplementary media details from TMDB by ID and media_type. Accepts tmdb_id or douban_id (at least one required). media_type accepts 'movie' or 'tv'. Returns non-duplicated detail fields such as status, genres, directors, actors, and season info for TV series."
     args_schema: Type[BaseModel] = QueryMediaDetailInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""
         tmdb_id = kwargs.get("tmdb_id")
-        return f"正在查询媒体详情: TMDB ID {tmdb_id}"
+        douban_id = kwargs.get("douban_id")
+        if tmdb_id:
+            return f"正在查询媒体详情: TMDB ID {tmdb_id}"
+        return f"正在查询媒体详情: 豆瓣 ID {douban_id}"
 
-    async def run(self, tmdb_id: int, media_type: str, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, media_type={media_type}")
+    async def run(self, media_type: str, tmdb_id: Optional[int] = None, douban_id: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, douban_id={douban_id}, media_type={media_type}")
+
+        if tmdb_id is None and douban_id is None:
+            return json.dumps({
+                "success": False,
+                "message": "必须提供 tmdb_id 或 douban_id 之一"
+            }, ensure_ascii=False)
 
         try:
             media_chain = MediaChain()
 
-            mtype = None
-            if media_type:
-                if media_type.lower() == 'movie':
-                    mtype = MediaType.MOVIE
-                elif media_type.lower() == 'tv':
-                    mtype = MediaType.TV
-
-            mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, mtype=mtype)
-            
-            if not mediainfo:
+            media_type_enum = MediaType.from_agent(media_type)
+            if not media_type_enum:
                 return json.dumps({
                     "success": False,
-                    "message": f"未找到 TMDB ID {tmdb_id} 的媒体信息"
+                    "message": f"无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
+                }, ensure_ascii=False)
+
+            mediainfo = await media_chain.async_recognize_media(tmdbid=tmdb_id, doubanid=douban_id, mtype=media_type_enum)
+
+            if not mediainfo:
+                id_info = f"TMDB ID {tmdb_id}" if tmdb_id else f"豆瓣 ID {douban_id}"
+                return json.dumps({
+                    "success": False,
+                    "message": f"未找到 {id_info} 的媒体信息"
                 }, ensure_ascii=False)
 
             # 精简 genres - 只保留名称
@@ -74,12 +85,6 @@ class QueryMediaDetailTool(MoviePilotTool):
 
             # 构建基础媒体详情信息
             result = {
-                "success": True,
-                "tmdb_id": tmdb_id,
-                "type": mediainfo.type.value if mediainfo.type else None,
-                "title": mediainfo.title,
-                "year": mediainfo.year,
-                "overview": mediainfo.overview,
                 "status": mediainfo.status,
                 "genres": genres,
                 "directors": directors,
@@ -116,5 +121,6 @@ class QueryMediaDetailTool(MoviePilotTool):
             return json.dumps({
                 "success": False,
                 "message": error_message,
-                "tmdb_id": tmdb_id
+                "tmdb_id": tmdb_id,
+                "douban_id": douban_id
             }, ensure_ascii=False)

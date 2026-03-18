@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.chain.recommend import RecommendChain
 from app.log import logger
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class GetRecommendationsInput(BaseModel):
@@ -30,7 +31,7 @@ class GetRecommendationsInput(BaseModel):
                                   "'douban_tv_animation' for Douban popular animation, "
                                   "'bangumi_calendar' for Bangumi anime calendar")
     media_type: Optional[str] = Field("all",
-                                      description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
+                                      description="Allowed values: movie, tv, all")
     limit: Optional[int] = Field(20,
                                  description="Maximum number of recommendations to return (default: 20, maximum: 100)")
 
@@ -75,6 +76,12 @@ class GetRecommendationsTool(MoviePilotTool):
                   media_type: Optional[str] = "all", limit: Optional[int] = 20, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: source={source}, media_type={media_type}, limit={limit}")
         try:
+            if media_type != "all":
+                media_type_enum = MediaType.from_agent(media_type)
+                if not media_type_enum:
+                    return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
+                media_type = media_type_enum.to_agent()  # 归一化为 "movie"/"tv"
+
             recommend_chain = RecommendChain()
             results = []
             if source == "tmdb_trending":
@@ -149,7 +156,7 @@ class GetRecommendationsTool(MoviePilotTool):
                         "title": r.get("title"),
                         "en_title": r.get("en_title"),
                         "year": r.get("year"),
-                        "type": r.get("type"),
+                        "type": media_type_to_agent(r.get("type")),
                         "season": r.get("season"),
                         "tmdb_id": r.get("tmdb_id"),
                         "imdb_id": r.get("imdb_id"),

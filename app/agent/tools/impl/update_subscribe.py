@@ -16,7 +16,7 @@ from app.schemas.types import EventType
 class UpdateSubscribeInput(BaseModel):
     """更新订阅工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    subscribe_id: int = Field(..., description="The ID of the subscription to update")
+    subscribe_id: int = Field(..., description="The ID of the subscription to update (can be obtained from query_subscribes tool)")
     name: Optional[str] = Field(None, description="Subscription name/title (optional)")
     year: Optional[str] = Field(None, description="Release year (optional)")
     season: Optional[int] = Field(None, description="Season number for TV shows (optional)")

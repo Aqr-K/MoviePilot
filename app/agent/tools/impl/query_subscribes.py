@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class QuerySubscribesInput(BaseModel):
@@ -16,7 +17,9 @@ class QuerySubscribesInput(BaseModel):
     status: Optional[str] = Field("all",
                                   description="Filter subscriptions by status: 'R' for enabled subscriptions, 'S' for paused ones, 'all' for all subscriptions")
     media_type: Optional[str] = Field("all",
-                                      description="Filter by media type: '电影' for films, '电视剧' for television series, 'all' for all types")
+                                      description="Allowed values: movie, tv, all")
+    tmdb_id: Optional[int] = Field(None, description="Filter by TMDB ID to check if a specific media is already subscribed")
+    douban_id: Optional[str] = Field(None, description="Filter by Douban ID to check if a specific media is already subscribed")
 
 
 class QuerySubscribesTool(MoviePilotTool):
@@ -42,16 +45,24 @@ class QuerySubscribesTool(MoviePilotTool):
         
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
-    async def run(self, status: Optional[str] = "all", media_type: Optional[str] = "all", **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}")
+    async def run(self, status: Optional[str] = "all", media_type: Optional[str] = "all",
+                  tmdb_id: Optional[int] = None, douban_id: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: status={status}, media_type={media_type}, tmdb_id={tmdb_id}, douban_id={douban_id}")
         try:
+            if media_type != "all" and not MediaType.from_agent(media_type):
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
+
             subscribe_oper = SubscribeOper()
             subscribes = await subscribe_oper.async_list()
             filtered_subscribes = []
             for sub in subscribes:
                 if status != "all" and sub.state != status:
                     continue
-                if media_type != "all" and sub.type != media_type:
+                if media_type != "all" and sub.type != MediaType.from_agent(media_type).value:
+                    continue
+                if tmdb_id is not None and sub.tmdbid != tmdb_id:
+                    continue
+                if douban_id is not None and sub.doubanid != douban_id:
                     continue
                 filtered_subscribes.append(sub)
             if filtered_subscribes:
@@ -65,7 +76,7 @@ class QuerySubscribesTool(MoviePilotTool):
                         "id": s.id,
                         "name": s.name,
                         "year": s.year,
-                        "type": s.type,
+                        "type": media_type_to_agent(s.type),
                         "season": s.season,
                         "tmdbid": s.tmdbid,
                         "doubanid": s.doubanid,

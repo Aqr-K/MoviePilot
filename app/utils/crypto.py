@@ -110,6 +110,19 @@ class HashUtils:
         return hashlib.md5(data).hexdigest()
 
     @staticmethod
+    def sha1(data: Union[str, bytes], encoding: str = "utf-8") -> str:
+        """
+        生成数据的SHA-1哈希值，并以字符串形式返回
+
+        :param data: 输入的数据，类型为字符串或字节
+        :param encoding: 字符串编码类型，默认使用UTF-8
+        :return: 生成的SHA-1哈希字符串
+        """
+        if isinstance(data, str):
+            data = data.encode(encoding)
+        return hashlib.sha1(data).hexdigest()
+
+    @staticmethod
     def md5_bytes(data: Union[str, bytes], encoding: str = "utf-8") -> bytes:
         """
         生成数据的MD5哈希值，并以字节形式返回

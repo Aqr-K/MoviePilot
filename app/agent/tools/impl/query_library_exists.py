@@ -7,76 +7,61 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.mediaserver import MediaServerChain
-from app.core.context import MediaInfo
-from app.core.meta import MetaBase
 from app.log import logger
-from app.schemas.types import MediaType
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class QueryLibraryExistsInput(BaseModel):
     """查询媒体库工具的输入参数模型"""
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    media_type: Optional[str] = Field("all",
-                                      description="Type of media content: '电影' for films, '电视剧' for television series or anime series, 'all' for all types")
-    title: Optional[str] = Field(None,
-                                 description="Specific media title to check if it exists in the media library (optional, if provided checks for that specific media)")
-    year: Optional[str] = Field(None,
-                                description="Release year of the media (optional, helps narrow down search results)")
+    tmdb_id: Optional[int] = Field(None, description="TMDB ID (can be obtained from search_media tool). Either tmdb_id or douban_id must be provided.")
+    douban_id: Optional[str] = Field(None, description="Douban ID (can be obtained from search_media tool). Either tmdb_id or douban_id must be provided.")
+    media_type: Optional[str] = Field(None, description="Allowed values: movie, tv")
 
 
 class QueryLibraryExistsTool(MoviePilotTool):
     name: str = "query_library_exists"
-    description: str = "Check if a specific media resource already exists in the media library (Plex, Emby, Jellyfin). Use this tool to verify whether a movie or TV series has been successfully processed and added to the media server before performing operations like downloading or subscribing."
+    description: str = "Check whether a specific media resource already exists in the media library (Plex, Emby, Jellyfin) by media ID. Requires tmdb_id or douban_id (can be obtained from search_media tool) for accurate matching."
     args_schema: Type[BaseModel] = QueryLibraryExistsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""
-        media_type = kwargs.get("media_type", "all")
-        title = kwargs.get("title")
-        year = kwargs.get("year")
-        
-        parts = ["正在查询媒体库"]
-        
-        if title:
-            parts.append(f"标题: {title}")
-        if year:
-            parts.append(f"年份: {year}")
-        if media_type != "all":
-            parts.append(f"类型: {media_type}")
-        
-        return " | ".join(parts) if len(parts) > 1 else parts[0]
+        tmdb_id = kwargs.get("tmdb_id")
+        douban_id = kwargs.get("douban_id")
+        media_type = kwargs.get("media_type")
 
-    async def run(self, media_type: Optional[str] = "all",
-                  title: Optional[str] = None, year: Optional[str] = None, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: media_type={media_type}, title={title}")
+        if tmdb_id:
+            message = f"正在查询媒体库: TMDB={tmdb_id}"
+        elif douban_id:
+            message = f"正在查询媒体库: 豆瓣={douban_id}"
+        else:
+            message = "正在查询媒体库"
+        if media_type:
+            message += f" [{media_type}]"
+        return message
+
+    async def run(self, tmdb_id: Optional[int] = None, douban_id: Optional[str] = None,
+                  media_type: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, douban_id={douban_id}, media_type={media_type}")
         try:
-            if not title:
-                return "请提供媒体标题进行查询"
+            if not tmdb_id and not douban_id:
+                return "参数错误：tmdb_id 和 douban_id 至少需要提供一个，请先使用 search_media 工具获取媒体 ID。"
+
+            media_type_enum = None
+            if media_type:
+                media_type_enum = MediaType.from_agent(media_type)
+                if not media_type_enum:
+                    return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             media_chain = MediaServerChain()
-
-            # 1. 识别媒体信息（获取 TMDB ID 和各季的总集数等元数据）
-            meta = MetaBase(title=title)
-            if year:
-                meta.year = str(year)
-            if media_type == "电影":
-                meta.type = MediaType.MOVIE
-            elif media_type == "电视剧":
-                meta.type = MediaType.TV
-
-            # 使用识别方法补充信息
-            recognize_info = media_chain.recognize_media(meta=meta)
-            if recognize_info:
-                mediainfo = recognize_info
-            else:
-                # 识别失败，创建基本信息的 MediaInfo
-                mediainfo = MediaInfo()
-                mediainfo.title = title
-                mediainfo.year = year
-                if media_type == "电影":
-                    mediainfo.type = MediaType.MOVIE
-                elif media_type == "电视剧":
-                    mediainfo.type = MediaType.TV
+            mediainfo = media_chain.recognize_media(
+                tmdbid=tmdb_id,
+                doubanid=douban_id,
+                mtype=media_type_enum,
+            )
+            if not mediainfo:
+                media_id = f"TMDB={tmdb_id}" if tmdb_id else f"豆瓣={douban_id}"
+                return f"未识别到媒体信息: {media_id}"
 
             # 2. 调用媒体服务器接口实时查询存在信息
             existsinfo = media_chain.media_exists(mediainfo=mediainfo)
@@ -120,7 +105,7 @@ class QueryLibraryExistsTool(MoviePilotTool):
             result_dict = {
                 "title": mediainfo.title,
                 "year": mediainfo.year,
-                "type": existsinfo.type.value if existsinfo.type else None,
+                "type": media_type_to_agent(existsinfo.type),
                 "server": existsinfo.server,
                 "server_type": existsinfo.server_type,
                 "itemid": existsinfo.itemid,

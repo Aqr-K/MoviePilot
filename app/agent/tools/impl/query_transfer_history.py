@@ -10,6 +10,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.db import AsyncSessionFactory
 from app.db.models.transferhistory import TransferHistory
 from app.log import logger
+from app.schemas.types import media_type_to_agent
 
 
 class QueryTransferHistoryInput(BaseModel):
@@ -95,7 +96,7 @@ class QueryTransferHistoryTool(MoviePilotTool):
                         "id": record.id,
                         "title": record.title,
                         "year": record.year,
-                        "type": record.type,
+                        "type": media_type_to_agent(record.type),
                         "category": record.category,
                         "seasons": record.seasons,
                         "episodes": record.episodes,

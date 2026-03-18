@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
 from app.log import logger
-from app.schemas.types import MediaType
+from app.schemas.types import MediaType, media_type_to_agent
 
 
 class SearchMediaInput(BaseModel):
@@ -17,7 +17,7 @@ class SearchMediaInput(BaseModel):
     title: str = Field(..., description="The title of the media to search for (e.g., 'The Matrix', 'Breaking Bad')")
     year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down results)")
     media_type: Optional[str] = Field(None,
-                                      description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
+                                      description="Allowed values: movie, tv")
     season: Optional[int] = Field(None,
                                   description="Season number for TV shows and anime (optional, only applicable for series)")
 
@@ -56,13 +56,18 @@ class SearchMediaTool(MoviePilotTool):
 
             # 过滤结果
             if results:
+                media_type_enum = None
+                if media_type:
+                    media_type_enum = MediaType.from_agent(media_type)
+                    if not media_type_enum:
+                        return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
+
                 filtered_results = []
                 for result in results:
                     if year and result.year != year:
                         continue
-                    if media_type:
-                        if result.type != MediaType(media_type):
-                            continue
+                    if media_type_enum and result.type != media_type_enum:
+                        continue
                     if season is not None and result.season != season:
                         continue
                     filtered_results.append(result)
@@ -78,7 +83,7 @@ class SearchMediaTool(MoviePilotTool):
                             "title": r.title,
                             "en_title": r.en_title,
                             "year": r.year,
-                            "type": r.type.value if r.type else None,
+                            "type": media_type_to_agent(r.type),
                             "season": r.season,
                             "tmdb_id": r.tmdb_id,
                             "imdb_id": r.imdb_id,

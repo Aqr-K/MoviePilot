@@ -16,11 +16,13 @@ class AddSubscribeInput(BaseModel):
     title: str = Field(..., description="The title of the media to subscribe to (e.g., 'The Matrix', 'Breaking Bad')")
     year: str = Field(..., description="Release year of the media (required for accurate identification)")
     media_type: str = Field(...,
-                            description="Type of media content: '电影' for films, '电视剧' for television series or anime series")
+                            description="Allowed values: movie, tv")
     season: Optional[int] = Field(None,
                                   description="Season number for TV shows (optional, if not specified will subscribe to all seasons)")
-    tmdb_id: Optional[str] = Field(None,
-                                   description="TMDB database ID for precise media identification (optional but recommended for accuracy)")
+    tmdb_id: Optional[int] = Field(None,
+                                   description="TMDB database ID for precise media identification (optional, can be obtained from search_media tool)")
+    douban_id: Optional[str] = Field(None,
+                                     description="Douban ID for precise media identification (optional, alternative to tmdb_id)")
     start_episode: Optional[int] = Field(None,
                                           description="Starting episode number for TV shows (optional, defaults to 1 if not specified)")
     total_episode: Optional[int] = Field(None,
@@ -32,9 +34,9 @@ class AddSubscribeInput(BaseModel):
     effect: Optional[str] = Field(None,
                                   description="Effect filter as regular expression (optional, e.g., 'HDR|DV|SDR')")
     filter_groups: Optional[List[str]] = Field(None,
-                                               description="List of filter rule group names to apply (optional, use query_rule_groups tool to get available rule groups)")
+                               description="List of filter rule group names to apply (optional, can be obtained from query_rule_groups tool)")
     sites: Optional[List[int]] = Field(None,
-                                       description="List of site IDs to search from (optional, use query_sites tool to get available site IDs)")
+                           description="List of site IDs to search from (optional, can be obtained from query_sites tool)")
 
 
 class AddSubscribeTool(MoviePilotTool):
@@ -60,26 +62,23 @@ class AddSubscribeTool(MoviePilotTool):
         return message
 
     async def run(self, title: str, year: str, media_type: str,
-                  season: Optional[int] = None, tmdb_id: Optional[str] = None,
+                  season: Optional[int] = None, tmdb_id: Optional[int] = None,
+                  douban_id: Optional[str] = None,
                   start_episode: Optional[int] = None, total_episode: Optional[int] = None,
                   quality: Optional[str] = None, resolution: Optional[str] = None,
                   effect: Optional[str] = None, filter_groups: Optional[List[str]] = None,
                   sites: Optional[List[int]] = None, **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, year={year}, media_type={media_type}, "
-            f"season={season}, tmdb_id={tmdb_id}, start_episode={start_episode}, "
+            f"season={season}, tmdb_id={tmdb_id}, douban_id={douban_id}, start_episode={start_episode}, "
             f"total_episode={total_episode}, quality={quality}, resolution={resolution}, "
             f"effect={effect}, filter_groups={filter_groups}, sites={sites}")
 
         try:
             subscribe_chain = SubscribeChain()
-            # 转换 tmdb_id 为整数
-            tmdbid_int = None
-            if tmdb_id:
-                try:
-                    tmdbid_int = int(tmdb_id)
-                except (ValueError, TypeError):
-                    logger.warning(f"无效的 tmdb_id: {tmdb_id}，将忽略")
+            media_type_enum = MediaType.from_agent(media_type)
+            if not media_type_enum:
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             # 构建额外的订阅参数
             subscribe_kwargs = {}
@@ -99,10 +98,11 @@ class AddSubscribeTool(MoviePilotTool):
                 subscribe_kwargs['sites'] = sites
 
             sid, message = await subscribe_chain.async_add(
-                mtype=MediaType(media_type),
+                mtype=media_type_enum,
                 title=title,
                 year=year,
-                tmdbid=tmdbid_int,
+                tmdbid=tmdb_id,
+                doubanid=douban_id,
                 season=season,
                 username=self._user_id,
                 **subscribe_kwargs

@@ -100,6 +100,69 @@ class MoviePilotToolsManager:
         return None
 
     @staticmethod
+    def _resolve_field_schema(field_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        解析字段schema，兼容 Optional[T] 生成的 anyOf 结构
+        """
+        if field_info.get("type"):
+            return field_info
+
+        any_of = field_info.get("anyOf")
+        if not any_of:
+            return field_info
+
+        for type_option in any_of:
+            if type_option.get("type") and type_option["type"] != "null":
+                merged = dict(type_option)
+                if "description" not in merged and field_info.get("description"):
+                    merged["description"] = field_info["description"]
+                if "default" not in merged and "default" in field_info:
+                    merged["default"] = field_info["default"]
+                return merged
+
+        return field_info
+
+    @staticmethod
+    def _normalize_scalar_value(field_type: Optional[str], value: Any, key: str) -> Any:
+        """
+        根据字段类型规范化单个值
+        """
+        if field_type == "integer" and isinstance(value, str):
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                logger.warning(f"无法将参数 {key}='{value}' 转换为整数，返回 None")
+                return None
+        if field_type == "number" and isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                logger.warning(f"无法将参数 {key}='{value}' 转换为浮点数，返回 None")
+                return None
+        if field_type == "boolean":
+            if isinstance(value, str):
+                return value.lower() in ("true", "1", "yes", "on")
+            if isinstance(value, (int, float)):
+                return value != 0
+            if isinstance(value, bool):
+                return value
+            return True
+        return value
+
+    @staticmethod
+    def _parse_array_string(value: str, key: str, item_type: str = "string") -> list:
+        """
+        将逗号分隔的字符串解析为列表，并根据 item_type 转换元素类型
+        """
+        trimmed = value.strip()
+        if not trimmed:
+            return []
+        return [
+            MoviePilotToolsManager._normalize_scalar_value(item_type, item.strip(), key)
+            for item in trimmed.split(",") if item.strip()
+        ]
+
+    @staticmethod
     def _normalize_arguments(tool_instance: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         根据工具的参数schema规范化参数类型
@@ -132,40 +195,17 @@ class MoviePilotToolsManager:
                 normalized[key] = value
                 continue
 
-            field_info = properties[key]
+            field_info = MoviePilotToolsManager._resolve_field_schema(properties[key])
             field_type = field_info.get("type")
 
-            # 处理 anyOf 类型（例如 Optional[int] 会生成 anyOf）
-            any_of = field_info.get("anyOf")
-            if any_of and not field_type:
-                # 从 anyOf 中提取实际类型
-                for type_option in any_of:
-                    if "type" in type_option and type_option["type"] != "null":
-                        field_type = type_option["type"]
-                        break
+            # 数组类型：将字符串解析为列表
+            if field_type == "array" and isinstance(value, str):
+                item_type = field_info.get("items", {}).get("type", "string")
+                normalized[key] = MoviePilotToolsManager._parse_array_string(value, key, item_type)
+                continue
 
             # 根据类型进行转换
-            if field_type == "integer" and isinstance(value, str):
-                try:
-                    normalized[key] = int(value)
-                except (ValueError, TypeError):
-                    logger.warning(f"无法将参数 {key}='{value}' 转换为整数，保持原值")
-                    normalized[key] = None
-            elif field_type == "number" and isinstance(value, str):
-                try:
-                    normalized[key] = float(value)
-                except (ValueError, TypeError):
-                    logger.warning(f"无法将参数 {key}='{value}' 转换为浮点数，保持原值")
-                    normalized[key] = None
-            elif field_type == "boolean":
-                if isinstance(value, str):
-                    normalized[key] = value.lower() in ("true", "1", "yes", "on")
-                elif isinstance(value, (int, float)):
-                    normalized[key] = value != 0
-                else:
-                    normalized[key] = True
-            else:
-                normalized[key] = value
+            normalized[key] = MoviePilotToolsManager._normalize_scalar_value(field_type, value, key)
 
         return normalized
 
@@ -235,14 +275,15 @@ class MoviePilotToolsManager:
 
         if "properties" in schema:
             for field_name, field_info in schema["properties"].items():
+                resolved_field_info = MoviePilotToolsManager._resolve_field_schema(field_info)
                 # 转换字段类型
-                field_type = field_info.get("type", "string")
-                field_description = field_info.get("description", "")
+                field_type = resolved_field_info.get("type", "string")
+                field_description = resolved_field_info.get("description", "")
 
                 # 处理可选字段
                 if field_name not in schema.get("required", []):
                     # 可选字段
-                    default_value = field_info.get("default")
+                    default_value = resolved_field_info.get("default")
                     properties[field_name] = {
                         "type": field_type,
                         "description": field_description
@@ -257,12 +298,12 @@ class MoviePilotToolsManager:
                     required.append(field_name)
 
                 # 处理枚举类型
-                if "enum" in field_info:
-                    properties[field_name]["enum"] = field_info["enum"]
+                if "enum" in resolved_field_info:
+                    properties[field_name]["enum"] = resolved_field_info["enum"]
 
                 # 处理数组类型
-                if field_type == "array" and "items" in field_info:
-                    properties[field_name]["items"] = field_info["items"]
+                if field_type == "array" and "items" in resolved_field_info:
+                    properties[field_name]["items"] = resolved_field_info["items"]
 
         return {
             "type": "object",
