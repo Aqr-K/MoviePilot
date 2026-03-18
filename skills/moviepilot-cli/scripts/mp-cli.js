@@ -149,7 +149,7 @@ function normalizeCommand(tool = {}) {
   };
 }
 
-function request(method, targetUrl, headers = {}, body) {
+function request(method, targetUrl, headers = {}, body, timeout = 120000) {
   return new Promise((resolve, reject) => {
     let url;
     try {
@@ -179,6 +179,10 @@ function request(method, targetUrl, headers = {}, body) {
         });
       }
     );
+
+    req.setTimeout(timeout, () => {
+      req.destroy(new Error(`Request timed out after ${timeout}ms`));
+    });
 
     req.on('error', reject);
 
@@ -225,7 +229,7 @@ async function loadCommandJson(commandName) {
 
   if (statusCode === '404') {
     console.error(`Error: command '${commandName}' not found`);
-    console.error(`Run '${SCRIPT_NAME} list' to see available commands`);
+    console.error(`Run 'node ${SCRIPT_NAME} list' to see available commands`);
     process.exit(1);
   }
 
@@ -345,80 +349,7 @@ async function cmdShow(commandName) {
   process.stdout.write(`\n${usageLabel} ${usageLine}${reqPart}${optPart}\n`);
 }
 
-function parseBoolean(value) {
-  return value === 'true' || value === '1' || value === 'yes';
-}
-
-function parseNumber(value, key) {
-  if (value === '') {
-    fail(`Error: invalid numeric value for '${key}'`);
-  }
-
-  const result = Number(value);
-  if (Number.isNaN(result)) {
-    fail(`Error: invalid numeric value for '${key}': '${value}'`);
-  }
-  return result;
-}
-
-function parseScalarValue(value, key, type = 'string') {
-  if (type === 'integer' || type === 'number') {
-    return parseNumber(value, key);
-  }
-
-  if (type === 'boolean') {
-    return parseBoolean(value);
-  }
-
-  return value;
-}
-
-function parseArrayValue(value, key, itemType = 'string') {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return [];
-  }
-
-  if (trimmed.startsWith('[')) {
-    let parsed;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      fail(`Error: invalid array value for '${key}': '${value}'`);
-    }
-
-    if (!Array.isArray(parsed)) {
-      fail(`Error: invalid array value for '${key}': '${value}'`);
-    }
-
-    return parsed.map((item) => {
-      if (typeof item === 'string') {
-        return parseScalarValue(item.trim(), key, itemType);
-      }
-      if (itemType === 'integer' || itemType === 'number') {
-        if (typeof item !== 'number') {
-          fail(`Error: invalid numeric value for '${key}': '${item}'`);
-        }
-        return item;
-      }
-      if (itemType === 'boolean') {
-        if (typeof item !== 'boolean') {
-          fail(`Error: invalid boolean value for '${key}': '${item}'`);
-        }
-        return item;
-      }
-      return item;
-    });
-  }
-
-  return trimmed
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => parseScalarValue(item, key, itemType));
-}
-
-function buildArguments(command, pairs) {
+function buildArguments(pairs) {
   const args = { explanation: 'CLI invocation' };
 
   for (const kv of pairs) {
@@ -427,40 +358,20 @@ function buildArguments(command, pairs) {
     }
 
     const index = kv.indexOf('=');
-    const key = kv.slice(0, index);
-    const value = kv.slice(index + 1);
-    const field = command.fields.find((item) => item.name === key);
-    const fieldType = field?.type || 'string';
-    const itemType = field?.item_type || 'string';
-
-    if (fieldType === 'array') {
-      args[key] = parseArrayValue(value, key, itemType);
-      continue;
-    }
-
-    args[key] = parseScalarValue(value, key, fieldType);
+    args[kv.slice(0, index)] = kv.slice(index + 1);
   }
 
   return args;
 }
 
 async function cmdRun(commandName, pairs) {
-  await loadCommandsJson();
-
   if (!commandName) {
     fail(`Usage: ${SCRIPT_NAME} <command> [key=value ...]`);
   }
 
-  const command = commandsJson.find((item) => item.name === commandName);
-  if (!command) {
-    console.error(`Error: command '${commandName}' not found`);
-    console.error(`Run 'node ${SCRIPT_NAME} list' to see available commands`);
-    process.exit(1);
-  }
-
   const requestBody = JSON.stringify({
     tool_name: commandName,
-    arguments: buildArguments(command, pairs),
+    arguments: buildArguments(pairs),
   });
 
   const { statusCode, body } = await request(
@@ -490,7 +401,7 @@ async function cmdRun(commandName, pairs) {
         try {
           printValue(JSON.parse(parsed.result));
         } catch {
-          printValue({ result: parsed.result });
+          printValue(parsed.result);
         }
       } else {
         printValue(parsed.result);

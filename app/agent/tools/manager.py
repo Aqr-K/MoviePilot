@@ -150,6 +150,19 @@ class MoviePilotToolsManager:
         return value
 
     @staticmethod
+    def _parse_array_string(value: str, key: str, item_type: str = "string") -> list:
+        """
+        将逗号分隔的字符串解析为列表，并根据 item_type 转换元素类型
+        """
+        trimmed = value.strip()
+        if not trimmed:
+            return []
+        return [
+            MoviePilotToolsManager._normalize_scalar_value(item_type, item.strip(), key)
+            for item in trimmed.split(",") if item.strip()
+        ]
+
+    @staticmethod
     def _normalize_arguments(tool_instance: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         根据工具的参数schema规范化参数类型
@@ -184,6 +197,12 @@ class MoviePilotToolsManager:
 
             field_info = MoviePilotToolsManager._resolve_field_schema(properties[key])
             field_type = field_info.get("type")
+
+            # 数组类型：将字符串解析为列表
+            if field_type == "array" and isinstance(value, str):
+                item_type = field_info.get("items", {}).get("type", "string")
+                normalized[key] = MoviePilotToolsManager._parse_array_string(value, key, item_type)
+                continue
 
             # 根据类型进行转换
             normalized[key] = MoviePilotToolsManager._normalize_scalar_value(field_type, value, key)
