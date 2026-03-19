@@ -1,6 +1,13 @@
 import unittest
 
 from tests.test_bluray import BluRayTest
+from tests.test_mediascrape import (
+    TestMediaScrapingPaths,
+    TestMediaScrapingNFO,
+    TestMediaScrapingImages,
+    TestMediaScrapingTVDirectory,
+    TestMediaScrapeEvents
+)
 from tests.test_metainfo import MetaInfoTest
 from tests.test_object import ObjectUtilsTest
 
@@ -21,6 +28,13 @@ if __name__ == '__main__':
 
     # 测试蓝光目录识别
     suite.addTest(BluRayTest())
+
+    # 测试媒体刮削
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestMediaScrapingPaths))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestMediaScrapingNFO))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestMediaScrapingImages))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestMediaScrapingTVDirectory))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestMediaScrapeEvents))
 
     # 运行测试
     runner = unittest.TextTestRunner()
