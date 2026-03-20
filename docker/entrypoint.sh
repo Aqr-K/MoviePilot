@@ -173,6 +173,49 @@ function load_config_from_app_env() {
     INFO "配置加载流程执行完毕。"
 }
 
+# 优雅退出
+function graceful_exit() {
+    local exit_code=${1:-0}
+    local reason=${2:-python_exit}
+
+    if [ "$reason" = "signal" ]; then
+        INFO "→ 收到停止信号，执行精准清理程序..."
+    else
+        INFO "→ 主进程已退出 (代码: $exit_code)，执行清理程序..."
+    fi
+
+    # 第一步：停止前端 Nginx
+    # 默认配置启动的 Nginx，默认 PID 在 /var/run/nginx.pid
+    INFO "→ [1/3] 正在关闭前端 Nginx..."
+    nginx -c /etc/nginx/nginx.conf -s stop 2>/dev/null || true
+
+    # 第二步：等待 Python 退出
+    # 由于使用了 tini -g，Python 已经收到了信号，我们只需等待
+    if [ -n "$PYTHON_PID" ] && ps -p "$PYTHON_PID" > /dev/null; then
+        INFO "→ [2/3] 正在等待 Python (PID: $PYTHON_PID) 完成清理..."
+        # 这里的 wait 会阻塞，直到 Python 真正退出
+        wait "$PYTHON_PID" 2>/dev/null || true
+    fi
+
+    # 第三步：最后关闭 Docker Proxy
+    # 必须指定配置文件路径，否则 nginx -s stop 找不到它
+    INFO "→ [3/3] 后端已安全退出，正在关闭 Docker Proxy..."
+    if [ -S "/var/run/docker.sock" ]; then
+        nginx -c /etc/nginx/docker_http_proxy.conf -s stop 2>/dev/null || true
+    fi
+
+    # 根据退出码判断最终日志性质
+    # 0: 正常退出
+    # 130/143: 被系统信号终止（通常也视为预期的清理退出）
+    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 130 ] || [ "$exit_code" -eq 143 ]; then
+        INFO "→ 所有服务已按序清理，容器正常退出 (ExitCode: $exit_code)。"
+    else
+        # 非预期退出码，使用 ERROR 级别并加重提示
+        ERROR "→ 清理完成，但主进程检测到异常退出 (ExitCode: $exit_code)！"
+    fi
+    exit "$exit_code"
+}
+
 # 使用env配置
 load_config_from_app_env
 
@@ -243,6 +286,10 @@ source /app/docker/cert.sh
 INFO "→ 启动前端nginx服务..."
 nginx
 
+# 捕获信号并跳转到函数
+trap 'graceful_exit 130 "signal"' SIGINT
+trap 'graceful_exit 143 "signal"' SIGTERM
+
 # 启动docker http proxy nginx
 if [ -S "/var/run/docker.sock" ]; then
     INFO "→ 启动 Docker Proxy..."
@@ -275,7 +322,16 @@ fi
 # 启动后端服务
 INFO "→ 启动后端服务..."
 if [ "${START_NOGOSU:-false}" = "true" ]; then
-    exec dumb-init "${VENV_PATH}/bin/python3" app/main.py
+    "${VENV_PATH}/bin/python3" app/main.py > /dev/stdout 2> /dev/stderr &
 else
-    exec dumb-init gosu moviepilot:moviepilot "${VENV_PATH}/bin/python3" app/main.py
-fi
+    gosu moviepilot:moviepilot "${VENV_PATH}/bin/python3" app/main.py > /dev/stdout 2> /dev/stderr &
+PYTHON_PID=$!
+
+# 等待 Python 进程退出。
+# 如果收到信号，trap 会中断 wait，并执行 graceful_exit。
+# 如果 Python 正常退出，wait 会结束，然后我们手动调用 graceful_exit。
+wait "$PYTHON_PID" 2>/dev/null
+exit_code=$?
+
+# 如果 Python 自己退出了（非信号触发），执行清理
+graceful_exit "$exit_code" "python_exit"
