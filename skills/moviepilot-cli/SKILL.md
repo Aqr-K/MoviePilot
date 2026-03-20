@@ -5,6 +5,8 @@ description: Use this skill when the user wants to find, download, or subscribe 
 
 # MoviePilot CLI
 
+> **Path note:** All script paths in this skill are relative to this skill file.
+
 Use `scripts/mp-cli.js` to interact with the MoviePilot backend.
 
 ## Discover Commands
@@ -78,7 +80,10 @@ node scripts/mp-cli.js query_subscribes tmdb_id=123456
 # If already in library or subscribed, warn the user and ask for confirmation to proceed
 
 # 7. Add download
-node scripts/mp-cli.js add_download torrent_url="..."
+# Single item:
+node scripts/mp-cli.js add_download torrent_url="abc1234:1"
+# Multiple items:
+node scripts/mp-cli.js add_download torrent_url="abc1234:1,def5678:2"
 ```
 
 ### Add Subscription

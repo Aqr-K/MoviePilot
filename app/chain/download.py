@@ -152,7 +152,8 @@ class DownloadChain(ChainBase):
                         save_path: Optional[str] = None,
                         userid: Union[str, int] = None,
                         username: Optional[str] = None,
-                        label: Optional[str] = None) -> Optional[str]:
+                        label: Optional[str] = None,
+                        return_detail: bool = False) -> Union[Optional[str], Tuple[Optional[str], Optional[str]]]:
         """
         下载及发送通知
         :param context: 资源上下文
@@ -166,6 +167,8 @@ class DownloadChain(ChainBase):
         :param userid: 用户ID
         :param username: 调用下载的用户名/插件名
         :param label: 自定义标签
+        :param return_detail: 是否返回详细结果；False 时返回下载任务 hash 或 None，True 时返回 (hash, error_msg)
+        :return: return_detail=False 时返回下载任务 hash 或 None；return_detail=True 时返回 (hash, error_msg)
         """
         _torrent = context.torrent_info
         _media = context.media_info
@@ -195,7 +198,7 @@ class DownloadChain(ChainBase):
                 logger.debug(
                     f"Resource download canceled by event: {event_data.source},"
                     f"Reason: {event_data.reason}")
-                return None
+                return (None, "下载被事件取消") if return_detail else None
             # 如果事件修改了下载路径，使用新路径
             if event_data.options and event_data.options.get("save_path"):
                 save_path = event_data.options.get("save_path")
@@ -227,7 +230,7 @@ class DownloadChain(ChainBase):
                 torrent_content = cache_backend.get(torrent_file.as_posix(), region="torrents")
 
         if not torrent_content:
-            return None
+            return (None, "下载种子内容为空") if return_detail else None
 
         # 获取种子文件的文件夹名和文件清单
         _folder_name, _file_list = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
@@ -259,7 +262,7 @@ class DownloadChain(ChainBase):
                 logger.error(f"未找到下载目录：{_media.type.value} {_media.title_year}")
                 self.messagehelper.put(f"{_media.type.value} {_media.title_year} 未找到下载目录！",
                                        title="下载失败", role="system")
-                return None
+                return (None, "未找到下载目录") if return_detail else None
             fileURI = FileURI(storage=storage, path=download_dir.as_posix())
             download_dir = Path(fileURI.uri)
 
@@ -388,6 +391,8 @@ class DownloadChain(ChainBase):
                      f"错误信息：{error_msg}",
                 image=_media.get_message_image(),
                 userid=userid))
+        if return_detail:
+            return _hash, error_msg
         return _hash
 
     def batch_download(self,
