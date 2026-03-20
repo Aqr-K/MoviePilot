@@ -51,6 +51,18 @@ class QueryDownloadTasksTool(MoviePilotTool):
         
         return all_torrents
 
+    @staticmethod
+    def _format_progress(progress: Optional[float]) -> Optional[str]:
+        """
+        将下载进度格式化为保留一位小数的百分比字符串
+        """
+        try:
+            if progress is None:
+                return None
+            return f"{float(progress):.1f}%"
+        except (TypeError, ValueError):
+            return None
+
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""
         downloader = kwargs.get("downloader")
@@ -198,7 +210,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         "year": d.year,
                         "season_episode": d.season_episode,
                         "size": d.size,
-                        "progress": d.progress,
+                        "progress": self._format_progress(d.progress),
                         "state": d.state,
                         "upspeed": d.upspeed,
                         "dlspeed": d.dlspeed,
