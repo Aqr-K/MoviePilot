@@ -29,4 +29,5 @@ jobs:
          days-before-pr-close: -1
          # 排除带有RFC标签的issue
          exempt-issue-labels: "RFC"
+         operations-per-run: 500
          repo-token: ${{ secrets.GITHUB_TOKEN }}
