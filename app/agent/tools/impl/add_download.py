@@ -24,7 +24,7 @@ class AddDownloadInput(BaseModel):
     explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
     torrent_url: List[str] = Field(
         ...,
-        description="One or more torrent_url values. Values matching the hash:id pattern from get_search_results are treated as internal references; other values must be direct torrent URLs or magnet links."
+        description="One or more torrent_url values. Supports refs from get_search_results (`hash:id`) and magnet links."
     )
     downloader: Optional[str] = Field(None,
                                       description="Name of the downloader to use (optional, uses default if not specified)")
@@ -36,7 +36,7 @@ class AddDownloadInput(BaseModel):
 
 class AddDownloadTool(MoviePilotTool):
     name: str = "add_download"
-    description: str = "Add torrent download task to the configured downloader (qBittorrent, Transmission, etc.) using hash:id references from get_search_results or direct torrent URLs / magnet links."
+    description: str = "Add torrent download tasks using refs from get_search_results or magnet links."
     args_schema: Type[BaseModel] = AddDownloadInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -49,7 +49,7 @@ class AddDownloadTool(MoviePilotTool):
                 if self._is_torrent_ref(torrent_urls[0]):
                     message = f"正在添加下载任务: 资源 {torrent_urls[0]}"
                 else:
-                    message = "正在添加下载任务: 直链或磁力链接"
+                    message = "正在添加下载任务: 磁力链接"
             else:
                 message = f"正在批量添加下载任务: 共 {len(torrent_urls)} 个资源"
         else:
@@ -74,12 +74,12 @@ class AddDownloadTool(MoviePilotTool):
         return bool(re.fullmatch(r"[0-9a-f]{7}:\d+", str(torrent_ref).strip()))
 
     @staticmethod
-    def _is_direct_download_url(torrent_url: Optional[str]) -> bool:
-        """判断是否为允许直传下载器的下载内容"""
+    def _is_magnet_link_input(torrent_url: Optional[str]) -> bool:
+        """判断输入是否为允许直接添加的磁力链接"""
         if not torrent_url:
             return False
         value = str(torrent_url).strip()
-        return value.startswith("http://") or value.startswith("https://") or value.startswith("magnet:")
+        return value.startswith("magnet:")
 
     @classmethod
     def _resolve_cached_context(cls, torrent_ref: str) -> Optional[Context]:
@@ -127,7 +127,7 @@ class AddDownloadTool(MoviePilotTool):
         prefix = "添加种子任务失败："
         if normalized_error.startswith(prefix):
             normalized_error = normalized_error[len(prefix):].lstrip()
-        if AddDownloadTool._is_direct_download_url(normalized_error):
+        if AddDownloadTool._is_magnet_link_input(normalized_error):
             normalized_error = ""
         if normalized_error:
             return f"{torrent_ref} {normalized_error}"
@@ -227,9 +227,9 @@ class AddDownloadTool(MoviePilotTool):
                         media_info=media_info
                     )
                 else:
-                    if not self._is_direct_download_url(torrent_input):
+                    if not self._is_magnet_link_input(torrent_input):
                         failed_messages.append(
-                            f"{torrent_input} 不是有效的下载内容，非 hash:id 时仅支持 http://、https:// 或 magnet: 开头"
+                            f"{torrent_input} 不是有效的下载内容，非 hash:id 时仅支持 magnet: 开头"
                         )
                         continue
                     download_dir = self._resolve_direct_download_dir(save_path)

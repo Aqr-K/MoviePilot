@@ -8,7 +8,35 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
-from app.schemas.types import MediaType, media_type_to_agent
+from app.schemas.subscribe import Subscribe as SubscribeSchema
+from app.schemas.types import MediaType
+
+QUERY_SUBSCRIBE_OUTPUT_FIELDS = [
+    "id",
+    "name",
+    "year",
+    "type",
+    "season",
+    "total_episode",
+    "start_episode",
+    "lack_episode",
+    "filter",
+    "include",
+    "exclude",
+    "quality",
+    "resolution",
+    "effect",
+    "state",
+    "last_update",
+    "sites",
+    "downloader",
+    "best_version",
+    "save_path",
+    "custom_words",
+    "media_category",
+    "filter_groups",
+    "episode_group"
+]
 
 
 class QuerySubscribesInput(BaseModel):
@@ -24,7 +52,7 @@ class QuerySubscribesInput(BaseModel):
 
 class QuerySubscribesTool(MoviePilotTool):
     name: str = "query_subscribes"
-    description: str = "Query subscription status and list all user subscriptions. Shows active subscriptions, their download status, and configuration details."
+    description: str = "Query subscription status and list user subscriptions. Returns full subscription parameters for each matched subscription."
     args_schema: Type[BaseModel] = QuerySubscribesInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -69,28 +97,14 @@ class QuerySubscribesTool(MoviePilotTool):
                 # 限制最多50条结果
                 total_count = len(filtered_subscribes)
                 limited_subscribes = filtered_subscribes[:50]
-                # 精简字段，只保留关键信息
-                simplified_subscribes = []
-                for s in limited_subscribes:
-                    simplified = {
-                        "id": s.id,
-                        "name": s.name,
-                        "year": s.year,
-                        "type": media_type_to_agent(s.type),
-                        "season": s.season,
-                        "tmdbid": s.tmdbid,
-                        "doubanid": s.doubanid,
-                        "bangumiid": s.bangumiid,
-                        "poster": s.poster,
-                        "vote": s.vote,
-                        "state": s.state,
-                        "total_episode": s.total_episode,
-                        "lack_episode": s.lack_episode,
-                        "last_update": s.last_update,
-                        "username": s.username
-                    }
-                    simplified_subscribes.append(simplified)
-                result_json = json.dumps(simplified_subscribes, ensure_ascii=False, indent=2)
+                full_subscribes = [
+                    SubscribeSchema.model_validate(s, from_attributes=True).model_dump(
+                        include=set(QUERY_SUBSCRIBE_OUTPUT_FIELDS),
+                        exclude_none=True
+                    )
+                    for s in limited_subscribes
+                ]
+                result_json = json.dumps(full_subscribes, ensure_ascii=False, indent=2)
                 # 如果结果被裁剪，添加提示信息
                 if total_count > 50:
                     return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 50 条结果。\n\n{result_json}"
