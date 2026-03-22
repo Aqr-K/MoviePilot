@@ -40,7 +40,7 @@ class MessageChain(ChainBase):
     # 用户会话信息 {userid: (session_id, last_time)}
     _user_sessions: Dict[Union[str, int], tuple] = {}
     # 会话超时时间（分钟）
-    _session_timeout_minutes: int = 30
+    _session_timeout_minutes: int = 24 * 60
 
     @staticmethod
     def __get_noexits_info(
