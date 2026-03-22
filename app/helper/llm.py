@@ -27,7 +27,7 @@ class LLMHelper:
                 # 通过代理使用 Google 的 OpenAI 兼容接口
                 from langchain_openai import ChatOpenAI
 
-                return ChatOpenAI(
+                model = ChatOpenAI(
                     model=settings.LLM_MODEL,
                     api_key=api_key,
                     max_retries=3,
@@ -41,7 +41,7 @@ class LLMHelper:
                 # 使用 langchain-google-genai 原生接口（v4 API 变更：google_api_key → api_key，max_retries → retries）
                 from langchain_google_genai import ChatGoogleGenerativeAI
 
-                return ChatGoogleGenerativeAI(
+                model = ChatGoogleGenerativeAI(
                     model=settings.LLM_MODEL,
                     api_key=api_key,
                     retries=3,
@@ -51,7 +51,7 @@ class LLMHelper:
         elif provider == "deepseek":
             from langchain_deepseek import ChatDeepSeek
 
-            return ChatDeepSeek(
+            model = ChatDeepSeek(
                 model=settings.LLM_MODEL,
                 api_key=api_key,
                 max_retries=3,
@@ -62,7 +62,7 @@ class LLMHelper:
         else:
             from langchain_openai import ChatOpenAI
 
-            return ChatOpenAI(
+            model = ChatOpenAI(
                 model=settings.LLM_MODEL,
                 api_key=api_key,
                 max_retries=3,
@@ -73,8 +73,18 @@ class LLMHelper:
                 openai_proxy=settings.PROXY_HOST,
             )
 
+        # 检查是否有profile
+        if hasattr(model, "profile") and model.profile:
+            logger.info(f"使用LLM模型: {model.model}，Profile: {model.profile}")
+        else:
+            model.profile = {
+                "max_input_tokens": settings.LLM_MAX_CONTEXT_TOKENS * 1000,  # 转换为token单位
+            }
+
+        return model
+
     def get_models(
-        self, provider: str, api_key: str, base_url: str = None
+            self, provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取模型列表"""
         logger.info(f"获取 {provider} 模型列表...")
@@ -102,7 +112,7 @@ class LLMHelper:
 
     @staticmethod
     def _get_openai_compatible_models(
-        provider: str, api_key: str, base_url: str = None
+            provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取OpenAI兼容模型列表"""
         try:

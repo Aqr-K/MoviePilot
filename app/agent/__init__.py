@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from time import strftime
 from typing import Dict, List
 
@@ -145,7 +146,9 @@ class MoviePilotAgent:
         try:
             # Agent运行配置
             agent_config = {
-                ""
+                "configurable": {
+                    "thread_id": self.session_id,
+                }
             }
 
             # 创建智能体
@@ -177,7 +180,7 @@ class MoviePilotAgent:
             logger.info(f"Agent执行被取消: session_id={self.session_id}")
             return "任务已取消", {}
         except Exception as e:
-            logger.error(f"Agent执行失败: {e}")
+            logger.error(f"Agent执行失败: {e} - {traceback.format_exc()}")
             return str(e), {}
 
     async def send_agent_message(self, message: str, title: str = "MoviePilot助手"):

@@ -83,8 +83,8 @@ class Telegram:
                     # 发送正在输入状态
                     try:
                         _bot.send_chat_action(message.chat.id, 'typing')
-                    except Exception as e:
-                        logger.error(f"发送Telegram正在输入状态失败：{e}")
+                    except Exception as err:
+                        logger.error(f"发送Telegram正在输入状态失败：{err}")
                     RequestUtils(timeout=15).post_res(self._ds_url, json=message.json)
 
             @_bot.callback_query_handler(func=lambda call: True)

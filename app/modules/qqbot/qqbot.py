@@ -11,7 +11,6 @@ from typing import Optional, List, Tuple
 
 from PIL import Image
 
-from app.chain.message import MessageChain
 from app.core.cache import FileCache
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
@@ -101,11 +100,12 @@ class QQBot:
         """直接调用消息链处理，避免 HTTP 开销"""
         def _run():
             try:
-                MessageChain().process(
+                # FIXME
+                """MessageChain().process(
                     body=payload,
                     form={},
                     args={"source": self._config_name},
-                )
+                )"""
             except Exception as e:
                 logger.error(f"QQ Bot 转发消息失败: {e}")
 
