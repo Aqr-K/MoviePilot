@@ -161,7 +161,8 @@ class MoviePilotAgent:
                     config=agent_config
             ):
                 token, metadata = chunk
-                if token:
+                # 处理流式token（过滤工具调用token，只保留模型生成的内容）
+                if token and hasattr(token, "tool_call_chunks") and not token.tool_call_chunks:
                     self.stream_handler.emit(token.content)
 
             # 发送最终消息给用户
@@ -173,7 +174,7 @@ class MoviePilotAgent:
             memory_manager.save_agent_messages(
                 session_id=self.session_id,
                 user_id=self.user_id,
-                messages=agent.get_state(agent_config).values("messages")
+                messages=agent.get_state(agent_config).values().get("messages", [])
             )
 
         except asyncio.CancelledError:
