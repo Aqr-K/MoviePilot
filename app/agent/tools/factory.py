@@ -41,6 +41,8 @@ from app.agent.tools.impl.list_directory import ListDirectoryTool
 from app.agent.tools.impl.query_transfer_history import QueryTransferHistoryTool
 from app.agent.tools.impl.transfer_file import TransferFileTool
 from app.agent.tools.impl.execute_command import ExecuteCommandTool
+from app.agent.tools.impl.edit_file import EditFileTool
+from app.agent.tools.impl.write_file import WriteFileTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -100,7 +102,9 @@ class MoviePilotToolFactory:
             RunSchedulerTool,
             QueryWorkflowsTool,
             RunWorkflowTool,
-            ExecuteCommandTool
+            ExecuteCommandTool,
+            EditFileTool,
+            WriteFileTool
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:

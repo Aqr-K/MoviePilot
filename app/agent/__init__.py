@@ -6,8 +6,6 @@ from typing import Dict, List
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     SummarizationMiddleware,
-    ModelRetryMiddleware,
-    ToolRetryMiddleware,
 )
 from langchain_core.messages import (
     HumanMessage,
@@ -17,9 +15,12 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.callback import StreamingHandler, StreamingHandler
 from app.agent.memory import memory_manager
+from app.agent.middleware.memory import MemoryMiddleware
+from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.prompt import prompt_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
+from app.core.config import settings
 from app.helper.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification
@@ -91,15 +92,17 @@ class MoviePilotAgent:
 
             # 中间件
             middlewares = [
+                # 记忆管理
+                MemoryMiddleware(
+                    sources=[str(settings.CONFIG_PATH / "agent" / "MEMORY.md")]
+                ),
                 # 上下文压缩
                 SummarizationMiddleware(
                     model=llm,
                     trigger=("fraction", 0.85)
                 ),
-                # 模型调用失败时自动重试
-                ModelRetryMiddleware(max_retries=3),
-                # 工具调用失败时自动重试
-                ToolRetryMiddleware(max_retries=1)
+                # 错误工具调用修复
+                PatchToolCallsMiddleware()
             ]
 
             return create_agent(
@@ -174,7 +177,7 @@ class MoviePilotAgent:
             memory_manager.save_agent_messages(
                 session_id=self.session_id,
                 user_id=self.user_id,
-                messages=agent.get_state(agent_config).values().get("messages", [])
+                messages=agent.get_state(agent_config).values.get("messages", [])
             )
 
         except asyncio.CancelledError:
