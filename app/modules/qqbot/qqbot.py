@@ -12,6 +12,7 @@ from typing import Optional, List, Tuple
 from PIL import Image
 
 from app.core.cache import FileCache
+from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
 from app.log import logger
@@ -33,13 +34,13 @@ class QQBot:
     """QQ Bot 通知客户端"""
 
     def __init__(
-        self,
-        QQ_APP_ID: Optional[str] = None,
-        QQ_APP_SECRET: Optional[str] = None,
-        QQ_OPENID: Optional[str] = None,
-        QQ_GROUP_OPENID: Optional[str] = None,
-        name: Optional[str] = None,
-        **kwargs,
+            self,
+            QQ_APP_ID: Optional[str] = None,
+            QQ_APP_SECRET: Optional[str] = None,
+            QQ_OPENID: Optional[str] = None,
+            QQ_GROUP_OPENID: Optional[str] = None,
+            name: Optional[str] = None,
+            **kwargs,
     ):
         """
         初始化 QQ Bot
@@ -98,14 +99,14 @@ class QQBot:
 
     def _forward_to_message_chain(self, payload: dict) -> None:
         """直接调用消息链处理，避免 HTTP 开销"""
+
         def _run():
             try:
-                # FIXME
-                """MessageChain().process(
-                    body=payload,
-                    form={},
-                    args={"source": self._config_name},
-                )"""
+                # 回调
+                RequestUtils(timeout=15).post_res(
+                    f"http://127.0.0.1:{settings.PORT}/api/v1/message?token={settings.API_TOKEN}&source={self._config_name}",
+                    json=payload
+                )
             except Exception as e:
                 logger.error(f"QQ Bot 转发消息失败: {e}")
 
@@ -234,10 +235,10 @@ class QQBot:
 
     @staticmethod
     def _format_message_markdown(
-        title: Optional[str] = None,
-        text: Optional[str] = None,
-        image: Optional[str] = None,
-        link: Optional[str] = None,
+            title: Optional[str] = None,
+            text: Optional[str] = None,
+            image: Optional[str] = None,
+            link: Optional[str] = None,
     ) -> tuple:
         """
         将消息格式化为 QQ Markdown，类似 Telegram 处理方式
@@ -271,14 +272,14 @@ class QQBot:
         return content, bool(content)
 
     def send_msg(
-        self,
-        title: str,
-        text: Optional[str] = None,
-        image: Optional[str] = None,
-        link: Optional[str] = None,
-        userid: Optional[str] = None,
-        targets: Optional[dict] = None,
-        **kwargs,
+            self,
+            title: str,
+            text: Optional[str] = None,
+            image: Optional[str] = None,
+            link: Optional[str] = None,
+            userid: Optional[str] = None,
+            targets: Optional[dict] = None,
+            **kwargs,
     ) -> bool:
         """
         发送 QQ 消息
@@ -303,7 +304,8 @@ class QQBot:
                 targets_to_send = broadcast
                 logger.debug(f"QQ Bot: 广播模式，共 {len(targets_to_send)} 个目标")
             else:
-                logger.warn("QQ Bot: 未指定接收者且无互动用户，请在配置中设置 QQ_OPENID/QQ_GROUP_OPENID 或先让用户发消息")
+                logger.warn(
+                    "QQ Bot: 未指定接收者且无互动用户，请在配置中设置 QQ_OPENID/QQ_GROUP_OPENID 或先让用户发消息")
                 return False
 
         # 使用 Markdown 格式发送（类似 Telegram）
@@ -349,12 +351,12 @@ class QQBot:
             return False
 
     def send_medias_msg(
-        self,
-        medias: List[MediaInfo],
-        userid: Optional[str] = None,
-        title: Optional[str] = None,
-        link: Optional[str] = None,
-        **kwargs,
+            self,
+            medias: List[MediaInfo],
+            userid: Optional[str] = None,
+            title: Optional[str] = None,
+            link: Optional[str] = None,
+            **kwargs,
     ) -> bool:
         """发送媒体列表（转为文本）"""
         if not medias:
@@ -370,12 +372,12 @@ class QQBot:
         )
 
     def send_torrents_msg(
-        self,
-        torrents: List[Context],
-        userid: Optional[str] = None,
-        title: Optional[str] = None,
-        link: Optional[str] = None,
-        **kwargs,
+            self,
+            torrents: List[Context],
+            userid: Optional[str] = None,
+            title: Optional[str] = None,
+            link: Optional[str] = None,
+            **kwargs,
     ) -> bool:
         """发送种子列表（转为文本）"""
         if not torrents:
