@@ -19,7 +19,13 @@ router = APIRouter()
 # MCP 协议版本
 MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"]
 MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSIONS[0]  # 默认使用最新版本
-MCP_HIDDEN_TOOLS = {"execute_command", "search_web"}
+MCP_HIDDEN_TOOLS = {
+    "execute_command",
+    "search_web",
+    "edit_file",
+    "write_file",
+    "read_file",
+}
 
 
 def list_exposed_tools():
