@@ -43,6 +43,7 @@ from app.agent.tools.impl.transfer_file import TransferFileTool
 from app.agent.tools.impl.execute_command import ExecuteCommandTool
 from app.agent.tools.impl.edit_file import EditFileTool
 from app.agent.tools.impl.write_file import WriteFileTool
+from app.agent.tools.impl.read_file import ReadFileTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -104,7 +105,8 @@ class MoviePilotToolFactory:
             RunWorkflowTool,
             ExecuteCommandTool,
             EditFileTool,
-            WriteFileTool
+            WriteFileTool,
+            ReadFileTool
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:
