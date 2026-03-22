@@ -1,39 +1,41 @@
 import threading
 
-from langchain_core.callbacks import AsyncCallbackHandler
-
 from app.log import logger
 
 
-class StreamingCallbackHandler(AsyncCallbackHandler):
+class StreamingHandler:
     """
-    流式输出回调处理器
+    流式Token缓冲管理器
+
+    负责从 LLM 流式 token 中积累文本，供 Agent 在工具调用之间穿插发送中间消息。
     """
 
-    def __init__(self, session_id: str):
+    def __init__(self):
         self._lock = threading.Lock()
-        self.session_id = session_id
-        self.current_message = ""
+        self._buffer = ""
 
-    async def get_message(self):
+    def emit(self, token: str):
         """
-        获取当前消息内容，获取后清空
+        接收 LLM 流式 token，积累到缓冲区。
         """
         with self._lock:
-            if not self.current_message:
+            self._buffer += token
+
+    def take(self) -> str:
+        """
+        获取当前已积累的消息内容，获取后清空缓冲区。
+        """
+        with self._lock:
+            if not self._buffer:
                 return ""
-            msg = self.current_message
-            logger.info(f"Agent消息: {msg}")
-            self.current_message = ""
-            return msg
+            message = self._buffer
+            logger.info(f"Agent消息: {message}")
+            self._buffer = ""
+            return message
 
-    async def on_llm_new_token(self, token: str, **kwargs):
+    def clear(self):
         """
-        处理新的token
+        清空缓冲区（不返回内容）
         """
-        if not token:
-            return
         with self._lock:
-            # 缓存当前消息
-            self.current_message += token
-
+            self._buffer = ""

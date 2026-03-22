@@ -54,7 +54,7 @@ class MoviePilotToolFactory:
     @staticmethod
     def create_tools(session_id: str, user_id: str,
                      channel: str = None, source: str = None, username: str = None,
-                     callback_handler: Callable = None) -> List[MoviePilotTool]:
+                     stream_handler: Callable = None) -> List[MoviePilotTool]:
         """
         创建MoviePilot工具列表
         """
@@ -109,7 +109,7 @@ class MoviePilotToolFactory:
                 user_id=user_id
             )
             tool.set_message_attr(channel=channel, source=source, username=username)
-            tool.set_callback_handler(callback_handler=callback_handler)
+            tool.set_stream_handler(stream_handler=stream_handler)
             tools.append(tool)
         
         # 加载插件提供的工具
@@ -131,7 +131,7 @@ class MoviePilotToolFactory:
                         user_id=user_id
                     )
                     tool.set_message_attr(channel=channel, source=source, username=username)
-                    tool.set_callback_handler(callback_handler=callback_handler)
+                    tool.set_stream_handler(stream_handler=stream_handler)
                     tools.append(tool)
                     plugin_tools_count += 1
                     logger.debug(f"成功加载插件 {plugin_name}({plugin_id}) 的工具: {ToolClass.__name__}")

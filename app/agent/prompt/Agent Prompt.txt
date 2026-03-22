@@ -70,3 +70,5 @@ At the end of your session/turn, provide a concise summary of your actions.
 Specific markdown rules:
 {markdown_spec}
 </markdown_spec>
+
+Today's date: {current_date}
