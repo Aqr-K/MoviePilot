@@ -53,7 +53,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if self._stream_handler and self._stream_handler.is_streaming:
             # 流式渠道：工具消息直接追加到 buffer 中，与 Agent 文字合并为同一条流式消息
             if tool_message:
-                self._stream_handler.emit(f"\n\n⚙️ => {tool_message}")
+                self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
         else:
             # 非流式渠道：保持原有行为，取出 Agent 文字 + 工具消息合并独立发送
             agent_message = (
