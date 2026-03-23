@@ -54,7 +54,7 @@ class StreamingHandler:
         self._source: Optional[str] = None
         self._user_id: Optional[str] = None
         self._username: Optional[str] = None
-        self._title: str = "MoviePilot助手"
+        self._title: str = ""
 
     def emit(self, token: str):
         """
@@ -95,7 +95,7 @@ class StreamingHandler:
         source: Optional[str] = None,
         user_id: Optional[str] = None,
         username: Optional[str] = None,
-        title: str = "MoviePilot助手",
+        title: str = "",
     ):
         """
         启动流式输出。检查渠道是否支持消息编辑，如果支持则启动定时刷新任务。
