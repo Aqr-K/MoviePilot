@@ -210,7 +210,7 @@ class MoviePilotAgent:
             logger.error(f"Agent执行失败: {e} - {traceback.format_exc()}")
             return str(e), {}
 
-    async def send_agent_message(self, message: str, title: str = "MoviePilot助手"):
+    async def send_agent_message(self, message: str, title: str = ""):
         """
         通过原渠道发送消息给用户
         """
