@@ -245,7 +245,7 @@ class AgentManager:
         """
         初始化管理器
         """
-        await memory_manager.initialize()
+        memory_manager.initialize()
 
     async def close(self):
         """
@@ -300,7 +300,7 @@ class AgentManager:
             agent = self.active_agents[session_id]
             await agent.cleanup()
             del self.active_agents[session_id]
-            await memory_manager.clear_memory(session_id, user_id)
+            memory_manager.clear_memory(session_id, user_id)
             logger.info(f"会话 {session_id} 的记忆已清空")
 
 
