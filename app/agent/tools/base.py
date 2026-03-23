@@ -68,7 +68,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
             if messages:
                 merged_message = "\n\n".join(messages)
-                await self.send_tool_message(merged_message, title="MoviePilot助手")
+                await self.send_tool_message(merged_message)
 
         logger.debug(f"Executing tool {self.name} with args: {kwargs}")
 
