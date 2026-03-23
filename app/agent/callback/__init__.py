@@ -37,7 +37,7 @@ class StreamingHandler:
     """
 
     # 流式输出的刷新间隔（秒）
-    FLUSH_INTERVAL = 3.0
+    FLUSH_INTERVAL = 1.0
 
     def __init__(self):
         self._lock = threading.Lock()
