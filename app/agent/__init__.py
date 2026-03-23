@@ -166,12 +166,16 @@ class MoviePilotAgent:
             async for chunk in agent.astream(
                     {"messages": messages},
                     stream_mode="messages",
-                    config=agent_config
+                    config=agent_config,
+                    version="v2"
             ):
-                token, metadata = chunk
                 # 处理流式token（过滤工具调用token，只保留模型生成的内容）
-                if token and hasattr(token, "tool_call_chunks") and not token.tool_call_chunks:
-                    self.stream_handler.emit(token.content)
+                if chunk["type"] == "messages":
+                    token, metadata = chunk["data"]
+                    if (token and hasattr(token, "tool_call_chunks")
+                            and not token.tool_call_chunks):
+                        if token.content:
+                            self.stream_handler.emit(token.content)
 
             # 发送最终消息给用户
             await self.send_agent_message(
