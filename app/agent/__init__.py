@@ -92,7 +92,7 @@ class MoviePilotAgent:
             # 中间件
             middlewares = [
                 # 工具选择
-                LLMToolSelectorMiddleware(model=llm, max_tools=20),
+                # LLMToolSelectorMiddleware(model=llm, max_tools=20),
                 # 记忆管理
                 MemoryMiddleware(
                     sources=[str(settings.CONFIG_PATH / "agent" / "MEMORY.md")]
