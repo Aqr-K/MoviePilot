@@ -90,18 +90,28 @@ class MoviePilotAgent:
             tools = self._initialize_tools()
 
             # 中间件
-            middlewares = [
-                # 工具选择
-                # LLMToolSelectorMiddleware(model=llm, max_tools=20),
-                # 记忆管理
-                MemoryMiddleware(
-                    sources=[str(settings.CONFIG_PATH / "agent" / "MEMORY.md")]
-                ),
-                # 上下文压缩
-                SummarizationMiddleware(model=llm, trigger=("fraction", 0.85)),
-                # 错误工具调用修复
-                PatchToolCallsMiddleware(),
-            ]
+            middlewares = []
+
+            # 工具选择（LLM_MAX_TOOLS > 0 时启用）
+            if settings.LLM_MAX_TOOLS > 0:
+                middlewares.append(
+                    LLMToolSelectorMiddleware(
+                        model=llm, max_tools=settings.LLM_MAX_TOOLS
+                    )
+                )
+
+            middlewares.extend(
+                [
+                    # 记忆管理
+                    MemoryMiddleware(
+                        sources=[str(settings.CONFIG_PATH / "agent" / "MEMORY.md")]
+                    ),
+                    # 上下文压缩
+                    SummarizationMiddleware(model=llm, trigger=("fraction", 0.85)),
+                    # 错误工具调用修复
+                    PatchToolCallsMiddleware(),
+                ]
+            )
 
             return create_agent(
                 model=llm,

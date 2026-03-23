@@ -27,6 +27,7 @@ class SystemConfModel(BaseModel):
     """
     系统关键资源大小配置
     """
+
     # 缓存种子数量
     torrents: int = 0
     # 订阅刷新处理数量
@@ -160,14 +161,16 @@ class ConfigModel(BaseModel):
     # 是否启用DOH解析域名
     DOH_ENABLE: bool = False
     # 使用 DOH 解析的域名列表
-    DOH_DOMAINS: str = ("api.themoviedb.org,"
-                        "api.tmdb.org,"
-                        "webservice.fanart.tv,"
-                        "api.github.com,"
-                        "github.com,"
-                        "raw.githubusercontent.com,"
-                        "codeload.github.com,"
-                        "api.telegram.org")
+    DOH_DOMAINS: str = (
+        "api.themoviedb.org,"
+        "api.tmdb.org,"
+        "webservice.fanart.tv,"
+        "api.github.com,"
+        "github.com,"
+        "raw.githubusercontent.com,"
+        "codeload.github.com,"
+        "api.telegram.org"
+    )
     # DOH 解析服务器列表
     DOH_RESOLVERS: str = "1.0.0.1,1.1.1.1,9.9.9.9,149.112.112.112"
 
@@ -216,30 +219,77 @@ class ConfigModel(BaseModel):
 
     # ==================== 系统升级配置 ====================
     # 重启自动升级
-    MOVIEPILOT_AUTO_UPDATE: str = 'release'
+    MOVIEPILOT_AUTO_UPDATE: str = "release"
     # 自动检查和更新站点资源包（站点索引、认证等）
     AUTO_UPDATE_RESOURCE: bool = True
 
     # ==================== 媒体文件格式配置 ====================
     # 支持的视频文件后缀格式
     RMT_MEDIAEXT: list = Field(
-        default_factory=lambda: ['.mp4', '.mkv', '.ts', '.iso',
-                                 '.rmvb', '.avi', '.mov', '.mpeg',
-                                 '.mpg', '.wmv', '.3gp', '.asf',
-                                 '.m4v', '.flv', '.m2ts', '.strm',
-                                 '.tp', '.f4v']
+        default_factory=lambda: [
+            ".mp4",
+            ".mkv",
+            ".ts",
+            ".iso",
+            ".rmvb",
+            ".avi",
+            ".mov",
+            ".mpeg",
+            ".mpg",
+            ".wmv",
+            ".3gp",
+            ".asf",
+            ".m4v",
+            ".flv",
+            ".m2ts",
+            ".strm",
+            ".tp",
+            ".f4v",
+        ]
     )
     # 支持的字幕文件后缀格式
-    RMT_SUBEXT: list = Field(default_factory=lambda: ['.srt', '.ass', '.ssa', '.sup'])
+    RMT_SUBEXT: list = Field(default_factory=lambda: [".srt", ".ass", ".ssa", ".sup"])
     # 支持的音轨文件后缀格式
     RMT_AUDIOEXT: list = Field(
-        default_factory=lambda: ['.aac', '.ac3', '.amr', '.caf', '.cda', '.dsf',
-                                 '.dff', '.kar', '.m4a', '.mp1', '.mp2', '.mp3',
-                                 '.mid', '.mod', '.mka', '.mpc', '.nsf', '.ogg',
-                                 '.pcm', '.rmi', '.s3m', '.snd', '.spx', '.tak',
-                                 '.tta', '.vqf', '.wav', '.wma',
-                                 '.aifc', '.aiff', '.alac', '.adif', '.adts',
-                                 '.flac', '.midi', '.opus', '.sfalc']
+        default_factory=lambda: [
+            ".aac",
+            ".ac3",
+            ".amr",
+            ".caf",
+            ".cda",
+            ".dsf",
+            ".dff",
+            ".kar",
+            ".m4a",
+            ".mp1",
+            ".mp2",
+            ".mp3",
+            ".mid",
+            ".mod",
+            ".mka",
+            ".mpc",
+            ".nsf",
+            ".ogg",
+            ".pcm",
+            ".rmi",
+            ".s3m",
+            ".snd",
+            ".spx",
+            ".tak",
+            ".tta",
+            ".vqf",
+            ".wav",
+            ".wma",
+            ".aifc",
+            ".aiff",
+            ".alac",
+            ".adif",
+            ".adts",
+            ".flac",
+            ".midi",
+            ".opus",
+            ".sfalc",
+        ]
     )
 
     # ==================== 媒体服务器配置 ====================
@@ -288,7 +338,7 @@ class ConfigModel(BaseModel):
     # 交互搜索自动下载用户ID，使用,分割
     AUTO_DOWNLOAD_USER: Optional[str] = None
     # 下载器临时文件后缀
-    DOWNLOAD_TMPEXT: list = Field(default_factory=lambda: ['.!qb', '.part'])
+    DOWNLOAD_TMPEXT: list = Field(default_factory=lambda: [".!qb", ".part"])
 
     # ==================== CookieCloud配置 ====================
     # CookieCloud是否启动本地服务
@@ -308,14 +358,18 @@ class ConfigModel(BaseModel):
     # 文件整理线程数
     TRANSFER_THREADS: int = 1
     # 电影重命名格式
-    MOVIE_RENAME_FORMAT: str = "{{title}}{% if year %} ({{year}}){% endif %}" \
-                               "/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if videoFormat %} - {{videoFormat}}{% endif %}" \
-                               "{{fileExt}}"
+    MOVIE_RENAME_FORMAT: str = (
+        "{{title}}{% if year %} ({{year}}){% endif %}"
+        "/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if videoFormat %} - {{videoFormat}}{% endif %}"
+        "{{fileExt}}"
+    )
     # 电视剧重命名格式
-    TV_RENAME_FORMAT: str = "{{title}}{% if year %} ({{year}}){% endif %}" \
-                            "/Season {{season}}" \
-                            "/{{title}} - {{season_episode}}{% if part %}-{{part}}{% endif %}{% if episode %} - 第 {{episode}} 集{% endif %}" \
-                            "{{fileExt}}"
+    TV_RENAME_FORMAT: str = (
+        "{{title}}{% if year %} ({{year}}){% endif %}"
+        "/Season {{season}}"
+        "/{{title}} - {{season_episode}}{% if part %}-{{part}}{% endif %}{% if episode %} - 第 {{episode}} 集{% endif %}"
+        "{{fileExt}}"
+    )
     # 重命名时支持的S0别名
     RENAME_FORMAT_S0_NAMES: list = Field(default=["Specials", "SPs"])
     # 为指定默认字幕添加.default后缀
@@ -337,26 +391,28 @@ class ConfigModel(BaseModel):
 
     # ==================== 插件配置 ====================
     # 插件市场仓库地址，多个地址使用,分隔，地址以/结尾
-    PLUGIN_MARKET: str = ("https://github.com/jxxghp/MoviePilot-Plugins,"
-                          "https://github.com/thsrite/MoviePilot-Plugins,"
-                          "https://github.com/honue/MoviePilot-Plugins,"
-                          "https://github.com/InfinityPacer/MoviePilot-Plugins,"
-                          "https://github.com/DDSRem-Dev/MoviePilot-Plugins,"
-                          "https://github.com/madrays/MoviePilot-Plugins,"
-                          "https://github.com/justzerock/MoviePilot-Plugins,"
-                          "https://github.com/KoWming/MoviePilot-Plugins,"
-                          "https://github.com/wikrin/MoviePilot-Plugins,"
-                          "https://github.com/HankunYu/MoviePilot-Plugins,"
-                          "https://github.com/baozaodetudou/MoviePilot-Plugins,"
-                          "https://github.com/Aqr-K/MoviePilot-Plugins,"
-                          "https://github.com/hotlcc/MoviePilot-Plugins-Third,"
-                          "https://github.com/gxterry/MoviePilot-Plugins,"
-                          "https://github.com/DzAvril/MoviePilot-Plugins,"
-                          "https://github.com/mrtian2016/MoviePilot-Plugins,"
-                          "https://github.com/Hqyel/MoviePilot-Plugins-Third,"
-                          "https://github.com/xijin285/MoviePilot-Plugins,"
-                          "https://github.com/Seed680/MoviePilot-Plugins,"
-                          "https://github.com/imaliang/MoviePilot-Plugins")
+    PLUGIN_MARKET: str = (
+        "https://github.com/jxxghp/MoviePilot-Plugins,"
+        "https://github.com/thsrite/MoviePilot-Plugins,"
+        "https://github.com/honue/MoviePilot-Plugins,"
+        "https://github.com/InfinityPacer/MoviePilot-Plugins,"
+        "https://github.com/DDSRem-Dev/MoviePilot-Plugins,"
+        "https://github.com/madrays/MoviePilot-Plugins,"
+        "https://github.com/justzerock/MoviePilot-Plugins,"
+        "https://github.com/KoWming/MoviePilot-Plugins,"
+        "https://github.com/wikrin/MoviePilot-Plugins,"
+        "https://github.com/HankunYu/MoviePilot-Plugins,"
+        "https://github.com/baozaodetudou/MoviePilot-Plugins,"
+        "https://github.com/Aqr-K/MoviePilot-Plugins,"
+        "https://github.com/hotlcc/MoviePilot-Plugins-Third,"
+        "https://github.com/gxterry/MoviePilot-Plugins,"
+        "https://github.com/DzAvril/MoviePilot-Plugins,"
+        "https://github.com/mrtian2016/MoviePilot-Plugins,"
+        "https://github.com/Hqyel/MoviePilot-Plugins-Third,"
+        "https://github.com/xijin285/MoviePilot-Plugins,"
+        "https://github.com/Seed680/MoviePilot-Plugins,"
+        "https://github.com/imaliang/MoviePilot-Plugins"
+    )
     # 插件安装数据共享
     PLUGIN_STATISTIC_SHARE: bool = True
     # 是否开启插件热加载
@@ -366,9 +422,9 @@ class ConfigModel(BaseModel):
     # Github token，提高请求api限流阈值 ghp_****
     GITHUB_TOKEN: Optional[str] = None
     # Github代理服务器，格式：https://mirror.ghproxy.com/
-    GITHUB_PROXY: Optional[str] = ''
+    GITHUB_PROXY: Optional[str] = ""
     # pip镜像站点，格式：https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
-    PIP_PROXY: Optional[str] = ''
+    PIP_PROXY: Optional[str] = ""
     # 指定的仓库Github token，多个仓库使用,分隔，格式：{user1}/{repo1}:ghp_****,{user2}/{repo2}:github_pat_****
     REPO_GITHUB_TOKEN: Optional[str] = None
 
@@ -384,24 +440,28 @@ class ConfigModel(BaseModel):
 
     # ==================== 安全配置 ====================
     # 允许的图片缓存域名
-    SECURITY_IMAGE_DOMAINS: list = Field(default=[
-        "image.tmdb.org",
-        "static-mdb.v.geilijiasu.com",
-        "bing.com",
-        "doubanio.com",
-        "lain.bgm.tv",
-        "raw.githubusercontent.com",
-        "github.com",
-        "thetvdb.com",
-        "cctvpic.com",
-        "iqiyipic.com",
-        "hdslb.com",
-        "cmvideo.cn",
-        "ykimg.com",
-        "qpic.cn"
-    ])
+    SECURITY_IMAGE_DOMAINS: list = Field(
+        default=[
+            "image.tmdb.org",
+            "static-mdb.v.geilijiasu.com",
+            "bing.com",
+            "doubanio.com",
+            "lain.bgm.tv",
+            "raw.githubusercontent.com",
+            "github.com",
+            "thetvdb.com",
+            "cctvpic.com",
+            "iqiyipic.com",
+            "hdslb.com",
+            "cmvideo.cn",
+            "ykimg.com",
+            "qpic.cn",
+        ]
+    )
     # 允许的图片文件后缀格式
-    SECURITY_IMAGE_SUFFIXES: list = Field(default=[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"])
+    SECURITY_IMAGE_SUFFIXES: list = Field(
+        default=[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"]
+    )
     # PassKey 是否强制用户验证（生物识别等）
     PASSKEY_REQUIRE_UV: bool = True
     # 允许在未启用 OTP 时直接注册 PassKey
@@ -459,12 +519,16 @@ class ConfigModel(BaseModel):
     # AI推荐用户偏好
     AI_RECOMMEND_USER_PREFERENCE: str = ""
     # Tavily API密钥（用于网络搜索）
-    TAVILY_API_KEY: List[str] = ["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",
-                                 "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",
-                                 "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"]
+    TAVILY_API_KEY: List[str] = [
+        "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",
+        "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",
+        "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",
+    ]
 
     # AI推荐条目数量限制
     AI_RECOMMEND_MAX_ITEMS: int = 50
+    # LLM工具选择中间件最大工具数量，0为不启用工具选择中间件
+    LLM_MAX_TOOLS: int = 0
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
@@ -501,15 +565,25 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         if not value or len(value) < 16:
             new_token = secrets.token_urlsafe(16)
             if not value:
-                logger.info(f"'API_TOKEN' 未设置，已随机生成新的【API_TOKEN】{new_token}")
+                logger.info(
+                    f"'API_TOKEN' 未设置，已随机生成新的【API_TOKEN】{new_token}"
+                )
             else:
-                logger.warning(f"'API_TOKEN' 长度不足 16 个字符，存在安全隐患，已随机生成新的【API_TOKEN】{new_token}")
+                logger.warning(
+                    f"'API_TOKEN' 长度不足 16 个字符，存在安全隐患，已随机生成新的【API_TOKEN】{new_token}"
+                )
             return new_token, True
         return value, str(value) != str(original_value)
 
     @staticmethod
-    def generic_type_converter(value: Any, original_value: Any, expected_type: Type, default: Any, field_name: str,
-                               raise_exception: bool = False) -> Tuple[Any, bool]:
+    def generic_type_converter(
+        value: Any,
+        original_value: Any,
+        expected_type: Type,
+        default: Any,
+        field_name: str,
+        raise_exception: bool = False,
+    ) -> Tuple[Any, bool]:
         """
         通用类型转换函数，根据预期类型转换值。如果转换失败，返回默认值
         :return: 元组 (转换后的值, 是否需要更新)
@@ -530,15 +604,25 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 if isinstance(value, str):
                     value_clean = value.lower()
                     bool_map = {
-                        "false": False, "no": False, "0": False, "off": False,
-                        "true": True, "yes": True, "1": True, "on": True
+                        "false": False,
+                        "no": False,
+                        "0": False,
+                        "off": False,
+                        "true": True,
+                        "yes": True,
+                        "1": True,
+                        "on": True,
                     }
                     if value_clean in bool_map:
                         converted = bool_map[value_clean]
-                        return converted, str(converted).lower() != str(original_value).lower()
+                        return converted, str(converted).lower() != str(
+                            original_value
+                        ).lower()
                 elif isinstance(value, (int, float)):
                     converted = bool(value)
-                    return converted, str(converted).lower() != str(original_value).lower()
+                    return converted, str(converted).lower() != str(
+                        original_value
+                    ).lower()
                 return default, True
             elif expected_type is int:
                 if isinstance(value, int):
@@ -568,12 +652,15 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 return value, str(value) != str(original_value)
         except (ValueError, TypeError) as e:
             if raise_exception:
-                raise ValueError(f"配置项 '{field_name}' 的值 '{value}' 无法转换成正确的类型") from e
+                raise ValueError(
+                    f"配置项 '{field_name}' 的值 '{value}' 无法转换成正确的类型"
+                ) from e
             logger.error(
-                f"配置项 '{field_name}' 的值 '{value}' 无法转换成正确的类型，使用默认值 '{default}'，错误信息: {e}")
+                f"配置项 '{field_name}' 的值 '{value}' 无法转换成正确的类型，使用默认值 '{default}'，错误信息: {e}"
+            )
         return default, True
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def generic_type_validator(cls, data: Any):  # noqa
         """
@@ -583,11 +670,13 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             return data
 
         # 处理 API_TOKEN 特殊验证
-        if 'API_TOKEN' in data:
-            converted_value, needs_update = cls.validate_api_token(data['API_TOKEN'], data['API_TOKEN'])
+        if "API_TOKEN" in data:
+            converted_value, needs_update = cls.validate_api_token(
+                data["API_TOKEN"], data["API_TOKEN"]
+            )
             if needs_update:
                 cls.update_env_config("API_TOKEN", data["API_TOKEN"], converted_value)
-                data['API_TOKEN'] = converted_value
+                data["API_TOKEN"] = converted_value
 
         # 对其他字段进行类型转换
         for field_name, field_info in cls.model_fields.items():
@@ -609,18 +698,24 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         return data
 
     @staticmethod
-    def update_env_config(field_name: str, original_value: Any, converted_value: Any) -> Tuple[bool, str]:
+    def update_env_config(
+        field_name: str, original_value: Any, converted_value: Any
+    ) -> Tuple[bool, str]:
         """
         更新 env 配置
         """
         message = None
-        is_converted = original_value is not None and str(original_value) != str(converted_value)
+        is_converted = original_value is not None and str(original_value) != str(
+            converted_value
+        )
         if is_converted:
             message = f"配置项 '{field_name}' 的值 '{original_value}' 无效，已替换为 '{converted_value}'"
             logger.warning(message)
 
         if field_name in os.environ:
-            message = f"配置项 '{field_name}' 已在环境变量中设置，请手动更新以保持一致性"
+            message = (
+                f"配置项 '{field_name}' 已在环境变量中设置，请手动更新以保持一致性"
+            )
             logger.warning(message)
             return False, message
         else:
@@ -628,10 +723,16 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             if isinstance(converted_value, (list, dict, set)):
                 value_to_write = json.dumps(converted_value)
             else:
-                value_to_write = str(converted_value) if converted_value is not None else ""
+                value_to_write = (
+                    str(converted_value) if converted_value is not None else ""
+                )
 
-            set_key(dotenv_path=SystemUtils.get_env_path(), key_to_set=field_name, value_to_set=value_to_write,
-                    quote_mode="always")
+            set_key(
+                dotenv_path=SystemUtils.get_env_path(),
+                key_to_set=field_name,
+                value_to_set=value_to_write,
+                quote_mode="always",
+            )
             if is_converted:
                 logger.info(f"配置项 '{field_name}' 已自动修正并写入到 'app.env' 文件")
         return True, message
@@ -650,7 +751,9 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             field = Settings.model_fields[key]
             original_value = getattr(self, key)
             if key == "API_TOKEN":
-                converted_value, needs_update = self.validate_api_token(value, original_value)
+                converted_value, needs_update = self.validate_api_token(
+                    value, original_value
+                )
             else:
                 converted_value, needs_update = self.generic_type_converter(
                     value, original_value, field.annotation, field.default, key
@@ -668,7 +771,9 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         except Exception as e:
             return False, str(e)
 
-    def update_settings(self, env: Dict[str, Any]) -> Dict[str, Tuple[Optional[bool], str]]:
+    def update_settings(
+        self, env: Dict[str, Any]
+    ) -> Dict[str, Tuple[Optional[bool], str]]:
         """
         更新多个配置项
         """
@@ -751,7 +856,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 fanart=512,
                 meta=(self.META_CACHE_EXPIRE or 72) * 3600,
                 scheduler=100,
-                threadpool=100
+                threadpool=100,
             )
         return SystemConfModel(
             torrents=100,
@@ -762,7 +867,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             fanart=128,
             meta=(self.META_CACHE_EXPIRE or 24) * 3600,
             scheduler=50,
-            threadpool=50
+            threadpool=50,
         )
 
     @property
@@ -844,7 +949,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         return {
             "subject": f"mailto:{self.SUPERUSER}@movie-pilot.org",
             "publicKey": "BH3w49sZA6jXUnE-yt4jO6VKh73lsdsvwoJ6Hx7fmPIDKoqGiUl2GEoZzy-iJfn4SfQQcx7yQdHf9RknwrL_lSM",
-            "privateKey": "JTixnYY0vEw97t9uukfO3UWKfHKJdT5kCQDiv3gu894"
+            "privateKey": "JTixnYY0vEw97t9uukfO3UWKfHKJdT5kCQDiv3gu894",
         }
 
     def MP_DOMAIN(self, url: str = None):
@@ -866,11 +971,11 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         )
         # 规范重命名格式
         rename_format = rename_format.replace("\\", "/")
-        rename_format = re.sub(r'/+', '/', rename_format)
+        rename_format = re.sub(r"/+", "/", rename_format)
         return rename_format.strip("/")
 
     def TMDB_IMAGE_URL(
-            self, file_path: Optional[str], file_size: str = "original"
+        self, file_path: Optional[str], file_size: str = "original"
     ) -> Optional[str]:
         """
         获取TMDB图片网址
@@ -881,9 +986,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """
         if not file_path:
             return None
-        return (
-            f"https://{self.TMDB_IMAGE_DOMAIN}/t/p/{file_size}/{file_path.removeprefix('/')}"
-        )
+        return f"https://{self.TMDB_IMAGE_DOMAIN}/t/p/{file_size}/{file_path.removeprefix('/')}"
 
 
 # 实例化配置
@@ -894,6 +997,7 @@ class GlobalVar(object):
     """
     全局标识
     """
+
     # 系统停止事件
     STOP_EVENT: threading.Event = threading.Event()
     # webpush订阅
