@@ -7,10 +7,28 @@ from pydantic import BaseModel, Field
 from app.schemas.types import ContentType, NotificationType, MessageChannel
 
 
+class MessageResponse(BaseModel):
+    """
+    消息发送响应，包含消息ID等信息用于后续编辑
+    """
+
+    # 消息ID
+    message_id: Optional[Union[str, int]] = None
+    # 聊天ID
+    chat_id: Optional[Union[str, int]] = None
+    # 消息渠道
+    channel: Optional[MessageChannel] = None
+    # 消息来源
+    source: Optional[str] = None
+    # 是否发送成功
+    success: bool = False
+
+
 class CommingMessage(BaseModel):
     """
     外来消息
     """
+
     # 用户ID
     userid: Optional[Union[str, int]] = None
     # 用户名称
@@ -51,6 +69,7 @@ class Notification(BaseModel):
     """
     消息
     """
+
     # 消息渠道
     channel: Optional[MessageChannel] = None
     # 消息来源
@@ -90,8 +109,7 @@ class Notification(BaseModel):
         """
         items = self.model_dump()
         for k, v in items.items():
-            if isinstance(v, MessageChannel) \
-                    or isinstance(v, NotificationType):
+            if isinstance(v, MessageChannel) or isinstance(v, NotificationType):
                 items[k] = v.value
         return items
 
@@ -100,6 +118,7 @@ class NotificationSwitch(BaseModel):
     """
     消息开关
     """
+
     # 消息类型
     mtype: Optional[str] = None
     # 微信开关
@@ -122,6 +141,7 @@ class Subscription(BaseModel):
     """
     客户端消息订阅
     """
+
     endpoint: Optional[str] = None
     keys: Optional[dict] = Field(default_factory=dict)
 
@@ -130,6 +150,7 @@ class SubscriptionMessage(BaseModel):
     """
     客户端订阅消息体
     """
+
     title: Optional[str] = None
     body: Optional[str] = None
     icon: Optional[str] = None
@@ -141,6 +162,7 @@ class ChannelCapability(Enum):
     """
     渠道能力枚举
     """
+
     # 支持内联按钮
     INLINE_BUTTONS = "inline_buttons"
     # 支持菜单命令
@@ -166,6 +188,7 @@ class ChannelCapabilities:
     """
     渠道能力配置
     """
+
     channel: MessageChannel
     capabilities: Set[ChannelCapability]
     max_buttons_per_row: int = 5
@@ -191,20 +214,20 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
-                ChannelCapability.FILE_SENDING
+                ChannelCapability.FILE_SENDING,
             },
             max_buttons_per_row=4,
             max_button_rows=10,
-            max_button_text_length=30
+            max_button_text_length=30,
         ),
         MessageChannel.Wechat: ChannelCapabilities(
             channel=MessageChannel.Wechat,
             capabilities={
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
-                ChannelCapability.MENU_COMMANDS
+                ChannelCapability.MENU_COMMANDS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.Slack: ChannelCapabilities(
             channel=MessageChannel.Slack,
@@ -216,12 +239,12 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
-                ChannelCapability.MENU_COMMANDS
+                ChannelCapability.MENU_COMMANDS,
             },
             max_buttons_per_row=3,
             max_button_rows=8,
             max_button_text_length=25,
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.Discord: ChannelCapabilities(
             channel=MessageChannel.Discord,
@@ -232,56 +255,54 @@ class ChannelCapabilityManager:
                 ChannelCapability.CALLBACK_QUERIES,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
             max_buttons_per_row=5,
             max_button_rows=5,
             max_button_text_length=80,
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.SynologyChat: ChannelCapabilities(
             channel=MessageChannel.SynologyChat,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.VoceChat: ChannelCapabilities(
             channel=MessageChannel.VoceChat,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.WebPush: ChannelCapabilities(
             channel=MessageChannel.WebPush,
-            capabilities={
-                ChannelCapability.LINKS
-            },
-            fallback_enabled=True
+            capabilities={ChannelCapability.LINKS},
+            fallback_enabled=True,
         ),
         MessageChannel.Web: ChannelCapabilities(
             channel=MessageChannel.Web,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.QQ: ChannelCapabilities(
             channel=MessageChannel.QQ,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
-        )
+            fallback_enabled=True,
+        ),
     }
 
     @classmethod
@@ -292,7 +313,9 @@ class ChannelCapabilityManager:
         return cls._capabilities.get(channel)
 
     @classmethod
-    def supports_capability(cls, channel: MessageChannel, capability: ChannelCapability) -> bool:
+    def supports_capability(
+        cls, channel: MessageChannel, capability: ChannelCapability
+    ) -> bool:
         """
         检查渠道是否支持某项能力
         """

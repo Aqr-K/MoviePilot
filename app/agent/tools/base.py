@@ -45,7 +45,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         """
         # 获取工具调用前 Agent 已积累的流式文本
         agent_message = (
-            self._stream_handler.take() if self._stream_handler else ""
+            await self._stream_handler.take() if self._stream_handler else ""
         )
 
         # 获取工具执行提示消息

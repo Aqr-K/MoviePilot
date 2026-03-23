@@ -8,20 +8,26 @@ from app.core.event import eventmanager
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
 from app.modules.telegram.telegram import Telegram
-from app.schemas import MessageChannel, CommingMessage, Notification, CommandRegisterEventData, \
-    NotificationConf
+from app.schemas import (
+    MessageChannel,
+    CommingMessage,
+    Notification,
+    CommandRegisterEventData,
+    NotificationConf,
+    MessageResponse,
+)
 from app.schemas.types import ModuleType, ChainEventType
 from app.utils.structures import DictUtils
 
 
 class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
-
     def init_module(self) -> None:
         """
         初始化模块
         """
-        super().init_service(service_name=Telegram.__name__.lower(),
-                             service_type=Telegram)
+        super().init_service(
+            service_name=Telegram.__name__.lower(), service_type=Telegram
+        )
         self._channel = MessageChannel.Telegram
 
     @staticmethod
@@ -71,8 +77,9 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
-    def message_parser(self, source: str, body: Any, form: Any,
-                       args: Any) -> Optional[CommingMessage]:
+    def message_parser(
+        self, source: str, body: Any, form: Any, args: Any
+    ) -> Optional[CommingMessage]:
         """
         解析消息内容，返回字典，注意以下约定值：
         userid: 用户ID
@@ -140,7 +147,9 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         return None
 
     @staticmethod
-    def _handle_callback_query(message: dict, client_config: NotificationConf) -> Optional[CommingMessage]:
+    def _handle_callback_query(
+        message: dict, client_config: NotificationConf
+    ) -> Optional[CommingMessage]:
         """
         处理按钮回调查询
         """
@@ -151,8 +160,10 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         user_name = user_info.get("username")
 
         if callback_data and user_id:
-            logger.info(f"收到来自 {client_config.name} 的Telegram按钮回调："
-                        f"userid={user_id}, username={user_name}, callback_data={callback_data}")
+            logger.info(
+                f"收到来自 {client_config.name} 的Telegram按钮回调："
+                f"userid={user_id}, username={user_name}, callback_data={callback_data}"
+            )
 
             # 将callback_data作为特殊格式的text返回，以便主程序识别这是按钮回调
             callback_text = f"CALLBACK:{callback_data}"
@@ -167,13 +178,16 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 is_callback=True,
                 callback_data=callback_data,
                 message_id=callback_query.get("message", {}).get("message_id"),
-                chat_id=str(callback_query.get("message", {}).get("chat", {}).get("id", "")),
-                callback_query=callback_query
+                chat_id=str(
+                    callback_query.get("message", {}).get("chat", {}).get("id", "")
+                ),
+                callback_query=callback_query,
             )
         return None
 
-    def _handle_text_message(self, msg: dict,
-                             client_config: NotificationConf, client: Telegram) -> Optional[CommingMessage]:
+    def _handle_text_message(
+        self, msg: dict, client_config: NotificationConf, client: Telegram
+    ) -> Optional[CommingMessage]:
         """
         处理普通文本消息
         """
@@ -184,11 +198,15 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         chat_id = msg.get("chat", {}).get("id")
 
         if text and user_id:
-            logger.info(f"收到来自 {client_config.name} 的Telegram消息："
-                        f"userid={user_id}, username={user_name}, chat_id={chat_id}, text={text}")
+            logger.info(
+                f"收到来自 {client_config.name} 的Telegram消息："
+                f"userid={user_id}, username={user_name}, chat_id={chat_id}, text={text}"
+            )
 
             # Clean bot mentions from text to ensure consistent processing
-            cleaned_text = self._clean_bot_mention(text, client.bot_username if client else None)
+            cleaned_text = self._clean_bot_mention(
+                text, client.bot_username if client else None
+            )
 
             # 检查权限
             admin_users = client_config.config.get("TELEGRAM_ADMINS")
@@ -196,16 +214,21 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
             config_chat_id = client_config.config.get("TELEGRAM_CHAT_ID")
 
             if cleaned_text.startswith("/"):
-                if admin_users \
-                        and str(user_id) not in admin_users.split(',') \
-                        and str(user_id) != config_chat_id:
-                    client.send_msg(title="只有管理员才有权限执行此命令", userid=user_id)
+                if (
+                    admin_users
+                    and str(user_id) not in admin_users.split(",")
+                    and str(user_id) != config_chat_id
+                ):
+                    client.send_msg(
+                        title="只有管理员才有权限执行此命令", userid=user_id
+                    )
                     return None
             else:
-                if user_list \
-                        and str(user_id) not in user_list.split(','):
+                if user_list and str(user_id) not in user_list.split(","):
                     logger.info(f"用户{user_id}不在用户白名单中，无法使用此机器人")
-                    client.send_msg(title="你不在用户白名单中，无法使用此机器人", userid=user_id)
+                    client.send_msg(
+                        title="你不在用户白名单中，无法使用此机器人", userid=user_id
+                    )
                     return None
 
             return CommingMessage(
@@ -214,7 +237,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 userid=user_id,
                 username=user_name,
                 text=cleaned_text,  # Use cleaned text
-                chat_id=str(chat_id) if chat_id else None
+                chat_id=str(chat_id) if chat_id else None,
             )
         return None
 
@@ -235,13 +258,13 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
 
         # Remove mention at the beginning with optional following space
         if cleaned.startswith(mention_pattern):
-            cleaned = cleaned[len(mention_pattern):].lstrip()
+            cleaned = cleaned[len(mention_pattern) :].lstrip()
 
         # Remove mention at any other position
         cleaned = cleaned.replace(mention_pattern, "").strip()
 
         # Clean up multiple spaces
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
         return cleaned
 
@@ -257,19 +280,26 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
             targets = message.targets
             userid = message.userid
             if not userid and targets is not None:
-                userid = targets.get('telegram_userid')
+                userid = targets.get("telegram_userid")
                 if not userid:
                     logger.warn(f"用户没有指定 Telegram用户ID，消息无法发送")
                     return
             client: Telegram = self.get_instance(conf.name)
             if client:
-                client.send_msg(title=message.title, text=message.text,
-                                image=message.image, userid=userid, link=message.link,
-                                buttons=message.buttons,
-                                original_message_id=message.original_message_id,
-                                original_chat_id=message.original_chat_id)
+                client.send_msg(
+                    title=message.title,
+                    text=message.text,
+                    image=message.image,
+                    userid=userid,
+                    link=message.link,
+                    buttons=message.buttons,
+                    original_message_id=message.original_message_id,
+                    original_chat_id=message.original_chat_id,
+                )
 
-    def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
+    def post_medias_message(
+        self, message: Notification, medias: List[MediaInfo]
+    ) -> None:
         """
         发送媒体信息选择列表
         :param message: 消息体
@@ -281,13 +311,19 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 continue
             client: Telegram = self.get_instance(conf.name)
             if client:
-                client.send_medias_msg(title=message.title, medias=medias,
-                                       userid=message.userid, link=message.link,
-                                       buttons=message.buttons,
-                                       original_message_id=message.original_message_id,
-                                       original_chat_id=message.original_chat_id)
+                client.send_medias_msg(
+                    title=message.title,
+                    medias=medias,
+                    userid=message.userid,
+                    link=message.link,
+                    buttons=message.buttons,
+                    original_message_id=message.original_message_id,
+                    original_chat_id=message.original_chat_id,
+                )
 
-    def post_torrents_message(self, message: Notification, torrents: List[Context]) -> None:
+    def post_torrents_message(
+        self, message: Notification, torrents: List[Context]
+    ) -> None:
         """
         发送种子信息选择列表
         :param message: 消息体
@@ -299,14 +335,23 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 continue
             client: Telegram = self.get_instance(conf.name)
             if client:
-                client.send_torrents_msg(title=message.title, torrents=torrents,
-                                         userid=message.userid, link=message.link,
-                                         buttons=message.buttons,
-                                         original_message_id=message.original_message_id,
-                                         original_chat_id=message.original_chat_id)
+                client.send_torrents_msg(
+                    title=message.title,
+                    torrents=torrents,
+                    userid=message.userid,
+                    link=message.link,
+                    buttons=message.buttons,
+                    original_message_id=message.original_message_id,
+                    original_chat_id=message.original_chat_id,
+                )
 
-    def delete_message(self, channel: MessageChannel, source: str,
-                       message_id: int, chat_id: Optional[int] = None) -> bool:
+    def delete_message(
+        self,
+        channel: MessageChannel,
+        source: str,
+        message_id: int,
+        chat_id: Optional[int] = None,
+    ) -> bool:
         """
         删除消息
         :param channel: 消息渠道
@@ -328,6 +373,77 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     success = True
         return success
 
+    def edit_message(
+        self,
+        channel: MessageChannel,
+        source: str,
+        message_id: Union[str, int],
+        chat_id: Union[str, int],
+        text: str,
+        title: Optional[str] = None,
+    ) -> bool:
+        """
+        编辑消息
+        :param channel: 消息渠道
+        :param source: 指定的消息源
+        :param message_id: 消息ID
+        :param chat_id: 聊天ID
+        :param text: 新的消息内容
+        :param title: 消息标题
+        :return: 编辑是否成功
+        """
+        if channel != self._channel:
+            return False
+        for conf in self.get_configs().values():
+            if source != conf.name:
+                continue
+            client: Telegram = self.get_instance(conf.name)
+            if client:
+                result = client.edit_msg(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    title=title,
+                )
+                if result:
+                    return True
+        return False
+
+    def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:
+        """
+        直接发送消息并返回消息ID等信息
+        :param message: 消息体
+        :return: 消息响应（包含message_id, chat_id等）
+        """
+        for conf in self.get_configs().values():
+            if not self.check_message(message, conf.name):
+                continue
+            targets = message.targets
+            userid = message.userid
+            if not userid and targets is not None:
+                userid = targets.get("telegram_userid")
+                if not userid:
+                    logger.warn("用户没有指定 Telegram用户ID，消息无法发送")
+                    return None
+            client: Telegram = self.get_instance(conf.name)
+            if client:
+                result = client.send_msg(
+                    title=message.title,
+                    text=message.text,
+                    image=message.image,
+                    userid=userid,
+                    link=message.link,
+                )
+                if result and result.get("success"):
+                    return MessageResponse(
+                        message_id=result.get("message_id"),
+                        chat_id=result.get("chat_id"),
+                        channel=MessageChannel.Telegram,
+                        source=conf.name,
+                        success=True,
+                    )
+        return None
+
     def register_commands(self, commands: Dict[str, dict]):
         """
         注册命令，实现这个函数接收系统可用的命令菜单
@@ -342,7 +458,11 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
             scoped_commands = copy.deepcopy(commands)
             event = eventmanager.send_event(
                 ChainEventType.CommandRegister,
-                CommandRegisterEventData(commands=scoped_commands, origin="Telegram", service=client_config.name)
+                CommandRegisterEventData(
+                    commands=scoped_commands,
+                    origin="Telegram",
+                    service=client_config.name,
+                ),
             )
 
             # 如果事件返回有效的 event_data，使用事件中调整后的命令
@@ -361,7 +481,9 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     client.delete_commands()
 
             # scoped_commands 必须是 commands 的子集
-            filtered_scoped_commands = DictUtils.filter_keys_to_subset(scoped_commands, commands)
+            filtered_scoped_commands = DictUtils.filter_keys_to_subset(
+                scoped_commands, commands
+            )
             # 如果 filtered_scoped_commands 为空，则跳过注册
             if not filtered_scoped_commands:
                 logger.debug("Filtered commands are empty, skipping registration.")
@@ -369,5 +491,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 continue
             # 对比调整后的命令与当前命令
             if filtered_scoped_commands != commands:
-                logger.debug(f"Command set has changed, Updating new commands: {filtered_scoped_commands}")
+                logger.debug(
+                    f"Command set has changed, Updating new commands: {filtered_scoped_commands}"
+                )
             client.register_commands(filtered_scoped_commands)
