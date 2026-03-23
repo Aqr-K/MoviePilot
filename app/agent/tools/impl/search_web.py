@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import re
 from typing import Optional, Type, List, Dict
 
@@ -72,10 +73,12 @@ class SearchWebTool(MoviePilotTool):
         """使用 Tavily API 进行搜索"""
         try:
             async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
+                # 从设置中随机选择一个 API Key（如果有多个）
+                tavity_api_key = random.choice(settings.TAVILY_API_KEY)
                 response = await client.post(
                     "https://api.tavily.com/search",
                     json={
-                        "api_key": settings.TAVILY_API_KEY,
+                        "api_key": tavity_api_key,
                         "query": query,
                         "search_depth": "basic",
                         "max_results": max_results,

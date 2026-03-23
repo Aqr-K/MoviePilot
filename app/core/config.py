@@ -459,11 +459,12 @@ class ConfigModel(BaseModel):
     # AI推荐用户偏好
     AI_RECOMMEND_USER_PREFERENCE: str = ""
     # Tavily API密钥（用于网络搜索）
-    TAVILY_API_KEY: str = "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"
+    TAVILY_API_KEY: List[str] = ["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",
+                                 "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",
+                                 "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"]
 
     # AI推荐条目数量限制
     AI_RECOMMEND_MAX_ITEMS: int = 50
-
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
@@ -869,7 +870,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         return rename_format.strip("/")
 
     def TMDB_IMAGE_URL(
-        self, file_path: Optional[str], file_size: str = "original"
+            self, file_path: Optional[str], file_size: str = "original"
     ) -> Optional[str]:
         """
         获取TMDB图片网址
