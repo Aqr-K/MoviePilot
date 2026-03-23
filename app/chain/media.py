@@ -147,8 +147,10 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         'thumb': ScrapingMetadata.THUMB,
     }
 
-    scraping_policies = ScrapingConfig.from_system_config()
-    storagechain = StorageChain()
+    def __init__(self):
+        super().__init__()
+        self.storagechain = StorageChain()
+        self.scraping_policies = ScrapingConfig.from_system_config()
 
     def on_config_changed(self):
         self.scraping_policies = ScrapingConfig.from_system_config()
