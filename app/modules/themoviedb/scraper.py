@@ -31,8 +31,13 @@ class TmdbScraper:
             return TmdbApi(language=mediainfo.original_language)
         return self.default_tmdb
 
-    def get_metadata_nfo(self, meta: MetaBase, mediainfo: MediaInfo,
-                         season: Optional[int] = None, episode: Optional[int] = None) -> Optional[str]:
+    def get_metadata_nfo(
+        self,
+        meta: MetaBase,
+        mediainfo: MediaInfo,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+    ) -> Optional[str]:
         """
         获取NFO文件内容文本
         :param meta: 元数据
@@ -47,17 +52,29 @@ class TmdbScraper:
             if season is not None:
                 # 查询季信息
                 if mediainfo.episode_group:
-                    seasoninfo = self.default_tmdb.get_tv_group_detail(mediainfo.episode_group, season=season)
+                    seasoninfo = self.default_tmdb.get_tv_group_detail(
+                        mediainfo.episode_group, season=season
+                    )
                 else:
-                    seasoninfo = self.default_tmdb.get_tv_season_detail(mediainfo.tmdb_id, season=season)
+                    seasoninfo = self.default_tmdb.get_tv_season_detail(
+                        mediainfo.tmdb_id, season=season
+                    )
                 if episode:
                     # 集元数据文件
-                    episodeinfo = self.__get_episode_detail(seasoninfo, meta.begin_episode)
-                    doc = self.__gen_tv_episode_nfo_file(episodeinfo=episodeinfo, tmdbid=mediainfo.tmdb_id,
-                                                         season=season, episode=episode)
+                    episodeinfo = self.__get_episode_detail(
+                        seasoninfo, meta.begin_episode
+                    )
+                    doc = self.__gen_tv_episode_nfo_file(
+                        episodeinfo=episodeinfo,
+                        tmdbid=mediainfo.tmdb_id,
+                        season=season,
+                        episode=episode,
+                    )
                 else:
                     # 季元数据文件
-                    doc = self.__gen_tv_season_nfo_file(seasoninfo=seasoninfo, season=season)
+                    doc = self.__gen_tv_season_nfo_file(
+                        seasoninfo=seasoninfo, season=season
+                    )
             else:
                 # 电视剧元数据文件
                 doc = self.__gen_tv_nfo_file(mediainfo=mediainfo)
@@ -66,8 +83,12 @@ class TmdbScraper:
 
         return None
 
-    def get_metadata_img(self, mediainfo: MediaInfo, season: Optional[int] = None,
-                         episode: Optional[int] = None) -> dict:
+    def get_metadata_img(
+        self,
+        mediainfo: MediaInfo,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+    ) -> dict:
         """
         获取图片名称和url
         :param mediainfo: 媒体信息
@@ -80,19 +101,26 @@ class TmdbScraper:
             if episode:
                 # 集的图片
                 if mediainfo.episode_group:
-                    seasoninfo = self.original_tmdb(mediainfo).get_tv_group_detail(mediainfo.episode_group, season)
+                    seasoninfo = self.original_tmdb(mediainfo).get_tv_group_detail(
+                        mediainfo.episode_group, season
+                    )
                 else:
-                    seasoninfo = self.original_tmdb(mediainfo).get_tv_season_detail(mediainfo.tmdb_id, season)
+                    seasoninfo = self.original_tmdb(mediainfo).get_tv_season_detail(
+                        mediainfo.tmdb_id, season
+                    )
                 if seasoninfo:
                     episodeinfo = self.__get_episode_detail(seasoninfo, episode)
                     if still_path := episodeinfo.get("still_path"):
                         # TMDB集still图片
-                        still_name = f"episode-thumb-{episode}"
+                        ext = Path(still_path).suffix
+                        still_name = f"episode-thumb{ext}"
                         still_url = settings.TMDB_IMAGE_URL(still_path)
                         images[still_name] = still_url
             else:
                 # 季的图片
-                seasoninfo = self.original_tmdb(mediainfo).get_tv_season_detail(mediainfo.tmdb_id, season)
+                seasoninfo = self.original_tmdb(mediainfo).get_tv_season_detail(
+                    mediainfo.tmdb_id, season
+                )
                 if seasoninfo:
                     # TMDB季poster图片
                     poster_name, poster_url = self.get_season_poster(seasoninfo, season)
@@ -102,21 +130,29 @@ class TmdbScraper:
         else:
             # 获取媒体信息中原有图片（TheMovieDb或Fanart）
             for attr_name, attr_value in vars(mediainfo).items():
-                if attr_value \
-                        and attr_name.endswith("_path") \
-                        and attr_value \
-                        and isinstance(attr_value, str) \
-                        and attr_value.startswith("http"):
-                    image_name = attr_name.replace("_path", "") + Path(attr_value).suffix
+                if (
+                    attr_value
+                    and attr_name.endswith("_path")
+                    and attr_value
+                    and isinstance(attr_value, str)
+                    and attr_value.startswith("http")
+                ):
+                    image_name = (
+                        attr_name.replace("_path", "") + Path(attr_value).suffix
+                    )
                     images[image_name] = attr_value
             # 替换原语言Poster
             if settings.TMDB_SCRAP_ORIGINAL_IMAGE:
-                _mediainfo = self.original_tmdb(mediainfo).get_info(mediainfo.type, mediainfo.tmdb_id)
+                _mediainfo = self.original_tmdb(mediainfo).get_info(
+                    mediainfo.type, mediainfo.tmdb_id
+                )
                 if _mediainfo:
                     for attr_name, attr_value in _mediainfo.items():
                         if attr_name.endswith("_path") and attr_value is not None:
                             image_url = settings.TMDB_IMAGE_URL(attr_value)
-                            image_name = attr_name.replace("_path", "") + Path(image_url).suffix
+                            image_name = (
+                                attr_name.replace("_path", "") + Path(image_url).suffix
+                            )
                             images[image_name] = image_url
             return images
 
@@ -126,7 +162,7 @@ class TmdbScraper:
         获取季的海报
         """
         # TMDB季poster图片
-        sea_seq = str(season).rjust(2, '0')
+        sea_seq = str(season).rjust(2, "0")
         if poster_path := seasoninfo.get("poster_path"):
             # 后缀
             ext = Path(poster_path).suffix
@@ -151,19 +187,25 @@ class TmdbScraper:
         return {}
 
     @staticmethod
-    def __gen_common_nfo(mediainfo: MediaInfo, doc: minidom.Document, root: minidom.Element):
+    def __gen_common_nfo(
+        mediainfo: MediaInfo, doc: minidom.Document, root: minidom.Element
+    ):
         """
         生成公共NFO
         """
         # TMDB
         DomUtils.add_node(doc, root, "tmdbid", mediainfo.tmdb_id or "")
-        uniqueid_tmdb = DomUtils.add_node(doc, root, "uniqueid", mediainfo.tmdb_id or "")
+        uniqueid_tmdb = DomUtils.add_node(
+            doc, root, "uniqueid", mediainfo.tmdb_id or ""
+        )
         uniqueid_tmdb.setAttribute("type", "tmdb")
         uniqueid_tmdb.setAttribute("default", "true")
         # TVDB
         if mediainfo.tvdb_id:
             DomUtils.add_node(doc, root, "tvdbid", str(mediainfo.tvdb_id))
-            uniqueid_tvdb = DomUtils.add_node(doc, root, "uniqueid", str(mediainfo.tvdb_id))
+            uniqueid_tvdb = DomUtils.add_node(
+                doc, root, "uniqueid", str(mediainfo.tvdb_id)
+            )
             uniqueid_tvdb.setAttribute("type", "tvdb")
         # IMDB
         if mediainfo.imdb_id:
@@ -180,7 +222,9 @@ class TmdbScraper:
         xoutline.appendChild(doc.createCDATASection(mediainfo.overview or ""))
         # 导演
         for director in mediainfo.directors:
-            xdirector = DomUtils.add_node(doc, root, "director", director.get("name") or "")
+            xdirector = DomUtils.add_node(
+                doc, root, "director", director.get("name") or ""
+            )
             xdirector.setAttribute("tmdbid", str(director.get("id") or ""))
         # 演员
         for actor in mediainfo.actors:
@@ -188,12 +232,20 @@ class TmdbScraper:
             xactor = DomUtils.add_node(doc, root, "actor")
             DomUtils.add_node(doc, xactor, "name", actor.get("name") or "")
             DomUtils.add_node(doc, xactor, "type", "Actor")
-            DomUtils.add_node(doc, xactor, "role", actor.get("character") or actor.get("role") or "")
+            DomUtils.add_node(
+                doc, xactor, "role", actor.get("character") or actor.get("role") or ""
+            )
             DomUtils.add_node(doc, xactor, "tmdbid", actor.get("id") or "")
-            if profile_path := actor.get('profile_path'):
-                DomUtils.add_node(doc, xactor, "thumb", settings.TMDB_IMAGE_URL(profile_path))
-            DomUtils.add_node(doc, xactor, "profile",
-                              f"https://www.themoviedb.org/person/{actor.get('id')}")
+            if profile_path := actor.get("profile_path"):
+                DomUtils.add_node(
+                    doc, xactor, "thumb", settings.TMDB_IMAGE_URL(profile_path)
+                )
+            DomUtils.add_node(
+                doc,
+                xactor,
+                "profile",
+                f"https://www.themoviedb.org/person/{actor.get('id')}",
+            )
         # 风格
         genres = mediainfo.genres or []
         for genre in genres:
@@ -215,9 +267,7 @@ class TmdbScraper:
         doc = minidom.Document()
         root = DomUtils.add_node(doc, doc, "movie")
         # 公共部分
-        doc = self.__gen_common_nfo(mediainfo=mediainfo,
-                                    doc=doc,
-                                    root=root)
+        doc = self.__gen_common_nfo(mediainfo=mediainfo, doc=doc, root=root)
         # 标题
         DomUtils.add_node(doc, root, "title", mediainfo.title or "")
         DomUtils.add_node(doc, root, "originaltitle", mediainfo.original_title or "")
@@ -236,9 +286,7 @@ class TmdbScraper:
         doc = minidom.Document()
         root = DomUtils.add_node(doc, doc, "tvshow")
         # 公共部分
-        doc = self.__gen_common_nfo(mediainfo=mediainfo,
-                                    doc=doc,
-                                    root=root)
+        doc = self.__gen_common_nfo(mediainfo=mediainfo, doc=doc, root=root)
         # 标题
         DomUtils.add_node(doc, root, "title", mediainfo.title or "")
         DomUtils.add_node(doc, root, "originaltitle", mediainfo.original_title or "")
@@ -266,22 +314,27 @@ class TmdbScraper:
         xoutline = DomUtils.add_node(doc, root, "outline")
         xoutline.appendChild(doc.createCDATASection(seasoninfo.get("overview") or ""))
         # 标题
-        DomUtils.add_node(doc, root, "title", seasoninfo.get("name") or "季 %s" % season)
+        DomUtils.add_node(
+            doc, root, "title", seasoninfo.get("name") or "季 %s" % season
+        )
         # 发行日期
         DomUtils.add_node(doc, root, "premiered", seasoninfo.get("air_date") or "")
         DomUtils.add_node(doc, root, "releasedate", seasoninfo.get("air_date") or "")
         # 发行年份
-        DomUtils.add_node(doc, root, "year",
-                          seasoninfo.get("air_date")[:4] if seasoninfo.get("air_date") else "")
+        DomUtils.add_node(
+            doc,
+            root,
+            "year",
+            seasoninfo.get("air_date")[:4] if seasoninfo.get("air_date") else "",
+        )
         # seasonnumber
         DomUtils.add_node(doc, root, "seasonnumber", str(season))
         return doc
 
     @staticmethod
-    def __gen_tv_episode_nfo_file(tmdbid: int,
-                                  episodeinfo: dict,
-                                  season: int,
-                                  episode: int) -> minidom.Document:
+    def __gen_tv_episode_nfo_file(
+        tmdbid: int, episodeinfo: dict, season: int, episode: int
+    ) -> minidom.Document:
         """
         生成电视剧集的NFO描述文件
         :param tmdbid: TMDBID
@@ -300,7 +353,9 @@ class TmdbScraper:
         # 应与uniqueid一致 使用剧集id 否则jellyfin/emby会将此id覆盖上面的uniqueid
         DomUtils.add_node(doc, root, "tmdbid", str(episodeinfo.get("id")))
         # 标题
-        DomUtils.add_node(doc, root, "title", episodeinfo.get("name") or "第 %s 集" % episode)
+        DomUtils.add_node(
+            doc, root, "title", episodeinfo.get("name") or "第 %s 集" % episode
+        )
         # 简介
         xplot = DomUtils.add_node(doc, root, "plot")
         xplot.appendChild(doc.createCDATASection(episodeinfo.get("overview") or ""))
@@ -309,8 +364,12 @@ class TmdbScraper:
         # 发布日期
         DomUtils.add_node(doc, root, "aired", episodeinfo.get("air_date") or "")
         # 年份
-        DomUtils.add_node(doc, root, "year",
-                          episodeinfo.get("air_date")[:4] if episodeinfo.get("air_date") else "")
+        DomUtils.add_node(
+            doc,
+            root,
+            "year",
+            episodeinfo.get("air_date")[:4] if episodeinfo.get("air_date") else "",
+        )
         # 季
         DomUtils.add_node(doc, root, "season", str(season))
         # 集
@@ -321,7 +380,9 @@ class TmdbScraper:
         directors = episodeinfo.get("crew") or []
         for director in directors:
             if director.get("known_for_department") == "Directing":
-                xdirector = DomUtils.add_node(doc, root, "director", director.get("name") or "")
+                xdirector = DomUtils.add_node(
+                    doc, root, "director", director.get("name") or ""
+                )
                 xdirector.setAttribute("tmdbid", str(director.get("id") or ""))
         # 演员
         actors = episodeinfo.get("guest_stars") or []
@@ -331,8 +392,14 @@ class TmdbScraper:
                 DomUtils.add_node(doc, xactor, "name", actor.get("name") or "")
                 DomUtils.add_node(doc, xactor, "type", "Actor")
                 DomUtils.add_node(doc, xactor, "tmdbid", actor.get("id") or "")
-                if profile_path := actor.get('profile_path'):
-                    DomUtils.add_node(doc, xactor, "thumb", settings.TMDB_IMAGE_URL(profile_path))
-                DomUtils.add_node(doc, xactor, "profile",
-                                  f"https://www.themoviedb.org/person/{actor.get('id')}")
+                if profile_path := actor.get("profile_path"):
+                    DomUtils.add_node(
+                        doc, xactor, "thumb", settings.TMDB_IMAGE_URL(profile_path)
+                    )
+                DomUtils.add_node(
+                    doc,
+                    xactor,
+                    "profile",
+                    f"https://www.themoviedb.org/person/{actor.get('id')}",
+                )
         return doc
