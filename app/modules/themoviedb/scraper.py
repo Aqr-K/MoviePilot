@@ -87,7 +87,7 @@ class TmdbScraper:
                     episodeinfo = self.__get_episode_detail(seasoninfo, episode)
                     if still_path := episodeinfo.get("still_path"):
                         # TMDB集still图片
-                        still_name = f"{episode}"
+                        still_name = f"episode-thumb-{episode}"
                         still_url = settings.TMDB_IMAGE_URL(still_path)
                         images[still_name] = still_url
             else:
