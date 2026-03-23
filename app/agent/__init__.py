@@ -168,6 +168,7 @@ class MoviePilotAgent:
                 {"messages": messages},
                 stream_mode="messages",
                 config=agent_config,
+                subgraphs=False,
                 version="v2",
             ):
                 # 处理流式token（过滤工具调用token，只保留模型生成的内容）
