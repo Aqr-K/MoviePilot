@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional, Type
 
-from aiopathlib import AsyncPath
+from anyio import Path as AsyncPath
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool

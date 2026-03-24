@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Generator, AsyncGenerator, Tuple, Litera
 
 import aiofiles
 import aioshutil
-from aiopathlib import AsyncPath
+from anyio import Path as AsyncPath
 from cachetools import LRUCache as MemoryLRUCache
 from cachetools import TTLCache as MemoryTTLCache
 from cachetools.keys import hashkey

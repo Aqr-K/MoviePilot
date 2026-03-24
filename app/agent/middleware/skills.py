@@ -4,7 +4,7 @@ from typing import Annotated, List
 from typing import NotRequired, TypedDict
 
 import yaml  # noqa
-from aiopathlib import AsyncPath
+from anyio import Path as AsyncPath
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -195,7 +195,7 @@ async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
 
     # 查找所有技能目录 (包含 SKILL.md 的目录)
     skill_dirs: List[AsyncPath] = []
-    async for path in source_path.iterdir():
+    for path in source_path.iterdir():
         if await path.is_dir() and await (path / "SKILL.md").is_file():
             skill_dirs.append(path)
 

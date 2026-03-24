@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple, Set, Callable, Awaitable
 import aiofiles
 import aioshutil
 import httpx
-from aiopathlib import AsyncPath
+from anyio import Path as AsyncPath
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet, InvalidSpecifier
 from packaging.version import Version, InvalidVersion

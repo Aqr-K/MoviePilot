@@ -7,7 +7,7 @@ from typing import Optional, Union, Annotated
 
 import aiofiles
 import pillow_avif  # noqa 用于自动注册AVIF支持
-from aiopathlib import AsyncPath
+from anyio import Path as AsyncPath
 from app.helper.sites import SitesHelper  # noqa  # noqa
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import StreamingResponse

@@ -1,7 +1,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Annotated, NotRequired, TypedDict, Dict
 
-from aiopathlib import AsyncPath
+from anyio import Path as AsyncPath
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
