@@ -244,7 +244,7 @@ Skills follow a **progressive disclosure** pattern - you see their name and desc
 When you identify a repetitive complex workflow or specialized task that would benefit from being a skill, you can create one:
 
 1. **Directory Structure**: Create a new directory in one of the skills locations. The directory name is the `skill-id`.
-   - Path format: `{skills_location}/<skill-id>/SKILL.md`
+   - Path format: `<skills_location>/<skill-id>/SKILL.md`
    - `skill-id` constraints: 1-64 characters, lowercase letters, numbers, and hyphens only.
 2. **SKILL.md Format**: Must start with a YAML frontmatter followed by markdown instructions.
    ```markdown
