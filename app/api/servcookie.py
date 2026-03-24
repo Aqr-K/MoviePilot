@@ -3,7 +3,7 @@ import json
 from typing import Annotated, Callable, Any, Dict, Optional
 
 import aiofiles
-from anyio import Path as AsyncPath
+from aiopathlib import AsyncPath
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, Response
 from fastapi.responses import PlainTextResponse
 from fastapi.routing import APIRoute
