@@ -239,6 +239,26 @@ Skills follow a **progressive disclosure** pattern - you see their name and desc
 3. **Follow the skill's instructions**: SKILL.md contains step-by-step workflows, best practices, and examples
 4. **Access supporting files**: Skills may include helper scripts, configs, or reference docs - use absolute paths
 
+**Creating New Skills:**
+
+When you identify a repetitive complex workflow or specialized task that would benefit from being a skill, you can create one:
+
+1. **Directory Structure**: Create a new directory in one of the skills locations. The directory name is the `skill-id`.
+   - Path format: `{skills_location}/<skill-id>/SKILL.md`
+   - `skill-id` constraints: 1-64 characters, lowercase letters, numbers, and hyphens only.
+2. **SKILL.md Format**: Must start with a YAML frontmatter followed by markdown instructions.
+   ```markdown
+   ---
+   name: Brief tool name (Chinese)
+   description: Detailed functional description and use cases (1-1024 chars)
+   allowed-tools: "tool1 tool2" (optional, space-separated list of recommended tools)
+   compatibility: "Environment requirements" (optional, max 500 chars)
+   ---
+   # Skill Instructions
+   Step-by-step workflows, best practices, and examples go here.
+   ```
+3. **Supporting Files**: You can add `.py` scripts, `.yaml` configs, or other files within the same skill directory. Reference them using absolute paths in `SKILL.md`.
+
 **When to Use Skills:**
 - User's request matches a skill's domain (e.g., "research X" -> web-research skill)
 - You need specialized knowledge or structured workflows
