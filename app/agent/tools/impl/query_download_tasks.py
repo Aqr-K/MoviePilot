@@ -111,16 +111,18 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     # 获取下载历史信息
                     history = DownloadHistoryOper().get_by_hash(torrent.hash)
                     if history:
-                        torrent.media = {
-                            "tmdbid": history.tmdbid,
-                            "type": history.type,
-                            "title": history.title,
-                            "season": history.seasons,
-                            "episode": history.episodes,
-                            "image": history.image,
-                        }
+                        if hasattr(torrent, "media"):
+                            torrent.media = {
+                                "tmdbid": history.tmdbid,
+                                "type": history.type,
+                                "title": history.title,
+                                "season": history.seasons,
+                                "episode": history.episodes,
+                                "image": history.image,
+                            }
+                        if hasattr(torrent, "username"):
+                            torrent.username = history.username
                         torrent.userid = history.userid
-                        torrent.username = history.username
                     downloads.append(torrent)
                 filtered_downloads = downloads
             elif title:
@@ -137,7 +139,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     matched = False
                     # 检查torrent的title和name字段
                     if (title_lower in (torrent.title or "").lower()) or \
-                       (title_lower in (torrent.name or "").lower()):
+                       (title_lower in (getattr(torrent, "name", None) or "").lower()):
                         matched = True
                     # 检查下载历史中的标题
                     if history and history.title:
@@ -146,16 +148,18 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     
                     if matched:
                         if history:
-                            torrent.media = {
-                                "tmdbid": history.tmdbid,
-                                "type": history.type,
-                                "title": history.title,
-                                "season": history.seasons,
-                                "episode": history.episodes,
-                                "image": history.image,
-                            }
+                            if hasattr(torrent, "media"):
+                                torrent.media = {
+                                    "tmdbid": history.tmdbid,
+                                    "type": history.type,
+                                    "title": history.title,
+                                    "season": history.seasons,
+                                    "episode": history.episodes,
+                                    "image": history.image,
+                                }
+                            if hasattr(torrent, "username"):
+                                torrent.username = history.username
                             torrent.userid = history.userid
-                            torrent.username = history.username
                         filtered_downloads.append(torrent)
                 if not filtered_downloads:
                     return f"未找到标题包含 '{title}' 的下载任务"
@@ -190,16 +194,18 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         # 获取下载历史信息
                         history = DownloadHistoryOper().get_by_hash(torrent.hash)
                         if history:
-                            torrent.media = {
-                                "tmdbid": history.tmdbid,
-                                "type": history.type,
-                                "title": history.title,
-                                "season": history.seasons,
-                                "episode": history.episodes,
-                                "image": history.image,
-                            }
+                            if hasattr(torrent, "media"):
+                                torrent.media = {
+                                    "tmdbid": history.tmdbid,
+                                    "type": history.type,
+                                    "title": history.title,
+                                    "season": history.seasons,
+                                    "episode": history.episodes,
+                                    "image": history.image,
+                                }
+                            if hasattr(torrent, "username"):
+                                torrent.username = history.username
                             torrent.userid = history.userid
-                            torrent.username = history.username
                         filtered_downloads.append(torrent)
             # 按tag过滤
             if tag and filtered_downloads:
@@ -221,25 +227,26 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         "downloader": d.downloader,
                         "hash": d.hash,
                         "title": d.title,
-                        "name": d.name,
-                        "year": d.year,
-                        "season_episode": d.season_episode,
+                        "name": getattr(d, "name", None),
+                        "year": getattr(d, "year", None),
+                        "season_episode": getattr(d, "season_episode", None),
                         "size": d.size,
                         "progress": self._format_progress(d.progress),
                         "state": d.state,
-                        "upspeed": d.upspeed,
-                        "dlspeed": d.dlspeed,
+                        "upspeed": getattr(d, "upspeed", None),
+                        "dlspeed": getattr(d, "dlspeed", None),
                         "tags": d.tags,
-                        "left_time": d.left_time
+                        "left_time": getattr(d, "left_time", None)
                     }
                     # 精简 media 字段
-                    if d.media:
+                    media = getattr(d, "media", None)
+                    if media:
                         simplified["media"] = {
-                            "tmdbid": d.media.get("tmdbid"),
-                            "type": media_type_to_agent(d.media.get("type")),
-                            "title": d.media.get("title"),
-                            "season": d.media.get("season"),
-                            "episode": d.media.get("episode")
+                            "tmdbid": media.get("tmdbid"),
+                            "type": media_type_to_agent(media.get("type")),
+                            "title": media.get("title"),
+                            "season": media.get("season"),
+                            "episode": media.get("episode")
                         }
                     simplified_downloads.append(simplified)
                 result_json = json.dumps(simplified_downloads, ensure_ascii=False, indent=2)
