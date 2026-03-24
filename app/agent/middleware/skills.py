@@ -215,7 +215,7 @@ async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
         # 解析元数据
         skill_metadata = _parse_skill_metadata(
             content=skill_content,
-            skill_path=skill_md_path,
+            skill_path=str(skill_md_path),
             skill_id=skill_path.name,
         )
         if skill_metadata:
