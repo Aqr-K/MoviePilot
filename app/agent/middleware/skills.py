@@ -78,13 +78,15 @@ class SkillsStateUpdate(TypedDict):
 
 
 def _parse_skill_metadata(  # noqa: C901
-        content: str,
-        skill_path: str,
-        skill_id: str,
+    content: str,
+    skill_path: str,
+    skill_id: str,
 ) -> SkillMetadata | None:
     """从 SKILL.md 内容中解析 YAML 前言并验证元数据。"""
     if len(content) > MAX_SKILL_FILE_SIZE:
-        logger.warning("Skipping %s: content too large (%d bytes)", skill_path, len(content))
+        logger.warning(
+            "Skipping %s: content too large (%d bytes)", skill_path, len(content)
+        )
         return None
 
     # 匹配 --- 分隔的 YAML 前言
@@ -110,7 +112,9 @@ def _parse_skill_metadata(  # noqa: C901
     name = str(frontmatter_data.get("name", "")).strip()
     description = str(frontmatter_data.get("description", "")).strip()
     if not name or not description:
-        logger.warning("Skipping %s: missing required 'name' or 'description'", skill_path)
+        logger.warning(
+            "Skipping %s: missing required 'name' or 'description'", skill_path
+        )
         return None
     description_str = description
     if len(description_str) > MAX_SKILL_DESCRIPTION_LENGTH:
@@ -161,8 +165,8 @@ def _parse_skill_metadata(  # noqa: C901
 
 
 def _validate_metadata(
-        raw: object,
-        skill_path: str,
+    raw: object,
+    skill_path: str,
 ) -> dict[str, str]:
     """验证并规范化 YAML 前言中的元数据字段，确保为 dict[str, str] 类型。"""
     if not isinstance(raw, dict):
@@ -188,7 +192,7 @@ def _format_skill_annotations(skill: SkillMetadata) -> str:
 
 async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
     """异步列出指定路径下的所有技能。
-    
+
     扫描包含 SKILL.md 的目录并解析其元数据。
     """
     skills: list[SkillMetadata] = []
@@ -206,7 +210,7 @@ async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
     for skill_path in skill_dirs:
         skill_md_path = skill_path / "SKILL.md"
 
-        skill_content = await skill_path.read_text(encoding="utf-8")
+        skill_content = await skill_md_path.read_text(encoding="utf-8")
 
         # 解析元数据
         skill_metadata = _parse_skill_metadata(
@@ -283,7 +287,7 @@ Remember: Skills make you more capable and consistent. When in doubt, check if a
 
 class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # noqa
     """加载并向系统提示词注入 Agent Skill 的中间件。
-    
+
     按源顺序加载 Skill，后加载的会覆盖重名的。
     """
 
@@ -334,18 +338,17 @@ class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # no
             skills_list=skills_list,
         )
 
-        new_system_message = append_to_system_message(request.system_message, skills_section)
+        new_system_message = append_to_system_message(
+            request.system_message, skills_section
+        )
 
         return request.override(system_message=new_system_message)
 
     async def abefore_agent(  # noqa
-            self,
-            state: SkillsState,
-            runtime: Runtime,
-            config: RunnableConfig
+        self, state: SkillsState, runtime: Runtime, config: RunnableConfig
     ) -> SkillsStateUpdate | None:  # ty: ignore[invalid-method-override]
         """在 Agent 执行前异步加载技能元数据。
-        
+
         每个会话仅加载一次。若 state 中已有则跳过。
         """
         # 如果 state 中已存在元数据则跳过
@@ -368,9 +371,11 @@ class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # no
         return SkillsStateUpdate(skills_metadata=skills)
 
     async def awrap_model_call(
-            self,
-            request: ModelRequest[ContextT],
-            handler: Callable[[ModelRequest[ContextT]], Awaitable[ModelResponse[ResponseT]]],
+        self,
+        request: ModelRequest[ContextT],
+        handler: Callable[
+            [ModelRequest[ContextT]], Awaitable[ModelResponse[ResponseT]]
+        ],
     ) -> ModelResponse[ResponseT]:
         """在模型调用时注入技能文档。"""
         modified_request = self.modify_request(request)
