@@ -186,7 +186,7 @@ def _format_skill_annotations(skill: SkillMetadata) -> str:
     return ", ".join(parts)
 
 
-async def _alist_skills(source_path: str) -> list[SkillMetadata]:
+async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
     """异步列出指定路径下的所有技能。
     
     扫描包含 SKILL.md 的目录并解析其元数据。
@@ -195,7 +195,7 @@ async def _alist_skills(source_path: str) -> list[SkillMetadata]:
 
     # 查找所有技能目录 (包含 SKILL.md 的目录)
     skill_dirs: List[AsyncPath] = []
-    async for path in AsyncPath(source_path).iterdir():
+    async for path in source_path.iterdir():
         if await path.is_dir() and await (path / "SKILL.md").is_file():
             skill_dirs.append(path)
 
@@ -336,7 +336,11 @@ class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # no
 
         # 遍历源按顺序加载技能，重名时后者覆盖前者
         for source_path in self.sources:
-            source_skills = await _alist_skills(source_path)
+            skill_source_path = AsyncPath(source_path)
+            if not await skill_source_path.exists():
+                await skill_source_path.mkdir(parents=True, exist_ok=True)
+                continue
+            source_skills = await _alist_skills(skill_source_path)
             for skill in source_skills:
                 all_skills[skill["name"]] = skill
 
