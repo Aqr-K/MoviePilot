@@ -12,7 +12,6 @@ from app.db.models.user import User
 from app.db.user_oper import get_current_active_superuser_async, \
     get_current_active_user_async, get_current_active_user
 from app.db.userconfig_oper import UserConfigOper
-from app.utils.otp import OtpUtils
 
 router = APIRouter()
 

@@ -17,34 +17,44 @@ class ConfigReloadMixin:
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
-        config_watch = getattr(cls, 'CONFIG_WATCH', None)
+        config_watch = getattr(cls, "CONFIG_WATCH", None)
         if not config_watch:
             return
 
         # 检查 on_config_changed 方法是否为异步
         is_async = inspect.iscoroutinefunction(cls.on_config_changed)
 
-        method_name = 'handle_config_changed'
+        method_name = "handle_config_changed"
 
         # 创建事件处理函数
         def create_handler(is_async):
             if is_async:
+
                 async def wrapper(self: ConfigReloadMixin, event: Event):
                     if not event:
                         return
-                    changed_keys = getattr(event.event_data, "key", set()) & config_watch
+                    changed_keys = (
+                        getattr(event.event_data, "key", set()) & config_watch
+                    )
                     if not changed_keys:
                         return
-                    logger.info(f"配置 {', '.join(changed_keys)} 变更，重载 {self.get_reload_name()}...")
-                    await self.on_config_changed()
+                    logger.info(
+                        f"配置 {', '.join(changed_keys)} 变更，重载 {self.get_reload_name()}..."
+                    )
+                    self.on_config_changed()
             else:
+
                 def wrapper(self: ConfigReloadMixin, event: Event):
                     if not event:
                         return
-                    changed_keys = getattr(event.event_data, "key", set()) & config_watch
+                    changed_keys = (
+                        getattr(event.event_data, "key", set()) & config_watch
+                    )
                     if not changed_keys:
                         return
-                    logger.info(f"配置 {', '.join(changed_keys)} 变更，重载 {self.get_reload_name()}...")
+                    logger.info(
+                        f"配置 {', '.join(changed_keys)} 变更，重载 {self.get_reload_name()}..."
+                    )
                     self.on_config_changed()
 
             return wrapper
@@ -52,7 +62,7 @@ class ConfigReloadMixin:
         # 创建并设置处理函数
         handler = create_handler(is_async)
         handler.__module__ = cls.__module__
-        handler.__qualname__ = f'{cls.__name__}.{method_name}'
+        handler.__qualname__ = f"{cls.__name__}.{method_name}"
         setattr(cls, method_name, handler)
         # 添加为事件处理器
         eventmanager.add_event_listener(EventType.ConfigChanged, handler)

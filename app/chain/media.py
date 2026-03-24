@@ -253,7 +253,6 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         流式下载图片并保存到文件
 
-        :param storagechain: StorageChain实例
         :param fileitem: 关联的媒体文件项
         :param path: 图片文件路径
         :param url: 图片下载URL

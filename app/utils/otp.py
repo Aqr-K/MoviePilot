@@ -1,9 +1,11 @@
+from typing import Tuple
+
 import pyotp
 
 
 class OtpUtils:
     @staticmethod
-    def generate_secret_key(username: str) -> (str, str):
+    def generate_secret_key(username: str) -> Tuple[str, str]:
         try:
             secret = pyotp.random_base32()
             uri = pyotp.totp.TOTP(secret).provisioning_uri(name='MoviePilot',
