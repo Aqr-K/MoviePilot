@@ -61,6 +61,9 @@ class StreamingHandler:
         接收 LLM 流式 token，积累到缓冲区。
         """
         with self._lock:
+            # 如果存量消息结束是两个换行，则去掉新消息前面的换行，避免过多空行
+            if self._buffer.endswith("\n\n") and token.startswith("\n"):
+                token = token.lstrip("\n")
             self._buffer += token
 
     async def take(self) -> str:
