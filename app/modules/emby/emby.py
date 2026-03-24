@@ -714,7 +714,7 @@ class Emby:
             logger.error(f"连接Users/Items出错：" + str(e))
         return None
 
-    def get_webhook_message(self, form: any, args: dict) -> Optional[schemas.WebhookEventInfo]:
+    def get_webhook_message(self, form: Any, args: dict) -> Optional[schemas.WebhookEventInfo]:
         """
         解析Emby Webhook报文
         电影：

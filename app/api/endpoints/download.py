@@ -5,15 +5,13 @@ from fastapi import APIRouter, Depends, Body
 from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
-from app.core.config import settings
 from app.core.context import MediaInfo, Context, TorrentInfo
-from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
 from app.core.security import verify_token
 from app.db.models.user import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user
-from app.schemas.types import ChainEventType, SystemConfigKey
+from app.schemas.types import SystemConfigKey
 
 router = APIRouter()
 

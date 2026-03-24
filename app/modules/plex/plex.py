@@ -549,7 +549,7 @@ class Plex:
             logger.error(f"获取媒体库列表出错：{str(err)}")
         return None
 
-    def get_webhook_message(self, form: any) -> Optional[schemas.WebhookEventInfo]:
+    def get_webhook_message(self, form: Any) -> Optional[schemas.WebhookEventInfo]:
         """
         解析Plex报文
         eventItem  字段的含义
