@@ -318,6 +318,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                             state="paused" if torrent.get('state') in ("paused", "pausedDL") else "downloading",
                             dlspeed=StringUtils.str_filesize(torrent.get('dlspeed')),
                             upspeed=StringUtils.str_filesize(torrent.get('upspeed')),
+                            tags=torrent.get('tags'),
                             left_time=StringUtils.str_secends(
                                 (torrent.get('total_size') - torrent.get('completed')) / torrent.get(
                                     'dlspeed')) if torrent.get(
@@ -355,6 +356,21 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         if not server:
             return None
         return server.delete_torrents(delete_file=delete_file, ids=hashs)
+
+    def set_torrents_tag(self, hashs: Union[str, list], tags: list,
+                        downloader: Optional[str] = None) -> Optional[bool]:
+        """
+        设置种子标签
+        :param hashs:  种子Hash
+        :param tags:  标签列表
+        :param downloader:  下载器
+        :return: bool
+        """
+        server: Qbittorrent = self.get_instance(downloader)
+        if not server:
+            return None
+        server.set_torrents_tag(ids=hashs, tags=tags)
+        return True
 
     def start_torrents(self, hashs: Union[list, str],
                        downloader: Optional[str] = None) -> Optional[bool]:

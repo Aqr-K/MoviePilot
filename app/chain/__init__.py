@@ -1034,6 +1034,18 @@ class ChainBase(metaclass=ABCMeta):
         """
         return self.run_module("stop_torrents", hashs=hashs, downloader=downloader)
 
+    def set_torrents_tag(
+            self, hashs: Union[list, str], tags: list, downloader: Optional[str] = None
+    ) -> bool:
+        """
+        设置种子标签
+        :param hashs:  种子Hash
+        :param tags:  标签列表
+        :param downloader:  下载器
+        :return: bool
+        """
+        return self.run_module("set_torrents_tag", hashs=hashs, tags=tags, downloader=downloader)
+
     def torrent_files(
             self, tid: str, downloader: Optional[str] = None
     ) -> Optional[Union[TorrentFilesList, List[File]]]:

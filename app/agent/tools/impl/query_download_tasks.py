@@ -214,6 +214,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         "state": d.state,
                         "upspeed": d.upspeed,
                         "dlspeed": d.dlspeed,
+                        "tags": d.tags,
                         "left_time": d.left_time
                     }
                     # 精简 media 字段
