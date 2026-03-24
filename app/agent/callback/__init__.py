@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Optional
+from typing import Optional, Tuple
 
 from app.chain import ChainBase
 from app.log import logger
@@ -127,14 +127,16 @@ class StreamingHandler:
         self._flush_task = asyncio.create_task(self._flush_loop())
         logger.debug("流式输出已启动")
 
-    async def stop_streaming(self) -> bool:
+    async def stop_streaming(self) -> Tuple[bool, str]:
         """
         停止流式输出。执行最后一次刷新确保所有内容都已发送。
-        :return: 是否已经通过流式编辑将最终完整内容发送给了用户
-                 （True 表示调用方无需再额外发送消息）
+        :return: (all_sent, final_text)
+                 all_sent: 是否已经通过流式编辑将最终完整内容发送给了用户
+                           （True 表示调用方无需再额外发送消息）
+                 final_text: 流式发送的完整文本内容（用于调用方保存消息记录）
         """
         if not self._streaming_enabled:
-            return False
+            return False, ""
 
         self._streaming_enabled = False
 
@@ -151,13 +153,15 @@ class StreamingHandler:
                 and self._sent_text
                 and self._buffer == self._sent_text
             )
+            # 保留最终文本用于返回
+            final_text = self._sent_text if all_sent else ""
             # 重置状态
             self._sent_text = ""
             self._message_response = None
             if all_sent:
                 # 所有内容已通过流式发送，清空缓冲区
                 self._buffer = ""
-            return all_sent
+            return all_sent, final_text
 
     def _can_stream(self) -> bool:
         """
