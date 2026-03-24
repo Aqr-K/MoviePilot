@@ -59,10 +59,18 @@ class Telegram:
         # 初始化机器人
         if self._telegram_token and self._telegram_chat_id:
             # telegram bot api 地址，格式：https://api.telegram.org
-            if kwargs.get("API_URL"):
-                apihelper.API_URL = urljoin(kwargs["API_URL"], "/bot{0}/{1}")
-                apihelper.FILE_URL = urljoin(kwargs["API_URL"], "/file/bot{0}/{1}")
+            api_url = kwargs.get("API_URL")
+            if api_url:
+                # 如果提供了自定义API地址，使用它
+                apihelper.API_URL = urljoin(api_url, "/bot{0}/{1}")
+                apihelper.FILE_URL = urljoin(api_url, "/file/bot{0}/{1}")
+                # 使用自定义地址时，不设置代理
+                apihelper.proxy = None
             else:
+                # 使用默认Telegram API地址
+                apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
+                apihelper.FILE_URL = "https://api.telegram.org/file/bot{0}/{1}"
+                # 设置代理
                 apihelper.proxy = settings.PROXY
             # bot
             _bot = TeleBot(self._telegram_token, parse_mode="MarkdownV2")
