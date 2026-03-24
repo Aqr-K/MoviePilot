@@ -41,7 +41,7 @@ class ConfigReloadMixin:
                     logger.info(
                         f"配置 {', '.join(changed_keys)} 变更，重载 {self.get_reload_name()}..."
                     )
-                    self.on_config_changed()
+                    await self.on_config_changed()
             else:
 
                 def wrapper(self: ConfigReloadMixin, event: Event):
