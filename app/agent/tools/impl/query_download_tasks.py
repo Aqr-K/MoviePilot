@@ -22,11 +22,12 @@ class QueryDownloadTasksInput(BaseModel):
                                   description="Filter downloads by status: 'downloading' for active downloads, 'completed' for finished downloads, 'paused' for paused downloads, 'all' for all downloads")
     hash: Optional[str] = Field(None, description="Query specific download task by hash (optional, if provided will search for this specific task regardless of status)")
     title: Optional[str] = Field(None, description="Query download tasks by title/name (optional, supports partial match, searches all tasks if provided)")
+    tag: Optional[str] = Field(None, description="Filter download tasks by tag (optional, supports partial match, e.g. 'movie' will match tasks with tag 'movie' or 'movie_2024')")
 
 
 class QueryDownloadTasksTool(MoviePilotTool):
     name: str = "query_download_tasks"
-    description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash or title. Shows download progress, completion status, and task details from configured downloaders."
+    description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash, title, or tag. Shows download progress, completion status, tags, and task details from configured downloaders."
     args_schema: Type[BaseModel] = QueryDownloadTasksInput
 
     @staticmethod
@@ -83,14 +84,19 @@ class QueryDownloadTasksTool(MoviePilotTool):
             parts.append(f"Hash: {hash_value[:8]}...")
         elif title:
             parts.append(f"标题: {title}")
+
+        tag = kwargs.get("tag")
+        if tag:
+            parts.append(f"标签: {tag}")
         
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
     async def run(self, downloader: Optional[str] = None,
                   status: Optional[str] = "all",
                   hash: Optional[str] = None,
-                  title: Optional[str] = None, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}, hash={hash}, title={title}")
+                  title: Optional[str] = None,
+                  tag: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}, hash={hash}, title={title}, tag={tag}")
         try:
             download_chain = DownloadChain()
             
@@ -195,6 +201,15 @@ class QueryDownloadTasksTool(MoviePilotTool):
                             torrent.userid = history.userid
                             torrent.username = history.username
                         filtered_downloads.append(torrent)
+            # 按tag过滤
+            if tag and filtered_downloads:
+                tag_lower = tag.lower()
+                filtered_downloads = [
+                    d for d in filtered_downloads
+                    if d.tags and tag_lower in d.tags.lower()
+                ]
+                if not filtered_downloads:
+                    return f"未找到标签包含 '{tag}' 的下载任务"
             if filtered_downloads:
                 # 限制最多20条结果
                 total_count = len(filtered_downloads)
