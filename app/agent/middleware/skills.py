@@ -195,7 +195,7 @@ async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
 
     # 查找所有技能目录 (包含 SKILL.md 的目录)
     skill_dirs: List[AsyncPath] = []
-    for path in source_path.iterdir():
+    async for path in source_path.iterdir():
         if await path.is_dir() and await (path / "SKILL.md").is_file():
             skill_dirs.append(path)
 
