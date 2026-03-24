@@ -45,6 +45,7 @@ from app.agent.tools.impl.execute_command import ExecuteCommandTool
 from app.agent.tools.impl.edit_file import EditFileTool
 from app.agent.tools.impl.write_file import WriteFileTool
 from app.agent.tools.impl.read_file import ReadFileTool
+from app.agent.tools.impl.browse_webpage import BrowseWebpageTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -56,9 +57,14 @@ class MoviePilotToolFactory:
     """
 
     @staticmethod
-    def create_tools(session_id: str, user_id: str,
-                     channel: str = None, source: str = None, username: str = None,
-                     stream_handler: Callable = None) -> List[MoviePilotTool]:
+    def create_tools(
+        session_id: str,
+        user_id: str,
+        channel: str = None,
+        source: str = None,
+        username: str = None,
+        stream_handler: Callable = None,
+    ) -> List[MoviePilotTool]:
         """
         创建MoviePilot工具列表
         """
@@ -108,18 +114,16 @@ class MoviePilotToolFactory:
             ExecuteCommandTool,
             EditFileTool,
             WriteFileTool,
-            ReadFileTool
+            ReadFileTool,
+            BrowseWebpageTool,
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:
-            tool = ToolClass(
-                session_id=session_id,
-                user_id=user_id
-            )
+            tool = ToolClass(session_id=session_id, user_id=user_id)
             tool.set_message_attr(channel=channel, source=source, username=username)
             tool.set_stream_handler(stream_handler=stream_handler)
             tools.append(tool)
-        
+
         # 加载插件提供的工具
         plugin_tools_count = 0
         plugin_tools_info = PluginManager().get_plugin_agent_tools()
@@ -131,24 +135,31 @@ class MoviePilotToolFactory:
                 try:
                     # 验证工具类是否继承自 MoviePilotTool
                     if not issubclass(ToolClass, MoviePilotTool):
-                        logger.warning(f"插件 {plugin_name}({plugin_id}) 提供的工具类 {ToolClass.__name__} 未继承自 MoviePilotTool，已跳过")
+                        logger.warning(
+                            f"插件 {plugin_name}({plugin_id}) 提供的工具类 {ToolClass.__name__} 未继承自 MoviePilotTool，已跳过"
+                        )
                         continue
                     # 创建工具实例
-                    tool = ToolClass(
-                        session_id=session_id,
-                        user_id=user_id
+                    tool = ToolClass(session_id=session_id, user_id=user_id)
+                    tool.set_message_attr(
+                        channel=channel, source=source, username=username
                     )
-                    tool.set_message_attr(channel=channel, source=source, username=username)
                     tool.set_stream_handler(stream_handler=stream_handler)
                     tools.append(tool)
                     plugin_tools_count += 1
-                    logger.debug(f"成功加载插件 {plugin_name}({plugin_id}) 的工具: {ToolClass.__name__}")
+                    logger.debug(
+                        f"成功加载插件 {plugin_name}({plugin_id}) 的工具: {ToolClass.__name__}"
+                    )
                 except Exception as e:
-                    logger.error(f"加载插件 {plugin_name}({plugin_id}) 的工具 {ToolClass.__name__} 失败: {str(e)}")
-        
+                    logger.error(
+                        f"加载插件 {plugin_name}({plugin_id}) 的工具 {ToolClass.__name__} 失败: {str(e)}"
+                    )
+
         builtin_tools_count = len(tool_definitions)
         if plugin_tools_count > 0:
-            logger.info(f"成功创建 {len(tools)} 个MoviePilot工具（内置工具: {builtin_tools_count} 个，插件工具: {plugin_tools_count} 个）")
+            logger.info(
+                f"成功创建 {len(tools)} 个MoviePilot工具（内置工具: {builtin_tools_count} 个，插件工具: {plugin_tools_count} 个）"
+            )
         else:
             logger.info(f"成功创建 {len(tools)} 个MoviePilot工具")
         return tools
