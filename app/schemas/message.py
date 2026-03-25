@@ -194,6 +194,8 @@ class ChannelCapabilities:
     max_buttons_per_row: int = 5
     max_button_rows: int = 10
     max_button_text_length: int = 30
+    # 单条消息最大长度（0 表示不限制），用于流式输出时自动分段
+    max_message_length: int = 0
     fallback_enabled: bool = True
 
 
@@ -219,6 +221,8 @@ class ChannelCapabilityManager:
             max_buttons_per_row=4,
             max_button_rows=10,
             max_button_text_length=30,
+            # Telegram 文本消息限制 4096 字符，预留空间给 MarkdownV2 转义和标题
+            max_message_length=3500,
         ),
         MessageChannel.Wechat: ChannelCapabilities(
             channel=MessageChannel.Wechat,
@@ -244,6 +248,8 @@ class ChannelCapabilityManager:
             max_buttons_per_row=3,
             max_button_rows=8,
             max_button_text_length=25,
+            # Slack 消息限制 40000 字符，预留空间给格式化
+            max_message_length=39000,
             fallback_enabled=True,
         ),
         MessageChannel.Discord: ChannelCapabilities(
@@ -260,6 +266,8 @@ class ChannelCapabilityManager:
             max_buttons_per_row=5,
             max_button_rows=5,
             max_button_text_length=80,
+            # Discord 消息限制 2000 字符
+            max_message_length=1800,
             fallback_enabled=True,
         ),
         MessageChannel.SynologyChat: ChannelCapabilities(
@@ -375,6 +383,14 @@ class ChannelCapabilityManager:
         """
         channel_caps = cls.get_capabilities(channel)
         return channel_caps.max_button_text_length if channel_caps else 20
+
+    @classmethod
+    def get_max_message_length(cls, channel: MessageChannel) -> int:
+        """
+        获取单条消息最大长度（0 表示不限制）
+        """
+        channel_caps = cls.get_capabilities(channel)
+        return channel_caps.max_message_length if channel_caps else 0
 
     @classmethod
     def should_use_fallback(cls, channel: MessageChannel) -> bool:
