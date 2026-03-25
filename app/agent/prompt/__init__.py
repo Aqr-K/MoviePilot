@@ -1,9 +1,15 @@
 """提示词管理器"""
+
 from pathlib import Path
 from typing import Dict
 
 from app.log import logger
-from app.schemas import ChannelCapability, ChannelCapabilities, MessageChannel, ChannelCapabilityManager
+from app.schemas import (
+    ChannelCapability,
+    ChannelCapabilities,
+    MessageChannel,
+    ChannelCapabilityManager,
+)
 
 
 class PromptManager:
@@ -27,7 +33,7 @@ class PromptManager:
 
         prompt_file = self.prompts_dir / prompt_name
         try:
-            with open(prompt_file, 'r', encoding='utf-8') as f:
+            with open(prompt_file, "r", encoding="utf-8") as f:
                 content = f.read().strip()
             # 缓存提示词
             self.prompts_cache[prompt_name] = content
@@ -50,15 +56,22 @@ class PromptManager:
         base_prompt = self.load_prompt("Agent Prompt.txt")
 
         # 识别渠道
-        msg_channel = next((c for c in MessageChannel if c.value.lower() == channel.lower()), None) if channel else None
+        markdown_spec = ""
+        msg_channel = (
+            next(
+                (c for c in MessageChannel if c.value.lower() == channel.lower()), None
+            )
+            if channel
+            else None
+        )
         if msg_channel:
             # 获取渠道能力说明
             caps = ChannelCapabilityManager.get_capabilities(msg_channel)
             if caps:
-                base_prompt = base_prompt.replace(
-                    "{markdown_spec}",
-                    self._generate_formatting_instructions(caps)
-                )
+                markdown_spec = self._generate_formatting_instructions(caps)
+
+        # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
+        base_prompt = base_prompt.replace("{markdown_spec}", markdown_spec)
 
         return base_prompt
 
@@ -69,11 +82,15 @@ class PromptManager:
         """
         instructions = []
         if ChannelCapability.RICH_TEXT not in caps.capabilities:
-            instructions.append("- Formatting: Use **Plain Text ONLY**. The channel does NOT support Markdown.")
             instructions.append(
-                "- No Markdown Symbols: NEVER use `**`, `*`, `__`, or `[` blocks. Use natural text to emphasize (e.g., using ALL CAPS or separators).")
+                "- Formatting: Use **Plain Text ONLY**. The channel does NOT support Markdown."
+            )
             instructions.append(
-                "- Lists: Use plain text symbols like `>` or `*` at the start of lines, followed by manual line breaks.")
+                "- No Markdown Symbols: NEVER use `**`, `*`, `__`, or `[` blocks. Use natural text to emphasize (e.g., using ALL CAPS or separators)."
+            )
+            instructions.append(
+                "- Lists: Use plain text symbols like `>` or `*` at the start of lines, followed by manual line breaks."
+            )
             instructions.append("- Links: Paste URLs directly as text.")
         return "\n".join(instructions)
 
