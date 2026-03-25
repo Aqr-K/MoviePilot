@@ -76,43 +76,64 @@ jobs:
           PREVIOUS_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -v "^v${{ env.app_version }}$" | head -n 1)
           echo "Previous tag: $PREVIOUS_TAG"
 
+          # 使用 || 作为分隔符，同时获取 commit 消息和作者 GitHub 用户名
           if [ -z "$PREVIOUS_TAG" ]; then
-            # 没有上一个 tag，获取所有 commit
-            COMMITS=$(git log --pretty=format:"%s" HEAD)
+            COMMITS=$(git log --pretty=format:"%s||%an" HEAD)
           else
-            # 获取上一个 tag 到当前 HEAD 之间的 commit
-            COMMITS=$(git log --pretty=format:"%s" ${PREVIOUS_TAG}..HEAD)
+            COMMITS=$(git log --pretty=format:"%s||%an" ${PREVIOUS_TAG}..HEAD)
           fi
 
-          # 分类收集 commit 消息
+          # 分类收集 commit 消息（使用关联数组去重）
+          declare -A SEEN
           FEATURES=""
           FIXES=""
           OTHERS=""
 
           while IFS= read -r line; do
-            # 跳过空行、Merge commit 和版本更新 commit
+            # 跳过空行
             if [ -z "$line" ]; then
               continue
             fi
-            if echo "$line" | grep -qE "^Merge pull request|^Merge branch|^更新 version"; then
+
+            # 分离 commit 消息和作者
+            msg=$(echo "$line" | sed 's/||[^|]*$//')
+            author=$(echo "$line" | sed 's/.*||//')
+
+            # 跳过 Merge commit 和版本更新 commit
+            if echo "$msg" | grep -qE "^Merge pull request|^Merge branch|^更新 version"; then
               continue
             fi
 
             # 按 Conventional Commits 前缀分类
-            if echo "$line" | grep -qiE "^feat(\(.+\))?:"; then
-              # 去掉前缀，保留描述
-              desc=$(echo "$line" | sed -E 's/^feat(\([^)]*\))?:\s*//')
-              FEATURES="${FEATURES}- ${desc}\n"
-            elif echo "$line" | grep -qiE "^fix(\(.+\))?:"; then
-              desc=$(echo "$line" | sed -E 's/^fix(\([^)]*\))?:\s*//')
-              FIXES="${FIXES}- ${desc}\n"
-            elif echo "$line" | grep -qiE "^(docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?:"; then
-              desc=$(echo "$line" | sed -E 's/^(docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?:\s*//')
-              OTHERS="${OTHERS}- ${desc}\n"
+            if echo "$msg" | grep -qiE "^feat(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^feat(\([^)]*\))?:\s*//')
+              category="FEATURES"
+            elif echo "$msg" | grep -qiE "^fix(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^fix(\([^)]*\))?:\s*//')
+              category="FIXES"
+            elif echo "$msg" | grep -qiE "^(docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^(docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?:\s*//')
+              category="OTHERS"
             else
-              # 没有前缀的 commit（如中文描述）
-              OTHERS="${OTHERS}- ${line}\n"
+              desc="$msg"
+              category="OTHERS"
             fi
+
+            # 使用 "分类+描述" 作为去重的 key，跳过重复内容
+            dedup_key="${category}::${desc}"
+            if [ -n "${SEEN[$dedup_key]+x}" ]; then
+              continue
+            fi
+            SEEN[$dedup_key]=1
+
+            # 添加 by @author 引用
+            entry="- ${desc} by @${author}"
+
+            case "$category" in
+              FEATURES) FEATURES="${FEATURES}${entry}\n" ;;
+              FIXES)    FIXES="${FIXES}${entry}\n" ;;
+              OTHERS)   OTHERS="${OTHERS}${entry}\n" ;;
+            esac
           done <<< "$COMMITS"
 
           # 组装 changelog
