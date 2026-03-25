@@ -47,6 +47,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
     """
     定时任务管理
     """
+
     CONFIG_WATCH = {
         "DEV",
         "COOKIECLOUD_INTERVAL",
@@ -56,6 +57,8 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
         "SUBSCRIBE_MODE",
         "SUBSCRIBE_RSS_INTERVAL",
         "SITEDATA_REFRESH_INTERVAL",
+        "AI_AGENT_ENABLE",
+        "AI_AGENT_JOB_INTERVAL",
     }
 
     def __init__(self):
@@ -98,133 +101,134 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 "cookiecloud": {
                     "name": "同步CookieCloud站点",
                     "func": SiteChain().sync_cookies,
-                    "running": False
+                    "running": False,
                 },
                 "mediaserver_sync": {
                     "name": "同步媒体服务器",
                     "func": MediaServerChain().sync,
-                    "running": False
+                    "running": False,
                 },
                 "subscribe_tmdb": {
                     "name": "订阅元数据更新",
                     "func": SubscribeChain().check,
-                    "running": False
+                    "running": False,
                 },
                 "subscribe_search": {
                     "name": "订阅搜索补全",
                     "func": SubscribeChain().search,
                     "running": False,
-                    "kwargs": {
-                        "state": "R"
-                    }
+                    "kwargs": {"state": "R"},
                 },
                 "new_subscribe_search": {
                     "name": "新增订阅搜索",
                     "func": SubscribeChain().search,
                     "running": False,
-                    "kwargs": {
-                        "state": "N"
-                    }
+                    "kwargs": {"state": "N"},
                 },
                 "subscribe_refresh": {
                     "name": "订阅刷新",
                     "func": SubscribeChain().refresh,
-                    "running": False
+                    "running": False,
                 },
                 "subscribe_follow": {
                     "name": "关注的订阅分享",
                     "func": SubscribeChain().follow,
-                    "running": False
+                    "running": False,
                 },
                 "transfer": {
                     "name": "下载文件整理",
                     "func": TransferChain().process,
-                    "running": False
+                    "running": False,
                 },
                 "clear_cache": {
                     "name": "缓存清理",
                     "func": self.clear_cache,
-                    "running": False
+                    "running": False,
                 },
                 "user_auth": {
                     "name": "用户认证检查",
                     "func": self.user_auth,
-                    "running": False
+                    "running": False,
                 },
                 "scheduler_job": {
                     "name": "公共定时服务",
                     "func": SchedulerChain().scheduler_job,
-                    "running": False
+                    "running": False,
                 },
                 "random_wallpager": {
                     "name": "壁纸缓存",
                     "func": WallpaperHelper().get_wallpapers,
-                    "running": False
+                    "running": False,
                 },
                 "sitedata_refresh": {
                     "name": "站点数据刷新",
                     "func": SiteChain().refresh_userdatas,
-                    "running": False
+                    "running": False,
                 },
                 "recommend_refresh": {
                     "name": "推荐缓存",
                     "func": RecommendChain().refresh_recommend,
-                    "running": False
+                    "running": False,
                 },
                 "plugin_market_refresh": {
                     "name": "插件市场缓存",
                     "func": PluginManager().async_get_online_plugins,
                     "running": False,
-                    "kwargs": {
-                        "force": True
-                    }
+                    "kwargs": {"force": True},
                 },
                 "subscribe_calendar_cache": {
                     "name": "订阅日历缓存",
                     "func": SubscribeChain().cache_calendar,
-                    "running": False
+                    "running": False,
                 },
                 "full_gc": {
                     "name": "主动内存回收",
                     "func": self.full_gc,
-                    "running": False
-                }
+                    "running": False,
+                },
+                "agent_heartbeat": {
+                    "name": "智能体定时任务",
+                    "func": self.agent_heartbeat,
+                    "running": False,
+                },
             }
 
             # 创建定时服务
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ,
-                                                  executors={
-                                                      'default': ThreadPoolExecutor(settings.CONF.scheduler)
-                                                  })
+            self._scheduler = BackgroundScheduler(
+                timezone=settings.TZ,
+                executors={"default": ThreadPoolExecutor(settings.CONF.scheduler)},
+            )
 
             # CookieCloud定时同步
-            if settings.COOKIECLOUD_INTERVAL \
-                    and str(settings.COOKIECLOUD_INTERVAL).isdigit():
+            if (
+                settings.COOKIECLOUD_INTERVAL
+                and str(settings.COOKIECLOUD_INTERVAL).isdigit()
+            ):
                 self._scheduler.add_job(
                     self.start,
                     "interval",
                     id="cookiecloud",
                     name="同步CookieCloud站点",
                     minutes=int(settings.COOKIECLOUD_INTERVAL),
-                    next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(minutes=5),
-                    kwargs={
-                        'job_id': 'cookiecloud'
-                    }
+                    next_run_time=datetime.now(pytz.timezone(settings.TZ))
+                    + timedelta(minutes=5),
+                    kwargs={"job_id": "cookiecloud"},
                 )
 
             # 媒体服务器同步
-            if settings.MEDIASERVER_SYNC_INTERVAL \
-                    and str(settings.MEDIASERVER_SYNC_INTERVAL).isdigit():
+            if (
+                settings.MEDIASERVER_SYNC_INTERVAL
+                and str(settings.MEDIASERVER_SYNC_INTERVAL).isdigit()
+            ):
                 self._scheduler.add_job(
                     self.start,
                     "interval",
                     id="mediaserver_sync",
                     name="同步媒体服务器",
                     hours=int(settings.MEDIASERVER_SYNC_INTERVAL),
-                    next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(minutes=10),
-                    kwargs={
-                        'job_id': 'mediaserver_sync'
-                    }
+                    next_run_time=datetime.now(pytz.timezone(settings.TZ))
+                    + timedelta(minutes=10),
+                    kwargs={"job_id": "mediaserver_sync"},
                 )
 
             # 新增订阅时搜索（5分钟检查一次）
@@ -234,9 +238,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="new_subscribe_search",
                 name="新增订阅搜索",
                 minutes=5,
-                kwargs={
-                    'job_id': 'new_subscribe_search'
-                }
+                kwargs={"job_id": "new_subscribe_search"},
             )
 
             # 检查更新订阅TMDB数据（每隔6小时）
@@ -246,9 +248,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="subscribe_tmdb",
                 name="订阅元数据更新",
                 hours=6,
-                kwargs={
-                    'job_id': 'subscribe_tmdb'
-                }
+                kwargs={"job_id": "subscribe_tmdb"},
             )
 
             # 订阅状态每隔24小时搜索一次
@@ -259,9 +259,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id="subscribe_search",
                     name="订阅搜索补全",
                     hours=settings.SUBSCRIBE_SEARCH_INTERVAL,
-                    kwargs={
-                        'job_id': 'subscribe_search'
-                    }
+                    kwargs={"job_id": "subscribe_search"},
                 )
 
             if settings.SUBSCRIBE_MODE == "spider":
@@ -275,13 +273,14 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                         name="订阅刷新",
                         hour=trigger.hour,
                         minute=trigger.minute,
-                        kwargs={
-                            'job_id': 'subscribe_refresh'
-                        })
+                        kwargs={"job_id": "subscribe_refresh"},
+                    )
             else:
                 # RSS订阅模式
-                if not settings.SUBSCRIBE_RSS_INTERVAL \
-                        or not str(settings.SUBSCRIBE_RSS_INTERVAL).isdigit():
+                if (
+                    not settings.SUBSCRIBE_RSS_INTERVAL
+                    or not str(settings.SUBSCRIBE_RSS_INTERVAL).isdigit()
+                ):
                     settings.SUBSCRIBE_RSS_INTERVAL = 30
                 elif int(settings.SUBSCRIBE_RSS_INTERVAL) < 5:
                     settings.SUBSCRIBE_RSS_INTERVAL = 5
@@ -291,9 +290,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id="subscribe_refresh",
                     name="RSS订阅刷新",
                     minutes=int(settings.SUBSCRIBE_RSS_INTERVAL),
-                    kwargs={
-                        'job_id': 'subscribe_refresh'
-                    }
+                    kwargs={"job_id": "subscribe_refresh"},
                 )
 
             # 关注订阅分享（每1小时）
@@ -303,9 +300,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="subscribe_follow",
                 name="关注的订阅分享",
                 hours=1,
-                kwargs={
-                    'job_id': 'subscribe_follow'
-                }
+                kwargs={"job_id": "subscribe_follow"},
             )
 
             # 下载器文件转移（每5分钟）
@@ -315,9 +310,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="transfer",
                 name="下载文件整理",
                 minutes=5,
-                kwargs={
-                    'job_id': 'transfer'
-                }
+                kwargs={"job_id": "transfer"},
             )
 
             # 后台刷新TMDB壁纸
@@ -327,10 +320,9 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="random_wallpager",
                 name="壁纸缓存",
                 minutes=30,
-                next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(seconds=1),
-                kwargs={
-                    'job_id': 'random_wallpager'
-                }
+                next_run_time=datetime.now(pytz.timezone(settings.TZ))
+                + timedelta(seconds=1),
+                kwargs={"job_id": "random_wallpager"},
             )
 
             # 公共定时服务
@@ -340,9 +332,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="scheduler_job",
                 name="公共定时服务",
                 minutes=10,
-                kwargs={
-                    'job_id': 'scheduler_job'
-                }
+                kwargs={"job_id": "scheduler_job"},
             )
 
             # 缓存清理服务，每隔24小时
@@ -352,9 +342,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="clear_cache",
                 name="缓存清理",
                 hours=settings.CONF.meta / 3600,
-                kwargs={
-                    'job_id': 'clear_cache'
-                }
+                kwargs={"job_id": "clear_cache"},
             )
 
             # 定时检查用户认证，每隔10分钟
@@ -364,9 +352,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="user_auth",
                 name="用户认证检查",
                 minutes=10,
-                kwargs={
-                    'job_id': 'user_auth'
-                }
+                kwargs={"job_id": "user_auth"},
             )
 
             # 站点数据刷新
@@ -377,9 +363,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id="sitedata_refresh",
                     name="站点数据刷新",
                     minutes=settings.SITEDATA_REFRESH_INTERVAL * 60,
-                    kwargs={
-                        'job_id': 'sitedata_refresh'
-                    }
+                    kwargs={"job_id": "sitedata_refresh"},
                 )
 
             # 推荐缓存
@@ -389,10 +373,9 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="recommend_refresh",
                 name="推荐缓存",
                 hours=24,
-                next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(seconds=5),
-                kwargs={
-                    'job_id': 'recommend_refresh'
-                }
+                next_run_time=datetime.now(pytz.timezone(settings.TZ))
+                + timedelta(seconds=5),
+                kwargs={"job_id": "recommend_refresh"},
             )
 
             # 插件市场缓存
@@ -402,9 +385,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="plugin_market_refresh",
                 name="插件市场缓存",
                 minutes=30,
-                kwargs={
-                    'job_id': 'plugin_market_refresh'
-                }
+                kwargs={"job_id": "plugin_market_refresh"},
             )
 
             # 订阅日历缓存
@@ -414,10 +395,9 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="subscribe_calendar_cache",
                 name="订阅日历缓存",
                 hours=6,
-                next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(minutes=2),
-                kwargs={
-                    'job_id': 'subscribe_calendar_cache'
-                }
+                next_run_time=datetime.now(pytz.timezone(settings.TZ))
+                + timedelta(minutes=2),
+                kwargs={"job_id": "subscribe_calendar_cache"},
             )
 
             # 主动内存回收
@@ -428,9 +408,18 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id="full_gc",
                     name="主动内存回收",
                     minutes=settings.MEMORY_GC_INTERVAL,
-                    kwargs={
-                        'job_id': 'full_gc'
-                    }
+                    kwargs={"job_id": "full_gc"},
+                )
+
+            # 智能体定时任务检查
+            if settings.AI_AGENT_ENABLE and settings.AI_AGENT_JOB_INTERVAL:
+                self._scheduler.add_job(
+                    self.start,
+                    "interval",
+                    id="agent_heartbeat",
+                    name="智能体定时任务",
+                    hours=settings.AI_AGENT_JOB_INTERVAL,
+                    kwargs={"job_id": "agent_heartbeat"},
                 )
 
             # 初始化工作流服务
@@ -502,19 +491,21 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 # 普通函数
                 job["func"](*args, **kwargs)
         except Exception as e:
-            logger.error(f"定时任务 {job.get('name')} 执行失败：{str(e)} - {traceback.format_exc()}")
-            MessageHelper().put(title=f"{job.get('name')} 执行失败",
-                                message=str(e),
-                                role="system")
+            logger.error(
+                f"定时任务 {job.get('name')} 执行失败：{str(e)} - {traceback.format_exc()}"
+            )
+            MessageHelper().put(
+                title=f"{job.get('name')} 执行失败", message=str(e), role="system"
+            )
             eventmanager.send_event(
                 EventType.SystemError,
                 {
                     "type": "scheduler",
                     "scheduler_id": job_id,
-                    "scheduler_name": job.get('name'),
+                    "scheduler_name": job.get("name"),
                     "error": str(e),
-                    "traceback": traceback.format_exc()
-                }
+                    "traceback": traceback.format_exc(),
+                },
             )
         # 运行结束
         self.__finish_job(job_id)
@@ -559,9 +550,11 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     logger.info(f"移除工作流服务：{service.get('name')}")
             except Exception as e:
                 logger.error(f"移除工作流服务失败：{str(e)} - {job_id}: {service}")
-                SchedulerChain().messagehelper.put(title=f"工作流 {workflow.name} 服务移除失败",
-                                                   message=str(e),
-                                                   role="system")
+                SchedulerChain().messagehelper.put(
+                    title=f"工作流 {workflow.name} 服务移除失败",
+                    message=str(e),
+                    role="system",
+                )
 
     def remove_plugin_job(self, pid: str, job_id: Optional[str] = None):
         """
@@ -581,7 +574,9 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             else:
                 # 移除插件的所有服务
                 jobs_to_remove = [
-                    (job_id, service) for job_id, service in self._jobs.items() if service.get("pid") == pid
+                    (job_id, service)
+                    for job_id, service in self._jobs.items()
+                    if service.get("pid") == pid
                 ]
                 for job_id, _ in jobs_to_remove:
                     self._jobs.pop(job_id, None)
@@ -602,12 +597,16 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                             except JobLookupError:
                                 pass
                     if job_removed:
-                        logger.info(f"移除插件服务({plugin_name})：{service.get('name')}")  # noqa
+                        logger.info(
+                            f"移除插件服务({plugin_name})：{service.get('name')}"
+                        )  # noqa
                 except Exception as e:
                     logger.error(f"移除插件服务失败：{str(e)} - {job_id}: {service}")
-                    SchedulerChain().messagehelper.put(title=f"插件 {plugin_name} 服务移除失败",
-                                                       message=str(e),
-                                                       role="system")
+                    SchedulerChain().messagehelper.put(
+                        title=f"插件 {plugin_name} 服务移除失败",
+                        message=str(e),
+                        role="system",
+                    )
 
     def update_workflow_job(self, workflow: Workflow):
         """
@@ -633,14 +632,16 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id=job_id,
                     name=workflow.name,
                     kwargs={"job_id": job_id, "workflow_id": workflow.id},
-                    replace_existing=True
+                    replace_existing=True,
                 )
                 logger.info(f"注册工作流服务：{workflow.name} - {workflow.timer}")
             except Exception as e:
                 logger.error(f"注册工作流服务失败：{workflow.name} - {str(e)}")
-                SchedulerChain().messagehelper.put(title=f"工作流 {workflow.name} 服务注册失败",
-                                                   message=str(e),
-                                                   role="system")
+                SchedulerChain().messagehelper.put(
+                    title=f"工作流 {workflow.name} 服务注册失败",
+                    message=str(e),
+                    role="system",
+                )
 
     def update_plugin_job(self, pid: str):
         """
@@ -656,7 +657,9 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             try:
                 plugin_services = plugin_manager.get_plugin_services(pid=pid)
             except Exception as e:
-                logger.error(f"运行插件 {pid} 服务失败：{str(e)} - {traceback.format_exc()}")
+                logger.error(
+                    f"运行插件 {pid} 服务失败：{str(e)} - {traceback.format_exc()}"
+                )
                 return
             # 获取插件名称
             plugin_name = plugin_manager.get_plugin_attr(pid, "plugin_name")
@@ -681,14 +684,18 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                         name=service["name"],
                         **(service.get("kwargs") or {}),
                         kwargs={"job_id": job_id},
-                        replace_existing=True
+                        replace_existing=True,
                     )
-                    logger.info(f"注册插件{plugin_name}服务：{service['name']} - {service['trigger']}")
+                    logger.info(
+                        f"注册插件{plugin_name}服务：{service['name']} - {service['trigger']}"
+                    )
                 except Exception as e:
                     logger.error(f"注册插件{plugin_name}服务失败：{str(e)} - {service}")
-                    SchedulerChain().messagehelper.put(title=f"插件 {plugin_name} 服务注册失败",
-                                                       message=str(e),
-                                                       role="system")
+                    SchedulerChain().messagehelper.put(
+                        title=f"插件 {plugin_name} 服务注册失败",
+                        message=str(e),
+                        role="system",
+                    )
 
     def list(self) -> List[schemas.ScheduleInfo]:
         """
@@ -714,12 +721,14 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 if service.get("running") and name and provider_name:
                     if job_id not in added:
                         added.append(job_id)
-                    schedulers.append(schemas.ScheduleInfo(
-                        id=job_id,
-                        name=name,
-                        provider=provider_name,
-                        status="正在运行",
-                    ))
+                    schedulers.append(
+                        schemas.ScheduleInfo(
+                            id=job_id,
+                            name=name,
+                            provider=provider_name,
+                            status="正在运行",
+                        )
+                    )
             # 获取其他待执行任务
             for job in jobs:
                 job_id = job.id.split("|")[0]
@@ -734,13 +743,15 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 status = "正在运行" if service.get("running") else "等待"
                 # 下次运行时间
                 next_run = TimerUtils.time_difference(job.next_run_time)
-                schedulers.append(schemas.ScheduleInfo(
-                    id=job_id,
-                    name=job.name,
-                    provider=service.get("provider_name", "[系统]"),
-                    status=status,
-                    next_run=next_run
-                ))
+                schedulers.append(
+                    schemas.ScheduleInfo(
+                        id=job_id,
+                        name=job.name,
+                        provider=service.get("provider_name", "[系统]"),
+                        status=status,
+                        next_run=next_run,
+                    )
+                )
             return schedulers
 
     def stop(self):
@@ -776,7 +787,18 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
         collected = gc.collect()
         memory_after = get_memory_usage()
         memory_freed = memory_before - memory_after
-        logger.info(f"主动内存回收完成，回收对象数: {collected}，释放内存: {memory_freed:.2f} MB")
+        logger.info(
+            f"主动内存回收完成，回收对象数: {collected}，释放内存: {memory_freed:.2f} MB"
+        )
+
+    @staticmethod
+    async def agent_heartbeat():
+        """
+        智能体心跳唤醒：检查并执行待处理的定时任务
+        """
+        from app.agent import agent_manager
+
+        await agent_manager.heartbeat_check_jobs()
 
     def user_auth(self):
         """
@@ -788,9 +810,11 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
         __max_try__ = 30
         if self._auth_count > __max_try__:
             if not self._auth_message:
-                SchedulerChain().messagehelper.put(title=f"用户认证失败",
-                                                   message="用户认证失败次数过多，将不再尝试认证！",
-                                                   role="system")
+                SchedulerChain().messagehelper.put(
+                    title=f"用户认证失败",
+                    message="用户认证失败次数过多，将不再尝试认证！",
+                    role="system",
+                )
                 self._auth_message = True
             return
         logger.info("用户未认证，正在尝试认证...")
@@ -807,7 +831,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     mtype=NotificationType.Manual,
                     title="MoviePilot用户认证成功",
                     text=f"使用站点：{msg}，如有插件使用异常，请重启MoviePilot。",
-                    link=settings.MP_DOMAIN('#/site')
+                    link=settings.MP_DOMAIN("#/site"),
                 )
             )
             # 认证通过后重新初始化插件

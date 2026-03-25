@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+import uuid
 from time import strftime
 from typing import Dict, List
 
@@ -16,6 +17,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.callback import StreamingHandler
 from app.agent.memory import memory_manager
+from app.agent.middleware.jobs import JobsMiddleware
 from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
@@ -95,6 +97,10 @@ class MoviePilotAgent:
                 # Skills
                 SkillsMiddleware(
                     sources=[str(settings.CONFIG_PATH / "agent" / "skills")],
+                ),
+                # Jobs 任务管理
+                JobsMiddleware(
+                    sources=[str(settings.CONFIG_PATH / "agent" / "jobs")],
                 ),
                 # 记忆管理
                 MemoryMiddleware(
@@ -339,6 +345,46 @@ class AgentManager:
             del self.active_agents[session_id]
             memory_manager.clear_memory(session_id, user_id)
             logger.info(f"会话 {session_id} 的记忆已清空")
+
+    async def heartbeat_check_jobs(self):
+        """
+        心跳唤醒：检查并执行待处理的定时任务（Jobs）。
+        由定时调度器周期性调用，每次使用独立的会话避免上下文干扰。
+        """
+        try:
+            # 每次使用唯一的 session_id，避免共享上下文
+            session_id = f"__agent_heartbeat_{uuid.uuid4().hex[:12]}__"
+            user_id = settings.SUPERUSER
+
+            logger.info("智能体心跳唤醒：开始检查待处理任务...")
+
+            # 英文提示词，便于大模型理解
+            heartbeat_message = (
+                "[System Heartbeat Wake-up] Please check all jobs in your jobs directory and process pending tasks:\n"
+                "1. List all jobs with status 'pending' or 'in_progress'\n"
+                "2. For 'recurring' jobs, check the 'last_run' timestamp to determine if it's time to run again\n"
+                "3. For 'once' jobs with status 'pending', execute them now\n"
+                "4. After executing each job, update its status, 'last_run' time, and execution log in the JOB.md file\n"
+                "5. If there are no pending jobs, simply respond with a brief summary\n"
+                "IMPORTANT: Respond in Chinese (中文). Begin checking and processing jobs now."
+            )
+
+            await self.process_message(
+                session_id=session_id,
+                user_id=user_id,
+                message=heartbeat_message,
+                channel=None,
+                source=None,
+                username=settings.SUPERUSER,
+            )
+
+            logger.info("智能体心跳唤醒：任务检查完成")
+
+            # 心跳会话用完即弃，清理资源
+            await self.clear_session(session_id, user_id)
+
+        except Exception as e:
+            logger.error(f"智能体心跳唤醒失败: {e}")
 
 
 # 全局智能体管理器实例
