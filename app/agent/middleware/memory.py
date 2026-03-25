@@ -72,6 +72,7 @@ MEMORY_SYSTEM_PROMPT = """<agent_memory>
     - When the information is stale or irrelevant in future conversations
     - Never store API keys, access tokens, passwords, or any other credentials in any file, memory, or system prompt.
     - If the user asks where to put API keys or provides an API key, do NOT echo or save it.
+    - Do NOT record daily activities or task execution history in MEMORY.md - these are automatically tracked in the activity log system (see <activity_log>). MEMORY.md is only for long-term knowledge, preferences, and patterns.
 
     **Examples:**
     Example 1 (remembering user information):
@@ -111,9 +112,9 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
     state_schema = MemoryState
 
     def __init__(
-            self,
-            *,
-            sources: list[str],
+        self,
+        *,
+        sources: list[str],
     ) -> None:
         """初始化记忆中间件。
 
@@ -138,9 +139,12 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         """
         if not contents:
             return MEMORY_SYSTEM_PROMPT.format(
-                agent_memory=f"(No memory loaded), but you can add some by calling the `write_file` tool to the file: {self.sources[0]}.")
+                agent_memory=f"(No memory loaded), but you can add some by calling the `write_file` tool to the file: {self.sources[0]}."
+            )
 
-        sections = [f"{path}\n{contents[path]}" for path in self.sources if contents.get(path)]
+        sections = [
+            f"{path}\n{contents[path]}" for path in self.sources if contents.get(path)
+        ]
 
         if not sections:
             return MEMORY_SYSTEM_PROMPT.format(agent_memory="(No memory loaded)")
@@ -148,8 +152,12 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         memory_body = "\n\n".join(sections)
         return MEMORY_SYSTEM_PROMPT.format(agent_memory=memory_body)
 
-    async def abefore_agent(self, state: MemoryState, runtime: Runtime,  # noqa
-                            config: RunnableConfig) -> MemoryStateUpdate | None:
+    async def abefore_agent(
+        self,
+        state: MemoryState,
+        runtime: Runtime,  # noqa
+        config: RunnableConfig,
+    ) -> MemoryStateUpdate | None:
         """在代理执行前加载记忆内容。
 
         从所有配置的源加载记忆并存储在状态中。
@@ -188,14 +196,18 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         contents = request.state.get("memory_contents", {})  # noqa
         agent_memory = self._format_agent_memory(contents)
 
-        new_system_message = append_to_system_message(request.system_message, agent_memory)
+        new_system_message = append_to_system_message(
+            request.system_message, agent_memory
+        )
 
         return request.override(system_message=new_system_message)
 
     async def awrap_model_call(
-            self,
-            request: ModelRequest[ContextT],
-            handler: Callable[[ModelRequest[ContextT]], Awaitable[ModelResponse[ResponseT]]],
+        self,
+        request: ModelRequest[ContextT],
+        handler: Callable[
+            [ModelRequest[ContextT]], Awaitable[ModelResponse[ResponseT]]
+        ],
     ) -> ModelResponse[ResponseT]:
         """异步包装模型调用，将记忆注入系统提示词。
 
