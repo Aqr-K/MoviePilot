@@ -406,13 +406,18 @@ class AgentManager:
 
             # 英文提示词，便于大模型理解
             heartbeat_message = (
-                "[System Heartbeat Wake-up] Please check all jobs in your jobs directory and process pending tasks:\n"
+                "[System Heartbeat] Check all jobs in your jobs directory and process pending tasks:\n"
                 "1. List all jobs with status 'pending' or 'in_progress'\n"
-                "2. For 'recurring' jobs, check the 'last_run' timestamp to determine if it's time to run again\n"
+                "2. For 'recurring' jobs, check 'last_run' to determine if it's time to run again\n"
                 "3. For 'once' jobs with status 'pending', execute them now\n"
                 "4. After executing each job, update its status, 'last_run' time, and execution log in the JOB.md file\n"
-                "5. If there are no pending jobs, simply respond with a brief summary\n"
-                "IMPORTANT: Respond in Chinese (中文). Begin checking and processing jobs now."
+                "5. If there are no pending jobs, do NOT generate any response\n\n"
+                "IMPORTANT: This is a background system task, NOT a user conversation. "
+                "Your final response will be broadcast as a notification. "
+                "Only output a brief completion summary listing each executed job and its result. "
+                "Do NOT include greetings, explanations, or conversational text. "
+                "If no jobs were executed, output nothing. "
+                "Respond in Chinese (中文)."
             )
 
             await self.process_message(
