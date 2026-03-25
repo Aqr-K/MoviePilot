@@ -208,18 +208,23 @@ class MoviePilotAgent:
             agent = self._create_agent()
 
             if self.is_background:
-                # 后台任务模式：不需要流式输出，只收集最终结果
-                collected: List[str] = []
-
-                await self._stream_agent_tokens(
-                    agent=agent,
-                    messages={"messages": messages},
+                # 后台任务模式：非流式执行，等待完成后只取最后一条AI回复
+                await agent.ainvoke(
+                    {"messages": messages},
                     config=agent_config,
-                    on_token=lambda t: collected.append(t),
                 )
 
-                # 后台任务仅广播最终结果，带标题
-                final_text = "".join(collected)
+                # 从最终状态中提取最后一条AI回复内容
+                final_messages = agent.get_state(agent_config).values.get(
+                    "messages", []
+                )
+                final_text = ""
+                for msg in reversed(final_messages):
+                    if hasattr(msg, "type") and msg.type == "ai" and msg.content:
+                        final_text = msg.content
+                        break
+
+                # 后台任务仅广播最终回复，带标题
                 if final_text:
                     await self.send_agent_message(final_text, title="MoviePilot助手")
 
