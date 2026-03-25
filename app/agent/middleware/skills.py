@@ -1,5 +1,7 @@
 import re
+import shutil
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Annotated, List
 from typing import NotRequired, TypedDict
 
@@ -285,17 +287,69 @@ Remember: Skills make you more capable and consistent. When in doubt, check if a
 """
 
 
+def _sync_bundled_skills(bundled_dir: Path, target_dir: Path) -> None:
+    """将项目自带的技能同步到用户目录。
+
+    仅当目标目录中不存在对应技能子目录时才复制，已存在则跳过（不覆盖用户修改）。
+
+    Parameters
+    ----------
+    bundled_dir : Path
+        项目内置技能目录（如 ``ROOT_PATH / "skills"``）。
+    target_dir : Path
+        用户配置技能目录（如 ``CONFIG_PATH / "agent" / "skills"``）。
+    """
+    if not bundled_dir.is_dir():
+        return
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for skill_src in bundled_dir.iterdir():
+        if not skill_src.is_dir():
+            continue
+        skill_md = skill_src / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+
+        skill_dst = target_dir / skill_src.name
+        if skill_dst.exists():
+            # 目标已存在，跳过（不覆盖用户自定义修改）
+            continue
+
+        try:
+            shutil.copytree(str(skill_src), str(skill_dst))
+            logger.info("已自动复制内置技能 '%s' -> '%s'", skill_src.name, skill_dst)
+        except Exception as e:
+            logger.warning("复制内置技能 '%s' 失败: %s", skill_src.name, e)
+
+
 class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # noqa
     """加载并向系统提示词注入 Agent Skill 的中间件。
 
     按源顺序加载 Skill，后加载的会覆盖重名的。
+    启动时自动将项目内置技能（bundled_skills_dir）同步到用户技能目录。
     """
 
     state_schema = SkillsState
 
-    def __init__(self, *, sources: list[str]) -> None:
-        """初始化 Skill 中间件。"""
+    def __init__(
+        self,
+        *,
+        sources: list[str],
+        bundled_skills_dir: str | None = None,
+    ) -> None:
+        """初始化 Skill 中间件。
+
+        Parameters
+        ----------
+        sources : list[str]
+            用户技能目录列表。
+        bundled_skills_dir : str | None
+            项目内置技能目录路径。若提供，在首次加载前会将其中不存在于
+            sources 首个目录的技能自动复制过去。
+        """
         self.sources = sources
+        self.bundled_skills_dir = bundled_skills_dir
         self.system_prompt_template = SKILLS_SYSTEM_PROMPT
 
     def _format_skills_locations(self) -> str:
@@ -350,10 +404,20 @@ class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # no
         """在 Agent 执行前异步加载技能元数据。
 
         每个会话仅加载一次。若 state 中已有则跳过。
+        首次加载时，会先将内置技能同步到用户目录（如不存在）。
         """
         # 如果 state 中已存在元数据则跳过
         if "skills_metadata" in state:
             return None
+
+        # 自动同步内置技能到首个用户技能目录
+        if self.bundled_skills_dir and self.sources:
+            bundled = Path(self.bundled_skills_dir)
+            target = Path(self.sources[0])
+            try:
+                _sync_bundled_skills(bundled, target)
+            except Exception as e:
+                logger.warning("同步内置技能失败: %s", e)
 
         all_skills: dict[str, SkillMetadata] = {}
 

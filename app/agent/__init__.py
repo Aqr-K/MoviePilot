@@ -105,6 +105,7 @@ class MoviePilotAgent:
                 # Skills
                 SkillsMiddleware(
                     sources=[str(settings.CONFIG_PATH / "agent" / "skills")],
+                    bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
                 ),
                 # Jobs 任务管理
                 JobsMiddleware(
