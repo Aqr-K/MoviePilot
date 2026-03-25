@@ -530,7 +530,7 @@ class ConfigModel(BaseModel):
     # LLM工具选择中间件最大工具数量，0为不启用工具选择中间件
     LLM_MAX_TOOLS: int = 0
     # AI智能体定时任务检查间隔（小时），0为不启用，默认24小时
-    AI_AGENT_JOB_INTERVAL: int = 24
+    AI_AGENT_JOB_INTERVAL: int = 0
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
