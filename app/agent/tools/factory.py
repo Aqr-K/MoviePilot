@@ -46,6 +46,9 @@ from app.agent.tools.impl.edit_file import EditFileTool
 from app.agent.tools.impl.write_file import WriteFileTool
 from app.agent.tools.impl.read_file import ReadFileTool
 from app.agent.tools.impl.browse_webpage import BrowseWebpageTool
+from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTool
+from app.agent.tools.impl.query_plugin_capabilities import QueryPluginCapabilitiesTool
+from app.agent.tools.impl.run_plugin_command import RunPluginCommandTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -116,6 +119,9 @@ class MoviePilotToolFactory:
             WriteFileTool,
             ReadFileTool,
             BrowseWebpageTool,
+            QueryInstalledPluginsTool,
+            QueryPluginCapabilitiesTool,
+            RunPluginCommandTool,
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:
