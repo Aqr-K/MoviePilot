@@ -17,8 +17,8 @@ from langgraph.runtime import Runtime
 from app.agent.middleware.utils import append_to_system_message
 from app.log import logger
 
-# 记忆文件最大限制为 5MB，防止单文件过大导致上下文溢出
-MAX_MEMORY_FILE_SIZE = 5 * 1024 * 1024
+# 记忆文件最大限制为 100KB，防止单文件过大导致上下文溢出
+MAX_MEMORY_FILE_SIZE = 100 * 1024
 
 # 默认记忆文件名（用户主记忆）
 DEFAULT_MEMORY_FILE = "MEMORY.md"
