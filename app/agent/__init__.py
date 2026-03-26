@@ -200,9 +200,8 @@ class MoviePilotAgent:
             await self.send_agent_message(error_message)
             return error_message
 
-    @staticmethod
     async def _stream_agent_tokens(
-        agent, messages: dict, config: dict, on_token: Callable[[str], None]
+        self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
     ):
         """
         流式运行智能体，过滤工具调用token和思考内容，将模型生成的内容通过回调输出。
@@ -231,7 +230,7 @@ class MoviePilotAgent:
                         continue
                     if token.content:
                         # content 可能是字符串或内容块列表，过滤掉思考类型的块
-                        content = MoviePilotAgent._extract_text_content(token.content)
+                        content = self._extract_text_content(token.content)
                         if content:
                             on_token(content)
 
@@ -506,7 +505,7 @@ class AgentManager:
             logger.info(f"会话 {session_id} 的worker被取消")
         finally:
             # 清理已完成的worker记录
-            self._session_workers.pop(session_id, None)
+            await self._session_workers.pop(session_id, None)
             # 如果队列为空，清理队列
             if (
                 session_id in self._session_queues
@@ -554,7 +553,7 @@ class AgentManager:
                 await self._session_workers[session_id]
             except asyncio.CancelledError:
                 pass
-            self._session_workers.pop(session_id, None)
+            await self._session_workers.pop(session_id, None)
 
         # 清理队列
         self._session_queues.pop(session_id, None)
