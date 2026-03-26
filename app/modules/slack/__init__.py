@@ -6,18 +6,16 @@ from app.core.context import MediaInfo, Context
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
 from app.modules.slack.slack import Slack
-from app.schemas import MessageChannel, CommingMessage, Notification
+from app.schemas import MessageChannel, CommingMessage, Notification, MessageResponse
 from app.schemas.types import ModuleType
 
 
 class SlackModule(_ModuleBase, _MessageBase[Slack]):
-
     def init_module(self) -> None:
         """
         初始化模块
         """
-        super().init_service(service_name=Slack.__name__.lower(),
-                             service_type=Slack)
+        super().init_service(service_name=Slack.__name__.lower(), service_type=Slack)
         self._channel = MessageChannel.Slack
 
     @staticmethod
@@ -67,7 +65,9 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
-    def message_parser(self, source: str, body: Any, form: Any, args: Any) -> Optional[CommingMessage]:
+    def message_parser(
+        self, source: str, body: Any, form: Any, args: Any
+    ) -> Optional[CommingMessage]:
         """
         解析消息内容，返回字典，注意以下约定值：
         userid: 用户ID
@@ -213,10 +213,14 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 message_info = msg_json.get("message", {})
                 # Slack消息的时间戳作为消息ID
                 message_ts = message_info.get("ts")
-                channel_id = msg_json.get("channel", {}).get("id") or msg_json.get("container", {}).get("channel_id")
+                channel_id = msg_json.get("channel", {}).get("id") or msg_json.get(
+                    "container", {}
+                ).get("channel_id")
 
-                logger.info(f"收到来自 {client_config.name} 的Slack按钮回调："
-                            f"userid={userid}, username={username}, callback_data={callback_data}")
+                logger.info(
+                    f"收到来自 {client_config.name} 的Slack按钮回调："
+                    f"userid={userid}, username={username}, callback_data={callback_data}"
+                )
 
                 # 创建包含回调信息的CommingMessage
                 return CommingMessage(
@@ -228,11 +232,16 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     is_callback=True,
                     callback_data=callback_data,
                     message_id=message_ts,
-                    chat_id=channel_id
+                    chat_id=channel_id,
                 )
             elif msg_json.get("type") == "event_callback":
-                userid = msg_json.get('event', {}).get('user')
-                text = re.sub(r"<@[0-9A-Z]+>", "", msg_json.get("event", {}).get("text"), flags=re.IGNORECASE).strip()
+                userid = msg_json.get("event", {}).get("user")
+                text = re.sub(
+                    r"<@[0-9A-Z]+>",
+                    "",
+                    msg_json.get("event", {}).get("text"),
+                    flags=re.IGNORECASE,
+                ).strip()
                 username = ""
             elif msg_json.get("type") == "shortcut":
                 userid = msg_json.get("user", {}).get("id")
@@ -244,9 +253,16 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 username = msg_json.get("user_name")
             else:
                 return None
-            logger.info(f"收到来自 {client_config.name} 的Slack消息：userid={userid}, username={username}, text={text}")
-            return CommingMessage(channel=MessageChannel.Slack, source=client_config.name,
-                                  userid=userid, username=username, text=text)
+            logger.info(
+                f"收到来自 {client_config.name} 的Slack消息：userid={userid}, username={username}, text={text}"
+            )
+            return CommingMessage(
+                channel=MessageChannel.Slack,
+                source=client_config.name,
+                userid=userid,
+                username=username,
+                text=text,
+            )
         return None
 
     def post_message(self, message: Notification, **kwargs) -> None:
@@ -261,19 +277,26 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
             targets = message.targets
             userid = message.userid
             if not userid and targets is not None:
-                userid = targets.get('slack_userid')
+                userid = targets.get("slack_userid")
                 if not userid:
                     logger.warn(f"用户没有指定 Slack用户ID，消息无法发送")
                     return
             client: Slack = self.get_instance(conf.name)
             if client:
-                client.send_msg(title=message.title, text=message.text,
-                                image=message.image, userid=userid, link=message.link,
-                                buttons=message.buttons,
-                                original_message_id=message.original_message_id,
-                                original_chat_id=message.original_chat_id)
+                client.send_msg(
+                    title=message.title,
+                    text=message.text,
+                    image=message.image,
+                    userid=userid,
+                    link=message.link,
+                    buttons=message.buttons,
+                    original_message_id=message.original_message_id,
+                    original_chat_id=message.original_chat_id,
+                )
 
-    def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
+    def post_medias_message(
+        self, message: Notification, medias: List[MediaInfo]
+    ) -> None:
         """
         发送媒体信息选择列表
         :param message: 消息体
@@ -285,12 +308,18 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 continue
             client: Slack = self.get_instance(conf.name)
             if client:
-                client.send_medias_msg(title=message.title, medias=medias, userid=message.userid,
-                                       buttons=message.buttons,
-                                       original_message_id=message.original_message_id,
-                                       original_chat_id=message.original_chat_id)
+                client.send_medias_msg(
+                    title=message.title,
+                    medias=medias,
+                    userid=message.userid,
+                    buttons=message.buttons,
+                    original_message_id=message.original_message_id,
+                    original_chat_id=message.original_chat_id,
+                )
 
-    def post_torrents_message(self, message: Notification, torrents: List[Context]) -> None:
+    def post_torrents_message(
+        self, message: Notification, torrents: List[Context]
+    ) -> None:
         """
         发送种子信息选择列表
         :param message: 消息体
@@ -302,13 +331,22 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 continue
             client: Slack = self.get_instance(conf.name)
             if client:
-                client.send_torrents_msg(title=message.title, torrents=torrents,
-                                         userid=message.userid, buttons=message.buttons,
-                                         original_message_id=message.original_message_id,
-                                         original_chat_id=message.original_chat_id)
+                client.send_torrents_msg(
+                    title=message.title,
+                    torrents=torrents,
+                    userid=message.userid,
+                    buttons=message.buttons,
+                    original_message_id=message.original_message_id,
+                    original_chat_id=message.original_chat_id,
+                )
 
-    def delete_message(self, channel: MessageChannel, source: str,
-                       message_id: str, chat_id: Optional[str] = None) -> bool:
+    def delete_message(
+        self,
+        channel: MessageChannel,
+        source: str,
+        message_id: str,
+        chat_id: Optional[str] = None,
+    ) -> bool:
         """
         删除消息
         :param channel: 消息渠道
@@ -329,3 +367,86 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 if result:
                     success = True
         return success
+
+    def edit_message(
+        self,
+        channel: MessageChannel,
+        source: str,
+        message_id: Union[str, int],
+        chat_id: Union[str, int],
+        text: str,
+        title: Optional[str] = None,
+    ) -> bool:
+        """
+        编辑消息
+        :param channel: 消息渠道
+        :param source: 指定的消息源
+        :param message_id: 消息ID
+        :param chat_id: 聊天ID
+        :param text: 新的消息内容
+        :param title: 消息标题
+        :return: 编辑是否成功
+        """
+        if channel != self._channel:
+            return False
+        for conf in self.get_configs().values():
+            if source != conf.name:
+                continue
+            client: Slack = self.get_instance(conf.name)
+            if client:
+                result = client.send_msg(
+                    title=title or "",
+                    text=text,
+                    original_message_id=str(message_id),
+                    original_chat_id=str(chat_id),
+                )
+                if result and result[0]:
+                    return True
+        return False
+
+    def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:
+        """
+        直接发送消息并返回消息ID等信息
+        :param message: 消息体
+        :return: 消息响应（包含message_id, chat_id等）
+        """
+        for conf in self.get_configs().values():
+            if not self.check_message(message, conf.name):
+                continue
+            targets = message.targets
+            userid = message.userid
+            if not userid and targets is not None:
+                userid = targets.get("slack_userid")
+                if not userid:
+                    logger.warn("用户没有指定 Slack 用户ID，消息无法发送")
+                    return None
+            client: Slack = self.get_instance(conf.name)
+            if client:
+                result = client.send_msg(
+                    title=message.title or "",
+                    text=message.text,
+                    userid=userid,
+                )
+                if result and result[0]:
+                    # Slack 使用时间戳作为 message_id，chat_id 是频道ID
+                    # 注意：这里返回的是发送后的结果，需要获取实际的 message_id
+                    # 由于 Slack API 返回的是 result[1]，包含完整响应，我们需要从中提取
+                    response_data = result[1]
+                    message_id = (
+                        response_data.get("ts")
+                        if isinstance(response_data, dict)
+                        else None
+                    )
+                    channel_id = (
+                        response_data.get("channel")
+                        if isinstance(response_data, dict)
+                        else None
+                    )
+                    return MessageResponse(
+                        message_id=message_id,
+                        chat_id=channel_id,
+                        channel=MessageChannel.Slack,
+                        source=conf.name,
+                        success=True,
+                    )
+        return None
