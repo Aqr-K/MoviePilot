@@ -72,6 +72,37 @@ class MoviePilotAgent:
         """
         return LLMHelper.get_llm(streaming=True)
 
+    @staticmethod
+    def _extract_text_content(content) -> str:
+        """
+        从消息内容中提取纯文本，过滤掉思考/推理类型的内容块。
+        :param content: 消息内容，可能是字符串或内容块列表
+        :return: 纯文本内容
+        """
+        if not content:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                if isinstance(block, str):
+                    text_parts.append(block)
+                elif isinstance(block, dict):
+                    # 跳过思考/推理类型的内容块
+                    if block.get("type") in (
+                        "thinking",
+                        "reasoning_content",
+                        "reasoning",
+                    ):
+                        continue
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    else:
+                        text_parts.append(str(block))
+            return "".join(text_parts)
+        return str(content)
+
     def _initialize_tools(self) -> List:
         """
         初始化工具列表
@@ -174,7 +205,7 @@ class MoviePilotAgent:
         agent, messages: dict, config: dict, on_token: Callable[[str], None]
     ):
         """
-        流式运行智能体，过滤工具调用token，将模型生成的内容通过回调输出。
+        流式运行智能体，过滤工具调用token和思考内容，将模型生成的内容通过回调输出。
         :param agent: LangGraph Agent 实例
         :param messages: Agent 输入消息
         :param config: Agent 运行配置
@@ -194,8 +225,15 @@ class MoviePilotAgent:
                     and hasattr(token, "tool_call_chunks")
                     and not token.tool_call_chunks
                 ):
+                    # 跳过模型思考/推理内容（如 DeepSeek R1 的 reasoning_content）
+                    additional = getattr(token, "additional_kwargs", None)
+                    if additional and additional.get("reasoning_content"):
+                        continue
                     if token.content:
-                        on_token(token.content)
+                        # content 可能是字符串或内容块列表，过滤掉思考类型的块
+                        content = MoviePilotAgent._extract_text_content(token.content)
+                        if content:
+                            on_token(content)
 
     async def _execute_agent(self, messages: List[BaseMessage]):
         """
@@ -228,8 +266,11 @@ class MoviePilotAgent:
                 final_text = ""
                 for msg in reversed(final_messages):
                     if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                        final_text = msg.content
-                        break
+                        # 过滤掉思考/推理内容，只提取纯文本
+                        text = self._extract_text_content(msg.content)
+                        if text:
+                            final_text = text
+                            break
 
                 # 后台任务仅广播最终回复，带标题
                 if final_text:
