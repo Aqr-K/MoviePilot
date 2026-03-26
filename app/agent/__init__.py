@@ -143,10 +143,8 @@ class MoviePilotAgent:
                 JobsMiddleware(
                     sources=[str(settings.CONFIG_PATH / "agent" / "jobs")],
                 ),
-                # 记忆管理
-                MemoryMiddleware(
-                    sources=[str(settings.CONFIG_PATH / "agent" / "MEMORY.md")]
-                ),
+                # 记忆管理（自动扫描 agent 目录下所有 .md 文件）
+                MemoryMiddleware(memory_dir=str(settings.CONFIG_PATH / "agent")),
                 # 活动日志
                 ActivityLogMiddleware(
                     activity_dir=str(settings.CONFIG_PATH / "agent" / "activity"),
