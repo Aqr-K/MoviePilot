@@ -1,4 +1,5 @@
 import asyncio
+import re
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -209,6 +210,9 @@ class MoviePilotAgent:
         :param config: Agent 运行配置
         :param on_token: 收到有效 token 时的回调
         """
+        in_think_tag = False
+        buffer = ""
+
         async for chunk in agent.astream(
                 messages,
                 stream_mode="messages",
@@ -231,7 +235,46 @@ class MoviePilotAgent:
                         # content 可能是字符串或内容块列表，过滤掉思考类型的块
                         content = self._extract_text_content(token.content)
                         if content:
-                            on_token(content)
+                            buffer += content
+                            while buffer:
+                                if not in_think_tag:
+                                    start_idx = buffer.find("<think>")
+                                    if start_idx != -1:
+                                        if start_idx > 0:
+                                            on_token(buffer[:start_idx])
+                                        in_think_tag = True
+                                        buffer = buffer[start_idx + 7:]
+                                    else:
+                                        # 检查是否以 <think> 的前缀结尾
+                                        partial_match = False
+                                        for i in range(6, 0, -1):
+                                            if buffer.endswith("<think>"[:i]):
+                                                if len(buffer) > i:
+                                                    on_token(buffer[:-i])
+                                                buffer = buffer[-i:]
+                                                partial_match = True
+                                                break
+                                        if not partial_match:
+                                            on_token(buffer)
+                                            buffer = ""
+                                else:
+                                    end_idx = buffer.find("</think>")
+                                    if end_idx != -1:
+                                        in_think_tag = False
+                                        buffer = buffer[end_idx + 8:]
+                                    else:
+                                        # 检查是否以 </think> 的前缀结尾
+                                        partial_match = False
+                                        for i in range(7, 0, -1):
+                                            if buffer.endswith("</think>"[:i]):
+                                                buffer = buffer[-i:]
+                                                partial_match = True
+                                                break
+                                        if not partial_match:
+                                            buffer = ""
+
+        if buffer and not in_think_tag:
+            on_token(buffer)
 
     async def _execute_agent(self, messages: List[BaseMessage]):
         """
@@ -267,7 +310,9 @@ class MoviePilotAgent:
                         # 过滤掉思考/推理内容，只提取纯文本
                         text = self._extract_text_content(msg.content)
                         if text:
-                            final_text = text
+                            # 过滤掉包含在 <think> 标签中的内容
+                            text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL)
+                            final_text = text.strip()
                             break
 
                 # 后台任务仅广播最终回复，带标题
