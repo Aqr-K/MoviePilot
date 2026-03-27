@@ -74,7 +74,7 @@ class PromptManager:
 
         # 啰嗦模式
         verbose_spec = ""
-        if settings.VERBOSE:
+        if settings.AI_AGENT_VERBOSE:
             verbose_spec = "\n\n[Important Instruction] If you need to call a tool, DO NOT output any conversational "
             "text or explanations before calling the tool. Call the tool directly without transitional "
             "phrases like 'Let me check', 'I will look this up', etc."
