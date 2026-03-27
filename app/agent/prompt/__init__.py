@@ -65,22 +65,24 @@ class PromptManager:
             if channel
             else None
         )
+        # 获取渠道能力说明
         if msg_channel:
-            # 获取渠道能力说明
             caps = ChannelCapabilityManager.get_capabilities(msg_channel)
             if caps:
                 markdown_spec = self._generate_formatting_instructions(caps)
 
-        # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
-        base_prompt = base_prompt.replace("{markdown_spec}", markdown_spec)
+        # 啰嗦模式
+        verbose_spec = ""
+        if settings.VERBOSE:
+            verbose_spec = "\n\n[Important Instruction] If you need to call a tool, DO NOT output any conversational "
+            "text or explanations before calling the tool. Call the tool directly without transitional "
+            "phrases like 'Let me check', 'I will look this up', etc."
 
-        # 据 VERBOSE 开关动态调整提示词：关闭时要求避免工具调用前的废话
-        if not settings.AI_AGENT_VERBOSE:
-            base_prompt += (
-                "\n\n[Important Instruction] If you need to call a tool, DO NOT output any conversational "
-                "text or explanations before calling the tool. Call the tool directly without transitional "
-                "phrases like 'Let me check', 'I will look this up', etc."
-            )
+        # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
+        base_prompt = base_prompt.format(
+            markdown_spec=markdown_spec,
+            verbose_spec=verbose_spec
+        )
 
         return base_prompt
 
