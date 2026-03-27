@@ -531,6 +531,8 @@ class ConfigModel(BaseModel):
     LLM_MAX_TOOLS: int = 0
     # AI智能体定时任务检查间隔（小时），0为不启用，默认24小时
     AI_AGENT_JOB_INTERVAL: int = 0
+    # AI智能体啰嗦模式，开启后会回复工具调用过程
+    AI_AGENT_VERBOSE: bool = False
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):

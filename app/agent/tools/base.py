@@ -7,6 +7,7 @@ from pydantic import PrivateAttr
 
 from app.agent import StreamingHandler
 from app.chain import ChainBase
+from app.core.config import settings
 from app.log import logger
 from app.schemas import Notification
 
@@ -53,7 +54,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             if explanation:
                 tool_message = explanation
 
-        if not is_background:
+        if not is_background and settings.AI_AGENT_VERBOSE:
             # 非后台模式：发送工具执行过程消息
             if self._stream_handler and self._stream_handler.is_streaming:
                 # 流式渠道：工具消息直接追加到 buffer 中，与 Agent 文字合并为同一条流式消息

@@ -81,19 +81,21 @@ class MoviePilotAgent:
         """
         if not content:
             return ""
-        if isinstance(content, str):
-            return content
+        # 跳过思考/推理类型的内容块
         if isinstance(content, list):
             text_parts = []
             for block in content:
                 if isinstance(block, str):
                     text_parts.append(block)
                 elif isinstance(block, dict):
-                    # 跳过思考/推理类型的内容块
+                    # 优先检查 thought 标志（LangChain Google GenAI 方案）
+                    if block.get("thought"):
+                        continue
                     if block.get("type") in (
                         "thinking",
                         "reasoning_content",
                         "reasoning",
+                        "thought",
                     ):
                         continue
                     if block.get("type") == "text":
