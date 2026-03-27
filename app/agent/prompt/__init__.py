@@ -1,6 +1,7 @@
 """提示词管理器"""
 
 from pathlib import Path
+from time import strftime
 from typing import Dict
 
 from app.core.config import settings
@@ -81,7 +82,8 @@ class PromptManager:
         # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
         base_prompt = base_prompt.format(
             markdown_spec=markdown_spec,
-            verbose_spec=verbose_spec
+            verbose_spec=verbose_spec,
+            current_date=strftime("%Y-%m-%d")
         )
 
         return base_prompt
