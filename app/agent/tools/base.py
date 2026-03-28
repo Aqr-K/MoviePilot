@@ -44,8 +44,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         3. 调用具体工具逻辑（子类实现的 execute 方法）
         4. 持久化工具结果到会话记忆
         """
-        # 判断是否为后台任务模式（无渠道信息，如定时唤醒）
-        is_background = not self._channel and not self._source
 
         # 获取工具执行提示消息
         tool_message = self.get_tool_message(**kwargs)
@@ -54,27 +52,30 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             if explanation:
                 tool_message = explanation
 
-        if not is_background and settings.AI_AGENT_VERBOSE:
-            # 非后台模式：发送工具执行过程消息
-            if self._stream_handler and self._stream_handler.is_streaming:
-                # 流式渠道：工具消息直接追加到 buffer 中，与 Agent 文字合并为同一条流式消息
+        # 发送工具执行过程消息
+        if self._stream_handler and self._stream_handler.is_streaming:
+            if settings.AI_AGENT_VERBOSE:
+                # VERBOSE：工具消息直接追加到 buffer 中，与 Agent 文字合并为同一条流式消息
                 if tool_message:
                     self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
             else:
-                # 非流式渠道：保持原有行为，取出 Agent 文字 + 工具消息合并独立发送
-                agent_message = (
-                    await self._stream_handler.take() if self._stream_handler else ""
-                )
+                # 非VERBOSE，不输出最后结果前的消息
+                self._stream_handler.clear()
+        else:
+            # 非流式渠道：保持原有行为，取出 Agent 文字 + 工具消息合并独立发送
+            agent_message = (
+                await self._stream_handler.take() if self._stream_handler else ""
+            )
 
-                messages = []
-                if agent_message:
-                    messages.append(agent_message)
-                if tool_message:
-                    messages.append(f"⚙️ => {tool_message}")
+            messages = []
+            if agent_message:
+                messages.append(agent_message)
+            if tool_message:
+                messages.append(f"⚙️ => {tool_message}")
 
-                if messages:
-                    merged_message = "\n\n".join(messages)
-                    await self.send_tool_message(merged_message)
+            if messages:
+                merged_message = "\n\n".join(messages)
+                await self.send_tool_message(merged_message)
 
         logger.debug(f"Executing tool {self.name} with args: {kwargs}")
 
