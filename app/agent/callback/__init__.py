@@ -98,6 +98,19 @@ class StreamingHandler:
             self._message_response = None
             self._msg_start_offset = 0
 
+    def reset(self):
+        """
+        重置缓冲区，清空已发送的文本从头更新，但保持消息编辑能力。
+
+        与 clear 的区别：
+        - clear：完全重置所有状态，后续会开新消息
+        - reset：只清空buffer，保留消息编辑状态，后续继续编辑同一条消息
+        """
+        with self._lock:
+            self._buffer = ""
+            self._sent_text = ""
+            self._msg_start_offset = 0
+
     async def start_streaming(
         self,
         channel: Optional[str] = None,

@@ -59,8 +59,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 if tool_message:
                     self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
             else:
-                # 非VERBOSE，不输出最后结果前的消息
-                self._stream_handler.clear()
+                # 非VERBOSE，重置缓冲区从头更新，保持消息编辑能力
+                self._stream_handler.reset()
         else:
             # 非流式渠道：保持原有行为，取出 Agent 文字 + 工具消息合并独立发送
             agent_message = (
