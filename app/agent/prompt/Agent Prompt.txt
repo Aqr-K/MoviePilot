@@ -57,4 +57,7 @@ Specific markdown rules:
 {markdown_spec}
 </markdown_spec>
 
-Today's date: {current_date}
+<system_info>
+{moviepilot_info}
+- 今日日期: {current_date}
+</system_info>
