@@ -124,9 +124,7 @@ class MoviePilotAgent:
         """
         try:
             # 系统提示词
-            system_prompt = prompt_manager.get_agent_prompt(
-                channel=self.channel
-            )
+            system_prompt = prompt_manager.get_agent_prompt(channel=self.channel)
 
             # LLM 模型（用于 agent 执行）
             llm = self._initialize_llm()
@@ -311,7 +309,9 @@ class MoviePilotAgent:
                         text = self._extract_text_content(msg.content)
                         if text:
                             # 过滤掉包含在 <think> 标签中的内容
-                            text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL)
+                            text = re.sub(
+                                r"<think>.*?(?:</think>|$)", "", text, flags=re.DOTALL
+                            )
                             final_text = text.strip()
                             break
 
@@ -549,7 +549,7 @@ class AgentManager:
             logger.info(f"会话 {session_id} 的worker被取消")
         finally:
             # 清理已完成的worker记录
-            await self._session_workers.pop(session_id, None)
+            self._session_workers.pop(session_id, None)  # noqa
             # 如果队列为空，清理队列
             if (
                     session_id in self._session_queues
