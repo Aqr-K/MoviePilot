@@ -1,4 +1,5 @@
 """提示词管理器"""
+
 import socket
 from pathlib import Path
 from time import strftime
@@ -121,7 +122,7 @@ class PromptManager:
         api_token = settings.API_TOKEN or "未设置"
 
         info_lines = [
-            f"- 当前日期: {strftime('%Y-%m-%d')}",
+            f"- 当前时间: {strftime('%Y-%m-%d %H:%M:%S')}",
             f"- 运行环境: {SystemUtils.platform} {'docker' if SystemUtils.is_docker() else ''}",
             f"- 主机名: {hostname}",
             f"- IP地址: {ip_address}",
@@ -131,6 +132,7 @@ class PromptManager:
             f"- 外网域名: {settings.APP_DOMAIN or '未设置'}",
             f"- 配置文件目录: {config_path}",
             f"- 日志文件目录: {log_path}",
+            f"- 系统安装目录: {settings.ROOT_PATH}",
         ]
 
         return "\n".join(info_lines)
