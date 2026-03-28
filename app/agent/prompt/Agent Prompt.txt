@@ -59,5 +59,4 @@ Specific markdown rules:
 
 <system_info>
 {moviepilot_info}
-- 今日日期: {current_date}
 </system_info>
