@@ -160,7 +160,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             MessageChannel.Slack: "slack",
             MessageChannel.VoceChat: "vocechat",
             MessageChannel.SynologyChat: "synologychat",
-            MessageChannel.QQBot: "qqbot",
+            MessageChannel.QQ: "qqbot",
         }
 
         channel_type = None
