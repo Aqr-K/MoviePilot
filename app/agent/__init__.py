@@ -190,8 +190,6 @@ class MoviePilotAgent:
 
             # 构建用户消息内容
             if images:
-                from langchain_core.messages import HumanMessage
-
                 content = []
                 if message:
                     content.append({"type": "text", "text": message})
