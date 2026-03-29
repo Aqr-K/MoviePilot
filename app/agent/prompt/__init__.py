@@ -126,7 +126,8 @@ class PromptManager:
         if db_type == "sqlite":
             db_info = f"SQLite ({settings.CONFIG_PATH / 'db' / 'moviepilot.db'})"
         else:
-            db_info = f"PostgreSQL ({settings.DB_POSTGRESQL_USERNAME}@{settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE})"
+            db_password = settings.DB_POSTGRESQL_PASSWORD or ""
+            db_info = f"PostgreSQL ({settings.DB_POSTGRESQL_USERNAME}:{db_password}@{settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE})"
 
         info_lines = [
             f"- 当前时间: {strftime('%Y-%m-%d %H:%M:%S')}",
