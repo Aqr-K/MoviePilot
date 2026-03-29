@@ -121,6 +121,13 @@ class PromptManager:
         # API令牌
         api_token = settings.API_TOKEN or "未设置"
 
+        # 数据库信息
+        db_type = settings.DB_TYPE
+        if db_type == "sqlite":
+            db_info = f"SQLite ({settings.CONFIG_PATH / 'db' / 'moviepilot.db'})"
+        else:
+            db_info = f"PostgreSQL ({settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE})"
+
         info_lines = [
             f"- 当前时间: {strftime('%Y-%m-%d %H:%M:%S')}",
             f"- 运行环境: {SystemUtils.platform} {'docker' if SystemUtils.is_docker() else ''}",
@@ -130,6 +137,8 @@ class PromptManager:
             f"- API路径: {api_path}",
             f"- API令牌: {api_token}",
             f"- 外网域名: {settings.APP_DOMAIN or '未设置'}",
+            f"- 数据库类型: {db_type}",
+            f"- 数据库: {db_info}",
             f"- 配置文件目录: {config_path}",
             f"- 日志文件目录: {log_path}",
             f"- 系统安装目录: {settings.ROOT_PATH}",
