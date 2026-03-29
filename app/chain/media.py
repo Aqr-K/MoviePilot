@@ -357,9 +357,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             metadata_type in [ScrapingMetadata.THUMB]
             and item_type == ScrapingTarget.EPISODE
         ):
-            # 集缩略图命名: {视频文件名}-thumb.{ext}，如 Show.S01E03-thumb.jpg
             hint_ext = Path(filename_hint).suffix if filename_hint else ".jpg"
-            final_filename = f"{target_dir_path.stem}-thumb{hint_ext}"
+            final_filename = f"{target_dir_path.stem}{hint_ext}"
             target_dir_item = parent_fileitem or self.storagechain.get_parent_item(
                 current_fileitem
             )
