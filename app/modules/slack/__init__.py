@@ -198,10 +198,12 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
             logger.debug(f"解析Slack消息失败：{str(err)}")
             return None
         if msg_json:
+            images = None
             if msg_json.get("type") == "message":
                 userid = msg_json.get("user")
                 text = msg_json.get("text")
                 username = msg_json.get("user")
+                images = self._extract_images(msg_json)
             elif msg_json.get("type") == "block_actions":
                 userid = msg_json.get("user", {}).get("id")
                 callback_data = msg_json.get("actions")[0].get("value")
@@ -243,6 +245,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     flags=re.IGNORECASE,
                 ).strip()
                 username = ""
+                images = self._extract_images(msg_json.get("event", {}))
             elif msg_json.get("type") == "shortcut":
                 userid = msg_json.get("user", {}).get("id")
                 text = msg_json.get("callback_id")
@@ -254,7 +257,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
             else:
                 return None
             logger.info(
-                f"收到来自 {client_config.name} 的Slack消息：userid={userid}, username={username}, text={text}"
+                f"收到来自 {client_config.name} 的Slack消息：userid={userid}, username={username}, text={text}, images={len(images) if images else 0}"
             )
             return CommingMessage(
                 channel=MessageChannel.Slack,
@@ -262,8 +265,25 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 userid=userid,
                 username=username,
                 text=text,
+                images=images,
             )
         return None
+
+    @staticmethod
+    def _extract_images(msg_json: dict) -> Optional[List[str]]:
+        """
+        从Slack消息中提取图片URL
+        """
+        files = msg_json.get("files", [])
+        if not files:
+            return None
+        images = []
+        for file in files:
+            if file.get("type") in ("image", "jpg", "jpeg", "png", "gif", "webp"):
+                url = file.get("url_private") or file.get("url_private_download")
+                if url:
+                    images.append(url)
+        return images if images else None
 
     def post_message(self, message: Notification, **kwargs) -> None:
         """

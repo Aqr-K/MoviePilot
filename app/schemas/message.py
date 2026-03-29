@@ -53,6 +53,8 @@ class CommingMessage(BaseModel):
     chat_id: Optional[str] = None
     # 完整的回调查询信息（原始数据）
     callback_query: Optional[Dict] = None
+    # 图片列表（图片URL或file_id）
+    images: Optional[List[str]] = None
 
     def to_dict(self):
         """

@@ -130,10 +130,11 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         if msg_type == "message":
             text = msg_json.get("text")
             chat_id = msg_json.get("chat_id")
-            if text and userid:
+            images = self._extract_images(msg_json)
+            if (text or images) and userid:
                 logger.info(
                     f"收到来自 {client_config.name} 的 Discord 消息："
-                    f"userid={userid}, username={username}, text={text}"
+                    f"userid={userid}, username={username}, text={text}, images={len(images) if images else 0}"
                 )
                 return CommingMessage(
                     channel=MessageChannel.Discord,
@@ -142,8 +143,25 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                     username=username,
                     text=text,
                     chat_id=str(chat_id) if chat_id else None,
+                    images=images,
                 )
         return None
+
+    @staticmethod
+    def _extract_images(msg_json: dict) -> Optional[List[str]]:
+        """
+        从Discord消息中提取图片URL
+        """
+        attachments = msg_json.get("attachments", [])
+        if not attachments:
+            return None
+        images = []
+        for attachment in attachments:
+            if attachment.get("type") == "image":
+                url = attachment.get("url")
+                if url:
+                    images.append(url)
+        return images if images else None
 
     def post_message(self, message: Notification, **kwargs) -> None:
         """
