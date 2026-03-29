@@ -166,7 +166,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             MessageChannel.Slack: "slack",
             MessageChannel.VoceChat: "vocechat",
             MessageChannel.SynologyChat: "synologychat",
-            MessageChannel.QQ: "qqbot",
+            MessageChannel.QQ: "qq",
         }
 
         channel_type = None
@@ -185,7 +185,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             "slack": "SLACK_ADMINS",
             "vocechat": "VOCECHAT_ADMINS",
             "synologychat": "SYNOLOGYCHAT_ADMINS",
-            "qqbot": "QQBOT_ADMINS",
+            "qq": "QQBOT_ADMINS",
         }
 
         user_id_key_map = {
