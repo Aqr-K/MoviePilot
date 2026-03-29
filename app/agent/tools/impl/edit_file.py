@@ -12,6 +12,7 @@ from app.log import logger
 
 class EditFileInput(BaseModel):
     """Input parameters for edit file tool"""
+
     file_path: str = Field(..., description="The absolute path of the file to edit")
     old_text: str = Field(..., description="The exact old text to be replaced")
     new_text: str = Field(..., description="The new text to replace with")
@@ -21,6 +22,7 @@ class EditFileTool(MoviePilotTool):
     name: str = "edit_file"
     description: str = "Edit a file by replacing specific old text with new text. Useful for modifying configuration files, code, or scripts."
     args_schema: Type[BaseModel] = EditFileInput
+    require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据参数生成友好的提示消息"""
@@ -38,7 +40,7 @@ class EditFileTool(MoviePilotTool):
                 # 如果 old_text 为空，可能用户想直接创建文件，但通常 edit_file 需要匹配旧内容
                 if old_text:
                     return f"错误：文件 {file_path} 不存在，无法进行内容替换。"
-                
+
             if await path.exists() and not await path.is_file():
                 return f"错误：{file_path} 不是一个文件"
 
@@ -56,13 +58,12 @@ class EditFileTool(MoviePilotTool):
 
             # 自动创建父目录
             await path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # 写入文件
             await path.write_text(new_content, encoding="utf-8")
-                
+
             logger.info(f"成功编辑文件 {file_path}，替换了 {occurrences} 处内容")
             return f"成功编辑文件 {file_path} (替换了 {occurrences} 处匹配内容)"
-
 
         except PermissionError:
             return f"错误：没有访问/修改 {file_path} 的权限"
@@ -71,5 +72,3 @@ class EditFileTool(MoviePilotTool):
         except Exception as e:
             logger.error(f"编辑文件 {file_path} 时发生错误: {str(e)}", exc_info=True)
             return f"操作失败: {str(e)}"
-
-

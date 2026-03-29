@@ -26,6 +26,7 @@ class DeleteDownloadHistoryTool(MoviePilotTool):
     name: str = "delete_download_history"
     description: str = "Delete a download history record by ID. This only removes the record from the database, does not delete any actual files."
     args_schema: Type[BaseModel] = DeleteDownloadHistoryInput
+    require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         history_id = kwargs.get("history_id")

@@ -47,6 +47,7 @@ class ModifyDownloadTool(MoviePilotTool):
         "Multiple operations can be performed in a single call."
     )
     args_schema: Type[BaseModel] = ModifyDownloadInput
+    require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         hash_value = kwargs.get("hash", "")

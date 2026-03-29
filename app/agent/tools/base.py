@@ -30,11 +30,13 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
     _source: Optional[str] = PrivateAttr(default=None)
     _username: Optional[str] = PrivateAttr(default=None)
     _stream_handler: Optional[StreamingHandler] = PrivateAttr(default=None)
+    _require_admin: bool = PrivateAttr(default=False)
 
     def __init__(self, session_id: str, user_id: str, **kwargs):
         super().__init__(**kwargs)
         self._session_id = session_id
         self._user_id = user_id
+        self._require_admin = getattr(self.__class__, "require_admin", False)
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("MoviePilotTool 只支持异步调用，请使用 _arun")
@@ -143,11 +145,15 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
     async def _check_permission(self) -> Optional[str]:
         """
         检查用户权限：
-        1. 首先检查用户是否是渠道管理员
-        2. 如果渠道没有设置管理员名单，则检查用户是否是系统管理员
-        3. 如果都不是系统管理员，检查用户ID是否等于渠道配置的用户ID
-        4. 如果都不是，返回权限拒绝消息
+        1. 首先检查工具是否需要管理员权限
+        2. 如果需要管理员权限，则检查用户是否是渠道管理员
+        3. 如果渠道没有设置管理员名单，则检查用户是否是系统管理员
+        4. 如果都不是系统管理员，检查用户ID是否等于渠道配置的用户ID
+        5. 如果都不是，返回权限拒绝消息
         """
+        if not self._require_admin:
+            return None
+
         if not self._channel or not self._source:
             return None
 

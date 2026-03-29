@@ -37,6 +37,7 @@ class RunPluginCommandTool(MoviePilotTool):
         "Note: This tool triggers the command execution but the actual processing happens in the background."
     )
     args_schema: Type[BaseModel] = RunPluginCommandInput
+    require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成友好的提示消息"""
