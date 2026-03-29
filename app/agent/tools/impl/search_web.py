@@ -18,10 +18,18 @@ SEARCH_TIMEOUT = 20
 
 class SearchWebInput(BaseModel):
     """搜索网络内容工具的输入参数模型"""
-    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
-    query: str = Field(..., description="The search query string to search for on the web")
-    max_results: Optional[int] = Field(5,
-                                       description="Maximum number of search results to return (default: 5, max: 10)")
+
+    explanation: str = Field(
+        ...,
+        description="Clear explanation of why this tool is being used in the current context",
+    )
+    query: str = Field(
+        ..., description="The search query string to search for on the web"
+    )
+    max_results: Optional[int] = Field(
+        5,
+        description="Maximum number of search results to return (default: 5, max: 10)",
+    )
 
 
 class SearchWebTool(MoviePilotTool):
@@ -39,19 +47,26 @@ class SearchWebTool(MoviePilotTool):
         """
         执行网络搜索
         """
-        logger.info(f"执行工具: {self.name}, 参数: query={query}, max_results={max_results}")
+        logger.info(
+            f"执行工具: {self.name}, 参数: query={query}, max_results={max_results}"
+        )
 
         try:
             # 限制最大结果数
             max_results = min(max(1, max_results or 5), 10)
             results = []
 
-            # 1. 优先使用 Tavily (如果配置了 API Key)
-            if settings.TAVILY_API_KEY:
+            # 1. 优先使用 Exa (如果配置了 API Key)
+            if settings.EXA_API_KEY:
+                logger.info("使用 Exa 进行搜索...")
+                results = await self._search_exa(query, max_results)
+
+            # 2. 如果没有结果或未配置 Exa，使用 Tavily (如果配置了 API Key)
+            if not results and settings.TAVILY_API_KEY:
                 logger.info("使用 Tavily 进行搜索...")
                 results = await self._search_tavily(query, max_results)
 
-            # 2. 如果没有结果或未配置 Tavily，使用 DuckDuckGo
+            # 3. 如果没有结果或未配置 Tavily，使用 DuckDuckGo
             if not results:
                 logger.info("使用 DuckDuckGo 进行搜索...")
                 results = await self._search_duckduckgo(query, max_results)
@@ -85,22 +100,64 @@ class SearchWebTool(MoviePilotTool):
                         "include_answer": False,
                         "include_images": False,
                         "include_raw_content": False,
-                    }
+                    },
                 )
                 response.raise_for_status()
                 data = response.json()
 
                 results = []
                 for result in data.get("results", []):
-                    results.append({
-                        'title': result.get('title', ''),
-                        'snippet': result.get('content', ''),
-                        'url': result.get('url', ''),
-                        'source': 'Tavily'
-                    })
+                    results.append(
+                        {
+                            "title": result.get("title", ""),
+                            "snippet": result.get("content", ""),
+                            "url": result.get("url", ""),
+                            "source": "Tavily",
+                        }
+                    )
                 return results
         except Exception as e:
             logger.warning(f"Tavily 搜索失败: {e}")
+            return []
+
+    @staticmethod
+    async def _search_exa(query: str, max_results: int) -> List[Dict]:
+        """使用 Exa API 进行搜索"""
+        try:
+            async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
+                response = await client.post(
+                    "https://api.exa.ai/search",
+                    headers={
+                        "x-api-key": settings.EXA_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "query": query,
+                        "numResults": max_results,
+                        "type": "auto",
+                        "contents": {"highlights": {"maxCharacters": 2000}},
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                results = []
+                for result in data.get("results", []):
+                    highlights = result.get("highlights", [])
+                    snippet = (
+                        highlights[0] if highlights else result.get("text", "")[:500]
+                    )
+                    results.append(
+                        {
+                            "title": result.get("title", ""),
+                            "snippet": snippet,
+                            "url": result.get("url", ""),
+                            "source": "Exa",
+                        }
+                    )
+                return results
+        except Exception as e:
+            logger.warning(f"Exa 搜索失败: {e}")
             return []
 
     @staticmethod
@@ -109,35 +166,33 @@ class SearchWebTool(MoviePilotTool):
         if not proxy_setting:
             return None
         if isinstance(proxy_setting, dict):
-            return proxy_setting.get('http') or proxy_setting.get('https')
+            return proxy_setting.get("http") or proxy_setting.get("https")
         return proxy_setting
 
     async def _search_duckduckgo(self, query: str, max_results: int) -> List[Dict]:
         """使用 duckduckgo-search (DDGS) 进行搜索"""
         try:
+
             def sync_search():
                 results = []
-                ddgs_kwargs = {
-                    'timeout': SEARCH_TIMEOUT
-                }
+                ddgs_kwargs = {"timeout": SEARCH_TIMEOUT}
                 proxy_url = self._get_proxy_url(settings.PROXY)
                 if proxy_url:
-                    ddgs_kwargs['proxy'] = proxy_url
+                    ddgs_kwargs["proxy"] = proxy_url
 
                 try:
                     with DDGS(**ddgs_kwargs) as ddgs:
-                        ddgs_gen = ddgs.text(
-                            query,
-                            max_results=max_results
-                        )
+                        ddgs_gen = ddgs.text(query, max_results=max_results)
                         if ddgs_gen:
                             for result in ddgs_gen:
-                                results.append({
-                                    'title': result.get('title', ''),
-                                    'snippet': result.get('body', ''),
-                                    'url': result.get('href', ''),
-                                    'source': 'DuckDuckGo'
-                                })
+                                results.append(
+                                    {
+                                        "title": result.get("title", ""),
+                                        "snippet": result.get("body", ""),
+                                        "url": result.get("href", ""),
+                                        "source": "DuckDuckGo",
+                                    }
+                                )
                 except Exception as err:
                     logger.warning(f"DuckDuckGo search process failed: {err}")
                 return results
@@ -152,10 +207,7 @@ class SearchWebTool(MoviePilotTool):
     @staticmethod
     def _format_and_truncate_results(results: List[Dict], max_results: int) -> Dict:
         """格式化并裁剪搜索结果"""
-        formatted = {
-            "total_results": len(results),
-            "results": []
-        }
+        formatted = {"total_results": len(results), "results": []}
 
         for idx, result in enumerate(results[:max_results], 1):
             title = result.get("title", "")[:200]
@@ -169,15 +221,17 @@ class SearchWebTool(MoviePilotTool):
                 snippet = snippet[:max_snippet_length] + "..."
 
             # 清理文本
-            snippet = re.sub(r'\s+', ' ', snippet).strip()
+            snippet = re.sub(r"\s+", " ", snippet).strip()
 
-            formatted["results"].append({
-                "rank": idx,
-                "title": title,
-                "snippet": snippet,
-                "url": url,
-                "source": source
-            })
+            formatted["results"].append(
+                {
+                    "rank": idx,
+                    "title": title,
+                    "snippet": snippet,
+                    "url": url,
+                    "source": source,
+                }
+            )
 
         if len(results) > max_results:
             formatted["note"] = f"仅显示前 {max_results} 条结果。"

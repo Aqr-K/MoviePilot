@@ -524,6 +524,8 @@ class ConfigModel(BaseModel):
         "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",
         "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",
     ]
+    # Exa API密钥（用于网络搜索）
+    EXA_API_KEY: str = "161ce010-fb56-419c-9ea8-4fb459b96298"
 
     # AI推荐条目数量限制
     AI_RECOMMEND_MAX_ITEMS: int = 50
