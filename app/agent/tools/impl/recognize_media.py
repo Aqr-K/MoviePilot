@@ -99,7 +99,8 @@ class RecognizeMediaTool(MoviePilotTool):
                 "message": error_message
             }, ensure_ascii=False)
 
-    def _format_context_result(self, context: Context, source_type: str) -> str:
+    @staticmethod
+    def _format_context_result(context: Context, source_type: str) -> str:
         """格式化识别结果为JSON字符串"""
         if not context:
             return json.dumps({
@@ -160,4 +161,3 @@ class RecognizeMediaTool(MoviePilotTool):
             }
         
         return json.dumps(result, ensure_ascii=False, indent=2)
-

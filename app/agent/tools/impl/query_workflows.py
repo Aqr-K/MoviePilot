@@ -125,4 +125,3 @@ class QueryWorkflowsTool(MoviePilotTool):
         except Exception as e:
             logger.error(f"查询工作流失败: {e}", exc_info=True)
             return f"查询工作流时发生错误: {str(e)}"
-

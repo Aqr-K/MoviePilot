@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 from enum import Enum
-from typing import Optional, Type, List
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 

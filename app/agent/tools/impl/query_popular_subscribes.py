@@ -160,4 +160,3 @@ class QueryPopularSubscribesTool(MoviePilotTool):
         except Exception as e:
             logger.error(f"查询热门订阅失败: {e}", exc_info=True)
             return f"查询热门订阅时发生错误: {str(e)}"
-
