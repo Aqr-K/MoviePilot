@@ -12,14 +12,14 @@ from telebot.types import (
     InlineKeyboardButton,
     InputMediaPhoto,
 )
-from telegramify_markdown import standardize, telegramify
+from telegramify_markdown import standardize, telegramify  # noqa
 from telegramify_markdown.type import ContentTypes, SentType
 
 from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
-from app.helper.thread import ThreadHelper
 from app.helper.image import ImageHelper
+from app.helper.thread import ThreadHelper
 from app.log import logger
 from app.utils.common import retry
 from app.utils.http import RequestUtils
@@ -44,10 +44,10 @@ class Telegram:
     _typing_stop_flags: Dict[str, bool] = {}  # chat_id -> 停止标志
 
     def __init__(
-        self,
-        TELEGRAM_TOKEN: Optional[str] = None,
-        TELEGRAM_CHAT_ID: Optional[str] = None,
-        **kwargs,
+            self,
+            TELEGRAM_TOKEN: Optional[str] = None,
+            TELEGRAM_CHAT_ID: Optional[str] = None,
+            **kwargs,
     ):
         """
         初始化参数
@@ -172,12 +172,38 @@ class Telegram:
             logger.info("Telegram消息接收服务启动")
 
     @property
+    def bot(self):
+        """
+        获取Telegram Bot实例
+        :return: TeleBot实例或None
+        """
+        return self._bot
+
+    @property
     def bot_username(self) -> Optional[str]:
         """
         获取Bot用户名
         :return: Bot用户名或None
         """
         return self._bot_username
+
+    def download_file(self, file_id: str) -> Optional[bytes]:
+        """
+        下载Telegram文件
+        :param file_id: 文件ID
+        :return: 文件字节数据
+        """
+        if not self._bot:
+            return None
+        try:
+            file_info = self._bot.get_file(file_id)
+            file_url = f"https://api.telegram.org/file/bot{self._telegram_token}/{file_info.file_path}"
+            resp = RequestUtils(timeout=30).get_res(file_url)
+            if resp and resp.content:
+                return resp.content
+        except Exception as e:
+            logger.error(f"下载Telegram文件失败: {e}")
+        return None
 
     def _update_user_chat_mapping(self, userid: int, chat_id: int) -> None:
         """
@@ -229,7 +255,7 @@ class Telegram:
                 for entity in message.entities:
                     if entity.type == "mention":
                         mention_text = message.text[
-                            entity.offset : entity.offset + entity.length
+                            entity.offset: entity.offset + entity.length
                         ]
                         if mention_text == f"@{self._bot_username}":
                             logger.debug(
@@ -295,15 +321,15 @@ class Telegram:
                 task.join(timeout=1)
 
     def send_msg(
-        self,
-        title: str,
-        text: Optional[str] = None,
-        image: Optional[str] = None,
-        userid: Optional[str] = None,
-        link: Optional[str] = None,
-        buttons: Optional[List[List[dict]]] = None,
-        original_message_id: Optional[int] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            title: str,
+            text: Optional[str] = None,
+            image: Optional[str] = None,
+            userid: Optional[str] = None,
+            link: Optional[str] = None,
+            buttons: Optional[List[List[dict]]] = None,
+            original_message_id: Optional[int] = None,
+            original_chat_id: Optional[str] = None,
     ) -> Optional[dict]:
         """
         发送Telegram消息
@@ -324,6 +350,9 @@ class Telegram:
             logger.warn("标题和内容不能同时为空")
             return {"success": False}
 
+        # Determine target chat_id with improved logic using user mapping
+        chat_id = self._determine_target_chat_id(userid, original_chat_id)
+
         try:
             # 标准化标题后再加粗，避免**符号被显示为文本
             bold_title = (
@@ -340,9 +369,6 @@ class Telegram:
 
             if link:
                 caption = f"{caption}\n[查看详情]({link})"
-
-            # Determine target chat_id with improved logic using user mapping
-            chat_id = self._determine_target_chat_id(userid, original_chat_id)
 
             # 创建按钮键盘
             reply_markup = None
@@ -386,7 +412,7 @@ class Telegram:
             return {"success": False}
 
     def _determine_target_chat_id(
-        self, userid: Optional[str] = None, original_chat_id: Optional[str] = None
+            self, userid: Optional[str] = None, original_chat_id: Optional[str] = None
     ) -> str:
         """
         确定目标聊天ID，使用用户映射确保回复到正确的聊天
@@ -410,14 +436,14 @@ class Telegram:
         return self._telegram_chat_id
 
     def send_medias_msg(
-        self,
-        medias: List[MediaInfo],
-        userid: Optional[str] = None,
-        title: Optional[str] = None,
-        link: Optional[str] = None,
-        buttons: Optional[List[List[Dict]]] = None,
-        original_message_id: Optional[int] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            medias: List[MediaInfo],
+            userid: Optional[str] = None,
+            title: Optional[str] = None,
+            link: Optional[str] = None,
+            buttons: Optional[List[List[Dict]]] = None,
+            original_message_id: Optional[int] = None,
+            original_chat_id: Optional[str] = None,
     ) -> Optional[bool]:
         """
         发送媒体列表消息
@@ -487,14 +513,14 @@ class Telegram:
             return False
 
     def send_torrents_msg(
-        self,
-        torrents: List[Context],
-        userid: Optional[str] = None,
-        title: Optional[str] = None,
-        link: Optional[str] = None,
-        buttons: Optional[List[List[Dict]]] = None,
-        original_message_id: Optional[int] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            torrents: List[Context],
+            userid: Optional[str] = None,
+            title: Optional[str] = None,
+            link: Optional[str] = None,
+            buttons: Optional[List[List[Dict]]] = None,
+            original_message_id: Optional[int] = None,
+            original_chat_id: Optional[str] = None,
     ) -> Optional[bool]:
         """
         发送种子列表消息
@@ -586,10 +612,10 @@ class Telegram:
         return InlineKeyboardMarkup(keyboard)
 
     def answer_callback_query(
-        self,
-        callback_query_id: int,
-        text: Optional[str] = None,
-        show_alert: bool = False,
+            self,
+            callback_query_id: int,
+            text: Optional[str] = None,
+            show_alert: bool = False,
     ) -> Optional[bool]:
         """
         回应回调查询
@@ -607,7 +633,7 @@ class Telegram:
             return False
 
     def delete_msg(
-        self, message_id: int, chat_id: Optional[int] = None
+            self, message_id: int, chat_id: Optional[int] = None
     ) -> Optional[bool]:
         """
         删除Telegram消息
@@ -644,11 +670,11 @@ class Telegram:
             return False
 
     def edit_msg(
-        self,
-        chat_id: Union[str, int],
-        message_id: Union[str, int],
-        text: str,
-        title: Optional[str] = None,
+            self,
+            chat_id: Union[str, int],
+            message_id: Union[str, int],
+            text: str,
+            title: Optional[str] = None,
     ) -> Optional[bool]:
         """
         编辑Telegram消息（公开方法）
@@ -681,12 +707,12 @@ class Telegram:
             return False
 
     def __edit_message(
-        self,
-        chat_id: str,
-        message_id: int,
-        text: str,
-        buttons: Optional[List[List[dict]]] = None,
-        image: Optional[str] = None,
+            self,
+            chat_id: str,
+            message_id: int,
+            text: str,
+            buttons: Optional[List[List[dict]]] = None,
+            image: Optional[str] = None,
     ) -> Optional[bool]:
         """
         编辑已发送的消息
@@ -732,11 +758,11 @@ class Telegram:
             return False
 
     def __send_request(
-        self,
-        userid: Optional[str] = None,
-        image="",
-        caption="",
-        reply_markup: Optional[InlineKeyboardMarkup] = None,
+            self,
+            userid: Optional[str] = None,
+            image="",
+            caption="",
+            reply_markup: Optional[InlineKeyboardMarkup] = None,
     ):
         """
         向Telegram发送报文，返回发送的消息对象
@@ -795,26 +821,27 @@ class Telegram:
 
     @retry(RetryException, logger=logger)
     def __send_long_message(
-        self, image: Optional[bytes], caption: str, sent_idx: set, **kwargs
+            self, image: Optional[bytes], caption: str, sent_idx: set, **kwargs
     ):
         """
         发送长消息
         """
-        try:
-            reply_markup = kwargs.pop("reply_markup", None)
 
-            boxs: SentType = (
-                ThreadHelper()
-                .submit(lambda x: asyncio.run(telegramify(x)), caption)
-                .result()
-            )
+        reply_markup = kwargs.pop("reply_markup", None)
 
-            ret = None
-            for i, item in enumerate(boxs):
-                if i in sent_idx:
-                    # 跳过已发送消息
-                    continue
+        boxs: SentType = (
+            ThreadHelper()
+            .submit(lambda x: asyncio.run(telegramify(x)), caption)
+            .result()
+        )
 
+        ret = None
+        for i, item in enumerate(boxs):
+            if i in sent_idx:
+                # 跳过已发送消息
+                continue
+
+            try:
                 current_reply_markup = reply_markup if i == 0 else None
 
                 if item.content_type == ContentTypes.TEXT and (i != 0 or not image):
@@ -843,12 +870,13 @@ class Telegram:
 
                 sent_idx.add(i)
 
-            return ret
-        except Exception as e:
-            try:
-                raise RetryException(f"消息 [{i + 1}/{len(boxs)}] 发送失败") from e
-            except NameError:
-                raise
+            except Exception as e:
+                try:
+                    raise RetryException(f"消息 [{i + 1}/{len(boxs)}] 发送失败") from e
+                except NameError:
+                    raise
+
+        return ret
 
     def register_commands(self, commands: Dict[str, dict]):
         """

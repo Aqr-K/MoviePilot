@@ -251,7 +251,7 @@ class MoviePilotAgent:
                                         if start_idx > 0:
                                             on_token(buffer[:start_idx])
                                         in_think_tag = True
-                                        buffer = buffer[start_idx + 7 :]
+                                        buffer = buffer[start_idx + 7:]
                                     else:
                                         # 检查是否以 <think> 的前缀结尾
                                         partial_match = False
@@ -269,7 +269,7 @@ class MoviePilotAgent:
                                     end_idx = buffer.find("</think>")
                                     if end_idx != -1:
                                         in_think_tag = False
-                                        buffer = buffer[end_idx + 8 :]
+                                        buffer = buffer[end_idx + 8:]
                                     else:
                                         # 检查是否以 </think> 的前缀结尾
                                         partial_match = False

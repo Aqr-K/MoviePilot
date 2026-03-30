@@ -1204,9 +1204,8 @@ class MessageChain(ChainBase):
                 f"AI智能体处理失败: {str(e)}", role="system", title="MoviePilot助手"
             )
 
-    @staticmethod
     def _download_images_to_base64(
-        images: List[str], channel: MessageChannel, source: str
+        self, images: List[str], channel: MessageChannel, source: str
     ) -> List[str]:
         """
         下载图片并转为base64
@@ -1218,7 +1217,9 @@ class MessageChain(ChainBase):
             try:
                 if img.startswith("tg://file_id/"):
                     file_id = img.replace("tg://file_id/", "")
-                    base64_data = MessageChain._download_telegram_file(file_id, source)
+                    base64_data = self.run_module(
+                        "download_file_to_base64", file_id=file_id, source=source
+                    )
                     if base64_data:
                         base64_images.append(f"data:image/jpeg;base64,{base64_data}")
                 elif img.startswith("http"):
@@ -1232,43 +1233,3 @@ class MessageChain(ChainBase):
             except Exception as e:
                 logger.error(f"下载图片失败: {img}, error: {e}")
         return base64_images if base64_images else None
-
-    @staticmethod
-    def _download_telegram_file(file_id: str, source: str) -> Optional[str]:
-        """
-        下载Telegram文件并转为base64
-        """
-        from app.modules.telegram import TelegramModule
-
-        module = TelegramModule()
-        config = module.get_config(source)
-        if not config:
-            return None
-        client = module.get_instance(config.name)
-        if not client or not client._bot:
-            return None
-        try:
-            file_info = client._bot.get_file(file_id)
-            file_url = f"https://api.telegram.org/file/bot{client._telegram_token}/{file_info.file_path}"
-            resp = RequestUtils(timeout=30).get_res(file_url)
-            if resp and resp.content:
-                import base64
-
-                return base64.b64encode(resp.content).decode()
-        except Exception as e:
-            logger.error(f"下载Telegram文件失败: {e}")
-        return None
-        client = module.get_instance(config.name)
-        if not client:
-            return None
-        try:
-            file_info = client.bot.get_file(file_id)
-            file_url = f"https://api.telegram.org/file/bot{client._telegram_token}/{file_info.file_path}"
-            resp = RequestUtils(timeout=30).get_res(file_url)
-            if resp and resp.content:
-                import base64
-
-                return base64.b64encode(resp.content).decode()
-        except Exception as e:
-            logger.error(f"下载Telegram文件失败: {e}")
-        return None

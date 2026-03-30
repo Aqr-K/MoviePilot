@@ -288,7 +288,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
 
         # Remove mention at the beginning with optional following space
         if cleaned.startswith(mention_pattern):
-            cleaned = cleaned[len(mention_pattern) :].lstrip()
+            cleaned = cleaned[len(mention_pattern):].lstrip()
 
         # Remove mention at any other position
         cleaned = cleaned.replace(mention_pattern, "").strip()
@@ -525,3 +525,23 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     f"Command set has changed, Updating new commands: {filtered_scoped_commands}"
                 )
             client.register_commands(filtered_scoped_commands)
+
+    def download_file_to_base64(self, file_id: str, source: str) -> Optional[str]:
+        """
+        下载Telegram文件并转为base64
+        :param file_id: Telegram文件ID
+        :param source: 来源名称
+        :return: base64编码的图片数据
+        """
+        config = self.get_config(source)
+        if not config:
+            return None
+        client = self.get_instance(config.name)
+        if not client:
+            return None
+        file_content = client.download_file(file_id)
+        if file_content:
+            import base64
+
+            return base64.b64encode(file_content).decode()
+        return None
