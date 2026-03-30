@@ -33,6 +33,7 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
         "Scheduled services are periodic tasks that can be triggered via the run_scheduler tool. "
         "Optionally specify a plugin_id to query a specific plugin, or omit to query all running plugins."
     )
+    require_admin: bool = True
     args_schema: Type[BaseModel] = QueryPluginCapabilitiesInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

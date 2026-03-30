@@ -26,6 +26,7 @@ class QueryInstalledPluginsTool(MoviePilotTool):
         "description, version, author, running state, and other information. "
         "Use this tool to discover what plugins are available before querying plugin capabilities or running plugin commands."
     )
+    require_admin: bool = True
     args_schema: Type[BaseModel] = QueryInstalledPluginsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
