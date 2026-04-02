@@ -580,7 +580,7 @@ class MessageChain(ChainBase):
                         total = len(cache_list)
                         # 加一页
                         cache_list = cache_list[
-                            (_current_page + 1) * self._page_size : (_current_page + 2)
+                            (_current_page + 1) * self._page_size: (_current_page + 2)
                             * self._page_size
                         ]
                         if not cache_list:
