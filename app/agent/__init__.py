@@ -29,7 +29,7 @@ from app.chain import ChainBase
 from app.core.config import settings
 from app.helper.llm import LLMHelper
 from app.log import logger
-from app.schemas import Notification
+from app.schemas import Notification, NotificationType
 
 
 class AgentChain(ChainBase):
@@ -388,6 +388,7 @@ class MoviePilotAgent:
             Notification(
                 channel=self.channel,
                 source=self.source,
+                mtype=NotificationType.Agent,
                 userid=self.user_id,
                 username=self.username,
                 title=title,
