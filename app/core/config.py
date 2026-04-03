@@ -535,6 +535,8 @@ class ConfigModel(BaseModel):
     AI_AGENT_JOB_INTERVAL: int = 0
     # AI智能体啰嗦模式，开启后会回复工具调用过程
     AI_AGENT_VERBOSE: bool = False
+    # AI智能体自动重试整理失败记录开关
+    AI_AGENT_RETRY_TRANSFER: bool = False
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):

@@ -37,6 +37,7 @@ from app.agent.tools.impl.run_workflow import RunWorkflowTool
 from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
 from app.agent.tools.impl.delete_download import DeleteDownloadTool
 from app.agent.tools.impl.delete_download_history import DeleteDownloadHistoryTool
+from app.agent.tools.impl.delete_transfer_history import DeleteTransferHistoryTool
 from app.agent.tools.impl.modify_download import ModifyDownloadTool
 from app.agent.tools.impl.query_directory_settings import QueryDirectorySettingsTool
 from app.agent.tools.impl.list_directory import ListDirectoryTool
@@ -97,6 +98,7 @@ class MoviePilotToolFactory:
             QueryDownloadTasksTool,
             DeleteDownloadTool,
             DeleteDownloadHistoryTool,
+            DeleteTransferHistoryTool,
             ModifyDownloadTool,
             QueryDownloadersTool,
             QuerySitesTool,
