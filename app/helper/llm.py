@@ -46,7 +46,7 @@ class LLMHelper:
                     api_key=api_key,
                     retries=3,
                     temperature=settings.LLM_TEMPERATURE,
-                    streaming=streaming
+                    streaming=streaming,
                 )
         elif provider == "deepseek":
             from langchain_deepseek import ChatDeepSeek
@@ -78,13 +78,14 @@ class LLMHelper:
             logger.info(f"使用LLM模型: {model.model}，Profile: {model.profile}")
         else:
             model.profile = {
-                "max_input_tokens": settings.LLM_MAX_CONTEXT_TOKENS * 1000,  # 转换为token单位
+                "max_input_tokens": settings.LLM_MAX_CONTEXT_TOKENS
+                * 1000,  # 转换为token单位
             }
 
         return model
 
     def get_models(
-            self, provider: str, api_key: str, base_url: str = None
+        self, provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取模型列表"""
         logger.info(f"获取 {provider} 模型列表...")
@@ -98,8 +99,16 @@ class LLMHelper:
         """获取Google模型列表（使用 google-genai SDK v1）"""
         try:
             from google import genai
+            from google.genai.types import HttpOptions
 
-            client = genai.Client(api_key=api_key)
+            http_options = None
+            if settings.PROXY_HOST:
+                http_options = HttpOptions(
+                    client_args={"proxy": settings.PROXY_HOST},
+                    async_client_args={"proxy": settings.PROXY_HOST},
+                )
+
+            client = genai.Client(api_key=api_key, http_options=http_options)
             models = client.models.list()
             return [
                 m.name
@@ -112,7 +121,7 @@ class LLMHelper:
 
     @staticmethod
     def _get_openai_compatible_models(
-            provider: str, api_key: str, base_url: str = None
+        provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取OpenAI兼容模型列表"""
         try:
