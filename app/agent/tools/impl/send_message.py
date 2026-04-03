@@ -20,8 +20,8 @@ class SendMessageInput(BaseModel):
         description="The message content to send to the user (should be clear and informative)",
     )
     message_type: Optional[str] = Field(
-        "info",
-        description="Type of message: 'info' for general information, 'success' for successful operations, 'warning' for warnings, 'error' for error messages",
+        None,
+        description="Title of the message, a short summary of the message content",
     )
 
 
@@ -34,30 +34,23 @@ class SendMessageTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据消息参数生成友好的提示消息"""
         message = kwargs.get("message", "")
-        message_type = kwargs.get("message_type", "info")
-
-        type_map = {
-            "info": "信息",
-            "success": "成功",
-            "warning": "警告",
-            "error": "错误",
-        }
-        type_desc = type_map.get(message_type, message_type)
+        title = kwargs.get("message_type") or ""
 
         # 截断过长的消息
         if len(message) > 50:
             message = message[:50] + "..."
 
-        return f"正在发送{type_desc}消息: {message}"
+        if title:
+            return f"正在发送消息: [{title}] {message}"
+        return f"正在发送消息: {message}"
 
     async def run(
         self, message: str, message_type: Optional[str] = None, **kwargs
     ) -> str:
-        logger.info(
-            f"执行工具: {self.name}, 参数: message={message}, message_type={message_type}"
-        )
+        title = message_type or ""
+        logger.info(f"执行工具: {self.name}, 参数: title={title}, message={message}")
         try:
-            await self.send_tool_message(message, title=message_type)
+            await self.send_tool_message(message, title=title)
             return "消息已发送"
         except Exception as e:
             logger.error(f"发送消息失败: {e}")
