@@ -182,7 +182,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         )
 
         if not configs:
-            logger.warning("[Discord] get_configs() 返回空，没有可用的 Discord 配置")
+            logger.debug("[Discord] get_configs() 返回空，没有可用的 Discord 配置")
             return
 
         for conf in configs.values():

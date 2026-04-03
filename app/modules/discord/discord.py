@@ -489,7 +489,7 @@ class Discord:
             return spans
 
         def _find_colon_index(s: str, m: re.Match) -> Optional[int]:
-            segment = s[m.start() : m.end()]
+            segment = s[m.start(): m.end()]
             for i, ch in enumerate(segment):
                 if ch in (":", "："):
                     return m.start() + i
@@ -546,7 +546,7 @@ class Discord:
                         last_end = 0
                         for m in matches:
                             # 追加匹配前的非空文本到描述
-                            prefix = line[last_end : m.start()].strip(" ，,;；。、")
+                            prefix = line[last_end: m.start()].strip(" ，,;；。、")
                             # 仅当前缀不全是分隔符/空白时才记录
                             if prefix and prefix.strip(" ，,;；。、"):
                                 desc_lines.append(prefix)
