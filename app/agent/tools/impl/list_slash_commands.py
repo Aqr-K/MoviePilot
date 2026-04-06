@@ -1,4 +1,4 @@
-"""查询所有可用命令工具（系统命令 + 插件命令）"""
+"""查询所有可用斜杠命令工具（系统命令 + 插件命令）"""
 
 import json
 from typing import Optional, Type
@@ -10,8 +10,8 @@ from app.command import Command
 from app.log import logger
 
 
-class ListAllCommandsInput(BaseModel):
-    """查询所有可用命令工具的输入参数模型"""
+class ListSlashCommandsInput(BaseModel):
+    """查询所有可用斜杠命令工具的输入参数模型"""
 
     explanation: str = Field(
         ...,
@@ -19,17 +19,17 @@ class ListAllCommandsInput(BaseModel):
     )
 
 
-class ListAllCommandsTool(MoviePilotTool):
-    name: str = "list_all_commands"
+class ListSlashCommandsTool(MoviePilotTool):
+    name: str = "list_slash_commands"
     description: str = (
-        "List all available commands in the system, including system preset commands "
+        "List all available slash commands in the system, including system preset commands "
         "(e.g. /cookiecloud, /sites, /subscribes, /downloading, /transfer, /restart, etc.) "
         "and plugin-registered commands. "
-        "Use this tool to discover what commands are available before executing them with run_slash_command. "
+        "Use this tool to discover what slash commands are available before executing them with run_slash_command. "
         "This is especially useful when the user describes an action in natural language and you need to "
         "find the matching command to fulfill their request."
     )
-    args_schema: Type[BaseModel] = ListAllCommandsInput
+    args_schema: Type[BaseModel] = ListSlashCommandsInput
     require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

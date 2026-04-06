@@ -24,7 +24,7 @@ class RunSlashCommandInput(BaseModel):
         description="The slash command to execute, e.g. '/cookiecloud'. "
         "Must start with '/'. Can include arguments after the command, e.g. '/command arg1 arg2'. "
         "Use query_plugin_capabilities tool to discover available plugin commands, "
-        "or list_all_commands tool to discover all available commands (including system commands).",
+        "or list_slash_commands tool to discover all available commands (including system commands).",
     )
 
 
@@ -36,7 +36,7 @@ class RunSlashCommandTool(MoviePilotTool):
         "1) System preset commands (e.g. /cookiecloud, /sites, /subscribes, /downloading, /transfer, /restart, etc.) "
         "2) Plugin commands registered by installed plugins. "
         "Use the query_plugin_capabilities tool to discover plugin commands, "
-        "or the list_all_commands tool to discover all available commands. "
+        "or the list_slash_commands tool to discover all available commands. "
         "The command will be executed asynchronously. "
         "Note: This tool triggers the command execution but the actual processing happens in the background."
     )
