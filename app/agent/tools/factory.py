@@ -51,6 +51,7 @@ from app.agent.tools.impl.browse_webpage import BrowseWebpageTool
 from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTool
 from app.agent.tools.impl.query_plugin_capabilities import QueryPluginCapabilitiesTool
 from app.agent.tools.impl.run_plugin_command import RunPluginCommandTool
+from app.agent.tools.impl.list_all_commands import ListAllCommandsTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -126,6 +127,7 @@ class MoviePilotToolFactory:
             QueryInstalledPluginsTool,
             QueryPluginCapabilitiesTool,
             RunPluginCommandTool,
+            ListAllCommandsTool,
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:

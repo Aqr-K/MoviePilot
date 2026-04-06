@@ -1,4 +1,4 @@
-"""运行插件命令工具"""
+"""运行插件/系统命令工具"""
 
 import json
 from typing import Optional, Type
@@ -6,14 +6,14 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.command import Command
 from app.core.event import eventmanager
-from app.core.plugin import PluginManager
 from app.log import logger
 from app.schemas.types import EventType, MessageChannel
 
 
 class RunPluginCommandInput(BaseModel):
-    """运行插件命令工具的输入参数模型"""
+    """运行插件/系统命令工具的输入参数模型"""
 
     explanation: str = Field(
         ...,
@@ -23,16 +23,20 @@ class RunPluginCommandInput(BaseModel):
         ...,
         description="The slash command to execute, e.g. '/cookiecloud'. "
         "Must start with '/'. Can include arguments after the command, e.g. '/command arg1 arg2'. "
-        "Use query_plugin_capabilities tool to discover available commands first.",
+        "Use query_plugin_capabilities tool to discover available plugin commands, "
+        "or list_all_commands tool to discover all available commands (including system commands).",
     )
 
 
 class RunPluginCommandTool(MoviePilotTool):
     name: str = "run_plugin_command"
     description: str = (
-        "Execute a plugin command by sending a CommandExcute event. "
-        "Plugin commands are slash-commands (starting with '/') registered by plugins. "
-        "Use the query_plugin_capabilities tool first to discover available commands and their descriptions. "
+        "Execute a system or plugin command by sending a CommandExcute event. "
+        "This tool supports ALL registered commands, including: "
+        "1) System preset commands (e.g. /cookiecloud, /sites, /subscribes, /downloading, /transfer, /restart, etc.) "
+        "2) Plugin commands registered by installed plugins. "
+        "Use the query_plugin_capabilities tool to discover plugin commands, "
+        "or the list_all_commands tool to discover all available commands. "
         "The command will be executed asynchronously. "
         "Note: This tool triggers the command execution but the actual processing happens in the background."
     )
@@ -42,7 +46,7 @@ class RunPluginCommandTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成友好的提示消息"""
         command = kwargs.get("command", "")
-        return f"正在执行插件命令: {command}"
+        return f"正在执行命令: {command}"
 
     async def run(self, command: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: command={command}")
@@ -52,21 +56,17 @@ class RunPluginCommandTool(MoviePilotTool):
             if not command.startswith("/"):
                 command = f"/{command}"
 
-            # 验证命令是否存在
-            plugin_manager = PluginManager()
-            registered_commands = plugin_manager.get_plugin_commands()
+            # 从全局 Command 单例中验证命令是否存在（包含系统预设命令 + 插件命令 + 其他命令）
             cmd_name = command.split()[0]
-            matched_command = None
-            for cmd in registered_commands:
-                if cmd.get("cmd") == cmd_name:
-                    matched_command = cmd
-                    break
+            command_obj = Command()
+            matched_command = command_obj.get(cmd_name)
 
             if not matched_command:
-                # 列出可用命令帮助用户
+                # 列出所有可用命令帮助用户
+                all_commands = command_obj.get_commands()
                 available_cmds = [
-                    f"{cmd.get('cmd')} - {cmd.get('desc', '无描述')}"
-                    for cmd in registered_commands
+                    f"{cmd} - {info.get('description', '无描述')}"
+                    for cmd, info in all_commands.items()
                 ]
                 result = {
                     "success": False,
@@ -99,14 +99,16 @@ class RunPluginCommandTool(MoviePilotTool):
                 "success": True,
                 "message": f"命令 {cmd_name} 已触发执行",
                 "command": command,
-                "command_desc": matched_command.get("desc", ""),
-                "plugin_id": matched_command.get("pid", ""),
+                "command_desc": matched_command.get("description", ""),
             }
+            # 如果是插件命令，附加插件ID
+            if matched_command.get("pid"):
+                result["plugin_id"] = matched_command["pid"]
             return json.dumps(result, ensure_ascii=False, indent=2)
 
         except Exception as e:
-            logger.error(f"执行插件命令失败: {e}", exc_info=True)
+            logger.error(f"执行命令失败: {e}", exc_info=True)
             return json.dumps(
-                {"success": False, "message": f"执行插件命令时发生错误: {str(e)}"},
+                {"success": False, "message": f"执行命令时发生错误: {str(e)}"},
                 ensure_ascii=False,
             )
