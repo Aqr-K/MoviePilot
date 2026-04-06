@@ -2,8 +2,9 @@
 name: database-operation
 description: >-
   Use this skill when you need to execute SQL against the MoviePilot database.
-  This skill guides you through connecting to the database (automatically detecting SQLite or PostgreSQL),
-  executing SQL statements, and interpreting the results. Applicable scenarios include:
+  This skill guides you through connecting to the database and executing SQL statements.
+  The database type (SQLite or PostgreSQL) and connection details are provided in the system prompt <system_info>.
+  Applicable scenarios include:
   1) The user asks about data statistics, counts, or aggregations that existing tools don't cover;
   2) The user wants to inspect, modify, or fix raw database records;
   3) The user asks to clean up data, update records, or perform database maintenance;
@@ -13,93 +14,76 @@ allowed-tools: execute_command read_file
 
 # Database Query (数据库查询)
 
-This skill guides you through executing SQL against the MoviePilot database. The system automatically detects whether the database is **SQLite** or **PostgreSQL** and adapts the connection method accordingly. Both read and write operations are supported.
+This skill guides you through executing SQL against the MoviePilot database. Both read and write operations are supported.
 
 ## Prerequisites
 
 You need the following tools:
 - `execute_command` - Execute shell commands to run database queries
-- `read_file` - Read configuration files to determine database type
 
-## Workflow
+## Getting Database Connection Info
 
-### Step 1: Detect Database Type
+The system prompt `<system_info>` section already contains all the database connection details you need:
+- **数据库类型** — `sqlite` or `postgresql`
+- **数据库** — Full connection info:
+  - For SQLite: the database file path, e.g. `SQLite (/config/db/moviepilot.db)`
+  - For PostgreSQL: the connection string, e.g. `PostgreSQL (user:password@host:port/database)`
 
-Read the environment configuration to determine the database type. The database type is controlled by the `DB_TYPE` environment variable (defaults to `sqlite`).
+**Do NOT run any detection commands.** Extract the database type and connection details directly from `<system_info>`.
 
-Use `execute_command` to check:
+## Executing Queries
 
-```bash
-echo $DB_TYPE
-```
+### SQLite Mode
 
-- If the result is empty or `sqlite` → **SQLite** mode
-- If the result is `postgresql` → **PostgreSQL** mode
+Extract the database file path from `<system_info>` (the path inside the parentheses after `SQLite`).
 
-### Step 2: Connect and Execute Query
-
-#### SQLite Mode
-
-The SQLite database file is located at `${CONFIG_PATH}/user.db` (default: `/config/user.db`).
-
-Use `execute_command` to execute SQL queries:
+Use `execute_command` to run queries:
 
 ```bash
-sqlite3 -header -column /config/user.db "YOUR SQL QUERY HERE;"
+sqlite3 -header -column <DB_PATH> "YOUR SQL QUERY HERE;"
 ```
 
 For JSON-formatted output (easier to parse):
 
 ```bash
-sqlite3 -json /config/user.db "YOUR SQL QUERY HERE;"
+sqlite3 -json <DB_PATH> "YOUR SQL QUERY HERE;"
 ```
 
 **List all tables:**
 
 ```bash
-sqlite3 -header -column /config/user.db "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+sqlite3 -header -column <DB_PATH> "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 ```
 
 **View table schema:**
 
 ```bash
-sqlite3 /config/user.db ".schema tablename"
+sqlite3 <DB_PATH> ".schema tablename"
 ```
 
-#### PostgreSQL Mode
+### PostgreSQL Mode
 
-The PostgreSQL connection parameters are configured via environment variables:
-- `DB_POSTGRESQL_HOST` (default: `127.0.0.1`)
-- `DB_POSTGRESQL_PORT` (default: `5432`)
-- `DB_POSTGRESQL_DATABASE` (default: `moviepilot`)
-- `DB_POSTGRESQL_USERNAME` (default: `moviepilot`)
-- `DB_POSTGRESQL_PASSWORD` (default: `moviepilot`)
+Extract the connection parameters from `<system_info>` (parse `user:password@host:port/database` from the parentheses after `PostgreSQL`).
 
-Use `execute_command` to execute SQL queries via `psql`:
+Use `execute_command` to run queries via `psql`:
 
 ```bash
-PGPASSWORD=$DB_POSTGRESQL_PASSWORD psql -h $DB_POSTGRESQL_HOST -p $DB_POSTGRESQL_PORT -U $DB_POSTGRESQL_USERNAME -d $DB_POSTGRESQL_DATABASE -c "YOUR SQL QUERY HERE;"
-```
-
-If environment variables are not set, use the defaults:
-
-```bash
-PGPASSWORD=moviepilot psql -h localhost -p 5432 -U moviepilot -d moviepilot -c "YOUR SQL QUERY HERE;"
+PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "YOUR SQL QUERY HERE;"
 ```
 
 **List all tables:**
 
 ```bash
-PGPASSWORD=$DB_POSTGRESQL_PASSWORD psql -h $DB_POSTGRESQL_HOST -p $DB_POSTGRESQL_PORT -U $DB_POSTGRESQL_USERNAME -d $DB_POSTGRESQL_DATABASE -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;"
+PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;"
 ```
 
 **View table schema:**
 
 ```bash
-PGPASSWORD=$DB_POSTGRESQL_PASSWORD psql -h $DB_POSTGRESQL_HOST -p $DB_POSTGRESQL_PORT -U $DB_POSTGRESQL_USERNAME -d $DB_POSTGRESQL_DATABASE -c "\d tablename"
+PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "\d tablename"
 ```
 
-### Step 3: Interpret Results
+## Interpret Results
 
 After executing the query, analyze the results and present them in a clear, user-friendly format. Use aggregation, sorting, and filtering as needed.
 
