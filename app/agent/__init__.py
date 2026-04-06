@@ -604,6 +604,43 @@ class AgentManager:
 
         return await agent.process(task.message, images=task.images)
 
+    async def stop_current_task(self, session_id: str):
+        """
+        应急停止当前正在执行的Agent推理任务，但保留会话和记忆。
+        与 clear_session 不同，此方法不会销毁Agent实例或清除记忆，
+        用户可以在停止后继续对话。
+        """
+        stopped = False
+
+        # 取消该会话的worker（会触发 _execute_agent 中的 CancelledError）
+        if session_id in self._session_workers:
+            self._session_workers[session_id].cancel()
+            try:
+                await self._session_workers[session_id]
+            except asyncio.CancelledError:
+                pass
+            self._session_workers.pop(session_id, None)
+            stopped = True
+
+        # 清空队列中待处理的消息
+        if session_id in self._session_queues:
+            queue = self._session_queues[session_id]
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                    queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            self._session_queues.pop(session_id, None)
+            stopped = True
+
+        if stopped:
+            logger.info(f"会话 {session_id} 的Agent推理已应急停止")
+        else:
+            logger.debug(f"会话 {session_id} 没有正在执行的Agent任务")
+
+        return stopped
+
     async def clear_session(self, session_id: str, user_id: str):
         """
         清空会话

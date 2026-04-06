@@ -580,7 +580,7 @@ class MessageChain(ChainBase):
                         total = len(cache_list)
                         # 加一页
                         cache_list = cache_list[
-                            (_current_page + 1) * self._page_size: (_current_page + 2)
+                            (_current_page + 1) * self._page_size : (_current_page + 2)
                             * self._page_size
                         ]
                         if not cache_list:
@@ -1124,6 +1124,59 @@ class MessageChain(ChainBase):
                     userid=userid,
                 )
             )
+        else:
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    title="您当前没有活跃的智能体会话",
+                    userid=userid,
+                )
+            )
+
+    def remote_stop_agent(
+        self,
+        channel: MessageChannel,
+        userid: Union[str, int],
+        source: Optional[str] = None,
+    ):
+        """
+        应急停止当前正在执行的Agent推理（远程命令接口）。
+        与 /clear_session 不同，此命令不会清除会话和记忆，
+        停止后用户仍可继续对话。
+        """
+        # 查找用户的会话ID（不弹出，保留会话）
+        session_info = self._user_sessions.get(userid)
+        if session_info:
+            session_id, _ = session_info
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    agent_manager.stop_current_task(session_id=session_id),
+                    global_vars.loop,
+                )
+                stopped = future.result(timeout=10)
+            except Exception as e:
+                logger.warning(f"停止Agent推理失败: {e}")
+                stopped = False
+
+            if stopped:
+                self.post_message(
+                    Notification(
+                        channel=channel,
+                        source=source,
+                        title="智能体推理已应急停止，会话记忆已保留，您可以继续对话",
+                        userid=userid,
+                    )
+                )
+            else:
+                self.post_message(
+                    Notification(
+                        channel=channel,
+                        source=source,
+                        title="当前没有正在执行的智能体任务",
+                        userid=userid,
+                    )
+                )
         else:
             self.post_message(
                 Notification(
