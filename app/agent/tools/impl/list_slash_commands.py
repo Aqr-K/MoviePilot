@@ -6,7 +6,6 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.command import Command
 from app.log import logger
 
 
@@ -40,6 +39,8 @@ class ListSlashCommandsTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}")
 
         try:
+            from app.command import Command
+
             command_obj = Command()
             all_commands = command_obj.get_commands()
 

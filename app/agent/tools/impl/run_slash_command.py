@@ -6,7 +6,6 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.command import Command
 from app.core.event import eventmanager
 from app.log import logger
 from app.schemas.types import EventType, MessageChannel
@@ -57,6 +56,8 @@ class RunSlashCommandTool(MoviePilotTool):
                 command = f"/{command}"
 
             # 从全局 Command 单例中验证命令是否存在（包含系统预设命令 + 插件命令 + 其他命令）
+            from app.command import Command
+
             cmd_name = command.split()[0]
             command_obj = Command()
             matched_command = command_obj.get(cmd_name)
