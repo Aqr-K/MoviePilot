@@ -69,7 +69,7 @@ sqlite3 /config/user.db ".schema tablename"
 #### PostgreSQL Mode
 
 The PostgreSQL connection parameters are configured via environment variables:
-- `DB_POSTGRESQL_HOST` (default: `localhost`)
+- `DB_POSTGRESQL_HOST` (default: `127.0.0.1`)
 - `DB_POSTGRESQL_PORT` (default: `5432`)
 - `DB_POSTGRESQL_DATABASE` (default: `moviepilot`)
 - `DB_POSTGRESQL_USERNAME` (default: `moviepilot`)
