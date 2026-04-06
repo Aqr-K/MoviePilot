@@ -25,7 +25,7 @@ class ListAllCommandsTool(MoviePilotTool):
         "List all available commands in the system, including system preset commands "
         "(e.g. /cookiecloud, /sites, /subscribes, /downloading, /transfer, /restart, etc.) "
         "and plugin-registered commands. "
-        "Use this tool to discover what commands are available before executing them with run_plugin_command. "
+        "Use this tool to discover what commands are available before executing them with run_slash_command. "
         "This is especially useful when the user describes an action in natural language and you need to "
         "find the matching command to fulfill their request."
     )

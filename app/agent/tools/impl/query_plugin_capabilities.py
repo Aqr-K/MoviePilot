@@ -29,7 +29,7 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
     name: str = "query_plugin_capabilities"
     description: str = (
         "Query the capabilities of installed plugins, including supported commands and scheduled services. "
-        "Commands are slash-commands (e.g. /xxx) that can be executed via the run_plugin_command tool. "
+        "Commands are slash-commands (e.g. /xxx) that can be executed via the run_slash_command tool. "
         "Scheduled services are periodic tasks that can be triggered via the run_scheduler tool. "
         "Optionally specify a plugin_id to query a specific plugin, or omit to query all running plugins."
     )

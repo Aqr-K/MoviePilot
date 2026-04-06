@@ -1,4 +1,4 @@
-"""运行插件/系统命令工具"""
+"""运行斜杠命令工具（系统命令 + 插件命令）"""
 
 import json
 from typing import Optional, Type
@@ -12,8 +12,8 @@ from app.log import logger
 from app.schemas.types import EventType, MessageChannel
 
 
-class RunPluginCommandInput(BaseModel):
-    """运行插件/系统命令工具的输入参数模型"""
+class RunSlashCommandInput(BaseModel):
+    """运行斜杠命令工具的输入参数模型"""
 
     explanation: str = Field(
         ...,
@@ -28,11 +28,11 @@ class RunPluginCommandInput(BaseModel):
     )
 
 
-class RunPluginCommandTool(MoviePilotTool):
-    name: str = "run_plugin_command"
+class RunSlashCommandTool(MoviePilotTool):
+    name: str = "run_slash_command"
     description: str = (
-        "Execute a system or plugin command by sending a CommandExcute event. "
-        "This tool supports ALL registered commands, including: "
+        "Execute a slash command (system or plugin) by sending a CommandExcute event. "
+        "This tool supports ALL registered slash commands, including: "
         "1) System preset commands (e.g. /cookiecloud, /sites, /subscribes, /downloading, /transfer, /restart, etc.) "
         "2) Plugin commands registered by installed plugins. "
         "Use the query_plugin_capabilities tool to discover plugin commands, "
@@ -40,7 +40,7 @@ class RunPluginCommandTool(MoviePilotTool):
         "The command will be executed asynchronously. "
         "Note: This tool triggers the command execution but the actual processing happens in the background."
     )
-    args_schema: Type[BaseModel] = RunPluginCommandInput
+    args_schema: Type[BaseModel] = RunSlashCommandInput
     require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
