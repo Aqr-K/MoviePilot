@@ -52,6 +52,8 @@ from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTo
 from app.agent.tools.impl.query_plugin_capabilities import QueryPluginCapabilitiesTool
 from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
 from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
+from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
+from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -128,6 +130,8 @@ class MoviePilotToolFactory:
             QueryPluginCapabilitiesTool,
             RunSlashCommandTool,
             ListSlashCommandsTool,
+            QueryCustomIdentifiersTool,
+            UpdateCustomIdentifiersTool,
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:
