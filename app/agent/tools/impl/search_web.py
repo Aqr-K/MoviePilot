@@ -27,7 +27,7 @@ class SearchWebInput(BaseModel):
         ..., description="The search query string to search for on the web"
     )
     max_results: Optional[int] = Field(
-        5,
+        20,
         description="Maximum number of search results to return (default: 5, max: 10)",
     )
 
@@ -40,10 +40,10 @@ class SearchWebTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据搜索参数生成友好的提示消息"""
         query = kwargs.get("query", "")
-        max_results = kwargs.get("max_results", 5)
+        max_results = kwargs.get("max_results", 20)
         return f"正在搜索网络内容: {query} (最多返回 {max_results} 条结果)"
 
-    async def run(self, query: str, max_results: Optional[int] = 5, **kwargs) -> str:
+    async def run(self, query: str, max_results: Optional[int] = 20, **kwargs) -> str:
         """
         执行网络搜索
         """
@@ -53,7 +53,7 @@ class SearchWebTool(MoviePilotTool):
 
         try:
             # 限制最大结果数
-            max_results = min(max(1, max_results or 5), 10)
+            max_results = min(max(1, max_results or 20), 20)
             results = []
 
             # 1. 优先使用 Exa (如果配置了 API Key)
@@ -216,7 +216,7 @@ class SearchWebTool(MoviePilotTool):
             source = result.get("source", "Unknown")
 
             # 裁剪摘要
-            max_snippet_length = 500  # 增加到500字符，提供更多上下文
+            max_snippet_length = 1000  # 增加到1000字符，提供更多上下文
             if len(snippet) > max_snippet_length:
                 snippet = snippet[:max_snippet_length] + "..."
 
