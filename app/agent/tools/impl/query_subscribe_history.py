@@ -107,8 +107,8 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
                 result_json = json.dumps(simplified_records, ensure_ascii=False, indent=2)
                 
                 # 如果结果被裁剪，添加提示信息
-                if total_count > 30:
-                    return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 30 条结果。\n\n{result_json}"
+                if total_count > 100:
+                    return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 100 条结果。\n\n{result_json}"
                 
                 return result_json
         except Exception as e:
