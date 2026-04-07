@@ -106,8 +106,8 @@ class QuerySubscribesTool(MoviePilotTool):
                 ]
                 result_json = json.dumps(full_subscribes, ensure_ascii=False, indent=2)
                 # 如果结果被裁剪，添加提示信息
-                if total_count > 50:
-                    return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 50 条结果。\n\n{result_json}"
+                if total_count > 200:
+                    return f"注意：查询结果共找到 {total_count} 条，为节省上下文空间，仅显示前 200 条结果。\n\n{result_json}"
                 return result_json
             return "未找到相关订阅"
         except Exception as e:
