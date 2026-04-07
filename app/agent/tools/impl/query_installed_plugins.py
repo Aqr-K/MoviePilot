@@ -61,10 +61,10 @@ class QueryInstalledPluginsTool(MoviePilotTool):
             total_count = len(plugins_list)
             result_json = json.dumps(plugins_list, ensure_ascii=False, indent=2)
 
-            if total_count > 50:
-                limited_plugins = plugins_list[:50]
+            if total_count > 100:
+                limited_plugins = plugins_list[:100]
                 limited_json = json.dumps(limited_plugins, ensure_ascii=False, indent=2)
-                return f"注意：共找到 {total_count} 个已安装插件，为节省上下文空间，仅显示前 50 个。\n\n{limited_json}"
+                return f"注意：共找到 {total_count} 个已安装插件，为节省上下文空间，仅显示前 100 个。\n\n{limited_json}"
 
             return result_json
         except Exception as e:
