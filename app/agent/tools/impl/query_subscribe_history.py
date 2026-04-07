@@ -28,7 +28,8 @@ class QuerySubscribeHistoryInput(BaseModel):
         None, description="Filter by media name (partial match, optional)"
     )
     page: Optional[int] = Field(
-        1, description="Page number for pagination (default: 1, 20 items per page)"
+        1,
+        description="Page number for pagination (default: 1, 20 items per page). Ignored when name filter is provided.",
     )
 
 
@@ -49,7 +50,8 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
             parts.append(f"类型: {media_type}")
         if name:
             parts.append(f"名称: {name}")
-        parts.append(f"第{page}页")
+        else:
+            parts.append(f"第{page}页")
 
         return " | ".join(parts)
 
@@ -72,8 +74,8 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
             # 获取数据库会话
             async with AsyncSessionFactory() as db:
                 if name:
-                    # 有名称过滤时，需要获取较多记录在内存中过滤
-                    fetch_count = page * PAGE_SIZE * 5  # 获取足够多的数据用于过滤后分页
+                    # 有名称过滤时，获取足够多的记录在内存中过滤，不分页
+                    fetch_count = 500
                     if media_type == "all":
                         movie_history = await SubscribeHistory.async_list_by_type(
                             db, mtype="movie", page=1, count=fetch_count
@@ -97,6 +99,16 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
                         for record in all_history
                         if record.name and name_lower in record.name.lower()
                     ]
+
+                    if not filtered_history:
+                        return "未找到相关订阅历史记录"
+
+                    # 名称过滤时直接返回所有匹配结果，不分页
+                    simplified_records = self._simplify_records(filtered_history)
+                    result_json = json.dumps(
+                        simplified_records, ensure_ascii=False, indent=2
+                    )
+                    return result_json
                 else:
                     # 无名称过滤时，直接利用数据库分页
                     if media_type == "all":
@@ -128,33 +140,7 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
                 if not page_records:
                     return f"第 {page} 页没有数据。"
 
-                # 转换为字典格式，只保留关键信息
-                simplified_records = []
-                for record in page_records:
-                    simplified = {
-                        "id": record.id,
-                        "name": record.name,
-                        "year": record.year,
-                        "type": media_type_to_agent(record.type),
-                        "season": record.season,
-                        "tmdbid": record.tmdbid,
-                        "doubanid": record.doubanid,
-                        "bangumiid": record.bangumiid,
-                        "poster": record.poster,
-                        "vote": record.vote,
-                        "total_episode": record.total_episode,
-                        "date": record.date,
-                        "username": record.username,
-                    }
-                    # 添加过滤规则信息（如果有）
-                    if record.filter:
-                        simplified["filter"] = record.filter
-                    if record.quality:
-                        simplified["quality"] = record.quality
-                    if record.resolution:
-                        simplified["resolution"] = record.resolution
-                    simplified_records.append(simplified)
-
+                simplified_records = self._simplify_records(page_records)
                 result_json = json.dumps(
                     simplified_records, ensure_ascii=False, indent=2
                 )
@@ -170,3 +156,32 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
         except Exception as e:
             logger.error(f"查询订阅历史失败: {e}", exc_info=True)
             return f"查询订阅历史时发生错误: {str(e)}"
+
+    @staticmethod
+    def _simplify_records(records) -> list:
+        """转换为字典格式，只保留关键信息"""
+        simplified_records = []
+        for record in records:
+            simplified = {
+                "id": record.id,
+                "name": record.name,
+                "year": record.year,
+                "type": media_type_to_agent(record.type),
+                "season": record.season,
+                "tmdbid": record.tmdbid,
+                "doubanid": record.doubanid,
+                "bangumiid": record.bangumiid,
+                "poster": record.poster,
+                "vote": record.vote,
+                "total_episode": record.total_episode,
+                "date": record.date,
+                "username": record.username,
+            }
+            if record.filter:
+                simplified["filter"] = record.filter
+            if record.quality:
+                simplified["quality"] = record.quality
+            if record.resolution:
+                simplified["resolution"] = record.resolution
+            simplified_records.append(simplified)
+        return simplified_records
