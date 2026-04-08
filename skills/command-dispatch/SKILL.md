@@ -1,5 +1,6 @@
 ---
 name: command-dispatch
+version: 1
 description: >-
   Use this skill when the user's intent is to execute a system or plugin function. Applicable scenarios include:
   1) The user sends a slash command starting with / (e.g. /cookiecloud, /sites, /subscribes, etc.);

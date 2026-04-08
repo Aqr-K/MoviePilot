@@ -1,5 +1,6 @@
 ---
 name: moviepilot-api
+version: 1
 description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 237 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
 ---
 

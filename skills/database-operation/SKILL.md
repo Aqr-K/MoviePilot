@@ -1,5 +1,6 @@
 ---
 name: database-operation
+version: 1
 description: >-
   Use this skill when you need to execute SQL against the MoviePilot database.
   This skill guides you through connecting to the database and executing SQL statements.

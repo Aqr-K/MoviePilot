@@ -1,5 +1,6 @@
 ---
 name: moviepilot-update
+version: 1
 description: Use this skill when you need to restart or upgrade MoviePilot. This skill covers system restart, version check, and manual upgrade procedures.
 ---
 

@@ -47,6 +47,11 @@ class SkillMetadata(TypedDict):
     约束: Skill中文描述。
     """
 
+    version: int
+    """Skill 版本号。
+    用于内置技能的版本管理，同步时比较版本号决定是否覆盖用户目录中的旧版本。
+    """
+
     description: str
     """Skill 功能描述。
     约束: 1-1024 字符，应说明功能及适用场景。
@@ -154,9 +159,23 @@ def _parse_skill_metadata(  # noqa: C901
         )
         compatibility_str = compatibility_str[:MAX_SKILL_COMPATIBILITY_LENGTH]
 
+    # 版本号，默认为 0（表示未设置版本）
+    raw_version = frontmatter_data.get("version")
+    version = 0
+    if raw_version is not None:
+        try:
+            version = int(raw_version)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid 'version' in %s (got %r), defaulting to 0",
+                skill_path,
+                raw_version,
+            )
+
     return SkillMetadata(
         id=skill_id,
         name=name,
+        version=version,
         description=description_str,
         path=skill_path,
         metadata=_validate_metadata(frontmatter_data.get("metadata", {}), skill_path),
@@ -287,10 +306,38 @@ Remember: Skills make you more capable and consistent. When in doubt, check if a
 """
 
 
+def _extract_version(skill_md: Path) -> int:
+    """从 SKILL.md 文件中快速提取 version 字段，无法提取时返回 0。"""
+    try:
+        content = skill_md.read_text(encoding="utf-8")
+    except Exception:
+        return 0
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
+    if not match:
+        return 0
+    try:
+        frontmatter = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return 0
+    if not isinstance(frontmatter, dict):
+        return 0
+    raw = frontmatter.get("version")
+    if raw is None:
+        return 0
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return 0
+
+
 def _sync_bundled_skills(bundled_dir: Path, target_dir: Path) -> None:
     """将项目自带的技能同步到用户目录。
 
-    仅当目标目录中不存在对应技能子目录时才复制，已存在则跳过（不覆盖用户修改）。
+    - 目标目录中不存在对应技能子目录时，直接复制。
+    - 目标目录中已存在时，比较内置与用户目录中 SKILL.md 的 version 字段：
+      - 内置版本更高时，直接覆盖用户目录中的旧版本。
+      - 版本相同或用户版本更高时，跳过。
+    - 内置 SKILL.md 无 version 字段（视为 0）时，不覆盖。
 
     Parameters
     ----------
@@ -312,15 +359,43 @@ def _sync_bundled_skills(bundled_dir: Path, target_dir: Path) -> None:
             continue
 
         skill_dst = target_dir / skill_src.name
-        if skill_dst.exists():
-            # 目标已存在，跳过（不覆盖用户自定义修改）
+
+        if not skill_dst.exists():
+            # 目标不存在，直接复制
+            try:
+                shutil.copytree(str(skill_src), str(skill_dst))
+                logger.info(
+                    "已自动复制内置技能 '%s' -> '%s'", skill_src.name, skill_dst
+                )
+            except Exception as e:
+                logger.warning("复制内置技能 '%s' 失败: %s", skill_src.name, e)
             continue
 
+        # 目标已存在，比较版本号
+        bundled_version = _extract_version(skill_md)
+        if bundled_version <= 0:
+            # 内置技能无版本号，保持旧逻辑不覆盖
+            continue
+
+        user_skill_md = skill_dst / "SKILL.md"
+        user_version = _extract_version(user_skill_md) if user_skill_md.is_file() else 0
+
+        if bundled_version <= user_version:
+            # 用户版本 >= 内置版本，跳过
+            continue
+
+        # 内置版本更高，删除旧版本后覆盖
         try:
+            shutil.rmtree(str(skill_dst))
             shutil.copytree(str(skill_src), str(skill_dst))
-            logger.info("已自动复制内置技能 '%s' -> '%s'", skill_src.name, skill_dst)
+            logger.info(
+                "已更新内置技能 '%s' (v%d -> v%d)",
+                skill_src.name,
+                user_version,
+                bundled_version,
+            )
         except Exception as e:
-            logger.warning("复制内置技能 '%s' 失败: %s", skill_src.name, e)
+            logger.warning("更新内置技能 '%s' 失败: %s", skill_src.name, e)
 
 
 class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # noqa

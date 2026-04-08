@@ -1,5 +1,6 @@
 ---
 name: moviepilot-cli
+version: 1
 description: Use this skill for any request involving movies, TV shows, or anime, including searching, downloads, subscriptions, library management. Also use this skill whenever the user explicitly mentions MoviePilot.
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: generate-identifiers
+version: 1
 description: >-
   Use this skill when a user provides a torrent name or file name and wants to fix recognition issues,
   or asks to add/manage custom identifiers (自定义识别词).
