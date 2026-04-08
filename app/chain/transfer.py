@@ -799,8 +799,17 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 try:
                     from app.agent import agent_manager
 
+                    # 使用 download_hash 或源文件父目录作为分组键，
+                    # 同一批次（如同一个种子）的失败记录会被合并为一次agent调用
+                    group_key = (
+                        task.download_hash or str(task.fileitem.path).rsplit("/", 1)[0]
+                        if task.fileitem
+                        else ""
+                    )
                     asyncio.run_coroutine_threadsafe(
-                        agent_manager.retry_failed_transfer(history.id),
+                        agent_manager.retry_failed_transfer(
+                            history.id, group_key=group_key
+                        ),
                         global_vars.loop,
                     )
                     logger.info(f"已触发AI智能体重试整理历史记录 #{history.id}")
@@ -1127,8 +1136,17 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         try:
                             from app.agent import agent_manager
 
+                            # 使用 download_hash 或源文件父目录作为分组键
+                            group_key = (
+                                task.download_hash
+                                or str(task.fileitem.path).rsplit("/", 1)[0]
+                                if task.fileitem
+                                else ""
+                            )
                             asyncio.run_coroutine_threadsafe(
-                                agent_manager.retry_failed_transfer(his.id),
+                                agent_manager.retry_failed_transfer(
+                                    his.id, group_key=group_key
+                                ),
                                 global_vars.loop,
                             )
                             logger.info(f"已触发AI智能体重试整理历史记录 #{his.id}")

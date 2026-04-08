@@ -68,7 +68,7 @@ class _ThinkTagStripper:
                         on_output(self.buffer[:start_idx])
                         emitted = True
                     self.in_think_tag = True
-                    self.buffer = self.buffer[start_idx + 7:]
+                    self.buffer = self.buffer[start_idx + 7 :]
                 else:
                     # 检查是否以 <think> 的不完整前缀结尾
                     partial_match = False
@@ -88,7 +88,7 @@ class _ThinkTagStripper:
                 end_idx = self.buffer.find("</think>")
                 if end_idx != -1:
                     self.in_think_tag = False
-                    self.buffer = self.buffer[end_idx + 8:]
+                    self.buffer = self.buffer[end_idx + 8 :]
                 else:
                     # 检查是否以 </think> 的不完整前缀结尾
                     partial_match = False
@@ -506,12 +506,21 @@ class AgentManager:
     同一会话的消息按顺序排队处理，不同会话之间互不影响。
     """
 
+    # 批量重试整理的等待时间（秒），同一批次内的失败记录会合并为一次agent调用
+    RETRY_TRANSFER_DEBOUNCE_SECONDS = 300
+
     def __init__(self):
         self.active_agents: Dict[str, MoviePilotAgent] = {}
         # 每个会话的消息队列
         self._session_queues: Dict[str, asyncio.Queue] = {}
         # 每个会话的worker任务
         self._session_workers: Dict[str, asyncio.Task] = {}
+        # 重试整理的 debounce 缓冲区: group_key -> List[history_id]
+        self._retry_transfer_buffer: Dict[str, List[int]] = {}
+        # 重试整理的 debounce 定时器: group_key -> asyncio.TimerHandle
+        self._retry_transfer_timers: Dict[str, asyncio.TimerHandle] = {}
+        # 重试整理缓冲区锁
+        self._retry_transfer_lock = asyncio.Lock()
 
     @staticmethod
     async def initialize():
@@ -525,6 +534,11 @@ class AgentManager:
         关闭管理器
         """
         await memory_manager.close()
+        # 取消所有重试整理的延迟定时器
+        for timer in self._retry_transfer_timers.values():
+            timer.cancel()
+        self._retry_transfer_timers.clear()
+        self._retry_transfer_buffer.clear()
         # 取消所有会话worker
         for task in self._session_workers.values():
             task.cancel()
@@ -779,40 +793,111 @@ class AgentManager:
         except Exception as e:
             logger.error(f"智能体心跳唤醒失败: {e}")
 
-    async def retry_failed_transfer(self, history_id: int):
+    async def retry_failed_transfer(self, history_id: int, group_key: str = ""):
         """
         触发智能体重新整理失败的历史记录。
-        由文件整理模块在检测到整理失败后调用，使用独立会话执行。
+        由文件整理模块在检测到整理失败后调用。
+        同一 group_key 的失败记录会在缓冲期内合并为一次agent调用，避免重复浪费token。
         :param history_id: 失败的整理历史记录ID
+        :param group_key: 分组键，相同key的记录会被合并处理（如download_hash、源目录等）
         """
+        if not group_key:
+            group_key = f"_default_{history_id}"
+
+        async with self._retry_transfer_lock:
+            # 将 history_id 加入缓冲区
+            if group_key not in self._retry_transfer_buffer:
+                self._retry_transfer_buffer[group_key] = []
+            if history_id not in self._retry_transfer_buffer[group_key]:
+                self._retry_transfer_buffer[group_key].append(history_id)
+                logger.info(
+                    f"智能体重试整理：记录 ID={history_id} 已加入缓冲区 "
+                    f"(group={group_key}, 当前{len(self._retry_transfer_buffer[group_key])}条)"
+                )
+
+            # 取消该分组的旧定时器
+            if group_key in self._retry_transfer_timers:
+                self._retry_transfer_timers[group_key].cancel()
+
+            # 设置新的延迟定时器
+            loop = asyncio.get_running_loop()
+            self._retry_transfer_timers[group_key] = loop.call_later(
+                self.RETRY_TRANSFER_DEBOUNCE_SECONDS,
+                lambda gk=group_key: asyncio.ensure_future(
+                    self._flush_retry_transfer(gk)
+                ),
+            )
+
+    async def _flush_retry_transfer(self, group_key: str):
+        """
+        延迟定时器到期后，取出该分组的所有 history_id 并合并为一次agent调用。
+        """
+        async with self._retry_transfer_lock:
+            history_ids = self._retry_transfer_buffer.pop(group_key, [])
+            self._retry_transfer_timers.pop(group_key, None)
+
+        if not history_ids:
+            return
+
         try:
-            # 每次使用唯一的 session_id，避免共享上下文
-            session_id = f"__agent_retry_transfer_{history_id}_{uuid.uuid4().hex[:8]}__"
+            session_id = f"__agent_retry_transfer_batch_{uuid.uuid4().hex[:8]}__"
             user_id = "system"
 
-            logger.info(f"智能体重试整理：开始处理失败记录 ID={history_id} ...")
-
-            # 英文提示词，便于大模型理解
-            retry_message = (
-                f"[System Task - Transfer Failed Retry] A file transfer/organization has failed. "
-                f"Please use the 'transfer-failed-retry' skill to retry the failed transfer.\n\n"
-                f"Failed transfer history record ID: {history_id}\n\n"
-                f"Follow these steps:\n"
-                f"1. Use `query_transfer_history` with status='failed' to find the record with id={history_id} "
-                f"and understand the failure details (source path, error message, media info)\n"
-                f"2. Analyze the error message to determine the best retry strategy\n"
-                f"3. If the source file no longer exists, skip this retry and report that the file is missing\n"
-                f"4. Delete the failed history record using `delete_transfer_history` with history_id={history_id}\n"
-                f"5. Re-identify the media using `recognize_media` with the source file path\n"
-                f"6. If recognition fails, try `search_media` with keywords from the filename\n"
-                f"7. Re-transfer using `transfer_file` with the source path and any identified media info (tmdbid, media_type)\n"
-                f"8. Report the final result\n\n"
-                f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                f"Your final response will be broadcast as a notification. "
-                f"Only output a brief result summary. "
-                f"Do NOT include greetings, explanations, or conversational text. "
-                f"Respond in Chinese (中文)."
+            ids_str = ", ".join(str(i) for i in history_ids)
+            logger.info(
+                f"智能体重试整理：开始批量处理失败记录 IDs=[{ids_str}] (group={group_key})"
             )
+
+            if len(history_ids) == 1:
+                # 单条记录，使用原有逻辑
+                retry_message = (
+                    f"[System Task - Transfer Failed Retry] A file transfer/organization has failed. "
+                    f"Please use the 'transfer-failed-retry' skill to retry the failed transfer.\n\n"
+                    f"Failed transfer history record ID: {history_ids[0]}\n\n"
+                    f"Follow these steps:\n"
+                    f"1. Use `query_transfer_history` with status='failed' to find the record with id={history_ids[0]} "
+                    f"and understand the failure details (source path, error message, media info)\n"
+                    f"2. Analyze the error message to determine the best retry strategy\n"
+                    f"3. If the source file no longer exists, skip this retry and report that the file is missing\n"
+                    f"4. Delete the failed history record using `delete_transfer_history` with history_id={history_ids[0]}\n"
+                    f"5. Re-identify the media using `recognize_media` with the source file path\n"
+                    f"6. If recognition fails, try `search_media` with keywords from the filename\n"
+                    f"7. Re-transfer using `transfer_file` with the source path and any identified media info (tmdbid, media_type)\n"
+                    f"8. Report the final result\n\n"
+                    f"IMPORTANT: This is a background system task, NOT a user conversation. "
+                    f"Your final response will be broadcast as a notification. "
+                    f"Only output a brief result summary. "
+                    f"Do NOT include greetings, explanations, or conversational text. "
+                    f"Respond in Chinese (中文)."
+                )
+            else:
+                # 多条记录，使用批量处理逻辑
+                retry_message = (
+                    f"[System Task - Batch Transfer Failed Retry] Multiple file transfers from the same source "
+                    f"have failed. These files likely belong to the SAME media (e.g., multiple episodes of the same TV show). "
+                    f"Please use the 'transfer-failed-retry' skill to retry them efficiently.\n\n"
+                    f"Failed transfer history record IDs: {ids_str}\n"
+                    f"Total failed records: {len(history_ids)}\n\n"
+                    f"Follow these steps:\n"
+                    f"1. Use `query_transfer_history` with status='failed' to find ALL records with these IDs "
+                    f"and understand the failure details\n"
+                    f"2. Since these files are likely from the same media, analyze the FIRST record to determine "
+                    f"the media identity and the best retry strategy. The root cause is usually the same for all files.\n"
+                    f"3. If the error is about media recognition (e.g., '未识别到媒体信息'), identify the media ONCE "
+                    f"using `recognize_media` or `search_media`, then reuse that result (tmdbid, media_type) for all files\n"
+                    f"4. For EACH failed record:\n"
+                    f"   a. Delete the failed history record using `delete_transfer_history`\n"
+                    f"   b. Re-transfer using `transfer_file` with the source path and the identified media info\n"
+                    f"5. Report a summary of results (how many succeeded, how many failed)\n\n"
+                    f"IMPORTANT OPTIMIZATION: These files share the same media identity. "
+                    f"Do NOT call `recognize_media` or `search_media` repeatedly for each file. "
+                    f"Identify the media ONCE, then apply to all files.\n\n"
+                    f"IMPORTANT: This is a background system task, NOT a user conversation. "
+                    f"Your final response will be broadcast as a notification. "
+                    f"Only output a brief result summary. "
+                    f"Do NOT include greetings, explanations, or conversational text. "
+                    f"Respond in Chinese (中文)."
+                )
 
             await self.process_message(
                 session_id=session_id,
@@ -834,13 +919,17 @@ class AgentManager:
                 except asyncio.CancelledError:
                     pass
 
-            logger.info(f"智能体重试整理：记录 ID={history_id} 处理完成")
+            logger.info(
+                f"智能体重试整理：批量处理完成 IDs=[{ids_str}] (group={group_key})"
+            )
 
             # 用完即弃，清理资源
             await self.clear_session(session_id, user_id)
 
         except Exception as e:
-            logger.error(f"智能体重试整理失败 (ID={history_id}): {e}")
+            logger.error(
+                f"智能体重试整理失败 (IDs=[{ids_str}], group={group_key}): {e}"
+            )
 
 
 # 全局智能体管理器实例
