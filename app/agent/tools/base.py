@@ -72,20 +72,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 # 非VERBOSE，重置缓冲区从头更新，保持消息编辑能力
                 self._stream_handler.reset()
         else:
-            # 非流式模式（渠道不支持消息编辑，但可能通过 astream 产出了 token 到 buffer）
-            if self._channel and settings.AI_AGENT_VERBOSE:
-                # 啰嗦模式：取出 Agent 文字 + 工具消息合并发送
-                agent_message = (
-                    await self._stream_handler.take() if self._stream_handler else ""
-                )
-                messages = []
-                if agent_message:
-                    messages.append(agent_message)
-                if tool_message:
-                    messages.append(f"⚙️ => {tool_message}")
-                if messages:
-                    merged_message = "\n\n".join(messages)
-                    await self.send_tool_message(merged_message)
+            # 未启用流式传输，不发送任何工具消息内容
+            pass
 
         logger.debug(f"Executing tool {self.name} with args: {kwargs}")
 
