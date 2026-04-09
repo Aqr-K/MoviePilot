@@ -120,7 +120,9 @@ class StreamingHandler:
         title: str = "",
     ):
         """
-        启动流式输出。检查渠道是否支持消息编辑，如果支持则启动定时刷新任务。
+        启动流式输出。
+        始终标记为流式状态（用于 buffer 收集 token），
+        但只有渠道支持消息编辑时才启动定时刷新任务（实时推送给用户）。
         :param channel: 消息渠道
         :param source: 消息来源
         :param user_id: 用户ID
@@ -133,15 +135,15 @@ class StreamingHandler:
         self._username = username
         self._title = title
 
-        # 检查渠道是否支持消息编辑
-        if not self._can_stream():
-            logger.debug(f"渠道 {channel} 不支持消息编辑，不启用流式输出")
-            return
-
         self._streaming_enabled = True
         self._sent_text = ""
         self._message_response = None
         self._msg_start_offset = 0
+
+        # 检查渠道是否支持消息编辑，不支持则仅收集 token 到 buffer，不实时推送
+        if not self._can_stream():
+            logger.debug(f"渠道 {channel} 不支持消息编辑，仅启用 buffer 收集模式")
+            return
 
         # 从渠道能力中获取单条消息最大长度
         try:
