@@ -138,7 +138,7 @@ class MoviePilotAgent:
         """
         是否为后台任务模式（无渠道信息，如定时唤醒）
         """
-        return not self.channel and not self.source
+        return not self.channel or not self.source
 
     def _should_stream(self) -> bool:
         """
@@ -150,8 +150,6 @@ class MoviePilotAgent:
         - 其他情况不启用流式输出
         """
         if self.is_background:
-            return False
-        if not self.channel:
             return False
         # 啰嗦模式下始终需要流式输出来捕获工具调用前的 Agent 文字
         if settings.AI_AGENT_VERBOSE:
