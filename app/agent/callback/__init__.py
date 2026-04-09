@@ -348,9 +348,9 @@ class StreamingHandler:
         return self._streaming_enabled
 
     @property
-    def can_edit_message(self) -> bool:
+    def is_auto_flushing(self) -> bool:
         """
-        是否支持消息编辑（实时推送），即定时刷新任务正在运行
+        是否正在定时刷新（渠道支持消息编辑时自动推送 buffer 内容）
         """
         return self._flush_task is not None
 
