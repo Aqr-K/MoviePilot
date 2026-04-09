@@ -348,6 +348,13 @@ class StreamingHandler:
         return self._streaming_enabled
 
     @property
+    def can_edit_message(self) -> bool:
+        """
+        是否支持消息编辑（实时推送），即定时刷新任务正在运行
+        """
+        return self._flush_task is not None
+
+    @property
     def has_sent_message(self) -> bool:
         """
         是否已经通过流式输出发送过消息（当前轮次）

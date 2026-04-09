@@ -65,9 +65,21 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 发送工具执行过程消息
         if self._stream_handler and self._stream_handler.is_streaming:
             if settings.AI_AGENT_VERBOSE:
-                # VERBOSE：工具消息直接追加到 buffer 中，与 Agent 文字合并为同一条流式消息
-                if tool_message:
-                    self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
+                if self._stream_handler.can_edit_message:
+                    # 渠道支持编辑：工具消息追加到 buffer，由定时刷新推送
+                    if tool_message:
+                        self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
+                else:
+                    # 渠道不支持编辑：取出 Agent 文字 + 工具消息合并独立发送
+                    agent_message = await self._stream_handler.take()
+                    messages = []
+                    if agent_message:
+                        messages.append(agent_message)
+                    if tool_message:
+                        messages.append(f"⚙️ => {tool_message}")
+                    if messages:
+                        merged_message = "\n\n".join(messages)
+                        await self.send_tool_message(merged_message)
             else:
                 # 非VERBOSE，重置缓冲区从头更新，保持消息编辑能力
                 self._stream_handler.reset()
