@@ -70,7 +70,7 @@ class _ThinkTagStripper:
                         on_output(self.buffer[:start_idx])
                         emitted = True
                     self.in_think_tag = True
-                    self.buffer = self.buffer[start_idx + 7 :]
+                    self.buffer = self.buffer[start_idx + 7:]
                 else:
                     # 检查是否以 <think> 的不完整前缀结尾
                     partial_match = False
@@ -90,7 +90,7 @@ class _ThinkTagStripper:
                 end_idx = self.buffer.find("</think>")
                 if end_idx != -1:
                     self.in_think_tag = False
-                    self.buffer = self.buffer[end_idx + 8 :]
+                    self.buffer = self.buffer[end_idx + 8:]
                 else:
                     # 检查是否以 </think> 的不完整前缀结尾
                     partial_match = False
@@ -875,65 +875,66 @@ class AgentManager:
         if not history_ids:
             return
 
-        try:
-            session_id = f"__agent_retry_transfer_batch_{uuid.uuid4().hex[:8]}__"
-            user_id = "system"
+        session_id = f"__agent_retry_transfer_batch_{uuid.uuid4().hex[:8]}__"
+        user_id = "system"
 
-            ids_str = ", ".join(str(i) for i in history_ids)
-            logger.info(
-                f"智能体重试整理：开始批量处理失败记录 IDs=[{ids_str}] (group={group_key})"
+        ids_str = ", ".join(str(i) for i in history_ids)
+        logger.info(
+            f"智能体重试整理：开始批量处理失败记录 IDs=[{ids_str}] (group={group_key})"
+        )
+
+        if len(history_ids) == 1:
+            # 单条记录，使用原有逻辑
+            retry_message = (
+                f"[System Task - Transfer Failed Retry] A file transfer/organization has failed. "
+                f"Please use the 'transfer-failed-retry' skill to retry the failed transfer.\n\n"
+                f"Failed transfer history record ID: {history_ids[0]}\n\n"
+                f"Follow these steps:\n"
+                f"1. Use `query_transfer_history` with status='failed' to find the record with id={history_ids[0]} "
+                f"and understand the failure details (source path, error message, media info)\n"
+                f"2. Analyze the error message to determine the best retry strategy\n"
+                f"3. If the source file no longer exists, skip this retry and report that the file is missing\n"
+                f"4. Delete the failed history record using `delete_transfer_history` with history_id={history_ids[0]}\n"
+                f"5. Re-identify the media using `recognize_media` with the source file path\n"
+                f"6. If recognition fails, try `search_media` with keywords from the filename\n"
+                f"7. Re-transfer using `transfer_file` with the source path and any identified media info (tmdbid, media_type)\n"
+                f"8. Report the final result\n\n"
+                f"IMPORTANT: This is a background system task, NOT a user conversation. "
+                f"Your final response will be broadcast as a notification. "
+                f"Only output a brief result summary. "
+                f"Do NOT include greetings, explanations, or conversational text. "
+                f"Respond in Chinese (中文)."
+            )
+        else:
+            # 多条记录，使用批量处理逻辑
+            retry_message = (
+                f"[System Task - Batch Transfer Failed Retry] Multiple file transfers from the same source "
+                f"have failed. These files likely belong to the SAME media (e.g., multiple episodes of the same TV show). "
+                f"Please use the 'transfer-failed-retry' skill to retry them efficiently.\n\n"
+                f"Failed transfer history record IDs: {ids_str}\n"
+                f"Total failed records: {len(history_ids)}\n\n"
+                f"Follow these steps:\n"
+                f"1. Use `query_transfer_history` with status='failed' to find ALL records with these IDs "
+                f"and understand the failure details\n"
+                f"2. Since these files are likely from the same media, analyze the FIRST record to determine "
+                f"the media identity and the best retry strategy. The root cause is usually the same for all files.\n"
+                f"3. If the error is about media recognition (e.g., '未识别到媒体信息'), identify the media ONCE "
+                f"using `recognize_media` or `search_media`, then reuse that result (tmdbid, media_type) for all files\n"
+                f"4. For EACH failed record:\n"
+                f"   a. Delete the failed history record using `delete_transfer_history`\n"
+                f"   b. Re-transfer using `transfer_file` with the source path and the identified media info\n"
+                f"5. Report a summary of results (how many succeeded, how many failed)\n\n"
+                f"IMPORTANT OPTIMIZATION: These files share the same media identity. "
+                f"Do NOT call `recognize_media` or `search_media` repeatedly for each file. "
+                f"Identify the media ONCE, then apply to all files.\n\n"
+                f"IMPORTANT: This is a background system task, NOT a user conversation. "
+                f"Your final response will be broadcast as a notification. "
+                f"Only output a brief result summary. "
+                f"Do NOT include greetings, explanations, or conversational text. "
+                f"Respond in Chinese (中文)."
             )
 
-            if len(history_ids) == 1:
-                # 单条记录，使用原有逻辑
-                retry_message = (
-                    f"[System Task - Transfer Failed Retry] A file transfer/organization has failed. "
-                    f"Please use the 'transfer-failed-retry' skill to retry the failed transfer.\n\n"
-                    f"Failed transfer history record ID: {history_ids[0]}\n\n"
-                    f"Follow these steps:\n"
-                    f"1. Use `query_transfer_history` with status='failed' to find the record with id={history_ids[0]} "
-                    f"and understand the failure details (source path, error message, media info)\n"
-                    f"2. Analyze the error message to determine the best retry strategy\n"
-                    f"3. If the source file no longer exists, skip this retry and report that the file is missing\n"
-                    f"4. Delete the failed history record using `delete_transfer_history` with history_id={history_ids[0]}\n"
-                    f"5. Re-identify the media using `recognize_media` with the source file path\n"
-                    f"6. If recognition fails, try `search_media` with keywords from the filename\n"
-                    f"7. Re-transfer using `transfer_file` with the source path and any identified media info (tmdbid, media_type)\n"
-                    f"8. Report the final result\n\n"
-                    f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                    f"Your final response will be broadcast as a notification. "
-                    f"Only output a brief result summary. "
-                    f"Do NOT include greetings, explanations, or conversational text. "
-                    f"Respond in Chinese (中文)."
-                )
-            else:
-                # 多条记录，使用批量处理逻辑
-                retry_message = (
-                    f"[System Task - Batch Transfer Failed Retry] Multiple file transfers from the same source "
-                    f"have failed. These files likely belong to the SAME media (e.g., multiple episodes of the same TV show). "
-                    f"Please use the 'transfer-failed-retry' skill to retry them efficiently.\n\n"
-                    f"Failed transfer history record IDs: {ids_str}\n"
-                    f"Total failed records: {len(history_ids)}\n\n"
-                    f"Follow these steps:\n"
-                    f"1. Use `query_transfer_history` with status='failed' to find ALL records with these IDs "
-                    f"and understand the failure details\n"
-                    f"2. Since these files are likely from the same media, analyze the FIRST record to determine "
-                    f"the media identity and the best retry strategy. The root cause is usually the same for all files.\n"
-                    f"3. If the error is about media recognition (e.g., '未识别到媒体信息'), identify the media ONCE "
-                    f"using `recognize_media` or `search_media`, then reuse that result (tmdbid, media_type) for all files\n"
-                    f"4. For EACH failed record:\n"
-                    f"   a. Delete the failed history record using `delete_transfer_history`\n"
-                    f"   b. Re-transfer using `transfer_file` with the source path and the identified media info\n"
-                    f"5. Report a summary of results (how many succeeded, how many failed)\n\n"
-                    f"IMPORTANT OPTIMIZATION: These files share the same media identity. "
-                    f"Do NOT call `recognize_media` or `search_media` repeatedly for each file. "
-                    f"Identify the media ONCE, then apply to all files.\n\n"
-                    f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                    f"Your final response will be broadcast as a notification. "
-                    f"Only output a brief result summary. "
-                    f"Do NOT include greetings, explanations, or conversational text. "
-                    f"Respond in Chinese (中文)."
-                )
+        try:
 
             await self.process_message(
                 session_id=session_id,
