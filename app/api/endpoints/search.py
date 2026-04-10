@@ -1,6 +1,8 @@
-from typing import List, Any, Optional
+import json
+from typing import List, Any, Optional, AsyncIterator
 
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, Request
+from fastapi.responses import StreamingResponse
 
 from app import schemas
 from app.chain.media import MediaChain
@@ -9,12 +11,44 @@ from app.chain.ai_recommend import AIRecommendChain
 from app.core.config import settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
-from app.core.security import verify_token
+from app.core.security import verify_resource_token, verify_token
 from app.log import logger
 from app.schemas import MediaRecognizeConvertEventData
 from app.schemas.types import MediaType, ChainEventType
 
 router = APIRouter()
+
+
+def _parse_site_list(sites: Optional[str]) -> Optional[List[int]]:
+    """
+    解析站点ID列表
+    """
+    return [int(site) for site in sites.split(",") if site] if sites else None
+
+
+def _sse_event(data: dict) -> str:
+    """
+    转换为SSE事件
+    """
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def _stream_search_events(request: Request, event_source: AsyncIterator[dict]):
+    """
+    输出搜索SSE事件
+    """
+    try:
+        async for event in event_source:
+            if await request.is_disconnected():
+                break
+            yield _sse_event(event)
+    except Exception as err:
+        logger.error(f"渐进式搜索出错：{err}", exc_info=True)
+        yield _sse_event({
+            "type": "error",
+            "success": False,
+            "message": str(err)
+        })
 
 
 @router.get("/last", summary="查询搜索结果", response_model=List[schemas.Context])
@@ -24,6 +58,139 @@ async def search_latest(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     torrents = await SearchChain().async_last_search_results() or []
     return [torrent.to_dict() for torrent in torrents]
+
+
+@router.get("/media/{mediaid}/stream", summary="渐进式精确搜索资源")
+async def search_by_id_stream(request: Request,
+                              mediaid: str,
+                              mtype: Optional[str] = None,
+                              area: Optional[str] = "title",
+                              title: Optional[str] = None,
+                              year: Optional[str] = None,
+                              season: Optional[str] = None,
+                              sites: Optional[str] = None,
+                              _: schemas.TokenPayload = Depends(verify_resource_token)) -> Any:
+    """
+    根据TMDBID/豆瓣ID渐进式搜索站点资源，返回格式为SSE
+    """
+    AIRecommendChain().cancel_ai_recommend()
+
+    media_type = MediaType(mtype) if mtype else None
+    media_season = int(season) if season else None
+    site_list = _parse_site_list(sites)
+    media_chain = MediaChain()
+    search_chain = SearchChain()
+
+    async def event_source():
+        nonlocal media_season
+        torrents = None
+        if mediaid.startswith("tmdb:"):
+            tmdbid = int(mediaid.replace("tmdb:", ""))
+            if settings.RECOGNIZE_SOURCE == "douban":
+                doubaninfo = await media_chain.async_get_doubaninfo_by_tmdbid(tmdbid=tmdbid, mtype=media_type)
+                if doubaninfo:
+                    torrents = search_chain.async_search_by_id_stream(doubanid=doubaninfo.get("id"),
+                                                                      mtype=media_type, area=area,
+                                                                      season=media_season, sites=site_list,
+                                                                      cache_local=True)
+                else:
+                    yield {"type": "error", "success": False, "message": "未识别到豆瓣媒体信息"}
+                    return
+            else:
+                torrents = search_chain.async_search_by_id_stream(tmdbid=tmdbid, mtype=media_type, area=area,
+                                                                  season=media_season, sites=site_list,
+                                                                  cache_local=True)
+        elif mediaid.startswith("douban:"):
+            doubanid = mediaid.replace("douban:", "")
+            if settings.RECOGNIZE_SOURCE == "themoviedb":
+                tmdbinfo = await media_chain.async_get_tmdbinfo_by_doubanid(doubanid=doubanid, mtype=media_type)
+                if tmdbinfo:
+                    if tmdbinfo.get('season') and not media_season:
+                        media_season = tmdbinfo.get('season')
+                    torrents = search_chain.async_search_by_id_stream(tmdbid=tmdbinfo.get("id"),
+                                                                      mtype=media_type, area=area,
+                                                                      season=media_season, sites=site_list,
+                                                                      cache_local=True)
+                else:
+                    yield {"type": "error", "success": False, "message": "未识别到TMDB媒体信息"}
+                    return
+            else:
+                torrents = search_chain.async_search_by_id_stream(doubanid=doubanid, mtype=media_type, area=area,
+                                                                  season=media_season, sites=site_list,
+                                                                  cache_local=True)
+        elif mediaid.startswith("bangumi:"):
+            bangumiid = int(mediaid.replace("bangumi:", ""))
+            if settings.RECOGNIZE_SOURCE == "themoviedb":
+                tmdbinfo = await media_chain.async_get_tmdbinfo_by_bangumiid(bangumiid=bangumiid)
+                if tmdbinfo:
+                    torrents = search_chain.async_search_by_id_stream(tmdbid=tmdbinfo.get("id"),
+                                                                      mtype=media_type, area=area,
+                                                                      season=media_season, sites=site_list,
+                                                                      cache_local=True)
+                else:
+                    yield {"type": "error", "success": False, "message": "未识别到TMDB媒体信息"}
+                    return
+            else:
+                doubaninfo = await media_chain.async_get_doubaninfo_by_bangumiid(bangumiid=bangumiid)
+                if doubaninfo:
+                    torrents = search_chain.async_search_by_id_stream(doubanid=doubaninfo.get("id"),
+                                                                      mtype=media_type, area=area,
+                                                                      season=media_season, sites=site_list,
+                                                                      cache_local=True)
+                else:
+                    yield {"type": "error", "success": False, "message": "未识别到豆瓣媒体信息"}
+                    return
+        else:
+            event_data = MediaRecognizeConvertEventData(
+                mediaid=mediaid,
+                convert_type=settings.RECOGNIZE_SOURCE
+            )
+            event = await eventmanager.async_send_event(ChainEventType.MediaRecognizeConvert, event_data)
+            if event and event.event_data:
+                event_data = event.event_data
+                if event_data.media_dict:
+                    search_id = event_data.media_dict.get("id")
+                    if event_data.convert_type == "themoviedb":
+                        torrents = search_chain.async_search_by_id_stream(tmdbid=search_id, mtype=media_type,
+                                                                          area=area, season=media_season,
+                                                                          sites=site_list, cache_local=True)
+                    elif event_data.convert_type == "douban":
+                        torrents = search_chain.async_search_by_id_stream(doubanid=search_id, mtype=media_type,
+                                                                          area=area, season=media_season,
+                                                                          sites=site_list, cache_local=True)
+            else:
+                if not title:
+                    yield {"type": "error", "success": False, "message": "未知的媒体ID"}
+                    return
+                meta = MetaInfo(title)
+                if year:
+                    meta.year = year
+                if media_type:
+                    meta.type = media_type
+                if media_season:
+                    meta.type = MediaType.TV
+                    meta.begin_season = media_season
+                mediainfo = await media_chain.async_recognize_media(meta=meta)
+                if mediainfo:
+                    if settings.RECOGNIZE_SOURCE == "themoviedb":
+                        torrents = search_chain.async_search_by_id_stream(tmdbid=mediainfo.tmdb_id,
+                                                                          mtype=media_type, area=area,
+                                                                          season=media_season, sites=site_list,
+                                                                          cache_local=True)
+                    else:
+                        torrents = search_chain.async_search_by_id_stream(doubanid=mediainfo.douban_id,
+                                                                          mtype=media_type, area=area,
+                                                                          season=media_season, sites=site_list,
+                                                                          cache_local=True)
+
+        if not torrents:
+            yield {"type": "error", "success": False, "message": "未搜索到任何资源"}
+            return
+
+        async for event in torrents:
+            yield event
+
+    return StreamingResponse(_stream_search_events(request, event_source()), media_type="text/event-stream")
 
 
 @router.get("/media/{mediaid}", summary="精确搜索资源", response_model=schemas.Response)
@@ -156,6 +323,26 @@ async def search_by_id(mediaid: str,
         return schemas.Response(success=True, data=[torrent.to_dict() for torrent in torrents])
 
 
+@router.get("/title/stream", summary="渐进式模糊搜索资源")
+async def search_by_title_stream(request: Request,
+                                 keyword: Optional[str] = None,
+                                 page: Optional[int] = 0,
+                                 sites: Optional[str] = None,
+                                 _: schemas.TokenPayload = Depends(verify_resource_token)) -> Any:
+    """
+    根据名称渐进式模糊搜索站点资源，返回格式为SSE
+    """
+    AIRecommendChain().cancel_ai_recommend()
+
+    event_source = SearchChain().async_search_by_title_stream(
+        title=keyword,
+        page=page,
+        sites=_parse_site_list(sites),
+        cache_local=True
+    )
+    return StreamingResponse(_stream_search_events(request, event_source), media_type="text/event-stream")
+
+
 @router.get("/title", summary="模糊搜索资源", response_model=schemas.Response)
 async def search_by_title(keyword: Optional[str] = None,
                           page: Optional[int] = 0,
@@ -169,7 +356,7 @@ async def search_by_title(keyword: Optional[str] = None,
     
     torrents = await SearchChain().async_search_by_title(
         title=keyword, page=page,
-        sites=[int(site) for site in sites.split(",") if site] if sites else None,
+        sites=_parse_site_list(sites),
         cache_local=True
     )
     if not torrents:

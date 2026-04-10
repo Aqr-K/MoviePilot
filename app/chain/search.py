@@ -3,7 +3,7 @@ import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import AsyncIterator, Any, Dict, Tuple
 from typing import List, Optional
 
 from app.helper.sites import SitesHelper  # noqa
@@ -166,6 +166,85 @@ class SearchChain(ChainBase):
         if cache_local:
             await self.async_save_cache(contexts, self.__result_temp_file)
         return contexts
+
+    async def async_search_by_title_stream(self, title: str, page: Optional[int] = 0,
+                                           sites: List[int] = None,
+                                           cache_local: Optional[bool] = False) -> AsyncIterator[dict]:
+        """
+        根据标题渐进式搜索资源，不识别不过滤，按站点完成顺序返回结果
+        """
+        if title:
+            logger.info(f'开始渐进式搜索资源，关键词：{title} ...')
+        else:
+            logger.info(f'开始渐进式浏览资源，站点：{sites} ...')
+
+        contexts: List[Context] = []
+        async for event in self.__async_search_all_sites_stream(keyword=title, sites=sites, page=page):
+            result = event.pop("items", []) or []
+            batch_contexts = [
+                Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                        torrent_info=torrent)
+                for torrent in result
+            ]
+            if batch_contexts:
+                contexts.extend(batch_contexts)
+            yield {
+                **event,
+                "type": "append",
+                "items": [context.to_dict() for context in batch_contexts],
+                "total_items": len(contexts)
+            }
+
+        if cache_local:
+            await self.async_save_cache(contexts, self.__result_temp_file)
+
+        if not contexts:
+            logger.warn(f'{title} 未搜索到资源')
+        yield {
+            "type": "done",
+            "text": f"搜索完成，共 {len(contexts)} 个资源",
+            "items": [context.to_dict() for context in contexts],
+            "total_items": len(contexts)
+        }
+
+    async def async_search_by_id_stream(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
+                                        mtype: MediaType = None, area: Optional[str] = "title",
+                                        season: Optional[int] = None, sites: List[int] = None,
+                                        cache_local: bool = False) -> AsyncIterator[dict]:
+        """
+        根据TMDBID/豆瓣ID渐进式搜索资源，先返回站点原始候选，再返回过滤匹配后的最终结果
+        """
+        mediainfo = await self.async_recognize_media(tmdbid=tmdbid, doubanid=doubanid, mtype=mtype)
+        if not mediainfo:
+            logger.error(f'{tmdbid} 媒体信息识别失败！')
+            yield {
+                "type": "error",
+                "success": False,
+                "message": "媒体信息识别失败"
+            }
+            return
+
+        no_exists = None
+        if season is not None:
+            no_exists = {
+                tmdbid or doubanid: {
+                    season: NotExistMediaInfo(episodes=[])
+                }
+            }
+
+        contexts: List[Context] = []
+        async for event in self.async_process_stream(mediainfo=mediainfo, sites=sites, area=area, no_exists=no_exists):
+            if event.get("type") == "done":
+                contexts = event.get("contexts") or []
+                event = {
+                    key: value
+                    for key, value in event.items()
+                    if key != "contexts"
+                }
+            yield event
+
+        if cache_local:
+            await self.async_save_cache(contexts, self.__result_temp_file)
 
     @staticmethod
     def __prepare_params(mediainfo: MediaInfo,
@@ -503,6 +582,115 @@ class SearchChain(ChainBase):
                                        filter_params=filter_params
                                        )
 
+    async def async_process_stream(self, mediainfo: MediaInfo,
+                                   keyword: Optional[str] = None,
+                                   no_exists: Dict[int, Dict[int, NotExistMediaInfo]] = None,
+                                   sites: List[int] = None,
+                                   rule_groups: List[str] = None,
+                                   area: Optional[str] = "title",
+                                   custom_words: List[str] = None,
+                                   filter_params: Dict[str, str] = None) -> AsyncIterator[dict]:
+        """
+        根据媒体信息渐进式搜索种子资源，先返回站点候选，再返回过滤匹配后的最终结果
+        """
+
+        # 豆瓣标题处理
+        if not mediainfo.tmdb_id:
+            meta = MetaInfo(title=mediainfo.title)
+            mediainfo.title = meta.name
+            mediainfo.season = meta.begin_season
+        logger.info(f'开始渐进式搜索资源，关键词：{keyword or mediainfo.title} ...')
+
+        # 补充媒体信息
+        if not mediainfo.names:
+            mediainfo = await self.async_recognize_media(mtype=mediainfo.type,
+                                                         tmdbid=mediainfo.tmdb_id,
+                                                         doubanid=mediainfo.douban_id)
+            if not mediainfo:
+                logger.error(f'媒体信息识别失败！')
+                yield {
+                    "type": "error",
+                    "success": False,
+                    "message": "媒体信息识别失败"
+                }
+                return
+
+        # 准备搜索参数
+        season_episodes, keywords = self.__prepare_params(
+            mediainfo=mediainfo,
+            keyword=keyword,
+            no_exists=no_exists
+        )
+
+        torrents: List[TorrentInfo] = []
+        candidate_contexts: List[Context] = []
+        search_count = 0
+
+        for search_word in keywords:
+            if search_count > 0:
+                logger.info(f"已搜索 {search_count} 次，强制休眠 1-10 秒 ...")
+                await asyncio.sleep(random.randint(1, 10))
+
+            async for event in self.__async_search_all_sites_stream(
+                    mediainfo=mediainfo,
+                    keyword=search_word,
+                    sites=sites,
+                    area=area):
+                result = event.pop("items", []) or []
+                torrents.extend(result)
+                batch_contexts = [
+                    Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                            media_info=mediainfo,
+                            torrent_info=torrent)
+                    for torrent in result
+                ]
+                candidate_contexts.extend(batch_contexts)
+                yield {
+                    **event,
+                    "type": "append",
+                    "stage": "searching",
+                    "items": [context.to_dict() for context in batch_contexts],
+                    "total_items": len(candidate_contexts)
+                }
+
+            search_count += 1
+            if torrents:
+                logger.info(f"共搜索到 {len(torrents)} 个资源，停止搜索")
+                break
+
+        yield {
+            "type": "progress",
+            "stage": "filtering",
+            "value": 98,
+            "text": f"正在过滤匹配 {len(torrents)} 个候选资源 ..."
+        }
+
+        contexts = await run_in_threadpool(self.__parse_result,
+                                           torrents=torrents,
+                                           mediainfo=mediainfo,
+                                           keyword=keyword,
+                                           rule_groups=rule_groups,
+                                           season_episodes=season_episodes,
+                                           custom_words=custom_words,
+                                           filter_params=filter_params)
+        final_items = [context.to_dict() for context in contexts]
+        yield {
+            "type": "replace",
+            "stage": "filtered",
+            "value": 100,
+            "text": f"过滤匹配完成，共 {len(contexts)} 个资源",
+            "items": final_items,
+            "total_items": len(contexts)
+        }
+        yield {
+            "type": "done",
+            "stage": "done",
+            "text": f"搜索完成，共 {len(contexts)} 个资源",
+            "items": final_items,
+            "total_items": len(contexts),
+            "contexts": contexts
+        }
+
     def __search_all_sites(self, keyword: str,
                            mediainfo: Optional[MediaInfo] = None,
                            sites: List[int] = None,
@@ -669,6 +857,106 @@ class SearchChain(ChainBase):
 
         # 返回
         return results
+
+    async def __async_search_all_sites_stream(self, keyword: str,
+                                              mediainfo: Optional[MediaInfo] = None,
+                                              sites: List[int] = None,
+                                              page: Optional[int] = 0,
+                                              area: Optional[str] = "title") -> AsyncIterator[Dict[str, Any]]:
+        """
+        异步搜索多个站点，按站点完成顺序渐进式返回结果
+        :param mediainfo:  识别的媒体信息
+        :param keyword:  搜索关键词
+        :param sites:  指定站点ID列表，如有则只搜索指定站点，否则搜索所有站点
+        :param page:  搜索页码
+        :param area:  搜索区域 title or imdbid
+        """
+        indexer_sites = []
+
+        if not sites:
+            sites = SystemConfigOper().get(SystemConfigKey.IndexerSites) or []
+
+        for indexer in await SitesHelper().async_get_indexers():
+            if not sites or indexer.get("id") in sites:
+                indexer_sites.append(indexer)
+        if not indexer_sites:
+            logger.warn('未开启任何有效站点，无法搜索资源')
+            yield {
+                "type": "done",
+                "stage": "searching",
+                "value": 100,
+                "text": "未开启任何有效站点，无法搜索资源",
+                "items": [],
+                "finished": 0,
+                "total": 0
+            }
+            return
+
+        progress = ProgressHelper(ProgressKey.Search)
+        progress.start()
+        start_time = datetime.now()
+        total_num = len(indexer_sites)
+        finish_count = 0
+        progress.update(value=0,
+                        text=f"开始搜索，共 {total_num} 个站点 ...")
+        yield {
+            "type": "progress",
+            "stage": "searching",
+            "value": 0,
+            "text": f"开始搜索，共 {total_num} 个站点 ...",
+            "items": [],
+            "finished": 0,
+            "total": total_num
+        }
+
+        async def search_site(site: dict) -> Tuple[dict, List[TorrentInfo]]:
+            if area == "imdbid":
+                result = await self.async_search_torrents(site=site,
+                                                          keyword=mediainfo.imdb_id if mediainfo else None,
+                                                          mtype=mediainfo.type if mediainfo else None,
+                                                          page=page)
+            else:
+                result = await self.async_search_torrents(site=site,
+                                                          keyword=keyword,
+                                                          mtype=mediainfo.type if mediainfo else None,
+                                                          page=page)
+            return site, result or []
+
+        tasks = [asyncio.create_task(search_site(site)) for site in indexer_sites]
+        results_count = 0
+        try:
+            for future in asyncio.as_completed(tasks):
+                if global_vars.is_system_stopped:
+                    break
+                finish_count += 1
+                site, result = await future
+                results_count += len(result)
+                logger.info(f"站点搜索进度：{finish_count} / {total_num}")
+                progress_value = finish_count / total_num * 100
+                progress_text = f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个站点 ..."
+                progress.update(value=progress_value, text=progress_text)
+                yield {
+                    "type": "append",
+                    "stage": "searching",
+                    "value": progress_value,
+                    "text": progress_text,
+                    "items": result,
+                    "site": site.get("name"),
+                    "site_id": site.get("id"),
+                    "finished": finish_count,
+                    "total": total_num,
+                    "total_items": results_count
+                }
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+        end_time = datetime.now()
+        progress.update(value=100,
+                        text=f"站点搜索完成，有效资源数：{results_count}，总耗时 {(end_time - start_time).seconds} 秒")
+        logger.info(f"站点搜索完成，有效资源数：{results_count}，总耗时 {(end_time - start_time).seconds} 秒")
+        progress.end()
 
     @eventmanager.register(EventType.SiteDeleted)
     def remove_site(self, event: Event):
