@@ -249,7 +249,9 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
         return None
 
-    async def send_tool_message(self, message: str, title: str = ""):
+    async def send_tool_message(
+        self, message: str, title: str = "", image: Optional[str] = None
+    ):
         """
         发送工具消息
         """
@@ -261,5 +263,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 username=self._username,
                 title=title,
                 text=message,
+                image=image,
             )
         )

@@ -267,14 +267,14 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
             largest_photo = photo[-1]
             file_id = largest_photo.get("file_id")
             if file_id:
-                images.append(file_id)
+                images.append(f"tg://file_id/{file_id}")
 
         document = msg.get("document")
         if document:
             file_id = document.get("file_id")
             mime_type = document.get("mime_type", "")
             if file_id and mime_type.startswith("image/"):
-                images.append(file_id)
+                images.append(f"tg://file_id/{file_id}")
 
         return images if images else None
 

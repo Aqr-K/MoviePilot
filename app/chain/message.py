@@ -126,15 +126,15 @@ class MessageChain(ChainBase):
             logger.debug(f"未识别到用户ID：{body}{form}{args}")
             return
         # 消息内容
-        text = str(info.text).strip() if info.text else None
-        if not text:
+        text = str(info.text).strip() if info.text else ""
+        images = info.images
+        if not text and not images:
             logger.debug(f"未识别到消息内容：：{body}{form}{args}")
             return
 
         # 获取原消息ID信息
         original_message_id = info.message_id
         original_chat_id = info.chat_id
-        images = info.images
 
         # 处理消息
         self.handle_message(
@@ -213,6 +213,16 @@ class MessageChain(ChainBase):
                 )
             elif text.lower().startswith("/ai"):
                 # 用户指定AI智能体消息响应
+                self._handle_ai_message(
+                    text=text,
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    images=images,
+                )
+            elif settings.AI_AGENT_ENABLE and images:
+                # 带图消息优先交给智能体处理，避免图片在传统消息链路中丢失
                 self._handle_ai_message(
                     text=text,
                     channel=channel,
@@ -1234,8 +1244,20 @@ class MessageChain(ChainBase):
             session_id = self._get_or_create_session_id(userid)
 
             # 下载图片并转为base64
+            original_images = images
             if images:
                 images = self._download_images_to_base64(images, channel, source)
+                if original_images and not images and not user_message:
+                    self.post_message(
+                        Notification(
+                            channel=channel,
+                            source=source,
+                            userid=userid,
+                            username=username,
+                            title="图片读取失败，请稍后重试",
+                        )
+                    )
+                    return
 
             # 在事件循环中处理
             asyncio.run_coroutine_threadsafe(
@@ -1275,6 +1297,12 @@ class MessageChain(ChainBase):
                     )
                     if base64_data:
                         base64_images.append(f"data:image/jpeg;base64,{base64_data}")
+                elif channel == MessageChannel.Slack:
+                    data_url = self.run_module(
+                        "download_file_to_data_url", file_url=img, source=source
+                    )
+                    if data_url:
+                        base64_images.append(data_url)
                 elif img.startswith("http"):
                     resp = RequestUtils(timeout=30).get_res(img)
                     if resp and resp.content:
