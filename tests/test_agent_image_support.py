@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from telebot import apihelper
+
 from app.agent.tools.impl.send_message import SendMessageInput
 from app.chain.message import MessageChain
 from app.core.config import settings
@@ -71,6 +73,32 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(
             payload,
             {"text": "hi", "photo": [{"file_id": "image-1"}]},
+        )
+
+    def test_telegram_download_file_uses_configured_file_url(self):
+        telegram = Telegram.__new__(Telegram)
+        telegram._bot = Mock()
+        telegram._telegram_token = "token-123"
+        telegram._bot.get_file.return_value = SimpleNamespace(file_path="photos/a.jpg")
+
+        old_file_url = apihelper.FILE_URL
+        old_proxy = apihelper.proxy
+        apihelper.FILE_URL = "https://tg-proxy.example/file/bot{0}/{1}"
+        apihelper.proxy = {"https": "http://127.0.0.1:7890"}
+
+        try:
+            with patch(
+                "app.modules.telegram.telegram.RequestUtils.get_res",
+                return_value=SimpleNamespace(content=b"image-bytes"),
+            ) as get_res:
+                content = telegram.download_file("file-id-1")
+        finally:
+            apihelper.FILE_URL = old_file_url
+            apihelper.proxy = old_proxy
+
+        self.assertEqual(content, b"image-bytes")
+        get_res.assert_called_once_with(
+            "https://tg-proxy.example/file/bottoken-123/photos/a.jpg"
         )
 
     def test_process_allows_image_only_message(self):

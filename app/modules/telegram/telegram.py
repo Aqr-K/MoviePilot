@@ -205,10 +205,27 @@ class Telegram:
             return None
         try:
             file_info = self._bot.get_file(file_id)
-            file_url = f"https://api.telegram.org/file/bot{self._telegram_token}/{file_info.file_path}"
-            resp = RequestUtils(timeout=30).get_res(file_url)
+            file_url = apihelper.FILE_URL.format(
+                self._telegram_token, file_info.file_path
+            )
+            resp = RequestUtils(
+                proxies=apihelper.proxy, timeout=30
+            ).get_res(file_url)
             if resp and resp.content:
+                logger.info(
+                    "Telegram图片下载成功: file_id=%s, file_path=%s, content_bytes=%s",
+                    file_id,
+                    file_info.file_path,
+                    len(resp.content),
+                )
                 return resp.content
+            logger.warn(
+                "Telegram图片下载失败: file_id=%s, file_path=%s, file_url=%s, proxy_enabled=%s",
+                file_id,
+                getattr(file_info, "file_path", None),
+                file_url,
+                bool(apihelper.proxy),
+            )
         except Exception as e:
             logger.error(f"下载Telegram文件失败: {e}")
         return None
