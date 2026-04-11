@@ -38,6 +38,30 @@ async def user_message(background_tasks: BackgroundTasks, request: Request,
     body = await request.body()
     form = await request.form()
     args = request.query_params
+    source = args.get("source")
+    content_type = request.headers.get("content-type", "")
+    body_text = body.decode("utf-8", errors="ignore")
+    image_markers = [
+        marker
+        for marker in (
+            '"photo"',
+            '"document"',
+            '"files"',
+            '"attachments"',
+            '"url_private"',
+            '"image/"',
+            '"image_url"',
+        )
+        if marker in body_text
+    ]
+    logger.info(
+        "消息入口收到请求: source=%s, content_type=%s, body_bytes=%s, form_keys=%s, image_markers=%s",
+        source,
+        content_type,
+        len(body),
+        list(form.keys()) if form else [],
+        image_markers,
+    )
     background_tasks.add_task(start_message_chain, body, form, args)
     return schemas.Response(success=True)
 

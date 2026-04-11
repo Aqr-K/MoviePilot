@@ -45,6 +45,26 @@ class MessageChain(ChainBase):
     _session_timeout_minutes: int = 24 * 60
 
     @staticmethod
+    def _summarize_images(images: Optional[List[str]], max_items: int = 3) -> List[str]:
+        """
+        图片引用摘要，避免日志过长或直接输出完整 base64。
+        """
+        if not images:
+            return []
+        summary = []
+        for image in images[:max_items]:
+            if not image:
+                continue
+            image = str(image)
+            if image.startswith("data:"):
+                summary.append(f"{image[:32]}...({len(image)} chars)")
+            elif len(image) > 120:
+                summary.append(f"{image[:117]}...")
+            else:
+                summary.append(image)
+        return summary
+
+    @staticmethod
     def __get_noexits_info(
         _meta: MetaBase, _mediainfo: MediaInfo
     ) -> Dict[Union[int, str], Dict[int, NotExistMediaInfo]]:
@@ -111,6 +131,7 @@ class MessageChain(ChainBase):
         # 获取消息内容
         info = self.message_parser(source=source, body=body, form=form, args=args)
         if not info:
+            logger.info("消息链路未识别到有效消息: source=%s", source)
             return
         # 更新消息来源
         source = info.source
@@ -131,6 +152,16 @@ class MessageChain(ChainBase):
         if not text and not images:
             logger.debug(f"未识别到消息内容：：{body}{form}{args}")
             return
+
+        logger.info(
+            "消息链路解析完成: source=%s, channel=%s, userid=%s, text_len=%s, image_count=%s, image_refs=%s",
+            source,
+            channel.value if channel else None,
+            userid,
+            len(text),
+            len(images or []),
+            self._summarize_images(images),
+        )
 
         # 获取原消息ID信息
         original_message_id = info.message_id
@@ -165,7 +196,15 @@ class MessageChain(ChainBase):
         # 申明全局变量
         global _current_page, _current_meta, _current_media
         # 处理消息
-        logger.info(f"收到用户消息内容，用户：{userid}，内容：{text}")
+        logger.info(
+            "收到用户消息内容: channel=%s, source=%s, userid=%s, text=%s, image_count=%s, image_refs=%s",
+            channel.value if channel else None,
+            source,
+            userid,
+            text,
+            len(images or []),
+            self._summarize_images(images),
+        )
         # 加载缓存
         user_cache: Dict[str, dict] = self.load_cache(self._cache_file) or {}
         try:
@@ -213,6 +252,13 @@ class MessageChain(ChainBase):
                 )
             elif text.lower().startswith("/ai"):
                 # 用户指定AI智能体消息响应
+                logger.info(
+                    "消息链路分流到AI: reason=explicit_ai, channel=%s, source=%s, userid=%s, image_count=%s",
+                    channel.value if channel else None,
+                    source,
+                    userid,
+                    len(images or []),
+                )
                 self._handle_ai_message(
                     text=text,
                     channel=channel,
@@ -223,6 +269,14 @@ class MessageChain(ChainBase):
                 )
             elif settings.AI_AGENT_ENABLE and images:
                 # 带图消息优先交给智能体处理，避免图片在传统消息链路中丢失
+                logger.info(
+                    "消息链路分流到AI: reason=image_message, channel=%s, source=%s, userid=%s, image_count=%s, image_refs=%s",
+                    channel.value if channel else None,
+                    source,
+                    userid,
+                    len(images or []),
+                    self._summarize_images(images),
+                )
                 self._handle_ai_message(
                     text=text,
                     channel=channel,
@@ -233,6 +287,13 @@ class MessageChain(ChainBase):
                 )
             elif settings.AI_AGENT_ENABLE and settings.AI_AGENT_GLOBAL:
                 # 普通消息，全局智能体响应
+                logger.info(
+                    "消息链路分流到AI: reason=global_agent, channel=%s, source=%s, userid=%s, image_count=%s",
+                    channel.value if channel else None,
+                    source,
+                    userid,
+                    len(images or []),
+                )
                 self._handle_ai_message(
                     text=text,
                     channel=channel,
@@ -1228,6 +1289,17 @@ class MessageChain(ChainBase):
                 user_message = text[3:].strip()  # 移除 "/ai" 前缀（大小写不敏感）
             else:
                 user_message = text.strip()  # 按原消息处理
+
+            logger.info(
+                "AI消息入口: channel=%s, source=%s, userid=%s, text_len=%s, raw_image_count=%s, raw_image_refs=%s",
+                channel.value if channel else None,
+                source,
+                userid,
+                len(user_message),
+                len(images or []),
+                self._summarize_images(images),
+            )
+
             if not user_message and not images:
                 self.post_message(
                     Notification(
@@ -1247,6 +1319,15 @@ class MessageChain(ChainBase):
             original_images = images
             if images:
                 images = self._download_images_to_base64(images, channel, source)
+                logger.info(
+                    "AI图片预处理完成: channel=%s, source=%s, userid=%s, raw_image_count=%s, converted_image_count=%s, converted_image_refs=%s",
+                    channel.value if channel else None,
+                    source,
+                    userid,
+                    len(original_images or []),
+                    len(images or []),
+                    self._summarize_images(images),
+                )
                 if original_images and not images and not user_message:
                     self.post_message(
                         Notification(
@@ -1297,12 +1378,25 @@ class MessageChain(ChainBase):
                     )
                     if base64_data:
                         base64_images.append(f"data:image/jpeg;base64,{base64_data}")
+                        logger.info(
+                            "图片下载成功: channel=%s, source=%s, input=%s, output=data:image/jpeg;base64...(omitted)",
+                            channel.value if channel else None,
+                            source,
+                            img,
+                        )
                 elif channel == MessageChannel.Slack:
                     data_url = self.run_module(
                         "download_file_to_data_url", file_url=img, source=source
                     )
                     if data_url:
                         base64_images.append(data_url)
+                        logger.info(
+                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
+                            channel.value if channel else None,
+                            source,
+                            img,
+                            self._summarize_images([data_url])[0],
+                        )
                 elif img.startswith("http"):
                     resp = RequestUtils(timeout=30).get_res(img)
                     if resp and resp.content:
@@ -1311,6 +1405,15 @@ class MessageChain(ChainBase):
                         base64_data = base64.b64encode(resp.content).decode()
                         mime_type = resp.headers.get("Content-Type", "image/jpeg")
                         base64_images.append(f"data:{mime_type};base64,{base64_data}")
+                        logger.info(
+                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
+                            channel.value if channel else None,
+                            source,
+                            img,
+                            self._summarize_images(
+                                [f"data:{mime_type};base64,{base64_data}"]
+                            )[0],
+                        )
             except Exception as e:
                 logger.error(f"下载图片失败: {img}, error: {e}")
         return base64_images if base64_images else None
