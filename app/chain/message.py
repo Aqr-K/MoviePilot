@@ -1371,7 +1371,15 @@ class MessageChain(ChainBase):
         base64_images = []
         for img in images:
             try:
-                if img.startswith("tg://file_id/"):
+                if img.startswith("data:"):
+                    base64_images.append(img)
+                    logger.info(
+                        "图片无需下载: channel=%s, source=%s, input=%s",
+                        channel.value if channel else None,
+                        source,
+                        self._summarize_images([img])[0],
+                    )
+                elif img.startswith("tg://file_id/"):
                     file_id = img.replace("tg://file_id/", "")
                     base64_data = self.run_module(
                         "download_file_to_base64", file_id=file_id, source=source
@@ -1384,9 +1392,41 @@ class MessageChain(ChainBase):
                             source,
                             img,
                         )
+                elif img.startswith("wxwork://media_id/") or img.startswith(
+                    "wxbot://image/"
+                ):
+                    data_url = self.run_module(
+                        "download_wechat_image_to_data_url",
+                        image_ref=img,
+                        source=source,
+                    )
+                    if data_url:
+                        base64_images.append(data_url)
+                        logger.info(
+                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
+                            channel.value if channel else None,
+                            source,
+                            img,
+                            self._summarize_images([data_url])[0],
+                        )
                 elif channel == MessageChannel.Slack:
                     data_url = self.run_module(
                         "download_file_to_data_url", file_url=img, source=source
+                    )
+                    if data_url:
+                        base64_images.append(data_url)
+                        logger.info(
+                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
+                            channel.value if channel else None,
+                            source,
+                            img,
+                            self._summarize_images([data_url])[0],
+                        )
+                elif img.startswith("vocechat://file/"):
+                    data_url = self.run_module(
+                        "download_vocechat_image_to_data_url",
+                        image_ref=img,
+                        source=source,
                     )
                     if data_url:
                         base64_images.append(data_url)

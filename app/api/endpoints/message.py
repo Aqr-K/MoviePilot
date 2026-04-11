@@ -67,16 +67,40 @@ async def user_message(background_tasks: BackgroundTasks, request: Request,
 
 
 @router.post("/web", summary="接收WEB消息", response_model=schemas.Response)
-def web_message(text: str, current_user: User = Depends(get_current_active_superuser)):
+async def web_message(
+    request: Request,
+    text: Optional[str] = None,
+    current_user: User = Depends(get_current_active_superuser),
+):
     """
     WEB消息响应
     """
+    images = None
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            text = payload.get("text", text)
+            image = payload.get("image")
+            images = payload.get("images")
+            if image:
+                if isinstance(images, list):
+                    images = [*images, image]
+                else:
+                    images = [image]
+            elif isinstance(images, str):
+                images = [images]
+
     MessageChain().handle_message(
         channel=MessageChannel.Web,
         source=current_user.name,
         userid=current_user.name,
         username=current_user.name,
-        text=text
+        text=text or "",
+        images=images,
     )
     return schemas.Response(success=True)
 

@@ -1,4 +1,5 @@
 from typing import Optional, Union, List, Tuple, Any
+import json
 
 from app.core.context import MediaInfo, Context
 from app.log import logger
@@ -9,6 +10,16 @@ from app.schemas.types import ModuleType
 
 
 class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
+    _IMAGE_SUFFIXES = (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".tiff",
+        ".svg",
+    )
 
     def init_module(self) -> None:
         """
@@ -96,14 +107,58 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
             user_id = int(message.get("user_id"))
             # 获取用户名
             user_name = message.get("username")
-            if text and user_id:
-                logger.info(f"收到来自 {client_config.name} 的SynologyChat消息："
-                            f"userid={user_id}, username={user_name}, text={text}")
+            images = self._extract_images(message)
+            if (text or images) and user_id:
+                logger.info(
+                    f"收到来自 {client_config.name} 的SynologyChat消息："
+                    f"userid={user_id}, username={user_name}, text={text}, images={len(images) if images else 0}"
+                )
                 return CommingMessage(channel=MessageChannel.SynologyChat, source=client_config.name,
-                                      userid=user_id, username=user_name, text=text)
+                                      userid=user_id, username=user_name, text=text or "",
+                                      images=images)
         except Exception as err:
             logger.debug(f"解析SynologyChat消息失败：{str(err)}")
         return None
+
+    @classmethod
+    def _extract_images(cls, message: dict) -> Optional[List[str]]:
+        images = []
+        for key in ("file_url", "image_url", "pic_url"):
+            value = message.get(key)
+            if isinstance(value, str) and cls._looks_like_image(value):
+                images.append(value)
+
+        for key in ("attachments", "files"):
+            raw_value = message.get(key)
+            if not raw_value:
+                continue
+            try:
+                parsed = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+            except Exception:
+                parsed = raw_value
+            items = parsed if isinstance(parsed, list) else [parsed]
+            for item in items:
+                if isinstance(item, str) and cls._looks_like_image(item):
+                    images.append(item)
+                elif isinstance(item, dict):
+                    url = item.get("url") or item.get("file_url") or item.get("image_url")
+                    if isinstance(url, str) and cls._looks_like_image(url):
+                        images.append(url)
+
+        deduped = []
+        for image in images:
+            if image not in deduped:
+                deduped.append(image)
+        return deduped or None
+
+    @classmethod
+    def _looks_like_image(cls, value: str) -> bool:
+        if not value or not isinstance(value, str):
+            return False
+        lowered = value.lower()
+        return lowered.startswith("http") and any(
+            suffix in lowered for suffix in cls._IMAGE_SUFFIXES
+        )
 
     def post_message(self, message: Notification, **kwargs) -> None:
         """

@@ -9,10 +9,16 @@ from telebot import apihelper
 from app.agent.tools.impl.send_message import SendMessageInput
 from app.chain.message import MessageChain
 from app.core.config import settings
+from app.modules.discord import DiscordModule
+from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule
 from app.modules.telegram.telegram import Telegram
 from app.modules.telegram import TelegramModule
-from app.schemas import CommingMessage
+from app.modules.synologychat import SynologyChatModule
+from app.modules.vocechat import VoceChatModule
+from app.modules.wechat import WechatModule
+from app.modules.wechat.wechatbot import WeChatBot
+from app.schemas import CommingMessage, Notification
 from app.schemas.types import MessageChannel
 
 
@@ -189,6 +195,282 @@ class AgentImageSupportTest(unittest.TestCase):
         )
 
         self.assertEqual(payload.image_url, "https://example.com/poster.png")
+
+    def test_discord_extract_images_supports_attachment_content_type(self):
+        images = DiscordModule._extract_images(
+            {
+                "attachments": [
+                    {
+                        "content_type": "image/png",
+                        "url": "https://cdn.discordapp.com/test.png",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(images, ["https://cdn.discordapp.com/test.png"])
+
+    def test_discord_send_direct_message_returns_chat_id(self):
+        module = DiscordModule()
+        client = Mock()
+        client.send_msg.return_value = (
+            True,
+            {"message_id": "discord-msg-1", "chat_id": "discord-chat-1"},
+        )
+
+        with patch.object(
+            module,
+            "get_configs",
+            return_value={"discord-test": SimpleNamespace(name="discord-test")},
+        ), patch.object(
+            module, "check_message", return_value=True
+        ), patch.object(
+            module, "get_instance", return_value=client
+        ):
+            response = module.send_direct_message(
+                Notification(title="hi", userid="user-1")
+            )
+
+        self.assertIsNotNone(response)
+        self.assertEqual(response.message_id, "discord-msg-1")
+        self.assertEqual(response.chat_id, "discord-chat-1")
+
+    def test_download_images_routes_wechat_refs_to_module_downloader(self):
+        chain = MessageChain()
+
+        with patch.object(
+            chain,
+            "run_module",
+            return_value="data:image/png;base64,wechat123",
+        ) as run_module:
+            images = chain._download_images_to_base64(
+                images=["wxwork://media_id/media-1"],
+                channel=MessageChannel.Wechat,
+                source="wechat-test",
+            )
+
+        self.assertEqual(images, ["data:image/png;base64,wechat123"])
+        run_module.assert_called_once_with(
+            "download_wechat_image_to_data_url",
+            image_ref="wxwork://media_id/media-1",
+            source="wechat-test",
+        )
+
+    def test_wechat_message_parser_extracts_image_media_id(self):
+        module = WechatModule()
+        xml_message = b"""
+        <xml>
+          <FromUserName><![CDATA[user-1]]></FromUserName>
+          <MsgType><![CDATA[image]]></MsgType>
+          <PicUrl><![CDATA[https://example.com/image.png]]></PicUrl>
+          <MediaId><![CDATA[media-1]]></MediaId>
+        </xml>
+        """
+        crypt = Mock()
+        crypt.DecryptMsg.return_value = (0, xml_message)
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(
+                name="wechat-test",
+                config={
+                    "WECHAT_TOKEN": "token",
+                    "WECHAT_ENCODING_AESKEY": "encoding",
+                    "WECHAT_CORPID": "corpid",
+                },
+            ),
+        ), patch.object(
+            module, "get_instance", return_value=SimpleNamespace(send_msg=Mock())
+        ), patch(
+            "app.modules.wechat.WXBizMsgCrypt",
+            return_value=crypt,
+        ):
+            message = module.message_parser(
+                source="wechat-test",
+                body=b"encrypted",
+                form={},
+                args={"msg_signature": "sig", "timestamp": "1", "nonce": "n"},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(message.images, ["wxwork://media_id/media-1"])
+
+    def test_wechat_bot_parser_accepts_image_only_payload(self):
+        module = WechatModule()
+        body = json.dumps(
+            {
+                "body": {
+                    "from": {"userid": "wxbot-user"},
+                    "msgtype": "image",
+                    "image": {
+                        "download_url": "https://example.com/encrypted-image",
+                        "aeskey": "YWJjZGVmZw",
+                    },
+                }
+            }
+        )
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(
+                name="wechat-bot-test", config={"WECHAT_MODE": "bot"}
+            ),
+        ), patch.object(
+            module, "get_instance", return_value=SimpleNamespace(send_msg=Mock())
+        ):
+            message = module.message_parser(
+                source="wechat-bot-test",
+                body=body,
+                form={},
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertTrue(message.images[0].startswith("wxbot://image/"))
+
+    def test_wechat_bot_handles_image_only_callback(self):
+        bot = WeChatBot.__new__(WeChatBot)
+        bot._config_name = "wechat-bot-test"
+        bot._admins = []
+        bot.send_msg = Mock()
+        bot._remember_target = Mock()
+        bot._forward_to_message_chain = Mock()
+
+        payload = {
+            "body": {
+                "from": {"userid": "wxbot-user"},
+                "msgtype": "image",
+                "image": {
+                    "download_url": "https://example.com/encrypted-image",
+                    "aeskey": "YWJjZGVmZw",
+                },
+            }
+        }
+
+        bot._handle_callback_message(payload)
+
+        bot._remember_target.assert_called_once_with("wxbot-user")
+        bot._forward_to_message_chain.assert_called_once_with(payload)
+
+    def test_vocechat_message_parser_extracts_image_file_payload(self):
+        module = VoceChatModule()
+        body = json.dumps(
+            {
+                "detail": {
+                    "type": "normal",
+                    "content_type": "vocechat/file",
+                    "content": "/uploads/poster.png",
+                    "properties": {"content_type": "image/png"},
+                },
+                "from_uid": 7910,
+                "target": {"gid": 2},
+            }
+        )
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(
+                name="vocechat-test", config={"channel_id": "2"}
+            ),
+        ):
+            message = module.message_parser(
+                source="vocechat-test",
+                body=body,
+                form={},
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(
+            message.images,
+            ["vocechat://file/%2Fuploads%2Fposter.png"],
+        )
+
+    def test_vocechat_post_message_passes_image_and_correct_target(self):
+        module = VoceChatModule()
+        client = Mock()
+
+        with patch.object(
+            module,
+            "get_configs",
+            return_value={"vocechat-test": SimpleNamespace(name="vocechat-test")},
+        ), patch.object(
+            module, "check_message", return_value=True
+        ), patch.object(
+            module, "get_instance", return_value=client
+        ):
+            module.post_message(
+                Notification(
+                    title="poster",
+                    image="https://example.com/poster.png",
+                    targets={"vocechat_userid": "UID#100"},
+                )
+            )
+
+        client.send_msg.assert_called_once_with(
+            title="poster",
+            text=None,
+            image="https://example.com/poster.png",
+            userid="UID#100",
+            link=None,
+        )
+
+    def test_qq_message_parser_accepts_image_only_attachment(self):
+        module = QQBotModule()
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(name="qq-test", config={}),
+        ):
+            message = module.message_parser(
+                source="qq-test",
+                body={
+                    "type": "C2C_MESSAGE_CREATE",
+                    "author": {"user_openid": "qq-user"},
+                    "attachments": [
+                        {
+                            "content_type": "image/png",
+                            "url": "https://example.com/qq-image.png",
+                        }
+                    ],
+                },
+                form={},
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(message.images, ["https://example.com/qq-image.png"])
+
+    def test_synology_message_parser_accepts_image_only_form(self):
+        module = SynologyChatModule()
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(name="synology-test", config={}),
+        ), patch.object(
+            module,
+            "get_instance",
+            return_value=SimpleNamespace(check_token=lambda token: token == "token-1"),
+        ):
+            message = module.message_parser(
+                source="synology-test",
+                body={},
+                form={
+                    "token": "token-1",
+                    "user_id": "42",
+                    "username": "tester",
+                    "file_url": "https://example.com/image.png",
+                },
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(message.images, ["https://example.com/image.png"])
 
 if __name__ == "__main__":
     unittest.main()

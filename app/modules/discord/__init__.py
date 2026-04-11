@@ -15,6 +15,17 @@ except Exception as err:  # ImportError or other load issues
 
 
 class DiscordModule(_ModuleBase, _MessageBase[Discord]):
+    _IMAGE_SUFFIXES = (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".tiff",
+        ".svg",
+    )
+
     def init_module(self) -> None:
         """
         初始化模块
@@ -157,10 +168,17 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             return None
         images = []
         for attachment in attachments:
-            if attachment.get("type") == "image":
-                url = attachment.get("url")
-                if url:
-                    images.append(url)
+            url = attachment.get("url") or attachment.get("proxy_url")
+            if not url:
+                continue
+            content_type = (attachment.get("content_type") or "").lower()
+            filename = (attachment.get("filename") or "").lower()
+            if (
+                attachment.get("type") == "image"
+                or content_type.startswith("image/")
+                or filename.endswith(DiscordModule._IMAGE_SUFFIXES)
+            ):
+                images.append(url)
         return images if images else None
 
     def post_message(self, message: Notification, **kwargs) -> None:
@@ -363,15 +381,22 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                     userid=userid,
                 )
                 if result:
-                    success, message_id = (
+                    success, response_data = (
                         (result[0], result[1])
                         if isinstance(result, tuple)
                         else (result, None)
                     )
                     if success:
+                        message_id = None
+                        chat_id = None
+                        if isinstance(response_data, dict):
+                            message_id = response_data.get("message_id")
+                            chat_id = response_data.get("chat_id")
+                        elif response_data is not None:
+                            message_id = str(response_data)
                         return MessageResponse(
                             message_id=str(message_id) if message_id else None,
-                            chat_id=None,
+                            chat_id=str(chat_id) if chat_id else None,
                             channel=MessageChannel.Discord,
                             source=conf.name,
                             success=True,

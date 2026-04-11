@@ -1,6 +1,7 @@
 import json
 import re
 import threading
+import base64
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -43,6 +44,8 @@ class WeChat:
     _create_menu_url = "cgi-bin/menu/create?access_token={access_token}&agentid={agentid}"
     # 企业微信删除菜单URL
     _delete_menu_url = "cgi-bin/menu/delete?access_token={access_token}&agentid={agentid}"
+    # 企业微信下载媒体URL
+    _download_media_url = "cgi-bin/media/get?access_token={access_token}&media_id={media_id}"
 
     def __init__(self, WECHAT_CORPID: Optional[str] = None, WECHAT_APP_SECRET: Optional[str] = None,
                  WECHAT_APP_ID: Optional[str] = None, WECHAT_PROXY: Optional[str] = None, **kwargs):
@@ -62,6 +65,7 @@ class WeChat:
             self._token_url = UrlUtils.adapt_request_url(self._proxy, self._token_url)
             self._create_menu_url = UrlUtils.adapt_request_url(self._proxy, self._create_menu_url)
             self._delete_menu_url = UrlUtils.adapt_request_url(self._proxy, self._delete_menu_url)
+            self._download_media_url = UrlUtils.adapt_request_url(self._proxy, self._download_media_url)
 
         if self._corpid and self._appsecret and self._appid:
             self.__get_access_token()
@@ -266,6 +270,58 @@ class WeChat:
         except Exception as e:
             logger.error(f"发送消息失败：{e}")
             return False
+
+    @staticmethod
+    def _guess_mime_type(content: bytes, default: str = "image/jpeg") -> str:
+        """
+        根据文件头推断图片 MIME
+        """
+        if not content:
+            return default
+        if content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if content.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if content.startswith((b"GIF87a", b"GIF89a")):
+            return "image/gif"
+        if content.startswith(b"BM"):
+            return "image/bmp"
+        if content.startswith(b"RIFF") and b"WEBP" in content[:16]:
+            return "image/webp"
+        return default
+
+    def download_media_to_data_url(self, media_id: str) -> Optional[str]:
+        """
+        下载企业微信媒体文件并转换为 data URL
+        """
+        if not media_id:
+            return None
+        access_token = self.__get_access_token()
+        if not access_token:
+            logger.error("下载企业微信媒体失败：access_token 获取失败")
+            return None
+        req_url = self._download_media_url.format(
+            access_token=access_token,
+            media_id=media_id,
+        )
+        try:
+            res = RequestUtils(timeout=30).get_res(req_url)
+        except Exception as err:
+            logger.error(f"下载企业微信媒体失败：{err}")
+            return None
+        if not res or not res.content:
+            return None
+
+        content_type = (res.headers.get("Content-Type") or "").split(";")[0].strip()
+        if content_type == "application/json":
+            try:
+                logger.error(f"企业微信媒体下载失败：{res.json()}")
+            except Exception:
+                logger.error(f"企业微信媒体下载失败：{res.text}")
+            return None
+
+        mime_type = self._guess_mime_type(res.content, content_type or "image/jpeg")
+        return f"data:{mime_type};base64,{base64.b64encode(res.content).decode()}"
 
     def send_medias_msg(self, medias: List[MediaInfo], userid: Optional[str] = None) -> Optional[bool]:
         """
