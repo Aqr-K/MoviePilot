@@ -193,9 +193,14 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         if not client_config:
             return None
         try:
-            msg_json: dict = json.loads(body)
+            msg_json = json.loads(body)
+            while isinstance(msg_json, str):
+                msg_json = json.loads(msg_json)
         except Exception as err:
             logger.debug(f"解析Slack消息失败：{str(err)}")
+            return None
+        if not isinstance(msg_json, dict):
+            logger.debug(f"Slack消息格式无效：{type(msg_json)}")
             return None
         if msg_json:
             images = None

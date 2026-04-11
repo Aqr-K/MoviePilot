@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import threading
 import time
@@ -113,7 +114,11 @@ class Telegram:
                 if self._should_process_message(message):
                     # 启动持续发送正在输入状态
                     self._start_typing_task(message.chat.id)
-                    RequestUtils(timeout=15).post_res(self._ds_url, json=message.json)
+                    payload = self._serialize_update_payload(message)
+                    if not payload:
+                        logger.warn("Telegram消息序列化失败，跳过转发")
+                        return
+                    RequestUtils(timeout=15).post_res(self._ds_url, json=payload)
 
             @_bot.callback_query_handler(func=lambda call: True)
             def callback_query(call):
@@ -207,6 +212,23 @@ class Telegram:
         except Exception as e:
             logger.error(f"下载Telegram文件失败: {e}")
         return None
+
+    @staticmethod
+    def _serialize_update_payload(message: Any) -> Optional[dict]:
+        """
+        将 Telegram Message 对象稳定序列化为 dict，避免 requests 的 json 参数再次包一层字符串。
+        """
+        try:
+            if hasattr(message, "to_dict"):
+                payload = message.to_dict()
+            else:
+                payload = getattr(message, "json", None) or message
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            return payload if isinstance(payload, dict) else None
+        except Exception as e:
+            logger.error(f"序列化Telegram消息失败: {e}")
+            return None
 
     def _update_user_chat_mapping(self, userid: int, chat_id: int) -> None:
         """

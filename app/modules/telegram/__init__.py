@@ -131,10 +131,20 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
             return None
         client: Telegram = self.get_instance(client_config.name)
         try:
-            message: dict = json.loads(body)
+            message = json.loads(body)
+            while isinstance(message, str):
+                message = json.loads(message)
         except Exception as err:
             logger.debug(f"解析Telegram消息失败：{str(err)}")
             return None
+
+        if not isinstance(message, dict):
+            logger.debug(f"Telegram消息格式无效：{type(message)}")
+            return None
+
+        # 兼容某些转发链路使用 Telegram Update 外壳
+        if "message" in message and isinstance(message.get("message"), dict):
+            message = message.get("message")
 
         if message:
             # 处理按钮回调

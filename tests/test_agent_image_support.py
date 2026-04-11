@@ -1,4 +1,5 @@
 import base64
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -7,6 +8,7 @@ from app.agent.tools.impl.send_message import SendMessageInput
 from app.chain.message import MessageChain
 from app.core.config import settings
 from app.modules.slack import SlackModule
+from app.modules.telegram.telegram import Telegram
 from app.modules.telegram import TelegramModule
 from app.schemas import CommingMessage
 from app.schemas.types import MessageChannel
@@ -24,6 +26,51 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(
             images,
             ["tg://file_id/large", "tg://file_id/doc-image"],
+        )
+
+    def test_telegram_message_parser_accepts_double_encoded_body(self):
+        module = TelegramModule()
+        body = json.dumps(
+            json.dumps(
+                {
+                    "message": {
+                        "from": {"id": 10001, "username": "tester"},
+                        "chat": {"id": 10001, "type": "private"},
+                        "photo": [{"file_id": "small"}, {"file_id": "large"}],
+                    }
+                }
+            )
+        )
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(name="telegram-test", config={}),
+        ), patch.object(
+            module,
+            "get_instance",
+            return_value=SimpleNamespace(bot_username=None),
+        ):
+            message = module.message_parser(
+                source="telegram-test", body=body, form={}, args={}
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(message.images, ["tg://file_id/large"])
+
+    def test_telegram_forward_payload_uses_dict_not_json_string(self):
+        payload = Telegram._serialize_update_payload(
+            SimpleNamespace(
+                to_dict=lambda: {
+                    "text": "hi",
+                    "photo": [{"file_id": "image-1"}],
+                }
+            )
+        )
+
+        self.assertEqual(
+            payload,
+            {"text": "hi", "photo": [{"file_id": "image-1"}]},
         )
 
     def test_process_allows_image_only_message(self):
