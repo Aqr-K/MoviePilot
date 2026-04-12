@@ -31,6 +31,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
     _username: Optional[str] = PrivateAttr(default=None)
     _stream_handler: Optional[StreamingHandler] = PrivateAttr(default=None)
     _require_admin: bool = PrivateAttr(default=False)
+    _agent_context: dict = PrivateAttr(default_factory=dict)
 
     def __init__(self, session_id: str, user_id: str, **kwargs):
         super().__init__(**kwargs)
@@ -141,6 +142,12 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         设置回调处理器
         """
         self._stream_handler = stream_handler
+
+    def set_agent_context(self, agent_context: Optional[dict]):
+        """
+        设置与当前 Agent 共享的上下文。
+        """
+        self._agent_context = agent_context or {}
 
     async def _check_permission(self) -> Optional[str]:
         """

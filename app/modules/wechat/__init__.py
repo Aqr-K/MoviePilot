@@ -167,6 +167,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             # 解析消息内容
             content = None
             images = None
+            audio_refs = None
             if msg_type == "event" and event == "click":
                 # 校验用户有权限执行交互命令
                 if client_config.config.get('WECHAT_ADMINS'):
@@ -192,14 +193,24 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                 logger.info(
                     f"收到来自 {client_config.name} 的微信图片消息：userid={user_id}, images={len(images) if images else 0}"
                 )
+            elif msg_type == "voice":
+                media_id = DomUtils.tag_value(root_node, "MediaId")
+                recognition = DomUtils.tag_value(root_node, "Recognition", default="")
+                content = (recognition or "").strip()
+                if media_id:
+                    audio_refs = [f"wxwork://voice_media_id/{media_id}"]
+                logger.info(
+                    f"收到来自 {client_config.name} 的微信语音消息：userid={user_id}, "
+                    f"text={content}, audios={len(audio_refs) if audio_refs else 0}"
+                )
             else:
                 return None
 
-            if content or images:
+            if content or images or audio_refs:
                 # 处理消息内容
                 return CommingMessage(channel=MessageChannel.Wechat, source=client_config.name,
                                       userid=user_id, username=user_id, text=content or "",
-                                      images=images)
+                                      images=images, audio_refs=audio_refs)
         except Exception as err:
             logger.error(f"微信消息处理发生错误：{str(err)}")
         return None
@@ -230,6 +241,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
 
         text = WeChatBot._extract_text_from_body(payload_body)
         images = WeChatBot._extract_images_from_body(payload_body)
+        audio_refs = ["wxbot://voice"] if payload_body.get("msgtype") == "voice" else None
         if text:
             text = re.sub(r"@\S+", "", text).strip()
 
@@ -245,7 +257,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                     client.send_msg(title="只有管理员才有权限执行此命令", userid=sender)
                 return None
 
-        if not text and not images:
+        if not text and not images and not audio_refs:
             return None
 
         logger.info(
@@ -259,6 +271,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             username=sender,
             text=text or "",
             images=images,
+            audio_refs=audio_refs,
         )
 
     def post_message(self, message: Notification, **kwargs) -> None:
@@ -279,8 +292,17 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                     return
             client: WeChat = self.get_instance(conf.name)
             if client:
-                client.send_msg(title=message.title, text=message.text,
-                                image=message.image, userid=userid, link=message.link)
+                if message.voice_path and hasattr(client, "send_voice"):
+                    sent = client.send_voice(
+                        voice_path=message.voice_path,
+                        userid=userid,
+                    )
+                    if not sent:
+                        client.send_msg(title=message.title, text=message.text,
+                                        image=message.image, userid=userid, link=message.link)
+                else:
+                    client.send_msg(title=message.title, text=message.text,
+                                    image=message.image, userid=userid, link=message.link)
 
     def download_wechat_image_to_data_url(self, image_ref: str, source: str) -> Optional[str]:
         """
@@ -299,6 +321,23 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             return client.download_media_to_data_url(media_id)
         if image_ref.startswith("wxbot://image/") and hasattr(client, "download_image_to_data_url"):
             return client.download_image_to_data_url(image_ref)
+        return None
+
+    def download_wechat_media_bytes(self, media_ref: str, source: str) -> Optional[bytes]:
+        """
+        下载企业微信语音媒体并返回原始字节。
+        """
+        if not media_ref:
+            return None
+        client_config = self.get_config(source)
+        if not client_config:
+            return None
+        client = self.get_instance(client_config.name)
+        if not client or not hasattr(client, "download_media_bytes"):
+            return None
+        if media_ref.startswith("wxwork://voice_media_id/"):
+            media_id = media_ref.replace("wxwork://voice_media_id/", "", 1)
+            return client.download_media_bytes(media_id)
         return None
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:

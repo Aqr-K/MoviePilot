@@ -297,7 +297,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     images.append(url)
         return images if images else None
 
-    def download_file_to_data_url(self, file_url: str, source: str) -> Optional[str]:
+    def download_slack_file_to_data_url(self, file_url: str, source: str) -> Optional[str]:
         """
         下载Slack文件并转为data URL
         :param file_url: Slack私有文件URL

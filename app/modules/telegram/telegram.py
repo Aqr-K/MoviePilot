@@ -3,6 +3,7 @@ import json
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional, List, Dict, Callable, Union
 from urllib.parse import urljoin, quote
 
@@ -460,6 +461,51 @@ class Telegram:
             logger.error(f"发送消息失败：{msg_e}")
             self._stop_typing_task(chat_id)
             return {"success": False}
+
+    def send_voice(
+            self,
+            voice_path: str,
+            userid: Optional[str] = None,
+            caption: Optional[str] = None,
+            original_chat_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        发送Telegram语音消息。
+        """
+        if not self._bot or not voice_path:
+            return None
+
+        chat_id = self._determine_target_chat_id(userid, original_chat_id)
+        voice_file = Path(voice_path)
+        if not voice_file.exists():
+            logger.error(f"语音文件不存在: {voice_file}")
+            return {"success": False}
+
+        try:
+            with voice_file.open("rb") as fp:
+                sent = self._bot.send_voice(
+                    chat_id=chat_id,
+                    voice=fp,
+                    caption=standardize(caption) if caption else None,
+                    parse_mode="MarkdownV2" if caption else None,
+                )
+            self._stop_typing_task(chat_id)
+            if sent and hasattr(sent, "message_id"):
+                return {
+                    "success": True,
+                    "message_id": sent.message_id,
+                    "chat_id": sent.chat.id if hasattr(sent, "chat") else chat_id,
+                }
+            return {"success": bool(sent)}
+        except Exception as err:
+            logger.error(f"发送语音消息失败：{err}")
+            self._stop_typing_task(chat_id)
+            return {"success": False}
+        finally:
+            try:
+                voice_file.unlink(missing_ok=True)
+            except Exception as cleanup_err:
+                logger.debug(f"清理语音临时文件失败: {cleanup_err}")
 
     def _determine_target_chat_id(
             self, userid: Optional[str] = None, original_chat_id: Optional[str] = None

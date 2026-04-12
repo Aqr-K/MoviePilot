@@ -4,6 +4,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional, Dict, Union, List
 
+import base64
+
 from app.agent import agent_manager
 from app.chain import ChainBase
 from app.chain.download import DownloadChain
@@ -15,6 +17,7 @@ from app.core.context import MediaInfo, Context
 from app.core.meta import MetaBase
 from app.db.user_oper import UserOper
 from app.helper.torrent import TorrentHelper
+from app.helper.voice import VoiceHelper
 from app.log import logger
 from app.schemas import Notification, NotExistMediaInfo, CommingMessage
 from app.schemas.message import ChannelCapabilityManager
@@ -43,26 +46,6 @@ class MessageChain(ChainBase):
     _user_sessions: Dict[Union[str, int], tuple] = {}
     # 会话超时时间（分钟）
     _session_timeout_minutes: int = 24 * 60
-
-    @staticmethod
-    def _summarize_images(images: Optional[List[str]], max_items: int = 3) -> List[str]:
-        """
-        图片引用摘要，避免日志过长或直接输出完整 base64。
-        """
-        if not images:
-            return []
-        summary = []
-        for image in images[:max_items]:
-            if not image:
-                continue
-            image = str(image)
-            if image.startswith("data:"):
-                summary.append(f"{image[:32]}...({len(image)} chars)")
-            elif len(image) > 120:
-                summary.append(f"{image[:117]}...")
-            else:
-                summary.append(image)
-        return summary
 
     @staticmethod
     def __get_noexits_info(
@@ -146,22 +129,14 @@ class MessageChain(ChainBase):
         if userid is None or userid == "":
             logger.debug(f"未识别到用户ID：{body}{form}{args}")
             return
+
         # 消息内容
         text = str(info.text).strip() if info.text else ""
         images = info.images
-        if not text and not images:
+        audio_refs = info.audio_refs
+        if not text and not images and not audio_refs:
             logger.debug(f"未识别到消息内容：：{body}{form}{args}")
             return
-
-        logger.info(
-            "消息链路解析完成: source=%s, channel=%s, userid=%s, text_len=%s, image_count=%s, image_refs=%s",
-            source,
-            channel.value if channel else None,
-            userid,
-            len(text),
-            len(images or []),
-            self._summarize_images(images),
-        )
 
         # 获取原消息ID信息
         original_message_id = info.message_id
@@ -177,6 +152,7 @@ class MessageChain(ChainBase):
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
             images=images,
+            audio_refs=audio_refs,
         )
 
     def handle_message(
@@ -189,25 +165,43 @@ class MessageChain(ChainBase):
         original_message_id: Optional[Union[str, int]] = None,
         original_chat_id: Optional[str] = None,
         images: Optional[List[str]] = None,
+        audio_refs: Optional[List[str]] = None,
     ) -> None:
         """
         识别消息内容，执行操作
         """
         # 申明全局变量
         global _current_page, _current_meta, _current_media
-        # 处理消息
-        logger.info(
-            "收到用户消息内容: channel=%s, source=%s, userid=%s, text=%s, image_count=%s, image_refs=%s",
-            channel.value if channel else None,
-            source,
-            userid,
-            text,
-            len(images or []),
-            self._summarize_images(images),
-        )
+
         # 加载缓存
         user_cache: Dict[str, dict] = self.load_cache(self._cache_file) or {}
+
         try:
+            # 识别语音为文本
+            reply_with_voice = bool(audio_refs)
+            if audio_refs:
+                transcript = self._transcribe_audio_refs(audio_refs, channel, source)
+                merged_parts = []
+                seen_parts = set()
+                for item in [text.strip() if text else "", transcript or ""]:
+                    normalized = item.strip()
+                    if not normalized or normalized in seen_parts:
+                        continue
+                    seen_parts.add(normalized)
+                    merged_parts.append(normalized)
+                text = "\n".join(merged_parts).strip()
+                if not text:
+                    self.post_message(
+                        Notification(
+                            channel=channel,
+                            source=source,
+                            userid=userid,
+                            username=username,
+                            title="语音识别失败，请稍后重试",
+                        )
+                    )
+                    return
+
             # 保存消息
             if not text.startswith("CALLBACK:"):
                 self.messagehelper.put(
@@ -251,14 +245,6 @@ class MessageChain(ChainBase):
                     {"cmd": text, "user": userid, "channel": channel, "source": source},
                 )
             elif text.lower().startswith("/ai"):
-                # 用户指定AI智能体消息响应
-                logger.info(
-                    "消息链路分流到AI: reason=explicit_ai, channel=%s, source=%s, userid=%s, image_count=%s",
-                    channel.value if channel else None,
-                    source,
-                    userid,
-                    len(images or []),
-                )
                 self._handle_ai_message(
                     text=text,
                     channel=channel,
@@ -266,34 +252,10 @@ class MessageChain(ChainBase):
                     userid=userid,
                     username=username,
                     images=images,
-                )
-            elif settings.AI_AGENT_ENABLE and images:
-                # 带图消息优先交给智能体处理，避免图片在传统消息链路中丢失
-                logger.info(
-                    "消息链路分流到AI: reason=image_message, channel=%s, source=%s, userid=%s, image_count=%s, image_refs=%s",
-                    channel.value if channel else None,
-                    source,
-                    userid,
-                    len(images or []),
-                    self._summarize_images(images),
-                )
-                self._handle_ai_message(
-                    text=text,
-                    channel=channel,
-                    source=source,
-                    userid=userid,
-                    username=username,
-                    images=images,
+                    reply_with_voice=reply_with_voice,
                 )
             elif settings.AI_AGENT_ENABLE and settings.AI_AGENT_GLOBAL:
                 # 普通消息，全局智能体响应
-                logger.info(
-                    "消息链路分流到AI: reason=global_agent, channel=%s, source=%s, userid=%s, image_count=%s",
-                    channel.value if channel else None,
-                    source,
-                    userid,
-                    len(images or []),
-                )
                 self._handle_ai_message(
                     text=text,
                     channel=channel,
@@ -301,6 +263,7 @@ class MessageChain(ChainBase):
                     userid=userid,
                     username=username,
                     images=images,
+                    reply_with_voice=reply_with_voice,
                 )
             else:
                 # 非智能体普通消息响应
@@ -1266,6 +1229,7 @@ class MessageChain(ChainBase):
         userid: Union[str, int],
         username: str,
         images: Optional[List[str]] = None,
+        reply_with_voice: bool = False,
     ) -> None:
         """
         处理AI智能体消息
@@ -1290,16 +1254,6 @@ class MessageChain(ChainBase):
             else:
                 user_message = text.strip()  # 按原消息处理
 
-            logger.info(
-                "AI消息入口: channel=%s, source=%s, userid=%s, text_len=%s, raw_image_count=%s, raw_image_refs=%s",
-                channel.value if channel else None,
-                source,
-                userid,
-                len(user_message),
-                len(images or []),
-                self._summarize_images(images),
-            )
-
             if not user_message and not images:
                 self.post_message(
                     Notification(
@@ -1319,15 +1273,6 @@ class MessageChain(ChainBase):
             original_images = images
             if images:
                 images = self._download_images_to_base64(images, channel, source)
-                logger.info(
-                    "AI图片预处理完成: channel=%s, source=%s, userid=%s, raw_image_count=%s, converted_image_count=%s, converted_image_refs=%s",
-                    channel.value if channel else None,
-                    source,
-                    userid,
-                    len(original_images or []),
-                    len(images or []),
-                    self._summarize_images(images),
-                )
                 if original_images and not images and not user_message:
                     self.post_message(
                         Notification(
@@ -1350,6 +1295,7 @@ class MessageChain(ChainBase):
                     channel=channel.value if channel else None,
                     source=source,
                     username=username,
+                    reply_with_voice=reply_with_voice,
                 ),
                 global_vars.loop,
             )
@@ -1359,6 +1305,64 @@ class MessageChain(ChainBase):
             self.messagehelper.put(
                 f"AI智能体处理失败: {str(e)}", role="system", title="MoviePilot助手"
             )
+
+    def _transcribe_audio_refs(
+        self, audio_refs: List[str], channel: MessageChannel, source: str
+    ) -> Optional[str]:
+        """
+        下载并识别语音消息，仅处理当前已接入的渠道。
+        """
+        if not audio_refs:
+            return None
+        if not VoiceHelper.is_available("stt"):
+            logger.warning("语音能力未配置，跳过语音识别")
+            return None
+
+        transcripts = []
+        for audio_ref in audio_refs:
+            try:
+                if audio_ref.startswith("tg://voice_file_id/"):
+                    file_id = audio_ref.replace("tg://voice_file_id/", "", 1)
+                    content = self.run_module(
+                        "download_telegram_file_bytes", file_id=file_id, source=source
+                    )
+                    filename = "input.ogg"
+                elif audio_ref.startswith("tg://audio_file_id/"):
+                    file_id = audio_ref.replace("tg://audio_file_id/", "", 1)
+                    content = self.run_module(
+                        "download_telegram_file_bytes", file_id=file_id, source=source
+                    )
+                    filename = "input.mp3"
+                elif audio_ref.startswith("wxwork://voice_media_id/"):
+                    content = self.run_module(
+                        "download_wechat_media_bytes", media_ref=audio_ref, source=source
+                    )
+                    filename = "input.amr"
+                elif audio_ref.startswith("wxbot://voice"):
+                    continue
+                else:
+                    logger.debug(
+                        "暂不支持的语音引用: channel=%s, source=%s, ref=%s",
+                        channel.value if channel else None,
+                        source,
+                        audio_ref,
+                    )
+                    continue
+
+                transcript = VoiceHelper.transcribe_bytes(content=content, filename=filename)
+                if transcript:
+                    transcripts.append(transcript)
+                    logger.info(
+                        "语音识别成功: channel=%s, source=%s, ref=%s, text_len=%s",
+                        channel.value if channel else None,
+                        source,
+                        audio_ref,
+                        len(transcript),
+                    )
+            except Exception as err:
+                logger.error(f"语音识别失败: {err}")
+
+        return "\n".join(transcripts).strip() if transcripts else None
 
     def _download_images_to_base64(
         self, images: List[str], channel: MessageChannel, source: str
@@ -1373,16 +1377,10 @@ class MessageChain(ChainBase):
             try:
                 if img.startswith("data:"):
                     base64_images.append(img)
-                    logger.info(
-                        "图片无需下载: channel=%s, source=%s, input=%s",
-                        channel.value if channel else None,
-                        source,
-                        self._summarize_images([img])[0],
-                    )
                 elif img.startswith("tg://file_id/"):
                     file_id = img.replace("tg://file_id/", "")
                     base64_data = self.run_module(
-                        "download_file_to_base64", file_id=file_id, source=source
+                        "download_telegram_file_to_base64", file_id=file_id, source=source
                     )
                     if base64_data:
                         base64_images.append(f"data:image/jpeg;base64,{base64_data}")
@@ -1402,26 +1400,12 @@ class MessageChain(ChainBase):
                     )
                     if data_url:
                         base64_images.append(data_url)
-                        logger.info(
-                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
-                            channel.value if channel else None,
-                            source,
-                            img,
-                            self._summarize_images([data_url])[0],
-                        )
                 elif channel == MessageChannel.Slack:
                     data_url = self.run_module(
-                        "download_file_to_data_url", file_url=img, source=source
+                        "download_slack_file_to_data_url", file_url=img, source=source
                     )
                     if data_url:
                         base64_images.append(data_url)
-                        logger.info(
-                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
-                            channel.value if channel else None,
-                            source,
-                            img,
-                            self._summarize_images([data_url])[0],
-                        )
                 elif img.startswith("vocechat://file/"):
                     data_url = self.run_module(
                         "download_vocechat_image_to_data_url",
@@ -1430,30 +1414,12 @@ class MessageChain(ChainBase):
                     )
                     if data_url:
                         base64_images.append(data_url)
-                        logger.info(
-                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
-                            channel.value if channel else None,
-                            source,
-                            img,
-                            self._summarize_images([data_url])[0],
-                        )
                 elif img.startswith("http"):
                     resp = RequestUtils(timeout=30).get_res(img)
                     if resp and resp.content:
-                        import base64
-
                         base64_data = base64.b64encode(resp.content).decode()
                         mime_type = resp.headers.get("Content-Type", "image/jpeg")
                         base64_images.append(f"data:{mime_type};base64,{base64_data}")
-                        logger.info(
-                            "图片下载成功: channel=%s, source=%s, input=%s, output=%s",
-                            channel.value if channel else None,
-                            source,
-                            img,
-                            self._summarize_images(
-                                [f"data:{mime_type};base64,{base64_data}"]
-                            )[0],
-                        )
             except Exception as e:
                 logger.error(f"下载图片失败: {img}, error: {e}")
         return base64_images if base64_images else None

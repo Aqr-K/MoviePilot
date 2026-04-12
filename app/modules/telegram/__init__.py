@@ -214,17 +214,19 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         text = self._append_reply_markup_links(text, msg.get("reply_markup"))
 
         images = self._extract_images(msg)
+        audio_refs = self._extract_audio_refs(msg)
 
         if user_id:
-            if not text and not images:
+            if not text and not images and not audio_refs:
                 logger.debug(
-                    f"收到来自 {client_config.name} 的Telegram消息无文本和图片"
+                    f"收到来自 {client_config.name} 的Telegram消息无文本、图片和语音"
                 )
                 return None
 
             logger.info(
                 f"收到来自 {client_config.name} 的Telegram消息："
-                f"userid={user_id}, username={user_name}, chat_id={chat_id}, text={text}, images={len(images) if images else 0}"
+                f"userid={user_id}, username={user_name}, chat_id={chat_id}, text={text}, "
+                f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}"
             )
 
             cleaned_text = (
@@ -263,6 +265,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 text=cleaned_text,
                 chat_id=str(chat_id) if chat_id else None,
                 images=images if images else None,
+                audio_refs=audio_refs if audio_refs else None,
             )
         return None
 
@@ -287,6 +290,26 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 images.append(f"tg://file_id/{file_id}")
 
         return images if images else None
+
+    @staticmethod
+    def _extract_audio_refs(msg: dict) -> Optional[List[str]]:
+        """
+        从Telegram消息中提取语音/音频 file_id。
+        """
+        audio_refs = []
+        voice = msg.get("voice")
+        if voice:
+            file_id = voice.get("file_id")
+            if file_id:
+                audio_refs.append(f"tg://voice_file_id/{file_id}")
+
+        audio = msg.get("audio")
+        if audio:
+            file_id = audio.get("file_id")
+            if file_id:
+                audio_refs.append(f"tg://audio_file_id/{file_id}")
+
+        return audio_refs if audio_refs else None
 
     @staticmethod
     def _embed_entity_links(text: str, entities: Optional[List[dict]]) -> str:
@@ -389,17 +412,25 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     return
             client: Telegram = self.get_instance(conf.name)
             if client:
-                client.send_msg(
-                    title=message.title,
-                    text=message.text,
-                    image=message.image,
-                    userid=userid,
-                    link=message.link,
-                    buttons=message.buttons,
-                    original_message_id=message.original_message_id,
-                    original_chat_id=message.original_chat_id,
-                    disable_web_page_preview=message.disable_web_page_preview,
-                )
+                if message.voice_path:
+                    client.send_voice(
+                        voice_path=message.voice_path,
+                        userid=userid,
+                        caption=message.voice_caption,
+                        original_chat_id=message.original_chat_id,
+                    )
+                else:
+                    client.send_msg(
+                        title=message.title,
+                        text=message.text,
+                        image=message.image,
+                        userid=userid,
+                        link=message.link,
+                        buttons=message.buttons,
+                        original_message_id=message.original_message_id,
+                        original_chat_id=message.original_chat_id,
+                        disable_web_page_preview=message.disable_web_page_preview,
+                    )
 
     def post_medias_message(
         self, message: Notification, medias: List[MediaInfo]
@@ -531,14 +562,22 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     return None
             client: Telegram = self.get_instance(conf.name)
             if client:
-                result = client.send_msg(
-                    title=message.title,
-                    text=message.text,
-                    image=message.image,
-                    userid=userid,
-                    link=message.link,
-                    disable_web_page_preview=message.disable_web_page_preview,
-                )
+                if message.voice_path:
+                    result = client.send_voice(
+                        voice_path=message.voice_path,
+                        userid=userid,
+                        caption=message.voice_caption,
+                        original_chat_id=message.original_chat_id,
+                    )
+                else:
+                    result = client.send_msg(
+                        title=message.title,
+                        text=message.text,
+                        image=message.image,
+                        userid=userid,
+                        link=message.link,
+                        disable_web_page_preview=message.disable_web_page_preview,
+                    )
                 if result and result.get("success"):
                     return MessageResponse(
                         message_id=result.get("message_id"),
@@ -601,7 +640,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 )
             client.register_commands(filtered_scoped_commands)
 
-    def download_file_to_base64(self, file_id: str, source: str) -> Optional[str]:
+    def download_telegram_file_to_base64(self, file_id: str, source: str) -> Optional[str]:
         """
         下载Telegram文件并转为base64
         :param file_id: Telegram文件ID
@@ -620,3 +659,15 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
 
             return base64.b64encode(file_content).decode()
         return None
+
+    def download_telegram_file_bytes(self, file_id: str, source: str) -> Optional[bytes]:
+        """
+        下载Telegram文件并返回原始字节。
+        """
+        config = self.get_config(source)
+        if not config:
+            return None
+        client = self.get_instance(config.name)
+        if not client:
+            return None
+        return client.download_file(file_id)
