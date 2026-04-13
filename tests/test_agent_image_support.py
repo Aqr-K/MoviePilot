@@ -3,6 +3,7 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import quote
 
 from telebot import apihelper
 
@@ -10,6 +11,7 @@ from app.agent.tools.impl.send_message import SendMessageInput
 from app.agent import MoviePilotAgent, AgentChain
 from app.chain.message import MessageChain
 from app.core.config import settings
+from app.helper.voice import VoiceHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule
@@ -203,6 +205,56 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(handle_ai_message.call_args.kwargs["text"], "帮我推荐一部电影")
         self.assertTrue(handle_ai_message.call_args.kwargs["reply_with_voice"])
 
+    def test_transcribe_audio_refs_supports_new_channel_refs(self):
+        chain = MessageChain()
+        audio_refs = [
+            "slack://file/" + quote("https://files.slack.com/test.mp3", safe=""),
+            "discord://file/" + quote("https://cdn.discordapp.com/voice.ogg", safe=""),
+            "qq://file/" + quote("https://example.com/qq-voice.ogg", safe=""),
+            "vocechat://file/%2Fuploads%2Fvoice.ogg",
+            "synology://file/" + quote("https://example.com/synology-voice.wav", safe=""),
+        ]
+
+        with patch.object(VoiceHelper, "is_available", return_value=True), patch.object(
+            chain,
+            "run_module",
+            side_effect=[b"slack", b"discord", b"qq", b"vocechat", b"synology"],
+        ) as run_module, patch.object(
+            VoiceHelper,
+            "transcribe_bytes",
+            side_effect=["slack text", "discord text", "qq text", "vocechat text", "synology text"],
+        ) as transcribe_bytes:
+            result = chain._transcribe_audio_refs(
+                audio_refs=audio_refs,
+                channel=MessageChannel.Slack,
+                source="mixed-source",
+            )
+
+        self.assertEqual(
+            result,
+            "slack text\ndiscord text\nqq text\nvocechat text\nsynology text",
+        )
+        self.assertEqual(
+            [call.args[0] for call in run_module.call_args_list],
+            [
+                "download_slack_file_bytes",
+                "download_discord_file_bytes",
+                "download_qq_file_bytes",
+                "download_vocechat_file_bytes",
+                "download_synologychat_file_bytes",
+            ],
+        )
+        self.assertEqual(
+            [call.kwargs["filename"] for call in transcribe_bytes.call_args_list],
+            [
+                "test.mp3",
+                "voice.ogg",
+                "qq-voice.ogg",
+                "voice.ogg",
+                "synology-voice.wav",
+            ],
+        )
+
     def test_agent_send_agent_message_does_not_auto_convert_to_voice(self):
         agent = MoviePilotAgent(
             session_id="session-1",
@@ -240,7 +292,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertEqual(images, ["data:image/png;base64,abc123"])
         run_module.assert_called_once_with(
-            "download_file_to_data_url",
+            "download_slack_file_to_data_url",
             file_url="https://files.slack.com/files-pri/T1-F1/test.png",
             source="slack-test",
         )
@@ -253,7 +305,7 @@ class AgentImageSupportTest(unittest.TestCase):
         with patch.object(
             module, "get_config", return_value=SimpleNamespace(name="slack-test")
         ), patch.object(module, "get_instance", return_value=client):
-            data_url = module.download_file_to_data_url(
+            data_url = module.download_slack_file_to_data_url(
                 "https://files.slack.com/files-pri/T1-F1/test.png",
                 "slack-test",
             )
@@ -261,6 +313,28 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(
             data_url,
             f"data:image/png;base64,{base64.b64encode(b'png-binary').decode()}",
+        )
+
+    def test_slack_extract_audio_refs_returns_private_file_refs(self):
+        audio_refs = SlackModule._extract_audio_refs(
+            {
+                "files": [
+                    {
+                        "type": "audio",
+                        "filetype": "mp3",
+                        "mimetype": "audio/mpeg",
+                        "url_private": "https://files.slack.com/files-pri/T1-F1/test.mp3",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(
+            audio_refs,
+            [
+                "slack://file/"
+                + quote("https://files.slack.com/files-pri/T1-F1/test.mp3", safe="")
+            ],
         )
 
     def test_send_message_input_accepts_image_only_payload(self):
@@ -284,6 +358,27 @@ class AgentImageSupportTest(unittest.TestCase):
         )
 
         self.assertEqual(images, ["https://cdn.discordapp.com/test.png"])
+
+    def test_discord_extract_audio_refs_supports_attachment_content_type(self):
+        audio_refs = DiscordModule._extract_audio_refs(
+            {
+                "attachments": [
+                    {
+                        "content_type": "audio/ogg",
+                        "filename": "voice.ogg",
+                        "url": "https://cdn.discordapp.com/voice.ogg",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(
+            audio_refs,
+            [
+                "discord://file/"
+                + quote("https://cdn.discordapp.com/voice.ogg", safe="")
+            ],
+        )
 
     def test_discord_send_direct_message_returns_chat_id(self):
         module = DiscordModule()
@@ -464,6 +559,41 @@ class AgentImageSupportTest(unittest.TestCase):
             ["vocechat://file/%2Fuploads%2Fposter.png"],
         )
 
+    def test_vocechat_message_parser_extracts_audio_file_payload(self):
+        module = VoceChatModule()
+        body = json.dumps(
+            {
+                "detail": {
+                    "type": "normal",
+                    "content_type": "vocechat/file",
+                    "content": "/uploads/voice.ogg",
+                    "properties": {"content_type": "audio/ogg"},
+                },
+                "from_uid": 7910,
+                "target": {"gid": 2},
+            }
+        )
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(
+                name="vocechat-test", config={"channel_id": "2"}
+            ),
+        ):
+            message = module.message_parser(
+                source="vocechat-test",
+                body=body,
+                form={},
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(
+            message.audio_refs,
+            ["vocechat://file/%2Fuploads%2Fvoice.ogg"],
+        )
+
     def test_vocechat_post_message_passes_image_and_correct_target(self):
         module = VoceChatModule()
         client = Mock()
@@ -520,6 +650,37 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertIsNotNone(message)
         self.assertEqual(message.images, ["https://example.com/qq-image.png"])
 
+    def test_qq_message_parser_accepts_audio_only_attachment(self):
+        module = QQBotModule()
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(name="qq-test", config={}),
+        ):
+            message = module.message_parser(
+                source="qq-test",
+                body={
+                    "type": "C2C_MESSAGE_CREATE",
+                    "author": {"user_openid": "qq-user"},
+                    "attachments": [
+                        {
+                            "content_type": "audio/ogg",
+                            "filename": "voice.ogg",
+                            "url": "https://example.com/qq-voice.ogg",
+                        }
+                    ],
+                },
+                form={},
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(
+            message.audio_refs,
+            ["qq://file/" + quote("https://example.com/qq-voice.ogg", safe="")],
+        )
+
     def test_synology_message_parser_accepts_image_only_form(self):
         module = SynologyChatModule()
 
@@ -546,6 +707,43 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertIsNotNone(message)
         self.assertEqual(message.images, ["https://example.com/image.png"])
+
+    def test_synology_message_parser_accepts_audio_only_form(self):
+        module = SynologyChatModule()
+
+        with patch.object(
+            module,
+            "get_config",
+            return_value=SimpleNamespace(name="synology-test", config={}),
+        ), patch.object(
+            module,
+            "get_instance",
+            return_value=SimpleNamespace(check_token=lambda token: token == "token-1"),
+        ):
+            message = module.message_parser(
+                source="synology-test",
+                body={},
+                form={
+                    "token": "token-1",
+                    "user_id": "42",
+                    "username": "tester",
+                    "attachments": json.dumps(
+                        [
+                            {
+                                "url": "https://example.com/voice.ogg",
+                                "content_type": "audio/ogg",
+                            }
+                        ]
+                    ),
+                },
+                args={},
+            )
+
+        self.assertIsNotNone(message)
+        self.assertEqual(
+            message.audio_refs,
+            ["synology://file/" + quote("https://example.com/voice.ogg", safe="")],
+        )
 
 if __name__ == "__main__":
     unittest.main()

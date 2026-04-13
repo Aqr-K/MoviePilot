@@ -3,6 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional, Dict, Union, List
+from urllib.parse import unquote
 
 import base64
 
@@ -1338,11 +1339,51 @@ class MessageChain(ChainBase):
                         "download_wechat_media_bytes", media_ref=audio_ref, source=source
                     )
                     filename = "input.amr"
+                elif audio_ref.startswith("slack://file/"):
+                    content = self.run_module(
+                        "download_slack_file_bytes", file_ref=audio_ref, source=source
+                    )
+                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                elif audio_ref.startswith("discord://file/"):
+                    content = self.run_module(
+                        "download_discord_file_bytes", file_ref=audio_ref, source=source
+                    )
+                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                elif audio_ref.startswith("qq://file/"):
+                    content = self.run_module(
+                        "download_qq_file_bytes", file_ref=audio_ref, source=source
+                    )
+                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                elif audio_ref.startswith("vocechat://file/"):
+                    content = self.run_module(
+                        "download_vocechat_file_bytes", file_ref=audio_ref, source=source
+                    )
+                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                elif audio_ref.startswith("synology://file/"):
+                    content = self.run_module(
+                        "download_synologychat_file_bytes",
+                        file_ref=audio_ref,
+                        source=source,
+                    )
+                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
                 elif audio_ref.startswith("wxbot://voice"):
                     continue
+                elif audio_ref.startswith("http"):
+                    resp = RequestUtils(timeout=30).get_res(audio_ref)
+                    content = resp.content if resp and resp.content else None
+                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
                 else:
                     logger.debug(
                         "暂不支持的语音引用: channel=%s, source=%s, ref=%s",
+                        channel.value if channel else None,
+                        source,
+                        audio_ref,
+                    )
+                    continue
+
+                if not content:
+                    logger.warning(
+                        "语音下载失败，跳过识别: channel=%s, source=%s, ref=%s",
                         channel.value if channel else None,
                         source,
                         audio_ref,
@@ -1363,6 +1404,23 @@ class MessageChain(ChainBase):
                 logger.error(f"语音识别失败: {err}")
 
         return "\n".join(transcripts).strip() if transcripts else None
+
+    @staticmethod
+    def _guess_audio_filename(audio_ref: str, default: str = "input.ogg") -> str:
+        """
+        根据引用中的扩展名推测音频文件名，便于 STT 服务识别格式。
+        """
+        if not audio_ref:
+            return default
+        raw_ref = unquote(audio_ref).split("?", 1)[0].split("#", 1)[0]
+        match = re.search(
+            r"([^/]+\.(mp3|m4a|wav|ogg|oga|opus|aac|amr|flac|mpga|mpeg|webm))$",
+            raw_ref,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return match.group(1)
+        return default
 
     def _download_images_to_base64(
         self, images: List[str], channel: MessageChannel, source: str

@@ -1,5 +1,6 @@
-from typing import Optional, Union, List, Tuple, Any
 import json
+from typing import Optional, Union, List, Tuple, Any
+from urllib.parse import quote, unquote
 
 from app.core.context import MediaInfo, Context
 from app.log import logger
@@ -7,6 +8,7 @@ from app.modules import _ModuleBase, _MessageBase
 from app.modules.synologychat.synologychat import SynologyChat
 from app.schemas import MessageChannel, CommingMessage, Notification
 from app.schemas.types import ModuleType
+from app.utils.http import RequestUtils
 
 
 class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
@@ -19,6 +21,20 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
         ".bmp",
         ".tiff",
         ".svg",
+    )
+    _AUDIO_SUFFIXES = (
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".ogg",
+        ".oga",
+        ".opus",
+        ".aac",
+        ".amr",
+        ".flac",
+        ".mpga",
+        ".mpeg",
+        ".webm",
     )
 
     def init_module(self) -> None:
@@ -108,14 +124,16 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
             # 获取用户名
             user_name = message.get("username")
             images = self._extract_images(message)
-            if (text or images) and user_id:
+            audio_refs = self._extract_audio_refs(message)
+            if (text or images or audio_refs) and user_id:
                 logger.info(
                     f"收到来自 {client_config.name} 的SynologyChat消息："
-                    f"userid={user_id}, username={user_name}, text={text}, images={len(images) if images else 0}"
+                    f"userid={user_id}, username={user_name}, text={text}, "
+                    f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}"
                 )
                 return CommingMessage(channel=MessageChannel.SynologyChat, source=client_config.name,
                                       userid=user_id, username=user_name, text=text or "",
-                                      images=images)
+                                      images=images, audio_refs=audio_refs)
         except Exception as err:
             logger.debug(f"解析SynologyChat消息失败：{str(err)}")
         return None
@@ -152,6 +170,49 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
         return deduped or None
 
     @classmethod
+    def _extract_audio_refs(cls, message: dict) -> Optional[List[str]]:
+        audio_refs = []
+        for key in ("audio_url", "voice_url", "file_url"):
+            value = message.get(key)
+            if isinstance(value, str) and cls._looks_like_audio(value):
+                audio_refs.append(f"synology://file/{quote(value, safe='')}")
+
+        for key in ("attachments", "files"):
+            raw_value = message.get(key)
+            if not raw_value:
+                continue
+            try:
+                parsed = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+            except Exception:
+                parsed = raw_value
+            items = parsed if isinstance(parsed, list) else [parsed]
+            for item in items:
+                if isinstance(item, str) and cls._looks_like_audio(item):
+                    audio_refs.append(f"synology://file/{quote(item, safe='')}")
+                elif isinstance(item, dict):
+                    url = item.get("url") or item.get("file_url") or item.get("audio_url")
+                    if not isinstance(url, str):
+                        continue
+                    content_type = (
+                        item.get("content_type")
+                        or item.get("mime_type")
+                        or ""
+                    ).lower()
+                    name = (
+                        item.get("name")
+                        or item.get("filename")
+                        or ""
+                    ).lower()
+                    if content_type.startswith("audio/") or cls._looks_like_audio(url) or name.endswith(cls._AUDIO_SUFFIXES):
+                        audio_refs.append(f"synology://file/{quote(url, safe='')}")
+
+        deduped = []
+        for audio_ref in audio_refs:
+            if audio_ref not in deduped:
+                deduped.append(audio_ref)
+        return deduped or None
+
+    @classmethod
     def _looks_like_image(cls, value: str) -> bool:
         if not value or not isinstance(value, str):
             return False
@@ -159,6 +220,29 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
         return lowered.startswith("http") and any(
             suffix in lowered for suffix in cls._IMAGE_SUFFIXES
         )
+
+    @classmethod
+    def _looks_like_audio(cls, value: str) -> bool:
+        if not value or not isinstance(value, str):
+            return False
+        lowered = value.lower()
+        return lowered.startswith("http") and any(
+            suffix in lowered for suffix in cls._AUDIO_SUFFIXES
+        )
+
+    def download_synologychat_file_bytes(self, file_ref: str, source: str) -> Optional[bytes]:
+        """
+        下载 Synology Chat 音频文件并返回原始字节
+        """
+        if not file_ref or not file_ref.startswith("synology://file/"):
+            return None
+        if not self.get_config(source):
+            return None
+        file_url = unquote(file_ref.replace("synology://file/", "", 1))
+        resp = RequestUtils(timeout=30).get_res(file_url)
+        if resp and resp.content:
+            return resp.content
+        return None
 
     def post_message(self, message: Notification, **kwargs) -> None:
         """
