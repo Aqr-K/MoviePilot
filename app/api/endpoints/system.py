@@ -181,6 +181,7 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
     # 业务功能相关的配置字段
     info = settings.model_dump(
         include={
+            "AI_AGENT_ENABLE",
             "RECOGNIZE_SOURCE",
             "SEARCH_SOURCE",
             "AI_RECOMMEND_ENABLED",
