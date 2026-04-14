@@ -22,11 +22,12 @@ class QueryDownloadTasksInput(BaseModel):
                                   description="Filter downloads by status: 'downloading' for active downloads, 'completed' for finished downloads, 'paused' for paused downloads, 'all' for all downloads")
     hash: Optional[str] = Field(None, description="Query specific download task by hash (optional, if provided will search for this specific task regardless of status)")
     title: Optional[str] = Field(None, description="Query download tasks by title/name (optional, supports partial match, searches all tasks if provided)")
+    tag: Optional[str] = Field(None, description="Filter download tasks by tag (optional, supports partial match, e.g. 'movie' will match tasks with tag 'movie' or 'movie_2024')")
 
 
 class QueryDownloadTasksTool(MoviePilotTool):
     name: str = "query_download_tasks"
-    description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash or title. Shows download progress, completion status, and task details from configured downloaders."
+    description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash, title, or tag. Shows download progress, completion status, tags, and task details from configured downloaders."
     args_schema: Type[BaseModel] = QueryDownloadTasksInput
 
     @staticmethod
@@ -83,14 +84,19 @@ class QueryDownloadTasksTool(MoviePilotTool):
             parts.append(f"Hash: {hash_value[:8]}...")
         elif title:
             parts.append(f"标题: {title}")
+
+        tag = kwargs.get("tag")
+        if tag:
+            parts.append(f"标签: {tag}")
         
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
     async def run(self, downloader: Optional[str] = None,
                   status: Optional[str] = "all",
                   hash: Optional[str] = None,
-                  title: Optional[str] = None, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}, hash={hash}, title={title}")
+                  title: Optional[str] = None,
+                  tag: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}, hash={hash}, title={title}, tag={tag}")
         try:
             download_chain = DownloadChain()
             
@@ -105,16 +111,18 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     # 获取下载历史信息
                     history = DownloadHistoryOper().get_by_hash(torrent.hash)
                     if history:
-                        torrent.media = {
-                            "tmdbid": history.tmdbid,
-                            "type": history.type,
-                            "title": history.title,
-                            "season": history.seasons,
-                            "episode": history.episodes,
-                            "image": history.image,
-                        }
+                        if hasattr(torrent, "media"):
+                            torrent.media = {
+                                "tmdbid": history.tmdbid,
+                                "type": history.type,
+                                "title": history.title,
+                                "season": history.seasons,
+                                "episode": history.episodes,
+                                "image": history.image,
+                            }
+                        if hasattr(torrent, "username"):
+                            torrent.username = history.username
                         torrent.userid = history.userid
-                        torrent.username = history.username
                     downloads.append(torrent)
                 filtered_downloads = downloads
             elif title:
@@ -131,7 +139,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     matched = False
                     # 检查torrent的title和name字段
                     if (title_lower in (torrent.title or "").lower()) or \
-                       (title_lower in (torrent.name or "").lower()):
+                       (title_lower in (getattr(torrent, "name", None) or "").lower()):
                         matched = True
                     # 检查下载历史中的标题
                     if history and history.title:
@@ -140,16 +148,18 @@ class QueryDownloadTasksTool(MoviePilotTool):
                     
                     if matched:
                         if history:
-                            torrent.media = {
-                                "tmdbid": history.tmdbid,
-                                "type": history.type,
-                                "title": history.title,
-                                "season": history.seasons,
-                                "episode": history.episodes,
-                                "image": history.image,
-                            }
+                            if hasattr(torrent, "media"):
+                                torrent.media = {
+                                    "tmdbid": history.tmdbid,
+                                    "type": history.type,
+                                    "title": history.title,
+                                    "season": history.seasons,
+                                    "episode": history.episodes,
+                                    "image": history.image,
+                                }
+                            if hasattr(torrent, "username"):
+                                torrent.username = history.username
                             torrent.userid = history.userid
-                            torrent.username = history.username
                         filtered_downloads.append(torrent)
                 if not filtered_downloads:
                     return f"未找到标题包含 '{title}' 的下载任务"
@@ -184,17 +194,28 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         # 获取下载历史信息
                         history = DownloadHistoryOper().get_by_hash(torrent.hash)
                         if history:
-                            torrent.media = {
-                                "tmdbid": history.tmdbid,
-                                "type": history.type,
-                                "title": history.title,
-                                "season": history.seasons,
-                                "episode": history.episodes,
-                                "image": history.image,
-                            }
+                            if hasattr(torrent, "media"):
+                                torrent.media = {
+                                    "tmdbid": history.tmdbid,
+                                    "type": history.type,
+                                    "title": history.title,
+                                    "season": history.seasons,
+                                    "episode": history.episodes,
+                                    "image": history.image,
+                                }
+                            if hasattr(torrent, "username"):
+                                torrent.username = history.username
                             torrent.userid = history.userid
-                            torrent.username = history.username
                         filtered_downloads.append(torrent)
+            # 按tag过滤
+            if tag and filtered_downloads:
+                tag_lower = tag.lower()
+                filtered_downloads = [
+                    d for d in filtered_downloads
+                    if d.tags and tag_lower in d.tags.lower()
+                ]
+                if not filtered_downloads:
+                    return f"未找到标签包含 '{tag}' 的下载任务"
             if filtered_downloads:
                 # 限制最多20条结果
                 total_count = len(filtered_downloads)
@@ -206,24 +227,26 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         "downloader": d.downloader,
                         "hash": d.hash,
                         "title": d.title,
-                        "name": d.name,
-                        "year": d.year,
-                        "season_episode": d.season_episode,
+                        "name": getattr(d, "name", None),
+                        "year": getattr(d, "year", None),
+                        "season_episode": getattr(d, "season_episode", None),
                         "size": d.size,
                         "progress": self._format_progress(d.progress),
                         "state": d.state,
-                        "upspeed": d.upspeed,
-                        "dlspeed": d.dlspeed,
-                        "left_time": d.left_time
+                        "upspeed": getattr(d, "upspeed", None),
+                        "dlspeed": getattr(d, "dlspeed", None),
+                        "tags": d.tags,
+                        "left_time": getattr(d, "left_time", None)
                     }
                     # 精简 media 字段
-                    if d.media:
+                    media = getattr(d, "media", None)
+                    if media:
                         simplified["media"] = {
-                            "tmdbid": d.media.get("tmdbid"),
-                            "type": media_type_to_agent(d.media.get("type")),
-                            "title": d.media.get("title"),
-                            "season": d.media.get("season"),
-                            "episode": d.media.get("episode")
+                            "tmdbid": media.get("tmdbid"),
+                            "type": media_type_to_agent(media.get("type")),
+                            "title": media.get("title"),
+                            "season": media.get("season"),
+                            "episode": media.get("episode")
                         }
                     simplified_downloads.append(simplified)
                 result_json = json.dumps(simplified_downloads, ensure_ascii=False, indent=2)

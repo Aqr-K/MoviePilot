@@ -391,6 +391,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
                                 else "downloading",
                                 dlspeed=StringUtils.str_filesize(dlspeed),
                                 upspeed=StringUtils.str_filesize(upspeed),
+                                tags=torrent.get("tags"),
                                 left_time=StringUtils.str_secends(
                                     (total_size - completed) / dlspeed
                                 )
@@ -444,6 +445,22 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
         if not server:
             return None
         return server.delete_torrents(delete_file=delete_file, ids=hashs)
+
+    def set_torrents_tag(
+        self, hashs: Union[str, list], tags: list,
+        downloader: Optional[str] = None,
+    ) -> Optional[bool]:
+        """
+        设置种子标签
+        :param hashs:  种子Hash
+        :param tags:  标签列表
+        :param downloader:  下载器
+        :return: bool
+        """
+        server: Rtorrent = self.get_instance(downloader)
+        if not server:
+            return None
+        return server.set_torrents_tag(ids=hashs, tags=tags)
 
     def start_torrents(
         self, hashs: Union[list, str], downloader: Optional[str] = None

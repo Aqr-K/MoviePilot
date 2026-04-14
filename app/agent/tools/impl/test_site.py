@@ -47,4 +47,3 @@ class TestSiteTool(MoviePilotTool):
         except Exception as e:
             logger.error(f"测试站点连通性失败: {e}", exc_info=True)
             return f"测试站点连通性时发生错误: {str(e)}"
-

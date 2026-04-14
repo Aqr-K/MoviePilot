@@ -62,4 +62,3 @@ class QueryRuleGroupsTool(MoviePilotTool):
                 "message": error_message,
                 "rule_groups": []
             }, ensure_ascii=False)
-

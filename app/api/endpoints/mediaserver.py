@@ -21,7 +21,9 @@ router = APIRouter()
 
 
 @router.get("/play/{itemid:path}", summary="在线播放")
-def play_item(itemid: str, _: schemas.TokenPayload = Depends(verify_token)) -> schemas.Response:
+def play_item(
+    itemid: str, _: schemas.TokenPayload = Depends(verify_token)
+) -> schemas.Response:
     """
     获取媒体服务器播放页面地址
     """
@@ -36,20 +38,22 @@ def play_item(itemid: str, _: schemas.TokenPayload = Depends(verify_token)) -> s
         if item:
             play_url = media_chain.get_play_url(server=name, item_id=itemid)
             if play_url:
-                return schemas.Response(success=True, data={
-                    "url": play_url
-                })
+                return schemas.Response(success=True, data={"url": play_url})
     return schemas.Response(success=False, message="未找到播放地址")
 
 
-@router.get("/exists", summary="查询本地是否存在（数据库）", response_model=schemas.Response)
-async def exists_local(title: Optional[str] = None,
-                       year: Optional[str] = None,
-                       mtype: Optional[str] = None,
-                       tmdbid: Optional[int] = None,
-                       season: Optional[int] = None,
-                       db: AsyncSession = Depends(get_async_db),
-                       _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.get(
+    "/exists", summary="查询本地是否存在（数据库）", response_model=schemas.Response
+)
+async def exists_local(
+    title: Optional[str] = None,
+    year: Optional[str] = None,
+    mtype: Optional[str] = None,
+    tmdbid: Optional[int] = None,
+    season: Optional[int] = None,
+    db: AsyncSession = Depends(get_async_db),
+    _: schemas.TokenPayload = Depends(verify_token),
+) -> Any:
     """
     判断本地是否存在
     """
@@ -63,36 +67,42 @@ async def exists_local(title: Optional[str] = None,
         title=meta.name, year=year, mtype=mtype, tmdbid=tmdbid, season=season
     )
     if exist:
-        ret_info = {
-            "id": exist.item_id
-        }
-    return schemas.Response(success=True if exist else False, data={
-        "item": ret_info
-    })
+        ret_info = {"id": exist.item_id}
+    return schemas.Response(success=True if exist else False, data={"item": ret_info})
 
 
-@router.post("/exists_remote", summary="查询已存在的剧集信息（媒体服务器）", response_model=Dict[int, list])
-def exists(media_in: schemas.MediaInfo,
-           _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.post(
+    "/exists_remote",
+    summary="查询已存在的剧集信息（媒体服务器）",
+    response_model=Dict[int, list],
+)
+def exists(
+    media_in: schemas.MediaInfo, _: schemas.TokenPayload = Depends(verify_token)
+) -> Any:
     """
     根据媒体信息查询媒体库已存在的剧集信息
     """
     # 转化为媒体信息对象
     mediainfo = MediaInfo()
     mediainfo.from_dict(media_in.model_dump())
-    existsinfo: schemas.ExistMediaInfo = MediaServerChain().media_exists(mediainfo=mediainfo)
+    existsinfo: schemas.ExistMediaInfo = MediaServerChain().media_exists(
+        mediainfo=mediainfo
+    )
     if not existsinfo:
         return {}
     if media_in.season is not None:
-        return {
-            media_in.season: existsinfo.seasons.get(media_in.season) or []
-        }
+        return {media_in.season: existsinfo.seasons.get(media_in.season) or []}
     return existsinfo.seasons
 
 
-@router.post("/notexists", summary="查询媒体库缺失信息（媒体服务器）", response_model=List[schemas.NotExistMediaInfo])
-def not_exists(media_in: schemas.MediaInfo,
-               _: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.post(
+    "/notexists",
+    summary="查询媒体库缺失信息（媒体服务器）",
+    response_model=List[schemas.NotExistMediaInfo],
+)
+def not_exists(
+    media_in: schemas.MediaInfo, _: schemas.TokenPayload = Depends(verify_token)
+) -> Any:
     """
     根据媒体信息查询缺失电影/剧集
     """
@@ -109,7 +119,9 @@ def not_exists(media_in: schemas.MediaInfo,
     # 转化为媒体信息对象
     mediainfo = MediaInfo()
     mediainfo.from_dict(media_in.model_dump())
-    exist_flag, no_exists = DownloadChain().get_no_exists_info(meta=meta, mediainfo=mediainfo)
+    exist_flag, no_exists = DownloadChain().get_no_exists_info(
+        meta=meta, mediainfo=mediainfo
+    )
     mediakey = mediainfo.tmdb_id or mediainfo.douban_id
     if mediainfo.type == MediaType.MOVIE:
         # 电影已存在时返回空列表，不存在时返回空对像列表
@@ -120,31 +132,61 @@ def not_exists(media_in: schemas.MediaInfo,
     return []
 
 
-@router.get("/latest", summary="最新入库条目", response_model=List[schemas.MediaServerPlayItem])
-def latest(server: str, count: Optional[int] = 20,
-           userinfo: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.get(
+    "/latest", summary="最新入库条目", response_model=List[schemas.MediaServerPlayItem]
+)
+def latest(
+    server: str,
+    count: Optional[int] = 20,
+    userinfo: schemas.TokenPayload = Depends(verify_token),
+) -> Any:
     """
     获取媒体服务器最新入库条目
     """
-    return MediaServerChain().latest(server=server, count=count, username=userinfo.username) or []
+    return (
+        MediaServerChain().latest(
+            server=server, count=count, username=userinfo.username
+        )
+        or []
+    )
 
 
-@router.get("/playing", summary="正在播放条目", response_model=List[schemas.MediaServerPlayItem])
-def playing(server: str, count: Optional[int] = 12,
-            userinfo: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.get(
+    "/playing", summary="正在播放条目", response_model=List[schemas.MediaServerPlayItem]
+)
+def playing(
+    server: str,
+    count: Optional[int] = 12,
+    userinfo: schemas.TokenPayload = Depends(verify_token),
+) -> Any:
     """
     获取媒体服务器正在播放条目
     """
-    return MediaServerChain().playing(server=server, count=count, username=userinfo.username) or []
+    return (
+        MediaServerChain().playing(
+            server=server, count=count, username=userinfo.username
+        )
+        or []
+    )
 
 
-@router.get("/library", summary="媒体库列表", response_model=List[schemas.MediaServerLibrary])
-def library(server: str, hidden: Optional[bool] = False,
-            userinfo: schemas.TokenPayload = Depends(verify_token)) -> Any:
+@router.get(
+    "/library", summary="媒体库列表", response_model=List[schemas.MediaServerLibrary]
+)
+def library(
+    server: str,
+    hidden: Optional[bool] = False,
+    userinfo: schemas.TokenPayload = Depends(verify_token),
+) -> Any:
     """
     获取媒体服务器媒体库列表
     """
-    return MediaServerChain().librarys(server=server, username=userinfo.username, hidden=hidden) or []
+    return (
+        MediaServerChain().librarys(
+            server=server, username=userinfo.username, hidden=hidden
+        )
+        or []
+    )
 
 
 @router.get("/clients", summary="查询可用媒体服务器", response_model=List[dict])
@@ -154,5 +196,9 @@ async def clients(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     mediaservers: List[dict] = SystemConfigOper().get(SystemConfigKey.MediaServers)
     if mediaservers:
-        return [{"name": d.get("name"), "type": d.get("type")} for d in mediaservers if d.get("enabled")]
+        return [
+            {"name": d.get("name"), "type": d.get("type")}
+            for d in mediaservers
+            if d.get("enabled")
+        ]
     return []

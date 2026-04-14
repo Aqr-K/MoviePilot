@@ -1,4 +1,4 @@
-FROM python:3.12.8-slim-bookworm AS base
+FROM python:3.12.13-slim-bookworm AS base
 
 
 # 准备软件包
@@ -67,8 +67,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.in requirements.in
 RUN python3 -m venv ${VENV_PATH} \
-    && pip install --upgrade "pip<25.0" \
-    && pip install "Cython" "pip-tools<7.5" \
+    && pip install --upgrade "pip" \
+    && pip install "Cython~=3.1.2" "pip-tools" \
     && pip-compile requirements.in \
     && pip install -r requirements.txt
 

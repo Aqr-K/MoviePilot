@@ -7,10 +7,38 @@ from pydantic import BaseModel, Field
 from app.schemas.types import ContentType, NotificationType, MessageChannel
 
 
+class MessageResponse(BaseModel):
+    """
+    消息发送响应，包含消息ID等信息用于后续编辑
+    """
+
+    # 消息ID
+    message_id: Optional[Union[str, int]] = None
+    # 聊天ID
+    chat_id: Optional[Union[str, int]] = None
+    # 消息渠道
+    channel: Optional[MessageChannel] = None
+    # 消息来源
+    source: Optional[str] = None
+    # 是否发送成功
+    success: bool = False
+
+
 class CommingMessage(BaseModel):
     """
     外来消息
     """
+
+    class MessageAttachment(BaseModel):
+        """
+        外来消息附件（非图片/非语音）
+        """
+
+        ref: str
+        name: Optional[str] = None
+        mime_type: Optional[str] = None
+        size: Optional[int] = None
+
     # 用户ID
     userid: Optional[Union[str, int]] = None
     # 用户名称
@@ -35,6 +63,12 @@ class CommingMessage(BaseModel):
     chat_id: Optional[str] = None
     # 完整的回调查询信息（原始数据）
     callback_query: Optional[Dict] = None
+    # 图片列表（图片URL或file_id）
+    images: Optional[List[str]] = None
+    # 语音/音频引用列表
+    audio_refs: Optional[List[str]] = None
+    # 文件附件列表
+    files: Optional[List[MessageAttachment]] = None
 
     def to_dict(self):
         """
@@ -51,6 +85,7 @@ class Notification(BaseModel):
     """
     消息
     """
+
     # 消息渠道
     channel: Optional[MessageChannel] = None
     # 消息来源
@@ -65,6 +100,14 @@ class Notification(BaseModel):
     text: Optional[str] = None
     # 图片
     image: Optional[str] = None
+    # 语音文件路径
+    voice_path: Optional[str] = None
+    # 本地文件路径
+    file_path: Optional[str] = None
+    # 发送时展示的文件名
+    file_name: Optional[str] = None
+    # 语音消息附带说明文字
+    voice_caption: Optional[str] = None
     # 链接
     link: Optional[str] = None
     # 用户ID
@@ -83,6 +126,8 @@ class Notification(BaseModel):
     original_message_id: Optional[Union[str, int]] = None
     # 原消息的聊天ID，用于编辑消息
     original_chat_id: Optional[str] = None
+    # 是否禁用链接预览（仅Telegram支持）
+    disable_web_page_preview: Optional[bool] = None
 
     def to_dict(self):
         """
@@ -90,8 +135,7 @@ class Notification(BaseModel):
         """
         items = self.model_dump()
         for k, v in items.items():
-            if isinstance(v, MessageChannel) \
-                    or isinstance(v, NotificationType):
+            if isinstance(v, MessageChannel) or isinstance(v, NotificationType):
                 items[k] = v.value
         return items
 
@@ -100,6 +144,7 @@ class NotificationSwitch(BaseModel):
     """
     消息开关
     """
+
     # 消息类型
     mtype: Optional[str] = None
     # 微信开关
@@ -122,6 +167,7 @@ class Subscription(BaseModel):
     """
     客户端消息订阅
     """
+
     endpoint: Optional[str] = None
     keys: Optional[dict] = Field(default_factory=dict)
 
@@ -130,6 +176,7 @@ class SubscriptionMessage(BaseModel):
     """
     客户端订阅消息体
     """
+
     title: Optional[str] = None
     body: Optional[str] = None
     icon: Optional[str] = None
@@ -141,6 +188,7 @@ class ChannelCapability(Enum):
     """
     渠道能力枚举
     """
+
     # 支持内联按钮
     INLINE_BUTTONS = "inline_buttons"
     # 支持菜单命令
@@ -166,11 +214,14 @@ class ChannelCapabilities:
     """
     渠道能力配置
     """
+
     channel: MessageChannel
     capabilities: Set[ChannelCapability]
     max_buttons_per_row: int = 5
     max_button_rows: int = 10
     max_button_text_length: int = 30
+    # 单条消息最大长度（0 表示不限制），用于流式输出时自动分段
+    max_message_length: int = 0
     fallback_enabled: bool = True
 
 
@@ -191,20 +242,22 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
-                ChannelCapability.FILE_SENDING
+                ChannelCapability.FILE_SENDING,
             },
             max_buttons_per_row=4,
             max_button_rows=10,
-            max_button_text_length=30
+            max_button_text_length=30,
+            # Telegram 文本消息限制 4096 字符，预留空间给 MarkdownV2 转义和标题
+            max_message_length=3500,
         ),
         MessageChannel.Wechat: ChannelCapabilities(
             channel=MessageChannel.Wechat,
             capabilities={
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
-                ChannelCapability.MENU_COMMANDS
+                ChannelCapability.MENU_COMMANDS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.Slack: ChannelCapabilities(
             channel=MessageChannel.Slack,
@@ -216,12 +269,15 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
-                ChannelCapability.MENU_COMMANDS
+                ChannelCapability.MENU_COMMANDS,
+                ChannelCapability.FILE_SENDING,
             },
             max_buttons_per_row=3,
             max_button_rows=8,
             max_button_text_length=25,
-            fallback_enabled=True
+            # Slack 消息限制 40000 字符，预留空间给格式化
+            max_message_length=39000,
+            fallback_enabled=True,
         ),
         MessageChannel.Discord: ChannelCapabilities(
             channel=MessageChannel.Discord,
@@ -232,56 +288,57 @@ class ChannelCapabilityManager:
                 ChannelCapability.CALLBACK_QUERIES,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
+                ChannelCapability.FILE_SENDING,
             },
             max_buttons_per_row=5,
             max_button_rows=5,
             max_button_text_length=80,
-            fallback_enabled=True
+            # Discord 消息限制 2000 字符
+            max_message_length=1800,
+            fallback_enabled=True,
         ),
         MessageChannel.SynologyChat: ChannelCapabilities(
             channel=MessageChannel.SynologyChat,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.VoceChat: ChannelCapabilities(
             channel=MessageChannel.VoceChat,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.WebPush: ChannelCapabilities(
             channel=MessageChannel.WebPush,
-            capabilities={
-                ChannelCapability.LINKS
-            },
-            fallback_enabled=True
+            capabilities={ChannelCapability.LINKS},
+            fallback_enabled=True,
         ),
         MessageChannel.Web: ChannelCapabilities(
             channel=MessageChannel.Web,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
+            fallback_enabled=True,
         ),
         MessageChannel.QQ: ChannelCapabilities(
             channel=MessageChannel.QQ,
             capabilities={
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
-                ChannelCapability.LINKS
+                ChannelCapability.LINKS,
             },
-            fallback_enabled=True
-        )
+            fallback_enabled=True,
+        ),
     }
 
     @classmethod
@@ -292,7 +349,9 @@ class ChannelCapabilityManager:
         return cls._capabilities.get(channel)
 
     @classmethod
-    def supports_capability(cls, channel: MessageChannel, capability: ChannelCapability) -> bool:
+    def supports_capability(
+        cls, channel: MessageChannel, capability: ChannelCapability
+    ) -> bool:
         """
         检查渠道是否支持某项能力
         """
@@ -352,6 +411,14 @@ class ChannelCapabilityManager:
         """
         channel_caps = cls.get_capabilities(channel)
         return channel_caps.max_button_text_length if channel_caps else 20
+
+    @classmethod
+    def get_max_message_length(cls, channel: MessageChannel) -> int:
+        """
+        获取单条消息最大长度（0 表示不限制）
+        """
+        channel_caps = cls.get_capabilities(channel)
+        return channel_caps.max_message_length if channel_caps else 0
 
     @classmethod
     def should_use_fallback(cls, channel: MessageChannel) -> bool:

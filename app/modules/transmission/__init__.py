@@ -309,6 +309,7 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                             state="paused" if torrent.status == "stopped" else "downloading",
                             dlspeed=StringUtils.str_filesize(dlspeed),
                             upspeed=StringUtils.str_filesize(upspeed),
+                            tags=",".join(torrent.labels or []),
                             left_time=StringUtils.str_secends(torrent.left_until_done / dlspeed) if dlspeed > 0 else ''
                         ))
                 finally:
@@ -352,6 +353,23 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
         if not server:
             return None
         return server.delete_torrents(delete_file=delete_file, ids=hashs)
+
+    def set_torrents_tag(self, hashs: Union[str, list], tags: list,
+                        downloader: Optional[str] = None) -> Optional[bool]:
+        """
+        设置种子标签
+        :param hashs:  种子Hash
+        :param tags:  标签列表
+        :param downloader:  下载器
+        :return: bool
+        """
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
+        if not server:
+            return None
+        # 获取原标签，TR默认会覆盖，需追加
+        org_tags = server.get_torrent_tags(ids=hashs)
+        return server.set_torrent_tag(ids=hashs, tags=tags, org_tags=org_tags)
 
     def start_torrents(self, hashs: Union[list, str],
                        downloader: Optional[str] = None) -> Optional[bool]:

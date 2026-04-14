@@ -30,12 +30,17 @@ from app.agent.tools.impl.search_torrents import SearchTorrentsTool
 from app.agent.tools.impl.get_search_results import GetSearchResultsTool
 from app.agent.tools.impl.search_web import SearchWebTool
 from app.agent.tools.impl.send_message import SendMessageTool
+from app.agent.tools.impl.send_local_file import SendLocalFileTool
+from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
 from app.agent.tools.impl.query_workflows import QueryWorkflowsTool
 from app.agent.tools.impl.run_workflow import RunWorkflowTool
 from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
 from app.agent.tools.impl.delete_download import DeleteDownloadTool
+from app.agent.tools.impl.delete_download_history import DeleteDownloadHistoryTool
+from app.agent.tools.impl.delete_transfer_history import DeleteTransferHistoryTool
+from app.agent.tools.impl.modify_download import ModifyDownloadTool
 from app.agent.tools.impl.query_directory_settings import QueryDirectorySettingsTool
 from app.agent.tools.impl.list_directory import ListDirectoryTool
 from app.agent.tools.impl.query_transfer_history import QueryTransferHistoryTool
@@ -44,6 +49,13 @@ from app.agent.tools.impl.execute_command import ExecuteCommandTool
 from app.agent.tools.impl.edit_file import EditFileTool
 from app.agent.tools.impl.write_file import WriteFileTool
 from app.agent.tools.impl.read_file import ReadFileTool
+from app.agent.tools.impl.browse_webpage import BrowseWebpageTool
+from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTool
+from app.agent.tools.impl.query_plugin_capabilities import QueryPluginCapabilitiesTool
+from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
+from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
+from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
+from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.core.plugin import PluginManager
 from app.log import logger
 from .base import MoviePilotTool
@@ -55,9 +67,15 @@ class MoviePilotToolFactory:
     """
 
     @staticmethod
-    def create_tools(session_id: str, user_id: str,
-                     channel: str = None, source: str = None, username: str = None,
-                     stream_handler: Callable = None) -> List[MoviePilotTool]:
+    def create_tools(
+        session_id: str,
+        user_id: str,
+        channel: str = None,
+        source: str = None,
+        username: str = None,
+        stream_handler: Callable = None,
+        agent_context: dict = None,
+    ) -> List[MoviePilotTool]:
         """
         创建MoviePilot工具列表
         """
@@ -85,6 +103,9 @@ class MoviePilotToolFactory:
             DeleteSubscribeTool,
             QueryDownloadTasksTool,
             DeleteDownloadTool,
+            DeleteDownloadHistoryTool,
+            DeleteTransferHistoryTool,
+            ModifyDownloadTool,
             QueryDownloadersTool,
             QuerySitesTool,
             UpdateSiteTool,
@@ -99,6 +120,8 @@ class MoviePilotToolFactory:
             QueryTransferHistoryTool,
             TransferFileTool,
             SendMessageTool,
+            SendLocalFileTool,
+            SendVoiceMessageTool,
             QuerySchedulersTool,
             RunSchedulerTool,
             QueryWorkflowsTool,
@@ -106,18 +129,23 @@ class MoviePilotToolFactory:
             ExecuteCommandTool,
             EditFileTool,
             WriteFileTool,
-            ReadFileTool
+            ReadFileTool,
+            BrowseWebpageTool,
+            QueryInstalledPluginsTool,
+            QueryPluginCapabilitiesTool,
+            RunSlashCommandTool,
+            ListSlashCommandsTool,
+            QueryCustomIdentifiersTool,
+            UpdateCustomIdentifiersTool,
         ]
         # 创建内置工具
         for ToolClass in tool_definitions:
-            tool = ToolClass(
-                session_id=session_id,
-                user_id=user_id
-            )
+            tool = ToolClass(session_id=session_id, user_id=user_id)
             tool.set_message_attr(channel=channel, source=source, username=username)
             tool.set_stream_handler(stream_handler=stream_handler)
+            tool.set_agent_context(agent_context=agent_context)
             tools.append(tool)
-        
+
         # 加载插件提供的工具
         plugin_tools_count = 0
         plugin_tools_info = PluginManager().get_plugin_agent_tools()
@@ -129,24 +157,32 @@ class MoviePilotToolFactory:
                 try:
                     # 验证工具类是否继承自 MoviePilotTool
                     if not issubclass(ToolClass, MoviePilotTool):
-                        logger.warning(f"插件 {plugin_name}({plugin_id}) 提供的工具类 {ToolClass.__name__} 未继承自 MoviePilotTool，已跳过")
+                        logger.warning(
+                            f"插件 {plugin_name}({plugin_id}) 提供的工具类 {ToolClass.__name__} 未继承自 MoviePilotTool，已跳过"
+                        )
                         continue
                     # 创建工具实例
-                    tool = ToolClass(
-                        session_id=session_id,
-                        user_id=user_id
+                    tool = ToolClass(session_id=session_id, user_id=user_id)
+                    tool.set_message_attr(
+                        channel=channel, source=source, username=username
                     )
-                    tool.set_message_attr(channel=channel, source=source, username=username)
                     tool.set_stream_handler(stream_handler=stream_handler)
+                    tool.set_agent_context(agent_context=agent_context)
                     tools.append(tool)
                     plugin_tools_count += 1
-                    logger.debug(f"成功加载插件 {plugin_name}({plugin_id}) 的工具: {ToolClass.__name__}")
+                    logger.debug(
+                        f"成功加载插件 {plugin_name}({plugin_id}) 的工具: {ToolClass.__name__}"
+                    )
                 except Exception as e:
-                    logger.error(f"加载插件 {plugin_name}({plugin_id}) 的工具 {ToolClass.__name__} 失败: {str(e)}")
-        
+                    logger.error(
+                        f"加载插件 {plugin_name}({plugin_id}) 的工具 {ToolClass.__name__} 失败: {str(e)}"
+                    )
+
         builtin_tools_count = len(tool_definitions)
         if plugin_tools_count > 0:
-            logger.info(f"成功创建 {len(tools)} 个MoviePilot工具（内置工具: {builtin_tools_count} 个，插件工具: {plugin_tools_count} 个）")
+            logger.info(
+                f"成功创建 {len(tools)} 个MoviePilot工具（内置工具: {builtin_tools_count} 个，插件工具: {plugin_tools_count} 个）"
+            )
         else:
             logger.info(f"成功创建 {len(tools)} 个MoviePilot工具")
         return tools

@@ -409,7 +409,7 @@ class TrimeMedia:
                     return lib
         return None
 
-    def get_webhook_message(self, body: any) -> Optional[schemas.WebhookEventInfo]:
+    def get_webhook_message(self, body: Any) -> Optional[schemas.WebhookEventInfo]:
         pass
 
     def get_iteminfo(self, itemid: str) -> Optional[schemas.MediaServerItem]:

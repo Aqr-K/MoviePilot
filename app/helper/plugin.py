@@ -49,9 +49,27 @@ class PluginHelper(metaclass=WeakSingleton):
                 if self.install_report():
                     self.systemconfig.set(SystemConfigKey.PluginInstallReport, "1")
 
+    @staticmethod
+    def __parse_plugin_index_response(content: str) -> Optional[Dict[str, dict]]:
+        """
+        解析插件索引响应，仅缓存成功解析出的字典结果。
+        """
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            if "404: Not Found" not in content:
+                logger.warn(f"插件包数据解析失败：{content}")
+            return None
+
+        if not isinstance(payload, dict):
+            logger.warn(f"插件包数据格式不正确，期望 dict，实际为 {type(payload).__name__}")
+            return None
+
+        return payload
+
     @cached(maxsize=128, ttl=1800)
     def get_plugins(self, repo_url: str,
-                         package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
+                    package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
         """
         获取Github所有最新插件列表
         :param repo_url: Github仓库地址
@@ -70,15 +88,11 @@ class PluginHelper(metaclass=WeakSingleton):
         res = self.__request_with_fallback(package_url, headers=settings.REPO_GITHUB_HEADERS(repo=f"{user}/{repo}"))
         if res is None:
             return None
-        if res:
-            content = res.text
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                if "404: Not Found" not in content:
-                    logger.warn(f"插件包数据解析失败：{content}")
-                    return None
-        return {}
+        if res.status_code == 404:
+            return {}
+        if res.status_code != 200:
+            return None
+        return self.__parse_plugin_index_response(res.text)
 
     def get_plugin_package_version(self, pid: str, repo_url: str,
                                    package_version: Optional[str] = None) -> Optional[str]:
@@ -136,7 +150,7 @@ class PluginHelper(metaclass=WeakSingleton):
         if not settings.PLUGIN_STATISTIC_SHARE:
             return {}
         res = RequestUtils(proxies=settings.PROXY, timeout=10).get_res(self._install_statistic)
-        if res and res.status_code == 200:
+        if res is not None and res.status_code == 200:
             return res.json()
         return {}
 
@@ -157,7 +171,7 @@ class PluginHelper(metaclass=WeakSingleton):
             "plugin_id": pid,
             "repo_url": repo_url
         })
-        if res and res.status_code == 200:
+        if res is not None and res.status_code == 200:
             return True
         return False
 
@@ -182,7 +196,7 @@ class PluginHelper(metaclass=WeakSingleton):
                            content_type="application/json",
                            timeout=5).post(self._install_report,
                                            json={"plugins": payload_plugins})
-        return True if res else False
+        return bool(res is not None and res.status_code == 200)
 
     def install(self, pid: str, repo_url: str, package_version: Optional[str] = None, force_install: bool = False) \
             -> Tuple[bool, str]:
@@ -444,23 +458,63 @@ class PluginHelper(metaclass=WeakSingleton):
         if plugin_dir.exists():
             shutil.rmtree(plugin_dir, ignore_errors=True)
 
+    def __collect_plugin_wheels_dirs(self) -> List[Path]:
+        """
+        收集已安装插件目录下可用的 wheels 目录，供批量依赖安装时复用。
+        """
+        wheels_dirs = []
+        try:
+            install_plugins = {
+                plugin_id.lower()
+                for plugin_id in self.systemconfig.get(SystemConfigKey.UserInstalledPlugins) or []
+            }
+            for plugin_id in install_plugins:
+                wheels_dir = PLUGIN_DIR / plugin_id / "wheels"
+                if wheels_dir.is_dir():
+                    wheels_dirs.append(wheels_dir)
+        except Exception as e:
+            logger.error(f"收集插件 wheels 目录时发生错误：{e}")
+            return []
+
+        # 去重并保持稳定顺序，避免重复传递相同目录
+        return list(dict.fromkeys(wheels_dirs))
+
     @staticmethod
-    def pip_install_with_fallback(requirements_file: Path) -> Tuple[bool, str]:
+    def pip_install_with_fallback(requirements_file: Path,
+                                  find_links_dirs: Optional[List[Path]] = None) -> Tuple[bool, str]:
         """
         使用自动降级策略安装依赖，并确保新安装的包可被动态导入
         :param requirements_file: 依赖的 requirements.txt 文件路径
+        :param find_links_dirs: 额外的本地 wheels 目录列表
         :return: (是否成功, 错误信息)
         """
         wheels_dir = requirements_file.parent / "wheels"
+        candidate_dirs = []
+        if wheels_dir.is_dir():
+            candidate_dirs.append(wheels_dir)
+        if find_links_dirs:
+            candidate_dirs.extend(find_links_dirs)
+
+        # 去重并保持传入顺序
+        resolved_dirs = []
+        seen_dirs = set()
+        for candidate_dir in candidate_dirs:
+            candidate_path = Path(candidate_dir)
+            if not candidate_path.is_dir():
+                continue
+            candidate_key = str(candidate_path.resolve())
+            if candidate_key in seen_dirs:
+                continue
+            seen_dirs.add(candidate_key)
+            resolved_dirs.append(candidate_path)
 
         find_links_option = []
-        if wheels_dir.is_dir():
-            # 如果目录存在，增加 --find-links 选项
-            logger.debug(f"[PIP] 发现插件内嵌的 wheels 目录: {wheels_dir}，将优先从本地安装。")
-            find_links_option = ["--find-links", str(wheels_dir)]
+        if resolved_dirs:
+            for local_wheels_dir in resolved_dirs:
+                logger.debug(f"[PIP] 发现可用的 wheels 目录: {local_wheels_dir}，将优先从本地安装。")
+                find_links_option.extend(["--find-links", str(local_wheels_dir)])
         else:
-            # 如果不存在，选项为空列表，对后续命令无影响
-            logger.debug(f"[PIP] 未发现插件内嵌的 wheels 目录，将仅使用在线源。")
+            logger.debug(f"[PIP] 未发现可用的 wheels 目录，将仅使用在线源。")
 
         base_cmd = [sys.executable, "-m", "pip", "install"] + find_links_option + ["-r", str(requirements_file)]
         strategies = []
@@ -719,7 +773,8 @@ class PluginHelper(metaclass=WeakSingleton):
                     f.write(dep + "\n")
             try:
                 # 使用自动降级策略安装依赖
-                return self.pip_install_with_fallback(requirements_temp_file)
+                wheels_dirs = self.__collect_plugin_wheels_dirs()
+                return self.pip_install_with_fallback(requirements_temp_file, wheels_dirs)
             finally:
                 # 删除临时文件
                 requirements_temp_file.unlink()
@@ -922,7 +977,7 @@ class PluginHelper(metaclass=WeakSingleton):
 
     @cached(maxsize=128, ttl=1800)
     async def async_get_plugins(self, repo_url: str,
-                                     package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
+                                package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
         """
         异步获取Github所有最新插件列表
         :param repo_url: Github仓库地址
@@ -942,15 +997,11 @@ class PluginHelper(metaclass=WeakSingleton):
                                                        headers=settings.REPO_GITHUB_HEADERS(repo=f"{user}/{repo}"))
         if res is None:
             return None
-        if res:
-            content = res.text
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                if "404: Not Found" not in content:
-                    logger.warn(f"插件包数据解析失败：{content}")
-                    return None
-        return {}
+        if res.status_code == 404:
+            return {}
+        if res.status_code != 200:
+            return None
+        return self.__parse_plugin_index_response(res.text)
 
     async def async_get_statistic(self) -> Dict:
         """
@@ -959,7 +1010,7 @@ class PluginHelper(metaclass=WeakSingleton):
         if not settings.PLUGIN_STATISTIC_SHARE:
             return {}
         res = await AsyncRequestUtils(proxies=settings.PROXY, timeout=10).get_res(self._install_statistic)
-        if res and res.status_code == 200:
+        if res is not None and res.status_code == 200:
             return res.json()
         return {}
 
@@ -980,7 +1031,7 @@ class PluginHelper(metaclass=WeakSingleton):
             "plugin_id": pid,
             "repo_url": repo_url
         })
-        if res and res.status_code == 200:
+        if res is not None and res.status_code == 200:
             return True
         return False
 
@@ -1005,7 +1056,7 @@ class PluginHelper(metaclass=WeakSingleton):
                                       content_type="application/json",
                                       timeout=5).post(self._install_report,
                                                       json={"plugins": payload_plugins})
-        return True if res else False
+        return bool(res is not None and res.status_code == 200)
 
     async def __async_get_file_list(self, pid: str, user_repo: str, package_version: Optional[str] = None) -> \
             Tuple[Optional[list], Optional[str]]:
@@ -1237,7 +1288,8 @@ class PluginHelper(metaclass=WeakSingleton):
 
             try:
                 # 使用自动降级策略安装依赖
-                return self.pip_install_with_fallback(Path(requirements_temp_file))
+                wheels_dirs = self.__collect_plugin_wheels_dirs()
+                return self.pip_install_with_fallback(Path(requirements_temp_file), wheels_dirs)
             finally:
                 # 删除临时文件
                 await requirements_temp_file.unlink()

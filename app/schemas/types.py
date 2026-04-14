@@ -156,6 +156,8 @@ class ChainEventType(Enum):
     TransferRename = "transfer.rename"
     # 整理拦截
     TransferIntercept = "transfer.intercept"
+    # 整理覆盖检查
+    TransferOverwriteCheck = "transfer.overwrite.check"
     # 资源选择
     ResourceSelection = "resource.selection"
     # 资源下载
@@ -276,6 +278,8 @@ class NotificationType(Enum):
     Manual = "手动处理"
     # 插件消息
     Plugin = "插件"
+    # 智能体消息
+    Agent = "智能体"
     # 其它消息
     Other = "其它"
 

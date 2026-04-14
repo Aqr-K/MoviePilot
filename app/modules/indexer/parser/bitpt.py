@@ -111,7 +111,7 @@ class BitptSiteUserInfo(SiteParserBase):
     def _parse_message_content(self, html_text) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         pass
 
-    def _parse_user_torrent_seeding_info(self, html_text: str):
+    def _parse_user_torrent_seeding_info(self, html_text: str, **kwargs):
         pass
 
     def parse(self):

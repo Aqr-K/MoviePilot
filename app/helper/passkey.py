@@ -22,7 +22,6 @@ from webauthn.helpers.structs import (
     PublicKeyCredentialDescriptor,
     AuthenticatorTransport,
     UserVerificationRequirement,
-    AuthenticatorAttachment,
     ResidentKeyRequirement,
     AuthenticatorSelectionCriteria
 )

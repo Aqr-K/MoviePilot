@@ -1,6 +1,7 @@
 import re
 from threading import Lock
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Tuple
 from urllib.parse import quote
 
 import requests
@@ -12,6 +13,7 @@ from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
 from app.log import logger
+from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
 lock = Lock()
@@ -22,6 +24,7 @@ class Slack:
     _service: SocketModeHandler = None
     _ds_url = f"http://127.0.0.1:{settings.PORT}/api/v1/message?token={settings.API_TOKEN}"
     _channel = ""
+    _oauth_token = ""
 
     def __init__(self, SLACK_OAUTH_TOKEN: Optional[str] = None, SLACK_APP_TOKEN: Optional[str] = None,
                  SLACK_CHANNEL: Optional[str] = None, **kwargs):
@@ -40,6 +43,7 @@ class Slack:
 
         self._client = slack_app.client
         self._channel = SLACK_CHANNEL
+        self._oauth_token = SLACK_OAUTH_TOKEN
 
         # 标记消息来源
         if kwargs.get("name"):
@@ -101,6 +105,28 @@ class Slack:
         获取状态
         """
         return True if self._client else False
+
+    def download_file(self, file_url: str) -> Optional[Tuple[bytes, str]]:
+        """
+        下载Slack私有文件
+        :param file_url: Slack文件URL
+        :return: (文件内容, MIME类型)
+        """
+        if not self._client or not self._oauth_token or not file_url:
+            return None
+        try:
+            headers = {
+                "Authorization": f"Bearer {self._oauth_token}",
+                "User-Agent": settings.USER_AGENT,
+                "Accept": "*/*",
+            }
+            resp = RequestUtils(headers=headers, timeout=30).get_res(file_url)
+            if resp and resp.content:
+                mime_type = resp.headers.get("Content-Type", "image/jpeg")
+                return resp.content, mime_type.split(";")[0]
+        except Exception as e:
+            logger.error(f"下载Slack文件失败: {e}")
+        return None
 
     def send_msg(self, title: str, text: Optional[str] = None,
                  image: Optional[str] = None, link: Optional[str] = None,
@@ -220,6 +246,48 @@ class Slack:
         except Exception as msg_e:
             logger.error(f"Slack消息发送失败: {msg_e}")
             return False, str(msg_e)
+
+    def send_file(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        text: Optional[str] = None,
+        userid: Optional[str] = None,
+        file_name: Optional[str] = None,
+    ):
+        """
+        发送本地文件到 Slack。
+        """
+        if not self._client:
+            return False, "消息客户端未就绪"
+        if not file_path:
+            return False, "文件路径不能为空"
+
+        local_file = Path(file_path)
+        if not local_file.exists() or not local_file.is_file():
+            return False, f"文件不存在: {local_file}"
+
+        try:
+            if userid:
+                channel = userid
+            else:
+                channel = self.__find_public_channel()
+
+            comment_parts = [part for part in [title, text] if part]
+            initial_comment = "\n".join(comment_parts) if comment_parts else None
+
+            with local_file.open("rb") as fp:
+                result = self._client.files_upload_v2(
+                    channel=channel,
+                    file=fp,
+                    filename=file_name or local_file.name,
+                    title=title or (file_name or local_file.name),
+                    initial_comment=initial_comment,
+                )
+            return True, result
+        except Exception as err:
+            logger.error(f"Slack文件发送失败: {err}")
+            return False, str(err)
 
     def send_medias_msg(self, medias: List[MediaInfo], userid: Optional[str] = None, title: Optional[str] = None,
                         buttons: Optional[List[List[dict]]] = None,

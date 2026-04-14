@@ -120,8 +120,8 @@ class ListDirectoryTool(MoviePilotTool):
             result_json = json.dumps(simplified_items, ensure_ascii=False, indent=2)
             
             # 如果结果被裁剪，添加提示信息
-            if total_count > 20:
-                return f"注意：目录中共有 {total_count} 个项目，为节省上下文空间，仅显示前 20 个项目。\n\n{result_json}"
+            if total_count > 100:
+                return f"注意：目录中共有 {total_count} 个项目，为节省上下文空间，仅显示前 100 个项目。\n\n{result_json}"
             else:
                 return result_json
         except Exception as e:

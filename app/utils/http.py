@@ -161,7 +161,7 @@ class RequestUtils:
             response = self.request(method=method, url=url, **kwargs)
             yield response
         finally:
-            if response:
+            if response is not None:
                 try:
                     response.close()
                 except Exception as e:
@@ -206,16 +206,18 @@ class RequestUtils:
         :return: 响应的内容，若发生RequestException则返回None
         """
         response = self.request(method="get", url=url, params=params, **kwargs)
-        if response:
-            try:
-                content = str(response.content, "utf-8")
-                return content
-            except Exception as e:
-                logger.debug(f"处理响应内容失败: {e}")
-                return None
-            finally:
+        try:
+            if response:
+                try:
+                    content = str(response.content, "utf-8")
+                    return content
+                except Exception as e:
+                    logger.debug(f"处理响应内容失败: {e}")
+                    return None
+            return None
+        finally:
+            if response is not None:
                 response.close()
-        return None
 
     def post(self, url: str, data: Any = None, json: dict = None, **kwargs) -> Optional[Response]:
         """
@@ -280,7 +282,7 @@ class RequestUtils:
         try:
             yield response
         finally:
-            if response:
+            if response is not None:
                 response.close()
 
     def post_res(self,
@@ -382,16 +384,18 @@ class RequestUtils:
         :return: JSON数据，若发生异常则返回None
         """
         response = self.request(method="get", url=url, params=params, **kwargs)
-        if response:
-            try:
-                data = response.json()
-                return data
-            except Exception as e:
-                logger.debug(f"解析JSON失败: {e}")
-                return None
-            finally:
+        try:
+            if response:
+                try:
+                    data = response.json()
+                    return data
+                except Exception as e:
+                    logger.debug(f"解析JSON失败: {e}")
+                    return None
+            return None
+        finally:
+            if response is not None:
                 response.close()
-        return None
 
     def post_json(self, url: str, data: Any = None, json: dict = None, **kwargs) -> Optional[dict]:
         """
@@ -405,16 +409,18 @@ class RequestUtils:
         if json is None:
             json = {}
         response = self.request(method="post", url=url, data=data, json=json, **kwargs)
-        if response:
-            try:
-                data = response.json()
-                return data
-            except Exception as e:
-                logger.debug(f"解析JSON失败: {e}")
-                return None
-            finally:
+        try:
+            if response:
+                try:
+                    data = response.json()
+                    return data
+                except Exception as e:
+                    logger.debug(f"解析JSON失败: {e}")
+                    return None
+            return None
+        finally:
+            if response is not None:
                 response.close()
-        return None
 
     @staticmethod
     def parse_cache_control(header: str) -> Tuple[str, Optional[int]]:
@@ -654,7 +660,7 @@ class AsyncRequestUtils:
             response = await self.request(method=method, url=url, **kwargs)
             yield response
         finally:
-            if response:
+            if response is not None:
                 try:
                     await response.aclose()
                 except Exception as e:
@@ -711,16 +717,18 @@ class AsyncRequestUtils:
         :return: 响应的内容，若发生RequestError则返回None
         """
         response = await self.request(method="get", url=url, params=params, **kwargs)
-        if response:
-            try:
-                content = response.text
-                return content
-            except Exception as e:
-                logger.debug(f"处理异步响应内容失败: {e}")
-                return None
-            finally:
-                await response.aclose()  # 确保连接被关闭
-        return None
+        try:
+            if response:
+                try:
+                    content = response.text
+                    return content
+                except Exception as e:
+                    logger.debug(f"处理异步响应内容失败: {e}")
+                    return None
+            return None
+        finally:
+            if response is not None:
+                await response.aclose()
 
     async def post(self, url: str, data: Any = None, json: dict = None, **kwargs) -> Optional[httpx.Response]:
         """
@@ -785,7 +793,7 @@ class AsyncRequestUtils:
         try:
             yield response
         finally:
-            if response:
+            if response is not None:
                 await response.aclose()
 
     async def post_res(self,
@@ -887,16 +895,18 @@ class AsyncRequestUtils:
         :return: JSON数据，若发生异常则返回None
         """
         response = await self.request(method="get", url=url, params=params, **kwargs)
-        if response:
-            try:
-                data = response.json()
-                return data
-            except Exception as e:
-                logger.debug(f"解析异步JSON失败: {e}")
-                return None
-            finally:
+        try:
+            if response:
+                try:
+                    data = response.json()
+                    return data
+                except Exception as e:
+                    logger.debug(f"解析异步JSON失败: {e}")
+                    return None
+            return None
+        finally:
+            if response is not None:
                 await response.aclose()
-        return None
 
     async def post_json(self, url: str, data: Any = None, json: dict = None, **kwargs) -> Optional[dict]:
         """
@@ -910,13 +920,15 @@ class AsyncRequestUtils:
         if json is None:
             json = {}
         response = await self.request(method="post", url=url, data=data, json=json, **kwargs)
-        if response:
-            try:
-                data = response.json()
-                return data
-            except Exception as e:
-                logger.debug(f"解析异步JSON失败: {e}")
-                return None
-            finally:
+        try:
+            if response:
+                try:
+                    data = response.json()
+                    return data
+                except Exception as e:
+                    logger.debug(f"解析异步JSON失败: {e}")
+                    return None
+            return None
+        finally:
+            if response is not None:
                 await response.aclose()
-        return None

@@ -40,6 +40,7 @@ class DownloadingTorrent(BaseModel):
     state: Optional[str] = 'downloading'
     upspeed: Optional[str] = None
     dlspeed: Optional[str] = None
+    tags: Optional[str] = None
     media: Optional[dict] = Field(default_factory=dict)
     userid: Optional[str] = None
     username: Optional[str] = None

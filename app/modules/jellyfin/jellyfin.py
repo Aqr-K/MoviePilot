@@ -569,7 +569,7 @@ class Jellyfin:
             logger.error(f"连接Library/Refresh出错：" + str(e))
             return False
 
-    def get_webhook_message(self, body: any) -> Optional[schemas.WebhookEventInfo]:
+    def get_webhook_message(self, body: Any) -> Optional[schemas.WebhookEventInfo]:
         """
         解析Jellyfin报文
         {
