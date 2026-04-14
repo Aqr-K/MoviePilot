@@ -121,7 +121,7 @@ class LLMHelper:
 
         # 检查是否有profile
         if hasattr(model, "profile") and model.profile:
-            logger.info(f"使用LLM模型: {model.model}，Profile: {model.profile}")
+            logger.debug(f"使用LLM模型: {model.model}，Profile: {model.profile}")
         else:
             model.profile = {
                 "max_input_tokens": settings.LLM_MAX_CONTEXT_TOKENS
