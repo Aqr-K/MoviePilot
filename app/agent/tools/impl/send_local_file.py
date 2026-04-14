@@ -1,0 +1,107 @@
+"""发送本地附件工具。"""
+
+from pathlib import Path
+from typing import Optional, Type
+
+from pydantic import BaseModel, Field, model_validator
+
+from app.agent.tools.base import MoviePilotTool, ToolChain
+from app.log import logger
+from app.schemas import Notification, NotificationType
+from app.schemas.message import ChannelCapabilityManager, ChannelCapability
+from app.schemas.types import MessageChannel
+
+
+class SendLocalFileInput(BaseModel):
+    """发送本地附件工具输入。"""
+
+    explanation: str = Field(
+        ...,
+        description="Clear explanation of why sending this local file helps the user",
+    )
+    file_path: str = Field(
+        ...,
+        description="Absolute path to the local image or file to send to the user",
+    )
+    message: Optional[str] = Field(
+        None,
+        description="Optional message or caption to send with the attachment",
+    )
+    title: Optional[str] = Field(
+        None,
+        description="Optional short title shown together with the attachment",
+    )
+    file_name: Optional[str] = Field(
+        None,
+        description="Optional override filename presented to the user when downloading",
+    )
+
+    @model_validator(mode="after")
+    def validate_file_path(self):
+        if not self.file_path:
+            raise ValueError("file_path 不能为空")
+        return self
+
+
+class SendLocalFileTool(MoviePilotTool):
+    name: str = "send_local_file"
+    description: str = (
+        "Send a local image or file from the server filesystem to the current user. "
+        "Use this when you have generated or identified a local file the user should download."
+    )
+    args_schema: Type[BaseModel] = SendLocalFileInput
+    require_admin: bool = False
+
+    def get_tool_message(self, **kwargs) -> Optional[str]:
+        file_path = kwargs.get("file_path", "")
+        file_name = Path(file_path).name if file_path else "未知文件"
+        return f"正在发送本地附件: {file_name}"
+
+    async def run(
+        self,
+        file_path: str,
+        message: Optional[str] = None,
+        title: Optional[str] = None,
+        file_name: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        if not self._channel or not self._source:
+            return "当前不在可回传消息的会话中，无法发送附件"
+
+        try:
+            channel = MessageChannel(self._channel)
+        except ValueError:
+            return f"不支持的消息渠道: {self._channel}"
+
+        if not ChannelCapabilityManager.supports_capability(
+            channel, ChannelCapability.FILE_SENDING
+        ):
+            return f"当前渠道 {channel.value} 暂不支持发送本地文件"
+
+        resolved_path = Path(file_path).expanduser()
+        if not resolved_path.is_absolute():
+            resolved_path = resolved_path.resolve()
+        if not resolved_path.exists() or not resolved_path.is_file():
+            return f"文件不存在: {resolved_path}"
+
+        logger.info(
+            "执行工具: %s, channel=%s, file=%s",
+            self.name,
+            channel.value,
+            resolved_path,
+        )
+
+        await ToolChain().async_post_message(
+            Notification(
+                channel=channel,
+                source=self._source,
+                mtype=NotificationType.Agent,
+                userid=self._user_id,
+                username=self._username,
+                title=title,
+                text=message,
+                file_path=str(resolved_path),
+                file_name=file_name or resolved_path.name,
+            )
+        )
+        return "本地附件已发送"

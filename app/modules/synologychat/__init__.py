@@ -125,15 +125,17 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
             user_name = message.get("username")
             images = self._extract_images(message)
             audio_refs = self._extract_audio_refs(message)
-            if (text or images or audio_refs) and user_id:
+            files = self._extract_files(message)
+            if (text or images or audio_refs or files) and user_id:
                 logger.info(
                     f"收到来自 {client_config.name} 的SynologyChat消息："
                     f"userid={user_id}, username={user_name}, text={text}, "
-                    f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}"
+                    f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}, "
+                    f"files={len(files) if files else 0}"
                 )
                 return CommingMessage(channel=MessageChannel.SynologyChat, source=client_config.name,
                                       userid=user_id, username=user_name, text=text or "",
-                                      images=images, audio_refs=audio_refs)
+                                      images=images, audio_refs=audio_refs, files=files)
         except Exception as err:
             logger.debug(f"解析SynologyChat消息失败：{str(err)}")
         return None
@@ -229,6 +231,56 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
         return lowered.startswith("http") and any(
             suffix in lowered for suffix in cls._AUDIO_SUFFIXES
         )
+
+    @classmethod
+    def _extract_files(
+        cls, message: dict
+    ) -> Optional[List[CommingMessage.MessageAttachment]]:
+        files = []
+        for key in ("attachments", "files"):
+            raw_value = message.get(key)
+            if not raw_value:
+                continue
+            try:
+                parsed = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+            except Exception:
+                parsed = raw_value
+            items = parsed if isinstance(parsed, list) else [parsed]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url") or item.get("file_url") or item.get("download_url")
+                if not isinstance(url, str) or not url.startswith("http"):
+                    continue
+                content_type = (
+                    item.get("content_type") or item.get("mime_type") or ""
+                ).lower()
+                name = (item.get("name") or item.get("filename") or "").lower()
+                is_image = content_type.startswith("image/") or name.endswith(
+                    cls._IMAGE_SUFFIXES
+                ) or cls._looks_like_image(url)
+                is_audio = content_type.startswith("audio/") or name.endswith(
+                    cls._AUDIO_SUFFIXES
+                ) or cls._looks_like_audio(url)
+                if is_image or is_audio:
+                    continue
+                files.append(
+                    CommingMessage.MessageAttachment(
+                        ref=f"synology://file/{quote(url, safe='')}",
+                        name=item.get("name") or item.get("filename"),
+                        mime_type=item.get("content_type") or item.get("mime_type"),
+                        size=item.get("size"),
+                    )
+                )
+
+        deduped = []
+        seen_refs = set()
+        for file_item in files:
+            if file_item.ref in seen_refs:
+                continue
+            seen_refs.add(file_item.ref)
+            deduped.append(file_item)
+        return deduped or None
 
     def download_synologychat_file_bytes(self, file_ref: str, source: str) -> Optional[bytes]:
         """

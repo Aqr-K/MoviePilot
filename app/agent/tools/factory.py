@@ -30,6 +30,7 @@ from app.agent.tools.impl.search_torrents import SearchTorrentsTool
 from app.agent.tools.impl.get_search_results import GetSearchResultsTool
 from app.agent.tools.impl.search_web import SearchWebTool
 from app.agent.tools.impl.send_message import SendMessageTool
+from app.agent.tools.impl.send_local_file import SendLocalFileTool
 from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
@@ -119,6 +120,7 @@ class MoviePilotToolFactory:
             QueryTransferHistoryTool,
             TransferFileTool,
             SendMessageTool,
+            SendLocalFileTool,
             SendVoiceMessageTool,
             QuerySchedulersTool,
             RunSchedulerTool,

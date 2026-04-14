@@ -507,6 +507,70 @@ class Telegram:
             except Exception as cleanup_err:
                 logger.debug(f"清理语音临时文件失败: {cleanup_err}")
 
+    def send_file(
+            self,
+            file_path: str,
+            userid: Optional[str] = None,
+            title: Optional[str] = None,
+            text: Optional[str] = None,
+            file_name: Optional[str] = None,
+            original_chat_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        发送本地图片或文件给 Telegram 用户。
+        """
+        if not self._bot or not file_path:
+            return None
+
+        local_file = Path(file_path)
+        if not local_file.exists() or not local_file.is_file():
+            logger.error(f"附件文件不存在: {local_file}")
+            return {"success": False}
+
+        chat_id = self._determine_target_chat_id(userid, original_chat_id)
+        send_name = file_name or local_file.name
+        suffix = local_file.suffix.lower()
+        is_image = suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+        try:
+            bold_title = (
+                f"**{standardize(title).removesuffix('\n')}**" if title else None
+            )
+            if bold_title and text:
+                caption = f"{bold_title}\n{text}"
+            elif bold_title:
+                caption = bold_title
+            else:
+                caption = text or ""
+
+            with local_file.open("rb") as fp:
+                if is_image:
+                    sent = self._bot.send_photo(
+                        chat_id=chat_id,
+                        photo=fp,
+                        caption=standardize(caption) if caption else None,
+                        parse_mode="MarkdownV2" if caption else None,
+                    )
+                else:
+                    sent = self._bot.send_document(
+                        chat_id=chat_id,
+                        document=(send_name, fp),
+                        caption=standardize(caption) if caption else None,
+                        parse_mode="MarkdownV2" if caption else None,
+                    )
+            self._stop_typing_task(chat_id)
+            if sent and hasattr(sent, "message_id"):
+                return {
+                    "success": True,
+                    "message_id": sent.message_id,
+                    "chat_id": sent.chat.id if hasattr(sent, "chat") else chat_id,
+                }
+            return {"success": bool(sent)}
+        except Exception as err:
+            logger.error(f"发送本地附件失败: {err}")
+            self._stop_typing_task(chat_id)
+            return {"success": False}
+
     def _determine_target_chat_id(
             self, userid: Optional[str] = None, original_chat_id: Optional[str] = None
     ) -> str:

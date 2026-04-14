@@ -133,6 +133,7 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
             content = detail.get("content")
             images = self._extract_images(detail)
             audio_refs = self._extract_audio_refs(detail)
+            files = self._extract_files(detail)
             text = None
             if content_type in ("text/plain", "text/markdown") and isinstance(content, str):
                 text = content
@@ -147,15 +148,15 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
                 userid = f"UID#{msg_body.get('from_uid')}"
 
             # 处理消息内容
-            if (text or images or audio_refs) and userid:
+            if (text or images or audio_refs or files) and userid:
                 logger.info(
                     f"收到来自 {client_config.name} 的VoceChat消息："
                     f"userid={userid}, text={text}, images={len(images) if images else 0}, "
-                    f"audios={len(audio_refs) if audio_refs else 0}"
+                    f"audios={len(audio_refs) if audio_refs else 0}, files={len(files) if files else 0}"
                 )
                 return CommingMessage(channel=MessageChannel.VoceChat, source=client_config.name,
                                       userid=userid, username=userid, text=text or "",
-                                      images=images, audio_refs=audio_refs)
+                                      images=images, audio_refs=audio_refs, files=files)
         except Exception as err:
             logger.error(f"VoceChat消息处理发生错误：{str(err)}")
         return None
@@ -228,6 +229,51 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
         if isinstance(file_path, str) and file_path:
             return [f"vocechat://file/{quote(file_path, safe='')}"]
         return None
+
+    @classmethod
+    def _extract_files(
+        cls, detail: dict
+    ) -> Optional[List[CommingMessage.MessageAttachment]]:
+        content_type = detail.get("content_type") or ""
+        if content_type != "vocechat/file":
+            return None
+        properties = detail.get("properties") or {}
+        mime_type = (
+            properties.get("content_type")
+            or properties.get("mime_type")
+            or properties.get("contentType")
+            or ""
+        ).lower()
+        file_path = (
+            properties.get("path")
+            or properties.get("file_path")
+            or properties.get("storage_path")
+            or detail.get("content")
+        )
+        file_name = (
+            properties.get("name")
+            or properties.get("filename")
+            or (str(file_path).rsplit("/", 1)[-1] if file_path else "")
+        )
+        lowered_name = str(file_name).lower()
+        is_image = mime_type.startswith("image/") or lowered_name.endswith(
+            cls._IMAGE_SUFFIXES
+        )
+        is_audio = mime_type.startswith("audio/") or lowered_name.endswith(
+            cls._AUDIO_SUFFIXES
+        )
+        if is_image or is_audio or not isinstance(file_path, str) or not file_path:
+            return None
+        return [
+            CommingMessage.MessageAttachment(
+                ref=f"vocechat://file/{quote(file_path, safe='')}",
+                name=file_name,
+                mime_type=properties.get("content_type")
+                or properties.get("mime_type")
+                or properties.get("contentType"),
+                size=properties.get("size"),
+            )
+        ]
 
     def post_message(self, message: Notification, **kwargs) -> None:
         """

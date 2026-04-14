@@ -221,12 +221,14 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         if msg_json:
             images = None
             audio_refs = None
+            files = None
             if msg_json.get("type") == "message":
                 userid = msg_json.get("user")
                 text = msg_json.get("text")
                 username = msg_json.get("user")
                 images = self._extract_images(msg_json)
                 audio_refs = self._extract_audio_refs(msg_json)
+                files = self._extract_files(msg_json)
             elif msg_json.get("type") == "block_actions":
                 userid = msg_json.get("user", {}).get("id")
                 callback_data = msg_json.get("actions")[0].get("value")
@@ -270,6 +272,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 username = ""
                 images = self._extract_images(msg_json.get("event", {}))
                 audio_refs = self._extract_audio_refs(msg_json.get("event", {}))
+                files = self._extract_files(msg_json.get("event", {}))
             elif msg_json.get("type") == "shortcut":
                 userid = msg_json.get("user", {}).get("id")
                 text = msg_json.get("callback_id")
@@ -282,7 +285,8 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 return None
             logger.info(
                 f"收到来自 {client_config.name} 的Slack消息：userid={userid}, username={username}, "
-                f"text={text}, images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}"
+                f"text={text}, images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}, "
+                f"files={len(files) if files else 0}"
             )
             return CommingMessage(
                 channel=MessageChannel.Slack,
@@ -292,6 +296,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 text=text,
                 images=images,
                 audio_refs=audio_refs,
+                files=files,
             )
         return None
 
@@ -340,6 +345,48 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 if url:
                     audio_refs.append(f"slack://file/{quote(url, safe='')}")
         return audio_refs if audio_refs else None
+
+    @classmethod
+    def _extract_files(
+        cls, msg_json: dict
+    ) -> Optional[List[CommingMessage.MessageAttachment]]:
+        """
+        从 Slack 消息中提取非图片/非音频文件。
+        """
+        files = msg_json.get("files", [])
+        if not files:
+            return None
+
+        attachments = []
+        for file in files:
+            file_type = str(file.get("type", "")).lower()
+            file_ext = f".{str(file.get('filetype', '')).lower().lstrip('.')}"
+            mime_type = str(file.get("mimetype", "")).lower()
+            is_image = (
+                file_type == "image"
+                or file_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+                or mime_type.startswith("image/")
+            )
+            is_audio = (
+                file_type == "audio"
+                or mime_type.startswith("audio/")
+                or file_ext in cls._AUDIO_SUFFIXES
+            )
+            if is_image or is_audio:
+                continue
+
+            url = file.get("url_private_download") or file.get("url_private")
+            if not url:
+                continue
+            attachments.append(
+                CommingMessage.MessageAttachment(
+                    ref=f"slack://file/{quote(url, safe='')}",
+                    name=file.get("name") or file.get("title"),
+                    mime_type=file.get("mimetype"),
+                    size=file.get("size"),
+                )
+            )
+        return attachments or None
 
     def download_slack_file_to_data_url(self, file_url: str, source: str) -> Optional[str]:
         """
@@ -399,16 +446,25 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     return
             client: Slack = self.get_instance(conf.name)
             if client:
-                client.send_msg(
-                    title=message.title,
-                    text=message.text,
-                    image=message.image,
-                    userid=userid,
-                    link=message.link,
-                    buttons=message.buttons,
-                    original_message_id=message.original_message_id,
-                    original_chat_id=message.original_chat_id,
-                )
+                if message.file_path:
+                    client.send_file(
+                        file_path=message.file_path,
+                        file_name=message.file_name,
+                        title=message.title,
+                        text=message.text,
+                        userid=userid,
+                    )
+                else:
+                    client.send_msg(
+                        title=message.title,
+                        text=message.text,
+                        image=message.image,
+                        userid=userid,
+                        link=message.link,
+                        buttons=message.buttons,
+                        original_message_id=message.original_message_id,
+                        original_chat_id=message.original_chat_id,
+                    )
 
     def post_medias_message(
         self, message: Notification, medias: List[MediaInfo]
@@ -538,26 +594,40 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     return None
             client: Slack = self.get_instance(conf.name)
             if client:
-                result = client.send_msg(
-                    title=message.title or "",
-                    text=message.text,
-                    userid=userid,
-                )
+                if message.file_path:
+                    result = client.send_file(
+                        file_path=message.file_path,
+                        file_name=message.file_name,
+                        title=message.title,
+                        text=message.text,
+                        userid=userid,
+                    )
+                else:
+                    result = client.send_msg(
+                        title=message.title or "",
+                        text=message.text,
+                        userid=userid,
+                    )
                 if result and result[0]:
                     # Slack 使用时间戳作为 message_id，chat_id 是频道ID
                     # 注意：这里返回的是发送后的结果，需要获取实际的 message_id
                     # 由于 Slack API 返回的是 result[1]，包含完整响应，我们需要从中提取
                     response_data = result[1]
-                    message_id = (
-                        response_data.get("ts")
-                        if isinstance(response_data, dict)
-                        else None
-                    )
-                    channel_id = (
-                        response_data.get("channel")
-                        if isinstance(response_data, dict)
-                        else None
-                    )
+                    message_id = None
+                    channel_id = None
+                    if hasattr(response_data, "get"):
+                        message_id = response_data.get("ts")
+                        channel_id = response_data.get("channel")
+                    if not message_id and hasattr(response_data, "data"):
+                        files = (response_data.data or {}).get("files") or []
+                        if files:
+                            message_id = files[0].get("id")
+                            shares = (
+                                files[0].get("shares", {})
+                                .get("private", {})
+                            )
+                            if shares:
+                                channel_id = next(iter(shares.keys()), None)
                     return MessageResponse(
                         message_id=message_id,
                         chat_id=channel_id,

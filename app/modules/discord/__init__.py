@@ -159,11 +159,13 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             chat_id = msg_json.get("chat_id")
             images = self._extract_images(msg_json)
             audio_refs = self._extract_audio_refs(msg_json)
-            if (text or images or audio_refs) and userid:
+            files = self._extract_files(msg_json)
+            if (text or images or audio_refs or files) and userid:
                 logger.info(
                     f"收到来自 {client_config.name} 的 Discord 消息："
                     f"userid={userid}, username={username}, text={text}, "
-                    f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}"
+                    f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}, "
+                    f"files={len(files) if files else 0}"
                 )
                 return CommingMessage(
                     channel=MessageChannel.Discord,
@@ -174,6 +176,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                     chat_id=str(chat_id) if chat_id else None,
                     images=images,
                     audio_refs=audio_refs,
+                    files=files,
                 )
         return None
 
@@ -218,6 +221,44 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             if content_type.startswith("audio/") or filename.endswith(cls._AUDIO_SUFFIXES):
                 audio_refs.append(f"discord://file/{quote(url, safe='')}")
         return audio_refs if audio_refs else None
+
+    @classmethod
+    def _extract_files(
+        cls, msg_json: dict
+    ) -> Optional[List[CommingMessage.MessageAttachment]]:
+        """
+        从 Discord 消息中提取非图片/非音频文件。
+        """
+        attachments = msg_json.get("attachments", [])
+        if not attachments:
+            return None
+
+        files = []
+        for attachment in attachments:
+            url = attachment.get("url") or attachment.get("proxy_url")
+            if not url:
+                continue
+            content_type = (attachment.get("content_type") or "").lower()
+            filename = (attachment.get("filename") or "").lower()
+            is_image = (
+                attachment.get("type") == "image"
+                or content_type.startswith("image/")
+                or filename.endswith(cls._IMAGE_SUFFIXES)
+            )
+            is_audio = content_type.startswith("audio/") or filename.endswith(
+                cls._AUDIO_SUFFIXES
+            )
+            if is_image or is_audio:
+                continue
+            files.append(
+                CommingMessage.MessageAttachment(
+                    ref=f"discord://file/{quote(url, safe='')}",
+                    name=attachment.get("filename"),
+                    mime_type=attachment.get("content_type"),
+                    size=attachment.get("size"),
+                )
+            )
+        return files or None
 
     def download_discord_file_bytes(self, file_ref: str, source: str) -> Optional[bytes]:
         """
@@ -278,19 +319,29 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             )
             if client:
                 logger.debug(
-                    f"[Discord] 调用 client.send_msg, userid={userid}, title={message.title[:50] if message.title else None}..."
+                    f"[Discord] 调用 client 发送, userid={userid}, title={message.title[:50] if message.title else None}..."
                 )
-                result = client.send_msg(
-                    title=message.title,
-                    text=message.text,
-                    image=message.image,
-                    userid=userid,
-                    link=message.link,
-                    buttons=message.buttons,
-                    original_message_id=message.original_message_id,
-                    original_chat_id=message.original_chat_id,
-                    mtype=message.mtype,
-                )
+                if message.file_path:
+                    result = client.send_file(
+                        file_path=message.file_path,
+                        file_name=message.file_name,
+                        title=message.title,
+                        text=message.text,
+                        userid=userid,
+                        original_chat_id=message.original_chat_id,
+                    )
+                else:
+                    result = client.send_msg(
+                        title=message.title,
+                        text=message.text,
+                        image=message.image,
+                        userid=userid,
+                        link=message.link,
+                        buttons=message.buttons,
+                        original_message_id=message.original_message_id,
+                        original_chat_id=message.original_chat_id,
+                        mtype=message.mtype,
+                    )
                 logger.debug(f"[Discord] send_msg 返回结果: {result}")
             else:
                 logger.warning(
@@ -427,11 +478,20 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                     return None
             client: Discord = self.get_instance(conf.name)
             if client:
-                result = client.send_msg(
-                    title=message.title or "",
-                    text=message.text,
-                    userid=userid,
-                )
+                if message.file_path:
+                    result = client.send_file(
+                        file_path=message.file_path,
+                        file_name=message.file_name,
+                        title=message.title,
+                        text=message.text,
+                        userid=userid,
+                    )
+                else:
+                    result = client.send_msg(
+                        title=message.title or "",
+                        text=message.text,
+                        userid=userid,
+                    )
                 if result:
                     success, response_data = (
                         (result[0], result[1])

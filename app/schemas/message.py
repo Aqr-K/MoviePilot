@@ -29,6 +29,16 @@ class CommingMessage(BaseModel):
     外来消息
     """
 
+    class MessageAttachment(BaseModel):
+        """
+        外来消息附件（非图片/非语音）
+        """
+
+        ref: str
+        name: Optional[str] = None
+        mime_type: Optional[str] = None
+        size: Optional[int] = None
+
     # 用户ID
     userid: Optional[Union[str, int]] = None
     # 用户名称
@@ -57,6 +67,8 @@ class CommingMessage(BaseModel):
     images: Optional[List[str]] = None
     # 语音/音频引用列表
     audio_refs: Optional[List[str]] = None
+    # 文件附件列表
+    files: Optional[List[MessageAttachment]] = None
 
     def to_dict(self):
         """
@@ -90,6 +102,10 @@ class Notification(BaseModel):
     image: Optional[str] = None
     # 语音文件路径
     voice_path: Optional[str] = None
+    # 本地文件路径
+    file_path: Optional[str] = None
+    # 发送时展示的文件名
+    file_name: Optional[str] = None
     # 语音消息附带说明文字
     voice_caption: Optional[str] = None
     # 链接
@@ -254,6 +270,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
                 ChannelCapability.MENU_COMMANDS,
+                ChannelCapability.FILE_SENDING,
             },
             max_buttons_per_row=3,
             max_button_rows=8,
@@ -272,6 +289,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
+                ChannelCapability.FILE_SENDING,
             },
             max_buttons_per_row=5,
             max_button_rows=5,

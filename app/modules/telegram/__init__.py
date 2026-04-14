@@ -215,18 +215,20 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
 
         images = self._extract_images(msg)
         audio_refs = self._extract_audio_refs(msg)
+        files = self._extract_files(msg)
 
         if user_id:
-            if not text and not images and not audio_refs:
+            if not text and not images and not audio_refs and not files:
                 logger.debug(
-                    f"收到来自 {client_config.name} 的Telegram消息无文本、图片和语音"
+                    f"收到来自 {client_config.name} 的Telegram消息无文本、图片、语音和文件"
                 )
                 return None
 
             logger.info(
                 f"收到来自 {client_config.name} 的Telegram消息："
                 f"userid={user_id}, username={user_name}, chat_id={chat_id}, text={text}, "
-                f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}"
+                f"images={len(images) if images else 0}, audios={len(audio_refs) if audio_refs else 0}, "
+                f"files={len(files) if files else 0}"
             )
 
             cleaned_text = (
@@ -266,6 +268,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 chat_id=str(chat_id) if chat_id else None,
                 images=images if images else None,
                 audio_refs=audio_refs if audio_refs else None,
+                files=files if files else None,
             )
         return None
 
@@ -310,6 +313,29 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 audio_refs.append(f"tg://audio_file_id/{file_id}")
 
         return audio_refs if audio_refs else None
+
+    @staticmethod
+    def _extract_files(msg: dict) -> Optional[List[CommingMessage.MessageAttachment]]:
+        """
+        从 Telegram 消息中提取非图片文件附件。
+        """
+        document = msg.get("document")
+        if not isinstance(document, dict):
+            return None
+
+        file_id = document.get("file_id")
+        mime_type = (document.get("mime_type") or "").lower()
+        if not file_id or mime_type.startswith("image/"):
+            return None
+
+        return [
+            CommingMessage.MessageAttachment(
+                ref=f"tg://document_file_id/{file_id}",
+                name=document.get("file_name"),
+                mime_type=document.get("mime_type"),
+                size=document.get("file_size"),
+            )
+        ]
 
     @staticmethod
     def _embed_entity_links(text: str, entities: Optional[List[dict]]) -> str:
@@ -412,7 +438,16 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     return
             client: Telegram = self.get_instance(conf.name)
             if client:
-                if message.voice_path:
+                if message.file_path:
+                    client.send_file(
+                        file_path=message.file_path,
+                        file_name=message.file_name,
+                        title=message.title,
+                        text=message.text,
+                        userid=userid,
+                        original_chat_id=message.original_chat_id,
+                    )
+                elif message.voice_path:
                     client.send_voice(
                         voice_path=message.voice_path,
                         userid=userid,

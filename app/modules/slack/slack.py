@@ -1,5 +1,6 @@
 import re
 from threading import Lock
+from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import quote
 
@@ -245,6 +246,48 @@ class Slack:
         except Exception as msg_e:
             logger.error(f"Slack消息发送失败: {msg_e}")
             return False, str(msg_e)
+
+    def send_file(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        text: Optional[str] = None,
+        userid: Optional[str] = None,
+        file_name: Optional[str] = None,
+    ):
+        """
+        发送本地文件到 Slack。
+        """
+        if not self._client:
+            return False, "消息客户端未就绪"
+        if not file_path:
+            return False, "文件路径不能为空"
+
+        local_file = Path(file_path)
+        if not local_file.exists() or not local_file.is_file():
+            return False, f"文件不存在: {local_file}"
+
+        try:
+            if userid:
+                channel = userid
+            else:
+                channel = self.__find_public_channel()
+
+            comment_parts = [part for part in [title, text] if part]
+            initial_comment = "\n".join(comment_parts) if comment_parts else None
+
+            with local_file.open("rb") as fp:
+                result = self._client.files_upload_v2(
+                    channel=channel,
+                    file=fp,
+                    filename=file_name or local_file.name,
+                    title=title or (file_name or local_file.name),
+                    initial_comment=initial_comment,
+                )
+            return True, result
+        except Exception as err:
+            logger.error(f"Slack文件发送失败: {err}")
+            return False, str(err)
 
     def send_medias_msg(self, medias: List[MediaInfo], userid: Optional[str] = None, title: Optional[str] = None,
                         buttons: Optional[List[List[dict]]] = None,

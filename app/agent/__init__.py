@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import traceback
 import uuid
@@ -281,13 +282,19 @@ class MoviePilotAgent:
             logger.error(f"创建 Agent 失败: {e}")
             raise e
 
-    async def process(self, message: str, images: List[str] = None) -> str:
+    async def process(
+        self,
+        message: str,
+        images: List[str] = None,
+        files: Optional[List[dict]] = None,
+    ) -> str:
         """
         处理用户消息，流式推理并返回 Agent 回复
         """
         try:
             logger.info(
-                f"Agent推理: session_id={self.session_id}, input={message}, images={len(images) if images else 0}"
+                f"Agent推理: session_id={self.session_id}, input={message}, "
+                f"images={len(images) if images else 0}, files={len(files) if files else 0}"
             )
             self._tool_context = {
                 "incoming_voice": self.reply_with_voice,
@@ -300,16 +307,24 @@ class MoviePilotAgent:
                 session_id=self.session_id, user_id=self.user_id
             )
 
-            # 构建用户消息内容
-            if images:
-                content = []
-                if message:
-                    content.append({"type": "text", "text": message})
-                for img in images:
-                    content.append({"type": "image_url", "image_url": {"url": img}})
-                messages.append(HumanMessage(content=content))
-            else:
-                messages.append(HumanMessage(content=message))
+            # 构建结构化用户消息内容
+            request_payload = {
+                "message": message or "",
+                "images": [
+                    {"index": index + 1, "type": "image"}
+                    for index, _ in enumerate(images or [])
+                ],
+                "files": files or [],
+            }
+            content = [
+                {
+                    "type": "text",
+                    "text": json.dumps(request_payload, ensure_ascii=False, indent=2),
+                }
+            ]
+            for img in images or []:
+                content.append({"type": "image_url", "image_url": {"url": img}})
+            messages.append(HumanMessage(content=content))
 
             # 执行推理
             await self._execute_agent(messages)
@@ -544,6 +559,7 @@ class _MessageTask:
     user_id: str
     message: str
     images: Optional[List[str]] = None
+    files: Optional[List[dict]] = None
     channel: Optional[str] = None
     source: Optional[str] = None
     username: Optional[str] = None
@@ -610,6 +626,7 @@ class AgentManager:
         user_id: str,
         message: str,
         images: List[str] = None,
+        files: Optional[List[dict]] = None,
         channel: str = None,
         source: str = None,
         username: str = None,
@@ -624,6 +641,7 @@ class AgentManager:
             user_id=user_id,
             message=message,
             images=images,
+            files=files,
             channel=channel,
             source=source,
             username=username,
@@ -727,7 +745,7 @@ class AgentManager:
                 agent.username = task.username
         agent.reply_with_voice = task.reply_with_voice
 
-        return await agent.process(task.message, images=task.images)
+        return await agent.process(task.message, images=task.images, files=task.files)
 
     async def stop_current_task(self, session_id: str):
         """

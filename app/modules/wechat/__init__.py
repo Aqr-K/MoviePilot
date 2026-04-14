@@ -3,6 +3,7 @@ import json
 import re
 import xml.dom.minidom
 from typing import Optional, Union, List, Tuple, Any, Dict
+from urllib.parse import quote
 
 from app.core.context import Context, MediaInfo
 from app.core.event import eventmanager
@@ -168,6 +169,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             content = None
             images = None
             audio_refs = None
+            files = None
             if msg_type == "event" and event == "click":
                 # 校验用户有权限执行交互命令
                 if client_config.config.get('WECHAT_ADMINS'):
@@ -203,14 +205,27 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                     f"收到来自 {client_config.name} 的微信语音消息：userid={user_id}, "
                     f"text={content}, audios={len(audio_refs) if audio_refs else 0}"
                 )
+            elif msg_type == "file":
+                media_id = DomUtils.tag_value(root_node, "MediaId")
+                file_name = DomUtils.tag_value(root_node, "FileName")
+                if media_id:
+                    files = [
+                        CommingMessage.MessageAttachment(
+                            ref=f"wxwork://file_media_id/{media_id}",
+                            name=file_name,
+                        )
+                    ]
+                logger.info(
+                    f"收到来自 {client_config.name} 的微信文件消息：userid={user_id}, files={len(files) if files else 0}"
+                )
             else:
                 return None
 
-            if content or images or audio_refs:
+            if content or images or audio_refs or files:
                 # 处理消息内容
                 return CommingMessage(channel=MessageChannel.Wechat, source=client_config.name,
                                       userid=user_id, username=user_id, text=content or "",
-                                      images=images, audio_refs=audio_refs)
+                                      images=images, audio_refs=audio_refs, files=files)
         except Exception as err:
             logger.error(f"微信消息处理发生错误：{str(err)}")
         return None
@@ -242,6 +257,20 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
         text = WeChatBot._extract_text_from_body(payload_body)
         images = WeChatBot._extract_images_from_body(payload_body)
         audio_refs = ["wxbot://voice"] if payload_body.get("msgtype") == "voice" else None
+        files = None
+        if payload_body.get("msgtype") == "file":
+            file_payload = payload_body.get("file") or {}
+            download_url = file_payload.get("download_url")
+            if download_url:
+                files = [
+                    CommingMessage.MessageAttachment(
+                        ref=f"wxbot://file/{quote(download_url, safe='')}",
+                        name=file_payload.get("name") or file_payload.get("filename"),
+                        mime_type=file_payload.get("content_type")
+                        or file_payload.get("mime_type"),
+                        size=file_payload.get("size"),
+                    )
+                ]
         if text:
             text = re.sub(r"@\S+", "", text).strip()
 
@@ -257,7 +286,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                     client.send_msg(title="只有管理员才有权限执行此命令", userid=sender)
                 return None
 
-        if not text and not images and not audio_refs:
+        if not text and not images and not audio_refs and not files:
             return None
 
         logger.info(
@@ -272,6 +301,7 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             text=text or "",
             images=images,
             audio_refs=audio_refs,
+            files=files,
         )
 
     def post_message(self, message: Notification, **kwargs) -> None:
@@ -337,6 +367,9 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             return None
         if media_ref.startswith("wxwork://voice_media_id/"):
             media_id = media_ref.replace("wxwork://voice_media_id/", "", 1)
+            return client.download_media_bytes(media_id)
+        if media_ref.startswith("wxwork://file_media_id/"):
+            media_id = media_ref.replace("wxwork://file_media_id/", "", 1)
             return client.download_media_bytes(media_id)
         return None
 

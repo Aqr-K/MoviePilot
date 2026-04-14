@@ -107,7 +107,8 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
         content = (msg_body.get("content") or "").strip()
         images = self._extract_images(msg_body)
         audio_refs = self._extract_audio_refs(msg_body)
-        if not content and not images and not audio_refs:
+        files = self._extract_files(msg_body)
+        if not content and not images and not audio_refs and not files:
             return None
 
         if msg_type == "C2C_MESSAGE_CREATE":
@@ -118,7 +119,7 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
             logger.info(
                 f"收到 QQ 私聊消息: userid={user_openid}, "
                 f"text={(content or '')[:50]}..., images={len(images) if images else 0}, "
-                f"audios={len(audio_refs) if audio_refs else 0}"
+                f"audios={len(audio_refs) if audio_refs else 0}, files={len(files) if files else 0}"
             )
             return CommingMessage(
                 channel=MessageChannel.QQ,
@@ -128,6 +129,7 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
                 text=content,
                 images=images,
                 audio_refs=audio_refs,
+                files=files,
             )
         elif msg_type == "GROUP_AT_MESSAGE_CREATE":
             author = msg_body.get("author", {})
@@ -138,7 +140,7 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
             logger.info(
                 f"收到 QQ 群消息: group={group_openid}, userid={member_openid}, "
                 f"text={(content or '')[:50]}..., images={len(images) if images else 0}, "
-                f"audios={len(audio_refs) if audio_refs else 0}"
+                f"audios={len(audio_refs) if audio_refs else 0}, files={len(files) if files else 0}"
             )
             return CommingMessage(
                 channel=MessageChannel.QQ,
@@ -148,6 +150,7 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
                 text=content,
                 images=images,
                 audio_refs=audio_refs,
+                files=files,
             )
         return None
 
@@ -225,6 +228,46 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
             if audio_ref not in deduped:
                 deduped.append(audio_ref)
         return deduped or None
+
+    @classmethod
+    def _extract_files(
+        cls, msg_body: dict
+    ) -> Optional[List[CommingMessage.MessageAttachment]]:
+        files: List[CommingMessage.MessageAttachment] = []
+        attachments = msg_body.get("attachments") or []
+        if isinstance(attachments, list):
+            for attachment in attachments:
+                if not isinstance(attachment, dict):
+                    continue
+                url = attachment.get("url") or attachment.get("proxy_url")
+                if not url:
+                    continue
+                content_type = (
+                    attachment.get("content_type")
+                    or attachment.get("mime_type")
+                    or ""
+                ).lower()
+                filename = (
+                    attachment.get("filename") or attachment.get("name") or ""
+                ).lower()
+                is_image = content_type.startswith("image/") or filename.endswith(
+                    cls._IMAGE_SUFFIXES
+                )
+                is_audio = content_type.startswith("audio/") or filename.endswith(
+                    cls._AUDIO_SUFFIXES
+                )
+                if is_image or is_audio:
+                    continue
+                files.append(
+                    CommingMessage.MessageAttachment(
+                        ref=f"qq://file/{quote(url, safe='')}",
+                        name=attachment.get("filename") or attachment.get("name"),
+                        mime_type=attachment.get("content_type")
+                        or attachment.get("mime_type"),
+                        size=attachment.get("size"),
+                    )
+                )
+        return files or None
 
     def download_qq_file_bytes(self, file_ref: str, source: str) -> Optional[bytes]:
         """

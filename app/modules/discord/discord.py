@@ -1,6 +1,7 @@
 import asyncio
 import re
 import threading
+from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Union
 from urllib.parse import quote
 
@@ -273,6 +274,37 @@ class Discord:
             logger.error(f"发送 Discord 消息失败：{err}")
             return False
 
+    def send_file(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        text: Optional[str] = None,
+        userid: Optional[str] = None,
+        file_name: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+    ) -> Optional[bool]:
+        if not self.get_state():
+            return False
+        if not file_path:
+            return False
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._send_file(
+                    file_path=file_path,
+                    title=title,
+                    text=text,
+                    userid=userid,
+                    file_name=file_name,
+                    original_chat_id=original_chat_id,
+                ),
+                self._loop,
+            )
+            return future.result(timeout=30)
+        except Exception as err:
+            logger.error(f"发送 Discord 文件失败：{err}")
+            return False
+
     def send_medias_msg(
         self,
         medias: List[MediaInfo],
@@ -412,6 +444,46 @@ class Discord:
             )
         except Exception as e:
             logger.error(f"[Discord] 发送消息到频道失败: {e}")
+            return False, None
+
+    async def _send_file(
+        self,
+        file_path: str,
+        title: Optional[str],
+        text: Optional[str],
+        userid: Optional[str],
+        file_name: Optional[str],
+        original_chat_id: Optional[str],
+    ) -> Tuple[bool, Optional[Dict[str, str]]]:
+        channel = await self._resolve_channel(userid=userid, chat_id=original_chat_id)
+        if not channel:
+            logger.error("未找到可用的 Discord 频道或私聊")
+            return False, None
+
+        local_file = Path(file_path)
+        if not local_file.exists() or not local_file.is_file():
+            logger.error(f"Discord发送文件失败，文件不存在: {local_file}")
+            return False, None
+
+        content_parts = [part for part in [title, text] if part]
+        content = "\n".join(content_parts) if content_parts else None
+        if content and len(content) > 1900:
+            content = content[:1900] + "..."
+
+        try:
+            discord_file = discord.File(
+                str(local_file), filename=file_name or local_file.name
+            )
+            sent_message = await channel.send(content=content, file=discord_file)
+            return (
+                True,
+                {
+                    "message_id": str(sent_message.id),
+                    "chat_id": str(channel.id),
+                },
+            )
+        except Exception as err:
+            logger.error(f"Discord发送文件失败: {err}")
             return False, None
 
     async def _send_list_message(

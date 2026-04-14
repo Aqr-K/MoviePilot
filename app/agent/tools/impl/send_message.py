@@ -19,7 +19,7 @@ class SendMessageInput(BaseModel):
         None,
         description="The message content to send to the user (should be clear and informative)",
     )
-    message_type: Optional[str] = Field(
+    title: Optional[str] = Field(
         None,
         description="Title of the message, a short summary of the message content",
     )
@@ -30,8 +30,8 @@ class SendMessageInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self):
-        if not self.message and not self.message_type and not self.image_url:
-            raise ValueError("message、message_type、image_url 至少需要提供一个")
+        if not self.message and not self.title and not self.image_url:
+            raise ValueError("message、title、image_url 至少需要提供一个")
         return self
 
 
@@ -44,7 +44,7 @@ class SendMessageTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据消息参数生成友好的提示消息"""
         message = kwargs.get("message", "") or ""
-        title = kwargs.get("message_type") or ""
+        title = kwargs.get("title") or ""
         image_url = kwargs.get("image_url")
 
         # 截断过长的消息
@@ -62,11 +62,11 @@ class SendMessageTool(MoviePilotTool):
     async def run(
         self,
         message: Optional[str] = None,
-        message_type: Optional[str] = None,
+        title: Optional[str] = None,
         image_url: Optional[str] = None,
         **kwargs,
     ) -> str:
-        title = message_type or ("图片" if image_url and not message else "")
+        title = title or ("图片" if image_url and not message else "")
         text = message or ""
         logger.info(
             f"执行工具: {self.name}, 参数: title={title}, message={text}, image_url={image_url}"
