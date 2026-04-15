@@ -1,3 +1,5 @@
+import asyncio
+import time
 from typing import List, Any, Optional
 
 import jieba
@@ -8,6 +10,7 @@ from pathlib import Path
 
 from app import schemas
 from app.chain.storage import StorageChain
+from app.core.config import settings, global_vars
 from app.core.event import eventmanager
 from app.core.security import verify_token
 from app.db import get_async_db, get_db
@@ -15,9 +18,49 @@ from app.db.models import User
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.transferhistory import TransferHistory
 from app.db.user_oper import get_current_active_superuser_async, get_current_active_superuser
+from app.helper.progress import ProgressHelper
 from app.schemas.types import EventType
 
 router = APIRouter()
+
+
+def _start_ai_redo_task(history_id: int, progress_key: str):
+    from app.agent import agent_manager
+
+    progress = ProgressHelper(progress_key)
+    progress.start()
+    progress.update(
+        text=f"智能助正在准备整理记录 #{history_id} ...",
+        data={"history_id": history_id, "success": True},
+    )
+
+    def update_output(text: str):
+        progress.update(text=text, data={"history_id": history_id})
+
+    async def runner():
+        try:
+            await agent_manager.manual_redo_transfer(
+                history_id=history_id,
+                output_callback=update_output,
+            )
+            progress.update(
+                text="智能助手整理完成",
+                data={"history_id": history_id, "success": True, "completed": True},
+            )
+        except Exception as e:
+            progress.update(
+                text=f"智能助手整理失败：{str(e)}",
+                data={
+                    "history_id": history_id,
+                    "success": False,
+                    "completed": True,
+                    "error": str(e),
+                },
+            )
+        finally:
+            progress.end()
+
+    asyncio.run_coroutine_threadsafe(runner(), global_vars.loop)
 
 
 @router.get("/download", summary="查询下载历史记录", response_model=List[schemas.DownloadHistory])
@@ -112,6 +155,28 @@ def delete_transfer_history(history_in: schemas.TransferHistory,
     # 删除记录
     TransferHistory.delete(db, history_in.id)
     return schemas.Response(success=True)
+
+
+@router.post("/transfer/{history_id}/ai-redo", summary="智能助手重新整理", response_model=schemas.Response)
+def ai_redo_transfer_history(
+    history_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    手动触发单条历史记录的 AI 重新整理，并返回进度键。
+    """
+    if not settings.AI_AGENT_ENABLE:
+        return schemas.Response(success=False, message="MoviePilot智能助手未启用")
+
+    history = TransferHistory.get(db, history_id)
+    if not history:
+        return schemas.Response(success=False, message="整理记录不存在")
+
+    progress_key = f"ai_redo_transfer_{history_id}_{int(time.time() * 1000)}"
+    _start_ai_redo_task(history_id=history_id, progress_key=progress_key)
+
+    return schemas.Response(success=True, data={"progress_key": progress_key})
 
 
 @router.get("/empty/transfer", summary="清空整理记录", response_model=schemas.Response)
