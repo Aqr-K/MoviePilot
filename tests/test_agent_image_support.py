@@ -14,6 +14,7 @@ from app.agent.tools.impl.send_local_file import SendLocalFileInput
 from app.agent import MoviePilotAgent, AgentChain
 from app.chain.message import MessageChain
 from app.core.config import settings
+from app.helper.llm import LLMHelper
 from app.helper.voice import VoiceHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
@@ -46,14 +47,18 @@ class AgentImageSupportTest(unittest.TestCase):
         images = TelegramModule._extract_images(
             {
                 "photo": [{"file_id": "small"}, {"file_id": "large"}],
-                "document": {"file_id": "doc-image", "mime_type": "image/png"},
+                "document": {
+                    "file_id": "doc-image",
+                    "mime_type": "image/png",
+                    "file_name": "poster.png",
+                },
             }
         )
 
-        self.assertEqual(
-            images,
-            ["tg://file_id/large", "tg://file_id/doc-image"],
-        )
+        self.assertEqual([image.ref for image in images], ["tg://file_id/large", "tg://file_id/doc-image"])
+        self.assertEqual(images[0].mime_type, "image/jpeg")
+        self.assertEqual(images[1].mime_type, "image/png")
+        self.assertEqual(images[1].name, "poster.png")
 
     def test_telegram_message_parser_accepts_double_encoded_body(self):
         module = TelegramModule()
@@ -83,7 +88,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(message)
-        self.assertEqual(message.images, ["tg://file_id/large"])
+        self.assertEqual([image.ref for image in message.images], ["tg://file_id/large"])
 
     def test_telegram_forward_payload_uses_dict_not_json_string(self):
         payload = Telegram._serialize_update_payload(
@@ -143,7 +148,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         handle_kwargs = handle_message.call_args.kwargs
         self.assertEqual(handle_kwargs["text"], "")
-        self.assertEqual(handle_kwargs["images"], ["tg://file_id/image-1"])
+        self.assertEqual([image.ref for image in handle_kwargs["images"]], ["tg://file_id/image-1"])
 
     def test_process_allows_audio_only_message(self):
         chain = MessageChain()
@@ -370,6 +375,61 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(payload["message"], "帮我总结这个文件")
         self.assertEqual(payload["files"][0]["local_path"], "/tmp/report.txt")
 
+    def test_llm_supports_image_input_respects_explicit_override(self):
+        with patch.object(settings, "LLM_SUPPORT_IMAGE_INPUT", False):
+            self.assertFalse(LLMHelper.supports_image_input())
+
+    def test_llm_supports_image_input_uses_boolean_setting(self):
+        with patch.object(settings, "LLM_SUPPORT_IMAGE_INPUT", True):
+            self.assertTrue(LLMHelper.supports_image_input())
+
+        with patch.object(settings, "LLM_SUPPORT_IMAGE_INPUT", False):
+            self.assertFalse(LLMHelper.supports_image_input())
+
+    def test_handle_ai_message_routes_images_to_files_when_image_input_disabled(self):
+        chain = MessageChain()
+
+        with patch.object(settings, "AI_AGENT_ENABLE", True), patch.object(
+            settings, "LLM_SUPPORT_IMAGE_INPUT", False
+        ), patch.object(chain, "_get_or_create_session_id", return_value="session-1"), patch.object(
+            chain, "_download_images_to_base64"
+        ) as download_images, patch.object(
+            chain,
+            "_prepare_agent_files",
+            return_value=[
+                {
+                    "name": "image_1.jpg",
+                    "mime_type": "image/jpeg",
+                    "local_path": "/tmp/image_1.jpg",
+                    "status": "ready",
+                }
+            ],
+        ) as prepare_files, patch(
+            "app.chain.message.agent_manager.process_message", new_callable=AsyncMock
+        ) as process_message, patch(
+            "app.chain.message.asyncio.run_coroutine_threadsafe"
+        ) as run_coroutine_threadsafe:
+            chain._handle_ai_message(
+                text="/ai 帮我看看这张图",
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                images=["tg://file_id/image-1"],
+            )
+
+        download_images.assert_not_called()
+        prepare_files.assert_called_once()
+        attachments = prepare_files.call_args.kwargs["files"]
+        self.assertEqual(attachments[0].ref, "tg://file_id/image-1")
+        self.assertEqual(attachments[0].mime_type, "image/jpeg")
+        run_coroutine_threadsafe.assert_called_once()
+        self.assertEqual(process_message.call_args.kwargs["images"], None)
+        self.assertEqual(
+            process_message.call_args.kwargs["files"][0]["local_path"],
+            "/tmp/image_1.jpg",
+        )
+
     def test_slack_images_use_authenticated_data_url_download(self):
         chain = MessageChain()
 
@@ -460,7 +520,8 @@ class AgentImageSupportTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(images, ["https://cdn.discordapp.com/test.png"])
+        self.assertEqual([image.ref for image in images], ["https://cdn.discordapp.com/test.png"])
+        self.assertEqual(images[0].mime_type, "image/png")
 
     def test_discord_extract_audio_refs_supports_attachment_content_type(self):
         audio_refs = DiscordModule._extract_audio_refs(
@@ -587,7 +648,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(message)
-        self.assertEqual(message.images, ["wxwork://media_id/media-1"])
+        self.assertEqual([image.ref for image in message.images], ["wxwork://media_id/media-1"])
 
     def test_wechat_message_parser_extracts_file_media_id(self):
         module = WechatModule()
@@ -661,7 +722,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(message)
-        self.assertTrue(message.images[0].startswith("wxbot://image/"))
+        self.assertTrue(message.images[0].ref.startswith("wxbot://image/"))
 
     def test_wechat_bot_handles_image_only_callback(self):
         bot = WeChatBot.__new__(WeChatBot)
@@ -718,9 +779,10 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertIsNotNone(message)
         self.assertEqual(
-            message.images,
+            [image.ref for image in message.images],
             ["vocechat://file/%2Fuploads%2Fposter.png"],
         )
+        self.assertEqual(message.images[0].mime_type, "image/png")
 
     def test_vocechat_message_parser_extracts_audio_file_payload(self):
         module = VoceChatModule()
@@ -901,7 +963,8 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(message)
-        self.assertEqual(message.images, ["https://example.com/qq-image.png"])
+        self.assertEqual([image.ref for image in message.images], ["https://example.com/qq-image.png"])
+        self.assertEqual(message.images[0].mime_type, "image/png")
 
     def test_qq_message_parser_accepts_audio_only_attachment(self):
         module = QQBotModule()
@@ -959,7 +1022,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(message)
-        self.assertEqual(message.images, ["https://example.com/image.png"])
+        self.assertEqual([image.ref for image in message.images], ["https://example.com/image.png"])
 
     def test_synology_message_parser_accepts_audio_only_form(self):
         module = SynologyChatModule()

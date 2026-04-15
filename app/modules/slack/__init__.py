@@ -301,7 +301,9 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         return None
 
     @staticmethod
-    def _extract_images(msg_json: dict) -> Optional[List[str]]:
+    def _extract_images(
+        msg_json: dict,
+    ) -> Optional[List[CommingMessage.MessageImage]]:
         """
         从Slack消息中提取图片URL
         """
@@ -320,7 +322,14 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
             ):
                 url = file.get("url_private") or file.get("url_private_download")
                 if url:
-                    images.append(url)
+                    images.append(
+                        CommingMessage.MessageImage(
+                            ref=url,
+                            name=file.get("name") or file.get("title"),
+                            mime_type=file.get("mimetype"),
+                            size=file.get("size"),
+                        )
+                    )
         return images if images else None
 
     @classmethod

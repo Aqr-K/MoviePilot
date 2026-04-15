@@ -60,6 +60,13 @@ class LLMHelper:
     """LLM模型相关辅助功能"""
 
     @staticmethod
+    def supports_image_input() -> bool:
+        """
+        判断当前模型是否启用了图片输入能力。
+        """
+        return bool(settings.LLM_SUPPORT_IMAGE_INPUT)
+
+    @staticmethod
     def get_llm(streaming: bool = False):
         """
         获取LLM实例

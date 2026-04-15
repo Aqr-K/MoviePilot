@@ -181,7 +181,9 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         return None
 
     @staticmethod
-    def _extract_images(msg_json: dict) -> Optional[List[str]]:
+    def _extract_images(
+        msg_json: dict,
+    ) -> Optional[List[CommingMessage.MessageImage]]:
         """
         从Discord消息中提取图片URL
         """
@@ -200,7 +202,14 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                 or content_type.startswith("image/")
                 or filename.endswith(DiscordModule._IMAGE_SUFFIXES)
             ):
-                images.append(url)
+                images.append(
+                    CommingMessage.MessageImage(
+                        ref=url,
+                        name=attachment.get("filename"),
+                        mime_type=attachment.get("content_type"),
+                        size=attachment.get("size"),
+                    )
+                )
         return images if images else None
 
     @classmethod

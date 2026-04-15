@@ -141,12 +141,14 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
         return None
 
     @classmethod
-    def _extract_images(cls, message: dict) -> Optional[List[str]]:
+    def _extract_images(
+        cls, message: dict
+    ) -> Optional[List[CommingMessage.MessageImage]]:
         images = []
         for key in ("file_url", "image_url", "pic_url"):
             value = message.get(key)
             if isinstance(value, str) and cls._looks_like_image(value):
-                images.append(value)
+                images.append(CommingMessage.MessageImage(ref=value))
 
         for key in ("attachments", "files"):
             raw_value = message.get(key)
@@ -159,15 +161,23 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
             items = parsed if isinstance(parsed, list) else [parsed]
             for item in items:
                 if isinstance(item, str) and cls._looks_like_image(item):
-                    images.append(item)
+                    images.append(CommingMessage.MessageImage(ref=item))
                 elif isinstance(item, dict):
                     url = item.get("url") or item.get("file_url") or item.get("image_url")
                     if isinstance(url, str) and cls._looks_like_image(url):
-                        images.append(url)
+                        images.append(
+                            CommingMessage.MessageImage(
+                                ref=url,
+                                name=item.get("name") or item.get("filename"),
+                                mime_type=item.get("content_type")
+                                or item.get("mime_type"),
+                                size=item.get("size"),
+                            )
+                        )
 
         deduped = []
         for image in images:
-            if image not in deduped:
+            if image.ref not in [item.ref for item in deduped]:
                 deduped.append(image)
         return deduped or None
 

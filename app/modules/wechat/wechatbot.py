@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
 from app.log import logger
+from app.schemas import CommingMessage
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
@@ -359,27 +360,50 @@ class WeChatBot:
         return f"wxbot://image/{encoded}"
 
     @classmethod
-    def _extract_images_from_body(cls, body: dict) -> Optional[List[str]]:
-        images: List[str] = []
+    def _extract_images_from_body(
+        cls, body: dict
+    ) -> Optional[List["CommingMessage.MessageImage"]]:
+        images: List["CommingMessage.MessageImage"] = []
         msgtype = body.get("msgtype")
 
         if msgtype == "image":
-            image_ref = cls._build_image_ref(body.get("image") or {})
+            image_payload = body.get("image") or {}
+            image_ref = cls._build_image_ref(image_payload)
             if image_ref:
-                images.append(image_ref)
+                images.append(
+                    CommingMessage.MessageImage(
+                        ref=image_ref,
+                        mime_type=image_payload.get("mime_type")
+                        or image_payload.get("content_type"),
+                    )
+                )
         elif msgtype == "mixed":
             for item in (body.get("mixed") or {}).get("msg_item") or []:
                 if item.get("msgtype") != "image":
                     continue
-                image_ref = cls._build_image_ref(item.get("image") or {})
+                image_payload = item.get("image") or {}
+                image_ref = cls._build_image_ref(image_payload)
                 if image_ref:
-                    images.append(image_ref)
+                    images.append(
+                        CommingMessage.MessageImage(
+                            ref=image_ref,
+                            mime_type=image_payload.get("mime_type")
+                            or image_payload.get("content_type"),
+                        )
+                    )
 
         quote = body.get("quote") or {}
         if not images and quote.get("msgtype") == "image":
-            image_ref = cls._build_image_ref(quote.get("image") or {})
+            image_payload = quote.get("image") or {}
+            image_ref = cls._build_image_ref(image_payload)
             if image_ref:
-                images.append(image_ref)
+                images.append(
+                    CommingMessage.MessageImage(
+                        ref=image_ref,
+                        mime_type=image_payload.get("mime_type")
+                        or image_payload.get("content_type"),
+                    )
+                )
 
         return images or None
 

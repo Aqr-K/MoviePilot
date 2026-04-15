@@ -155,8 +155,10 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
         return None
 
     @classmethod
-    def _extract_images(cls, msg_body: dict) -> Optional[List[str]]:
-        images: List[str] = []
+    def _extract_images(
+        cls, msg_body: dict
+    ) -> Optional[List[CommingMessage.MessageImage]]:
+        images: List[CommingMessage.MessageImage] = []
         attachments = msg_body.get("attachments") or []
         if isinstance(attachments, list):
             for attachment in attachments:
@@ -176,26 +178,42 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
                     or ""
                 ).lower()
                 if content_type.startswith("image/") or filename.endswith(cls._IMAGE_SUFFIXES):
-                    images.append(url)
+                    images.append(
+                        CommingMessage.MessageImage(
+                            ref=url,
+                            name=attachment.get("filename") or attachment.get("name"),
+                            mime_type=attachment.get("content_type")
+                            or attachment.get("mime_type"),
+                            size=attachment.get("size"),
+                        )
+                    )
 
         for key in ("image", "image_url", "pic_url"):
             value = msg_body.get(key)
             if isinstance(value, str) and value.startswith("http"):
-                images.append(value)
+                images.append(CommingMessage.MessageImage(ref=value))
 
         extra_images = msg_body.get("images")
         if isinstance(extra_images, list):
             for item in extra_images:
                 if isinstance(item, str) and item.startswith("http"):
-                    images.append(item)
+                    images.append(CommingMessage.MessageImage(ref=item))
                 elif isinstance(item, dict):
                     url = item.get("url") or item.get("image_url")
                     if isinstance(url, str) and url.startswith("http"):
-                        images.append(url)
+                        images.append(
+                            CommingMessage.MessageImage(
+                                ref=url,
+                                name=item.get("name") or item.get("filename"),
+                                mime_type=item.get("content_type")
+                                or item.get("mime_type"),
+                                size=item.get("size"),
+                            )
+                        )
 
         deduped = []
         for image in images:
-            if image not in deduped:
+            if image.ref not in [item.ref for item in deduped]:
                 deduped.append(image)
         return deduped or None
 
