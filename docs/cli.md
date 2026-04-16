@@ -206,7 +206,12 @@ moviepilot setup --config-dir /path/to/moviepilot-config
 `--wizard` 会进入交互式初始化向导，支持配置：
 
 - `API_TOKEN`
+- 数据库类型
+  默认 `SQLite`
+  可切换为 `PostgreSQL`，并填写主机、端口、数据库名、用户名、密码
 - 默认下载目录与媒体库目录
+- AI Agent
+  可按需启用，并配置 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL`
 - 下载器
 - 媒体服务器
 - 消息通知渠道
