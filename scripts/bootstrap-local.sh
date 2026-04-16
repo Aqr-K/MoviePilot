@@ -198,7 +198,7 @@ prompt_yes_no() {
   while true; do
     printf '%s %s: ' "$label" "$prompt" >"$PROMPT_OUTPUT"
     IFS= read -r answer <"$PROMPT_INPUT" || true
-    answer="${answer,,}"
+    answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
     if [[ -z "$answer" ]]; then
       answer="$default_value"
     fi
