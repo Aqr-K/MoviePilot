@@ -16,6 +16,7 @@ from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
 from app.chain.subscribe import SubscribeChain
+from app.chain.transfer import TransferChain
 from app.core.config import settings, global_vars
 from app.core.context import MediaInfo, Context
 from app.core.meta import MetaBase
@@ -784,6 +785,15 @@ class MessageChain(ChainBase):
         callback_data = text[9:]  # 去掉 "CALLBACK:" 前缀
         logger.info(f"处理按钮回调：{callback_data}")
 
+        if self._handle_transfer_callback(
+            callback_data=callback_data,
+            channel=channel,
+            source=source,
+            userid=userid,
+            username=username,
+        ):
+            return
+
         # 插件消息的事件回调 [PLUGIN]插件ID|内容
         if callback_data.startswith("[PLUGIN]"):
             # 提取插件ID和内容
@@ -826,6 +836,178 @@ class MessageChain(ChainBase):
                     title="回调数据格式错误，请检查！",
                 )
             )
+
+    @staticmethod
+    def _parse_transfer_callback(
+        callback_data: str,
+    ) -> Optional[tuple[str, int]]:
+        """
+        解析整理失败通知按钮回调。
+        """
+        for prefix, action in (
+            ("transfer_retry_", "retry"),
+            ("transfer_ai_retry_", "ai_retry"),
+        ):
+            if callback_data.startswith(prefix):
+                history_id = callback_data.replace(prefix, "", 1)
+                if history_id.isdigit():
+                    return action, int(history_id)
+        return None
+
+    def _handle_transfer_callback(
+        self,
+        callback_data: str,
+        channel: MessageChannel,
+        source: str,
+        userid: Union[str, int],
+        username: str,
+    ) -> bool:
+        """
+        处理整理失败通知中的重试类按钮。
+        """
+        callback = self._parse_transfer_callback(callback_data)
+        if not callback:
+            return False
+
+        action, history_id = callback
+        if action == "retry":
+            self._retry_transfer_history(
+                history_id=history_id,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+        else:
+            self._take_over_transfer_history_by_ai(
+                history_id=history_id,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+        return True
+
+    def _retry_transfer_history(
+        self,
+        history_id: int,
+        channel: MessageChannel,
+        source: str,
+        userid: Union[str, int],
+        username: str,
+    ) -> None:
+        """
+        立即重新整理一条失败的整理记录。
+        """
+        self.post_message(
+            Notification(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                title=f"开始重新整理记录 #{history_id} ...",
+            )
+        )
+
+        state, errmsg = TransferChain().redo_transfer_history(history_id)
+        if state:
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title=f"整理记录 #{history_id} 已重新整理",
+                    link=settings.MP_DOMAIN("#/history"),
+                )
+            )
+            return
+
+        self.post_message(
+            Notification(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                title="重新整理失败",
+                text=errmsg,
+                link=settings.MP_DOMAIN("#/history"),
+            )
+        )
+
+    def _take_over_transfer_history_by_ai(
+        self,
+        history_id: int,
+        channel: MessageChannel,
+        source: str,
+        userid: Union[str, int],
+        username: str,
+    ) -> None:
+        """
+        由智能助手接管一条失败的整理记录。
+        """
+        if not settings.AI_AGENT_ENABLE:
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title="MoviePilot智能助手未启用，请在系统设置中启用",
+                )
+            )
+            return
+
+        self.post_message(
+            Notification(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                title=f"已将整理记录 #{history_id} 交给智能助手处理",
+                text="处理完成后会在这里回复结果。",
+                link=settings.MP_DOMAIN("#/history"),
+            )
+        )
+
+        async def _run_ai_takeover():
+            final_output = ""
+
+            def _capture_output(text_output: str):
+                nonlocal final_output
+                final_output = text_output or ""
+
+            try:
+                await agent_manager.manual_redo_transfer(
+                    history_id=history_id,
+                    output_callback=_capture_output,
+                )
+                await self.async_post_message(
+                    Notification(
+                        channel=channel,
+                        source=source,
+                        userid=userid,
+                        username=username,
+                        title="智能助手整理完成",
+                        text=final_output.strip()
+                        or f"整理记录 #{history_id} 已由智能助手处理完成。",
+                        link=settings.MP_DOMAIN("#/history"),
+                    )
+                )
+            except Exception as e:
+                await self.async_post_message(
+                    Notification(
+                        channel=channel,
+                        source=source,
+                        userid=userid,
+                        username=username,
+                        title="智能助手整理失败",
+                        text=str(e),
+                        link=settings.MP_DOMAIN("#/history"),
+                    )
+                )
+
+        asyncio.run_coroutine_threadsafe(_run_ai_takeover(), global_vars.loop)
 
     def __auto_download(
         self,

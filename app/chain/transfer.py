@@ -842,10 +842,22 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 Notification(
                     mtype=NotificationType.Manual,
                     title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
-                    text=f"原因：{transferinfo.message or '未知'}",
+                    text="\n".join(
+                        [
+                            f"原因：{transferinfo.message or '未知'}",
+                            (
+                                f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
+                                if history
+                                else ""
+                            ),
+                        ]
+                    ).strip(),
                     image=task.mediainfo.get_message_image(),
                     username=task.username,
                     link=settings.MP_DOMAIN("#/history"),
+                    buttons=self.build_failed_transfer_buttons(
+                        history.id if history else None
+                    ),
                 )
             )
 
@@ -1193,9 +1205,17 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         Notification(
                             mtype=NotificationType.Manual,
                             title=f"{task.fileitem.name} 未识别到媒体信息，无法入库！",
-                            text=f"回复：\n```\n/redo {his.id} [tmdbid]|[类型]\n```\n手动识别整理。",
+                            text=(
+                                "原因：未识别到媒体信息\n"
+                                "如果按钮不可用，可回复：\n"
+                                f"```\n/redo {his.id}\n/redo {his.id} [tmdbid]|[类型]\n```\n"
+                                "自动重试或手动识别整理。"
+                            ),
                             username=task.username,
                             link=settings.MP_DOMAIN("#/history"),
+                            buttons=self.build_failed_transfer_buttons(
+                                his.id if his else None
+                            ),
                         )
                     )
                     # 任务失败，直接移除task
@@ -1895,8 +1915,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 Notification(
                     channel=channel,
                     source=source,
-                    title="请输入正确的命令格式：/redo [id] [tmdbid/豆瓣id]|[类型]，"
-                    "[id]整理记录编号",
+                    title="请输入正确的命令格式：/redo [id] 或 /redo [id] [tmdbid/豆瓣id]|[类型]，"
+                    "[id] 为整理记录编号",
                     userid=userid,
                 )
             )
@@ -1905,13 +1925,27 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             args_error()
             return
         arg_strs = str(arg_str).split()
-        if len(arg_strs) != 2:
+        if len(arg_strs) not in (1, 2):
             args_error()
             return
         # 历史记录ID
         logid = arg_strs[0]
         if not logid.isdigit():
             args_error()
+            return
+        if len(arg_strs) == 1:
+            state, errmsg = self.redo_transfer_history(int(logid))
+            if not state:
+                self.post_message(
+                    Notification(
+                        channel=channel,
+                        title="手动整理失败",
+                        source=source,
+                        text=errmsg,
+                        userid=userid,
+                        link=settings.MP_DOMAIN("#/history"),
+                    )
+                )
             return
         # TMDBID/豆瓣ID
         id_strs = arg_strs[1].split("|")
@@ -1939,6 +1973,31 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 )
             )
             return
+
+    @staticmethod
+    def build_failed_transfer_buttons(
+        history_id: Optional[int],
+    ) -> Optional[List[List[dict]]]:
+        """
+        构建整理失败通知的操作按钮。
+        """
+        if not history_id:
+            return None
+        return [
+            [
+                {"text": "重试", "callback_data": f"transfer_retry_{history_id}"},
+                {
+                    "text": "智能助手接管",
+                    "callback_data": f"transfer_ai_retry_{history_id}",
+                },
+            ]
+        ]
+
+    def redo_transfer_history(self, history_id: int) -> Tuple[bool, str]:
+        """
+        按历史记录直接重新整理，自动重新识别媒体信息。
+        """
+        return self.__re_transfer(logid=history_id)
 
     def __re_transfer(
         self, logid: int, mtype: MediaType = None, mediaid: Optional[str] = None
