@@ -899,7 +899,7 @@ def _merge_notification_switches(existing_items: list[dict]) -> list[dict]:
     return [merged[key] for key in [*preferred_order, *extras]]
 
 
-def apply_local_system_config(config_payload: dict[str, Any]) -> None:
+def _apply_local_system_config_inner(config_payload: dict[str, Any]) -> None:
     for directory in config_payload.get("directories") or []:
         download_path = directory.get("download_path")
         library_path = directory.get("library_path")
@@ -953,6 +953,41 @@ def apply_local_system_config(config_payload: dict[str, Any]) -> None:
     print_step("已写入本地系统配置")
 
 
+def _current_python_matches(target_python: Optional[Path]) -> bool:
+    if not target_python:
+        return True
+    current_python = Path(sys.executable).expanduser()
+    target_python = target_python.expanduser()
+    if not current_python.is_absolute():
+        current_python = (ROOT / current_python).absolute()
+    if not target_python.is_absolute():
+        target_python = (ROOT / target_python).absolute()
+    return str(current_python) == str(target_python)
+
+
+def apply_local_system_config(config_payload: dict[str, Any], runtime_python: Optional[Path] = None) -> None:
+    if _current_python_matches(runtime_python):
+        _apply_local_system_config_inner(config_payload)
+        return
+
+    with TemporaryDirectory() as temp_dir:
+        payload_path = Path(temp_dir) / "moviepilot-config.json"
+        payload_path.write_text(
+            json.dumps(config_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        run(
+            [
+                str(runtime_python),
+                str(Path(__file__).resolve()),
+                "apply-config",
+                "--config-json-file",
+                str(payload_path),
+            ],
+            cwd=ROOT,
+        )
+
+
 def init_local(
     *,
     resources_repo: Optional[Path],
@@ -961,6 +996,7 @@ def init_local(
     resources_ready: bool,
     force_token: bool,
     wizard: bool,
+    runtime_python: Optional[Path] = None,
 ) -> None:
     ensure_local_dirs()
 
@@ -979,7 +1015,7 @@ def init_local(
         install_resources(resources_repo=resources_repo, resource_dir=resource_dir)
 
     if wizard_payload:
-        apply_local_system_config(wizard_payload)
+        apply_local_system_config(wizard_payload, runtime_python=runtime_python)
 
 
 def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
@@ -1178,6 +1214,9 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument("--skip-resources", action="store_true", help="更新 all 时跳过资源同步")
     update_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
+    apply_config_parser = subparsers.add_parser("apply-config", help=argparse.SUPPRESS)
+    apply_config_parser.add_argument("--config-json-file", required=True, help=argparse.SUPPRESS)
+
     return parser
 
 
@@ -1222,6 +1261,7 @@ def main() -> int:
                 resources_ready=False,
                 force_token=args.force_token,
                 wizard=args.wizard,
+                runtime_python=None,
             )
             print_step("初始化完成")
             print_step(f"当前配置目录：{config_dir}")
@@ -1248,6 +1288,7 @@ def main() -> int:
                 resources_ready=resources_installed,
                 force_token=args.force_token,
                 wizard=args.wizard,
+                runtime_python=venv_python,
             )
             print_step(f"本地环境已完成安装与初始化：{venv_python}")
             print_step(f"当前配置目录：{config_dir}")
@@ -1281,6 +1322,13 @@ def main() -> int:
                 install_resources(resources_repo=None, resource_dir=None)
                 print_step("资源文件已同步到最新")
             print_step(f"更新完成，当前配置目录：{config_dir}")
+            return 0
+
+        if args.command == "apply-config":
+            payload = json.loads(Path(args.config_json_file).read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise RuntimeError("配置负载格式错误")
+            _apply_local_system_config_inner(payload)
             return 0
     except subprocess.CalledProcessError as exc:
         print(f"命令执行失败，退出码：{exc.returncode}", file=sys.stderr)
