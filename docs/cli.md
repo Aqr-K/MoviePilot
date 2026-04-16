@@ -212,6 +212,8 @@ moviepilot setup --config-dir /path/to/moviepilot-config
 - 默认下载目录与媒体库目录
 - AI Agent
   可按需启用，并配置 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL`
+- 用户站点认证
+  可按需选择认证站点，并按站点要求填写用户名、UID、Passkey 等参数
 - 下载器
 - 媒体服务器
 - 消息通知渠道
@@ -287,6 +289,7 @@ moviepilot version
 说明：
 
 - `start` 会先启动后端，再启动前端
+- 通过系统内置的重启入口触发重启时，本地 CLI 安装模式也会复用同一套前后端进程管理完成重启
 - 前端默认监听 `NGINX_PORT`，默认值 `3000`
 - 后端默认监听 `PORT`，默认值 `3001`
 - 前端通过 `service.js` 代理 `/api` 与 `/cookiecloud` 到后端

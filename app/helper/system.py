@@ -1,11 +1,15 @@
+import json
 import os
 import signal
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 import docker
+import psutil
 
 from app.core.config import settings
 from app.log import logger
@@ -27,6 +31,8 @@ class SystemHelper(ConfigReloadMixin):
     }
 
     __system_flag_file = "/var/log/nginx/__moviepilot__"
+    __local_backend_runtime_file = settings.TEMP_PATH / "moviepilot.runtime.json"
+    __local_restart_log_file = settings.LOG_PATH / "moviepilot.restart.stdout.log"
 
     def on_config_changed(self):
         logger.update_loggers()
@@ -39,10 +45,74 @@ class SystemHelper(ConfigReloadMixin):
         """
         判断是否可以内部重启
         """
-        return (
-                Path("/var/run/docker.sock").exists()
-                or settings.DOCKER_CLIENT_API != "tcp://127.0.0.1:38379"
+        return SystemUtils.is_docker() or SystemHelper._is_local_cli_managed()
+
+    @staticmethod
+    def _load_runtime_file(path: Path) -> Optional[dict]:
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _is_local_cli_managed() -> bool:
+        runtime = SystemHelper._load_runtime_file(SystemHelper.__local_backend_runtime_file)
+        if not runtime:
+            return False
+
+        pid = runtime.get("pid")
+        create_time = runtime.get("create_time")
+        if not pid:
+            return False
+
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            return False
+
+        if pid != os.getpid():
+            return False
+
+        if create_time is None:
+            return True
+
+        try:
+            current_process = psutil.Process(os.getpid())
+            return abs(current_process.create_time() - float(create_time)) <= 2
+        except (psutil.Error, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _spawn_local_restart_helper() -> None:
+        helper_code = (
+            "import os, subprocess, sys, time;"
+            "time.sleep(1.0);"
+            "cmd=[sys.executable, '-m', 'app.cli', 'restart', '--force', '--stop-timeout', '30', '--start-timeout', '60'];"
+            "subprocess.run(cmd, cwd=os.environ.get('MOVIEPILOT_ROOT'), env=os.environ.copy(), check=False)"
         )
+        env = os.environ.copy()
+        env["MOVIEPILOT_ROOT"] = str(settings.ROOT_PATH)
+        env["PYTHONUNBUFFERED"] = "1"
+
+        SystemHelper.__local_restart_log_file.parent.mkdir(parents=True, exist_ok=True)
+        with SystemHelper.__local_restart_log_file.open("a", encoding="utf-8") as log_handle:
+            kwargs = {
+                "cwd": str(settings.ROOT_PATH),
+                "stdout": log_handle,
+                "stderr": subprocess.STDOUT,
+                "stdin": subprocess.DEVNULL,
+                "close_fds": True,
+                "env": env,
+            }
+            if os.name == "nt":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            else:
+                kwargs["start_new_session"] = True
+            process = subprocess.Popen([sys.executable, "-c", helper_code], **kwargs)
+        logger.info(f"已创建本地 CLI 重启任务，辅助进程 PID: {process.pid}")
 
     @staticmethod
     def _get_container_id() -> str:
@@ -104,7 +174,14 @@ class SystemHelper(ConfigReloadMixin):
         执行Docker重启操作
         """
         if not SystemUtils.is_docker():
-            return False, "非Docker环境，无法重启！"
+            if not SystemHelper._is_local_cli_managed():
+                return False, "当前实例不是由 moviepilot CLI 启动，无法执行内建重启！"
+            try:
+                SystemHelper._spawn_local_restart_helper()
+                return True, ""
+            except Exception as err:
+                logger.error(f"本地 CLI 重启失败: {str(err)}")
+                return False, f"本地 CLI 重启失败：{str(err)}"
 
         try:
             # 检查容器是否配置了自动重启策略
