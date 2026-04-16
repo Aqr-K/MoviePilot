@@ -192,6 +192,7 @@ moviepilot init
 moviepilot init --wizard
 moviepilot init --skip-resources
 moviepilot init --force-token
+moviepilot init --superuser admin --superuser-password 'ChangeMe123!'
 moviepilot init --config-dir /path/to/moviepilot-config
 ```
 
@@ -204,6 +205,7 @@ moviepilot setup --frontend-version latest
 moviepilot setup --node-version 20.12.1
 moviepilot setup --skip-resources
 moviepilot setup --recreate
+moviepilot setup --superuser admin --superuser-password 'ChangeMe123!'
 moviepilot setup --config-dir /path/to/moviepilot-config
 ```
 
@@ -217,6 +219,7 @@ moviepilot setup --config-dir /path/to/moviepilot-config
 `--wizard` 会进入交互式初始化向导，支持配置：
 
 - `API_TOKEN`
+- 超级管理员用户名与密码
 - 数据库类型
   默认 `SQLite`
   可切换为 `PostgreSQL`，并填写主机、端口、数据库名、用户名、密码
@@ -228,6 +231,18 @@ moviepilot setup --config-dir /path/to/moviepilot-config
 - 下载器
 - 媒体服务器
 - 消息通知渠道
+
+如果希望在自动化安装时直接预设超级管理员，也可以在一键安装脚本中透传：
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootstrap-local.sh | \
+  bash -s -- --superuser admin --superuser-password 'ChangeMe123!'
+```
+
+说明：
+
+- `--superuser-password` 更适合自动化场景，命令可能会出现在 shell 历史中
+- 交互式 `--wizard` 会在初始化过程中提示输入超级管理员用户名和密码
 
 ## 更新命令
 

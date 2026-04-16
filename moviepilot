@@ -12,8 +12,8 @@ Bootstrap Commands:
   moviepilot install deps [--python PYTHON] [--venv PATH] [--recreate] [--config-dir PATH]
   moviepilot install frontend [--version latest] [--node-version 20.12.1] [--config-dir PATH]
   moviepilot install resources [--resources-repo PATH] [--resource-dir PATH] [--config-dir PATH]
-  moviepilot init [--skip-resources] [--force-token] [--wizard] [--config-dir PATH]
-  moviepilot setup [--python PYTHON] [--venv PATH] [--recreate] [--frontend-version latest] [--node-version 20.12.1] [--wizard] [--config-dir PATH]
+  moviepilot init [--skip-resources] [--force-token] [--wizard] [--superuser NAME] [--superuser-password PASSWORD] [--config-dir PATH]
+  moviepilot setup [--python PYTHON] [--venv PATH] [--recreate] [--frontend-version latest] [--node-version 20.12.1] [--wizard] [--superuser NAME] [--superuser-password PASSWORD] [--config-dir PATH]
   moviepilot update {backend|frontend|all} [OPTIONS]
   moviepilot agent [OPTIONS] MESSAGE...
 
@@ -118,6 +118,8 @@ Options:
   --skip-resources          跳过资源同步
   --force-token             强制重置 API_TOKEN
   --wizard                  启动交互式初始化向导
+  --superuser NAME          预设超级管理员用户名
+  --superuser-password PWD  预设超级管理员密码
   --config-dir PATH         指定配置目录
   -h, --help                显示帮助
 EOF
@@ -136,6 +138,8 @@ Options:
   --skip-resources          跳过资源同步
   --force-token             强制重置 API_TOKEN
   --wizard                  安装完成后启动交互式初始化向导
+  --superuser NAME          预设超级管理员用户名
+  --superuser-password PWD  预设超级管理员密码
   --config-dir PATH         指定配置目录
   -h, --help                显示帮助
 EOF

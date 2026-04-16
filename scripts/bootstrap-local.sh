@@ -12,6 +12,8 @@ CONFIG_DIR=""
 RUN_WIZARD="true"
 START_AFTER_INSTALL="true"
 NON_INTERACTIVE="false"
+SUPERUSER=""
+SUPERUSER_PASSWORD=""
 OS_NAME="Unknown"
 PYTHON_BIN=""
 BREW_BIN=""
@@ -32,6 +34,8 @@ Options:
   --app-dir NAME           MoviePilot 目录名，默认 ${APP_DIR_NAME}
   --repo-url URL           主项目仓库地址
   --config-dir PATH        配置目录，默认使用程序目录外的系统配置目录
+  --superuser NAME         预设超级管理员用户名
+  --superuser-password PWD 预设超级管理员密码
   --link-path PATH         全局 moviepilot 软链接位置
   --no-link-cli            安装完成后不创建全局 moviepilot 命令
   --no-wizard              跳过 moviepilot setup 的交互式初始化向导
@@ -43,6 +47,7 @@ Examples:
   $(basename "$0")
   $(basename "$0") --workdir ~/Projects
   $(basename "$0") --config-dir ~/.config/moviepilot-local
+  $(basename "$0") --superuser admin --superuser-password 'ChangeMe123!'
   $(basename "$0") --non-interactive --workdir ~/Projects --no-start
 EOF
 }
@@ -572,6 +577,14 @@ while [[ $# -gt 0 ]]; do
       CONFIG_DIR="$2"
       shift 2
       ;;
+    --superuser)
+      SUPERUSER="$2"
+      shift 2
+      ;;
+    --superuser-password)
+      SUPERUSER_PASSWORD="$2"
+      shift 2
+      ;;
     --link-path)
       LINK_PATH="$2"
       shift 2
@@ -628,6 +641,12 @@ echo "==> 执行本地环境安装与初始化"
 SETUP_ARGS=(setup --python "$PYTHON_BIN" --config-dir "$CONFIG_DIR")
 if [[ "$RUN_WIZARD" == "true" ]]; then
   SETUP_ARGS+=(--wizard)
+fi
+if [[ -n "$SUPERUSER" ]]; then
+  SETUP_ARGS+=(--superuser "$SUPERUSER")
+fi
+if [[ -n "$SUPERUSER_PASSWORD" ]]; then
+  SETUP_ARGS+=(--superuser-password "$SUPERUSER_PASSWORD")
 fi
 if [[ "$HAS_TTY" == "true" ]]; then
   "$PYTHON_BIN" ./scripts/local_setup.py "${SETUP_ARGS[@]}" <"$PROMPT_INPUT"

@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import secrets
+import re
 import shlex
 import shutil
 import subprocess
@@ -716,6 +717,86 @@ def _prompt_path(label: str, *, default: Path, allow_empty: bool = False) -> str
     return str(Path(value).expanduser().resolve())
 
 
+def _validate_superuser_name(username: str) -> Optional[str]:
+    if not username:
+        return "超级管理员用户名不能为空。"
+    if any(char.isspace() for char in username):
+        return "超级管理员用户名不能包含空白字符。"
+    if len(username) > 64:
+        return "超级管理员用户名长度不能超过 64 个字符。"
+    return None
+
+
+def _validate_superuser_password(password: str) -> Optional[str]:
+    if len(password) < 6 or len(password) > 50:
+        return "超级管理员密码长度需为 6 到 50 位。"
+
+    categories = 0
+    if re.search(r"[A-Za-z]", password):
+        categories += 1
+    if re.search(r"\d", password):
+        categories += 1
+    if re.search(r"[^\w\s]", password):
+        categories += 1
+
+    if categories < 2:
+        return "超级管理员密码需至少包含字母、数字、特殊字符中的两类。"
+    return None
+
+
+def _collect_superuser_config(
+    *,
+    preset_username: Optional[str] = None,
+    preset_password: Optional[str] = None,
+) -> dict[str, str]:
+    print_step("超级管理员配置")
+
+    default_username = (preset_username or _env_default("SUPERUSER", "admin")).strip() or "admin"
+    while True:
+        username = _prompt_text("超级管理员用户名", default=default_username).strip()
+        error = _validate_superuser_name(username)
+        if not error:
+            break
+        print(error)
+
+    if preset_password is not None:
+        password = preset_password.strip()
+        if not password:
+            return {"SUPERUSER": username}
+        error = _validate_superuser_password(password)
+        if error:
+            raise RuntimeError(error)
+        return {
+            "SUPERUSER": username,
+            "SUPERUSER_PASSWORD": password,
+        }
+
+    current_password = read_env_value("SUPERUSER_PASSWORD")
+    while True:
+        password = _prompt_secret_text(
+            "超级管理员密码（留空则保留现有值或首次启动时随机生成）",
+            current_value=current_password,
+            allow_empty=True,
+        ).strip()
+        if not password:
+            return {"SUPERUSER": username}
+
+        error = _validate_superuser_password(password)
+        if error:
+            print(error)
+            continue
+
+        confirmed = _prompt_secret_text("请再次输入超级管理员密码", required=True).strip()
+        if password != confirmed:
+            print("两次输入的超级管理员密码不一致，请重新输入。")
+            continue
+
+        return {
+            "SUPERUSER": username,
+            "SUPERUSER_PASSWORD": password,
+        }
+
+
 def _collect_path_mapping() -> list[tuple[str, str]]:
     if not _prompt_yes_no("是否配置下载器路径映射", default=False):
         return []
@@ -1159,7 +1240,12 @@ def _collect_site_auth_config(runtime_python: Optional[Path] = None) -> Optional
     }
 
 
-def run_setup_wizard(force_token: bool, runtime_python: Optional[Path] = None) -> dict[str, Any]:
+def run_setup_wizard(
+    force_token: bool,
+    runtime_python: Optional[Path] = None,
+    preset_superuser: Optional[str] = None,
+    preset_superuser_password: Optional[str] = None,
+) -> dict[str, Any]:
     if not _is_interactive():
         raise RuntimeError("交互式向导需要在终端中运行，请直接执行 moviepilot setup --wizard 或 moviepilot init --wizard")
 
@@ -1193,6 +1279,10 @@ def run_setup_wizard(force_token: bool, runtime_python: Optional[Path] = None) -
     return {
         "api_token": api_token,
         "env_settings": {
+            **_collect_superuser_config(
+                preset_username=preset_superuser,
+                preset_password=preset_superuser_password,
+            ),
             **_collect_database_config(),
             **_collect_agent_config(),
         },
@@ -1275,7 +1365,11 @@ def _apply_local_system_config_inner(config_payload: dict[str, Any]) -> None:
         raise RuntimeError("当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup") from exc
 
     init_db()
+    generated_password = _prepare_superuser_password_for_bootstrap()
     update_db()
+    _ensure_superuser_account_inner()
+    if generated_password:
+        print_step(f"超级管理员初始密码：{generated_password}")
 
     system_config = SystemConfigOper()
     directory_items = config_payload.get("directories") or []
@@ -1335,6 +1429,112 @@ def _current_python_matches(target_python: Optional[Path]) -> bool:
     return str(current_python) == str(target_python)
 
 
+def _ensure_superuser_account_inner() -> None:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+
+    from app.core.config import settings
+    from app.core.security import get_password_hash
+    from app.db.user_oper import UserOper
+
+    username = str(settings.SUPERUSER or "").strip()
+    username_error = _validate_superuser_name(username)
+    if username_error:
+        raise RuntimeError(username_error)
+
+    password = str(settings.SUPERUSER_PASSWORD or "").strip()
+    if password:
+        password_error = _validate_superuser_password(password)
+        if password_error:
+            raise RuntimeError(password_error)
+
+    user_oper = UserOper()
+    user = user_oper.get_by_name(username)
+    if not user:
+        init_password = password or secrets.token_urlsafe(16)
+        user_oper.add(
+            name=username,
+            email="admin@movie-pilot.org",
+            hashed_password=get_password_hash(init_password),
+            is_active=True,
+            is_superuser=True,
+            avatar="",
+        )
+        print_step(f"已创建超级管理员用户：{username}")
+        if not password:
+            print_step(f"超级管理员初始密码：{init_password}")
+        return
+
+    update_payload: dict[str, Any] = {}
+    if not user.is_active:
+        update_payload["is_active"] = True
+    if not user.is_superuser:
+        update_payload["is_superuser"] = True
+    if password:
+        update_payload["hashed_password"] = get_password_hash(password)
+
+    if update_payload:
+        user.update(user_oper._db, update_payload)
+        if password:
+            print_step(f"已同步超级管理员账号与密码：{username}")
+        else:
+            print_step(f"已同步超级管理员账号权限：{username}")
+    else:
+        print_step(f"已确认超级管理员账号：{username}")
+
+
+def _prepare_superuser_password_for_bootstrap() -> Optional[str]:
+    from app.core.config import settings
+    from app.db.user_oper import UserOper
+
+    username = str(settings.SUPERUSER or "").strip()
+    username_error = _validate_superuser_name(username)
+    if username_error:
+        raise RuntimeError(username_error)
+
+    if str(settings.SUPERUSER_PASSWORD or "").strip():
+        return None
+
+    if UserOper().get_by_name(username):
+        return None
+
+    generated_password = secrets.token_urlsafe(16)
+    settings.SUPERUSER_PASSWORD = generated_password
+    return generated_password
+
+
+def _sync_superuser_account_inner() -> None:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+
+    try:
+        from app.db.init import init_db, update_db
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup") from exc
+
+    init_db()
+    generated_password = _prepare_superuser_password_for_bootstrap()
+    update_db()
+    _ensure_superuser_account_inner()
+    if generated_password:
+        print_step(f"超级管理员初始密码：{generated_password}")
+
+
+def sync_superuser_account(runtime_python: Optional[Path] = None) -> None:
+    if _current_python_matches(runtime_python):
+        _sync_superuser_account_inner()
+        return
+
+    run(
+        [
+            str(runtime_python),
+            str(Path(__file__).resolve()),
+            "sync-superuser",
+        ],
+        cwd=ROOT,
+    )
+
+
 def apply_local_system_config(config_payload: dict[str, Any], runtime_python: Optional[Path] = None) -> None:
     if _current_python_matches(runtime_python):
         _apply_local_system_config_inner(config_payload)
@@ -1366,15 +1566,40 @@ def init_local(
     resources_ready: bool,
     force_token: bool,
     wizard: bool,
+    superuser: Optional[str],
+    superuser_password: Optional[str],
     runtime_python: Optional[Path] = None,
 ) -> None:
     ensure_local_dirs()
 
     wizard_payload: Optional[dict[str, Any]] = None
+    direct_env_settings: dict[str, str] = {}
+    if superuser:
+        superuser = superuser.strip()
+        error = _validate_superuser_name(superuser)
+        if error:
+            raise RuntimeError(error)
+        direct_env_settings["SUPERUSER"] = superuser
+    if superuser_password is not None:
+        superuser_password = superuser_password.strip()
+        if superuser_password:
+            error = _validate_superuser_password(superuser_password)
+            if error:
+                raise RuntimeError(error)
+        direct_env_settings["SUPERUSER_PASSWORD"] = superuser_password
+
     if wizard:
-        wizard_payload = run_setup_wizard(force_token=force_token, runtime_python=runtime_python)
+        wizard_payload = run_setup_wizard(
+            force_token=force_token,
+            runtime_python=runtime_python,
+            preset_superuser=direct_env_settings.get("SUPERUSER"),
+            preset_superuser_password=direct_env_settings.get("SUPERUSER_PASSWORD"),
+        )
     else:
         ensure_api_token(force_token=force_token)
+        if direct_env_settings:
+            write_env_values(direct_env_settings)
+            print_step(f"已写入环境配置到 {ENV_FILE}")
 
     if wizard_payload and wizard_payload.get("env_settings"):
         write_env_values(wizard_payload["env_settings"])
@@ -1390,6 +1615,8 @@ def init_local(
 
     if wizard_payload:
         apply_local_system_config(wizard_payload, runtime_python=runtime_python)
+    elif direct_env_settings:
+        sync_superuser_account(runtime_python=runtime_python)
 
 
 def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
@@ -1571,6 +1798,8 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--skip-resources", action="store_true", help="只初始化配置，不同步资源文件")
     init_parser.add_argument("--force-token", action="store_true", help="强制重置 API_TOKEN")
     init_parser.add_argument("--wizard", action="store_true", help="启动交互式初始化向导")
+    init_parser.add_argument("--superuser", help="预设超级管理员用户名")
+    init_parser.add_argument("--superuser-password", help="预设超级管理员密码")
     init_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     setup_parser = subparsers.add_parser("setup", help="执行 install-deps、install-frontend、install-resources 和 init")
@@ -1584,6 +1813,8 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--skip-resources", action="store_true", help="只初始化配置，不同步资源文件")
     setup_parser.add_argument("--force-token", action="store_true", help="强制重置 API_TOKEN")
     setup_parser.add_argument("--wizard", action="store_true", help="安装完成后启动交互式初始化向导")
+    setup_parser.add_argument("--superuser", help="预设超级管理员用户名")
+    setup_parser.add_argument("--superuser-password", help="预设超级管理员密码")
     setup_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     agent_parser = subparsers.add_parser("agent", help="直接向 MoviePilot 智能体发送一次请求")
@@ -1606,6 +1837,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     apply_config_parser = subparsers.add_parser("apply-config", help=argparse.SUPPRESS)
     apply_config_parser.add_argument("--config-json-file", required=True, help=argparse.SUPPRESS)
+
+    sync_superuser_parser = subparsers.add_parser("sync-superuser", help=argparse.SUPPRESS)
+    sync_superuser_parser.add_argument("--config-dir", help=argparse.SUPPRESS)
 
     query_auth_sites_parser = subparsers.add_parser("query-auth-sites", help=argparse.SUPPRESS)
     query_auth_sites_parser.add_argument("--output-json-file", required=True, help=argparse.SUPPRESS)
@@ -1654,6 +1888,8 @@ def main() -> int:
                 resources_ready=False,
                 force_token=args.force_token,
                 wizard=args.wizard,
+                superuser=args.superuser,
+                superuser_password=args.superuser_password,
                 runtime_python=None,
             )
             print_step("初始化完成")
@@ -1681,6 +1917,8 @@ def main() -> int:
                 resources_ready=resources_installed,
                 force_token=args.force_token,
                 wizard=args.wizard,
+                superuser=args.superuser,
+                superuser_password=args.superuser_password,
                 runtime_python=venv_python,
             )
             print_step(f"本地环境已完成安装与初始化：{venv_python}")
@@ -1722,6 +1960,10 @@ def main() -> int:
             if not isinstance(payload, dict):
                 raise RuntimeError("配置负载格式错误")
             _apply_local_system_config_inner(payload)
+            return 0
+
+        if args.command == "sync-superuser":
+            _sync_superuser_account_inner()
             return 0
 
         if args.command == "query-auth-sites":
