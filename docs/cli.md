@@ -1,10 +1,8 @@
 # MoviePilot CLI
 
-`moviepilot` 是 MoviePilot 本地源码模式的一体化入口，用于安装后端、安装前端 release、同步资源文件、初始化配置，以及统一管理前后端服务。
+`moviepilot` 是 MoviePilot 本地源码模式的一体化入口，负责本地安装、初始化、更新，以及前后端服务管理。
 
 ## 一键安装
-
-直接从仓库读取脚本并执行：
 
 ```shell
 curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootstrap-local.sh | bash
@@ -20,19 +18,44 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
 - 下载 `MoviePilot-Resources` 主分支资源
 - 将 `resources.v2/*` 同步到后端 [app/helper](/Users/jxxghp/PycharmProjects/MoviePilot/app/helper)
 - 下载本地 Node 运行时并安装前端运行依赖
+- 执行初始化向导
 - 创建全局 `moviepilot` 命令
 - 默认启动前后端服务
 
+如果安装完成后当前终端仍提示找不到 `moviepilot`：
+
+- 重新打开终端
+- 如果脚本提示使用了 `~/.local/bin`，执行 `source ~/.zshrc` 或 `source ~/.bashrc`
+
+## 配置目录
+
+本地 CLI 默认将配置目录放在程序目录外，避免直接删除程序目录时把配置一并删掉。
+
+- macOS：`~/Library/Application Support/MoviePilot`
+- Linux：`${XDG_CONFIG_HOME:-~/.config}/moviepilot`
+
+可以在安装或初始化时手动指定：
+
+```shell
+moviepilot setup --config-dir /path/to/moviepilot-config
+moviepilot init --config-dir /path/to/moviepilot-config
+```
+
+查看当前实际配置目录：
+
+```shell
+moviepilot config path
+```
+
 ## 目录说明
 
-本地安装完成后，主要运行目录如下：
-
 - 后端代码：仓库根目录
+- 外置配置目录：`moviepilot config path` 输出的 `Config Dir`
 - 前端静态文件：`public/`
 - 前端本地 Node 运行时：`.runtime/node/`
-- 后端日志：`config/logs/moviepilot.log`
-- 后端启动日志：`config/logs/moviepilot.stdout.log`
-- 前端启动日志：`config/logs/moviepilot.frontend.stdout.log`
+- 后端日志：`<Config Dir>/logs/moviepilot.log`
+- 后端启动日志：`<Config Dir>/logs/moviepilot.stdout.log`
+- 前端启动日志：`<Config Dir>/logs/moviepilot.frontend.stdout.log`
 
 ## 帮助与发现
 
@@ -50,6 +73,8 @@ moviepilot commands
 moviepilot help install
 moviepilot help init
 moviepilot help setup
+moviepilot help update
+moviepilot help agent
 moviepilot help config
 moviepilot help config set
 moviepilot help tool
@@ -79,6 +104,10 @@ moviepilot install frontend
 moviepilot install resources
 moviepilot init
 moviepilot setup
+moviepilot update backend
+moviepilot update frontend
+moviepilot update all
+moviepilot agent
 moviepilot start
 moviepilot stop
 moviepilot restart
@@ -109,6 +138,7 @@ moviepilot install deps
 moviepilot install deps --python python3.12
 moviepilot install deps --venv /path/to/venv
 moviepilot install deps --recreate
+moviepilot install deps --config-dir /path/to/moviepilot-config
 ```
 
 安装前端 release：
@@ -118,6 +148,7 @@ moviepilot install frontend
 moviepilot install frontend --version latest
 moviepilot install frontend --version v2.9.31
 moviepilot install frontend --node-version 20.12.1
+moviepilot install frontend --config-dir /path/to/moviepilot-config
 ```
 
 说明：
@@ -132,6 +163,7 @@ moviepilot install frontend --node-version 20.12.1
 moviepilot install resources
 moviepilot install resources --resources-repo /path/to/MoviePilot-Resources
 moviepilot install resources --resource-dir /path/to/resources.v2
+moviepilot install resources --config-dir /path/to/moviepilot-config
 ```
 
 说明：
@@ -149,6 +181,7 @@ moviepilot init
 moviepilot init --wizard
 moviepilot init --skip-resources
 moviepilot init --force-token
+moviepilot init --config-dir /path/to/moviepilot-config
 ```
 
 一体化安装：
@@ -160,6 +193,7 @@ moviepilot setup --frontend-version latest
 moviepilot setup --node-version 20.12.1
 moviepilot setup --skip-resources
 moviepilot setup --recreate
+moviepilot setup --config-dir /path/to/moviepilot-config
 ```
 
 `moviepilot setup` 会串行执行：
@@ -177,9 +211,60 @@ moviepilot setup --recreate
 - 媒体服务器
 - 消息通知渠道
 
+## 更新命令
+
+更新后端：
+
+```shell
+moviepilot update backend
+moviepilot update backend --ref latest
+moviepilot update backend --ref v2
+moviepilot update backend --ref v2.9.31
+```
+
+更新前端：
+
+```shell
+moviepilot update frontend
+moviepilot update frontend --frontend-version latest
+moviepilot update frontend --frontend-version v2.9.31
+```
+
+整体更新：
+
+```shell
+moviepilot update all
+moviepilot update all --ref latest --frontend-version latest
+moviepilot update all --skip-resources
+```
+
+说明：
+
+- `update backend` 会更新 Git 仓库并重新安装后端依赖
+- `update frontend` 会下载并替换前端 release
+- `update all` 会同时更新后端、前端，默认也会同步资源文件
+- 更新前请先执行 `moviepilot stop`
+
+## Agent 命令
+
+直接给智能体发送一次请求：
+
+```shell
+moviepilot agent 帮我分析最近一次搜索失败的原因
+moviepilot agent --user-id admin 帮我检查当前下载器配置
+moviepilot agent --session cli-debug-1 帮我看看为什么没有自动整理
+moviepilot agent --new-session 帮我总结当前系统配置有什么明显问题
+```
+
+说明：
+
+- `moviepilot agent` 直接在本地环境里发起一次智能体请求
+- 默认每次可自动创建新会话，也可以通过 `--session` 指定会话 ID
+- 使用前需要先正确配置 LLM 相关参数，并打开 `AI_AGENT_ENABLE`
+
 ## 服务管理命令
 
-`moviepilot start/stop/restart/status` 现在统一管理前后端。
+`moviepilot start/stop/restart/status` 统一管理前后端。
 
 启动、停止、重启与状态：
 
@@ -258,37 +343,39 @@ moviepilot config describe API_TOKEN --show-secrets
 
 - `config list` 显示当前配置值
 - `config keys` 显示配置项名称、类型和默认值
-- `config describe` 显示单个配置项的类型、默认值、当前值与配置文件位置
-- 如果前后端正在运行，更新配置后需要 `moviepilot restart`
+- `config describe` 显示单个配置项的类型、默认值和当前值
 
-## 工具命令
+## Tool 命令
 
-工具命令依赖后端已启动，并且本地配置中存在有效的 `API_TOKEN`。
-
-列出工具：
+列出所有 MCP 工具：
 
 ```shell
 moviepilot tool list
 ```
 
-查看工具参数：
+查看单个工具的参数说明：
 
 ```shell
-moviepilot tool show search_media
+moviepilot tool show query_schedulers
+moviepilot tool show search_torrents
 ```
 
-调用工具：
+运行工具：
 
 ```shell
-moviepilot tool run search_media title="Inception" media_type=movie
 moviepilot tool run query_schedulers
+moviepilot tool run search_torrents media_type=movie tmdb_id=12345
 ```
 
-`tool list` 和 `tool show` 是查看“当前后端实际暴露的全部工具与参数”的推荐方式。
+说明：
 
-## 调度命令
+- `tool list` 用于动态发现当前服务可调用的工具
+- `tool show` 会输出参数名、类型和描述
+- `tool run` 参数格式固定为 `key=value`
 
-查看调度任务：
+## Scheduler 命令
+
+列出调度任务：
 
 ```shell
 moviepilot scheduler list
@@ -297,25 +384,5 @@ moviepilot scheduler list
 立即执行调度任务：
 
 ```shell
-moviepilot scheduler run subscribe_search
-```
-
-## 推荐流程
-
-首次安装：
-
-```shell
-moviepilot setup --wizard
-moviepilot start
-moviepilot status
-```
-
-日常维护：
-
-```shell
-moviepilot status
-moviepilot logs --frontend
-moviepilot logs --stdio
-moviepilot config keys
-moviepilot tool list
+moviepilot scheduler run subscribe_refresh
 ```

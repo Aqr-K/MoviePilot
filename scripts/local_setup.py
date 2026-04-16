@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import json
 import os
 import platform
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
+import uuid
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,16 +22,19 @@ from typing import Any, Optional
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_DIR = ROOT / "config"
+LEGACY_CONFIG_DIR = ROOT / "config"
+HELPER_DIR = ROOT / "app" / "helper"
+PUBLIC_DIR = ROOT / "public"
+RUNTIME_DIR = ROOT / ".runtime"
+NODE_DIR = RUNTIME_DIR / "node"
+INSTALL_ENV_FILE = ROOT / ".moviepilot.env"
+
+CONFIG_DIR = LEGACY_CONFIG_DIR
 LOG_DIR = CONFIG_DIR / "logs"
 CACHE_DIR = CONFIG_DIR / "cache"
 TEMP_DIR = CONFIG_DIR / "temp"
 COOKIE_DIR = CONFIG_DIR / "cookies"
-HELPER_DIR = ROOT / "app" / "helper"
 ENV_FILE = CONFIG_DIR / "app.env"
-PUBLIC_DIR = ROOT / "public"
-RUNTIME_DIR = ROOT / ".runtime"
-NODE_DIR = RUNTIME_DIR / "node"
 
 DEFAULT_NODE_VERSION = "20.12.1"
 FRONTEND_LATEST_API = "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases/latest"
@@ -54,6 +60,116 @@ NOTIFICATION_SWITCH_TYPES = [
     "智能体",
     "其它",
 ]
+
+
+def _default_config_dir() -> Path:
+    if platform.system() == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "MoviePilot"
+    return Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "moviepilot"
+
+
+def _legacy_runtime_config_exists() -> bool:
+    markers = [
+        LEGACY_CONFIG_DIR / "app.env",
+        LEGACY_CONFIG_DIR / "user.db",
+        LEGACY_CONFIG_DIR / "logs",
+        LEGACY_CONFIG_DIR / "temp",
+        LEGACY_CONFIG_DIR / "cache",
+        LEGACY_CONFIG_DIR / "cookies",
+        LEGACY_CONFIG_DIR / "sites",
+    ]
+    return any(marker.exists() for marker in markers)
+
+
+def _read_install_env_config_dir() -> Optional[Path]:
+    if not INSTALL_ENV_FILE.exists():
+        return None
+
+    for line in INSTALL_ENV_FILE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        if key.strip() != "CONFIG_DIR":
+            continue
+        return Path(value.strip().strip('"').strip("'")).expanduser()
+    return None
+
+
+def _set_config_dir(config_dir: Path) -> Path:
+    global CONFIG_DIR, LOG_DIR, CACHE_DIR, TEMP_DIR, COOKIE_DIR, ENV_FILE
+
+    CONFIG_DIR = config_dir.expanduser().resolve()
+    LOG_DIR = CONFIG_DIR / "logs"
+    CACHE_DIR = CONFIG_DIR / "cache"
+    TEMP_DIR = CONFIG_DIR / "temp"
+    COOKIE_DIR = CONFIG_DIR / "cookies"
+    ENV_FILE = CONFIG_DIR / "app.env"
+    os.environ["CONFIG_DIR"] = str(CONFIG_DIR)
+    return CONFIG_DIR
+
+
+def _write_install_env(config_dir: Path) -> None:
+    INSTALL_ENV_FILE.write_text(
+        f"CONFIG_DIR={shlex.quote(str(config_dir.expanduser().resolve()))}\n",
+        encoding="utf-8",
+    )
+
+
+def _seed_default_config_files(target_dir: Path) -> None:
+    for name in ("category.yaml",):
+        source = LEGACY_CONFIG_DIR / name
+        target = target_dir / name
+        if source.exists() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def _migrate_legacy_config_if_needed(target_dir: Path) -> None:
+    target_dir = target_dir.expanduser().resolve()
+    if target_dir == LEGACY_CONFIG_DIR.resolve():
+        return
+    if not _legacy_runtime_config_exists():
+        _seed_default_config_files(target_dir)
+        return
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for source in sorted(LEGACY_CONFIG_DIR.iterdir()):
+        target = target_dir / source.name
+        if target.exists():
+            continue
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            shutil.copy2(source, target)
+    print_step(f"已将现有本地配置迁移到 {target_dir}")
+
+
+def configure_config_dir(explicit: Optional[Path] = None, *, persist: bool = False, prefer_external: bool = False) -> Path:
+    if explicit:
+        config_dir = explicit.expanduser().resolve()
+    elif os.getenv("CONFIG_DIR"):
+        config_dir = Path(os.environ["CONFIG_DIR"]).expanduser().resolve()
+    else:
+        install_env_dir = _read_install_env_config_dir()
+        if install_env_dir:
+            config_dir = install_env_dir.resolve()
+        elif prefer_external:
+            config_dir = _default_config_dir().resolve()
+        elif _legacy_runtime_config_exists():
+            config_dir = LEGACY_CONFIG_DIR.resolve()
+        else:
+            config_dir = _default_config_dir().resolve()
+
+    _set_config_dir(config_dir)
+    if prefer_external:
+        _migrate_legacy_config_if_needed(config_dir)
+    if persist:
+        _write_install_env(config_dir)
+    return config_dir
+
+
+configure_config_dir()
 
 
 def print_step(message: str) -> None:
@@ -93,6 +209,7 @@ def ensure_supported_python(python_bin: str) -> None:
 def ensure_local_dirs() -> None:
     for path in (CONFIG_DIR, LOG_DIR, CACHE_DIR, TEMP_DIR, COOKIE_DIR, RUNTIME_DIR):
         path.mkdir(parents=True, exist_ok=True)
+    _seed_default_config_files(CONFIG_DIR)
 
 
 def _load_env_lines() -> list[str]:
@@ -888,6 +1005,120 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
     return venv_python
 
 
+def _read_runtime_file(path: Path) -> Optional[dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _services_running() -> list[str]:
+    running: list[str] = []
+    runtime_files = {
+        "backend": TEMP_DIR / "moviepilot.runtime.json",
+        "frontend": TEMP_DIR / "moviepilot.frontend.runtime.json",
+    }
+    for name, runtime_file in runtime_files.items():
+        payload = _read_runtime_file(runtime_file)
+        pid = payload.get("pid") if isinstance(payload, dict) else None
+        if pid and _pid_exists(int(pid)):
+            running.append(name)
+    return running
+
+
+def ensure_services_stopped() -> None:
+    running = _services_running()
+    if running:
+        raise RuntimeError(
+            "检测到本地服务仍在运行（%s），请先执行 `moviepilot stop` 后再更新。"
+            % ", ".join(running)
+        )
+
+
+def _git_output(*args: str) -> str:
+    return capture(["git", *args], cwd=ROOT)
+
+
+def _ensure_git_clean() -> None:
+    status = _git_output("status", "--porcelain")
+    if status.strip():
+        raise RuntimeError("检测到当前仓库有未提交改动，请先提交或清理后再执行更新。")
+
+
+def _update_backend_ref(ref: str) -> str:
+    if not (ROOT / ".git").exists():
+        raise RuntimeError("当前目录不是 Git 仓库，无法更新后端代码。")
+
+    _ensure_git_clean()
+    print_step("获取远端更新")
+    run(["git", "fetch", "--tags", "origin"], cwd=ROOT)
+
+    current_branch = _git_output("rev-parse", "--abbrev-ref", "HEAD")
+    if ref == "latest":
+        if current_branch == "HEAD":
+            raise RuntimeError("当前仓库处于 detached HEAD 状态，请使用 `moviepilot update backend --ref <tag|branch>` 指定版本。")
+        print_step(f"更新后端代码到当前分支最新版本：{current_branch}")
+        run(["git", "pull", "--ff-only", "origin", current_branch], cwd=ROOT)
+        return current_branch
+
+    print_step(f"切换后端代码到指定版本：{ref}")
+    run(["git", "checkout", ref], cwd=ROOT)
+    return ref
+
+
+def update_backend(*, ref: str, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
+    ensure_services_stopped()
+    resolved_ref = _update_backend_ref(ref=ref)
+    venv_python = install_deps(python_bin=python_bin, venv_dir=venv_dir, recreate=recreate)
+    print_step(f"后端更新完成：{resolved_ref}")
+    return venv_python
+
+
+def run_agent_request(*, message: str, session_id: Optional[str], new_session: bool, user_id: str) -> dict[str, str]:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+
+    try:
+        from app.db.init import init_db, update_db
+        from app.agent import MoviePilotAgent
+        from app.core.config import settings
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup") from exc
+
+    if not settings.AI_AGENT_ENABLE:
+        raise RuntimeError("MoviePilot 智能体未启用，请先在配置中打开 AI_AGENT_ENABLE")
+
+    init_db()
+    update_db()
+
+    session = (session_id or "").strip()
+    if new_session or not session:
+        session = f"cli-{uuid.uuid4().hex[:12]}"
+
+    async def _run_agent() -> dict[str, str]:
+        agent = MoviePilotAgent(session_id=session, user_id=user_id or "cli")
+        agent.suppress_user_reply = True
+        await agent.process(message.strip())
+        return {
+            "session_id": session,
+            "result": (agent._streamed_output or "").strip(),
+        }
+
+    return asyncio.run(_run_agent())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MoviePilot 本地安装与初始化工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -896,14 +1127,17 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--python", default=sys.executable, help="用于创建虚拟环境的 Python 解释器")
     install_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
     install_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
+    install_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     frontend_parser = subparsers.add_parser("install-frontend", help="下载前端 release 并安装本地运行时")
     frontend_parser.add_argument("--version", default="latest", help="前端版本，默认 latest")
     frontend_parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本")
+    frontend_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     resources_parser = subparsers.add_parser("install-resources", help="下载资源文件并同步到 app/helper")
     resources_parser.add_argument("--resources-repo", help="本地 MoviePilot-Resources 仓库路径")
     resources_parser.add_argument("--resource-dir", help="直接指定 resources.v2 目录")
+    resources_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     init_parser = subparsers.add_parser("init", help="初始化本地配置与资源文件")
     init_parser.add_argument("--resources-repo", help="本地 MoviePilot-Resources 仓库路径")
@@ -911,6 +1145,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--skip-resources", action="store_true", help="只初始化配置，不同步资源文件")
     init_parser.add_argument("--force-token", action="store_true", help="强制重置 API_TOKEN")
     init_parser.add_argument("--wizard", action="store_true", help="启动交互式初始化向导")
+    init_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     setup_parser = subparsers.add_parser("setup", help="执行 install-deps、install-frontend、install-resources 和 init")
     setup_parser.add_argument("--python", default=sys.executable, help="用于创建虚拟环境的 Python 解释器")
@@ -923,6 +1158,25 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--skip-resources", action="store_true", help="只初始化配置，不同步资源文件")
     setup_parser.add_argument("--force-token", action="store_true", help="强制重置 API_TOKEN")
     setup_parser.add_argument("--wizard", action="store_true", help="安装完成后启动交互式初始化向导")
+    setup_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+
+    agent_parser = subparsers.add_parser("agent", help="直接向 MoviePilot 智能体发送一次请求")
+    agent_parser.add_argument("message", nargs="+", help="发给智能体的文本请求")
+    agent_parser.add_argument("--session", help="会话 ID，默认自动生成")
+    agent_parser.add_argument("--new-session", action="store_true", help="忽略传入会话，强制创建新会话")
+    agent_parser.add_argument("--user-id", default="cli", help="智能体上下文中的用户 ID")
+    agent_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+
+    update_parser = subparsers.add_parser("update", help="更新本地后端、前端或全部组件")
+    update_parser.add_argument("target", choices=["backend", "frontend", "all"], help="更新目标")
+    update_parser.add_argument("--ref", default="latest", help="后端 Git 版本，默认 latest")
+    update_parser.add_argument("--frontend-version", default="latest", help="前端版本，默认 latest")
+    update_parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本")
+    update_parser.add_argument("--python", default=sys.executable, help="用于安装后端依赖的 Python 解释器")
+    update_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
+    update_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
+    update_parser.add_argument("--skip-resources", action="store_true", help="更新 all 时跳过资源同步")
+    update_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     return parser
 
@@ -930,6 +1184,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    explicit_config_dir = Path(args.config_dir) if getattr(args, "config_dir", None) else None
+    config_dir = configure_config_dir(
+        explicit=explicit_config_dir,
+        persist=True,
+        prefer_external=True,
+    )
 
     try:
         if args.command == "install-deps":
@@ -939,6 +1199,7 @@ def main() -> int:
                 recreate=args.recreate,
             )
             print_step(f"后端依赖安装完成，可执行：{venv_python} -m app.cli")
+            print_step(f"当前配置目录：{config_dir}")
             return 0
 
         if args.command == "install-frontend":
@@ -963,6 +1224,7 @@ def main() -> int:
                 wizard=args.wizard,
             )
             print_step("初始化完成")
+            print_step(f"当前配置目录：{config_dir}")
             return 0
 
         if args.command == "setup":
@@ -988,6 +1250,37 @@ def main() -> int:
                 wizard=args.wizard,
             )
             print_step(f"本地环境已完成安装与初始化：{venv_python}")
+            print_step(f"当前配置目录：{config_dir}")
+            return 0
+
+        if args.command == "agent":
+            result = run_agent_request(
+                message=" ".join(args.message),
+                session_id=args.session,
+                new_session=args.new_session,
+                user_id=args.user_id,
+            )
+            if result.get("session_id"):
+                print_step(f"智能体会话：{result['session_id']}")
+            print(result.get("result") or "")
+            return 0
+
+        if args.command == "update":
+            ensure_services_stopped()
+            if args.target in {"backend", "all"}:
+                update_backend(
+                    ref=args.ref,
+                    python_bin=args.python,
+                    venv_dir=Path(args.venv),
+                    recreate=args.recreate,
+                )
+            if args.target in {"frontend", "all"}:
+                frontend_result = install_frontend(frontend_version=args.frontend_version, node_version=args.node_version)
+                print_step(f"前端更新完成，版本：{frontend_result['version']}")
+            if args.target == "all" and not args.skip_resources:
+                install_resources(resources_repo=None, resource_dir=None)
+                print_step("资源文件已同步到最新")
+            print_step(f"更新完成，当前配置目录：{config_dir}")
             return 0
     except subprocess.CalledProcessError as exc:
         print(f"命令执行失败，退出码：{exc.returncode}", file=sys.stderr)

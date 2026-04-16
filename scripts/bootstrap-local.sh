@@ -7,11 +7,17 @@ WORKDIR="$PWD"
 APP_DIR_NAME="MoviePilot"
 LINK_CLI="true"
 LINK_PATH=""
+CONFIG_DIR=""
 RUN_WIZARD="true"
 START_AFTER_INSTALL="true"
 NON_INTERACTIVE="false"
 OS_NAME="Unknown"
 PYTHON_BIN=""
+PROMPT_INPUT="/dev/stdin"
+PROMPT_OUTPUT="/dev/stdout"
+HAS_TTY="false"
+PATH_RC_FILE=""
+PATH_UPDATED="false"
 
 usage() {
   cat <<EOF
@@ -21,6 +27,7 @@ Options:
   --workdir PATH           克隆与安装的目标目录，默认当前目录
   --app-dir NAME           MoviePilot 目录名，默认 ${APP_DIR_NAME}
   --repo-url URL           主项目仓库地址
+  --config-dir PATH        配置目录，默认使用程序目录外的系统配置目录
   --link-path PATH         全局 moviepilot 软链接位置
   --no-link-cli            安装完成后不创建全局 moviepilot 命令
   --no-wizard              跳过 moviepilot setup 的交互式初始化向导
@@ -31,8 +38,33 @@ Options:
 Examples:
   $(basename "$0")
   $(basename "$0") --workdir ~/Projects
+  $(basename "$0") --config-dir ~/.config/moviepilot-local
   $(basename "$0") --non-interactive --workdir ~/Projects --no-start
 EOF
+}
+
+default_config_dir() {
+  case "$OS_NAME" in
+    macOS)
+      printf '%s\n' "$HOME/Library/Application Support/MoviePilot"
+      ;;
+    *)
+      printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/moviepilot"
+      ;;
+  esac
+}
+
+setup_prompt_io() {
+  if [[ -t 0 && -t 1 ]]; then
+    HAS_TTY="true"
+    return
+  fi
+
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    PROMPT_INPUT="/dev/tty"
+    PROMPT_OUTPUT="/dev/tty"
+    HAS_TTY="true"
+  fi
 }
 
 detect_os() {
@@ -64,6 +96,10 @@ detect_os() {
       LINK_PATH="/usr/local/bin/moviepilot"
       ;;
   esac
+
+  if [[ -z "$CONFIG_DIR" ]]; then
+    CONFIG_DIR="$(default_config_dir)"
+  fi
 }
 
 find_python() {
@@ -137,14 +173,15 @@ prompt_text() {
   local answer=""
 
   if [[ -n "$default_value" ]]; then
-    read -r -p "$label [$default_value]: " answer || true
-    if [[ -z "$answer" ]]; then
-      answer="$default_value"
-    fi
+    printf '%s [%s]: ' "$label" "$default_value" >"$PROMPT_OUTPUT"
   else
-    read -r -p "$label: " answer || true
+    printf '%s: ' "$label" >"$PROMPT_OUTPUT"
   fi
 
+  IFS= read -r answer <"$PROMPT_INPUT" || true
+  if [[ -z "$answer" ]]; then
+    answer="$default_value"
+  fi
   printf '%s\n' "$answer"
 }
 
@@ -159,7 +196,8 @@ prompt_yes_no() {
   fi
 
   while true; do
-    read -r -p "$label $prompt: " answer || true
+    printf '%s %s: ' "$label" "$prompt" >"$PROMPT_OUTPUT"
+    IFS= read -r answer <"$PROMPT_INPUT" || true
     answer="${answer,,}"
     if [[ -z "$answer" ]]; then
       answer="$default_value"
@@ -168,16 +206,17 @@ prompt_yes_no() {
       y|yes) return 0 ;;
       n|no) return 1 ;;
     esac
-    echo "请输入 y 或 n。"
+    printf '请输入 y 或 n。\n' >"$PROMPT_OUTPUT"
   done
 }
 
 run_interactive_guide() {
-  echo "==> 当前系统: $OS_NAME"
-  echo "==> 将自动拉取 MoviePilot，并下载前端 release、资源文件与本地 Node 运行时"
+  printf '==> 当前系统: %s\n' "$OS_NAME" >"$PROMPT_OUTPUT"
+  printf '==> 将自动拉取 MoviePilot，并下载前端 release、资源文件与本地 Node 运行时\n' >"$PROMPT_OUTPUT"
 
   WORKDIR="$(prompt_text "安装目录" "$WORKDIR")"
   APP_DIR_NAME="$(prompt_text "主项目目录名" "$APP_DIR_NAME")"
+  CONFIG_DIR="$(prompt_text "配置目录" "$CONFIG_DIR")"
 
   if prompt_yes_no "安装过程中进入 MoviePilot 初始化向导" "y"; then
     RUN_WIZARD="true"
@@ -211,6 +250,49 @@ ensure_link_path() {
   mkdir -p "$(dirname "$LINK_PATH")"
 }
 
+detect_rc_file() {
+  local shell_name
+  shell_name="$(basename "${SHELL:-}")"
+  case "$shell_name" in
+    zsh)
+      printf '%s\n' "$HOME/.zshrc"
+      ;;
+    bash)
+      printf '%s\n' "$HOME/.bashrc"
+      ;;
+    *)
+      printf '%s\n' "$HOME/.profile"
+      ;;
+  esac
+}
+
+ensure_path_configured() {
+  if [[ "$LINK_CLI" != "true" ]]; then
+    return
+  fi
+
+  local bin_dir
+  bin_dir="$(dirname "$LINK_PATH")"
+  export PATH="$bin_dir:$PATH"
+
+  if [[ "$bin_dir" != "$HOME/.local/bin" ]]; then
+    return
+  fi
+
+  PATH_RC_FILE="$(detect_rc_file)"
+  local export_line='export PATH="$HOME/.local/bin:$PATH"'
+  mkdir -p "$(dirname "$PATH_RC_FILE")"
+  touch "$PATH_RC_FILE"
+
+  if ! grep -Fqs "$export_line" "$PATH_RC_FILE"; then
+    {
+      printf '\n# MoviePilot CLI\n'
+      printf '%s\n' "$export_line"
+    } >>"$PATH_RC_FILE"
+    PATH_UPDATED="true"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --workdir)
@@ -223,6 +305,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo-url)
       REPO_URL="$2"
+      shift 2
+      ;;
+    --config-dir)
+      CONFIG_DIR="$2"
       shift 2
       ;;
     --link-path)
@@ -258,12 +344,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 detect_os
+setup_prompt_io
 require_prereqs
 ensure_link_path
 
-if [[ "$NON_INTERACTIVE" != "true" && -t 0 && -t 1 ]]; then
+if [[ "$NON_INTERACTIVE" != "true" && "$HAS_TTY" == "true" ]]; then
   run_interactive_guide
   ensure_link_path
+elif [[ "$RUN_WIZARD" == "true" && "$HAS_TTY" != "true" ]]; then
+  echo "==> 未检测到可用终端输入，已跳过初始化向导。安装完成后可手动执行：moviepilot setup --wizard"
+  RUN_WIZARD="false"
 fi
 
 mkdir -p "$WORKDIR"
@@ -279,15 +369,20 @@ fi
 
 cd "$APP_DIR"
 echo "==> 执行本地环境安装与初始化"
-SETUP_ARGS=(setup)
+SETUP_ARGS=(setup --config-dir "$CONFIG_DIR")
 if [[ "$RUN_WIZARD" == "true" ]]; then
   SETUP_ARGS+=(--wizard)
 fi
-./moviepilot "${SETUP_ARGS[@]}"
+if [[ "$HAS_TTY" == "true" ]]; then
+  ./moviepilot "${SETUP_ARGS[@]}" <"$PROMPT_INPUT"
+else
+  ./moviepilot "${SETUP_ARGS[@]}"
+fi
 
 if [[ "$LINK_CLI" == "true" ]]; then
   echo "==> 创建全局 moviepilot 命令到 $LINK_PATH"
   ln -sf "$APP_DIR/moviepilot" "$LINK_PATH"
+  ensure_path_configured
 fi
 
 if [[ "$START_AFTER_INSTALL" == "true" ]]; then
@@ -300,6 +395,7 @@ cat <<EOF
 
 系统环境: $OS_NAME
 项目目录: $APP_DIR
+配置目录: $CONFIG_DIR
 Python 解释器: $PYTHON_BIN
 CLI 命令: ${LINK_CLI:-false}
 CLI 路径: ${LINK_PATH:-未创建}
@@ -308,7 +404,18 @@ CLI 路径: ${LINK_PATH:-未创建}
   moviepilot status
   moviepilot logs --frontend
   moviepilot logs --stdio
+  moviepilot config path
 
 完整 CLI 文档:
   $APP_DIR/docs/cli.md
 EOF
+
+if [[ "$LINK_CLI" == "true" && "$(dirname "$LINK_PATH")" == "$HOME/.local/bin" ]]; then
+  echo
+  echo "PATH 说明:"
+  if [[ "$PATH_UPDATED" == "true" ]]; then
+    echo "  已将 ~/.local/bin 写入 $PATH_RC_FILE"
+  fi
+  echo "  如果当前终端仍提示找不到 moviepilot，请重新打开终端，或执行："
+  echo "  source ${PATH_RC_FILE:-$HOME/.profile}"
+fi

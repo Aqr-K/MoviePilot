@@ -9,11 +9,13 @@ Usage: moviepilot [BOOTSTRAP COMMAND] | [RUNTIME COMMAND]
        moviepilot commands
 
 Bootstrap Commands:
-  moviepilot install deps [--python PYTHON] [--venv PATH] [--recreate]
-  moviepilot install frontend [--version latest] [--node-version 20.12.1]
-  moviepilot install resources [--resources-repo PATH] [--resource-dir PATH]
-  moviepilot init [--skip-resources] [--force-token] [--wizard]
-  moviepilot setup [--python PYTHON] [--venv PATH] [--recreate] [--frontend-version latest] [--node-version 20.12.1] [--wizard]
+  moviepilot install deps [--python PYTHON] [--venv PATH] [--recreate] [--config-dir PATH]
+  moviepilot install frontend [--version latest] [--node-version 20.12.1] [--config-dir PATH]
+  moviepilot install resources [--resources-repo PATH] [--resource-dir PATH] [--config-dir PATH]
+  moviepilot init [--skip-resources] [--force-token] [--wizard] [--config-dir PATH]
+  moviepilot setup [--python PYTHON] [--venv PATH] [--recreate] [--frontend-version latest] [--node-version 20.12.1] [--wizard] [--config-dir PATH]
+  moviepilot update {backend|frontend|all} [OPTIONS]
+  moviepilot agent [OPTIONS] MESSAGE...
 
 Runtime Commands:
   moviepilot start|stop|restart|status|logs|version
@@ -25,6 +27,7 @@ Discovery Commands:
   moviepilot help
   moviepilot help config
   moviepilot help install
+  moviepilot help update
   moviepilot commands
 
 Examples:
@@ -32,6 +35,8 @@ Examples:
   moviepilot install frontend
   moviepilot install resources
   moviepilot setup --wizard
+  moviepilot update all
+  moviepilot agent 帮我分析最近一次搜索失败
   moviepilot help config
   moviepilot config keys
   moviepilot start
@@ -47,6 +52,10 @@ Bootstrap Commands
   install resources
   init
   setup
+  update backend
+  update frontend
+  update all
+  agent
 
 Runtime Commands
   start
@@ -85,14 +94,17 @@ Options:
     --python PYTHON   用于创建虚拟环境的 Python 解释器
     --venv PATH       虚拟环境目录，默认 ./venv
     --recreate        删除并重建虚拟环境
+    --config-dir PATH 指定配置目录
 
   frontend:
     --version TAG         前端版本，默认 latest
     --node-version VER    本地 Node 运行时版本，默认 20.12.1
+    --config-dir PATH     指定配置目录
 
   resources:
     --resources-repo PATH 本地 MoviePilot-Resources 仓库路径
     --resource-dir PATH   直接指定 resources.v2 目录
+    --config-dir PATH     指定配置目录
 
   -h, --help              显示帮助
 EOF
@@ -106,6 +118,7 @@ Options:
   --skip-resources          跳过资源同步
   --force-token             强制重置 API_TOKEN
   --wizard                  启动交互式初始化向导
+  --config-dir PATH         指定配置目录
   -h, --help                显示帮助
 EOF
 }
@@ -123,6 +136,41 @@ Options:
   --skip-resources          跳过资源同步
   --force-token             强制重置 API_TOKEN
   --wizard                  安装完成后启动交互式初始化向导
+  --config-dir PATH         指定配置目录
+  -h, --help                显示帮助
+EOF
+}
+
+show_update_help() {
+  cat <<'EOF'
+Usage:
+  moviepilot update backend [OPTIONS]
+  moviepilot update frontend [OPTIONS]
+  moviepilot update all [OPTIONS]
+
+Options:
+  --ref REF                 后端 Git 版本，默认 latest
+  --frontend-version TAG    前端版本，默认 latest
+  --node-version VER        本地 Node 运行时版本，默认 20.12.1
+  --python PYTHON           用于安装后端依赖的 Python 解释器
+  --venv PATH               虚拟环境目录，默认 ./venv
+  --recreate                删除并重建虚拟环境
+  --skip-resources          更新 all 时跳过资源同步
+  --config-dir PATH         指定配置目录
+  -h, --help                显示帮助
+EOF
+}
+
+show_agent_help() {
+  cat <<'EOF'
+Usage:
+  moviepilot agent [OPTIONS] MESSAGE...
+
+Options:
+  --session ID              指定会话 ID
+  --new-session             强制创建新会话
+  --user-id ID              智能体上下文中的用户 ID，默认 cli
+  --config-dir PATH         指定配置目录
   -h, --help                显示帮助
 EOF
 }
@@ -137,6 +185,22 @@ find_system_python() {
     return 0
   fi
   return 1
+}
+
+default_config_dir() {
+  case "$(uname -s)" in
+    Darwin)
+      printf '%s\n' "$HOME/Library/Application Support/MoviePilot"
+      ;;
+    *)
+      printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/moviepilot"
+      ;;
+  esac
+}
+
+legacy_config_exists() {
+  local legacy_dir="$ROOT/config"
+  [[ -f "$legacy_dir/app.env" ]] || [[ -f "$legacy_dir/user.db" ]] || [[ -d "$legacy_dir/logs" ]] || [[ -d "$legacy_dir/temp" ]] || [[ -d "$legacy_dir/cache" ]] || [[ -d "$legacy_dir/cookies" ]] || [[ -d "$legacy_dir/sites" ]]
 }
 
 run_runtime_cli() {
@@ -182,6 +246,14 @@ show_command_help() {
       show_setup_help
       exit 0
       ;;
+    agent)
+      show_agent_help
+      exit 0
+      ;;
+    update)
+      show_update_help
+      exit 0
+      ;;
     commands)
       show_commands
       exit 0
@@ -206,6 +278,20 @@ done
 ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 VENV_PYTHON="$ROOT/venv/bin/python"
 SETUP_SCRIPT="$ROOT/scripts/local_setup.py"
+
+if [ -z "${CONFIG_DIR:-}" ] && [ -f "$ROOT/.moviepilot.env" ]; then
+  # shellcheck disable=SC1090
+  . "$ROOT/.moviepilot.env"
+fi
+
+if [ -z "${CONFIG_DIR:-}" ]; then
+  if legacy_config_exists; then
+    CONFIG_DIR="$ROOT/config"
+  else
+    CONFIG_DIR="$(default_config_dir)"
+  fi
+fi
+export CONFIG_DIR
 
 BOOTSTRAP_PYTHON=""
 if [ -x "$VENV_PYTHON" ]; then
@@ -269,6 +355,22 @@ case "${1:-}" in
       exit 1
     fi
     exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" setup "$@"
+    ;;
+  update)
+    shift
+    if [ -z "$BOOTSTRAP_PYTHON" ]; then
+      echo "未找到可用的 Python 解释器，请先安装 Python 3" >&2
+      exit 1
+    fi
+    exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" update "$@"
+    ;;
+  agent)
+    shift
+    if [ -z "$BOOTSTRAP_PYTHON" ]; then
+      echo "未找到可用的 Python 解释器，请先安装 Python 3" >&2
+      exit 1
+    fi
+    exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" agent "$@"
     ;;
 esac
 

@@ -23,6 +23,7 @@ config/temp/
 config/cache/
 .runtime/
 public/
+.moviepilot.env
 *.pyc
 *.log
 .vscode
