@@ -10,6 +10,9 @@ def init_db():
     """
     初始化数据库
     """
+    # 确保所有模型都已注册到 Base.metadata 中
+    import app.db.models  # noqa: F401
+
     # 全量建表
     Base.metadata.create_all(bind=Engine) # noqa
 
