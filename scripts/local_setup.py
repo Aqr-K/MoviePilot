@@ -1425,9 +1425,24 @@ def _git_output(*args: str) -> str:
 
 
 def _ensure_git_clean() -> None:
-    status = _git_output("status", "--porcelain")
-    if status.strip():
-        raise RuntimeError("检测到当前仓库有未提交改动，请先提交或清理后再执行更新。")
+    status = _git_output("status", "--porcelain", "--untracked-files=no")
+    if not status.strip():
+        return
+
+    changed_files: list[str] = []
+    for line in status.splitlines():
+        if len(line) < 4:
+            continue
+        changed_files.append(line[3:].strip())
+
+    detail = ""
+    if changed_files:
+        preview = "、".join(changed_files[:5])
+        if len(changed_files) > 5:
+            preview += " 等"
+        detail = f"：{preview}"
+
+    raise RuntimeError(f"检测到当前仓库有未提交的源码改动{detail}，请先提交或清理后再执行更新。")
 
 
 def _update_backend_ref(ref: str) -> str:
