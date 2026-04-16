@@ -175,15 +175,40 @@ Options:
 EOF
 }
 
+python_version_ok() {
+  local python_bin="$1"
+  "$python_bin" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
+PY
+}
+
 find_system_python() {
   if command -v python3 >/dev/null 2>&1; then
-    command -v python3
-    return 0
+    local python3_bin
+    python3_bin="$(command -v python3)"
+    if python_version_ok "$python3_bin"; then
+      printf '%s\n' "$python3_bin"
+      return 0
+    fi
   fi
   if command -v python >/dev/null 2>&1; then
-    command -v python
-    return 0
+    local python_bin
+    python_bin="$(command -v python)"
+    if python_version_ok "$python_bin"; then
+      printf '%s\n' "$python_bin"
+      return 0
+    fi
   fi
+  local uv_bin
+  for uv_bin in "$(command -v uv 2>/dev/null || true)" "$HOME/.local/bin/uv"; do
+    if [ -n "$uv_bin" ] && [ -x "$uv_bin" ]; then
+      if "$uv_bin" python find 3.12 >/dev/null 2>&1; then
+        "$uv_bin" python find 3.12
+        return 0
+      fi
+    fi
+  done
   return 1
 }
 

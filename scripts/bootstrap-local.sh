@@ -14,6 +14,9 @@ START_AFTER_INSTALL="true"
 NON_INTERACTIVE="false"
 OS_NAME="Unknown"
 PYTHON_BIN=""
+BREW_BIN=""
+PACKAGE_MANAGER=""
+PACKAGE_INDEX_UPDATED="false"
 PROMPT_INPUT="/dev/stdin"
 PROMPT_OUTPUT="/dev/stdout"
 HAS_TTY="false"
@@ -47,7 +50,7 @@ EOF
 repo_dirty() {
   (
     cd "$1"
-    git status --porcelain 2>/dev/null | grep -q .
+    git status --porcelain --untracked-files=no 2>/dev/null | grep -q .
   )
 }
 
@@ -137,6 +140,34 @@ detect_os() {
   fi
 }
 
+detect_package_manager() {
+  case "$OS_NAME" in
+    macOS)
+      PACKAGE_MANAGER="brew"
+      ;;
+    Linux*)
+      if command -v apt-get >/dev/null 2>&1; then
+        PACKAGE_MANAGER="apt-get"
+      elif command -v dnf >/dev/null 2>&1; then
+        PACKAGE_MANAGER="dnf"
+      elif command -v yum >/dev/null 2>&1; then
+        PACKAGE_MANAGER="yum"
+      elif command -v zypper >/dev/null 2>&1; then
+        PACKAGE_MANAGER="zypper"
+      elif command -v pacman >/dev/null 2>&1; then
+        PACKAGE_MANAGER="pacman"
+      elif command -v apk >/dev/null 2>&1; then
+        PACKAGE_MANAGER="apk"
+      else
+        PACKAGE_MANAGER=""
+      fi
+      ;;
+    *)
+      PACKAGE_MANAGER=""
+      ;;
+  esac
+}
+
 find_python() {
   if command -v python3 >/dev/null 2>&1; then
     command -v python3
@@ -160,10 +191,12 @@ PY
 python_install_hint() {
   case "$OS_NAME" in
     macOS)
-      echo "请先安装 Git、curl 和 Python 3.12，例如：brew install git curl python@3.12" >&2
+      echo "脚本已尝试自动安装 Git、curl 和 Python 3.12+。" >&2
+      echo "如果自动安装失败，请先安装 Homebrew，或手动执行：brew install git curl python@3.12" >&2
       ;;
     Linux*)
-      echo "请先安装 Git、curl 和 Python 3.12，并确保包含 venv 模块。" >&2
+      echo "脚本已尝试自动安装 Git、curl 和 Python 3.12+。" >&2
+      echo "如果自动安装失败，请先安装 Git、curl 和 Python 3.12，并确保包含 venv 模块。" >&2
       echo "例如 Debian/Ubuntu: sudo apt install git curl python3.12 python3.12-venv" >&2
       echo "例如 Fedora/RHEL:  sudo dnf install git curl python3.12" >&2
       ;;
@@ -176,27 +209,183 @@ python_install_hint() {
   esac
 }
 
-require_prereqs() {
+setup_brew_env() {
+  local candidate=""
+  for candidate in "$BREW_BIN" "$(command -v brew 2>/dev/null || true)" /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew "$HOME/.linuxbrew/bin/brew"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      BREW_BIN="$candidate"
+      eval "$("$BREW_BIN" shellenv)"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_brew() {
+  if setup_brew_env; then
+    return 0
+  fi
+
+  echo "==> 未找到 Homebrew，开始自动安装"
+  NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if ! setup_brew_env; then
+    echo "自动安装 Homebrew 失败。" >&2
+    return 1
+  fi
+}
+
+run_privileged() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+    return
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "当前步骤需要 sudo 权限，但系统中未找到 sudo。" >&2
+    return 1
+  fi
+
+  if [[ "$HAS_TTY" == "true" ]]; then
+    sudo "$@"
+    return
+  fi
+
+  if sudo -n true >/dev/null 2>&1; then
+    sudo -n "$@"
+    return
+  fi
+
+  echo "当前步骤需要 sudo 权限，请在可交互终端中重新运行脚本。" >&2
+  return 1
+}
+
+refresh_package_index() {
+  if [[ "$PACKAGE_INDEX_UPDATED" == "true" ]]; then
+    return
+  fi
+
+  case "$PACKAGE_MANAGER" in
+    apt-get)
+      run_privileged apt-get update
+      ;;
+    pacman)
+      run_privileged pacman -Sy --noconfirm
+      ;;
+    zypper)
+      run_privileged zypper --gpg-auto-import-keys refresh
+      ;;
+    apk)
+      run_privileged apk update
+      ;;
+  esac
+
+  PACKAGE_INDEX_UPDATED="true"
+}
+
+install_system_packages() {
+  local packages=("$@")
+  if [[ "${#packages[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  case "$PACKAGE_MANAGER" in
+    brew)
+      ensure_brew
+      "$BREW_BIN" install "${packages[@]}"
+      ;;
+    apt-get)
+      refresh_package_index
+      run_privileged apt-get install -y "${packages[@]}"
+      ;;
+    dnf)
+      run_privileged dnf install -y "${packages[@]}"
+      ;;
+    yum)
+      run_privileged yum install -y "${packages[@]}"
+      ;;
+    zypper)
+      refresh_package_index
+      run_privileged zypper install -y "${packages[@]}"
+      ;;
+    pacman)
+      refresh_package_index
+      run_privileged pacman -S --noconfirm --needed "${packages[@]}"
+      ;;
+    apk)
+      refresh_package_index
+      run_privileged apk add --no-cache "${packages[@]}"
+      ;;
+    *)
+      echo "当前系统暂不支持自动安装依赖，请手动安装：${packages[*]}" >&2
+      return 1
+      ;;
+  esac
+}
+
+ensure_base_tools() {
+  local missing=()
+
+  if ! command -v git >/dev/null 2>&1; then
+    missing+=("git")
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    missing+=("curl")
+  fi
+
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "==> 自动安装基础依赖: ${missing[*]}"
+  install_system_packages "${missing[@]}"
+  hash -r
+
+  if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+    echo "基础依赖安装失败，请确认 git 和 curl 可用后重试。" >&2
+    return 1
+  fi
+}
+
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "==> 自动安装 uv，用于拉取 Python 3.12+"
+  env UV_INSTALL_DIR="$HOME/.local/bin" sh -c "$(curl -LsSf https://astral.sh/uv/install.sh)"
+  export PATH="$HOME/.local/bin:$PATH"
+  hash -r
+
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv 安装失败，无法继续自动安装 Python。" >&2
+    return 1
+  fi
+}
+
+ensure_python() {
+  PYTHON_BIN="$(find_python || true)"
+  if [[ -n "$PYTHON_BIN" ]] && python_version_ok "$PYTHON_BIN"; then
+    return 0
+  fi
+
+  echo "==> 未找到可用的 Python 3.12+，开始自动安装独立 Python 运行时"
+  ensure_uv
+  uv python install 3.12
+  PYTHON_BIN="$(uv python find 3.12 || true)"
+  if [[ -z "$PYTHON_BIN" ]] || ! python_version_ok "$PYTHON_BIN"; then
+    echo "自动安装 Python 3.12+ 失败。" >&2
+    return 1
+  fi
+}
+
+ensure_prereqs() {
   if [[ "$OS_NAME" == "Windows" ]]; then
     echo "检测到当前环境为 Windows shell，建议改用 WSL、Linux 或 macOS 终端运行。" >&2
     exit 1
   fi
 
-  if ! command -v git >/dev/null 2>&1; then
-    echo "未找到 git。" >&2
-    python_install_hint
-    exit 1
-  fi
-
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "未找到 curl。" >&2
-    python_install_hint
-    exit 1
-  fi
-
-  PYTHON_BIN="$(find_python || true)"
-  if [[ -z "$PYTHON_BIN" ]] || ! python_version_ok "$PYTHON_BIN"; then
-    echo "未找到可用的 Python 3.12+ 解释器。" >&2
+  if ! ensure_base_tools || ! ensure_python; then
     python_install_hint
     exit 1
   fi
@@ -379,8 +568,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 detect_os
+detect_package_manager
 setup_prompt_io
-require_prereqs
+ensure_prereqs
 ensure_link_path
 
 if [[ "$NON_INTERACTIVE" != "true" && "$HAS_TTY" == "true" ]]; then
@@ -398,14 +588,14 @@ sync_repo
 
 cd "$APP_DIR"
 echo "==> 执行本地环境安装与初始化"
-SETUP_ARGS=(setup --config-dir "$CONFIG_DIR")
+SETUP_ARGS=(setup --python "$PYTHON_BIN" --config-dir "$CONFIG_DIR")
 if [[ "$RUN_WIZARD" == "true" ]]; then
   SETUP_ARGS+=(--wizard)
 fi
 if [[ "$HAS_TTY" == "true" ]]; then
-  ./moviepilot "${SETUP_ARGS[@]}" <"$PROMPT_INPUT"
+  "$PYTHON_BIN" ./scripts/local_setup.py "${SETUP_ARGS[@]}" <"$PROMPT_INPUT"
 else
-  ./moviepilot "${SETUP_ARGS[@]}"
+  "$PYTHON_BIN" ./scripts/local_setup.py "${SETUP_ARGS[@]}"
 fi
 
 if [[ "$LINK_CLI" == "true" ]]; then
