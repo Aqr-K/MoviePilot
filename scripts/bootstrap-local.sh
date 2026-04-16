@@ -3,6 +3,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/jxxghp/MoviePilot.git"
+REPO_REF="v2"
 WORKDIR="$PWD"
 APP_DIR_NAME="MoviePilot"
 LINK_CLI="true"
@@ -41,6 +42,40 @@ Examples:
   $(basename "$0") --config-dir ~/.config/moviepilot-local
   $(basename "$0") --non-interactive --workdir ~/Projects --no-start
 EOF
+}
+
+repo_dirty() {
+  (
+    cd "$1"
+    git status --porcelain 2>/dev/null | grep -q .
+  )
+}
+
+sync_repo() {
+  if [[ ! -d "$APP_DIR/.git" ]]; then
+    echo "==> 克隆 MoviePilot 到 $APP_DIR"
+    git clone --branch "$REPO_REF" "$REPO_URL" "$APP_DIR"
+    return
+  fi
+
+  echo "==> 复用已有 MoviePilot 仓库: $APP_DIR"
+  if repo_dirty "$APP_DIR"; then
+    echo "检测到现有仓库包含未提交改动，已停止自动更新。" >&2
+    echo "请先清理 $APP_DIR 的本地修改，或换一个新的安装目录后重试。" >&2
+    exit 1
+  fi
+
+  (
+    cd "$APP_DIR"
+    echo "==> 更新本地仓库到 origin/$REPO_REF"
+    git fetch --tags origin "$REPO_REF"
+    if git show-ref --verify --quiet "refs/heads/$REPO_REF"; then
+      git checkout "$REPO_REF"
+    else
+      git checkout -b "$REPO_REF" "origin/$REPO_REF"
+    fi
+    git pull --ff-only origin "$REPO_REF"
+  )
 }
 
 default_config_dir() {
@@ -359,13 +394,7 @@ fi
 mkdir -p "$WORKDIR"
 WORKDIR="$(cd "$WORKDIR" && pwd)"
 APP_DIR="$WORKDIR/$APP_DIR_NAME"
-
-if [[ ! -d "$APP_DIR/.git" ]]; then
-  echo "==> 克隆 MoviePilot 到 $APP_DIR"
-  git clone "$REPO_URL" "$APP_DIR"
-else
-  echo "==> 复用已有 MoviePilot 仓库: $APP_DIR"
-fi
+sync_repo
 
 cd "$APP_DIR"
 echo "==> 执行本地环境安装与初始化"
