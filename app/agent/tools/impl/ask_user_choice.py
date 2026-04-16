@@ -5,7 +5,10 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.tools.base import MoviePilotTool, ToolChain
-from app.agent.user_choice import AgentChoiceOption, agent_user_choice_manager
+from app.agent.interaction import (
+    AgentInteractionOption,
+    agent_interaction_manager,
+)
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager
@@ -111,15 +114,18 @@ class AskUserChoiceTool(MoviePilotTool):
             return f"当前渠道最多支持 {max_options} 个按钮选项"
 
         choice_options = [
-            AgentChoiceOption(label=option.label.strip(), value=option.value.strip())
+            AgentInteractionOption(
+                label=option.label.strip(), value=option.value.strip()
+            )
             for option in options
         ]
-        request = agent_user_choice_manager.create_request(
+        request = agent_interaction_manager.create_request(
             session_id=self._session_id,
             user_id=str(self._user_id),
             channel=channel.value,
             source=self._source,
             username=self._username,
+            title=title,
             prompt=message.strip(),
             options=choice_options,
         )
@@ -130,7 +136,9 @@ class AskUserChoiceTool(MoviePilotTool):
             current_row.append(
                 {
                     "text": self._truncate_button_text(option.label, max_text_length),
-                    "callback_data": f"agent_choice:{request.request_id}:{index}",
+                    "callback_data": (
+                        f"agent_interaction:choice:{request.request_id}:{index}"
+                    ),
                 }
             )
             if len(current_row) >= max_per_row:

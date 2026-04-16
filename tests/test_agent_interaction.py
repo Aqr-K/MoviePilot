@@ -8,14 +8,17 @@ from app.agent.tools.impl.ask_user_choice import (
     AskUserChoiceTool,
     UserChoiceOptionInput,
 )
-from app.agent.user_choice import AgentChoiceOption, agent_user_choice_manager
+from app.agent.interaction import (
+    AgentInteractionOption,
+    agent_interaction_manager,
+)
 from app.chain.message import MessageChain
 from app.schemas.types import MessageChannel
 
 
-class TestAgentUserChoice(unittest.TestCase):
+class TestAgentInteraction(unittest.TestCase):
     def tearDown(self):
-        agent_user_choice_manager.clear()
+        agent_interaction_manager.clear()
 
     def test_prompt_injects_choice_tool_hint_only_for_button_channels(self):
         telegram_prompt = prompt_manager.get_agent_prompt(
@@ -82,30 +85,76 @@ class TestAgentUserChoice(unittest.TestCase):
         self.assertEqual(len(notification.buttons[0]), 2)
 
         callback_data = notification.buttons[0][0]["callback_data"]
-        _, request_id, option_index = callback_data.split(":")
-        resolved = agent_user_choice_manager.resolve(request_id, int(option_index), "10001")
+        _, _, request_id, option_index = callback_data.split(":")
+        resolved = agent_interaction_manager.resolve(
+            request_id, int(option_index), "10001"
+        )
         self.assertIsNotNone(resolved)
         _, option = resolved
         self.assertEqual(option.value, "继续下载")
 
-    def test_agent_choice_callback_routes_selected_value_back_to_agent(self):
+    def test_agent_interaction_callback_routes_selected_value_back_to_agent(self):
         chain = MessageChain()
-        request = agent_user_choice_manager.create_request(
+        request = agent_interaction_manager.create_request(
             session_id="session-choice",
             user_id="10001",
             channel=MessageChannel.Telegram.value,
             source="telegram-test",
             username="tester",
+            title="需要你的选择",
             prompt="请选择",
             options=[
-                AgentChoiceOption(label="电影", value="我选择电影"),
-                AgentChoiceOption(label="电视剧", value="我选择电视剧"),
+                AgentInteractionOption(label="电影", value="我选择电影"),
+                AgentInteractionOption(label="电视剧", value="我选择电视剧"),
             ],
         )
 
         with patch.object(chain, "_handle_ai_message") as handle_ai_message, patch.object(
             chain.messagehelper, "put"
-        ) as message_put, patch.object(chain.messageoper, "add") as message_add:
+        ) as message_put, patch.object(chain.messageoper, "add") as message_add, patch.object(
+            chain, "edit_message", return_value=True
+        ) as edit_message:
+            chain._handle_callback(
+                text=f"CALLBACK:agent_interaction:choice:{request.request_id}:1",
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                original_message_id=123,
+                original_chat_id="456",
+            )
+
+        handle_ai_message.assert_called_once()
+        edit_message.assert_called_once_with(
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            message_id=123,
+            chat_id="456",
+            title="需要你的选择",
+            text="请选择\n\n已选择：电影",
+        )
+        kwargs = handle_ai_message.call_args.kwargs
+        self.assertEqual(kwargs["text"], "我选择电影")
+        self.assertEqual(kwargs["session_id"], "session-choice")
+        message_put.assert_called_once()
+        message_add.assert_called_once()
+
+    def test_legacy_agent_choice_callback_still_supported(self):
+        chain = MessageChain()
+        request = agent_interaction_manager.create_request(
+            session_id="session-choice",
+            user_id="10001",
+            channel=MessageChannel.Telegram.value,
+            source="telegram-test",
+            username="tester",
+            title=None,
+            prompt="请选择",
+            options=[AgentInteractionOption(label="电影", value="我选择电影")],
+        )
+
+        with patch.object(chain, "_handle_ai_message") as handle_ai_message, patch.object(
+            chain.messagehelper, "put"
+        ), patch.object(chain.messageoper, "add"):
             chain._handle_callback(
                 text=f"CALLBACK:agent_choice:{request.request_id}:1",
                 channel=MessageChannel.Telegram,
@@ -115,11 +164,6 @@ class TestAgentUserChoice(unittest.TestCase):
             )
 
         handle_ai_message.assert_called_once()
-        kwargs = handle_ai_message.call_args.kwargs
-        self.assertEqual(kwargs["text"], "我选择电影")
-        self.assertEqual(kwargs["session_id"], "session-choice")
-        message_put.assert_called_once()
-        message_add.assert_called_once()
 
 
 if __name__ == "__main__":

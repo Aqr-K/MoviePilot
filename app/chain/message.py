@@ -11,7 +11,7 @@ import uuid
 import base64
 
 from app.agent import agent_manager
-from app.agent.user_choice import agent_user_choice_manager
+from app.agent.interaction import agent_interaction_manager
 from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
@@ -791,6 +791,8 @@ class MessageChain(ChainBase):
             source=source,
             userid=userid,
             username=username,
+            original_message_id=original_message_id,
+            original_chat_id=original_chat_id,
         ):
             return
 
@@ -895,11 +897,18 @@ class MessageChain(ChainBase):
         """
         解析 Agent 按钮选择回调。
         """
-        if not callback_data.startswith("agent_choice:"):
-            return None
-        try:
-            _, request_id, option_index = callback_data.split(":", 2)
-        except ValueError:
+        if callback_data.startswith("agent_interaction:choice:"):
+            try:
+                _, _, request_id, option_index = callback_data.split(":", 3)
+            except ValueError:
+                return None
+        elif callback_data.startswith("agent_choice:"):
+            # 兼容旧格式，避免已发送的按钮失效
+            try:
+                _, request_id, option_index = callback_data.split(":", 2)
+            except ValueError:
+                return None
+        else:
             return None
         if not request_id or not option_index.isdigit():
             return None
@@ -912,6 +921,8 @@ class MessageChain(ChainBase):
         source: str,
         userid: Union[str, int],
         username: str,
+        original_message_id: Optional[Union[str, int]] = None,
+        original_chat_id: Optional[str] = None,
     ) -> bool:
         """
         将 Agent 按钮选择回传为同一会话中的下一条用户消息。
@@ -921,7 +932,7 @@ class MessageChain(ChainBase):
             return False
 
         request_id, option_index = callback
-        resolved = agent_user_choice_manager.resolve(
+        resolved = agent_interaction_manager.resolve(
             request_id=request_id,
             option_index=option_index,
             user_id=str(userid),
@@ -940,6 +951,15 @@ class MessageChain(ChainBase):
 
         request, option = resolved
         selected_text = option.value
+        self._update_interaction_message_feedback(
+            channel=channel,
+            source=source,
+            original_message_id=original_message_id,
+            original_chat_id=original_chat_id,
+            title=request.title,
+            prompt=request.prompt,
+            selected_label=option.label,
+        )
         self._bind_session_id(userid, request.session_id)
         self._record_user_message(
             channel=channel,
@@ -957,6 +977,35 @@ class MessageChain(ChainBase):
             session_id=request.session_id,
         )
         return True
+
+    def _update_interaction_message_feedback(
+        self,
+        channel: MessageChannel,
+        source: str,
+        original_message_id: Optional[Union[str, int]],
+        original_chat_id: Optional[str],
+        prompt: str,
+        selected_label: str,
+        title: Optional[str] = None,
+    ) -> None:
+        """
+        在用户点击交互按钮后，立即更新原消息，明确显示已选择的内容。
+        """
+        if not original_message_id or not original_chat_id:
+            return
+
+        lines = [prompt.strip()]
+        if selected_label:
+            lines.append(f"已选择：{selected_label}")
+        feedback_text = "\n\n".join(line for line in lines if line)
+        self.edit_message(
+            channel=channel,
+            source=source,
+            message_id=original_message_id,
+            chat_id=original_chat_id,
+            title=title,
+            text=feedback_text,
+        )
 
     def _retry_transfer_history(
         self,
