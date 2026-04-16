@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
 脚本会自动：
 
 - 检测操作系统
-- 自动检查并尽量安装 `git`、`curl`、`Python 3.12+`
+- 自动检查并尽量安装 `git`、`curl`、`Python 3.11+`
 - 克隆 `MoviePilot`
 - 安装后端依赖
 - 下载 `MoviePilot-Frontend` 最新 release 的 `dist.zip`
@@ -24,7 +24,8 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
 
 说明：
 
-- 如果系统里没有可用的 `Python 3.12+`，脚本会优先尝试自动补齐运行环境，再继续安装
+- 如果系统里已经有可用的 `Python 3.11+`，脚本会优先直接复用本地解释器
+- 如果系统里没有可用的 `Python 3.11+`，脚本会再尝试自动补齐运行环境
 - Linux 下安装系统依赖时通常需要 `sudo`
 - 复用已有仓库时，脚本现在只会因为已跟踪源码改动而阻止自动更新，不会再被 `.DS_Store` 之类未跟踪文件卡住
 
@@ -141,11 +142,15 @@ moviepilot commands
 
 ```shell
 moviepilot install deps
-moviepilot install deps --python python3.12
+moviepilot install deps --python python3.11
 moviepilot install deps --venv /path/to/venv
 moviepilot install deps --recreate
 moviepilot install deps --config-dir /path/to/moviepilot-config
 ```
+
+说明：
+
+- 默认会自动选择本地已安装的 `Python 3.11+` 解释器
 
 安装前端 release：
 

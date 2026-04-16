@@ -28,6 +28,8 @@ PUBLIC_DIR = ROOT / "public"
 RUNTIME_DIR = ROOT / ".runtime"
 NODE_DIR = RUNTIME_DIR / "node"
 INSTALL_ENV_FILE = ROOT / ".moviepilot.env"
+MIN_PYTHON_VERSION = (3, 11)
+SUPPORTED_PYTHON_TEXT = f"Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} 或更高版本"
 
 CONFIG_DIR = LEGACY_CONFIG_DIR
 LOG_DIR = CONFIG_DIR / "logs"
@@ -204,6 +206,42 @@ def command_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def get_python_version(python_bin: str) -> tuple[int, int, int]:
+    version_json = capture([python_bin, "-c", "import json, sys; print(json.dumps(list(sys.version_info[:3])))"])
+    version_info = json.loads(version_json)
+    if not isinstance(version_info, list) or len(version_info) < 3:
+        raise RuntimeError(f"无法识别 Python 版本信息：{python_bin}")
+    return int(version_info[0]), int(version_info[1]), int(version_info[2])
+
+
+def discover_supported_python() -> Optional[str]:
+    candidates = [f"python3.{minor}" for minor in range(20, MIN_PYTHON_VERSION[1] - 1, -1)]
+    if sys.executable:
+        candidates.append(sys.executable)
+    candidates.extend(["python3", "python"])
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+
+        python_path = candidate if os.sep in candidate else (shutil.which(candidate) or "")
+        if not python_path:
+            continue
+
+        try:
+            version = get_python_version(python_path)
+        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+            continue
+        if version >= MIN_PYTHON_VERSION:
+            return python_path
+    return None
+
+
+DEFAULT_BOOTSTRAP_PYTHON = discover_supported_python() or sys.executable
+
+
 def get_venv_python(venv_dir: Path) -> Path:
     if os.name == "nt":
         return venv_dir / "Scripts" / "python.exe"
@@ -211,11 +249,10 @@ def get_venv_python(venv_dir: Path) -> Path:
 
 
 def ensure_supported_python(python_bin: str) -> None:
-    version_json = capture([python_bin, "-c", "import json, sys; print(json.dumps(list(sys.version_info[:3])))"])
-    version = tuple(json.loads(version_json))
-    if version < (3, 12, 0):
+    version = get_python_version(python_bin)
+    if version < MIN_PYTHON_VERSION:
         raise RuntimeError(
-            f"MoviePilot 本地安装需要 Python 3.12 或更高版本，当前解释器为 {python_bin} "
+            f"MoviePilot 本地安装需要 {SUPPORTED_PYTHON_TEXT}，当前解释器为 {python_bin} "
             f"({version[0]}.{version[1]}.{version[2]})"
         )
 
@@ -1359,6 +1396,7 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
     ensure_supported_python(python_bin)
     venv_dir = venv_dir.expanduser().resolve()
     venv_python = get_venv_python(venv_dir)
+    print_step(f"使用 Python 解释器：{python_bin}")
 
     if recreate and venv_dir.exists():
         print_step(f"删除已有虚拟环境：{venv_dir}")
@@ -1512,7 +1550,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     install_parser = subparsers.add_parser("install-deps", help="创建虚拟环境并安装后端依赖")
-    install_parser.add_argument("--python", default=sys.executable, help="用于创建虚拟环境的 Python 解释器")
+    install_parser.add_argument("--python", default=DEFAULT_BOOTSTRAP_PYTHON, help="用于创建虚拟环境的 Python 解释器，默认自动选择本地 3.11+ 版本")
     install_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
     install_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
     install_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
@@ -1536,7 +1574,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
 
     setup_parser = subparsers.add_parser("setup", help="执行 install-deps、install-frontend、install-resources 和 init")
-    setup_parser.add_argument("--python", default=sys.executable, help="用于创建虚拟环境的 Python 解释器")
+    setup_parser.add_argument("--python", default=DEFAULT_BOOTSTRAP_PYTHON, help="用于创建虚拟环境的 Python 解释器，默认自动选择本地 3.11+ 版本")
     setup_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
     setup_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
     setup_parser.add_argument("--frontend-version", default="latest", help="前端版本，默认 latest")
@@ -1560,7 +1598,7 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument("--ref", default="latest", help="后端 Git 版本，默认 latest")
     update_parser.add_argument("--frontend-version", default="latest", help="前端版本，默认 latest")
     update_parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本")
-    update_parser.add_argument("--python", default=sys.executable, help="用于安装后端依赖的 Python 解释器")
+    update_parser.add_argument("--python", default=DEFAULT_BOOTSTRAP_PYTHON, help="用于安装后端依赖的 Python 解释器，默认自动选择本地 3.11+ 版本")
     update_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
     update_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
     update_parser.add_argument("--skip-resources", action="store_true", help="更新 all 时跳过资源同步")
