@@ -30,6 +30,7 @@ from app.agent.tools.impl.search_torrents import SearchTorrentsTool
 from app.agent.tools.impl.get_search_results import GetSearchResultsTool
 from app.agent.tools.impl.search_web import SearchWebTool
 from app.agent.tools.impl.send_message import SendMessageTool
+from app.agent.tools.impl.ask_user_choice import AskUserChoiceTool
 from app.agent.tools.impl.send_local_file import SendLocalFileTool
 from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
@@ -58,6 +59,8 @@ from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiers
 from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.core.plugin import PluginManager
 from app.log import logger
+from app.schemas.message import ChannelCapabilityManager
+from app.schemas.types import MessageChannel
 from .base import MoviePilotTool
 
 
@@ -65,6 +68,18 @@ class MoviePilotToolFactory:
     """
     MoviePilot工具工厂
     """
+
+    @staticmethod
+    def _should_enable_choice_tool(channel: str = None) -> bool:
+        if not channel:
+            return False
+        try:
+            message_channel = MessageChannel(channel)
+        except ValueError:
+            return False
+        return ChannelCapabilityManager.supports_buttons(
+            message_channel
+        ) and ChannelCapabilityManager.supports_callbacks(message_channel)
 
     @staticmethod
     def create_tools(
@@ -120,8 +135,6 @@ class MoviePilotToolFactory:
             QueryTransferHistoryTool,
             TransferFileTool,
             SendMessageTool,
-            SendLocalFileTool,
-            SendVoiceMessageTool,
             QuerySchedulersTool,
             RunSchedulerTool,
             QueryWorkflowsTool,
@@ -138,6 +151,14 @@ class MoviePilotToolFactory:
             QueryCustomIdentifiersTool,
             UpdateCustomIdentifiersTool,
         ]
+        if MoviePilotToolFactory._should_enable_choice_tool(channel):
+            tool_definitions.append(AskUserChoiceTool)
+        tool_definitions.extend(
+            [
+                SendLocalFileTool,
+                SendVoiceMessageTool,
+            ]
+        )
         # 创建内置工具
         for ToolClass in tool_definitions:
             tool = ToolClass(session_id=session_id, user_id=user_id)

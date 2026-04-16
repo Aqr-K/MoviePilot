@@ -76,6 +76,7 @@ class PromptManager:
             caps = ChannelCapabilityManager.get_capabilities(msg_channel)
             if caps:
                 markdown_spec = self._generate_formatting_instructions(caps)
+        button_choice_spec = self._generate_button_choice_instructions(msg_channel)
 
         # 啰嗦模式
         verbose_spec = ""
@@ -100,6 +101,7 @@ class PromptManager:
             verbose_spec=verbose_spec,
             moviepilot_info=moviepilot_info,
             voice_reply_spec=voice_reply_spec,
+            button_choice_spec=button_choice_spec,
         )
 
         return base_prompt
@@ -185,6 +187,23 @@ class PromptManager:
             "- Reply preference: Prioritize calling `send_voice_message` for the main user-facing reply.\n"
             "- Fallback: If voice is unavailable on the current channel, `send_voice_message` will fall back to text.\n"
             "- Do not repeat the same full reply again after calling `send_voice_message`."
+        )
+
+    @staticmethod
+    def _generate_button_choice_instructions(
+        channel: MessageChannel = None,
+    ) -> str:
+        if channel and ChannelCapabilityManager.supports_buttons(
+            channel
+        ) and ChannelCapabilityManager.supports_callbacks(channel):
+            return (
+                "- User questions: If you need the user to choose from a few clear options, "
+                "call `ask_user_choice` to send button options. After the user clicks a button, "
+                "the selected value will come back as the user's next message. After calling this tool, "
+                "wait for the user's selection instead of repeating the question in plain text."
+            )
+        return (
+            "- User questions: When you truly need user input, ask briefly in plain text."
         )
 
     def clear_cache(self):
