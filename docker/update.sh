@@ -143,7 +143,7 @@ function install_backend_and_download_resources() {
     cp -a /plugins/* /app/app/plugins/
     # 更新站点资源
     INFO "→ 开始更新站点资源..."
-    python_version=$(python3 -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')
+    python_version=$(python3 -c 'import sys; print(f"cpython-{sys.version_info.major}{sys.version_info.minor}")')
     arch=$(uname -m)
     if [ "$arch" = "aarch64" ]; then
         arch_suffix="aarch64-linux-gnu"
