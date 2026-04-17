@@ -30,7 +30,9 @@ RUNTIME_DIR = ROOT / ".runtime"
 NODE_DIR = RUNTIME_DIR / "node"
 INSTALL_ENV_FILE = ROOT / ".moviepilot.env"
 MIN_PYTHON_VERSION = (3, 11)
-SUPPORTED_PYTHON_TEXT = f"Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} 或更高版本"
+SUPPORTED_PYTHON_TEXT = (
+    f"Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} 或更高版本"
+)
 
 CONFIG_DIR = LEGACY_CONFIG_DIR
 LOG_DIR = CONFIG_DIR / "logs"
@@ -40,9 +42,15 @@ COOKIE_DIR = CONFIG_DIR / "cookies"
 ENV_FILE = CONFIG_DIR / "app.env"
 
 DEFAULT_NODE_VERSION = "20.12.1"
-FRONTEND_LATEST_API = "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases/latest"
-FRONTEND_TAG_API = "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases/tags/{tag}"
-RESOURCES_MAIN_ZIP = "https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip"
+FRONTEND_LATEST_API = (
+    "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases/latest"
+)
+FRONTEND_TAG_API = (
+    "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases/tags/{tag}"
+)
+RESOURCES_MAIN_ZIP = (
+    "https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip"
+)
 LLM_PROVIDER_DEFAULTS = {
     "deepseek": {
         "model": "deepseek-chat",
@@ -82,7 +90,9 @@ NOTIFICATION_SWITCH_TYPES = [
 def _default_config_dir() -> Path:
     if platform.system() == "Darwin":
         return Path.home() / "Library" / "Application Support" / "MoviePilot"
-    return Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "moviepilot"
+    return (
+        Path(os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "moviepilot"
+    )
 
 
 def _legacy_runtime_config_exists() -> bool:
@@ -162,7 +172,12 @@ def _migrate_legacy_config_if_needed(target_dir: Path) -> None:
     print_step(f"已将现有本地配置迁移到 {target_dir}")
 
 
-def configure_config_dir(explicit: Optional[Path] = None, *, persist: bool = False, prefer_external: bool = False) -> Path:
+def configure_config_dir(
+    explicit: Optional[Path] = None,
+    *,
+    persist: bool = False,
+    prefer_external: bool = False,
+) -> Path:
     if explicit:
         config_dir = explicit.expanduser().resolve()
     elif os.getenv("CONFIG_DIR"):
@@ -208,7 +223,13 @@ def command_exists(name: str) -> bool:
 
 
 def get_python_version(python_bin: str) -> tuple[int, int, int]:
-    version_json = capture([python_bin, "-c", "import json, sys; print(json.dumps(list(sys.version_info[:3])))"])
+    version_json = capture(
+        [
+            python_bin,
+            "-c",
+            "import json, sys; print(json.dumps(list(sys.version_info[:3])))",
+        ]
+    )
     version_info = json.loads(version_json)
     if not isinstance(version_info, list) or len(version_info) < 3:
         raise RuntimeError(f"无法识别 Python 版本信息：{python_bin}")
@@ -216,7 +237,9 @@ def get_python_version(python_bin: str) -> tuple[int, int, int]:
 
 
 def discover_supported_python() -> Optional[str]:
-    candidates = [f"python3.{minor}" for minor in range(20, MIN_PYTHON_VERSION[1] - 1, -1)]
+    candidates = [
+        f"python3.{minor}" for minor in range(20, MIN_PYTHON_VERSION[1] - 1, -1)
+    ]
     if sys.executable:
         candidates.append(sys.executable)
     candidates.extend(["python3", "python"])
@@ -227,7 +250,9 @@ def discover_supported_python() -> Optional[str]:
             continue
         seen.add(candidate)
 
-        python_path = candidate if os.sep in candidate else (shutil.which(candidate) or "")
+        python_path = (
+            candidate if os.sep in candidate else (shutil.which(candidate) or "")
+        )
         if not python_path:
             continue
 
@@ -337,11 +362,24 @@ def ensure_api_token(force_token: bool = False, token: Optional[str] = None) -> 
 
 
 def _download_to_stdout(url: str) -> str:
-    headers = ["-H", "Accept: application/vnd.github+json", "-H", "User-Agent: MoviePilot-CLI"]
+    headers = [
+        "-H",
+        "Accept: application/vnd.github+json",
+        "-H",
+        "User-Agent: MoviePilot-CLI",
+    ]
     if command_exists("curl"):
         return capture(["curl", "-fsSL", *headers, url])
     if command_exists("wget"):
-        return capture(["wget", "-qO-", "--header=Accept: application/vnd.github+json", "--header=User-Agent: MoviePilot-CLI", url])
+        return capture(
+            [
+                "wget",
+                "-qO-",
+                "--header=Accept: application/vnd.github+json",
+                "--header=User-Agent: MoviePilot-CLI",
+                url,
+            ]
+        )
     raise RuntimeError("未找到可用的下载工具，请先安装 curl 或 wget")
 
 
@@ -362,7 +400,12 @@ def fetch_json(url: str) -> dict[str, Any]:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"无法解析远程响应：{url}") from exc
-    if isinstance(data, dict) and data.get("message") and isinstance(data.get("message"), str) and "API rate limit" in data["message"]:
+    if (
+        isinstance(data, dict)
+        and data.get("message")
+        and isinstance(data.get("message"), str)
+        and "API rate limit" in data["message"]
+    ):
         raise RuntimeError(f"访问 GitHub API 失败：{data['message']}")
     if not isinstance(data, dict):
         raise RuntimeError(f"接口返回格式异常：{url}")
@@ -434,7 +477,9 @@ def _node_platform() -> tuple[str, str]:
         if machine in {"x86_64", "amd64"}:
             return "linux-x64", "tar.xz"
 
-    raise RuntimeError(f"当前系统暂不支持自动安装本地 Node 运行时：{platform.system()} / {platform.machine()}")
+    raise RuntimeError(
+        f"当前系统暂不支持自动安装本地 Node 运行时：{platform.system()} / {platform.machine()}"
+    )
 
 
 def get_node_bin(node_dir: Path = NODE_DIR) -> Path:
@@ -531,7 +576,9 @@ def install_frontend(frontend_version: str, node_version: str) -> dict[str, str]
 
 
 def local_resource_status() -> bool:
-    return (HELPER_DIR / "user.sites.v2.bin").exists() and bool(list(HELPER_DIR.glob("sites*")))
+    return (HELPER_DIR / "user.sites.v2.bin").exists() and bool(
+        list(HELPER_DIR.glob("sites*"))
+    )
 
 
 def copy_resource_files(source_dir: Path) -> list[str]:
@@ -552,6 +599,60 @@ def copy_resource_files(source_dir: Path) -> list[str]:
     return copied
 
 
+def _get_platform_tag() -> str:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "darwin":
+        if machine in {"arm64", "aarch64"}:
+            return "darwin", "arm64"
+        if machine in {"x86_64", "amd64"}:
+            return "darwin", "x86_64"
+    elif system == "linux":
+        if machine in {"aarch64", "arm64"}:
+            return "linux", "aarch64"
+        if machine in {"x86_64", "amd64"}:
+            return "linux", "x86_64"
+    elif system == "windows":
+        return "windows", "amd64"
+    raise RuntimeError(f"不支持的平台：{system} / {machine}")
+
+
+def _get_python_version_tag() -> str:
+    version = sys.version_info
+    return f"cp{version.major}{version.minor}"
+
+
+def _filter_resources_files(
+    source_dir: Path, platform_tag: str, python_version: str
+) -> list[Path]:
+    matched_files: list[Path] = []
+    for file in source_dir.iterdir():
+        if not file.is_file():
+            continue
+        filename = file.name
+        if filename == "user.sites.v2.bin":
+            matched_files.append(file)
+            continue
+        if not filename.startswith("sites."):
+            continue
+        if platform_tag == "windows":
+            if filename == f"sites.cp{python_version.replace('cp', '')}-win_amd64.pyd":
+                matched_files.append(file)
+        elif platform_tag == "darwin":
+            if (
+                filename
+                == f"sites.cpython-{python_version.replace('cp', '')}-darwin.so"
+            ):
+                matched_files.append(file)
+        elif platform_tag == "linux":
+            if (
+                f"cpython-{python_version.replace('cp', '')}" in filename
+                and "linux-gnu" in filename
+            ):
+                matched_files.append(file)
+    return matched_files
+
+
 def _download_resources_dir() -> Path:
     with TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -563,15 +664,37 @@ def _download_resources_dir() -> Path:
         source_dir = extract_dir / "MoviePilot-Resources-main" / "resources.v2"
         if not source_dir.exists():
             raise RuntimeError("资源压缩包中未找到 resources.v2 目录")
+
+        platform_name, machine = _get_platform_tag()
+        python_version = _get_python_version_tag()
+        print_step(
+            f"当前平台：{platform_name}-{machine}，Python 版本：{python_version}"
+        )
+
+        matched_files = _filter_resources_files(
+            source_dir, platform_name, python_version
+        )
+        if not matched_files:
+            raise RuntimeError(
+                f"未找到匹配的 sites 资源文件：{platform_name} / {python_version}"
+            )
+
         staging_dir = temp_path / "staging"
-        shutil.copytree(source_dir, staging_dir)
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        for file in matched_files:
+            target = staging_dir / file.name
+            shutil.copy2(file, target)
+
         persisted = TEMP_DIR / "resources.v2"
         _remove_path(persisted)
         shutil.copytree(staging_dir, persisted)
+        print_step(f"已筛选对应平台的资源文件，共 {len(matched_files)} 个")
         return persisted
 
 
-def _resolve_local_resource_dir(resources_repo: Optional[Path], resource_dir: Optional[Path]) -> Optional[Path]:
+def _resolve_local_resource_dir(
+    resources_repo: Optional[Path], resource_dir: Optional[Path]
+) -> Optional[Path]:
     if resource_dir:
         resolved = resource_dir.expanduser().resolve()
         if resolved.is_dir():
@@ -593,7 +716,9 @@ def _resolve_local_resource_dir(resources_repo: Optional[Path], resource_dir: Op
     return None
 
 
-def install_resources(resources_repo: Optional[Path], resource_dir: Optional[Path]) -> list[str]:
+def install_resources(
+    resources_repo: Optional[Path], resource_dir: Optional[Path]
+) -> list[str]:
     ensure_local_dirs()
     source_dir = _resolve_local_resource_dir(resources_repo, resource_dir)
     if source_dir is None:
@@ -751,7 +876,9 @@ def _collect_superuser_config(
 ) -> dict[str, str]:
     print_step("超级管理员配置")
 
-    default_username = (preset_username or _env_default("SUPERUSER", "admin")).strip() or "admin"
+    default_username = (
+        preset_username or _env_default("SUPERUSER", "admin")
+    ).strip() or "admin"
     while True:
         username = _prompt_text("超级管理员用户名", default=default_username).strip()
         error = _validate_superuser_name(username)
@@ -786,7 +913,9 @@ def _collect_superuser_config(
             print(error)
             continue
 
-        confirmed = _prompt_secret_text("请再次输入超级管理员密码", required=True).strip()
+        confirmed = _prompt_secret_text(
+            "请再次输入超级管理员密码", required=True
+        ).strip()
         if password != confirmed:
             print("两次输入的超级管理员密码不一致，请重新输入。")
             continue
@@ -801,7 +930,9 @@ def _collect_path_mapping() -> list[tuple[str, str]]:
     if not _prompt_yes_no("是否配置下载器路径映射", default=False):
         return []
 
-    storage_path = _prompt_path("MoviePilot 可访问的下载目录根路径", default=ROOT.parent / "downloads")
+    storage_path = _prompt_path(
+        "MoviePilot 可访问的下载目录根路径", default=ROOT.parent / "downloads"
+    )
     download_path = _prompt_text("下载器中对应的目录根路径", default="/downloads")
     return [(storage_path, download_path)]
 
@@ -979,7 +1110,9 @@ def _collect_media_server_config() -> Optional[dict[str, Any]]:
             "apikey": _prompt_text("媒体服务器 API Key", secret=True),
         }
         if server_type == "emby":
-            username = _prompt_text("Emby 管理员用户名（可选）", default="", allow_empty=True)
+            username = _prompt_text(
+                "Emby 管理员用户名（可选）", default="", allow_empty=True
+            )
             if username:
                 config["username"] = username
 
@@ -1016,7 +1149,9 @@ def _collect_notification_config() -> Optional[dict[str, Any]]:
             "TELEGRAM_TOKEN": _prompt_text("Telegram Bot Token", secret=True),
             "TELEGRAM_CHAT_ID": _prompt_text("Telegram Chat ID"),
         }
-        api_url = _prompt_text("自定义 Telegram API 地址（可选）", default="", allow_empty=True)
+        api_url = _prompt_text(
+            "自定义 Telegram API 地址（可选）", default="", allow_empty=True
+        )
         if api_url:
             config["API_URL"] = api_url
     elif notification_type == "wechat":
@@ -1026,7 +1161,9 @@ def _collect_notification_config() -> Optional[dict[str, Any]]:
             "WECHAT_BOT_SECRET": _prompt_text("企业微信机器人 Secret", secret=True),
         }
         chat_id = _prompt_text("默认发送对象（可选）", default="", allow_empty=True)
-        admins = _prompt_text("管理员用户列表，多个逗号分隔（可选）", default="", allow_empty=True)
+        admins = _prompt_text(
+            "管理员用户列表，多个逗号分隔（可选）", default="", allow_empty=True
+        )
         if chat_id:
             config["WECHAT_BOT_CHAT_ID"] = chat_id
         if admins:
@@ -1143,7 +1280,9 @@ def _load_auth_site_definitions_inner() -> dict[str, Any]:
     return definitions
 
 
-def _load_auth_site_definitions(runtime_python: Optional[Path] = None) -> dict[str, Any]:
+def _load_auth_site_definitions(
+    runtime_python: Optional[Path] = None,
+) -> dict[str, Any]:
     try:
         return _load_auth_site_definitions_inner()
     except Exception as exc:
@@ -1168,7 +1307,9 @@ def _load_auth_site_definitions(runtime_python: Optional[Path] = None) -> dict[s
                     if isinstance(data, dict):
                         return data
             except Exception as runtime_exc:
-                print_step(f"当前环境暂时无法读取站点认证资源，已跳过站点认证配置：{runtime_exc}")
+                print_step(
+                    f"当前环境暂时无法读取站点认证资源，已跳过站点认证配置：{runtime_exc}"
+                )
                 return {}
 
         print_step(f"当前环境暂时无法读取站点认证资源，已跳过站点认证配置：{exc}")
@@ -1177,7 +1318,10 @@ def _load_auth_site_definitions(runtime_python: Optional[Path] = None) -> dict[s
 
 def _print_auth_sites(auth_sites: dict[str, Any]) -> None:
     print("可用认证站点：")
-    items = [f"{site_key}({site_conf.get('name') or site_key})" for site_key, site_conf in sorted(auth_sites.items())]
+    items = [
+        f"{site_key}({site_conf.get('name') or site_key})"
+        for site_key, site_conf in sorted(auth_sites.items())
+    ]
     line: list[str] = []
     for item in items:
         line.append(item)
@@ -1211,7 +1355,9 @@ def _prompt_auth_param(param_key: str, param_meta: dict[str, Any]) -> Any:
             print("请输入有效数字。")
 
 
-def _collect_site_auth_config(runtime_python: Optional[Path] = None) -> Optional[dict[str, Any]]:
+def _collect_site_auth_config(
+    runtime_python: Optional[Path] = None,
+) -> Optional[dict[str, Any]]:
     print_step("用户站点认证配置")
     if not _prompt_yes_no("是否配置用户站点认证", default=False):
         return None
@@ -1247,7 +1393,9 @@ def run_setup_wizard(
     preset_superuser_password: Optional[str] = None,
 ) -> dict[str, Any]:
     if not _is_interactive():
-        raise RuntimeError("交互式向导需要在终端中运行，请直接执行 moviepilot setup --wizard 或 moviepilot init --wizard")
+        raise RuntimeError(
+            "交互式向导需要在终端中运行，请直接执行 moviepilot setup --wizard 或 moviepilot init --wizard"
+        )
 
     print_step("启动本地初始化向导，直接回车可接受默认值，部分步骤可选择跳过")
 
@@ -1260,17 +1408,25 @@ def run_setup_wizard(
                 api_token = ensure_api_token(force_token=True)
             else:
                 while True:
-                    custom_token = _prompt_text("请输入新的 API_TOKEN（至少 16 位）", secret=True)
+                    custom_token = _prompt_text(
+                        "请输入新的 API_TOKEN（至少 16 位）", secret=True
+                    )
                     if len(custom_token) >= 16:
-                        api_token = ensure_api_token(force_token=True, token=custom_token)
+                        api_token = ensure_api_token(
+                            force_token=True, token=custom_token
+                        )
                         break
                     print("API_TOKEN 长度不能少于 16 个字符。")
     else:
         if _prompt_yes_no("是否自动生成 API_TOKEN", default=True):
-            api_token = ensure_api_token(force_token=force_token or bool(existing_token))
+            api_token = ensure_api_token(
+                force_token=force_token or bool(existing_token)
+            )
         else:
             while True:
-                custom_token = _prompt_text("请输入 API_TOKEN（至少 16 位）", secret=True)
+                custom_token = _prompt_text(
+                    "请输入 API_TOKEN（至少 16 位）", secret=True
+                )
                 if len(custom_token) >= 16:
                     api_token = ensure_api_token(force_token=True, token=custom_token)
                     break
@@ -1318,8 +1474,12 @@ def _merge_directory_item(existing_items: list[dict], new_item: dict) -> list[di
             return merged
 
     new_copy = dict(new_item)
-    max_priority = max((int(item.get("priority", 0) or 0) for item in merged), default=-1)
-    new_copy["priority"] = max_priority + 1 if merged else int(new_item.get("priority", 0) or 0)
+    max_priority = max(
+        (int(item.get("priority", 0) or 0) for item in merged), default=-1
+    )
+    new_copy["priority"] = (
+        max_priority + 1 if merged else int(new_item.get("priority", 0) or 0)
+    )
     merged.append(new_copy)
     return merged
 
@@ -1340,7 +1500,9 @@ def _merge_notification_switches(existing_items: list[dict]) -> list[dict]:
             },
         )
 
-    preferred_order = [switch for switch in NOTIFICATION_SWITCH_TYPES if switch in merged]
+    preferred_order = [
+        switch for switch in NOTIFICATION_SWITCH_TYPES if switch in merged
+    ]
     extras = [key for key in merged if key not in preferred_order]
     return [merged[key] for key in [*preferred_order, *extras]]
 
@@ -1362,7 +1524,9 @@ def _apply_local_system_config_inner(config_payload: dict[str, Any]) -> None:
         from app.db.systemconfig_oper import SystemConfigOper
         from app.schemas.types import SystemConfigKey
     except ModuleNotFoundError as exc:
-        raise RuntimeError("当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup") from exc
+        raise RuntimeError(
+            "当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup"
+        ) from exc
 
     init_db()
     generated_password = _prepare_superuser_password_for_bootstrap()
@@ -1394,18 +1558,29 @@ def _apply_local_system_config_inner(config_payload: dict[str, Any]) -> None:
     notification_item = config_payload.get("notification")
     if notification_item:
         current_notifications = system_config.get(SystemConfigKey.Notifications) or []
-        current_notifications = _merge_named_item(current_notifications, notification_item)
+        current_notifications = _merge_named_item(
+            current_notifications, notification_item
+        )
         system_config.set(SystemConfigKey.Notifications, current_notifications)
         current_switches = system_config.get(SystemConfigKey.NotificationSwitchs) or []
-        system_config.set(SystemConfigKey.NotificationSwitchs, _merge_notification_switches(current_switches))
+        system_config.set(
+            SystemConfigKey.NotificationSwitchs,
+            _merge_notification_switches(current_switches),
+        )
 
     site_auth_item = config_payload.get("site_auth")
-    if isinstance(site_auth_item, dict) and site_auth_item.get("site") and site_auth_item.get("params"):
+    if (
+        isinstance(site_auth_item, dict)
+        and site_auth_item.get("site")
+        and site_auth_item.get("params")
+    ):
         system_config.set(SystemConfigKey.UserSiteAuthParams, site_auth_item)
         try:
             from app.helper.sites import SitesHelper
 
-            status, msg = SitesHelper().check_user(site_auth_item.get("site"), site_auth_item.get("params"))
+            status, msg = SitesHelper().check_user(
+                site_auth_item.get("site"), site_auth_item.get("params")
+            )
             if status:
                 print_step(f"站点认证校验成功：{msg}")
             else:
@@ -1510,7 +1685,9 @@ def _sync_superuser_account_inner() -> None:
     try:
         from app.db.init import init_db, update_db
     except ModuleNotFoundError as exc:
-        raise RuntimeError("当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup") from exc
+        raise RuntimeError(
+            "当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup"
+        ) from exc
 
     init_db()
     generated_password = _prepare_superuser_password_for_bootstrap()
@@ -1535,7 +1712,9 @@ def sync_superuser_account(runtime_python: Optional[Path] = None) -> None:
     )
 
 
-def apply_local_system_config(config_payload: dict[str, Any], runtime_python: Optional[Path] = None) -> None:
+def apply_local_system_config(
+    config_payload: dict[str, Any], runtime_python: Optional[Path] = None
+) -> None:
     if _current_python_matches(runtime_python):
         _apply_local_system_config_inner(config_payload)
         return
@@ -1639,7 +1818,9 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
     run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
 
     print_step("安装项目依赖")
-    run([str(venv_python), "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")])
+    run(
+        [str(venv_python), "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")]
+    )
     return venv_python
 
 
@@ -1707,7 +1888,9 @@ def _ensure_git_clean() -> None:
             preview += " 等"
         detail = f"：{preview}"
 
-    raise RuntimeError(f"检测到当前仓库有未提交的源码改动{detail}，请先提交或清理后再执行更新。")
+    raise RuntimeError(
+        f"检测到当前仓库有未提交的源码改动{detail}，请先提交或清理后再执行更新。"
+    )
 
 
 def _update_backend_ref(ref: str) -> str:
@@ -1721,7 +1904,9 @@ def _update_backend_ref(ref: str) -> str:
     current_branch = _git_output("rev-parse", "--abbrev-ref", "HEAD")
     if ref == "latest":
         if current_branch == "HEAD":
-            raise RuntimeError("当前仓库处于 detached HEAD 状态，请使用 `moviepilot update backend --ref <tag|branch>` 指定版本。")
+            raise RuntimeError(
+                "当前仓库处于 detached HEAD 状态，请使用 `moviepilot update backend --ref <tag|branch>` 指定版本。"
+            )
         print_step(f"更新后端代码到当前分支最新版本：{current_branch}")
         run(["git", "pull", "--ff-only", "origin", current_branch], cwd=ROOT)
         return current_branch
@@ -1731,15 +1916,21 @@ def _update_backend_ref(ref: str) -> str:
     return ref
 
 
-def update_backend(*, ref: str, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
+def update_backend(
+    *, ref: str, python_bin: str, venv_dir: Path, recreate: bool
+) -> Path:
     ensure_services_stopped()
     resolved_ref = _update_backend_ref(ref=ref)
-    venv_python = install_deps(python_bin=python_bin, venv_dir=venv_dir, recreate=recreate)
+    venv_python = install_deps(
+        python_bin=python_bin, venv_dir=venv_dir, recreate=recreate
+    )
     print_step(f"后端更新完成：{resolved_ref}")
     return venv_python
 
 
-def run_agent_request(*, message: str, session_id: Optional[str], new_session: bool, user_id: str) -> dict[str, str]:
+def run_agent_request(
+    *, message: str, session_id: Optional[str], new_session: bool, user_id: str
+) -> dict[str, str]:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
 
@@ -1748,7 +1939,9 @@ def run_agent_request(*, message: str, session_id: Optional[str], new_session: b
         from app.agent import MoviePilotAgent
         from app.core.config import settings
     except ModuleNotFoundError as exc:
-        raise RuntimeError("当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup") from exc
+        raise RuntimeError(
+            "当前环境尚未安装 MoviePilot 运行依赖，请先执行 moviepilot install deps 或 moviepilot setup"
+        ) from exc
 
     if not settings.AI_AGENT_ENABLE:
         raise RuntimeError("MoviePilot 智能体未启用，请先在配置中打开 AI_AGENT_ENABLE")
@@ -1776,73 +1969,167 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MoviePilot 本地安装与初始化工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    install_parser = subparsers.add_parser("install-deps", help="创建虚拟环境并安装后端依赖")
-    install_parser.add_argument("--python", default=DEFAULT_BOOTSTRAP_PYTHON, help="用于创建虚拟环境的 Python 解释器，默认自动选择本地 3.11+ 版本")
-    install_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
-    install_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
-    install_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    install_parser = subparsers.add_parser(
+        "install-deps", help="创建虚拟环境并安装后端依赖"
+    )
+    install_parser.add_argument(
+        "--python",
+        default=DEFAULT_BOOTSTRAP_PYTHON,
+        help="用于创建虚拟环境的 Python 解释器，默认自动选择本地 3.11+ 版本",
+    )
+    install_parser.add_argument(
+        "--venv", default=str(ROOT / "venv"), help="虚拟环境目录"
+    )
+    install_parser.add_argument(
+        "--recreate", action="store_true", help="删除并重建虚拟环境"
+    )
+    install_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
-    frontend_parser = subparsers.add_parser("install-frontend", help="下载前端 release 并安装本地运行时")
-    frontend_parser.add_argument("--version", default="latest", help="前端版本，默认 latest")
-    frontend_parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本")
-    frontend_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    frontend_parser = subparsers.add_parser(
+        "install-frontend", help="下载前端 release 并安装本地运行时"
+    )
+    frontend_parser.add_argument(
+        "--version", default="latest", help="前端版本，默认 latest"
+    )
+    frontend_parser.add_argument(
+        "--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本"
+    )
+    frontend_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
-    resources_parser = subparsers.add_parser("install-resources", help="下载资源文件并同步到 app/helper")
-    resources_parser.add_argument("--resources-repo", help="本地 MoviePilot-Resources 仓库路径")
+    resources_parser = subparsers.add_parser(
+        "install-resources", help="下载资源文件并同步到 app/helper"
+    )
+    resources_parser.add_argument(
+        "--resources-repo", help="本地 MoviePilot-Resources 仓库路径"
+    )
     resources_parser.add_argument("--resource-dir", help="直接指定 resources.v2 目录")
-    resources_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    resources_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
     init_parser = subparsers.add_parser("init", help="初始化本地配置与资源文件")
-    init_parser.add_argument("--resources-repo", help="本地 MoviePilot-Resources 仓库路径")
+    init_parser.add_argument(
+        "--resources-repo", help="本地 MoviePilot-Resources 仓库路径"
+    )
     init_parser.add_argument("--resource-dir", help="直接指定 resources.v2 目录")
-    init_parser.add_argument("--skip-resources", action="store_true", help="只初始化配置，不同步资源文件")
-    init_parser.add_argument("--force-token", action="store_true", help="强制重置 API_TOKEN")
-    init_parser.add_argument("--wizard", action="store_true", help="启动交互式初始化向导")
+    init_parser.add_argument(
+        "--skip-resources", action="store_true", help="只初始化配置，不同步资源文件"
+    )
+    init_parser.add_argument(
+        "--force-token", action="store_true", help="强制重置 API_TOKEN"
+    )
+    init_parser.add_argument(
+        "--wizard", action="store_true", help="启动交互式初始化向导"
+    )
     init_parser.add_argument("--superuser", help="预设超级管理员用户名")
     init_parser.add_argument("--superuser-password", help="预设超级管理员密码")
-    init_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    init_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
-    setup_parser = subparsers.add_parser("setup", help="执行 install-deps、install-frontend、install-resources 和 init")
-    setup_parser.add_argument("--python", default=DEFAULT_BOOTSTRAP_PYTHON, help="用于创建虚拟环境的 Python 解释器，默认自动选择本地 3.11+ 版本")
+    setup_parser = subparsers.add_parser(
+        "setup", help="执行 install-deps、install-frontend、install-resources 和 init"
+    )
+    setup_parser.add_argument(
+        "--python",
+        default=DEFAULT_BOOTSTRAP_PYTHON,
+        help="用于创建虚拟环境的 Python 解释器，默认自动选择本地 3.11+ 版本",
+    )
     setup_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
-    setup_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
-    setup_parser.add_argument("--frontend-version", default="latest", help="前端版本，默认 latest")
-    setup_parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本")
-    setup_parser.add_argument("--resources-repo", help="本地 MoviePilot-Resources 仓库路径")
+    setup_parser.add_argument(
+        "--recreate", action="store_true", help="删除并重建虚拟环境"
+    )
+    setup_parser.add_argument(
+        "--frontend-version", default="latest", help="前端版本，默认 latest"
+    )
+    setup_parser.add_argument(
+        "--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本"
+    )
+    setup_parser.add_argument(
+        "--resources-repo", help="本地 MoviePilot-Resources 仓库路径"
+    )
     setup_parser.add_argument("--resource-dir", help="直接指定 resources.v2 目录")
-    setup_parser.add_argument("--skip-resources", action="store_true", help="只初始化配置，不同步资源文件")
-    setup_parser.add_argument("--force-token", action="store_true", help="强制重置 API_TOKEN")
-    setup_parser.add_argument("--wizard", action="store_true", help="安装完成后启动交互式初始化向导")
+    setup_parser.add_argument(
+        "--skip-resources", action="store_true", help="只初始化配置，不同步资源文件"
+    )
+    setup_parser.add_argument(
+        "--force-token", action="store_true", help="强制重置 API_TOKEN"
+    )
+    setup_parser.add_argument(
+        "--wizard", action="store_true", help="安装完成后启动交互式初始化向导"
+    )
     setup_parser.add_argument("--superuser", help="预设超级管理员用户名")
     setup_parser.add_argument("--superuser-password", help="预设超级管理员密码")
-    setup_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    setup_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
-    agent_parser = subparsers.add_parser("agent", help="直接向 MoviePilot 智能体发送一次请求")
+    agent_parser = subparsers.add_parser(
+        "agent", help="直接向 MoviePilot 智能体发送一次请求"
+    )
     agent_parser.add_argument("message", nargs="+", help="发给智能体的文本请求")
     agent_parser.add_argument("--session", help="会话 ID，默认自动生成")
-    agent_parser.add_argument("--new-session", action="store_true", help="忽略传入会话，强制创建新会话")
-    agent_parser.add_argument("--user-id", default="cli", help="智能体上下文中的用户 ID")
-    agent_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    agent_parser.add_argument(
+        "--new-session", action="store_true", help="忽略传入会话，强制创建新会话"
+    )
+    agent_parser.add_argument(
+        "--user-id", default="cli", help="智能体上下文中的用户 ID"
+    )
+    agent_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
     update_parser = subparsers.add_parser("update", help="更新本地后端、前端或全部组件")
-    update_parser.add_argument("target", choices=["backend", "frontend", "all"], help="更新目标")
-    update_parser.add_argument("--ref", default="latest", help="后端 Git 版本，默认 latest")
-    update_parser.add_argument("--frontend-version", default="latest", help="前端版本，默认 latest")
-    update_parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本")
-    update_parser.add_argument("--python", default=DEFAULT_BOOTSTRAP_PYTHON, help="用于安装后端依赖的 Python 解释器，默认自动选择本地 3.11+ 版本")
-    update_parser.add_argument("--venv", default=str(ROOT / "venv"), help="虚拟环境目录")
-    update_parser.add_argument("--recreate", action="store_true", help="删除并重建虚拟环境")
-    update_parser.add_argument("--skip-resources", action="store_true", help="更新 all 时跳过资源同步")
-    update_parser.add_argument("--config-dir", help="配置目录，默认使用程序目录外的系统配置目录")
+    update_parser.add_argument(
+        "target", choices=["backend", "frontend", "all"], help="更新目标"
+    )
+    update_parser.add_argument(
+        "--ref", default="latest", help="后端 Git 版本，默认 latest"
+    )
+    update_parser.add_argument(
+        "--frontend-version", default="latest", help="前端版本，默认 latest"
+    )
+    update_parser.add_argument(
+        "--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本"
+    )
+    update_parser.add_argument(
+        "--python",
+        default=DEFAULT_BOOTSTRAP_PYTHON,
+        help="用于安装后端依赖的 Python 解释器，默认自动选择本地 3.11+ 版本",
+    )
+    update_parser.add_argument(
+        "--venv", default=str(ROOT / "venv"), help="虚拟环境目录"
+    )
+    update_parser.add_argument(
+        "--recreate", action="store_true", help="删除并重建虚拟环境"
+    )
+    update_parser.add_argument(
+        "--skip-resources", action="store_true", help="更新 all 时跳过资源同步"
+    )
+    update_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
+    )
 
     apply_config_parser = subparsers.add_parser("apply-config", help=argparse.SUPPRESS)
-    apply_config_parser.add_argument("--config-json-file", required=True, help=argparse.SUPPRESS)
+    apply_config_parser.add_argument(
+        "--config-json-file", required=True, help=argparse.SUPPRESS
+    )
 
-    sync_superuser_parser = subparsers.add_parser("sync-superuser", help=argparse.SUPPRESS)
+    sync_superuser_parser = subparsers.add_parser(
+        "sync-superuser", help=argparse.SUPPRESS
+    )
     sync_superuser_parser.add_argument("--config-dir", help=argparse.SUPPRESS)
 
-    query_auth_sites_parser = subparsers.add_parser("query-auth-sites", help=argparse.SUPPRESS)
-    query_auth_sites_parser.add_argument("--output-json-file", required=True, help=argparse.SUPPRESS)
+    query_auth_sites_parser = subparsers.add_parser(
+        "query-auth-sites", help=argparse.SUPPRESS
+    )
+    query_auth_sites_parser.add_argument(
+        "--output-json-file", required=True, help=argparse.SUPPRESS
+    )
 
     return parser
 
@@ -1850,7 +2137,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    explicit_config_dir = Path(args.config_dir) if getattr(args, "config_dir", None) else None
+    explicit_config_dir = (
+        Path(args.config_dir) if getattr(args, "config_dir", None) else None
+    )
     config_dir = configure_config_dir(
         explicit=explicit_config_dir,
         persist=True,
@@ -1869,20 +2158,26 @@ def main() -> int:
             return 0
 
         if args.command == "install-frontend":
-            result = install_frontend(frontend_version=args.version, node_version=args.node_version)
+            result = install_frontend(
+                frontend_version=args.version, node_version=args.node_version
+            )
             print_step(f"前端安装完成，版本：{result['version']}")
             return 0
 
         if args.command == "install-resources":
             install_resources(
-                resources_repo=Path(args.resources_repo) if args.resources_repo else None,
+                resources_repo=Path(args.resources_repo)
+                if args.resources_repo
+                else None,
                 resource_dir=Path(args.resource_dir) if args.resource_dir else None,
             )
             return 0
 
         if args.command == "init":
             init_local(
-                resources_repo=Path(args.resources_repo) if args.resources_repo else None,
+                resources_repo=Path(args.resources_repo)
+                if args.resources_repo
+                else None,
                 resource_dir=Path(args.resource_dir) if args.resource_dir else None,
                 skip_resources=args.skip_resources,
                 resources_ready=False,
@@ -1902,16 +2197,22 @@ def main() -> int:
                 venv_dir=Path(args.venv),
                 recreate=args.recreate,
             )
-            install_frontend(frontend_version=args.frontend_version, node_version=args.node_version)
+            install_frontend(
+                frontend_version=args.frontend_version, node_version=args.node_version
+            )
             resources_installed = False
             if not args.skip_resources:
                 install_resources(
-                    resources_repo=Path(args.resources_repo) if args.resources_repo else None,
+                    resources_repo=Path(args.resources_repo)
+                    if args.resources_repo
+                    else None,
                     resource_dir=Path(args.resource_dir) if args.resource_dir else None,
                 )
                 resources_installed = True
             init_local(
-                resources_repo=Path(args.resources_repo) if args.resources_repo else None,
+                resources_repo=Path(args.resources_repo)
+                if args.resources_repo
+                else None,
                 resource_dir=Path(args.resource_dir) if args.resource_dir else None,
                 skip_resources=args.skip_resources or resources_installed,
                 resources_ready=resources_installed,
@@ -1947,7 +2248,10 @@ def main() -> int:
                     recreate=args.recreate,
                 )
             if args.target in {"frontend", "all"}:
-                frontend_result = install_frontend(frontend_version=args.frontend_version, node_version=args.node_version)
+                frontend_result = install_frontend(
+                    frontend_version=args.frontend_version,
+                    node_version=args.node_version,
+                )
                 print_step(f"前端更新完成，版本：{frontend_result['version']}")
             if args.target == "all" and not args.skip_resources:
                 install_resources(resources_repo=None, resource_dir=None)
@@ -1956,7 +2260,9 @@ def main() -> int:
             return 0
 
         if args.command == "apply-config":
-            payload = json.loads(Path(args.config_json_file).read_text(encoding="utf-8"))
+            payload = json.loads(
+                Path(args.config_json_file).read_text(encoding="utf-8")
+            )
             if not isinstance(payload, dict):
                 raise RuntimeError("配置负载格式错误")
             _apply_local_system_config_inner(payload)

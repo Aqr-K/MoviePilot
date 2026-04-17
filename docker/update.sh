@@ -143,14 +143,24 @@ function install_backend_and_download_resources() {
     cp -a /plugins/* /app/app/plugins/
     # 更新站点资源
     INFO "→ 开始更新站点资源..."
-    if ! download_and_unzip "${GITHUB_PROXY}https://github.com/jxxghp/MoviePilot-Resources/archive/refs/heads/main.zip" "Resources"; then
-        cp -a /resources_bakcup/* /app/app/helper/
-        rm -rf /resources_bakcup
-        WARN "站点资源下载失败，继续使用旧的资源来启动..."
-        return 1
+    python_version=$(python3 -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')
+    arch=$(uname -m)
+    if [ "$arch" = "aarch64" ]; then
+        arch_suffix="aarch64-linux-gnu"
+    else
+        arch_suffix="x86_64-linux-gnu"
     fi
-    # 复制新站点资源
-    cp -a ${TMP_PATH}/Resources/resources.v2/* /app/app/helper/
+    INFO "当前 Python 版本：${python_version}，架构：${arch}"
+    # 下载 user.sites.v2.bin
+    if ! curl ${CURL_OPTIONS} "${GITHUB_PROXY}https://raw.githubusercontent.com/jxxghp/MoviePilot-Resources/main/resources.v2/user.sites.v2.bin" -o /app/app/helper/user.sites.v2.bin; then
+        cp -a /resources_bakcup/user.sites.v2.bin /app/app/helper/
+        WARN "user.sites.v2.bin 下载失败，继续使用旧的资源来启动..."
+    fi
+    # 下载对应平台的 sites 文件
+    sites_file="sites.${python_version}-${arch_suffix}.so"
+    if ! curl ${CURL_OPTIONS} "${GITHUB_PROXY}https://raw.githubusercontent.com/jxxghp/MoviePilot-Resources/main/resources.v2/${sites_file}" -o "/app/app/helper/${sites_file}"; then
+        WARN "${sites_file} 下载失败，继续使用旧的资源来启动..."
+    fi
     INFO "站点资源更新成功"
     # 清理临时目录
     rm -rf "${TMP_PATH}"

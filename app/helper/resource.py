@@ -1,4 +1,6 @@
 import json
+import platform
+import sys
 from pathlib import Path
 
 from app.core.config import settings
@@ -14,7 +16,7 @@ class ResourceHelper:
     """
     检测和更新资源包
     """
-    # 资源包的git仓库地址
+
     _repo = f"{settings.GITHUB_PROXY}https://raw.githubusercontent.com/jxxghp/MoviePilot-Resources/main/package.v2.json"
     _files_api = f"https://api.github.com/repos/jxxghp/MoviePilot-Resources/contents/resources.v2"
     _base_dir: Path = settings.ROOT_PATH
@@ -26,6 +28,35 @@ class ResourceHelper:
     def proxies(self):
         return None if settings.GITHUB_PROXY else settings.PROXY
 
+    @staticmethod
+    def _get_python_version_tag() -> str:
+        version = sys.version_info
+        return f"cp{version.major}{version.minor}"
+
+    @staticmethod
+    def _get_machine_tag() -> str:
+        machine = platform.machine().lower()
+        if machine in {"arm64", "aarch64"}:
+            return "aarch64"
+        elif machine in {"x86_64", "amd64"}:
+            return "x86_64"
+        return machine
+
+    @staticmethod
+    def _get_needed_files() -> list[str]:
+        python_version = ResourceHelper._get_python_version_tag()
+        python_ver = python_version.replace("cp", "")
+        system = platform.system().lower()
+        machine = ResourceHelper._get_machine_tag()
+        files = ["user.sites.v2.bin"]
+        if system == "linux":
+            files.append(f"sites.cpython-{python_ver}-{machine}-linux-gnu.so")
+        elif system == "darwin":
+            files.append(f"sites.cpython-{python_ver}-darwin.so")
+        elif system == "windows":
+            files.append(f"sites.cp{python_ver}-win_amd64.pyd")
+        return files
+
     def check(self):
         """
         检测是否有更新，如有则下载安装
@@ -35,7 +66,9 @@ class ResourceHelper:
         if SystemUtils.is_frozen():
             return None
         logger.info("开始检测资源包版本...")
-        res = RequestUtils(proxies=self.proxies, headers=settings.GITHUB_HEADERS, timeout=10).get_res(self._repo)
+        res = RequestUtils(
+            proxies=self.proxies, headers=settings.GITHUB_HEADERS, timeout=10
+        ).get_res(self._repo)
         if res:
             try:
                 resource_info = json.loads(res.text)
@@ -71,38 +104,50 @@ class ResourceHelper:
                         need_updates[rname] = target
                     if need_updates:
                         # 下载文件信息列表
-                        r = RequestUtils(proxies=settings.PROXY, headers=settings.GITHUB_HEADERS,
-                                         timeout=30).get_res(self._files_api)
+                        r = RequestUtils(
+                            proxies=settings.PROXY,
+                            headers=settings.GITHUB_HEADERS,
+                            timeout=30,
+                        ).get_res(self._files_api)
                         if r and not r.ok:
                             return None, f"连接仓库失败：{r.status_code} - {r.reason}"
                         elif not r:
                             return None, "连接仓库失败"
                         files_info = r.json()
                         # 下载资源文件
+                        needed_files = self._get_needed_files()
+                        logger.info(f"需要下载的资源文件：{needed_files}")
                         success = True
                         for item in files_info:
-                            save_path = need_updates.get(item.get("name"))
+                            file_name = item.get("name")
+                            if file_name not in needed_files:
+                                continue
+                            save_path = need_updates.get(file_name)
                             if not save_path:
                                 continue
                             if item.get("download_url"):
-                                logger.info(f"开始更新资源文件：{item.get('name')} ...")
-                                download_url = f"{settings.GITHUB_PROXY}{item.get('download_url')}"
-                                # 下载资源文件
-                                res = RequestUtils(proxies=self.proxies, headers=settings.GITHUB_HEADERS,
-                                                   timeout=180).get_res(download_url)
+                                logger.info(f"开始更新资源文件：{file_name} ...")
+                                download_url = (
+                                    f"{settings.GITHUB_PROXY}{item.get('download_url')}"
+                                )
+                                res = RequestUtils(
+                                    proxies=self.proxies,
+                                    headers=settings.GITHUB_HEADERS,
+                                    timeout=180,
+                                ).get_res(download_url)
                                 if not res:
-                                    logger.error(f"文件 {item.get('name')} 下载失败！")
+                                    logger.error(f"文件 {file_name} 下载失败！")
                                     success = False
                                     break
                                 elif res.status_code != 200:
-                                    logger.error(f"下载文件 {item.get('name')} 失败：{res.status_code} - {res.reason}")
+                                    logger.error(
+                                        f"下载文件 {file_name} 失败：{res.status_code} - {res.reason}"
+                                    )
                                     success = False
                                     break
-                                # 创建插件文件夹
-                                file_path = self._base_dir / save_path / item.get("name")
+                                file_path = self._base_dir / save_path / file_name
                                 if not file_path.parent.exists():
                                     file_path.parent.mkdir(parents=True, exist_ok=True)
-                                # 写入文件
                                 file_path.write_bytes(res.content)
                         if success:
                             logger.info("资源包更新完成，开始重启服务...")
