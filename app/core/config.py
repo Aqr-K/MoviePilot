@@ -1046,7 +1046,16 @@ class GlobalVar(object):
     # 需应急停止文件整理
     EMERGENCY_STOP_TRANSFER: List[str] = []
     # 当前事件循环
-    CURRENT_EVENT_LOOP: AbstractEventLoop = asyncio.get_event_loop()
+    CURRENT_EVENT_LOOP: AbstractEventLoop = None
+
+    @classmethod
+    def _get_event_loop(cls) -> AbstractEventLoop:
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
 
     def stop_system(self):
         """
@@ -1116,6 +1125,8 @@ class GlobalVar(object):
         """
         当前循环
         """
+        if self.CURRENT_EVENT_LOOP is None:
+            self.CURRENT_EVENT_LOOP = self._get_event_loop()
         return self.CURRENT_EVENT_LOOP
 
     def set_loop(self, loop: AbstractEventLoop):
