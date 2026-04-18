@@ -123,6 +123,50 @@ class NettestSecurityTest(unittest.TestCase):
         self.assertIn("跳转", resp.message)
         self.assertEqual(captured["calls"], 1)
 
+    def test_nettest_allows_known_external_redirects(self):
+        cases = {
+            "telegram_api": "https://core.telegram.org/bots",
+            "douban_api": "https://www.douban.com/doubanapp/frodo?wechat=0&os=Other",
+            "github_codeload": "https://github.com/",
+        }
+
+        for target_id, redirect_url in cases.items():
+            call_urls = []
+
+            class FakeResponse:
+                def __init__(self, status_code, headers=None, text=""):
+                    self.status_code = status_code
+                    self.headers = headers or {}
+                    self.text = text
+
+                async def aclose(self):
+                    return None
+
+            class FakeAsyncRequestUtils:
+                def __init__(self, **kwargs):
+                    pass
+
+                async def get_res(self, url, allow_redirects=True):
+                    call_urls.append(url)
+                    if len(call_urls) == 1:
+                        return FakeResponse(302, headers={"location": redirect_url})
+                    return FakeResponse(200, text="ok")
+
+            with self.subTest(target_id=target_id), patch.object(
+                system_endpoint,
+                "AsyncRequestUtils",
+                FakeAsyncRequestUtils,
+            ):
+                resp = asyncio.run(
+                    system_endpoint.nettest(
+                        target_id=target_id,
+                        _="token",
+                    )
+                )
+
+            self.assertTrue(resp.success)
+            self.assertEqual(len(call_urls), 2)
+
     def test_nettest_uses_safe_http_options_and_server_side_content_check(self):
         captured = {}
 

@@ -141,7 +141,10 @@ def _build_nettest_rules() -> list[dict[str, Any]]:
             "icon": "telegram",
             "url": "https://api.telegram.org",
             "proxy": True,
-            "allowed_redirect_prefixes": ["https://api.telegram.org/"],
+            "allowed_redirect_prefixes": [
+                "https://api.telegram.org/",
+                "https://core.telegram.org/",
+            ],
         },
         {
             "id": "wechat_api",
@@ -157,7 +160,10 @@ def _build_nettest_rules() -> list[dict[str, Any]]:
             "icon": "douban",
             "url": "https://frodo.douban.com",
             "proxy": False,
-            "allowed_redirect_prefixes": ["https://frodo.douban.com/"],
+            "allowed_redirect_prefixes": [
+                "https://frodo.douban.com/",
+                "https://www.douban.com/doubanapp/frodo",
+            ],
         },
         {
             "id": "slack_api",
@@ -214,7 +220,10 @@ def _build_nettest_rules() -> list[dict[str, Any]]:
             "icon": "github",
             "url": "https://codeload.github.com",
             "proxy": True,
-            "allowed_redirect_prefixes": ["https://codeload.github.com/"],
+            "allowed_redirect_prefixes": [
+                "https://codeload.github.com/",
+                "https://github.com/",
+            ],
             "headers": settings.GITHUB_HEADERS,
         },
         {
