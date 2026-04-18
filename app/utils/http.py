@@ -581,7 +581,9 @@ class AsyncRequestUtils:
                  timeout: int = None,
                  referer: str = None,
                  content_type: str = None,
-                 accept_type: str = None):
+                 accept_type: str = None,
+                 verify: bool = False,
+                 follow_redirects: bool = True):
         """
         :param headers: 请求头部信息
         :param ua: User-Agent字符串
@@ -592,10 +594,14 @@ class AsyncRequestUtils:
         :param referer: Referer头部信息
         :param content_type: 请求的Content-Type，默认为 "application/x-www-form-urlencoded; charset=UTF-8"
         :param accept_type: Accept头部信息，默认为 "application/json"
+        :param verify: 是否校验证书
+        :param follow_redirects: 客户端默认是否跟随重定向
         """
         self._proxies = self._convert_proxies_for_httpx(proxies)
         self._client = client
         self._timeout = timeout or 20
+        self._verify = verify
+        self._follow_redirects = follow_redirects
         if not content_type:
             content_type = "application/x-www-form-urlencoded; charset=UTF-8"
         if headers:
@@ -681,8 +687,8 @@ class AsyncRequestUtils:
             async with httpx.AsyncClient(
                     proxy=self._proxies,
                     timeout=self._timeout,
-                    verify=False,
-                    follow_redirects=True,
+                    verify=self._verify,
+                    follow_redirects=self._follow_redirects,
                     cookies=self._cookies  # 在创建客户端时传入Cookie
             ) as client:
                 return await self._make_request(client, method, url, raise_exception, **kwargs)
