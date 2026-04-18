@@ -53,6 +53,12 @@ _NETTEST_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 
 def _match_nettest_prefix(url: str, prefix: str) -> bool:
+    """
+    判断目标URL是否仍然落在允许的协议、主机、端口和路径前缀内。
+
+    nettest 会在服务端手动处理重定向，因此这里需要一个比简单 startswith
+    更严格的匹配，避免不同端口或同名路径被误判为白名单内跳转。
+    """
     parsed_url = urlparse(url)
     parsed_prefix = urlparse(prefix)
     if parsed_url.scheme.lower() != parsed_prefix.scheme.lower():
@@ -67,6 +73,13 @@ def _match_nettest_prefix(url: str, prefix: str) -> bool:
 
 
 def _build_nettest_rules() -> list[dict[str, Any]]:
+    """
+    构建系统内置的网络测试目标。
+
+    这里集中维护“前端允许显示哪些测试项”和“后端允许访问哪些远端地址”。
+    前端只拿到展示所需的 id/name/icon；真正的 URL、代理策略、内容校验规则
+    和重定向白名单都保留在服务端，避免再出现用户可控 SSRF。
+    """
     github_proxy = UrlUtils.standardize_base_url(settings.GITHUB_PROXY or "")
     pip_proxy = UrlUtils.standardize_base_url(
         settings.PIP_PROXY or "https://pypi.org/simple/"
@@ -238,6 +251,12 @@ def _build_nettest_rules() -> list[dict[str, Any]]:
 
 
 def _validate_nettest_url(url: str) -> Optional[str]:
+    """
+    对实际请求地址做基础安全校验。
+
+    即使请求来自服务端内置规则，这里仍保留一层兜底校验，防止配置项被拼出
+    非 HTTPS、带凭据或不在内置目标集合中的地址。
+    """
     parsed = urlparse(url)
     if parsed.scheme.lower() != "https":
         return "测试地址仅支持 HTTPS"
@@ -251,6 +270,12 @@ def _validate_nettest_url(url: str) -> Optional[str]:
 
 
 def _get_nettest_rule(url: Optional[str] = None, target_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """
+    根据 target_id 或历史兼容参数匹配网络测试规则。
+
+    现在的主路径是 target_id。保留 url 参数是为了兼容旧前端或未升级的调用方，
+    但匹配结果仍然只能落到服务端预定义规则上。
+    """
     for rule in _build_nettest_rules():
         if target_id and rule.get("id") == target_id:
             return rule
@@ -260,6 +285,12 @@ def _get_nettest_rule(url: Optional[str] = None, target_id: Optional[str] = None
 
 
 def _is_allowed_nettest_redirect(url: str, rule: dict[str, Any]) -> bool:
+    """
+    校验重定向目标是否仍属于当前测试项允许的跳转范围。
+
+    nettest 不再信任客户端跟随重定向，而是只允许在该测试项自己的白名单内跳转，
+    这样既能兼容正常 30x，又不会把安全边界重新放开。
+    """
     parsed = urlparse(url)
     if parsed.scheme.lower() != "https" or not parsed.netloc:
         return False
@@ -272,6 +303,12 @@ def _is_allowed_nettest_redirect(url: str, rule: dict[str, Any]) -> bool:
 
 
 async def _close_nettest_response(response: Any) -> None:
+    """
+    安静地关闭 httpx 响应对象。
+
+    nettest 在手动处理重定向时会提前结束部分响应读取，这里统一做资源回收，
+    避免连接泄漏干扰后续测试。
+    """
     if response is None or not hasattr(response, "aclose"):
         return
     try:
@@ -775,7 +812,10 @@ def ruletest(
 @router.get("/nettest/targets", summary="获取网络测试目标", response_model=schemas.Response)
 async def nettest_targets(_: schemas.TokenPayload = Depends(verify_token)):
     """
-    获取网络测试目标
+    获取网络测试目标。
+
+    这里只返回前端渲染所需的最小信息，避免把可请求 URL、内容校验规则和
+    跳转白名单暴露给客户端。
     """
     return schemas.Response(
         success=True,
@@ -799,7 +839,10 @@ async def nettest(
     _: schemas.TokenPayload = Depends(verify_token),
 ):
     """
-    测试网络连通性
+    测试内置目标的网络连通性。
+
+    `target_id` 是当前前端使用的正式入口。`url/proxy/include` 仅作兼容保留，
+    其中 `include` 不再参与客户端可控的内容匹配，具体校验由服务端规则决定。
     """
     target = _get_nettest_rule(url=url, target_id=target_id)
     if not target:
