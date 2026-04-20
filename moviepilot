@@ -14,6 +14,7 @@ Bootstrap Commands:
   moviepilot install resources [--resources-repo PATH] [--resource-dir PATH] [--config-dir PATH]
   moviepilot init [--skip-resources] [--force-token] [--wizard] [--superuser NAME] [--superuser-password PASSWORD] [--config-dir PATH]
   moviepilot setup [--python PYTHON] [--venv PATH] [--recreate] [--frontend-version latest] [--node-version 20.12.1] [--wizard] [--superuser NAME] [--superuser-password PASSWORD] [--config-dir PATH]
+  moviepilot uninstall [--venv PATH] [--config-dir PATH]
   moviepilot update {backend|frontend|all} [OPTIONS]
   moviepilot agent [OPTIONS] MESSAGE...
 
@@ -27,6 +28,7 @@ Discovery Commands:
   moviepilot help
   moviepilot help config
   moviepilot help install
+  moviepilot help uninstall
   moviepilot help update
   moviepilot commands
 
@@ -35,6 +37,7 @@ Examples:
   moviepilot install frontend
   moviepilot install resources
   moviepilot setup --wizard
+  moviepilot uninstall
   moviepilot update all
   moviepilot agent 帮我分析最近一次搜索失败
   moviepilot help config
@@ -52,6 +55,7 @@ Bootstrap Commands
   install resources
   init
   setup
+  uninstall
   update backend
   update frontend
   update all
@@ -142,6 +146,22 @@ Options:
   --superuser-password PWD  预设超级管理员密码
   --config-dir PATH         指定配置目录
   -h, --help                显示帮助
+EOF
+}
+
+show_uninstall_help() {
+  cat <<'EOF'
+Usage: moviepilot uninstall [OPTIONS]
+
+Options:
+  --venv PATH        虚拟环境目录，默认 ./venv
+  --config-dir PATH  指定配置目录，默认使用当前安装配置
+  -h, --help         显示帮助
+
+说明:
+  - 默认保留配置目录，过程中会询问是否删除
+  - 卸载时会进行两次确认
+  - 源码目录不会被删除
 EOF
 }
 
@@ -296,6 +316,10 @@ show_command_help() {
       show_setup_help
       exit 0
       ;;
+    uninstall)
+      show_uninstall_help
+      exit 0
+      ;;
     agent)
       show_agent_help
       exit 0
@@ -396,6 +420,12 @@ case "${1:-}" in
     shift
     require_bootstrap_python
     exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" setup "$@"
+    ;;
+  uninstall)
+    shift
+    require_bootstrap_python
+    COMMAND_PATH="$(command -v moviepilot 2>/dev/null || true)"
+    MOVIEPILOT_LAUNCH_PATH="$0" MOVIEPILOT_COMMAND_PATH="$COMMAND_PATH" exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" uninstall "$@"
     ;;
   update)
     shift

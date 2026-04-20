@@ -41,6 +41,8 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
 - macOS：`~/Library/Application Support/MoviePilot`
 - Linux：`${XDG_CONFIG_HOME:-~/.config}/moviepilot`
 
+如果在交互式终端中执行一键安装脚本，或直接执行 `moviepilot setup` / `moviepilot init` 且未传入 `--config-dir`，程序会先询问配置目录，并把上面的默认路径作为默认值展示出来。
+
 可以在安装或初始化时手动指定：
 
 ```shell
@@ -80,6 +82,7 @@ moviepilot commands
 moviepilot help install
 moviepilot help init
 moviepilot help setup
+moviepilot help uninstall
 moviepilot help update
 moviepilot help agent
 moviepilot help config
@@ -111,6 +114,7 @@ moviepilot install frontend
 moviepilot install resources
 moviepilot init
 moviepilot setup
+moviepilot uninstall
 moviepilot update backend
 moviepilot update frontend
 moviepilot update all
@@ -243,6 +247,25 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
 
 - `--superuser-password` 更适合自动化场景，命令可能会出现在 shell 历史中
 - 交互式 `--wizard` 会在初始化过程中提示输入超级管理员用户名和密码
+
+## 卸载命令
+
+卸载本地安装产物：
+
+```shell
+moviepilot uninstall
+moviepilot uninstall --venv /path/to/venv
+moviepilot uninstall --config-dir /path/to/moviepilot-config
+```
+
+说明：
+
+- 卸载时会先停止当前 CLI 管理的前后端服务
+- 会删除本地虚拟环境、前端运行时、本地 Node 运行时、全局 `moviepilot` 软链接，以及同步到 `app/helper` 的资源文件
+- 会询问是否同时删除配置目录，默认不删除
+- 如果当前使用的是仓库内 legacy `config/` 目录，确认删除后其中的 `category.yaml` 等配置文件也会一起删除
+- 整个卸载流程包含两次确认
+- 源码目录会保留，如需彻底移除仓库请在确认后手动删除项目目录
 
 ## 更新命令
 

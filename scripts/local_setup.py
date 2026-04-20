@@ -17,6 +17,7 @@ import sys
 import tarfile
 import uuid
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Optional
@@ -85,6 +86,8 @@ NOTIFICATION_SWITCH_TYPES = [
     "智能体",
     "其它",
 ]
+UNINSTALL_CONFIRM_TEXT = "UNINSTALL"
+RESOURCE_FILE_PATTERNS = ("sites*", "user.sites*.bin")
 
 
 def _default_config_dir() -> Path:
@@ -199,6 +202,31 @@ def configure_config_dir(
     if persist:
         _write_install_env(config_dir)
     return config_dir
+
+
+def resolve_config_dir(
+    explicit: Optional[Path] = None,
+    *,
+    prefer_external: bool = False,
+) -> Path:
+    """
+    解析当前命令应使用的配置目录，但不写入环境变量或安装元数据。
+
+    该函数用于交互式命令在真正持久化配置目录前，先给用户展示默认值。
+    """
+    if explicit:
+        return explicit.expanduser().resolve()
+    if os.getenv("CONFIG_DIR"):
+        return Path(os.environ["CONFIG_DIR"]).expanduser().resolve()
+
+    install_env_dir = _read_install_env_config_dir()
+    if install_env_dir:
+        return install_env_dir.resolve()
+    if prefer_external:
+        return _default_config_dir().resolve()
+    if _legacy_runtime_config_exists():
+        return LEGACY_CONFIG_DIR.resolve()
+    return _default_config_dir().resolve()
 
 
 configure_config_dir()
@@ -840,6 +868,23 @@ def _prompt_path(label: str, *, default: Path, allow_empty: bool = False) -> str
     if not value:
         return ""
     return str(Path(value).expanduser().resolve())
+
+
+def _resolve_interactive_config_dir(
+    command: str, explicit_config_dir: Optional[Path]
+) -> Optional[Path]:
+    """
+    `setup` / `init` 是最常见的本地安装入口。
+    当用户没有显式传入 `--config-dir` 且当前终端可交互时，先询问一次配置目录，
+    并把程序外默认路径展示出来，避免用户安装后才发现配置写到了别处。
+    """
+    if explicit_config_dir or command not in {"init", "setup"} or not _is_interactive():
+        return explicit_config_dir
+
+    default_config_dir = resolve_config_dir(prefer_external=True)
+    print_step("安装将使用程序目录外的配置目录，直接回车可接受默认值")
+    selected_path = _prompt_path("配置目录", default=default_config_dir)
+    return Path(selected_path) if selected_path else default_config_dir
 
 
 def _validate_superuser_name(username: str) -> Optional[str]:
@@ -1843,6 +1888,22 @@ def _pid_exists(pid: int) -> bool:
     return True
 
 
+def _read_process_start_time(pid: int) -> Optional[float]:
+    try:
+        output = capture(["ps", "-p", str(pid), "-o", "lstart="])
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    started = output.strip()
+    if not started:
+        return None
+
+    try:
+        return datetime.strptime(started, "%a %b %d %H:%M:%S %Y").timestamp()
+    except ValueError:
+        return None
+
+
 def _services_running() -> list[str]:
     running: list[str] = []
     runtime_files = {
@@ -1852,8 +1913,27 @@ def _services_running() -> list[str]:
     for name, runtime_file in runtime_files.items():
         payload = _read_runtime_file(runtime_file)
         pid = payload.get("pid") if isinstance(payload, dict) else None
-        if pid and _pid_exists(int(pid)):
-            running.append(name)
+        if not pid:
+            continue
+
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            continue
+
+        if not _pid_exists(pid_int):
+            continue
+
+        runtime_start_time = payload.get("create_time") if isinstance(payload, dict) else None
+        process_start_time = _read_process_start_time(pid_int)
+        if runtime_start_time is not None and process_start_time is not None:
+            try:
+                if abs(process_start_time - float(runtime_start_time)) > 3:
+                    continue
+            except (TypeError, ValueError):
+                pass
+
+        running.append(name)
     return running
 
 
@@ -1864,6 +1944,208 @@ def ensure_services_stopped() -> None:
             "检测到本地服务仍在运行（%s），请先执行 `moviepilot stop` 后再更新。"
             % ", ".join(running)
         )
+
+
+def _stop_managed_services(venv_dir: Path) -> None:
+    venv_dir = venv_dir.expanduser().resolve()
+    venv_python = get_venv_python(venv_dir)
+    if venv_python.exists():
+        print_step("停止本地前后端服务")
+        run(
+            [str(venv_python), "-m", "app.cli", "stop", "--timeout", "30", "--force"],
+            cwd=ROOT,
+        )
+        return
+
+    running = _services_running()
+    if running:
+        raise RuntimeError(
+            "检测到本地服务仍在运行（%s），但当前未找到虚拟环境 %s，无法安全停止。"
+            " 请先执行 `moviepilot stop`，或在卸载时通过 `--venv PATH` 指定正确的虚拟环境目录。"
+            % (", ".join(running), venv_dir)
+        )
+
+
+def _collect_cli_link_candidates(
+    *, command_path: Optional[str] = None, launch_path: Optional[str] = None
+) -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    raw_candidates = [
+        launch_path,
+        command_path,
+        os.getenv("MOVIEPILOT_LAUNCH_PATH"),
+        os.getenv("MOVIEPILOT_COMMAND_PATH"),
+        shutil.which("moviepilot"),
+    ]
+
+    for raw_value in raw_candidates:
+        if not raw_value:
+            continue
+        candidate = Path(raw_value).expanduser()
+        if not candidate.is_absolute():
+            candidate = (ROOT / candidate).resolve()
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+    return candidates
+
+
+def _remove_cli_symlinks(
+    *, command_path: Optional[str] = None, launch_path: Optional[str] = None
+) -> list[Path]:
+    removed: list[Path] = []
+    script_path = (ROOT / "moviepilot").resolve()
+
+    for candidate in _collect_cli_link_candidates(
+        command_path=command_path, launch_path=launch_path
+    ):
+        if not candidate.is_symlink():
+            continue
+        try:
+            if candidate.resolve() != script_path:
+                continue
+        except OSError:
+            continue
+        candidate.unlink()
+        removed.append(candidate)
+    return removed
+
+
+def _remove_runtime_state_files() -> list[Path]:
+    removed: list[Path] = []
+    for path in (
+        TEMP_DIR / "moviepilot.runtime.json",
+        TEMP_DIR / "moviepilot.frontend.runtime.json",
+    ):
+        if not path.exists():
+            continue
+        _remove_path(path)
+        removed.append(path)
+    return removed
+
+
+def _remove_installed_resource_files() -> list[Path]:
+    removed: list[Path] = []
+    seen: set[Path] = set()
+    for pattern in RESOURCE_FILE_PATTERNS:
+        for path in sorted(HELPER_DIR.glob(pattern)):
+            if path in seen or not path.exists() or path.is_dir():
+                continue
+            _remove_path(path)
+            removed.append(path)
+            seen.add(path)
+    return removed
+
+
+def _remove_config_data(config_dir: Path) -> list[Path]:
+    config_dir = config_dir.expanduser().resolve()
+    removed: list[Path] = []
+
+    if config_dir.exists():
+        _remove_path(config_dir)
+        removed.append(config_dir)
+    return removed
+
+
+def uninstall_local(
+    *,
+    venv_dir: Path,
+    config_dir: Path,
+    command_path: Optional[str] = None,
+    launch_path: Optional[str] = None,
+) -> dict[str, Any]:
+    if not _is_interactive():
+        raise RuntimeError("卸载命令需要在交互式终端中运行，以完成两次确认。")
+
+    venv_dir = venv_dir.expanduser().resolve()
+    config_dir = config_dir.expanduser().resolve()
+    cli_links = _collect_cli_link_candidates(
+        command_path=command_path, launch_path=launch_path
+    )
+    script_path = (ROOT / "moviepilot").resolve()
+    linked_cli_paths = [
+        path
+        for path in cli_links
+        if path.is_symlink() and path.exists() and path.resolve() == script_path
+    ]
+
+    delete_config = _prompt_yes_no(
+        f"是否同时删除配置目录 {config_dir}", default=False
+    )
+
+    print_step("卸载将执行以下操作")
+    print(f"  - 保留源码目录：{ROOT}")
+    print(f"  - 删除虚拟环境：{venv_dir}")
+    print(f"  - 删除前端运行时目录：{PUBLIC_DIR}")
+    print(f"  - 删除本地 Node 运行时目录：{RUNTIME_DIR}")
+    print(f"  - 删除资源文件：{HELPER_DIR}/sites*、{HELPER_DIR}/user.sites*.bin")
+    if linked_cli_paths:
+        print("  - 删除全局 CLI 软链接：")
+        for path in linked_cli_paths:
+            print(f"    {path}")
+    else:
+        print("  - 未检测到指向当前仓库的全局 CLI 软链接")
+
+    if delete_config:
+        print(f"  - 删除配置目录：{config_dir}")
+        if config_dir == LEGACY_CONFIG_DIR.resolve():
+            print("    包括 legacy config 目录中的 category.yaml 等配置文件")
+    else:
+        print(f"  - 保留配置目录：{config_dir}")
+
+    if not _prompt_yes_no("第一次确认：是否继续卸载 MoviePilot", default=False):
+        print_step("已取消卸载")
+        return {"cancelled": True}
+
+    confirm_text = _prompt_text(
+        f"第二次确认：请输入 {UNINSTALL_CONFIRM_TEXT} 以继续",
+        allow_empty=False,
+    )
+    if confirm_text != UNINSTALL_CONFIRM_TEXT:
+        print_step("确认文本不匹配，已取消卸载")
+        return {"cancelled": True}
+
+    _stop_managed_services(venv_dir=venv_dir)
+
+    removed_paths: list[Path] = []
+    removed_paths.extend(
+        _remove_cli_symlinks(command_path=command_path, launch_path=launch_path)
+    )
+    removed_paths.extend(_remove_runtime_state_files())
+    removed_paths.extend(_remove_installed_resource_files())
+    for path in (venv_dir, RUNTIME_DIR, PUBLIC_DIR):
+        if not path.exists():
+            continue
+        _remove_path(path)
+        removed_paths.append(path)
+
+    removed_config_paths: list[Path] = []
+    if delete_config:
+        removed_config_paths = _remove_config_data(config_dir)
+        removed_paths.extend(removed_config_paths)
+        if INSTALL_ENV_FILE.exists():
+            _remove_path(INSTALL_ENV_FILE)
+            removed_paths.append(INSTALL_ENV_FILE)
+
+    print_step("卸载完成")
+    if delete_config:
+        print_step(f"已删除配置目录：{config_dir}")
+    else:
+        print_step(f"已保留配置目录：{config_dir}")
+    print_step(f"源码目录仍保留在：{ROOT}")
+
+    return {
+        "cancelled": False,
+        "config_deleted": delete_config,
+        "removed_paths": [str(path) for path in removed_paths],
+        "removed_config_paths": [str(path) for path in removed_config_paths],
+    }
 
 
 def _git_output(*args: str) -> str:
@@ -2068,6 +2350,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--config-dir", help="配置目录，默认使用程序目录外的系统配置目录"
     )
 
+    uninstall_parser = subparsers.add_parser(
+        "uninstall", help="卸载本地安装产物，并可选删除配置目录"
+    )
+    uninstall_parser.add_argument(
+        "--venv", default=str(ROOT / "venv"), help="虚拟环境目录"
+    )
+    uninstall_parser.add_argument(
+        "--config-dir", help="配置目录，默认使用当前安装配置"
+    )
+
     agent_parser = subparsers.add_parser(
         "agent", help="直接向 MoviePilot 智能体发送一次请求"
     )
@@ -2140,10 +2432,22 @@ def main() -> int:
     explicit_config_dir = (
         Path(args.config_dir) if getattr(args, "config_dir", None) else None
     )
+    explicit_config_dir = _resolve_interactive_config_dir(
+        args.command, explicit_config_dir
+    )
+    persist_config_commands = {
+        "install-deps",
+        "install-frontend",
+        "install-resources",
+        "init",
+        "setup",
+        "agent",
+        "update",
+    }
     config_dir = configure_config_dir(
         explicit=explicit_config_dir,
-        persist=True,
-        prefer_external=True,
+        persist=args.command in persist_config_commands,
+        prefer_external=args.command in persist_config_commands,
     )
 
     try:
@@ -2224,6 +2528,15 @@ def main() -> int:
             )
             print_step(f"本地环境已完成安装与初始化：{venv_python}")
             print_step(f"当前配置目录：{config_dir}")
+            return 0
+
+        if args.command == "uninstall":
+            uninstall_local(
+                venv_dir=Path(args.venv),
+                config_dir=config_dir,
+                command_path=os.getenv("MOVIEPILOT_COMMAND_PATH"),
+                launch_path=os.getenv("MOVIEPILOT_LAUNCH_PATH"),
+            )
             return 0
 
         if args.command == "agent":
