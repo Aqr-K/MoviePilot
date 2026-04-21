@@ -142,6 +142,47 @@ class LlmTestEndpointTest(unittest.TestCase):
         self.assertEqual(resp.data["duration_ms"], 321)
         self.assertEqual(resp.data["reply_preview"], "OK")
 
+    def test_llm_test_prefers_request_payload_over_saved_settings(self):
+        llm_test_mock = AsyncMock(
+            return_value={
+                "provider": "openai",
+                "model": "gpt-4.1-mini",
+                "duration_ms": 123,
+                "reply_preview": "OK",
+            }
+        )
+        payload = system_endpoint.LlmTestRequest(
+            enabled=True,
+            provider="openai",
+            model="gpt-4.1-mini",
+            api_key="sk-live",
+            base_url="https://example.com/v1",
+        )
+
+        with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", False), patch.object(
+            system_endpoint.settings, "LLM_PROVIDER", "deepseek"
+        ), patch.object(system_endpoint.settings, "LLM_MODEL", "deepseek-chat"), patch.object(
+            system_endpoint.settings, "LLM_API_KEY", "sk-saved"
+        ), patch.object(
+            system_endpoint.settings, "LLM_BASE_URL", "https://api.deepseek.com"
+        ), patch.object(
+            system_endpoint.LLMHelper,
+            "test_current_settings",
+            llm_test_mock,
+            create=True,
+        ):
+            resp = asyncio.run(system_endpoint.llm_test(payload=payload, _="token"))
+
+        llm_test_mock.assert_awaited_once_with(
+            provider="openai",
+            model="gpt-4.1-mini",
+            api_key="sk-live",
+            base_url="https://example.com/v1",
+        )
+        self.assertTrue(resp.success)
+        self.assertEqual(resp.data["provider"], "openai")
+        self.assertEqual(resp.data["model"], "gpt-4.1-mini")
+
     def test_llm_test_rejects_empty_reply(self):
         with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", True), patch.object(
             system_endpoint.settings, "LLM_PROVIDER", "deepseek"
