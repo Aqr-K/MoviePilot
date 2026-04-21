@@ -1,11 +1,13 @@
 ---
 name: generate-identifiers
-version: 1
+version: 2
 description: >-
   Use this skill when a user provides a torrent name or file name and wants to fix recognition issues,
   or asks to add/manage custom identifiers (自定义识别词).
   This skill generates identifier rules based on the WordsMatcher preprocessing logic,
   checks for duplicates against existing rules, and saves them via MCP tools.
+  Because custom identifiers are global, generated rules must default to conservative,
+  sample-specific regex patterns instead of broad matches unless the user explicitly wants global cleanup.
   Applicable scenarios include:
   1) A torrent or file name is incorrectly recognized (wrong title, season, episode, etc.);
   2) The user wants to block unwanted keywords from torrent names;
@@ -34,8 +36,10 @@ There are **four formats**. Operators must have spaces on both sides.
 Removes matched text from the title. Supports regex.
 
 ```
-REPACK
+SomeUniqueAlias
 ```
+
+Use a bare block word only when the token itself is specific enough globally, or when the user explicitly wants a global cleanup rule.
 
 ### 2. Replacement (被替换词 => 替换词)
 
@@ -84,6 +88,40 @@ Lines starting with `#` are comments and will be skipped during processing.
 5. **Chinese number support**: Episode offset handles Chinese numbers (一二三四五六七八九十).
 6. **Empty replacement**: Using nothing after `=>` is equivalent to a block word.
 
+## Global Scope Guardrails
+
+Custom identifiers are **global**. A new rule affects all future torrent/file recognition, not just the sample provided by the user.
+
+When generating a new rule, default to **the narrowest regex that still fixes the user's sample**:
+
+- Extract the sample's unique anchors first: wrong title alias, year, season/episode marker, group tag, source, resolution, release tag, file extension, or other distinctive fragments.
+- The matching side should usually contain **at least two meaningful anchors**, and one of them should normally be the title alias or another highly distinctive identifier from the user-provided sample.
+- Prefer matching the **full wrong alias or a stable unique fragment** from the sample, not a short generic substring.
+- Avoid generic global rules such as bare `1080p`, `WEB-DL`, `中字`, `国配`, `REPACK`, `S01E01`, or pure numbers unless the user explicitly wants a global cleanup rule.
+- If the rule only needs to fix one specific naming pattern, prefer a **contextual replacement** with capture groups/backreferences over a bare block word.
+- For episode offset rules, the `前定位词` and `后定位词` should use sample-specific context so the offset only runs on the intended naming pattern.
+- For direct TMDB/Douban binding, the left side should match the user's specific wrong alias or naming pattern, not a broad season/episode pattern that could hit other media.
+
+### Narrow vs Broad Examples
+
+Bad (too broad for a global rule):
+```
+REPACK
+1080p
+S01E01 => {[tmdbid=12345;type=tv;s=1;e=1]}
+```
+
+Better (scoped to the user's sample pattern):
+```
+(\[SubGroup\].*?My\.Show.*?2024.*?)REPACK => \1
+Some\.Weird\.Name(?:\.2024)?(?:\.S01E\d+)? => {[tmdbid=12345;type=tv;s=1]}
+\[Baha\] <> \[1080P\] >> EP-12
+```
+
+Before saving, mentally test the rule against:
+- the user's sample: it should match
+- unrelated titles with common release tags: it should usually **not** match
+
 ## Workflow
 
 ### Step 1: Analyze the Problem
@@ -92,6 +130,7 @@ Parse the torrent/file name provided by the user. Identify:
 - What is being incorrectly recognized (title, season, episode, year, quality, etc.)
 - What the correct recognition result should be
 - Which identifier format(s) will solve the problem
+- Which fragments in the provided sample are unique enough to use as regex anchors, so the rule does not accidentally affect unrelated titles
 
 ### Step 2: Generate the Identifier Rule(s)
 
@@ -99,6 +138,7 @@ Write the rule using the appropriate format. Ensure:
 - Regex special characters are properly escaped
 - Add a comment line (starting with `#`) above the rule to describe what it does
 - Test the regex mentally against the provided name to verify correctness
+- Because the rule is global, prefer the most specific viable match; if a bare block word would be too broad, rewrite it as a contextual replacement that includes sample-specific anchors
 
 ### Step 3: Query Existing Identifiers
 
@@ -159,30 +199,30 @@ Tell the user:
 
 **User**: "种子名 `My.Show.2024.REPACK.1080p.mkv`，REPACK导致识别异常"
 
-**Solution**: Block word:
+**Solution**: Contextual replacement, scoped to this title pattern:
 ```
-# 屏蔽REPACK标记
-REPACK
+# 仅在 My.Show.2024 命名中移除 REPACK
+(My\.Show\.2024\.)REPACK(\.1080p) => \1\2
 ```
 
 ### Non-Standard Naming
 
 **User**: "文件名 `[OldName] EP01.mkv`，应该识别为 NewName"
 
-**Solution**: Replacement:
+**Solution**: Replacement scoped to the wrong alias:
 ```
-# OldName替换为NewName
-OldName => NewName
+# 将特定错误别名 OldName 替换为 NewName
+\[OldName\] => [NewName]
 ```
 
 ### Force TMDB ID Recognition
 
 **User**: "种子名 `Some.Weird.Name.S01E01.1080p.mkv`，识别不到，TMDB ID是12345，是电视剧"
 
-**Solution**: Direct ID specification:
+**Solution**: Direct ID specification with a sample-specific alias pattern:
 ```
-# 强制识别Some.Weird.Name为TMDB ID 12345
-Some\.Weird\.Name => {[tmdbid=12345;type=tv;s=1]}
+# 仅在 Some.Weird.Name 这一命名模式下强制绑定 TMDB ID 12345
+Some\.Weird\.Name(?:\.S01E\d+)?(?:\.1080p)? => {[tmdbid=12345;type=tv;s=1]}
 ```
 
 ### Combined Fix
@@ -224,4 +264,5 @@ The `WordsMatcher.prepare()` method (in `app/core/meta/words.py`) processes each
 - Always query existing rules first before updating
 - Never remove existing rules unless the user explicitly asks
 - Add comment lines before new rules for maintainability
+- Remember that new rules are global. If a rule looks broad, rewrite it to include more sample-specific anchors before saving.
 - When uncertain about the correct approach, present multiple options and let the user choose

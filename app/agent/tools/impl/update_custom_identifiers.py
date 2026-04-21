@@ -23,7 +23,12 @@ class UpdateCustomIdentifiersInput(BaseModel):
         description=(
             "The complete list of custom identifier rules to save. "
             "This REPLACES the entire existing list. "
-            "Always query existing identifiers first, merge new rules, then pass the full list."
+            "Always query existing identifiers first, merge new rules, then pass the full list. "
+            "These rules are global and affect future recognition for all torrents/files. "
+            "When adding a rule for a user-provided sample, prefer narrow regex patterns that include "
+            "sample-specific anchors such as the title alias, year, season/episode marker, group tag, "
+            "resolution, or other distinctive fragments. Avoid overly broad patterns like bare generic "
+            "tags, pure episode numbers, or common release words unless the user explicitly wants a global rule."
         ),
     )
 
@@ -35,6 +40,10 @@ class UpdateCustomIdentifiersTool(MoviePilotTool):
         "This tool REPLACES all existing identifier rules with the provided list. "
         "IMPORTANT: Always use 'query_custom_identifiers' first to get existing rules, "
         "then merge new rules into the list before calling this tool to avoid accidentally deleting existing rules. "
+        "IMPORTANT: New identifier rules are global. When the rule is created from a specific torrent/file name, "
+        "make the regex as narrow as possible and include distinctive elements from that sample so unrelated titles "
+        "are not affected. Prefer contextual replacements with capture groups/backreferences over bare block words "
+        "when a generic word like REPACK, WEB-DL, 1080p, 字幕, or a simple episode marker would otherwise match too broadly. "
         "Supported rule formats (spaces around operators are required): "
         "1) Block word: just the word/regex to remove; "
         "2) Replacement: '被替换词 => 替换词'; "
