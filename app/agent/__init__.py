@@ -34,6 +34,7 @@ from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
 from app.schemas.types import MessageChannel
+from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
 class AgentChain(ChainBase):
@@ -543,16 +544,12 @@ class MoviePilotAgent:
         """
         通过原渠道发送消息给用户
         """
-        user_id = self.user_id
-        if self.user_id == "system":
-            user_id = None
-
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
                 source=self.source,
                 mtype=NotificationType.Agent,
-                userid=user_id,
+                userid=self.user_id,
                 username=self.username,
                 title=title,
                 text=message,
@@ -853,7 +850,7 @@ class AgentManager:
         try:
             # 每次使用唯一的 session_id，避免共享上下文
             session_id = f"__agent_heartbeat_{uuid.uuid4().hex[:12]}__"
-            user_id = "system"
+            user_id = SYSTEM_INTERNAL_USER_ID
 
             logger.info("智能体心跳唤醒：开始检查待处理任务...")
 
@@ -948,7 +945,7 @@ class AgentManager:
             return
 
         session_id = f"__agent_retry_transfer_batch_{uuid.uuid4().hex[:8]}__"
-        user_id = "system"
+        user_id = SYSTEM_INTERNAL_USER_ID
 
         ids_str = ", ".join(str(i) for i in history_ids)
         logger.info(
@@ -1107,7 +1104,7 @@ class AgentManager:
         手动触发单条历史记录的 AI 整理。
         """
         session_id = f"__agent_manual_redo_{history_id}_{uuid.uuid4().hex[:8]}__"
-        user_id = "system"
+        user_id = SYSTEM_INTERNAL_USER_ID
         agent = MoviePilotAgent(
             session_id=session_id,
             user_id=user_id,

@@ -38,6 +38,7 @@ from app.schemas import (
     TransferDirectoryConf,
     MessageResponse,
 )
+from app.utils.identity import normalize_internal_user_id
 from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     TorrentStatus,
@@ -118,6 +119,21 @@ class ChainBase(metaclass=ABCMeta):
         删除缓存，同时删除Redis和本地缓存
         """
         self.filecache.delete(filename)
+
+    @staticmethod
+    def _normalize_notification_for_dispatch(
+            message: Notification
+    ) -> Notification:
+        """
+        规范化待发送的通知消息。
+        后台任务会复用内部占位用户ID作为会话身份，这里在真正发送前清空，
+        让消息重新走默认通知路由或基于 targets 的目标解析。
+        """
+        dispatch_message = copy.deepcopy(message)
+        dispatch_message.userid = normalize_internal_user_id(
+            dispatch_message.userid
+        )
+        return dispatch_message
 
     async def async_remove_cache(self, filename: str) -> None:
         """
@@ -1119,10 +1135,13 @@ class ChainBase(metaclass=ABCMeta):
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         self.messageoper.add(**message.model_dump())
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
-        if not message.userid and message.mtype:
+        if not dispatch_message.userid and dispatch_message.mtype:
             # 消息隔离设置
-            notify_action = ServiceConfigHelper.get_notification_switch(message.mtype)
+            notify_action = ServiceConfigHelper.get_notification_switch(
+                dispatch_message.mtype
+            )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
                 actions = notify_action.split(",")
@@ -1131,7 +1150,7 @@ class ChainBase(metaclass=ABCMeta):
                 send_orignal = False
                 useroper = UserOper()
                 for action in actions:
-                    send_message = copy.deepcopy(message)
+                    send_message = copy.deepcopy(dispatch_message)
                     if action == "admin" and not admin_sended:
                         # 仅发送管理员
                         logger.info(f"{send_message.mtype} 的消息已设置发送给管理员")
@@ -1186,13 +1205,13 @@ class ChainBase(metaclass=ABCMeta):
         # 发送消息事件
         self.eventmanager.send_event(
             etype=EventType.NoticeMessage,
-            data={**message.model_dump(), "type": message.mtype},
+            data={**dispatch_message.model_dump(), "type": dispatch_message.mtype},
         )
         # 按原消息发送
         self.messagequeue.send_message(
             "post_message",
-            message=message,
-            immediately=True if message.userid else False,
+            message=dispatch_message,
+            immediately=True if dispatch_message.userid else False,
             **kwargs,
         )
 
@@ -1233,10 +1252,13 @@ class ChainBase(metaclass=ABCMeta):
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         await self.messageoper.async_add(**message.model_dump())
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
-        if not message.userid and message.mtype:
+        if not dispatch_message.userid and dispatch_message.mtype:
             # 消息隔离设置
-            notify_action = ServiceConfigHelper.get_notification_switch(message.mtype)
+            notify_action = ServiceConfigHelper.get_notification_switch(
+                dispatch_message.mtype
+            )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
                 actions = notify_action.split(",")
@@ -1245,7 +1267,7 @@ class ChainBase(metaclass=ABCMeta):
                 send_orignal = False
                 useroper = UserOper()
                 for action in actions:
-                    send_message = copy.deepcopy(message)
+                    send_message = copy.deepcopy(dispatch_message)
                     if action == "admin" and not admin_sended:
                         # 仅发送管理员
                         logger.info(f"{send_message.mtype} 的消息已设置发送给管理员")
@@ -1300,13 +1322,13 @@ class ChainBase(metaclass=ABCMeta):
         # 发送消息事件
         await self.eventmanager.async_send_event(
             etype=EventType.NoticeMessage,
-            data={**message.model_dump(), "type": message.mtype},
+            data={**dispatch_message.model_dump(), "type": dispatch_message.mtype},
         )
         # 按原消息发送
         await self.messagequeue.async_send_message(
             "post_message",
-            message=message,
-            immediately=True if message.userid else False,
+            message=dispatch_message,
+            immediately=True if dispatch_message.userid else False,
             **kwargs,
         )
 
@@ -1324,11 +1346,12 @@ class ChainBase(metaclass=ABCMeta):
             message, role="user", note=note_list, title=message.title
         )
         self.messageoper.add(**message.model_dump(), note=note_list)
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
             "post_medias_message",
-            message=message,
+            message=dispatch_message,
             medias=medias,
-            immediately=True if message.userid else False,
+            immediately=True if dispatch_message.userid else False,
         )
 
     def post_torrents_message(
@@ -1345,11 +1368,12 @@ class ChainBase(metaclass=ABCMeta):
             message, role="user", note=note_list, title=message.title
         )
         self.messageoper.add(**message.model_dump(), note=note_list)
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
             "post_torrents_message",
-            message=message,
+            message=dispatch_message,
             torrents=torrents,
-            immediately=True if message.userid else False,
+            immediately=True if dispatch_message.userid else False,
         )
 
     def delete_message(
@@ -1411,7 +1435,10 @@ class ChainBase(metaclass=ABCMeta):
         :param message: 消息体
         :return: 消息响应（包含message_id, chat_id等）
         """
-        return self.run_module("send_direct_message", message=message)
+        return self.run_module(
+            "send_direct_message",
+            message=self._normalize_notification_for_dispatch(message),
+        )
 
     def metadata_img(
             self,
