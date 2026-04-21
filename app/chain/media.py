@@ -1320,7 +1320,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 mediainfo = await native_fn()
         else:
             # 原生优先
-            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{log_name} ...")
+            logger.info(f"识别标题：{log_name} ...")
             mediainfo = await native_fn()
             if not mediainfo and plugin_available:
                 logger.info(
