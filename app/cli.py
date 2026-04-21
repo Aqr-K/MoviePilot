@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, get_args, get_origin
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 import click
 import psutil
@@ -28,7 +29,11 @@ FRONTEND_VERSION_FILE = FRONTEND_DIR / "version.txt"
 HEALTH_PATH = "/api/v1/system/global"
 HEALTH_TOKEN = "moviepilot"
 FRONTEND_HEALTH_PATH = "/version.txt"
+BACKEND_RELEASES_API = "https://api.github.com/repos/jxxghp/MoviePilot/releases"
+FRONTEND_RELEASES_API = "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases"
 LOCAL_HOSTS = {"0.0.0.0", "::", "::1", "", "localhost"}
+MANAGED_ACTIVE_STATES = {"running", "starting"}
+AUTO_UPDATE_ENABLED_VALUES = {"true", "release", "dev"}
 MASKED_FIELDS = {
     "API_TOKEN",
     "DB_POSTGRESQL_PASSWORD",
@@ -197,6 +202,173 @@ def _frontend_health(runtime: Optional[Dict[str, Any]] = None, timeout: float = 
             return response.status == 200, {"version": raw}
     except (HTTPError, URLError):
         return False, None
+
+
+def _warn(message: str) -> None:
+    click.secho(message, fg="yellow")
+
+
+def _release_prefix(version: Optional[str]) -> str:
+    """
+    从版本号中提取主版本前缀，用于把本地自动更新限制在当前主版本线上。
+    """
+    matched = re.match(r"^(v\d+)", str(version or "").strip())
+    return matched.group(1) if matched else "v2"
+
+
+def _release_sort_key(tag: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", tag))
+
+
+def _github_api_json(url: str, *, repo: str) -> Any:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "MoviePilot-CLI",
+    }
+    headers.update(settings.REPO_GITHUB_HEADERS(repo))
+    opener = build_opener(ProxyHandler(settings.PROXY or {}))
+    request = Request(url=url, headers=headers, method="GET")
+
+    try:
+        with opener.open(request, timeout=10.0) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"访问 GitHub API 失败（HTTP {exc.code}）: {detail or url}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"访问 GitHub API 失败：{exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"GitHub API 返回了无法解析的响应：{url}") from exc
+
+
+def _latest_release_tag(url: str, *, repo: str, prefix: str) -> Optional[str]:
+    payload = _github_api_json(url, repo=repo)
+    if not isinstance(payload, list):
+        raise RuntimeError(f"GitHub API 返回格式异常：{url}")
+
+    matched_tags = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        tag_name = str(item.get("tag_name") or "").strip()
+        if tag_name.startswith(f"{prefix}."):
+            matched_tags.append(tag_name)
+
+    if not matched_tags:
+        return None
+    return sorted(matched_tags, key=_release_sort_key)[-1]
+
+
+def _git_current_branch() -> Optional[str]:
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(_repo_root()),
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return branch or None
+
+
+def _auto_update_mode() -> str:
+    return str(getattr(settings, "MOVIEPILOT_AUTO_UPDATE", "") or "").strip().lower()
+
+
+def _resolve_auto_update_targets(mode: str) -> tuple[Optional[str], Optional[str]]:
+    backend_prefix = _release_prefix(APP_VERSION)
+    frontend_prefix = _release_prefix(_installed_frontend_version() or APP_VERSION)
+
+    if mode == "dev":
+        current_branch = _git_current_branch()
+        backend_ref = "latest"
+        if not current_branch or current_branch == "HEAD":
+            # 从 release 模式切回 dev 时，detached HEAD 需要一个明确分支。
+            backend_ref = backend_prefix
+    else:
+        backend_ref = _latest_release_tag(
+            BACKEND_RELEASES_API,
+            repo="jxxghp/MoviePilot",
+            prefix=backend_prefix,
+        )
+
+    frontend_version = _latest_release_tag(
+        FRONTEND_RELEASES_API,
+        repo="jxxghp/MoviePilot-Frontend",
+        prefix=frontend_prefix,
+    )
+    return backend_ref, frontend_version
+
+
+def _best_effort_auto_update() -> None:
+    mode = _auto_update_mode()
+    if mode not in AUTO_UPDATE_ENABLED_VALUES:
+        return
+
+    try:
+        backend_ref, frontend_version = _resolve_auto_update_targets(mode)
+    except RuntimeError as exc:
+        _warn(f"自动更新准备失败，继续使用当前版本启动：{exc}")
+        return
+
+    if not backend_ref or not frontend_version:
+        _warn("自动更新准备失败，未能解析当前主版本对应的远端版本，继续使用当前版本启动")
+        return
+
+    update_command = [
+        sys.executable,
+        str(_repo_root() / "scripts" / "local_setup.py"),
+        "update",
+        "all",
+        "--ref",
+        backend_ref,
+        "--frontend-version",
+        frontend_version,
+        "--venv",
+        str(_repo_root() / "venv"),
+        "--config-dir",
+        str(settings.CONFIG_PATH),
+    ]
+
+    update_env = os.environ.copy()
+    if settings.PROXY_HOST:
+        update_env.setdefault("http_proxy", settings.PROXY_HOST)
+        update_env.setdefault("https_proxy", settings.PROXY_HOST)
+        update_env.setdefault("HTTP_PROXY", settings.PROXY_HOST)
+        update_env.setdefault("HTTPS_PROXY", settings.PROXY_HOST)
+    if settings.GITHUB_TOKEN:
+        update_env.setdefault("GITHUB_TOKEN", settings.GITHUB_TOKEN)
+
+    click.echo(f"检测到 MOVIEPILOT_AUTO_UPDATE={mode}，启动前执行本地自动更新")
+    result = subprocess.run(
+        update_command,
+        cwd=str(_repo_root()),
+        env=update_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+        check=False,
+    )
+    if result.returncode == 0:
+        click.echo("本地自动更新完成")
+        return
+
+    output_lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
+    tail = output_lines[-1] if output_lines else "未知错误"
+    _warn(f"本地自动更新失败，继续使用当前版本启动：{tail}")
+
+
+def _ensure_frontend_not_running_alone(timeout: int) -> None:
+    """
+    如果只检测到 CLI 管理的前端仍在运行，则先停掉它，再按统一顺序重启前后端。
+    """
+    backend_state, _, _, _ = _managed_backend_status()
+    frontend_state, _, _, _ = _managed_frontend_status()
+    if backend_state == "stopped" and frontend_state in MANAGED_ACTIVE_STATES:
+        click.echo("检测到仅前端仍在运行，先停止前端后再整体启动")
+        _stop_frontend_service(timeout=timeout, force=True)
 
 
 def _managed_backend_status() -> tuple[str, Optional[Dict[str, Any]], Optional[psutil.Process], Optional[Dict[str, Any]]]:
@@ -431,18 +603,27 @@ def _ensure_local_api_token() -> bool:
     return result is True
 
 
-def _spawn_process(command: list[str], *, cwd: Path, log_file: Path, env: Optional[Dict[str, str]] = None) -> subprocess.Popen:
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = log_file.open("a", encoding="utf-8")
-
+def _spawn_process(
+    command: list[str],
+    *,
+    cwd: Path,
+    log_file: Optional[Path],
+    env: Optional[Dict[str, str]] = None,
+) -> subprocess.Popen:
     kwargs: Dict[str, Any] = {
         "cwd": str(cwd),
-        "stdout": log_handle,
-        "stderr": subprocess.STDOUT,
         "stdin": subprocess.DEVNULL,
         "close_fds": True,
         "env": env or os.environ.copy(),
     }
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_handle = log_file.open("a", encoding="utf-8")
+        kwargs["stdout"] = log_handle
+        kwargs["stderr"] = subprocess.STDOUT
+    else:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     else:
@@ -454,8 +635,19 @@ def _spawn_backend_process() -> subprocess.Popen:
     return _spawn_process(
         [sys.executable, "-m", "app.main"],
         cwd=_repo_root(),
-        log_file=BACKEND_STDIO_LOG_FILE,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        log_file=None,
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "MOVIEPILOT_DISABLE_CONSOLE_LOG": "1",
+            "MOVIEPILOT_STDIO_LOG_FILE": str(BACKEND_STDIO_LOG_FILE),
+            "MOVIEPILOT_STDIO_LOG_MAX_BYTES": str(
+                max(int(settings.LOG_MAX_FILE_SIZE or 0), 1) * 1024 * 1024
+            ),
+            "MOVIEPILOT_STDIO_LOG_BACKUP_COUNT": str(
+                max(int(settings.LOG_BACKUP_COUNT or 0), 0)
+            ),
+        },
     )
 
 
@@ -649,6 +841,12 @@ def cli() -> None:
 @click.option("--timeout", default=60, show_default=True, help="等待后端与前端就绪的秒数")
 def start(timeout: int) -> None:
     """后台启动本地 MoviePilot 前后端服务"""
+    _ensure_frontend_not_running_alone(timeout=min(timeout, 15))
+    backend_state, _, _, _ = _managed_backend_status()
+    frontend_state, _, _, _ = _managed_frontend_status()
+    if backend_state == "stopped" and frontend_state == "stopped":
+        _best_effort_auto_update()
+
     backend_result = _start_backend_service(timeout=timeout)
     backend_runtime = backend_result["runtime"]
     try:
@@ -699,6 +897,7 @@ def restart(start_timeout: int, stop_timeout: int, force: bool) -> None:
     """重启本地 MoviePilot 前后端服务"""
     _stop_frontend_service(timeout=stop_timeout, force=force)
     _stop_backend_service(timeout=stop_timeout, force=force)
+    _best_effort_auto_update()
     backend_result = _start_backend_service(timeout=start_timeout)
     frontend_result = _start_frontend_service(timeout=start_timeout, backend_port=int(backend_result["runtime"]["port"]))
     click.echo("MoviePilot 已重启")

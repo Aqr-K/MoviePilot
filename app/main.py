@@ -4,19 +4,32 @@ import setproctitle
 import signal
 import sys
 import threading
+from pathlib import Path
 
 import uvicorn as uvicorn
 from PIL import Image
 from uvicorn import Config
 
-from app.factory import app
+from app.utils.stdio import configure_rotating_stdio
 from app.utils.system import SystemUtils
 
 # 禁用输出
-if SystemUtils.is_frozen():
+stdio_log_file = os.getenv("MOVIEPILOT_STDIO_LOG_FILE")
+if stdio_log_file:
+    # 本地 CLI 会把 stdout/stderr 切到滚动日志，避免无限追加单独的大文件。
+    configure_rotating_stdio(
+        log_file=Path(stdio_log_file),
+        max_bytes=max(int(os.getenv("MOVIEPILOT_STDIO_LOG_MAX_BYTES", "0") or 0), 1),
+        backup_count=max(
+            int(os.getenv("MOVIEPILOT_STDIO_LOG_BACKUP_COUNT", "0") or 0),
+            0,
+        ),
+    )
+elif SystemUtils.is_frozen():
     sys.stdout = open(os.devnull, 'w')
     sys.stderr = open(os.devnull, 'w')
 
+from app.factory import app
 from app.core.config import settings
 from app.db.init import init_db, update_db
 

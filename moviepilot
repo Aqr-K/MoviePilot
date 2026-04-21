@@ -16,6 +16,7 @@ Bootstrap Commands:
   moviepilot setup [--python PYTHON] [--venv PATH] [--recreate] [--frontend-version latest] [--node-version 20.12.1] [--wizard] [--superuser NAME] [--superuser-password PASSWORD] [--config-dir PATH]
   moviepilot uninstall [--venv PATH] [--config-dir PATH]
   moviepilot update {backend|frontend|all} [OPTIONS]
+  moviepilot startup {enable|disable|status} [--venv PATH] [--config-dir PATH]
   moviepilot agent [OPTIONS] MESSAGE...
 
 Runtime Commands:
@@ -30,6 +31,7 @@ Discovery Commands:
   moviepilot help install
   moviepilot help uninstall
   moviepilot help update
+  moviepilot help startup
   moviepilot commands
 
 Examples:
@@ -39,6 +41,7 @@ Examples:
   moviepilot setup --wizard
   moviepilot uninstall
   moviepilot update all
+  moviepilot startup enable
   moviepilot agent 帮我分析最近一次搜索失败
   moviepilot help config
   moviepilot config keys
@@ -59,6 +62,9 @@ Bootstrap Commands
   update backend
   update frontend
   update all
+  startup enable
+  startup disable
+  startup status
   agent
 
 Runtime Commands
@@ -182,6 +188,25 @@ Options:
   --skip-resources          更新 all 时跳过资源同步
   --config-dir PATH         指定配置目录
   -h, --help                显示帮助
+EOF
+}
+
+show_startup_help() {
+  cat <<'EOF'
+Usage:
+  moviepilot startup enable [OPTIONS]
+  moviepilot startup disable [OPTIONS]
+  moviepilot startup status [OPTIONS]
+
+Options:
+  --venv PATH        虚拟环境目录，默认 ./venv
+  --config-dir PATH  指定配置目录，默认使用当前安装配置
+  -h, --help         显示帮助
+
+说明:
+  - macOS 使用 LaunchAgent
+  - Linux 优先使用 systemd --user，不可用时回退到 XDG autostart
+  - Windows 使用当前用户的 Startup 启动目录
 EOF
 }
 
@@ -328,6 +353,10 @@ show_command_help() {
       show_update_help
       exit 0
       ;;
+    startup)
+      show_startup_help
+      exit 0
+      ;;
     commands)
       show_commands
       exit 0
@@ -431,6 +460,11 @@ case "${1:-}" in
     shift
     require_bootstrap_python
     exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" update "$@"
+    ;;
+  startup)
+    shift
+    require_bootstrap_python
+    exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" startup "$@"
     ;;
   agent)
     shift
