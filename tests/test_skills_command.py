@@ -162,6 +162,65 @@ class TestSkillsCommand(unittest.TestCase):
         helper = SkillHelper()
         response = _FakeResponse(
             payload={
+                "status": "success",
+                "value": {
+                    "hasMore": False,
+                    "nextCursor": None,
+                    "page": [
+                        {
+                            "ownerHandle": "openclaw",
+                            "skill": {
+                                "slug": "weather-forecast",
+                                "displayName": "Weather Forecast",
+                                "summary": "Forecast weather from ClawHub",
+                            },
+                        }
+                    ],
+                },
+            }
+        )
+
+        with patch.object(
+            helper,
+            "_discover_clawhub_runtime_env",
+            return_value={"convex_url": "https://wry-manatee-359.convex.cloud"},
+        ), patch.object(helper, "_request_convex_query", return_value=response):
+            skills = helper._list_market_source_skills("https://clawhub.ai")
+
+        self.assertEqual(len(skills), 1)
+        self.assertEqual(skills[0].id, "weather-forecast")
+        self.assertEqual(skills[0].name, "Weather Forecast")
+        self.assertEqual(skills[0].source_type, "registry")
+        self.assertEqual(skills[0].registry_name, "ClawHub")
+        self.assertEqual(skills[0].source_label, "社区注册表 · ClawHub")
+        self.assertIn("/openclaw/weather-forecast", skills[0].path)
+
+    def test_skillhelper_filters_market_skills_by_query(self):
+        helper = SkillHelper()
+        skills = [
+            SkillInfo(
+                id="weather-forecast",
+                name="Weather Forecast",
+                description="Forecast weather from ClawHub",
+                source_label="社区注册表 · ClawHub",
+            ),
+            SkillInfo(
+                id="github-tools",
+                name="GitHub Tools",
+                description="Manage pull requests",
+                source_label="官方仓库 · openai/skills",
+            ),
+        ]
+
+        filtered = helper.filter_market_skills(skills=skills, query="weather clawhub")
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].id, "weather-forecast")
+
+    def test_skillhelper_falls_back_to_rest_registry_listing_when_runtime_missing(self):
+        helper = SkillHelper()
+        response = _FakeResponse(
+            payload={
                 "items": [
                     {
                         "slug": "weather-forecast",
@@ -173,7 +232,9 @@ class TestSkillsCommand(unittest.TestCase):
             }
         )
 
-        with patch.object(helper, "_request_registry", return_value=response):
+        with patch.object(
+            helper, "_discover_clawhub_runtime_env", return_value=None
+        ), patch.object(helper, "_request_registry", return_value=response):
             skills = helper._list_market_source_skills("https://clawhub.ai")
 
         self.assertEqual(len(skills), 1)
@@ -261,6 +322,50 @@ class TestSkillsCommand(unittest.TestCase):
         self.assertIn("社区源，安装前请自行甄别安全性", text)
         self.assertIn("ClawHub 属于社区注册表", text)
 
+    def test_skills_chain_market_view_filters_by_search_query(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+        request.view = "market"
+        request.market_query = "weather"
+
+        with patch.object(
+            chain.skillhelper,
+            "list_market_skills",
+            return_value=[
+                SkillInfo(
+                    id="weather-forecast",
+                    name="Weather Forecast",
+                    description="Forecast weather from ClawHub",
+                    source_type="registry",
+                    source_label="社区注册表 · ClawHub",
+                    registry_name="ClawHub",
+                    registry_url="https://clawhub.ai",
+                    registry_slug="weather-forecast",
+                ),
+                SkillInfo(
+                    id="github-tools",
+                    name="GitHub Tools",
+                    description="Manage pull requests",
+                    source_type="market",
+                    source_label="官方仓库 · openai/skills",
+                    repo_name="openai/skills",
+                ),
+            ],
+        ):
+            title, text, buttons = chain._build_market_view(request=request)
+
+        self.assertEqual(title, "技能市场")
+        self.assertIn("当前搜索：weather", text)
+        self.assertIn("weather-forecast", text)
+        self.assertNotIn("github-tools", text)
+        self.assertTrue(buttons)
+        self.assertEqual(buttons[0][0]["callback_data"], f"skills:{request.request_id}:clear-search")
+
     def test_skills_chain_root_view_uses_friendly_source_labels(self):
         chain = SkillsChain()
         request = skills_interaction_manager.create_or_replace(
@@ -282,6 +387,79 @@ class TestSkillsCommand(unittest.TestCase):
         self.assertEqual(title, "技能管理")
         self.assertIn("社区注册表 · ClawHub", text)
         self.assertIn("官方仓库 · openai/skills", text)
+
+    def test_skills_chain_callback_enters_search_input_mode(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain, "_render_interaction") as render:
+            handled = chain.handle_callback_interaction(
+                callback_data=f"skills:{request.request_id}:search",
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(request.view, "market")
+        self.assertEqual(request.awaiting_input, "market-search")
+        render.assert_called_once()
+
+    def test_skills_chain_text_search_updates_market_query(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+        request.view = "market"
+
+        with patch.object(chain, "_render_interaction") as render:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="搜索 weather",
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(request.market_query, "weather")
+        self.assertEqual(request.market_page, 0)
+        self.assertIsNone(request.awaiting_input)
+        render.assert_called_once()
+
+    def test_skills_chain_followup_text_applies_search_when_awaiting_input(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+        request.view = "market"
+        request.awaiting_input = "market-search"
+
+        with patch.object(chain, "_render_interaction") as render:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="calendar",
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(request.market_query, "calendar")
+        self.assertIsNone(request.awaiting_input)
+        render.assert_called_once()
 
     def test_skills_chain_updates_buttons_via_edit_message(self):
         chain = SkillsChain()

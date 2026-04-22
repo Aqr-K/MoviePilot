@@ -1,12 +1,13 @@
 import io
 import json
+import re
 import shutil
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 from app.agent.middleware.skills import _parse_skill_metadata
 from app.core.cache import cached, fresh
@@ -20,6 +21,10 @@ _SOURCE_META_FILENAME = ".moviepilot-skill-source.json"
 _DEFAULT_BRANCHES = ("main", "master")
 _MARKET_CACHE_TTL = 60 * 30
 _CLAWHUB_HOSTS = {"clawhub.ai", "www.clawhub.ai"}
+_CLAWHUB_CONVEX_CLIENT = "npm-1.35.1"
+_CLAWHUB_LIST_QUERY = "skills:listPublicPageV4"
+_CLAWHUB_LIST_PAGE_SIZE = 100
+_CLAWHUB_LIST_MAX_PAGES = 2
 _OFFICIAL_SKILL_REPOS = {
     "openai/skills",
     "anthropics/skills",
@@ -316,6 +321,44 @@ class SkillHelper(metaclass=WeakSingleton):
             ),
         )
 
+    @staticmethod
+    def filter_market_skills(
+        skills: List[SkillInfo],
+        query: str,
+    ) -> List[SkillInfo]:
+        """
+        按关键词过滤市场技能。
+
+        搜索范围覆盖技能 ID、名称、描述以及来源标签；多词查询按 AND 语义匹配，
+        便于用户逐步缩小候选范围。
+        """
+        normalized_query = (query or "").strip().lower()
+        if not normalized_query:
+            return skills
+
+        terms = [term for term in re.split(r"\s+", normalized_query) if term]
+        if not terms:
+            return skills
+
+        results: List[SkillInfo] = []
+        for skill in skills:
+            haystack = " ".join(
+                filter(
+                    None,
+                    [
+                        skill.id,
+                        skill.name,
+                        skill.description,
+                        skill.source_label,
+                        skill.repo_name,
+                        skill.registry_name,
+                    ],
+                )
+            ).lower()
+            if all(term in haystack for term in terms):
+                results.append(skill)
+        return results
+
     @cached(maxsize=24, ttl=_MARKET_CACHE_TTL, skip_empty=True)
     def _list_market_source_skills(self, source: str) -> List[SkillInfo]:
         """
@@ -405,8 +448,17 @@ class SkillHelper(metaclass=WeakSingleton):
 
     def _list_market_registry_skills(self, registry: dict) -> List[SkillInfo]:
         """
-        从注册表拉取技能列表，目前用于 ClawHub。
+        从注册表拉取技能列表。
+
+        ClawHub 官方前端当前通过 Convex query 拉取公开技能列表，因此这里优先复用
+        同一条查询链路；若运行时信息解析失败，再回退到旧的 REST 风格接口。
         """
+        parsed = urlparse((registry.get("registry_url") or "").rstrip("/"))
+        if parsed.netloc.lower() in _CLAWHUB_HOSTS:
+            skills = self._list_clawhub_registry_skills(registry)
+            if skills:
+                return skills
+
         response = self._request_registry(
             url=f"{registry['api_base']}/skills",
             params={"limit": 200, "sort": "installsAllTime"},
@@ -599,29 +651,94 @@ class SkillHelper(metaclass=WeakSingleton):
                     return [item for item in items if isinstance(item, dict)]
         return []
 
+    def _list_clawhub_registry_skills(self, registry: dict) -> List[SkillInfo]:
+        """
+        按 ClawHub 官方前端的调用方式，通过 Convex query 获取公开技能列表。
+        """
+        runtime_env = self._discover_clawhub_runtime_env(registry["registry_url"])
+        convex_url = (runtime_env or {}).get("convex_url")
+        if not convex_url:
+            return []
+
+        results: Dict[str, SkillInfo] = {}
+        cursor = None
+        for _ in range(_CLAWHUB_LIST_MAX_PAGES):
+            args = {
+                "numItems": _CLAWHUB_LIST_PAGE_SIZE,
+                "sort": "downloads",
+                "dir": "desc",
+                "nonSuspiciousOnly": True,
+            }
+            if cursor:
+                args["cursor"] = cursor
+
+            response = self._request_convex_query(
+                deployment_url=convex_url,
+                path=_CLAWHUB_LIST_QUERY,
+                args=args,
+            )
+            if not response:
+                break
+
+            payload = self._load_json_response(response)
+            value = payload.get("value")
+            if not isinstance(value, dict):
+                break
+
+            page = value.get("page")
+            if not isinstance(page, list):
+                break
+
+            for item in page:
+                if not isinstance(item, dict):
+                    continue
+                skill = self._build_registry_skill(item, registry)
+                if skill and skill.id not in results:
+                    results[skill.id] = skill
+
+            if not value.get("hasMore") or not value.get("nextCursor"):
+                break
+            cursor = value["nextCursor"]
+
+        return list(results.values())
+
     def _build_registry_skill(
         self, item: dict, registry: dict
     ) -> Optional[SkillInfo]:
         """
         将注册表返回的条目转换为统一的 SkillInfo。
         """
+        skill_data = item.get("skill") if isinstance(item.get("skill"), dict) else item
         slug = (
-            item.get("slug")
+            skill_data.get("slug")
+            or item.get("slug")
+            or skill_data.get("id")
             or item.get("id")
-            or item.get("name")
-            or item.get("title")
+            or skill_data.get("name")
+            or skill_data.get("displayName")
+            or skill_data.get("title")
         )
         if not slug:
             return None
 
-        name = item.get("name") or item.get("title") or slug
+        name = (
+            skill_data.get("name")
+            or skill_data.get("displayName")
+            or item.get("displayName")
+            or skill_data.get("title")
+            or item.get("title")
+            or slug
+        )
         description = (
-            item.get("description")
+            skill_data.get("description")
+            or skill_data.get("summary")
+            or item.get("description")
             or item.get("summary")
+            or skill_data.get("excerpt")
             or item.get("excerpt")
             or ""
         )
-        owner_handle = self._extract_registry_owner_handle(item)
+        owner_handle = item.get("ownerHandle") or self._extract_registry_owner_handle(item)
         page_path = f"/{owner_handle}/{slug}" if owner_handle else f"/skills/{slug}"
 
         return SkillInfo(
@@ -637,7 +754,8 @@ class SkillHelper(metaclass=WeakSingleton):
             registry_url=registry["registry_url"],
             registry_name=registry["registry_name"],
             registry_slug=str(slug),
-            download_url=item.get("downloadUrl")
+            download_url=skill_data.get("downloadUrl")
+            or item.get("downloadUrl")
             or self._build_registry_download_url(registry["api_base"], str(slug)),
             installed=False,
             removable=False,
@@ -684,6 +802,74 @@ class SkillHelper(metaclass=WeakSingleton):
             logger.warning("下载注册表技能失败：%s", download_url)
             return None
         return response.content
+
+    @cached(maxsize=4, ttl=_MARKET_CACHE_TTL, skip_empty=True)
+    def _discover_clawhub_runtime_env(self, registry_url: str) -> Optional[dict]:
+        """
+        从 ClawHub 首页的 runtime env 脚本中提取当前生效的 Convex 部署地址。
+        """
+        response = self._request_registry(url=registry_url)
+        if response is None or response.status_code != 200:
+            return None
+
+        html = self._read_response_text(response)
+        runtime_asset_path = self._extract_runtime_env_asset_path(html)
+        if not runtime_asset_path:
+            return None
+
+        runtime_asset_url = urljoin(f"{registry_url.rstrip('/')}/", runtime_asset_path)
+        asset_response = self._request_registry(url=runtime_asset_url)
+        if asset_response is None or asset_response.status_code != 200:
+            return None
+
+        script = self._read_response_text(asset_response)
+        convex_url = self._extract_runtime_env_value(script, "VITE_CONVEX_URL")
+        convex_site_url = self._extract_runtime_env_value(script, "VITE_CONVEX_SITE_URL")
+        if not convex_url and not convex_site_url:
+            return None
+        return {
+            "convex_url": convex_url.rstrip("/") if convex_url else None,
+            "convex_site_url": convex_site_url.rstrip("/") if convex_site_url else None,
+        }
+
+    @staticmethod
+    def _read_response_text(response) -> str:
+        """
+        尽量稳定地把 requests 响应或测试桩响应转换成文本。
+        """
+        text = getattr(response, "text", None)
+        if isinstance(text, str):
+            return text
+
+        content = getattr(response, "content", b"")
+        if isinstance(content, bytes):
+            return content.decode("utf-8", errors="ignore")
+        if isinstance(content, str):
+            return content
+        return ""
+
+    @staticmethod
+    def _extract_runtime_env_asset_path(html: str) -> Optional[str]:
+        """
+        从 ClawHub 首页 HTML 中定位 runtime env 资源路径。
+        """
+        match = re.search(r'"/assets/runtimeEnv-[^"]+\.js"', html or "")
+        if not match:
+            return None
+        return match.group(0).strip('"')
+
+    @staticmethod
+    def _extract_runtime_env_value(script: str, key: str) -> Optional[str]:
+        """
+        从运行时脚本中提取指定环境变量的值。
+        """
+        match = re.search(
+            rf"{re.escape(key)}:\s*['\"`]([^'\"`]+)['\"`]",
+            script or "",
+        )
+        if not match:
+            return None
+        return match.group(1).strip()
 
     @staticmethod
     def _extract_skill_archive(zf: zipfile.ZipFile, target_dir: Path) -> bool:
@@ -742,6 +928,48 @@ class SkillHelper(metaclass=WeakSingleton):
                 repo["branch"] = branch
                 return response.content
         logger.warning("下载技能市场仓库失败：%s", repo["repo_url"])
+        return None
+
+    @staticmethod
+    def _request_convex_query(
+        deployment_url: str,
+        path: str,
+        args: dict,
+        timeout: int = 30,
+    ):
+        """
+        以官方前端相同的请求格式调用 Convex query 接口。
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Convex-Client": _CLAWHUB_CONVEX_CLIENT,
+        }
+        payload = {
+            "path": path,
+            "format": "convex_encoded_json",
+            "args": [args or {}],
+        }
+
+        strategies = []
+        if settings.PROXY_HOST:
+            strategies.append({"proxies": settings.PROXY, "timeout": timeout})
+        strategies.append({"timeout": timeout})
+
+        for kwargs in strategies:
+            try:
+                response = RequestUtils(headers=headers, **kwargs).post_res(
+                    url=f"{deployment_url.rstrip('/')}/api/query",
+                    json=payload,
+                    raise_exception=True,
+                )
+                if response is not None and response.status_code == 200:
+                    return response
+            except Exception as e:
+                logger.warning(
+                    "请求 Convex 技能列表失败：%s/api/query - %s",
+                    deployment_url.rstrip("/"),
+                    e,
+                )
         return None
 
     @staticmethod

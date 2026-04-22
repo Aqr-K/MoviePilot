@@ -27,6 +27,8 @@ class PendingSkillsInteraction:
     view: str = "root"
     local_page: int = 0
     market_page: int = 0
+    market_query: str = ""
+    awaiting_input: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -162,7 +164,14 @@ class SkillsChain(ChainBase):
             source=source,
             username=None,
         )
-        force = (arg_str or "").strip().lower() in {"refresh", "刷新"}
+        normalized_arg = (arg_str or "").strip()
+        force = normalized_arg.lower() in {"refresh", "刷新"}
+        search_query = self._extract_market_search_query(normalized_arg) or (
+            "" if force else normalized_arg
+        )
+        if search_query:
+            request.view = "market"
+            request.market_query = search_query
         self._render_interaction(
             request=request,
             channel=channel,
@@ -242,13 +251,22 @@ class SkillsChain(ChainBase):
 
         if action == "root":
             request.view = "root"
+            request.awaiting_input = None
         elif action == "installed":
             request.view = "installed"
             request.local_page = 0
+            request.awaiting_input = None
         elif action == "market":
             request.view = "market"
             request.market_page = 0
+            request.awaiting_input = None
+        elif action == "search":
+            request.view = "market"
+            request.awaiting_input = "market-search"
+        elif action == "clear-search":
+            self._clear_market_search(request)
         elif action == "refresh":
+            request.awaiting_input = None
             self._render_interaction(
                 request=request,
                 channel=channel,
@@ -261,16 +279,19 @@ class SkillsChain(ChainBase):
             )
             return True
         elif action == "page-next":
+            request.awaiting_input = None
             if request.view == "installed":
                 request.local_page += 1
             elif request.view == "market":
                 request.market_page += 1
         elif action == "page-prev":
+            request.awaiting_input = None
             if request.view == "installed":
                 request.local_page = max(0, request.local_page - 1)
             elif request.view == "market":
                 request.market_page = max(0, request.market_page - 1)
         elif action == "install" and index:
+            request.awaiting_input = None
             success, message = self._install_market_skill(request, index)
             if success:
                 self.post_message(
@@ -293,6 +314,7 @@ class SkillsChain(ChainBase):
                     )
                 )
         elif action == "remove" and index:
+            request.awaiting_input = None
             success, message = self._remove_local_skill(request, index)
             self.post_message(
                 Notification(
@@ -354,6 +376,7 @@ class SkillsChain(ChainBase):
 
         if lowered in {"返回", "back"}:
             request.view = "root"
+            request.awaiting_input = None
             self._render_interaction(
                 request=request,
                 channel=channel,
@@ -364,6 +387,7 @@ class SkillsChain(ChainBase):
             return True
 
         if lowered in {"刷新", "refresh"}:
+            request.awaiting_input = None
             self._render_interaction(
                 request=request,
                 channel=channel,
@@ -375,6 +399,7 @@ class SkillsChain(ChainBase):
             return True
 
         if lowered in {"p", "prev", "上一页"}:
+            request.awaiting_input = None
             if request.view == "installed":
                 request.local_page = max(0, request.local_page - 1)
             elif request.view == "market":
@@ -389,6 +414,7 @@ class SkillsChain(ChainBase):
             return True
 
         if lowered in {"n", "next", "下一页"}:
+            request.awaiting_input = None
             if request.view == "installed":
                 request.local_page += 1
             elif request.view == "market":
@@ -407,6 +433,11 @@ class SkillsChain(ChainBase):
                 request.view = "installed"
             elif lowered in {"2", "市场", "market"}:
                 request.view = "market"
+            elif self._extract_market_search_query(normalized):
+                self._apply_market_search(
+                    request,
+                    self._extract_market_search_query(normalized),
+                )
             else:
                 self.post_message(
                     Notification(
@@ -427,9 +458,49 @@ class SkillsChain(ChainBase):
             )
             return True
 
+        if lowered in {"清除搜索", "取消搜索", "clear", "clear search"}:
+            if request.view == "market" or request.market_query:
+                self._clear_market_search(request)
+                self._render_interaction(
+                    request=request,
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                )
+                return True
+
+        if request.awaiting_input == "market-search":
+            if lowered in {"取消", "cancel"}:
+                request.awaiting_input = None
+            else:
+                search_query = self._extract_market_search_query(normalized) or normalized
+                self._apply_market_search(request, search_query)
+            self._render_interaction(
+                request=request,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+            return True
+
+        search_query = self._extract_market_search_query(normalized)
+        if search_query:
+            self._apply_market_search(request, search_query)
+            self._render_interaction(
+                request=request,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+            return True
+
         install_match = re.match(r"^(?:安装|装)\s*(\d+)$", normalized)
         remove_match = re.match(r"^(?:删除|删)\s*(\d+)$", normalized)
         if request.view == "market" and install_match:
+            request.awaiting_input = None
             success, message = self._install_market_skill(
                 request=request,
                 page_index=int(install_match.group(1)),
@@ -452,6 +523,7 @@ class SkillsChain(ChainBase):
             )
             return True
         if request.view == "installed" and remove_match:
+            request.awaiting_input = None
             success, message = self._remove_local_skill(
                 request=request,
                 page_index=int(remove_match.group(1)),
@@ -493,7 +565,7 @@ class SkillsChain(ChainBase):
         """
         按当前市场页的可见序号安装技能，避免跨页序号歧义。
         """
-        market_skills = [skill for skill in self.skillhelper.list_market_skills() if not skill.installed]
+        market_skills = self._get_market_skills(request=request)
         page_items, page, _ = self._page_items(
             items=market_skills,
             page=request.market_page,
@@ -683,11 +755,10 @@ class SkillsChain(ChainBase):
         """
         构建技能市场视图，仅展示尚未安装的技能。
         """
-        market_skills = [
-            skill
-            for skill in self.skillhelper.list_market_skills(force=force_market_refresh)
-            if not skill.installed
-        ]
+        market_skills = self._get_market_skills(
+            request=request,
+            force_market_refresh=force_market_refresh,
+        )
         page_items, page, total_pages = self._page_items(
             items=market_skills,
             page=request.market_page,
@@ -696,9 +767,21 @@ class SkillsChain(ChainBase):
         request.market_page = page
 
         text_lines = [f"第 {page + 1}/{total_pages} 页，共 {len(market_skills)} 个可安装技能"]
+        if request.market_query:
+            text_lines.append(f"当前搜索：{request.market_query}")
+        if request.awaiting_input == "market-search":
+            text_lines.extend(
+                [
+                    "",
+                    "搜索输入中：直接回复关键词即可筛选市场技能，回复 取消 结束输入。",
+                ]
+            )
         if not page_items:
             text_lines.append("")
-            text_lines.append("当前没有可安装的市场技能")
+            if request.market_query:
+                text_lines.append("当前搜索没有匹配的市场技能")
+            else:
+                text_lines.append("当前没有可安装的市场技能")
         else:
             for index, skill in enumerate(page_items, start=1):
                 text_lines.extend(
@@ -722,13 +805,30 @@ class SkillsChain(ChainBase):
         text_lines.extend(
             [
                 "",
-                "回复 安装 <序号> 安装技能，回复 刷新 重新拉取市场，回复 n/p 翻页，回复 返回 回到菜单，回复 退出 结束交互",
+                "回复 搜索 <关键词> 筛选技能，回复 清除搜索 恢复全量列表，回复 安装 <序号> 安装技能，回复 刷新 重新拉取市场，回复 n/p 翻页，回复 返回 回到菜单，回复 退出 结束交互",
             ]
         )
 
         buttons = None
         if self._supports_interactive_buttons(request.channel):
             buttons = []
+            search_row = []
+            if request.market_query:
+                search_row.append(
+                    {
+                        "text": "清除搜索",
+                        "callback_data": f"skills:{request.request_id}:clear-search",
+                    }
+                )
+            else:
+                search_row.append(
+                    {
+                        "text": "搜索",
+                        "callback_data": f"skills:{request.request_id}:search",
+                    }
+                )
+            if search_row:
+                buttons.append(search_row)
             for index, _skill in enumerate(page_items, start=1):
                 buttons.append(
                     [
@@ -872,7 +972,60 @@ class SkillsChain(ChainBase):
         根据当前视图返回可执行的文本命令提示。
         """
         if view == "market":
-            return "请输入 安装 <序号>、刷新、n、p、返回 或 退出"
+            return "请输入 搜索 <关键词>、清除搜索、安装 <序号>、刷新、n、p、返回 或 退出"
         if view == "installed":
             return "请输入 删除 <序号>、n、p、返回 或 退出"
-        return "请输入 1、2、刷新 或 退出"
+        return "请输入 1、2、搜索 <关键词>、刷新 或 退出"
+
+    def _get_market_skills(
+        self,
+        request: PendingSkillsInteraction,
+        force_market_refresh: bool = False,
+    ) -> List[SkillInfo]:
+        """
+        获取当前 /skills 会话可见的市场技能，并应用搜索词过滤。
+        """
+        skills = [
+            skill
+            for skill in self.skillhelper.list_market_skills(force=force_market_refresh)
+            if not skill.installed
+        ]
+        if not request.market_query:
+            return skills
+        return self.skillhelper.filter_market_skills(
+            skills=skills,
+            query=request.market_query,
+        )
+
+    @staticmethod
+    def _extract_market_search_query(text: str) -> str:
+        """
+        从文本命令中提取市场搜索词，兼容“搜索/查找/查”前缀。
+        """
+        normalized = (text or "").strip()
+        if not normalized:
+            return ""
+        match = re.match(r"^(?:搜索|查找|查)\s+(.+)$", normalized)
+        return match.group(1).strip() if match else ""
+
+    @staticmethod
+    def _apply_market_search(
+        request: PendingSkillsInteraction,
+        query: str,
+    ) -> None:
+        """
+        将会话切到市场搜索结果视图，并重置分页状态。
+        """
+        request.view = "market"
+        request.market_query = (query or "").strip()
+        request.market_page = 0
+        request.awaiting_input = None
+
+    @staticmethod
+    def _clear_market_search(request: PendingSkillsInteraction) -> None:
+        """
+        清除当前市场搜索状态，恢复全量市场列表。
+        """
+        request.market_query = ""
+        request.market_page = 0
+        request.awaiting_input = None
