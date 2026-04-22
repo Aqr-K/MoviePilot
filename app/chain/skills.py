@@ -585,7 +585,7 @@ class SkillsChain(ChainBase):
         sources = self.skillhelper.get_market_sources()
         source_lines = []
         for index, source in enumerate(sources, start=1):
-            source_lines.append(f"{index}. {source}")
+            source_lines.append(f"{index}. {self.skillhelper.describe_market_source(source)}")
 
         text_lines = [
             f"已安装技能：{len(local_skills)}",
@@ -708,6 +708,16 @@ class SkillsChain(ChainBase):
                         self._truncate(skill.description),
                     ]
                 )
+                if skill.source_type == "registry":
+                    text_lines.append("社区源，安装前请自行甄别安全性")
+
+        if any(skill.source_type == "registry" for skill in page_items):
+            text_lines.extend(
+                [
+                    "",
+                    "提示：ClawHub 属于社区注册表，技能质量与安全性需要自行甄别。",
+                ]
+            )
 
         text_lines.extend(
             [

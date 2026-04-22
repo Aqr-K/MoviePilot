@@ -37,6 +37,16 @@ def _build_skill_zip(skill_dir: str, skill_name: str) -> bytes:
     return buf.getvalue()
 
 
+class _FakeResponse:
+    def __init__(self, payload=None, content: bytes = b"", status_code: int = 200):
+        self._payload = payload
+        self.content = content
+        self.status_code = status_code
+
+    def json(self):
+        return self._payload
+
+
 class TestSkillsCommand(unittest.TestCase):
     def tearDown(self):
         skills_interaction_manager.clear()
@@ -147,6 +157,131 @@ class TestSkillsCommand(unittest.TestCase):
                 removed, remove_message = helper.remove_local_skill("builtin-skill")
                 self.assertFalse(removed)
                 self.assertIn("内置技能", remove_message)
+
+    def test_skillhelper_lists_clawhub_registry_skills(self):
+        helper = SkillHelper()
+        response = _FakeResponse(
+            payload={
+                "items": [
+                    {
+                        "slug": "weather-forecast",
+                        "name": "Weather Forecast",
+                        "summary": "Forecast weather from ClawHub",
+                        "owner": {"handle": "openclaw"},
+                    }
+                ]
+            }
+        )
+
+        with patch.object(helper, "_request_registry", return_value=response):
+            skills = helper._list_market_source_skills("https://clawhub.ai")
+
+        self.assertEqual(len(skills), 1)
+        self.assertEqual(skills[0].id, "weather-forecast")
+        self.assertEqual(skills[0].source_type, "registry")
+        self.assertEqual(skills[0].registry_name, "ClawHub")
+        self.assertEqual(skills[0].source_label, "社区注册表 · ClawHub")
+        self.assertIn("/openclaw/weather-forecast", skills[0].path)
+
+    def test_skillhelper_installs_registry_skill(self):
+        helper = SkillHelper()
+        skill = SkillInfo(
+            id="registry-demo",
+            name="Registry Demo",
+            description="registry demo",
+            source_type="registry",
+            source_label="注册表 · ClawHub",
+            registry_url="https://clawhub.ai",
+            registry_name="ClawHub",
+            registry_slug="registry-demo",
+            download_url="https://clawhub.ai/api/v1/download?slug=registry-demo",
+        )
+        zip_bytes = _build_skill_zip("package", "registry-demo")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            user_root = Path(tempdir) / "user-skills"
+            bundled_root = Path(tempdir) / "bundled-skills"
+            user_root.mkdir(parents=True, exist_ok=True)
+            bundled_root.mkdir(parents=True, exist_ok=True)
+
+            with patch.object(
+                SkillHelper, "get_user_skills_dir", return_value=user_root
+            ), patch.object(
+                SkillHelper, "get_bundled_skills_dir", return_value=bundled_root
+            ), patch.object(
+                helper, "_request_registry", return_value=_FakeResponse(content=zip_bytes)
+            ):
+                success, message = helper.install_market_skill(skill)
+                self.assertTrue(success, message)
+                self.assertTrue((user_root / "registry-demo" / "SKILL.md").exists())
+                self.assertTrue(
+                    (
+                        user_root
+                        / "registry-demo"
+                        / ".moviepilot-skill-source.json"
+                    ).exists()
+                )
+
+                local_skills = helper.list_local_skills()
+                self.assertEqual(len(local_skills), 1)
+                self.assertEqual(local_skills[0].source_type, "registry")
+                self.assertEqual(local_skills[0].registry_name, "ClawHub")
+                self.assertEqual(local_skills[0].source_label, "社区注册表 · ClawHub")
+
+    def test_skills_chain_market_view_marks_clawhub_as_community_source(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+        request.view = "market"
+
+        with patch.object(
+            chain.skillhelper,
+            "list_market_skills",
+            return_value=[
+                SkillInfo(
+                    id="weather-forecast",
+                    name="Weather Forecast",
+                    description="Forecast weather from ClawHub",
+                    source_type="registry",
+                    source_label="社区注册表 · ClawHub",
+                    registry_name="ClawHub",
+                    registry_url="https://clawhub.ai",
+                    registry_slug="weather-forecast",
+                )
+            ],
+        ):
+            title, text, _buttons = chain._build_market_view(request=request)
+
+        self.assertEqual(title, "技能市场")
+        self.assertIn("社区注册表 · ClawHub", text)
+        self.assertIn("社区源，安装前请自行甄别安全性", text)
+        self.assertIn("ClawHub 属于社区注册表", text)
+
+    def test_skills_chain_root_view_uses_friendly_source_labels(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain.skillhelper, "list_local_skills", return_value=[]), patch.object(
+            chain.skillhelper, "list_market_skills", return_value=[]
+        ), patch.object(
+            chain.skillhelper,
+            "get_market_sources",
+            return_value=["https://clawhub.ai", "https://github.com/openai/skills"],
+        ):
+            title, text, _buttons = chain._build_root_view(request=request)
+
+        self.assertEqual(title, "技能管理")
+        self.assertIn("社区注册表 · ClawHub", text)
+        self.assertIn("官方仓库 · openai/skills", text)
 
     def test_skills_chain_updates_buttons_via_edit_message(self):
         chain = SkillsChain()

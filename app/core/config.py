@@ -423,6 +423,7 @@ class ConfigModel(BaseModel):
     # ==================== 技能配置 ====================
     # 技能市场仓库地址，多个地址使用,分隔
     SKILL_MARKET: str = (
+        "https://clawhub.ai,"
         "https://github.com/openai/skills,"
         "https://github.com/anthropics/skills,"
         "https://github.com/vercel-labs/agent-skills"
