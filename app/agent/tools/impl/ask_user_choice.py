@@ -5,7 +5,7 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.tools.base import MoviePilotTool, ToolChain
-from app.agent.interaction import (
+from app.chain.interaction import (
     AgentInteractionOption,
     agent_interaction_manager,
 )

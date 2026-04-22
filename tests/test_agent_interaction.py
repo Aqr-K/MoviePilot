@@ -8,7 +8,7 @@ from app.agent.tools.impl.ask_user_choice import (
     AskUserChoiceTool,
     UserChoiceOptionInput,
 )
-from app.agent.interaction import (
+from app.chain.interaction import (
     AgentInteractionOption,
     agent_interaction_manager,
 )
