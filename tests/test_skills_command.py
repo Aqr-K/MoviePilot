@@ -12,10 +12,16 @@ setattr(sys.modules["qbittorrentapi"], "TorrentFilesList", list)
 sys.modules.setdefault("transmission_rpc", ModuleType("transmission_rpc"))
 setattr(sys.modules["transmission_rpc"], "File", object)
 sys.modules.setdefault("psutil", ModuleType("psutil"))
+sys.modules.setdefault("aioshutil", ModuleType("aioshutil"))
 
 from app.chain.message import MessageChain
 from app.chain.skills import SkillsChain, skills_interaction_manager
-from app.helper.skill import SkillHelper, SkillInfo
+from app.helper.skill import (
+    SkillHelper,
+    SkillInfo,
+    SkillMarketSource,
+    settings as skill_settings,
+)
 from app.schemas.types import MessageChannel
 
 
@@ -289,6 +295,70 @@ class TestSkillsCommand(unittest.TestCase):
                 self.assertEqual(local_skills[0].registry_name, "ClawHub")
                 self.assertEqual(local_skills[0].source_label, "社区注册表 · ClawHub")
 
+    def test_skillhelper_lists_market_sources_and_marks_custom_entries(self):
+        helper = SkillHelper()
+
+        with patch.object(
+            helper,
+            "get_market_sources",
+            return_value=[
+                "https://clawhub.ai",
+                "https://github.com/openai/skills",
+                "https://github.com/acme/custom-skills",
+            ],
+        ), patch.object(
+            helper,
+            "get_default_market_sources",
+            return_value=[
+                "https://clawhub.ai",
+                "https://github.com/openai/skills",
+            ],
+        ):
+            sources = helper.list_market_source_entries()
+
+        self.assertEqual(len(sources), 3)
+        self.assertTrue(sources[0].builtin)
+        self.assertTrue(sources[1].builtin)
+        self.assertFalse(sources[2].builtin)
+        self.assertTrue(sources[2].removable)
+        self.assertEqual(sources[2].label, "仓库来源 · acme/custom-skills")
+
+    def test_skillhelper_add_custom_market_source_updates_setting(self):
+        helper = SkillHelper()
+
+        with patch.object(
+            helper,
+            "get_market_sources",
+            return_value=["https://github.com/openai/skills"],
+        ), patch.object(
+            type(skill_settings),
+            "update_setting",
+            return_value=(True, ""),
+        ) as update_setting:
+            success, message = helper.add_custom_market_source("acme/custom-skills")
+
+        self.assertTrue(success)
+        self.assertIn("acme/custom-skills", message)
+        update_setting.assert_called_once_with(
+            key="SKILL_MARKET",
+            value="https://github.com/openai/skills,https://github.com/acme/custom-skills",
+        )
+
+    def test_skillhelper_remove_custom_market_source_blocks_builtin(self):
+        helper = SkillHelper()
+
+        with patch.object(
+            helper,
+            "get_default_market_sources",
+            return_value=["https://github.com/openai/skills"],
+        ):
+            success, message = helper.remove_custom_market_source(
+                "https://github.com/openai/skills"
+            )
+
+        self.assertFalse(success)
+        self.assertIn("内置默认源", message)
+
     def test_skills_chain_market_view_marks_clawhub_as_community_source(self):
         chain = SkillsChain()
         request = skills_interaction_manager.create_or_replace(
@@ -379,14 +449,35 @@ class TestSkillsCommand(unittest.TestCase):
             chain.skillhelper, "list_market_skills", return_value=[]
         ), patch.object(
             chain.skillhelper,
-            "get_market_sources",
-            return_value=["https://clawhub.ai", "https://github.com/openai/skills"],
+            "list_market_source_entries",
+            return_value=[
+                SkillMarketSource(
+                    source="https://clawhub.ai",
+                    label="社区注册表 · ClawHub",
+                    builtin=True,
+                    removable=False,
+                ),
+                SkillMarketSource(
+                    source="https://github.com/openai/skills",
+                    label="官方仓库 · openai/skills",
+                    builtin=True,
+                    removable=False,
+                ),
+                SkillMarketSource(
+                    source="https://github.com/acme/custom-skills",
+                    label="仓库来源 · acme/custom-skills",
+                    builtin=False,
+                    removable=True,
+                ),
+            ],
         ):
             title, text, _buttons = chain._build_root_view(request=request)
 
         self.assertEqual(title, "技能管理")
         self.assertIn("社区注册表 · ClawHub", text)
         self.assertIn("官方仓库 · openai/skills", text)
+        self.assertIn("仓库来源 · acme/custom-skills", text)
+        self.assertIn("3. 管理技能源", text)
 
     def test_skills_chain_callback_enters_search_input_mode(self):
         chain = SkillsChain()
@@ -460,6 +551,131 @@ class TestSkillsCommand(unittest.TestCase):
         self.assertEqual(request.market_query, "calendar")
         self.assertIsNone(request.awaiting_input)
         render.assert_called_once()
+
+    def test_skills_chain_callback_enters_source_add_mode(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain, "_render_interaction") as render:
+            handled = chain.handle_callback_interaction(
+                callback_data=f"skills:{request.request_id}:source-add",
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(request.view, "sources")
+        self.assertEqual(request.awaiting_input, "source-add")
+        render.assert_called_once()
+
+    def test_skills_chain_followup_text_adds_custom_market_source(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+        request.view = "sources"
+        request.awaiting_input = "source-add"
+
+        with patch.object(
+            chain.skillhelper,
+            "add_custom_market_source",
+            return_value=(True, "已添加技能源：仓库来源 · acme/custom-skills"),
+        ) as add_source, patch.object(chain, "_render_interaction") as render, patch.object(
+            chain, "post_message"
+        ) as post_message:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="acme/custom-skills",
+            )
+
+        self.assertTrue(handled)
+        self.assertIsNone(request.awaiting_input)
+        add_source.assert_called_once_with("acme/custom-skills")
+        post_message.assert_called_once()
+        render.assert_called_once()
+
+    def test_skills_chain_text_removes_custom_market_source_by_index(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(
+            chain,
+            "_remove_market_source",
+            return_value=(True, "已删除技能源：仓库来源 · acme/custom-skills"),
+        ) as remove_source, patch.object(chain, "_render_interaction") as render, patch.object(
+            chain, "post_message"
+        ) as post_message:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="删除源 3",
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(request.view, "sources")
+        remove_source.assert_called_once_with(page_index=3)
+        post_message.assert_called_once()
+        render.assert_called_once()
+
+    def test_skills_chain_source_view_lists_custom_sources(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+        request.view = "sources"
+
+        with patch.object(
+            chain.skillhelper,
+            "list_market_source_entries",
+            return_value=[
+                SkillMarketSource(
+                    source="https://clawhub.ai",
+                    label="社区注册表 · ClawHub",
+                    builtin=True,
+                    removable=False,
+                ),
+                SkillMarketSource(
+                    source="https://github.com/acme/custom-skills",
+                    label="仓库来源 · acme/custom-skills",
+                    builtin=False,
+                    removable=True,
+                ),
+            ],
+        ):
+            title, text, buttons = chain._build_sources_view(request=request)
+
+        self.assertEqual(title, "技能源管理")
+        self.assertIn("社区注册表 · ClawHub", text)
+        self.assertIn("仓库来源 · acme/custom-skills", text)
+        self.assertIn("删除自定义源", text)
+        self.assertTrue(buttons)
+        self.assertEqual(
+            buttons[1][0]["callback_data"],
+            f"skills:{request.request_id}:source-remove:2",
+        )
 
     def test_skills_chain_updates_buttons_via_edit_message(self):
         chain = SkillsChain()

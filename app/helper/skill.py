@@ -53,6 +53,14 @@ class SkillInfo:
     removable: bool = False
 
 
+@dataclass
+class SkillMarketSource:
+    source: str
+    label: str
+    builtin: bool = True
+    removable: bool = False
+
+
 class SkillHelper(metaclass=WeakSingleton):
     """
     技能市场与本地技能管理
@@ -82,6 +90,16 @@ class SkillHelper(metaclass=WeakSingleton):
         return [item.strip() for item in settings.SKILL_MARKET.split(",") if item.strip()]
 
     @staticmethod
+    def get_default_market_sources() -> List[str]:
+        """
+        返回系统默认的技能市场列表，用于区分内置源和用户追加源。
+        """
+        default_value = type(settings).model_fields["SKILL_MARKET"].default
+        if not default_value:
+            return []
+        return [item.strip() for item in str(default_value).split(",") if item.strip()]
+
+    @staticmethod
     def _ensure_user_skills_dir() -> Path:
         """
         确保用户技能目录存在，供安装和扫描复用。
@@ -89,6 +107,31 @@ class SkillHelper(metaclass=WeakSingleton):
         skill_dir = SkillHelper.get_user_skills_dir()
         skill_dir.mkdir(parents=True, exist_ok=True)
         return skill_dir
+
+    @staticmethod
+    def _canonical_market_source(source: str) -> Optional[str]:
+        """
+        生成市场源的规范化值，用于去重、默认源比对和持久化。
+        """
+        normalized = (source or "").strip()
+        if not normalized:
+            return None
+
+        registry = SkillHelper._parse_market_registry(normalized)
+        if registry:
+            return registry["registry_url"].rstrip("/")
+
+        repo = SkillHelper._parse_market_repo(normalized)
+        if repo:
+            # 对 GitHub 仓库保留分支和技能根目录，避免不同路径的技能仓库混淆。
+            if repo["branch"]:
+                return (
+                    f"{repo['repo_url']}/tree/"
+                    f"{repo['branch']}/{repo['root_path'].strip('/')}"
+                ).rstrip("/")
+            return repo["repo_url"].rstrip("/")
+
+        return normalized.rstrip("/")
 
     @staticmethod
     def _build_repo_source_label(repo_name: Optional[str]) -> str:
@@ -124,6 +167,98 @@ class SkillHelper(metaclass=WeakSingleton):
         if repo:
             return self._build_repo_source_label(repo.get("repo_name"))
         return source
+
+    def list_market_source_entries(self) -> List[SkillMarketSource]:
+        """
+        返回当前技能源及其是否属于内置默认源的展示信息。
+        """
+        default_keys = {
+            self._canonical_market_source(item) for item in self.get_default_market_sources()
+        }
+        results: List[SkillMarketSource] = []
+        for source in self.get_market_sources():
+            source_key = self._canonical_market_source(source)
+            builtin = source_key in default_keys
+            results.append(
+                SkillMarketSource(
+                    source=source,
+                    label=self.describe_market_source(source),
+                    builtin=builtin,
+                    removable=not builtin,
+                )
+            )
+        return results
+
+    @staticmethod
+    def _persist_market_sources(sources: List[str]) -> Tuple[bool, str]:
+        """
+        将技能源列表写回配置文件，并同步更新内存中的 settings。
+        """
+        filtered_sources = [item.strip() for item in sources if item and item.strip()]
+        success, message = settings.update_setting(
+            key="SKILL_MARKET",
+            value=",".join(filtered_sources),
+        )
+        if success is False:
+            return False, message
+        return True, message
+
+    def add_custom_market_source(self, source: str) -> Tuple[bool, str]:
+        """
+        添加自定义 GitHub 技能源，支持 owner/repo 与 GitHub URL 两种写法。
+        """
+        repo = self._parse_market_repo(source)
+        if not repo:
+            return (
+                False,
+                "仅支持 GitHub skills 仓库，示例：openai/skills 或 https://github.com/openai/skills",
+            )
+
+        canonical_source = self._canonical_market_source(source)
+        if not canonical_source:
+            return False, "技能源地址不能为空"
+
+        existing_keys = {
+            self._canonical_market_source(item) for item in self.get_market_sources()
+        }
+        if canonical_source in existing_keys:
+            return False, "该技能源已存在"
+
+        current_sources = self.get_market_sources()
+        success, message = self._persist_market_sources(
+            current_sources + [canonical_source]
+        )
+        if not success:
+            return False, message
+        return True, f"已添加技能源：{self.describe_market_source(canonical_source)}"
+
+    def remove_custom_market_source(self, source: str) -> Tuple[bool, str]:
+        """
+        删除一个自定义技能源，内置默认源不允许移除。
+        """
+        canonical_source = self._canonical_market_source(source)
+        if not canonical_source:
+            return False, "技能源地址无效"
+
+        default_keys = {
+            self._canonical_market_source(item) for item in self.get_default_market_sources()
+        }
+        if canonical_source in default_keys:
+            return False, f"技能源 {self.describe_market_source(source)} 是内置默认源，不能删除"
+
+        current_sources = self.get_market_sources()
+        remaining_sources = [
+            item
+            for item in current_sources
+            if self._canonical_market_source(item) != canonical_source
+        ]
+        if len(remaining_sources) == len(current_sources):
+            return False, "技能源不存在"
+
+        success, message = self._persist_market_sources(remaining_sources)
+        if not success:
+            return False, message
+        return True, f"已删除技能源：{self.describe_market_source(source)}"
 
     @staticmethod
     def _normalize_repo_url(repo_url: str) -> Optional[str]:

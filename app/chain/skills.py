@@ -260,9 +260,15 @@ class SkillsChain(ChainBase):
             request.view = "market"
             request.market_page = 0
             request.awaiting_input = None
+        elif action == "sources":
+            request.view = "sources"
+            request.awaiting_input = None
         elif action == "search":
             request.view = "market"
             request.awaiting_input = "market-search"
+        elif action == "source-add":
+            request.view = "sources"
+            request.awaiting_input = "source-add"
         elif action == "clear-search":
             self._clear_market_search(request)
         elif action == "refresh":
@@ -328,6 +334,19 @@ class SkillsChain(ChainBase):
             if not success:
                 # 保持当前页
                 pass
+        elif action == "source-remove" and index:
+            request.view = "sources"
+            request.awaiting_input = None
+            success, message = self._remove_market_source(index)
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title=message,
+                )
+            )
 
         self._render_interaction(
             request=request,
@@ -386,6 +405,59 @@ class SkillsChain(ChainBase):
             )
             return True
 
+        add_source = self._extract_market_source_input(normalized)
+        remove_source_match = re.match(
+            r"^(?:删除源|移除源|删除仓库|移除仓库|remove source)\s*(\d+)$",
+            normalized,
+            re.IGNORECASE,
+        )
+
+        if add_source:
+            request.view = "sources"
+            request.awaiting_input = None
+            _, message = self.skillhelper.add_custom_market_source(add_source)
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title=message,
+                )
+            )
+            self._render_interaction(
+                request=request,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+            return True
+
+        if remove_source_match:
+            request.view = "sources"
+            request.awaiting_input = None
+            _, message = self._remove_market_source(
+                page_index=int(remove_source_match.group(1))
+            )
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title=message,
+                )
+            )
+            self._render_interaction(
+                request=request,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+            return True
+
         if lowered in {"刷新", "refresh"}:
             request.awaiting_input = None
             self._render_interaction(
@@ -433,6 +505,8 @@ class SkillsChain(ChainBase):
                 request.view = "installed"
             elif lowered in {"2", "市场", "market"}:
                 request.view = "market"
+            elif lowered in {"3", "技能源", "源", "sources", "source"}:
+                request.view = "sources"
             elif self._extract_market_search_query(normalized):
                 self._apply_market_search(
                     request,
@@ -445,10 +519,34 @@ class SkillsChain(ChainBase):
                         source=source,
                         userid=userid,
                         username=username,
-                        title="请输入 1 查看已安装技能，2 查看技能市场，或回复 刷新/退出",
+                        title="请输入 1 查看已安装技能，2 查看技能市场，3 管理技能源，或回复 刷新/退出",
                     )
                 )
                 return True
+            self._render_interaction(
+                request=request,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+            )
+            return True
+
+        if request.awaiting_input == "source-add":
+            if lowered in {"取消", "cancel"}:
+                request.awaiting_input = None
+            else:
+                _, message = self.skillhelper.add_custom_market_source(normalized)
+                request.awaiting_input = None
+                self.post_message(
+                    Notification(
+                        channel=channel,
+                        source=source,
+                        userid=userid,
+                        username=username,
+                        title=message,
+                    )
+                )
             self._render_interaction(
                 request=request,
                 channel=channel,
@@ -524,7 +622,7 @@ class SkillsChain(ChainBase):
             return True
         if request.view == "installed" and remove_match:
             request.awaiting_input = None
-            success, message = self._remove_local_skill(
+            _, message = self._remove_local_skill(
                 request=request,
                 page_index=int(remove_match.group(1)),
             )
@@ -598,6 +696,18 @@ class SkillsChain(ChainBase):
             return False, f"技能 {target.id} 是内置技能，不能删除"
         return self.skillhelper.remove_local_skill(target.id)
 
+    def _remove_market_source(self, page_index: int) -> Tuple[bool, str]:
+        """
+        按当前源列表序号删除自定义技能源，避免误删内置默认源。
+        """
+        sources = self.skillhelper.list_market_source_entries()
+        if page_index < 1 or page_index > len(sources):
+            return False, "删除源序号无效"
+        target = sources[page_index - 1]
+        if not target.removable:
+            return False, f"技能源 {target.label} 是内置默认源，不能删除"
+        return self.skillhelper.remove_custom_market_source(target.source)
+
     def _render_interaction(
         self,
         request: PendingSkillsInteraction,
@@ -619,6 +729,11 @@ class SkillsChain(ChainBase):
             )
         elif request.view == "market":
             title, text, buttons = self._build_market_view(
+                request=request,
+                force_market_refresh=force_market_refresh,
+            )
+        elif request.view == "sources":
+            title, text, buttons = self._build_sources_view(
                 request=request,
                 force_market_refresh=force_market_refresh,
             )
@@ -654,22 +769,26 @@ class SkillsChain(ChainBase):
             for skill in self.skillhelper.list_market_skills(force=force_market_refresh)
             if not skill.installed
         ]
-        sources = self.skillhelper.get_market_sources()
+        source_entries = self.skillhelper.list_market_source_entries()
         source_lines = []
-        for index, source in enumerate(sources, start=1):
-            source_lines.append(f"{index}. {self.skillhelper.describe_market_source(source)}")
+        for index, source_entry in enumerate(source_entries, start=1):
+            state = "内置" if source_entry.builtin else "自定义"
+            source_lines.append(
+                f"{index}. {source_entry.label}（{state}）"
+            )
 
         text_lines = [
             f"已安装技能：{len(local_skills)}",
             f"市场可安装技能：{len(market_skills)}",
         ]
         if source_lines:
-            text_lines.extend(["", "公开技能源：", *source_lines])
+            text_lines.extend(["", "当前技能源：", *source_lines])
         text_lines.extend(
             [
                 "",
                 "1. 查看已安装技能",
                 "2. 浏览技能市场",
+                "3. 管理技能源",
                 "回复 刷新 重新获取市场数据，回复 退出 结束交互",
             ]
         )
@@ -679,6 +798,7 @@ class SkillsChain(ChainBase):
             buttons = [
                 [{"text": "已安装技能", "callback_data": f"skills:{request.request_id}:installed"}],
                 [{"text": "技能市场", "callback_data": f"skills:{request.request_id}:market"}],
+                [{"text": "技能源管理", "callback_data": f"skills:{request.request_id}:sources"}],
                 [
                     {"text": "刷新市场", "callback_data": f"skills:{request.request_id}:refresh"},
                     {"text": "关闭", "callback_data": f"skills:{request.request_id}:close"},
@@ -848,6 +968,79 @@ class SkillsChain(ChainBase):
             )
         return "技能市场", "\n".join(text_lines), buttons
 
+    def _build_sources_view(
+        self,
+        request: PendingSkillsInteraction,
+        force_market_refresh: bool = False,  # noqa: ARG002
+    ) -> Tuple[str, str, Optional[List[List[dict]]]]:
+        """
+        构建技能源管理视图，提供自定义 GitHub 源的增删入口。
+        """
+        sources = self.skillhelper.list_market_source_entries()
+        custom_count = len([source for source in sources if not source.builtin])
+        text_lines = [
+            f"当前技能源：{len(sources)}",
+            f"自定义技能源：{custom_count}",
+        ]
+        if request.awaiting_input == "source-add":
+            text_lines.extend(
+                [
+                    "",
+                    "添加输入中：直接回复 GitHub 仓库地址即可。",
+                    "支持 owner/repo、https://github.com/owner/repo，或 /tree/<branch>/<skills_path> 形式。",
+                    "回复 取消 结束输入。",
+                ]
+            )
+
+        if not sources:
+            text_lines.extend(["", "当前没有可用技能源"])
+        else:
+            for index, market_source in enumerate(sources, start=1):
+                state = "自定义可删" if market_source.removable else "内置默认"
+                text_lines.extend(
+                    [
+                        "",
+                        f"{index}. {market_source.label}（{state}）",
+                        self._truncate(market_source.source, limit=200),
+                    ]
+                )
+
+        text_lines.extend(
+            [
+                "",
+                "回复 添加源 <GitHub仓库地址> 添加自定义源，回复 删除源 <序号> 删除自定义源，回复 返回 回到菜单，回复 退出 结束交互",
+            ]
+        )
+
+        buttons = None
+        if self._supports_interactive_buttons(request.channel):
+            buttons = [
+                [
+                    {
+                        "text": "添加自定义源",
+                        "callback_data": f"skills:{request.request_id}:source-add",
+                    }
+                ]
+            ]
+            for index, market_source in enumerate(sources, start=1):
+                if not market_source.removable:
+                    continue
+                buttons.append(
+                    [
+                        {
+                            "text": f"删除 {index}",
+                            "callback_data": f"skills:{request.request_id}:source-remove:{index}",
+                        }
+                    ]
+                )
+            buttons.append(
+                [
+                    {"text": "返回", "callback_data": f"skills:{request.request_id}:root"},
+                    {"text": "关闭", "callback_data": f"skills:{request.request_id}:close"},
+                ]
+            )
+        return "技能源管理", "\n".join(text_lines), buttons
+
     @staticmethod
     def _truncate(text: str, limit: int = 140) -> str:
         """
@@ -975,7 +1168,9 @@ class SkillsChain(ChainBase):
             return "请输入 搜索 <关键词>、清除搜索、安装 <序号>、刷新、n、p、返回 或 退出"
         if view == "installed":
             return "请输入 删除 <序号>、n、p、返回 或 退出"
-        return "请输入 1、2、搜索 <关键词>、刷新 或 退出"
+        if view == "sources":
+            return "请输入 添加源 <GitHub仓库地址>、删除源 <序号>、返回 或 退出"
+        return "请输入 1、2、3、搜索 <关键词>、刷新 或 退出"
 
     def _get_market_skills(
         self,
@@ -1006,6 +1201,21 @@ class SkillsChain(ChainBase):
         if not normalized:
             return ""
         match = re.match(r"^(?:搜索|查找|查)\s+(.+)$", normalized)
+        return match.group(1).strip() if match else ""
+
+    @staticmethod
+    def _extract_market_source_input(text: str) -> str:
+        """
+        从文本命令中提取自定义技能源地址。
+        """
+        normalized = (text or "").strip()
+        if not normalized:
+            return ""
+        match = re.match(
+            r"^(?:添加源|新增源|添加仓库|新增仓库|add source)\s+(.+)$",
+            normalized,
+            re.IGNORECASE,
+        )
         return match.group(1).strip() if match else ""
 
     @staticmethod
