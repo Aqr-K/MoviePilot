@@ -133,6 +133,7 @@ class LlmTestEndpointTest(unittest.TestCase):
         llm_test_mock.assert_awaited_once_with(
             provider="deepseek",
             model="deepseek-chat",
+            disable_thinking=False,
             api_key="sk-test",
             base_url="https://api.deepseek.com",
         )
@@ -155,6 +156,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             enabled=True,
             provider="openai",
             model="gpt-4.1-mini",
+            disable_thinking=True,
             api_key="sk-live",
             base_url="https://example.com/v1",
         )
@@ -176,6 +178,7 @@ class LlmTestEndpointTest(unittest.TestCase):
         llm_test_mock.assert_awaited_once_with(
             provider="openai",
             model="gpt-4.1-mini",
+            disable_thinking=True,
             api_key="sk-live",
             base_url="https://example.com/v1",
         )

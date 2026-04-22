@@ -496,6 +496,8 @@ class ConfigModel(BaseModel):
     LLM_PROVIDER: str = "deepseek"
     # LLM模型名称
     LLM_MODEL: str = "deepseek-chat"
+    # 是否尽量关闭模型的思考/推理能力（按各 provider/model 支持情况自动适配）
+    LLM_DISABLE_THINKING: bool = False
     # LLM是否支持图片输入，开启后消息图片会按多模态输入发送给模型
     LLM_SUPPORT_IMAGE_INPUT: bool = True
     # LLM API密钥

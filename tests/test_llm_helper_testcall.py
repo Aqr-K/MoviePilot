@@ -38,6 +38,7 @@ _stub_module(
         LLM_MODEL="global-model",
         LLM_API_KEY="global-key",
         LLM_BASE_URL="https://global.example.com",
+        LLM_DISABLE_THINKING=False,
         LLM_TEMPERATURE=0.1,
         LLM_MAX_CONTEXT_TOKENS=64,
         PROXY_HOST=None,
@@ -82,6 +83,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
             streaming=False,
             provider="deepseek",
             model="deepseek-chat",
+            disable_thinking=None,
             api_key="sk-test",
             base_url="https://api.deepseek.com",
         )
@@ -108,6 +110,86 @@ class LlmHelperTestCallTest(unittest.TestCase):
             )
 
         self.assertNotIn("reply_preview", result)
+
+    def test_get_llm_uses_kimi_extra_body_to_disable_thinking(self):
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="openai",
+                model="kimi-k2.6",
+                disable_thinking=True,
+                api_key="sk-test",
+                base_url="https://kimi.example.com/v1",
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0].get("extra_body"),
+            {"thinking": {"type": "disabled"}},
+        )
+
+    def test_get_llm_uses_openai_reasoning_effort_none(self):
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="openai",
+                model="gpt-5-mini",
+                disable_thinking=True,
+                api_key="sk-test",
+                base_url="https://api.openai.com/v1",
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].get("reasoning_effort"), "none")
+
+    def test_get_llm_uses_gemini_builtin_thinking_controls(self):
+        calls = []
+
+        class _FakeChatGoogleGenerativeAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {
+                "langchain_google_genai": SimpleNamespace(
+                    ChatGoogleGenerativeAI=_FakeChatGoogleGenerativeAI
+                )
+            },
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="google",
+                model="gemini-2.5-flash",
+                disable_thinking=True,
+                api_key="sk-test",
+                base_url=None,
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].get("thinking_budget"), 0)
+        self.assertFalse(calls[0].get("include_thoughts"))
 
 
 if __name__ == "__main__":

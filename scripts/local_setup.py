@@ -1476,6 +1476,10 @@ def _collect_agent_config() -> dict[str, Any]:
             current_value=read_env_value("LLM_API_KEY"),
             required=True,
         ),
+        "LLM_DISABLE_THINKING": _prompt_yes_no(
+            "是否尽量关闭模型思考/推理",
+            default=_env_bool("LLM_DISABLE_THINKING", False),
+        ),
         "LLM_SUPPORT_IMAGE_INPUT": _prompt_yes_no(
             "是否启用图片输入支持",
             default=_env_bool("LLM_SUPPORT_IMAGE_INPUT", True),

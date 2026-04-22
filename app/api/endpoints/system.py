@@ -57,6 +57,7 @@ class LlmTestRequest(BaseModel):
     enabled: Optional[bool] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    disable_thinking: Optional[bool] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
 
@@ -307,6 +308,7 @@ def _build_llm_test_snapshot(payload: Optional[LlmTestRequest] = None) -> dict[s
     """
     provider = settings.LLM_PROVIDER
     model = settings.LLM_MODEL
+    disable_thinking = bool(getattr(settings, "LLM_DISABLE_THINKING", False))
     api_key = settings.LLM_API_KEY
     base_url = settings.LLM_BASE_URL
     enabled = bool(settings.AI_AGENT_ENABLE)
@@ -318,6 +320,8 @@ def _build_llm_test_snapshot(payload: Optional[LlmTestRequest] = None) -> dict[s
             provider = _normalize_llm_test_value(payload.provider) or ""
         if payload.model is not None:
             model = _normalize_llm_test_value(payload.model) or ""
+        if payload.disable_thinking is not None:
+            disable_thinking = bool(payload.disable_thinking)
         if payload.api_key is not None:
             api_key = _normalize_llm_test_value(payload.api_key, empty_as_none=True)
         if payload.base_url is not None:
@@ -327,6 +331,7 @@ def _build_llm_test_snapshot(payload: Optional[LlmTestRequest] = None) -> dict[s
         "enabled": enabled,
         "provider": provider,
         "model": model,
+        "disable_thinking": disable_thinking,
         "api_key": api_key,
         "base_url": base_url,
     }
@@ -755,6 +760,7 @@ async def llm_test(
         result = await LLMHelper.test_current_settings(
             provider=snapshot["provider"],
             model=snapshot["model"],
+            disable_thinking=snapshot["disable_thinking"],
             api_key=snapshot["api_key"],
             base_url=snapshot["base_url"],
         )

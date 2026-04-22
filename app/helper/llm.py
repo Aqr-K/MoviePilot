@@ -3,7 +3,7 @@
 import asyncio
 import inspect
 import time
-from typing import List
+from typing import Any, List
 
 from app.core.config import settings
 from app.log import logger
@@ -78,6 +78,68 @@ class LLMHelper:
     """LLM模型相关辅助功能"""
 
     @staticmethod
+    def _should_disable_thinking(disable_thinking: bool | None = None) -> bool:
+        """
+        判断本次调用是否应尝试关闭模型思考能力。
+        """
+        if disable_thinking is not None:
+            return bool(disable_thinking)
+        return bool(getattr(settings, "LLM_DISABLE_THINKING", False))
+
+    @staticmethod
+    def _normalize_model_name(model_name: str | None) -> str:
+        """
+        统一清理模型名称，便于按模型族做能力映射。
+        """
+        return (model_name or "").strip().lower()
+
+    @classmethod
+    def _build_disabled_thinking_kwargs(
+        cls,
+        provider: str,
+        model: str | None,
+        disable_thinking: bool | None = None,
+    ) -> dict[str, Any]:
+        """
+        按 provider/model 生成“禁用思考”相关参数。
+
+        优先使用 LangChain/OpenAI SDK 已支持的原生字段；仅在 provider
+        明确要求自定义请求体时，才回退到 extra_body。
+        """
+        if not cls._should_disable_thinking(disable_thinking):
+            return {}
+
+        provider_name = (provider or "").strip().lower()
+        model_name = cls._normalize_model_name(model)
+        if not model_name:
+            return {}
+
+        # Moonshot Kimi K2.5/K2.6 需要在请求体显式声明 thinking.disabled。
+        if model_name.startswith(("kimi-k2.5", "kimi-k2.6")):
+            return {"extra_body": {"thinking": {"type": "disabled"}}}
+
+        # OpenAI 原生推理模型优先走 LangChain 内置 reasoning_effort。
+        if provider_name == "openai" and model_name.startswith(
+            ("gpt-5", "o1", "o3", "o4")
+        ):
+            return {"reasoning_effort": "none"}
+
+        # Gemini 使用 google-genai / langchain-google-genai 内置思考控制参数。
+        if provider_name == "google":
+            if "gemini-2.5" in model_name:
+                return {
+                    "thinking_budget": 0,
+                    "include_thoughts": False,
+                }
+            if "gemini-3" in model_name:
+                return {
+                    "thinking_level": "minimal",
+                    "include_thoughts": False,
+                }
+
+        return {}
+
+    @staticmethod
     def supports_image_input() -> bool:
         """
         判断当前模型是否启用了图片输入能力。
@@ -89,6 +151,7 @@ class LLMHelper:
         streaming: bool = False,
         provider: str | None = None,
         model: str | None = None,
+        disable_thinking: bool | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
     ):
@@ -103,6 +166,11 @@ class LLMHelper:
         model_name = model if model is not None else settings.LLM_MODEL
         api_key_value = api_key if api_key is not None else settings.LLM_API_KEY
         base_url_value = base_url if base_url is not None else settings.LLM_BASE_URL
+        thinking_kwargs = LLMHelper._build_disabled_thinking_kwargs(
+            provider=provider_name,
+            model=model_name,
+            disable_thinking=disable_thinking,
+        )
 
         if not api_key_value:
             raise ValueError("未配置LLM API Key")
@@ -128,6 +196,7 @@ class LLMHelper:
                 temperature=settings.LLM_TEMPERATURE,
                 streaming=streaming,
                 client_args=client_args,
+                **thinking_kwargs,
             )
         elif provider_name == "deepseek":
             from langchain_deepseek import ChatDeepSeek
@@ -139,6 +208,7 @@ class LLMHelper:
                 temperature=settings.LLM_TEMPERATURE,
                 streaming=streaming,
                 stream_usage=True,
+                **thinking_kwargs,
             )
         else:
             from langchain_openai import ChatOpenAI
@@ -152,6 +222,7 @@ class LLMHelper:
                 streaming=streaming,
                 stream_usage=True,
                 openai_proxy=settings.PROXY_HOST,
+                **thinking_kwargs,
             )
 
         # 检查是否有profile
@@ -211,6 +282,7 @@ class LLMHelper:
         timeout: int = 20,
         provider: str | None = None,
         model: str | None = None,
+        disable_thinking: bool | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> dict:
@@ -226,6 +298,7 @@ class LLMHelper:
             streaming=False,
             provider=provider_name,
             model=model_name,
+            disable_thinking=disable_thinking,
             api_key=api_key_value,
             base_url=base_url_value,
         )
