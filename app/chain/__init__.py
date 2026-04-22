@@ -1407,6 +1407,7 @@ class ChainBase(metaclass=ABCMeta):
             chat_id: Union[str, int],
             text: str,
             title: Optional[str] = None,
+            buttons: Optional[List[List[dict]]] = None,
     ) -> bool:
         """
         编辑已发送的消息
@@ -1416,6 +1417,7 @@ class ChainBase(metaclass=ABCMeta):
         :param chat_id: 聊天ID
         :param text: 新的消息内容
         :param title: 消息标题
+        :param buttons: 更新后的按钮列表
         :return: 编辑是否成功
         """
         return self.run_module(
@@ -1426,6 +1428,7 @@ class ChainBase(metaclass=ABCMeta):
             chat_id=chat_id,
             text=text,
             title=title,
+            buttons=buttons,
         )
 
     def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:

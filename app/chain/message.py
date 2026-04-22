@@ -16,6 +16,7 @@ from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
+from app.chain.skills import SkillsChain, skills_interaction_manager
 from app.chain.subscribe import SubscribeChain
 from app.chain.transfer import TransferChain
 from app.core.config import settings, global_vars
@@ -246,6 +247,15 @@ class MessageChain(ChainBase):
                     EventType.CommandExcute,
                     {"cmd": text, "user": userid, "channel": channel, "source": source},
                 )
+            elif skills_interaction_manager.get_by_user(userid):
+                if SkillsChain().handle_text_interaction(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    text=text,
+                ):
+                    return
             elif text.lower().startswith("/ai"):
                 self._handle_ai_message(
                     text=text,
@@ -782,6 +792,17 @@ class MessageChain(ChainBase):
             source=source,
             userid=userid,
             username=username,
+        ):
+            return
+
+        if SkillsChain().handle_callback_interaction(
+            callback_data=callback_data,
+            channel=channel,
+            source=source,
+            userid=userid,
+            username=username,
+            original_message_id=original_message_id,
+            original_chat_id=original_chat_id,
         ):
             return
 

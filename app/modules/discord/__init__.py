@@ -439,6 +439,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         chat_id: Union[str, int],
         text: str,
         title: Optional[str] = None,
+        buttons: Optional[List[List[dict]]] = None,
     ) -> bool:
         """
         编辑消息
@@ -448,6 +449,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         :param chat_id: 聊天ID
         :param text: 新的消息内容
         :param title: 消息标题
+        :param buttons: 新的按钮列表
         :return: 编辑是否成功
         """
         if channel != self._channel:
@@ -460,6 +462,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                 result = client.send_msg(
                     title=title or "",
                     text=text,
+                    buttons=buttons,
                     original_message_id=message_id,
                     original_chat_id=str(chat_id),
                 )

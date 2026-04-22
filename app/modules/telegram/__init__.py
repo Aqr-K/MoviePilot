@@ -564,6 +564,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         chat_id: Union[str, int],
         text: str,
         title: Optional[str] = None,
+        buttons: Optional[List[List[dict]]] = None,
     ) -> bool:
         """
         编辑消息
@@ -573,6 +574,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         :param chat_id: 聊天ID
         :param text: 新的消息内容
         :param title: 消息标题
+        :param buttons: 新的按钮列表
         :return: 编辑是否成功
         """
         if channel != self._channel:
@@ -587,6 +589,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     message_id=message_id,
                     text=text,
                     title=title,
+                    buttons=buttons,
                 )
                 if result:
                     return True

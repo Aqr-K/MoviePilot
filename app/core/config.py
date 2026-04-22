@@ -420,6 +420,14 @@ class ConfigModel(BaseModel):
     # 本地插件仓库目录，多个地址使用,分隔
     PLUGIN_LOCAL_REPO_PATHS: Optional[str] = None
 
+    # ==================== 技能配置 ====================
+    # 技能市场仓库地址，多个地址使用,分隔
+    SKILL_MARKET: str = (
+        "https://github.com/openai/skills,"
+        "https://github.com/anthropics/skills,"
+        "https://github.com/vercel-labs/agent-skills"
+    )
+
     # ==================== Github & PIP ====================
     # Github token，提高请求api限流阈值 ghp_****
     GITHUB_TOKEN: Optional[str] = None

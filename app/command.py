@@ -7,6 +7,7 @@ from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.message import MessageChain
 from app.chain.site import SiteChain
+from app.chain.skills import SkillsChain
 from app.chain.subscribe import SubscribeChain
 from app.chain.system import SystemChain
 from app.chain.transfer import TransferChain
@@ -152,6 +153,12 @@ class Command(metaclass=Singleton):
                 "func": MessageChain().remote_stop_agent,
                 "description": "停止推理",
                 "category": "管理",
+                "data": {},
+            },
+            "/skills": {
+                "func": SkillsChain().remote_manage,
+                "description": "管理技能",
+                "category": "智能体",
                 "data": {},
             },
         }
