@@ -519,7 +519,7 @@ class SkillsChain(ChainBase):
                         source=source,
                         userid=userid,
                         username=username,
-                        title="请输入 1 查看已安装技能，2 查看技能市场，3 管理技能源，或回复 刷新/退出",
+                        title="请输入 `1` 查看已安装技能，`2` 查看技能市场，3 管理技能源，或回复 `刷新/退出`",
                     )
                 )
                 return True
@@ -789,7 +789,7 @@ class SkillsChain(ChainBase):
                 "1. 查看已安装技能",
                 "2. 浏览技能市场",
                 "3. 管理技能源",
-                "回复 刷新 重新获取市场数据，回复 退出 结束交互",
+                "回复 `刷新` 重新获取市场数据，回复 `退出` 结束交互",
             ]
         )
 
@@ -840,7 +840,7 @@ class SkillsChain(ChainBase):
         text_lines.extend(
             [
                 "",
-                "回复 删除 <序号> 删除技能，回复 n/p 翻页，回复 返回 回到菜单，回复 退出 结束交互",
+                "回复 `删除 <序号>` 删除技能，回复 `n/p` 翻页，回复 `返回` 回到菜单，回复 `退出` 结束交互",
             ]
         )
 
@@ -893,7 +893,7 @@ class SkillsChain(ChainBase):
             text_lines.extend(
                 [
                     "",
-                    "搜索输入中：直接回复关键词即可筛选市场技能，回复 取消 结束输入。",
+                    "搜索输入中：直接回复关键词即可筛选市场技能，回复 `取消` 结束输入。",
                 ]
             )
         if not page_items:
@@ -925,7 +925,7 @@ class SkillsChain(ChainBase):
         text_lines.extend(
             [
                 "",
-                "回复 搜索 <关键词> 筛选技能，回复 清除搜索 恢复全量列表，回复 安装 <序号> 安装技能，回复 刷新 重新拉取市场，回复 n/p 翻页，回复 返回 回到菜单，回复 退出 结束交互",
+                "回复 `搜索 <关键词>` 筛选技能，回复 `清除搜索` 恢复全量列表，回复 `安装 <序号>` 安装技能，回复 `刷新` 重新拉取市场，回复 `n/p` 翻页，回复 `返回` 回到菜单，回复 `退出` 结束交互",
             ]
         )
 
@@ -988,7 +988,7 @@ class SkillsChain(ChainBase):
                     "",
                     "添加输入中：直接回复 GitHub 仓库地址即可。",
                     "支持 owner/repo、https://github.com/owner/repo，或 /tree/<branch>/<skills_path> 形式。",
-                    "回复 取消 结束输入。",
+                    "回复 `取消` 结束输入。",
                 ]
             )
 
@@ -1008,7 +1008,7 @@ class SkillsChain(ChainBase):
         text_lines.extend(
             [
                 "",
-                "回复 添加源 <GitHub仓库地址> 添加自定义源，回复 删除源 <序号> 删除自定义源，回复 返回 回到菜单，回复 退出 结束交互",
+                "回复 `添加源 <GitHub仓库地址>` 添加自定义源，回复 `删除源 <序号>` 删除自定义源，回复 `返回` 回到菜单，回复 `退出` 结束交互",
             ]
         )
 
