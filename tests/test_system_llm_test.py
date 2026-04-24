@@ -119,6 +119,8 @@ class LlmTestEndpointTest(unittest.TestCase):
         with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", True), patch.object(
             system_endpoint.settings, "LLM_PROVIDER", "deepseek"
         ), patch.object(system_endpoint.settings, "LLM_MODEL", "deepseek-chat"), patch.object(
+            system_endpoint.settings, "LLM_THINKING_LEVEL", "max"
+        ), patch.object(
             system_endpoint.settings, "LLM_API_KEY", "sk-test"
         ), patch.object(
             system_endpoint.settings, "LLM_BASE_URL", "https://api.deepseek.com"
@@ -133,7 +135,9 @@ class LlmTestEndpointTest(unittest.TestCase):
         llm_test_mock.assert_awaited_once_with(
             provider="deepseek",
             model="deepseek-chat",
-            disable_thinking=False,
+            thinking_level="max",
+            disable_thinking=None,
+            reasoning_effort=None,
             api_key="sk-test",
             base_url="https://api.deepseek.com",
         )
@@ -156,7 +160,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             enabled=True,
             provider="openai",
             model="gpt-4.1-mini",
-            disable_thinking=True,
+            thinking_level="high",
             api_key="sk-live",
             base_url="https://example.com/v1",
         )
@@ -178,13 +182,53 @@ class LlmTestEndpointTest(unittest.TestCase):
         llm_test_mock.assert_awaited_once_with(
             provider="openai",
             model="gpt-4.1-mini",
-            disable_thinking=True,
+            thinking_level="high",
+            disable_thinking=None,
+            reasoning_effort=None,
             api_key="sk-live",
             base_url="https://example.com/v1",
         )
         self.assertTrue(resp.success)
         self.assertEqual(resp.data["provider"], "openai")
         self.assertEqual(resp.data["model"], "gpt-4.1-mini")
+
+    def test_llm_test_supports_legacy_thinking_payload(self):
+        llm_test_mock = AsyncMock(
+            return_value={
+                "provider": "deepseek",
+                "model": "deepseek-v4-pro",
+                "duration_ms": 123,
+                "reply_preview": "OK",
+            }
+        )
+        payload = system_endpoint.LlmTestRequest(
+            enabled=True,
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            disable_thinking=False,
+            reasoning_effort="xhigh",
+            api_key="sk-live",
+            base_url="https://api.deepseek.com",
+        )
+
+        with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", False), patch.object(
+            system_endpoint.LLMHelper,
+            "test_current_settings",
+            llm_test_mock,
+            create=True,
+        ):
+            resp = asyncio.run(system_endpoint.llm_test(payload=payload, _="token"))
+
+        llm_test_mock.assert_awaited_once_with(
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            thinking_level=None,
+            disable_thinking=False,
+            reasoning_effort="xhigh",
+            api_key="sk-live",
+            base_url="https://api.deepseek.com",
+        )
+        self.assertTrue(resp.success)
 
     def test_llm_test_rejects_empty_reply(self):
         with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", True), patch.object(

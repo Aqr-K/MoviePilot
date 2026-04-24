@@ -1063,6 +1063,40 @@ def _prompt_choice(label: str, choices: dict[str, str], default: str) -> str:
         print("请输入列表中的可选值。")
 
 
+def _env_llm_thinking_level_default() -> str:
+    value = _normalize_choice(_env_default("LLM_THINKING_LEVEL", ""))
+    alias_map = {
+        "none": "off",
+        "disabled": "off",
+        "disable": "off",
+        "enabled": "auto",
+        "enable": "auto",
+        "default": "auto",
+        "dynamic": "auto",
+    }
+    normalized = alias_map.get(value, value)
+    if normalized in {
+        "off",
+        "auto",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "max",
+        "xhigh",
+    }:
+        return normalized
+
+    legacy_disable = _env_bool("LLM_DISABLE_THINKING", True)
+    legacy_effort = _normalize_choice(_env_default("LLM_REASONING_EFFORT", ""))
+    legacy_effort = alias_map.get(legacy_effort, legacy_effort)
+    if legacy_disable:
+        return "off"
+    if legacy_effort in {"minimal", "low", "medium", "high", "max", "xhigh"}:
+        return legacy_effort
+    return "auto"
+
+
 def _prompt_path(label: str, *, default: Path, allow_empty: bool = False) -> str:
     value = _prompt_text(label, default=str(default), allow_empty=allow_empty)
     if not value:
@@ -1476,9 +1510,19 @@ def _collect_agent_config() -> dict[str, Any]:
             current_value=read_env_value("LLM_API_KEY"),
             required=True,
         ),
-        "LLM_DISABLE_THINKING": _prompt_yes_no(
-            "是否尽量关闭模型思考/推理",
-            default=_env_bool("LLM_DISABLE_THINKING", False),
+        "LLM_THINKING_LEVEL": _prompt_choice(
+            "LLM 思考模式/深度",
+            choices={
+                "off": "关闭思考",
+                "auto": "自动",
+                "minimal": "最小",
+                "low": "低",
+                "medium": "中",
+                "high": "高",
+                "max": "极高",
+                "xhigh": "超高",
+            },
+            default=_env_llm_thinking_level_default(),
         ),
         "LLM_SUPPORT_IMAGE_INPUT": _prompt_yes_no(
             "是否启用图片输入支持",

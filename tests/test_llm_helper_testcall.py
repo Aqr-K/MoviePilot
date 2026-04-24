@@ -38,7 +38,9 @@ _stub_module(
         LLM_MODEL="global-model",
         LLM_API_KEY="global-key",
         LLM_BASE_URL="https://global.example.com",
+        LLM_THINKING_LEVEL=None,
         LLM_DISABLE_THINKING=False,
+        LLM_REASONING_EFFORT=None,
         LLM_TEMPERATURE=0.1,
         LLM_MAX_CONTEXT_TOKENS=64,
         PROXY_HOST=None,
@@ -83,7 +85,9 @@ class LlmHelperTestCallTest(unittest.TestCase):
             streaming=False,
             provider="deepseek",
             model="deepseek-chat",
+            thinking_level=None,
             disable_thinking=None,
+            reasoning_effort=None,
             api_key="sk-test",
             base_url="https://api.deepseek.com",
         )
@@ -138,7 +142,65 @@ class LlmHelperTestCallTest(unittest.TestCase):
             {"thinking": {"type": "disabled"}},
         )
 
-    def test_get_llm_uses_openai_reasoning_effort_none(self):
+    def test_get_llm_uses_deepseek_thinking_level_controls(self):
+        calls = []
+
+        class _FakeChatDeepSeek:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_deepseek": SimpleNamespace(ChatDeepSeek=_FakeChatDeepSeek)},
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="deepseek",
+                model="deepseek-v4-pro",
+                thinking_level="xhigh",
+                api_key="sk-test",
+                base_url="https://api.deepseek.com",
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0].get("extra_body"),
+            {"thinking": {"type": "enabled"}},
+        )
+        self.assertEqual(calls[0].get("reasoning_effort"), "max")
+        self.assertEqual(calls[0].get("api_base"), "https://api.deepseek.com")
+
+    def test_get_llm_disables_deepseek_thinking_via_thinking_level(self):
+        calls = []
+
+        class _FakeChatDeepSeek:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_deepseek": SimpleNamespace(ChatDeepSeek=_FakeChatDeepSeek)},
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="deepseek",
+                model="deepseek-v4-flash",
+                thinking_level="off",
+                api_key="sk-test",
+                base_url="https://proxy.example.com",
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0].get("extra_body"),
+            {"thinking": {"type": "disabled"}},
+        )
+        self.assertIsNone(calls[0].get("reasoning_effort"))
+        self.assertEqual(calls[0].get("api_base"), "https://proxy.example.com")
+
+    def test_get_llm_uses_openai_reasoning_effort_none_for_off(self):
         calls = []
 
         class _FakeChatOpenAI:
@@ -154,13 +216,37 @@ class LlmHelperTestCallTest(unittest.TestCase):
             llm_module.LLMHelper.get_llm(
                 provider="openai",
                 model="gpt-5-mini",
-                disable_thinking=True,
+                thinking_level="off",
                 api_key="sk-test",
                 base_url="https://api.openai.com/v1",
             )
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("reasoning_effort"), "none")
+
+    def test_get_llm_maps_unified_max_to_openai_xhigh(self):
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="openai",
+                model="gpt-5.4",
+                thinking_level="max",
+                api_key="sk-test",
+                base_url="https://api.openai.com/v1",
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].get("reasoning_effort"), "xhigh")
 
     def test_get_llm_uses_gemini_builtin_thinking_controls(self):
         calls = []
@@ -182,13 +268,42 @@ class LlmHelperTestCallTest(unittest.TestCase):
             llm_module.LLMHelper.get_llm(
                 provider="google",
                 model="gemini-2.5-flash",
-                disable_thinking=True,
+                thinking_level="off",
                 api_key="sk-test",
                 base_url=None,
             )
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("thinking_budget"), 0)
+        self.assertFalse(calls[0].get("include_thoughts"))
+
+    def test_get_llm_uses_gemini_3_thinking_level_controls(self):
+        calls = []
+
+        class _FakeChatGoogleGenerativeAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {
+                "langchain_google_genai": SimpleNamespace(
+                    ChatGoogleGenerativeAI=_FakeChatGoogleGenerativeAI
+                )
+            },
+        ):
+            llm_module.LLMHelper.get_llm(
+                provider="google",
+                model="gemini-3.1-flash",
+                thinking_level="xhigh",
+                api_key="sk-test",
+                base_url=None,
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].get("thinking_level"), "high")
         self.assertFalse(calls[0].get("include_thoughts"))
 
 
