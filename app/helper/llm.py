@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import time
+from functools import wraps
 from typing import Any, List
 
 from app.core.config import settings
@@ -72,6 +73,132 @@ def _get_httpx_proxy_key() -> str:
         return "proxies"
     except Exception:
         return "proxies"
+
+
+def _deepseek_thinking_toggle(extra_body: Any) -> bool | None:
+    """
+    解析 DeepSeek extra_body 中显式传入的 thinking 开关。
+    """
+    if not isinstance(extra_body, dict):
+        return None
+
+    thinking = extra_body.get("thinking")
+    if not isinstance(thinking, dict):
+        return None
+
+    thinking_type = str(thinking.get("type") or "").strip().lower()
+    if thinking_type == "enabled":
+        return True
+    if thinking_type == "disabled":
+        return False
+    return None
+
+
+def _is_deepseek_thinking_enabled(model_name: str | None, extra_body: Any) -> bool:
+    """
+    判断本次 DeepSeek 调用是否处于 thinking mode。
+    """
+    explicit_toggle = _deepseek_thinking_toggle(extra_body)
+    if explicit_toggle is not None:
+        return explicit_toggle
+
+    normalized_model_name = str(model_name or "").strip().lower()
+    if normalized_model_name == "deepseek-reasoner":
+        return True
+    if normalized_model_name.startswith("deepseek-v4-"):
+        # DeepSeek V4 默认启用 thinking mode，除非显式关闭。
+        return True
+    return False
+
+
+def _extract_input_messages(input_: Any) -> list[Any]:
+    """
+    将 chat model 输入还原为原始 BaseMessage 序列。
+    """
+    try:
+        from langchain_core.messages import convert_to_messages
+
+        return list(convert_to_messages(input_))
+    except Exception:
+        if isinstance(input_, list):
+            return list(input_)
+        return []
+
+
+def _patch_deepseek_reasoning_content_support():
+    """
+    修补 langchain-deepseek 在 tool-call 场景下遗漏 reasoning_content 回传的问题。
+
+    DeepSeek thinking mode 要求：若 assistant 历史消息包含 tool_calls，
+    后续请求中必须带回该条消息的顶层 reasoning_content。
+    某些 langchain-deepseek 版本虽然能从响应中拿到 reasoning_content，
+    但不会在重放消息历史时写回请求载荷，导致 400。
+    """
+    try:
+        from langchain_deepseek import ChatDeepSeek
+    except Exception as err:
+        logger.debug(f"跳过 langchain-deepseek reasoning_content 修补：{err}")
+        return
+
+    if getattr(ChatDeepSeek, "_moviepilot_reasoning_content_patched", False):
+        return
+
+    original_get_request_payload = getattr(ChatDeepSeek, "_get_request_payload", None)
+    if not callable(original_get_request_payload):
+        logger.warning("langchain-deepseek 缺少 _get_request_payload，无法修补 reasoning_content")
+        return
+
+    @wraps(original_get_request_payload)
+    def _patched_get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = original_get_request_payload(self, input_, stop=stop, **kwargs)
+
+        try:
+            original_messages = _extract_input_messages(input_)
+            payload_messages = payload.get("messages") or []
+            model_name = getattr(self, "model_name", None) or getattr(
+                self, "model", None
+            )
+            extra_body = kwargs.get("extra_body")
+            if extra_body is None:
+                extra_body = getattr(self, "extra_body", None)
+            if extra_body is None:
+                extra_body = getattr(self, "model_kwargs", {}).get("extra_body")
+
+            if not _is_deepseek_thinking_enabled(model_name, extra_body):
+                return payload
+
+            for index, message in enumerate(payload_messages):
+                if not isinstance(message, dict):
+                    continue
+                if message.get("role") != "assistant":
+                    continue
+                if not message.get("tool_calls"):
+                    continue
+                if message.get("reasoning_content") is not None:
+                    continue
+
+                reasoning_content = ""
+                if index < len(original_messages):
+                    additional_kwargs = (
+                        getattr(original_messages[index], "additional_kwargs", None)
+                        or {}
+                    )
+                    if isinstance(additional_kwargs, dict):
+                        captured_reasoning = additional_kwargs.get("reasoning_content")
+                        if isinstance(captured_reasoning, str):
+                            reasoning_content = captured_reasoning
+
+                message["reasoning_content"] = reasoning_content
+        except Exception as err:
+            logger.warning(
+                f"修补 langchain-deepseek reasoning_content 请求载荷时失败，将继续使用原始载荷: {err}"
+            )
+
+        return payload
+
+    ChatDeepSeek._get_request_payload = _patched_get_request_payload
+    ChatDeepSeek._moviepilot_reasoning_content_patched = True
+    logger.debug("已修补 langchain-deepseek thinking tool-call 的 reasoning_content 回传兼容性")
 
 
 class LLMHelper:
@@ -437,6 +564,7 @@ class LLMHelper:
         elif provider_name == "deepseek":
             from langchain_deepseek import ChatDeepSeek
 
+            _patch_deepseek_reasoning_content_support()
             model = ChatDeepSeek(
                 model=model_name,
                 api_key=api_key_value,
