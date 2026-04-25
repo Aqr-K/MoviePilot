@@ -73,7 +73,7 @@ class _ThinkTagStripper:
                         on_output(self.buffer[:start_idx])
                         emitted = True
                     self.in_think_tag = True
-                    self.buffer = self.buffer[start_idx + 7:]
+                    self.buffer = self.buffer[start_idx + 7 :]
                 else:
                     # 检查是否以 <think> 的不完整前缀结尾
                     partial_match = False
@@ -93,7 +93,7 @@ class _ThinkTagStripper:
                 end_idx = self.buffer.find("</think>")
                 if end_idx != -1:
                     self.in_think_tag = False
-                    self.buffer = self.buffer[end_idx + 8:]
+                    self.buffer = self.buffer[end_idx + 8 :]
                 else:
                     # 检查是否以 </think> 的不完整前缀结尾
                     partial_match = False
@@ -371,10 +371,6 @@ class MoviePilotAgent:
         :param on_token: 收到有效 token 时的回调
         """
         stripper = _ThinkTagStripper()
-        # 非VERBOSE模式下，跟踪当前langgraph_step以检测中间步骤的模型输出
-        # 当模型在工具调用之前输出的"计划/思考"文本，会在检测到tool_call时被清除
-        current_model_step = -1
-        has_emitted_in_step = False
 
         async for chunk in agent.astream(
             messages,
@@ -388,24 +384,12 @@ class MoviePilotAgent:
                 if not token or not hasattr(token, "tool_call_chunks"):
                     continue
 
-                # 获取当前步骤信息
-                step = metadata.get("langgraph_step", -1) if metadata else -1
-
                 if token.tool_call_chunks:
-                    # 检测到工具调用token：说明当前步骤是中间步骤
-                    # 非VERBOSE模式下，清除该步骤之前输出的"计划/思考"文本
-                    if not settings.AI_AGENT_VERBOSE and has_emitted_in_step:
-                        self.stream_handler.reset()
-                        stripper.reset()
-                        has_emitted_in_step = False
+                    # 清除 stripper 内部缓冲中可能残留的 <think> 标签中间状态
+                    stripper.reset()
                     continue
 
                 # 以下处理纯文本token（tool_call_chunks为空）
-
-                # 检测步骤变化，重置步骤内emit跟踪
-                if step != current_model_step:
-                    current_model_step = step
-                    has_emitted_in_step = False
 
                 # 跳过模型思考/推理内容（如 DeepSeek R1 的 reasoning_content）
                 additional = getattr(token, "additional_kwargs", None)
@@ -416,8 +400,7 @@ class MoviePilotAgent:
                     # content 可能是字符串或内容块列表，过滤掉思考类型的块
                     content = self._extract_text_content(token.content)
                     if content:
-                        if stripper.process(content, on_token):
-                            has_emitted_in_step = True
+                        stripper.process(content, on_token)
 
         stripper.flush(on_token)
 
@@ -457,7 +440,10 @@ class MoviePilotAgent:
                     agent=agent,
                     messages={"messages": messages},
                     config=agent_config,
-                    on_token=lambda token: (self.stream_handler.emit(token), self._emit_output(token)),
+                    on_token=lambda token: (
+                        self.stream_handler.emit(token),
+                        self._emit_output(token),
+                    ),
                 )
 
                 # 停止流式输出，返回是否已通过流式编辑发送了所有内容及最终文本
@@ -1004,7 +990,6 @@ class AgentManager:
             )
 
         try:
-
             await self.process_message(
                 session_id=session_id,
                 user_id=user_id,
