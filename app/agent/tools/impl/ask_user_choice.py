@@ -106,7 +106,7 @@ class AskUserChoiceTool(MoviePilotTool):
         ):
             return f"当前渠道 {channel.value} 不支持按钮选择"
 
-        max_per_row = min(ChannelCapabilityManager.get_max_buttons_per_row(channel), 2)
+        max_per_row = 1
         max_rows = ChannelCapabilityManager.get_max_button_rows(channel)
         max_text_length = ChannelCapabilityManager.get_max_button_text_length(channel)
         max_options = max_per_row * max_rows
