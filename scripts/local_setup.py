@@ -1086,14 +1086,6 @@ def _env_llm_thinking_level_default() -> str:
         "xhigh",
     }:
         return normalized
-
-    legacy_disable = _env_bool("LLM_DISABLE_THINKING", True)
-    legacy_effort = _normalize_choice(_env_default("LLM_REASONING_EFFORT", ""))
-    legacy_effort = alias_map.get(legacy_effort, legacy_effort)
-    if legacy_disable:
-        return "off"
-    if legacy_effort in {"minimal", "low", "medium", "high", "max", "xhigh"}:
-        return legacy_effort
     return "auto"
 
 
@@ -1550,7 +1542,7 @@ def _load_auth_site_definitions_inner() -> dict[str, Any]:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
 
-    from app.helper.sites import SitesHelper
+    from app.helper.sites import SitesHelper  # noqa
 
     auth_sites = SitesHelper().get_authsites() or {}
     definitions: dict[str, Any] = {}
@@ -1887,7 +1879,7 @@ def _apply_local_system_config_inner(config_payload: dict[str, Any]) -> None:
     ):
         system_config.set(SystemConfigKey.UserSiteAuthParams, site_auth_item)
         try:
-            from app.helper.sites import SitesHelper
+            from app.helper.sites import SitesHelper  # noqa
 
             status, msg = SitesHelper().check_user(
                 site_auth_item.get("site"), site_auth_item.get("params")

@@ -39,8 +39,6 @@ _stub_module(
         LLM_API_KEY="global-key",
         LLM_BASE_URL="https://global.example.com",
         LLM_THINKING_LEVEL=None,
-        LLM_DISABLE_THINKING=False,
-        LLM_REASONING_EFFORT=None,
         LLM_TEMPERATURE=0.1,
         LLM_MAX_CONTEXT_TOKENS=64,
         PROXY_HOST=None,

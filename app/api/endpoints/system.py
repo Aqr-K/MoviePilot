@@ -12,6 +12,7 @@ from anyio import Path as AsyncPath
 from app.helper.sites import SitesHelper  # noqa  # noqa
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app import schemas
 from app.chain.mediaserver import MediaServerChain
@@ -29,14 +30,14 @@ from app.db.user_oper import (
     get_current_active_superuser_async,
     get_current_active_user_async,
 )
-from app.helper.llm import LLMHelper, LLMTestError, LLMTestTimeout
+from app.helper.image import ImageHelper
+from app.helper.llm import LLMHelper, LLMTestTimeout
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
 from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
-from app.helper.image import ImageHelper
 from app.log import logger
 from app.scheduler import Scheduler
 from app.schemas import ConfigChangeEventData
@@ -45,7 +46,6 @@ from app.utils.crypto import HashUtils
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.security import SecurityUtils
 from app.utils.url import UrlUtils
-from pydantic import BaseModel
 from version import APP_VERSION
 
 router = APIRouter()
@@ -58,8 +58,6 @@ class LlmTestRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     thinking_level: Optional[str] = None
-    disable_thinking: Optional[bool] = None
-    reasoning_effort: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
 
@@ -271,94 +269,6 @@ def _build_nettest_rules() -> list[dict[str, Any]]:
     return rules
 
 
-def _build_llm_test_data(
-    duration_ms: Optional[int] = None,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-) -> dict[str, Any]:
-    """
-    构造 LLM 测试接口的基础返回数据。
-    """
-    data = {
-        "provider": provider if provider is not None else settings.LLM_PROVIDER,
-        "model": model if model is not None else settings.LLM_MODEL,
-    }
-    if duration_ms is not None:
-        data["duration_ms"] = duration_ms
-    return data
-
-
-def _normalize_llm_test_value(
-    value: Optional[str], *, empty_as_none: bool = False
-) -> Optional[str]:
-    """
-    清理来自前端的 LLM 测试字段。
-    """
-    if value is None:
-        return None
-    stripped = value.strip()
-    if empty_as_none and not stripped:
-        return None
-    return stripped
-
-
-def _build_llm_test_snapshot(payload: Optional[LlmTestRequest] = None) -> dict[str, Any]:
-    """
-    冻结当前 LLM 测试所需配置。
-
-    优先使用前端传入的临时参数；未传入时回退到已保存配置，兼容旧调用。
-    """
-    provider = settings.LLM_PROVIDER
-    model = settings.LLM_MODEL
-    thinking_level = _normalize_llm_test_value(
-        getattr(settings, "LLM_THINKING_LEVEL", None), empty_as_none=True
-    )
-    disable_thinking = bool(getattr(settings, "LLM_DISABLE_THINKING", False))
-    reasoning_effort = _normalize_llm_test_value(
-        getattr(settings, "LLM_REASONING_EFFORT", None), empty_as_none=True
-    )
-    api_key = settings.LLM_API_KEY
-    base_url = settings.LLM_BASE_URL
-    enabled = bool(settings.AI_AGENT_ENABLE)
-
-    if payload:
-        if payload.enabled is not None:
-            enabled = bool(payload.enabled)
-        if payload.provider is not None:
-            provider = _normalize_llm_test_value(payload.provider) or ""
-        if payload.model is not None:
-            model = _normalize_llm_test_value(payload.model) or ""
-        if payload.thinking_level is not None:
-            thinking_level = _normalize_llm_test_value(
-                payload.thinking_level, empty_as_none=True
-            )
-        if payload.disable_thinking is not None:
-            disable_thinking = bool(payload.disable_thinking)
-        if payload.reasoning_effort is not None:
-            reasoning_effort = _normalize_llm_test_value(
-                payload.reasoning_effort, empty_as_none=True
-            )
-        if payload.api_key is not None:
-            api_key = _normalize_llm_test_value(payload.api_key, empty_as_none=True)
-        if payload.base_url is not None:
-            base_url = _normalize_llm_test_value(payload.base_url, empty_as_none=True)
-
-    if thinking_level is not None:
-        disable_thinking = None
-        reasoning_effort = None
-
-    return {
-        "enabled": enabled,
-        "provider": provider,
-        "model": model,
-        "thinking_level": thinking_level,
-        "disable_thinking": disable_thinking,
-        "reasoning_effort": reasoning_effort,
-        "api_key": api_key,
-        "base_url": base_url,
-    }
-
-
 def _sanitize_llm_test_error(message: str, api_key: Optional[str] = None) -> str:
     """
     清理错误信息中的敏感字段，避免回显密钥。
@@ -450,12 +360,12 @@ async def _close_nettest_response(response: Any) -> None:
 
 
 async def fetch_image(
-    url: str,
-    proxy: Optional[bool] = None,
-    use_cache: bool = False,
-    if_none_match: Optional[str] = None,
-    cookies: Optional[str | dict] = None,
-    allowed_domains: Optional[set[str]] = None,
+        url: str,
+        proxy: Optional[bool] = None,
+        use_cache: bool = False,
+        if_none_match: Optional[str] = None,
+        cookies: Optional[str | dict] = None,
+        allowed_domains: Optional[set[str]] = None,
 ) -> Optional[Response]:
     """
     处理图片缓存逻辑，支持HTTP缓存和磁盘缓存
@@ -477,6 +387,7 @@ async def fetch_image(
         use_cache=use_cache,
         cookies=cookies,
     )
+
     if content:
         # 检查 If-None-Match
         etag = HashUtils.md5(content)
@@ -489,16 +400,17 @@ async def fetch_image(
             media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
             headers=headers,
         )
+    return None
 
 
 @router.get("/img/{proxy}", summary="图片代理")
 async def proxy_img(
-    imgurl: str,
-    proxy: bool = False,
-    cache: bool = False,
-    use_cookies: bool = False,
-    if_none_match: Annotated[str | None, Header()] = None,
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        imgurl: str,
+        proxy: bool = False,
+        cache: bool = False,
+        use_cookies: bool = False,
+        if_none_match: Annotated[str | None, Header()] = None,
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ) -> Response:
     """
     图片代理，可选是否使用代理服务器，支持 HTTP 缓存
@@ -527,9 +439,9 @@ async def proxy_img(
 
 @router.get("/cache/image", summary="图片缓存")
 async def cache_img(
-    url: str,
-    if_none_match: Annotated[str | None, Header()] = None,
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        url: str,
+        if_none_match: Annotated[str | None, Header()] = None,
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ) -> Response:
     """
     本地缓存图片文件，支持 HTTP 缓存，如果启用全局图片缓存，则使用磁盘缓存
@@ -623,7 +535,7 @@ async def get_env_setting(_: User = Depends(get_current_active_user_async)):
 
 @router.post("/env", summary="更新系统配置", response_model=schemas.Response)
 async def set_env_setting(
-    env: dict, _: User = Depends(get_current_active_superuser_async)
+        env: dict, _: User = Depends(get_current_active_superuser_async)
 ):
     """
     更新系统环境变量（仅管理员）
@@ -658,9 +570,9 @@ async def set_env_setting(
 
 @router.get("/progress/{process_type}", summary="实时进度")
 async def get_progress(
-    request: Request,
-    process_type: str,
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        request: Request,
+        process_type: str,
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ):
     """
     实时获取处理进度，返回格式为SSE
@@ -695,9 +607,9 @@ async def get_setting(key: str, _: User = Depends(get_current_active_user_async)
 
 @router.post("/setting/{key}", summary="更新系统设置", response_model=schemas.Response)
 async def set_setting(
-    key: str,
-    value: Annotated[Union[list, dict, bool, int, str] | None, Body()] = None,
-    _: User = Depends(get_current_active_superuser_async),
+        key: str,
+        value: Annotated[Union[list, dict, bool, int, str] | None, Body()] = None,
+        _: User = Depends(get_current_active_superuser_async),
 ):
     """
     更新系统设置（仅管理员）
@@ -731,10 +643,10 @@ async def set_setting(
 
 @router.get("/llm-models", summary="获取LLM模型列表", response_model=schemas.Response)
 async def get_llm_models(
-    provider: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    _: User = Depends(get_current_active_user_async),
+        provider: str,
+        api_key: str,
+        base_url: Optional[str] = None,
+        _: User = Depends(get_current_active_user_async),
 ):
     """
     获取LLM模型列表
@@ -750,28 +662,33 @@ async def get_llm_models(
 
 @router.post("/llm-test", summary="测试LLM调用", response_model=schemas.Response)
 async def llm_test(
-    payload: Annotated[Optional[LlmTestRequest], Body()] = None,
-    _: User = Depends(get_current_active_superuser_async),
+        payload: Annotated[Optional[LlmTestRequest], Body()] = None,
+        _: User = Depends(get_current_active_superuser_async),
 ):
     """
     使用传入配置或当前已保存配置执行一次最小 LLM 调用。
     """
-    snapshot = _build_llm_test_snapshot(payload)
-    data = _build_llm_test_data(
-        provider=snapshot["provider"],
-        model=snapshot["model"],
-    )
-    if not snapshot["enabled"]:
+    if not payload:
+        return schemas.Response(success=False, message="请配置智能助手LLM相关参数后再进行测试")
+
+    if not payload.provider or not payload.model:
+        return schemas.Response(success=False, message="请配置LLM提供商和模型")
+
+    data = {
+        "provider": payload.provider,
+        "model": payload.model,
+    }
+    if not payload.enabled:
         return schemas.Response(success=False, message="请先启用智能助手", data=data)
 
-    if not snapshot["api_key"]:
+    if not payload.api_key or not payload.api_key.strip():
         return schemas.Response(
             success=False,
             message="请先配置 LLM API Key",
             data=data,
         )
 
-    if not (snapshot["model"] or "").strip():
+    if not payload.model or not payload.model.strip():
         return schemas.Response(
             success=False,
             message="请先配置 LLM 模型",
@@ -780,52 +697,36 @@ async def llm_test(
 
     try:
         result = await LLMHelper.test_current_settings(
-            provider=snapshot["provider"],
-            model=snapshot["model"],
-            thinking_level=snapshot["thinking_level"],
-            disable_thinking=snapshot["disable_thinking"],
-            reasoning_effort=snapshot["reasoning_effort"],
-            api_key=snapshot["api_key"],
-            base_url=snapshot["base_url"],
+            provider=payload.provider,
+            model=payload.model,
+            thinking_level=payload.thinking_level,
+            api_key=payload.api_key,
+            base_url=payload.base_url,
         )
         if not result.get("reply_preview"):
             return schemas.Response(
                 success=False,
-                message="模型响应为空",
-                data=_build_llm_test_data(
-                    result.get("duration_ms"),
-                    provider=snapshot["provider"],
-                    model=snapshot["model"],
-                ),
+                message="模型响应为空"
             )
         return schemas.Response(success=True, data=result)
     except (LLMTestTimeout, TimeoutError) as err:
+        logger.warning(err)
         return schemas.Response(
             success=False,
-            message="LLM 调用超时",
-            data=_build_llm_test_data(
-                getattr(err, "duration_ms", None),
-                provider=snapshot["provider"],
-                model=snapshot["model"],
-            ),
+            message="LLM 调用超时"
         )
     except Exception as err:
         return schemas.Response(
             success=False,
-            message=_sanitize_llm_test_error(str(err), snapshot["api_key"]),
-            data=_build_llm_test_data(
-                getattr(err, "duration_ms", None),
-                provider=snapshot["provider"],
-                model=snapshot["model"],
-            ),
+            message=_sanitize_llm_test_error(str(err), payload.api_key)
         )
 
 
 @router.get("/message", summary="实时消息")
 async def get_message(
-    request: Request,
-    role: Optional[str] = "system",
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        request: Request,
+        role: Optional[str] = "system",
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ):
     """
     实时获取系统消息，返回格式为SSE
@@ -848,10 +749,10 @@ async def get_message(
 
 @router.get("/logging", summary="实时日志")
 async def get_logging(
-    request: Request,
-    length: Optional[int] = 50,
-    logfile: Optional[str] = "moviepilot.log",
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        request: Request,
+        length: Optional[int] = 50,
+        logfile: Optional[str] = "moviepilot.log",
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ):
     """
     实时获取系统日志
@@ -862,7 +763,7 @@ async def get_logging(
     log_path = base_path / logfile
 
     if not await SecurityUtils.async_is_safe_path(
-        base_path=base_path, user_path=log_path, allowed_suffixes={".log"}
+            base_path=base_path, user_path=log_path, allowed_suffixes={".log"}
     ):
         raise HTTPException(status_code=404, detail="Not Found")
 
@@ -879,7 +780,7 @@ async def get_logging(
 
             # 读取历史日志
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                    log_path, mode="r", encoding="utf-8", errors="ignore"
             ) as f:
                 # 优化大文件读取策略
                 if file_size > 100 * 1024:
@@ -891,7 +792,7 @@ async def get_logging(
                     # 找到第一个完整的行
                     first_newline = content.find("\n")
                     if first_newline != -1:
-                        content = content[first_newline + 1 :]
+                        content = content[first_newline + 1:]
                 else:
                     # 小文件直接读取全部内容
                     content = await f.read()
@@ -899,7 +800,7 @@ async def get_logging(
                 # 按行分割并添加到队列，只保留非空行
                 lines = [line.strip() for line in content.splitlines() if line.strip()]
                 # 只取最后N行
-                for line in lines[-max(length, 50) :]:
+                for line in lines[-max(length, 50):]:
                     lines_queue.append(line)
 
             # 输出历史日志
@@ -908,7 +809,7 @@ async def get_logging(
 
             # 实时监听新日志
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                    log_path, mode="r", encoding="utf-8", errors="ignore"
             ) as f:
                 # 移动文件指针到文件末尾，继续监听新增内容
                 await f.seek(0, 2)
@@ -947,7 +848,7 @@ async def get_logging(
         try:
             # 使用 aiofiles 异步读取文件
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                    log_path, mode="r", encoding="utf-8", errors="ignore"
             ) as file:
                 text = await file.read()
             # 倒序输出
@@ -979,10 +880,10 @@ async def latest_version(_: schemas.TokenPayload = Depends(verify_token)):
 
 @router.get("/ruletest", summary="过滤规则测试", response_model=schemas.Response)
 def ruletest(
-    title: str,
-    rulegroup_name: str,
-    subtitle: Optional[str] = None,
-    _: schemas.TokenPayload = Depends(verify_token),
+        title: str,
+        rulegroup_name: str,
+        subtitle: Optional[str] = None,
+        _: schemas.TokenPayload = Depends(verify_token),
 ):
     """
     过滤规则测试，规则类型 1-订阅，2-洗版，3-搜索
@@ -1037,11 +938,10 @@ async def nettest_targets(_: schemas.TokenPayload = Depends(verify_token)):
 
 @router.get("/nettest", summary="测试网络连通性")
 async def nettest(
-    target_id: Optional[str] = None,
-    url: Optional[str] = None,
-    proxy: Optional[bool] = None,
-    include: Optional[str] = None,
-    _: schemas.TokenPayload = Depends(verify_token),
+        target_id: Optional[str] = None,
+        url: Optional[str] = None,
+        include: Optional[str] = None,
+        _: schemas.TokenPayload = Depends(verify_token),
 ):
     """
     测试内置目标的网络连通性。

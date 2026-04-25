@@ -6,6 +6,8 @@ import time
 from functools import wraps
 from typing import Any, List
 
+from langchain_core.messages import convert_to_messages
+
 from app.core.config import settings
 from app.log import logger
 
@@ -71,7 +73,8 @@ def _get_httpx_proxy_key() -> str:
         if "proxy" in params:
             return "proxy"
         return "proxies"
-    except Exception:
+    except Exception as e:
+        logger.warning(f"检测 httpx 代理参数失败，默认使用 'proxies'：{e}")
         return "proxies"
 
 
@@ -111,20 +114,6 @@ def _is_deepseek_thinking_enabled(model_name: str | None, extra_body: Any) -> bo
     return False
 
 
-def _extract_input_messages(input_: Any) -> list[Any]:
-    """
-    将 chat model 输入还原为原始 BaseMessage 序列。
-    """
-    try:
-        from langchain_core.messages import convert_to_messages
-
-        return list(convert_to_messages(input_))
-    except Exception:
-        if isinstance(input_, list):
-            return list(input_)
-        return []
-
-
 def _patch_deepseek_reasoning_content_support():
     """
     修补 langchain-deepseek 在 tool-call 场景下遗漏 reasoning_content 回传的问题。
@@ -153,7 +142,7 @@ def _patch_deepseek_reasoning_content_support():
         payload = original_get_request_payload(self, input_, stop=stop, **kwargs)
 
         try:
-            original_messages = _extract_input_messages(input_)
+            original_messages = convert_to_messages(input_)
             payload_messages = payload.get("messages") or []
             model_name = getattr(self, "model_name", None) or getattr(
                 self, "model", None
@@ -180,8 +169,8 @@ def _patch_deepseek_reasoning_content_support():
                 reasoning_content = ""
                 if index < len(original_messages):
                     additional_kwargs = (
-                        getattr(original_messages[index], "additional_kwargs", None)
-                        or {}
+                            getattr(original_messages[index], "additional_kwargs", None)
+                            or {}
                     )
                     if isinstance(additional_kwargs, dict):
                         captured_reasoning = additional_kwargs.get("reasoning_content")
@@ -189,9 +178,9 @@ def _patch_deepseek_reasoning_content_support():
                             reasoning_content = captured_reasoning
 
                 message["reasoning_content"] = reasoning_content
-        except Exception as err:
+        except Exception as e:
             logger.warning(
-                f"修补 langchain-deepseek reasoning_content 请求载荷时失败，将继续使用原始载荷: {err}"
+                f"修补 langchain-deepseek reasoning_content 请求载荷时失败，将继续使用原始载荷: {e}"
             )
 
         return payload
@@ -209,15 +198,6 @@ class LLMHelper:
     )
 
     @staticmethod
-    def _should_disable_thinking(disable_thinking: bool | None = None) -> bool:
-        """
-        判断本次调用是否应尝试关闭模型思考能力。
-        """
-        if disable_thinking is not None:
-            return bool(disable_thinking)
-        return bool(getattr(settings, "LLM_DISABLE_THINKING", False))
-
-    @staticmethod
     def _normalize_model_name(model_name: str | None) -> str:
         """
         统一清理模型名称，便于按模型族做能力映射。
@@ -225,146 +205,41 @@ class LLMHelper:
         return (model_name or "").strip().lower()
 
     @classmethod
-    def _normalize_thinking_level_value(cls, value: str | None) -> str | None:
-        """
-        统一清理思考级别/强度值，并兼容常见别名。
-        """
-        if value is None:
-            return None
-
-        normalized = str(value).strip().lower()
-        if not normalized:
-            return None
-
-        alias_map = {
-            "none": "off",
-            "disabled": "off",
-            "disable": "off",
-            "enabled": "auto",
-            "enable": "auto",
-            "default": "auto",
-            "dynamic": "auto",
-        }
-        return alias_map.get(normalized, normalized)
-
-    @classmethod
-    def _normalize_thinking_level(
-        cls, thinking_level: str | None = None
-    ) -> str | None:
-        """
-        统一清理 thinking_level 配置。
-        """
-        value = (
-            thinking_level
-            if thinking_level is not None
-            else getattr(settings, "LLM_THINKING_LEVEL", None)
-        )
-        normalized = cls._normalize_thinking_level_value(value)
-        if not normalized:
-            return None
-
-        if normalized not in cls._SUPPORTED_THINKING_LEVELS:
-            logger.warning(f"忽略不支持的 thinking_level 配置: {normalized}")
-            return None
-        return normalized
-
-    @classmethod
-    def _normalize_reasoning_effort(
-        cls, reasoning_effort: str | None = None
-    ) -> str | None:
-        """
-        统一清理 legacy reasoning_effort 配置。
-        """
-        value = (
-            reasoning_effort
-            if reasoning_effort is not None
-            else getattr(settings, "LLM_REASONING_EFFORT", None)
-        )
-        return cls._normalize_thinking_level(value)
-
-    @classmethod
-    def _resolve_thinking_level(
-        cls,
-        thinking_level: str | None = None,
-        disable_thinking: bool | None = None,
-        reasoning_effort: str | None = None,
-    ) -> str:
-        """
-        统一解析本次调用的思考配置。
-
-        优先级：
-        1. 新字段 `thinking_level`
-        2. 本次调用传入的 legacy 字段
-        3. 已保存的新字段 `LLM_THINKING_LEVEL`
-        4. 已保存的 legacy 字段
-        """
-        explicit_level = cls._normalize_thinking_level(thinking_level)
-        if explicit_level:
-            return explicit_level
-
-        explicit_effort = (
-            cls._normalize_reasoning_effort(reasoning_effort)
-            if reasoning_effort is not None
-            else None
-        )
-        if disable_thinking is not None or reasoning_effort is not None:
-            if disable_thinking is not None and bool(disable_thinking):
-                return "off"
-            return explicit_effort or "auto"
-
-        configured_level = cls._normalize_thinking_level(
-            getattr(settings, "LLM_THINKING_LEVEL", None)
-        )
-        if configured_level:
-            return configured_level
-
-        legacy_disable = getattr(settings, "LLM_DISABLE_THINKING", None)
-        legacy_effort = cls._normalize_reasoning_effort(
-            getattr(settings, "LLM_REASONING_EFFORT", None)
-        )
-        if legacy_disable is not None:
-            return "off" if bool(legacy_disable) else (legacy_effort or "auto")
-
-        return legacy_effort or "off"
-
-    @classmethod
     def _normalize_deepseek_reasoning_effort(
-        cls, thinking_level: str | None = None
+            cls, thinking_level: str | None = None
     ) -> str | None:
         """
         DeepSeek 文档当前建议使用 high/max；兼容常见 effort 别名。
         """
-        normalized = cls._normalize_thinking_level(thinking_level)
-        if not normalized or normalized in {"off", "auto"}:
+        if not thinking_level or thinking_level in {"off", "auto"}:
             return None
 
-        if normalized in {"minimal", "low", "medium", "high"}:
+        if thinking_level in {"minimal", "low", "medium", "high"}:
             return "high"
-        if normalized in {"max", "xhigh"}:
+        if thinking_level in {"max", "xhigh"}:
             return "max"
 
-        logger.warning(f"忽略不支持的 DeepSeek reasoning_effort 配置: {normalized}")
+        logger.warning(f"忽略不支持的 DeepSeek reasoning_effort 配置: {thinking_level}")
         return None
 
     @classmethod
     def _normalize_openai_reasoning_effort(
-        cls, thinking_level: str | None = None
+            cls, thinking_level: str | None = None
     ) -> str | None:
         """
         OpenAI reasoning_effort 支持更细粒度的 effort，统一做最近似映射。
         """
-        normalized = cls._normalize_thinking_level(thinking_level)
-        if not normalized or normalized == "auto":
+        if not thinking_level or thinking_level == "auto":
             return None
-        if normalized == "off":
+        if thinking_level == "off":
             return "none"
-        if normalized == "max":
+        if thinking_level == "max":
             return "xhigh"
-        return normalized
+        return thinking_level
 
     @classmethod
     def _build_google_thinking_kwargs(
-        cls, model_name: str, thinking_level: str
+            cls, model_name: str, thinking_level: str
     ) -> dict[str, Any]:
         """
         Gemini 3 使用 thinking_level；Gemini 2.5 使用 thinking_budget。
@@ -427,7 +302,7 @@ class LLMHelper:
 
     @classmethod
     def _build_kimi_thinking_kwargs(
-        cls, model_name: str, thinking_level: str
+            cls, model_name: str, thinking_level: str
     ) -> dict[str, Any]:
         """
         Kimi 当前公开文档仅支持思考开关，不支持显式深度调节。
@@ -440,12 +315,10 @@ class LLMHelper:
 
     @classmethod
     def _build_thinking_kwargs(
-        cls,
-        provider: str,
-        model: str | None,
-        thinking_level: str | None = None,
-        disable_thinking: bool | None = None,
-        reasoning_effort: str | None = None,
+            cls,
+            provider: str,
+            model: str | None,
+            thinking_level: str | None = None
     ) -> dict[str, Any]:
         """
         按 provider/model 生成思考模式相关参数。
@@ -455,45 +328,40 @@ class LLMHelper:
         """
         provider_name = (provider or "").strip().lower()
         model_name = cls._normalize_model_name(model)
-        resolved_thinking_level = cls._resolve_thinking_level(
-            thinking_level=thinking_level,
-            disable_thinking=disable_thinking,
-            reasoning_effort=reasoning_effort,
-        )
 
         if provider_name == "deepseek":
-            if resolved_thinking_level == "off":
+            if thinking_level == "off":
                 return {"extra_body": {"thinking": {"type": "disabled"}}}
-            if resolved_thinking_level == "auto":
+            if thinking_level == "auto":
                 return {}
 
             kwargs: dict[str, Any] = {"extra_body": {"thinking": {"type": "enabled"}}}
             deepseek_effort = cls._normalize_deepseek_reasoning_effort(
-                resolved_thinking_level
+                thinking_level
             )
             if deepseek_effort:
                 kwargs["reasoning_effort"] = deepseek_effort
             return kwargs
 
         if model_name.startswith(("kimi-k2.5", "kimi-k2.6", "kimi-k2-thinking")):
-            return cls._build_kimi_thinking_kwargs(model_name, resolved_thinking_level)
+            return cls._build_kimi_thinking_kwargs(model_name, thinking_level)
 
         if not model_name:
             return {}
 
         # OpenAI 原生推理模型优先走 LangChain 内置 reasoning_effort。
         if provider_name == "openai" and model_name.startswith(
-            ("gpt-5", "o1", "o3", "o4")
+                ("gpt-5", "o1", "o3", "o4")
         ):
             openai_effort = cls._normalize_openai_reasoning_effort(
-                resolved_thinking_level
+                thinking_level
             )
             return {"reasoning_effort": openai_effort} if openai_effort else {}
 
         # Gemini 使用 google-genai / langchain-google-genai 内置思考控制参数。
         if provider_name == "google":
             return cls._build_google_thinking_kwargs(
-                model_name, resolved_thinking_level
+                model_name, thinking_level
             )
 
         return {}
@@ -507,18 +375,26 @@ class LLMHelper:
 
     @staticmethod
     def get_llm(
-        streaming: bool = False,
-        provider: str | None = None,
-        model: str | None = None,
-        thinking_level: str | None = None,
-        disable_thinking: bool | None = None,
-        reasoning_effort: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
+            streaming: bool = False,
+            provider: str | None = None,
+            model: str | None = None,
+            thinking_level: str | None = None,
+            api_key: str | None = None,
+            base_url: str | None = None,
     ):
         """
         获取LLM实例
         :param streaming: 是否启用流式输出
+        :param provider: LLM提供商，默认为配置项LLM_PROVIDER
+        :param model: 模型名称，默认为配置项LLM_MODEL
+        :param thinking_level: 思考模式级别，默认为 None（即自动判断
+            是否启用思考模式）。支持的级别包括 "off"（关闭）、"auto"（自动）、"minimal"、"low"、"medium"、"high"、"max"/"xhigh"（最大）。
+            不同模型对思考模式的支持和表现不同，具体映射关系请
+            参考代码实现。对于不支持思考模式的模型，该参数将被忽略。
+        :param api_key: API Key，默认为
+            配置项LLM_API_KEY。对于某些提供商（
+            如 DeepSeek），可能需要同时提供 base_url。
+        :param base_url: API Base URL，默认为配置项LLM_BASE_URL。
         :return: LLM实例
         """
         provider_name = str(
@@ -530,9 +406,7 @@ class LLMHelper:
         thinking_kwargs = LLMHelper._build_thinking_kwargs(
             provider=provider_name,
             model=model_name,
-            thinking_level=thinking_level,
-            disable_thinking=disable_thinking,
-            reasoning_effort=reasoning_effort,
+            thinking_level=thinking_level
         )
 
         if not api_key_value:
@@ -596,7 +470,7 @@ class LLMHelper:
         else:
             model.profile = {
                 "max_input_tokens": settings.LLM_MAX_CONTEXT_TOKENS
-                * 1000,  # 转换为token单位
+                                    * 1000,  # 转换为token单位
             }
 
         return model
@@ -620,10 +494,10 @@ class LLMHelper:
                 if isinstance(block, dict) or hasattr(block, "get"):
                     block_type = block.get("type")
                     if block.get("thought") or block_type in (
-                        "thinking",
-                        "reasoning_content",
-                        "reasoning",
-                        "thought",
+                            "thinking",
+                            "reasoning_content",
+                            "reasoning",
+                            "thought",
                     ):
                         continue
                     if block_type == "text":
@@ -643,15 +517,13 @@ class LLMHelper:
 
     @staticmethod
     async def test_current_settings(
-        prompt: str = "请只回复 OK",
-        timeout: int = 20,
-        provider: str | None = None,
-        model: str | None = None,
-        thinking_level: str | None = None,
-        disable_thinking: bool | None = None,
-        reasoning_effort: str | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
+            prompt: str = "请只回复 OK",
+            timeout: int = 20,
+            provider: str | None = None,
+            model: str | None = None,
+            thinking_level: str | None = None,
+            api_key: str | None = None,
+            base_url: str | None = None,
     ) -> dict:
         """
         使用当前已保存配置执行一次最小 LLM 调用。
@@ -666,8 +538,6 @@ class LLMHelper:
             provider=provider_name,
             model=model_name,
             thinking_level=thinking_level,
-            disable_thinking=disable_thinking,
-            reasoning_effort=reasoning_effort,
             api_key=api_key_value,
             base_url=base_url_value,
         )
@@ -695,7 +565,7 @@ class LLMHelper:
         return data
 
     def get_models(
-        self, provider: str, api_key: str, base_url: str = None
+            self, provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取模型列表"""
         logger.info(f"获取 {provider} 模型列表...")
@@ -733,7 +603,7 @@ class LLMHelper:
 
     @staticmethod
     def _get_openai_compatible_models(
-        provider: str, api_key: str, base_url: str = None
+            provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取OpenAI兼容模型列表"""
         try:
