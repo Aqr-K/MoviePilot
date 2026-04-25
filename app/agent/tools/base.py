@@ -83,7 +83,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                         await self.send_tool_message(merged_message)
             else:
                 # 非VERBOSE，重置缓冲区从头更新，保持消息编辑能力
-                self._stream_handler.reset()
+                # self._stream_handler.reset()
+                pass
         else:
             # 未启用流式传输，不发送任何工具消息内容
             pass
