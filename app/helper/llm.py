@@ -2,11 +2,12 @@
 
 import asyncio
 import inspect
+import json
 import time
 from functools import wraps
 from typing import Any, List
 
-from langchain_core.messages import convert_to_messages
+from langchain_core.messages import AIMessage
 
 from app.core.config import settings
 from app.log import logger
@@ -141,47 +142,38 @@ def _patch_deepseek_reasoning_content_support():
     def _patched_get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = original_get_request_payload(self, input_, stop=stop, **kwargs)
 
-        try:
-            original_messages = convert_to_messages(input_)
-            payload_messages = payload.get("messages") or []
-            model_name = getattr(self, "model_name", None) or getattr(
-                self, "model", None
-            )
-            extra_body = kwargs.get("extra_body")
-            if extra_body is None:
-                extra_body = getattr(self, "extra_body", None)
-            if extra_body is None:
-                extra_body = getattr(self, "model_kwargs", {}).get("extra_body")
+        # Resolve original messages so we can extract reasoning_content from
+        # additional_kwargs.  The parent's payload builder does not propagate
+        # this DeepSeek-specific field.
+        messages = self._convert_input(input_).to_messages()
 
-            if not _is_deepseek_thinking_enabled(model_name, extra_body):
-                return payload
+        for i, message in enumerate(payload["messages"]):
+            if message["role"] == "tool" and isinstance(message["content"], list):
+                message["content"] = json.dumps(message["content"])
+            elif message["role"] == "assistant":
+                if isinstance(message["content"], list):
+                    # DeepSeek API expects assistant content to be a string,
+                    # not a list. Extract text blocks and join them, or use
+                    # empty string if none exist.
+                    text_parts = [
+                        block.get("text", "")
+                        for block in message["content"]
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    ]
+                    message["content"] = "".join(text_parts) if text_parts else ""
 
-            for index, message in enumerate(payload_messages):
-                if not isinstance(message, dict):
-                    continue
-                if message.get("role") != "assistant":
-                    continue
-                if not message.get("tool_calls"):
-                    continue
-                if message.get("reasoning_content") is not None:
-                    continue
-
-                reasoning_content = ""
-                if index < len(original_messages):
-                    additional_kwargs = (
-                            getattr(original_messages[index], "additional_kwargs", None)
-                            or {}
+                # DeepSeek reasoning models require every assistant message to
+                # carry a reasoning_content field (even when empty).  The value
+                # is stored in AIMessage.additional_kwargs by
+                # _create_chat_result(); re-inject it into the API payload.
+                if (
+                        "reasoning_content" not in message
+                        and i < len(messages)
+                        and isinstance(messages[i], AIMessage)
+                ):
+                    message["reasoning_content"] = messages[i].additional_kwargs.get(
+                        "reasoning_content", ""
                     )
-                    if isinstance(additional_kwargs, dict):
-                        captured_reasoning = additional_kwargs.get("reasoning_content")
-                        if isinstance(captured_reasoning, str):
-                            reasoning_content = captured_reasoning
-
-                message["reasoning_content"] = reasoning_content
-        except Exception as e:
-            logger.warning(
-                f"修补 langchain-deepseek reasoning_content 请求载荷时失败，将继续使用原始载荷: {e}"
-            )
 
         return payload
 
