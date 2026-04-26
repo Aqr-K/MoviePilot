@@ -29,7 +29,7 @@ class QueryEpisodeScheduleTool(MoviePilotTool):
         season = kwargs.get("season")
         episode_group = kwargs.get("episode_group")
 
-        message = f"正在查询剧集上映时间: TMDB ID {tmdb_id} 第{season}季"
+        message = f"查询剧集上映时间: TMDB ID {tmdb_id} 第{season}季"
         if episode_group:
             message += f" (剧集组: {episode_group})"
 

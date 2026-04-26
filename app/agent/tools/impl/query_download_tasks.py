@@ -36,7 +36,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
         查询所有状态的任务（包括下载中和已完成的任务）
         """
         all_torrents = []
-        # 查询正在下载的任务
+        # 查询下载的任务
         downloading_torrents = download_chain.list_torrents(
             downloader=downloader, 
             status=TorrentStatus.DOWNLOADING
@@ -71,7 +71,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
         hash_value = kwargs.get("hash")
         title = kwargs.get("title")
         
-        parts = ["正在查询下载任务"]
+        parts = ["查询下载任务"]
         
         if downloader:
             parts.append(f"下载器: {downloader}")

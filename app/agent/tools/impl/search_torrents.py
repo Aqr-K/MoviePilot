@@ -41,11 +41,11 @@ class SearchTorrentsTool(MoviePilotTool):
         media_type = kwargs.get("media_type")
 
         if tmdb_id:
-            message = f"正在搜索种子: TMDB={tmdb_id}"
+            message = f"搜索种子: TMDB={tmdb_id}"
         elif douban_id:
-            message = f"正在搜索种子: 豆瓣={douban_id}"
+            message = f"搜索种子: 豆瓣={douban_id}"
         else:
-            message = "正在搜索种子"
+            message = "搜索种子"
         if media_type:
             message += f" [{media_type}]"
         return message

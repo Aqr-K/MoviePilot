@@ -40,8 +40,8 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
         """生成友好的提示消息"""
         plugin_id = kwargs.get("plugin_id")
         if plugin_id:
-            return f"正在查询插件 {plugin_id} 的能力"
-        return "正在查询所有插件的能力"
+            return f"查询插件 {plugin_id} 的能力"
+        return "查询所有插件的能力"
 
     async def run(self, plugin_id: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: plugin_id={plugin_id}")

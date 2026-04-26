@@ -57,7 +57,7 @@ class UpdateCustomIdentifiersTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成友好的提示消息"""
         identifiers = kwargs.get("identifiers", [])
-        return f"正在更新自定义识别词（共 {len(identifiers)} 条规则）"
+        return f"更新自定义识别词（共 {len(identifiers)} 条规则）"
 
     async def run(self, identifiers: List[str] = None, **kwargs) -> str:
         logger.info(

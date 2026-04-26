@@ -34,7 +34,7 @@ class DeleteSubscribeTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据删除参数生成友好的提示消息"""
         subscribe_id = kwargs.get("subscribe_id")
-        return f"正在删除订阅 (ID: {subscribe_id})"
+        return f"删除订阅 (ID: {subscribe_id})"
 
     async def run(self, subscribe_id: int, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: subscribe_id={subscribe_id}")

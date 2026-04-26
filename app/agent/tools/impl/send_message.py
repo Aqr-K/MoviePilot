@@ -52,12 +52,12 @@ class SendMessageTool(MoviePilotTool):
             message = message[:50] + "..."
 
         if title and image_url:
-            return f"正在发送图文消息: [{title}] {message}"
+            return f"发送图文消息: [{title}] {message}"
         if title:
-            return f"正在发送消息: [{title}] {message}"
+            return f"发送消息: [{title}] {message}"
         if image_url:
-            return f"正在发送图片消息: {message}"
-        return f"正在发送消息: {message}"
+            return f"发送图片消息: {message}"
+        return f"发送消息: {message}"
 
     async def run(
         self,

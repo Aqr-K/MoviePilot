@@ -33,7 +33,7 @@ class QueryTransferHistoryTool(MoviePilotTool):
         status = kwargs.get("status", "all")
         page = kwargs.get("page", 1)
 
-        parts = ["正在查询整理历史"]
+        parts = ["查询整理历史"]
 
         if title:
             parts.append(f"标题: {title}")

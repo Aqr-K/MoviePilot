@@ -108,16 +108,16 @@ class BrowseWebpageTool(MoviePilotTool):
         url = kwargs.get("url", "")
         selector = kwargs.get("selector", "")
         action_messages = {
-            "goto": f"正在打开网页: {url}",
-            "get_content": "正在获取页面内容",
-            "screenshot": "正在截取页面截图",
-            "click": f"正在点击元素: {selector}",
-            "fill": f"正在填写表单: {selector}",
-            "select": f"正在选择选项: {selector}",
-            "evaluate": "正在执行 JavaScript",
-            "wait": f"正在等待元素: {selector}",
+            "goto": f"打开网页: {url}",
+            "get_content": "获取页面内容",
+            "screenshot": "截取页面截图",
+            "click": f"点击元素: {selector}",
+            "fill": f"填写表单: {selector}",
+            "select": f"选择选项: {selector}",
+            "evaluate": "执行 JavaScript",
+            "wait": f"等待元素: {selector}",
         }
-        return action_messages.get(action, f"正在执行浏览器操作: {action}")
+        return action_messages.get(action, f"执行浏览器操作: {action}")
 
     async def run(
         self,

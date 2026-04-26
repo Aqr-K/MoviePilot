@@ -68,7 +68,7 @@ class TransferFileTool(MoviePilotTool):
         transfer_type = kwargs.get("transfer_type")
         background = kwargs.get("background", False)
 
-        message = f"正在整理文件: {file_path}"
+        message = f"整理文件: {file_path}"
         if media_type:
             message += f" [{media_type}]"
         if transfer_type:

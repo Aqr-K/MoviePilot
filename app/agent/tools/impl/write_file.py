@@ -27,7 +27,7 @@ class WriteFileTool(MoviePilotTool):
         """根据参数生成友好的提示消息"""
         file_path = kwargs.get("file_path", "")
         file_name = Path(file_path).name if file_path else "未知文件"
-        return f"正在写入文件: {file_name}"
+        return f"写入文件: {file_name}"
 
     async def run(self, file_path: str, content: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: file_path={file_path}")

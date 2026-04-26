@@ -41,7 +41,7 @@ class DeleteDownloadTool(MoviePilotTool):
         downloader = kwargs.get("downloader")
         delete_files = kwargs.get("delete_files", False)
 
-        message = f"正在删除下载任务: {hash_value}"
+        message = f"删除下载任务: {hash_value}"
         if downloader:
             message += f" [下载器: {downloader}]"
         if delete_files:

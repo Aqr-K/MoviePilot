@@ -41,7 +41,7 @@ class UpdateSiteCookieTool(MoviePilotTool):
         username = kwargs.get("username", "")
         two_step_code = kwargs.get("two_step_code")
 
-        message = f"正在更新站点Cookie: {site_identifier} (用户: {username})"
+        message = f"更新站点Cookie: {site_identifier} (用户: {username})"
         if two_step_code:
             message += " [需要两步验证]"
 

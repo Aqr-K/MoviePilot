@@ -32,7 +32,7 @@ class ListDirectoryTool(MoviePilotTool):
         path = kwargs.get("path", "")
         storage = kwargs.get("storage", "local")
         
-        message = f"正在查询目录: {path}"
+        message = f"查询目录: {path}"
         if storage != "local":
             message += f" [存储: {storage}]"
         

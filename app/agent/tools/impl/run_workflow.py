@@ -38,7 +38,7 @@ class RunWorkflowTool(MoviePilotTool):
         workflow_id = kwargs.get("workflow_id")
         from_begin = kwargs.get("from_begin", True)
 
-        message = f"正在执行工作流: {workflow_id}"
+        message = f"执行工作流: {workflow_id}"
         if not from_begin:
             message += " (从上次位置继续)"
         else:

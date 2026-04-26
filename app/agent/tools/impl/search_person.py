@@ -24,7 +24,7 @@ class SearchPersonTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据搜索参数生成友好的提示消息"""
         name = kwargs.get("name", "")
-        return f"正在搜索人物: {name}"
+        return f"搜索人物: {name}"
 
     async def run(self, name: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: name={name}")

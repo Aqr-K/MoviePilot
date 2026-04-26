@@ -30,7 +30,7 @@ class ExecuteCommandTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据命令生成友好的提示消息"""
         command = kwargs.get("command", "")
-        return f"正在执行系统命令: {command}"
+        return f"执行系统命令: {command}"
 
     async def run(self, command: str, timeout: Optional[int] = 60, **kwargs) -> str:
         logger.info(

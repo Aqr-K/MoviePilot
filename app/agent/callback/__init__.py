@@ -360,3 +360,11 @@ class StreamingHandler:
         是否已经通过流式输出发送过消息（当前轮次）
         """
         return self._message_response is not None
+
+    @property
+    def last_buffer_char(self) -> str:
+        """
+        返回当前缓冲区最后一个字符；缓冲区为空时返回空字符串。
+        """
+        with self._lock:
+            return self._buffer[-1:] if self._buffer else ""

@@ -40,7 +40,7 @@ class QuerySiteUserdataTool(MoviePilotTool):
         site_id = kwargs.get("site_id")
         workdate = kwargs.get("workdate")
 
-        message = f"正在查询站点 #{site_id} 的用户数据"
+        message = f"查询站点 #{site_id} 的用户数据"
         if workdate:
             message += f" (日期: {workdate})"
         else:

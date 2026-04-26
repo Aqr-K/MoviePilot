@@ -75,7 +75,7 @@ class AskUserChoiceTool(MoviePilotTool):
         message = kwargs.get("message", "") or ""
         if len(message) > 40:
             message = message[:40] + "..."
-        return f"正在发送按钮选择: {message}"
+        return f"发送按钮选择: {message}"
 
     @staticmethod
     def _truncate_button_text(text: str, max_length: int) -> str:

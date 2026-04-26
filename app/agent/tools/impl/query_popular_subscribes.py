@@ -39,7 +39,7 @@ class QueryPopularSubscribesTool(MoviePilotTool):
         min_rating = kwargs.get("min_rating")
         max_rating = kwargs.get("max_rating")
         
-        parts = [f"正在查询热门订阅 [{media_type}]"]
+        parts = [f"查询热门订阅 [{media_type}]"]
         
         if min_sub:
             parts.append(f"最少订阅: {min_sub}")

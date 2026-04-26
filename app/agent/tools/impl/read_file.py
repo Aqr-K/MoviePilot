@@ -29,7 +29,7 @@ class ReadFileTool(MoviePilotTool):
         """根据参数生成友好的提示消息"""
         file_path = kwargs.get("file_path", "")
         file_name = Path(file_path).name if file_path else "未知文件"
-        return f"正在读取文件: {file_name}"
+        return f"读取文件: {file_name}"
 
     async def run(self, file_path: str, start_line: Optional[int] = None,
                   end_line: Optional[int] = None, **kwargs) -> str:

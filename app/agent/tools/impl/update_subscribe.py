@@ -117,8 +117,8 @@ class UpdateSubscribeTool(MoviePilotTool):
             fields_updated.append("下载器")
 
         if fields_updated:
-            return f"正在更新订阅 #{subscribe_id}: {', '.join(fields_updated)}"
-        return f"正在更新订阅 #{subscribe_id}"
+            return f"更新订阅 #{subscribe_id}: {', '.join(fields_updated)}"
+        return f"更新订阅 #{subscribe_id}"
 
     async def run(
         self,

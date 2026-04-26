@@ -89,7 +89,7 @@ class AddSubscribeTool(MoviePilotTool):
         media_type = kwargs.get("media_type", "")
         season = kwargs.get("season")
 
-        message = f"正在添加订阅: {title}"
+        message = f"添加订阅: {title}"
         if year:
             message += f" ({year})"
         if media_type:

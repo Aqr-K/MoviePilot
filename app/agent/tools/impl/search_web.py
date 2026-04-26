@@ -41,7 +41,7 @@ class SearchWebTool(MoviePilotTool):
         """根据搜索参数生成友好的提示消息"""
         query = kwargs.get("query", "")
         max_results = kwargs.get("max_results", 20)
-        return f"正在搜索网络内容: {query} (最多返回 {max_results} 条结果)"
+        return f"搜索网络内容: {query} (最多返回 {max_results} 条结果)"
 
     async def run(self, query: str, max_results: Optional[int] = 20, **kwargs) -> str:
         """

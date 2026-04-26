@@ -30,7 +30,7 @@ class QueryWorkflowsTool(MoviePilotTool):
         name = kwargs.get("name")
         trigger_type = kwargs.get("trigger_type", "all")
         
-        parts = ["正在查询工作流"]
+        parts = ["查询工作流"]
         
         if state != "all":
             state_map = {"W": "等待", "R": "运行中", "P": "暂停", "S": "成功", "F": "失败"}

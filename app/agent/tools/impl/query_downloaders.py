@@ -23,7 +23,7 @@ class QueryDownloadersTool(MoviePilotTool):
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成友好的提示消息"""
-        return "正在查询下载器配置"
+        return "查询下载器配置"
 
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")

@@ -34,7 +34,7 @@ class SearchMediaTool(MoviePilotTool):
         media_type = kwargs.get("media_type")
         season = kwargs.get("season")
         
-        message = f"正在搜索媒体: {title}"
+        message = f"搜索媒体: {title}"
         if year:
             message += f" ({year})"
         if media_type:

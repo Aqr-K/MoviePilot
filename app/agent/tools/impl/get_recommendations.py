@@ -62,7 +62,7 @@ class GetRecommendationsTool(MoviePilotTool):
             "douban_hot": "豆瓣热门",
             "douban_movie_hot": "豆瓣热门电影",
             "douban_tv_hot": "豆瓣热门电视剧",
-            "douban_movie_showing": "豆瓣正在热映",
+            "douban_movie_showing": "豆瓣热映",
             "douban_movies": "豆瓣最新电影",
             "douban_tvs": "豆瓣最新电视剧",
             "douban_movie_top250": "豆瓣电影TOP250",
@@ -73,7 +73,7 @@ class GetRecommendationsTool(MoviePilotTool):
         }
         source_desc = source_map.get(source, source)
 
-        message = f"正在获取推荐: {source_desc}"
+        message = f"获取推荐: {source_desc}"
         if media_type != "all":
             message += f" [{media_type}]"
         message += f" (第{page}页)"

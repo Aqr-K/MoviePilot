@@ -24,7 +24,7 @@ class TestSiteTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据测试参数生成友好的提示消息"""
         site_identifier = kwargs.get("site_identifier")
-        return f"正在测试站点连通性: {site_identifier}"
+        return f"测试站点连通性: {site_identifier}"
 
     async def run(self, site_identifier: int, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: site_identifier={site_identifier}")

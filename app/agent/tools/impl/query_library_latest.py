@@ -39,7 +39,7 @@ class QueryLibraryLatestTool(MoviePilotTool):
         server = kwargs.get("server")
         page = kwargs.get("page", 1)
 
-        parts = ["正在查询媒体服务器最近入库影片"]
+        parts = ["查询媒体服务器最近入库影片"]
 
         if server:
             parts.append(f"服务器: {server}")

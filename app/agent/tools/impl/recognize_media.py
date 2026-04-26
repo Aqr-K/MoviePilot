@@ -33,13 +33,13 @@ class RecognizeMediaTool(MoviePilotTool):
         path = kwargs.get("path")
         
         if path:
-            message = f"正在识别文件媒体信息: {path}"
+            message = f"识别文件媒体信息: {path}"
         elif title:
-            message = f"正在识别种子媒体信息: {title}"
+            message = f"识别种子媒体信息: {title}"
             if subtitle:
                 message += f" ({subtitle})"
         else:
-            message = "正在识别媒体信息"
+            message = "识别媒体信息"
         
         return message
 

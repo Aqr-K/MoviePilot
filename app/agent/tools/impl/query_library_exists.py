@@ -93,11 +93,11 @@ class QueryLibraryExistsTool(MoviePilotTool):
         media_type = kwargs.get("media_type")
 
         if tmdb_id:
-            message = f"正在查询媒体库: TMDB={tmdb_id}"
+            message = f"查询媒体库: TMDB={tmdb_id}"
         elif douban_id:
-            message = f"正在查询媒体库: 豆瓣={douban_id}"
+            message = f"查询媒体库: 豆瓣={douban_id}"
         else:
-            message = "正在查询媒体库"
+            message = "查询媒体库"
         if media_type:
             message += f" [{media_type}]"
         return message

@@ -95,8 +95,8 @@ class UpdateSiteTool(MoviePilotTool):
             fields_updated.append("下载器")
 
         if fields_updated:
-            return f"正在更新站点 #{site_id}: {', '.join(fields_updated)}"
-        return f"正在更新站点 #{site_id}"
+            return f"更新站点 #{site_id}: {', '.join(fields_updated)}"
+        return f"更新站点 #{site_id}"
 
     async def run(
         self,

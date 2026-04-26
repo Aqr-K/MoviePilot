@@ -47,13 +47,13 @@ class AddDownloadTool(MoviePilotTool):
         if torrent_urls:
             if len(torrent_urls) == 1:
                 if self._is_torrent_ref(torrent_urls[0]):
-                    message = f"正在添加下载任务: 资源 {torrent_urls[0]}"
+                    message = f"添加下载任务: 资源 {torrent_urls[0]}"
                 else:
-                    message = "正在添加下载任务: 磁力链接"
+                    message = "添加下载任务: 磁力链接"
             else:
-                message = f"正在批量添加下载任务: 共 {len(torrent_urls)} 个资源"
+                message = f"批量添加下载任务: 共 {len(torrent_urls)} 个资源"
         else:
-            message = "正在添加下载任务"
+            message = "添加下载任务"
         if downloader:
             message += f" [下载器: {downloader}]"
 

@@ -34,7 +34,7 @@ class QuerySubscribeSharesTool(MoviePilotTool):
         min_rating = kwargs.get("min_rating")
         max_rating = kwargs.get("max_rating")
         
-        parts = ["正在查询订阅分享"]
+        parts = ["查询订阅分享"]
         
         if name:
             parts.append(f"名称: {name}")

@@ -55,7 +55,7 @@ class ModifyDownloadTool(MoviePilotTool):
         tags = kwargs.get("tags")
         downloader = kwargs.get("downloader")
 
-        parts = [f"正在修改下载任务: {hash_value}"]
+        parts = [f"修改下载任务: {hash_value}"]
         if action == "start":
             parts.append("操作: 开始下载")
         elif action == "stop":

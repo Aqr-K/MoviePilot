@@ -28,7 +28,7 @@ class EditFileTool(MoviePilotTool):
         """根据参数生成友好的提示消息"""
         file_path = kwargs.get("file_path", "")
         file_name = Path(file_path).name if file_path else "未知文件"
-        return f"正在编辑文件: {file_name}"
+        return f"编辑文件: {file_name}"
 
     async def run(self, file_path: str, old_text: str, new_text: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: file_path={file_path}")

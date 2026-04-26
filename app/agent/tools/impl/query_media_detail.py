@@ -29,8 +29,8 @@ class QueryMediaDetailTool(MoviePilotTool):
         tmdb_id = kwargs.get("tmdb_id")
         douban_id = kwargs.get("douban_id")
         if tmdb_id:
-            return f"正在查询媒体详情: TMDB ID {tmdb_id}"
-        return f"正在查询媒体详情: 豆瓣 ID {douban_id}"
+            return f"查询媒体详情: TMDB ID {tmdb_id}"
+        return f"查询媒体详情: 豆瓣 ID {douban_id}"
 
     async def run(self, media_type: str, tmdb_id: Optional[int] = None, douban_id: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, douban_id={douban_id}, media_type={media_type}")

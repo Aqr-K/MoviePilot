@@ -53,7 +53,7 @@ class GetSearchResultsTool(MoviePilotTool):
     args_schema: Type[BaseModel] = GetSearchResultsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
-        return "正在获取搜索结果"
+        return "获取搜索结果"
 
     async def run(
         self,

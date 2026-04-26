@@ -32,7 +32,7 @@ class SearchSubscribeTool(MoviePilotTool):
         subscribe_id = kwargs.get("subscribe_id")
         manual = kwargs.get("manual", False)
 
-        message = f"正在搜索订阅 #{subscribe_id} 的缺失剧集"
+        message = f"搜索订阅 #{subscribe_id} 的缺失剧集"
         if manual:
             message += "（手动搜索）"
 

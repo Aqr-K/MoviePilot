@@ -32,7 +32,7 @@ class QueryDirectorySettingsTool(MoviePilotTool):
         storage_type = kwargs.get("storage_type", "all")
         name = kwargs.get("name")
         
-        parts = ["正在查询目录配置"]
+        parts = ["查询目录配置"]
         
         if directory_type != "all":
             type_map = {"download": "下载目录", "library": "媒体库目录"}

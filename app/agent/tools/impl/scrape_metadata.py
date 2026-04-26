@@ -47,7 +47,7 @@ class ScrapeMetadataTool(MoviePilotTool):
         storage = kwargs.get("storage", "local")
         overwrite = kwargs.get("overwrite", False)
 
-        message = f"正在刮削媒体元数据: {path}"
+        message = f"刮削媒体元数据: {path}"
         if storage != "local":
             message += f" [存储: {storage}]"
         if overwrite:
