@@ -44,6 +44,7 @@ class Telegram:
     _bot_username: Optional[str] = None  # Bot username for mention detection
     _typing_tasks: Dict[str, threading.Thread] = {}  # chat_id -> typing任务
     _typing_stop_flags: Dict[str, bool] = {}  # chat_id -> 停止标志
+    _message_payload_cache: Dict[str, Dict[str, Any]] = {}  # message payload cache
 
     def __init__(
             self,
@@ -81,6 +82,7 @@ class Telegram:
             _bot = TeleBot(self._telegram_token, parse_mode="MarkdownV2")
             # 记录句柄
             self._bot = _bot
+            self._message_payload_cache = {}
             # 获取并存储bot用户名用于@检测
             try:
                 bot_info = _bot.get_me()
@@ -363,6 +365,66 @@ class Telegram:
             if task and task.is_alive():
                 task.join(timeout=1)
 
+    @staticmethod
+    def _message_cache_key(chat_id: Union[str, int], message_id: Union[str, int]) -> str:
+        """
+        构造消息缓存键。
+        """
+        return f"{chat_id}:{message_id}"
+
+    @staticmethod
+    def _serialize_reply_markup(
+        reply_markup: Optional[InlineKeyboardMarkup],
+    ) -> Optional[str]:
+        """
+        将 reply_markup 稳定序列化，用于判重。
+        """
+        if not reply_markup:
+            return None
+        if hasattr(reply_markup, "to_dict"):
+            return json.dumps(
+                reply_markup.to_dict(), ensure_ascii=False, sort_keys=True
+            )
+        return json.dumps(reply_markup, ensure_ascii=False, sort_keys=True)
+
+    def _build_message_payload_signature(
+        self,
+        text: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
+        image: Optional[str] = None,
+        disable_web_page_preview: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """
+        构造 Telegram 消息内容签名，基于实际发送到 API 的标准化内容。
+        """
+        return {
+            "text": standardize(text) if text else "",
+            "reply_markup": self._serialize_reply_markup(reply_markup),
+            "image": image or None,
+            "disable_web_page_preview": disable_web_page_preview,
+        }
+
+    def _remember_message_payload(
+        self,
+        chat_id: Union[str, int],
+        message_id: Union[str, int],
+        text: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
+        image: Optional[str] = None,
+        disable_web_page_preview: Optional[bool] = None,
+    ) -> None:
+        """
+        记录消息最近一次成功发送/编辑的内容签名。
+        """
+        self._message_payload_cache[self._message_cache_key(chat_id, message_id)] = (
+            self._build_message_payload_signature(
+                text=text,
+                reply_markup=reply_markup,
+                image=image,
+                disable_web_page_preview=disable_web_page_preview,
+            )
+        )
+
     def send_msg(
             self,
             title: str,
@@ -448,10 +510,21 @@ class Telegram:
                 )
                 self._stop_typing_task(chat_id)
                 if sent and hasattr(sent, "message_id"):
+                    target_chat_id = (
+                        sent.chat.id if hasattr(sent, "chat") else chat_id
+                    )
+                    self._remember_message_payload(
+                        chat_id=target_chat_id,
+                        message_id=sent.message_id,
+                        text=caption,
+                        reply_markup=reply_markup,
+                        image=image,
+                        disable_web_page_preview=disable_web_page_preview,
+                    )
                     return {
                         "success": True,
                         "message_id": sent.message_id,
-                        "chat_id": sent.chat.id if hasattr(sent, "chat") else chat_id,
+                        "chat_id": target_chat_id,
                     }
                 elif sent:
                     return {"success": True}
@@ -819,6 +892,9 @@ class Telegram:
                 logger.info(
                     f"成功删除Telegram消息: chat_id={target_chat_id}, message_id={message_id}"
                 )
+                self._message_payload_cache.pop(
+                    self._message_cache_key(target_chat_id, message_id), None
+                )
                 return True
             else:
                 logger.error(
@@ -897,10 +973,25 @@ class Telegram:
             if buttons:
                 reply_markup = self._create_inline_keyboard(buttons)
 
+            payload_signature = self._build_message_payload_signature(
+                text=text,
+                reply_markup=reply_markup,
+                image=image,
+                disable_web_page_preview=disable_web_page_preview,
+            )
+            cache_key = self._message_cache_key(chat_id, message_id)
+            if self._message_payload_cache.get(cache_key) == payload_signature:
+                logger.debug(
+                    f"跳过重复编辑Telegram消息: chat_id={chat_id}, message_id={message_id}"
+                )
+                return True
+
             if image:
                 # 如果有图片，使用edit_message_media
                 media = InputMediaPhoto(
-                    media=image, caption=standardize(text), parse_mode="MarkdownV2"
+                    media=image,
+                    caption=payload_signature["text"],
+                    parse_mode="MarkdownV2",
                 )
                 self._bot.edit_message_media(
                     chat_id=chat_id,
@@ -913,7 +1004,7 @@ class Telegram:
                 edit_text_kwargs: Dict[str, Any] = {
                     "chat_id": chat_id,
                     "message_id": message_id,
-                    "text": standardize(text),
+                    "text": payload_signature["text"],
                     "parse_mode": "MarkdownV2",
                     "reply_markup": reply_markup,
                 }
@@ -922,8 +1013,15 @@ class Telegram:
                         disable_web_page_preview
                     )
                 self._bot.edit_message_text(**edit_text_kwargs)
+            self._message_payload_cache[cache_key] = payload_signature
             return True
         except Exception as e:
+            if "message is not modified" in str(e):
+                self._message_payload_cache[cache_key] = payload_signature
+                logger.debug(
+                    f"Telegram消息内容未变化，跳过重复编辑: chat_id={chat_id}, message_id={message_id}"
+                )
+                return True
             logger.error(f"编辑消息失败：{str(e)}")
             return False
 
