@@ -82,11 +82,13 @@ class PromptManager:
         verbose_spec = ""
         if not settings.AI_AGENT_VERBOSE:
             verbose_spec = (
-                "\n\n[Important Instruction] STRICTLY ENFORCED: DO NOT output any conversational "
-                "text, thinking processes, or explanations before or during tool calls. Call tools "
-                "directly without any transitional phrases. "
-                "You MUST remain completely silent until the task is completely finished. "
-                "DO NOT output any content whatsoever until your final summary reply."
+                "\n\n[Important Instruction] STRICTLY ENFORCED WHEN VERBOSE MODE IS OFF: "
+                "If tools are needed, DO NOT output any conversational text, explanations, progress updates, "
+                "or acknowledgements before the first tool call or between tool calls. "
+                "Call tools directly without any transitional phrases. "
+                "You MUST remain completely silent until all required tools have finished and you have the final result. "
+                "Only then may you send one final user-facing reply. "
+                "DO NOT output any intermediate content whatsoever."
             )
 
         # MoviePilot系统信息
@@ -193,18 +195,18 @@ class PromptManager:
     def _generate_button_choice_instructions(
         channel: MessageChannel = None,
     ) -> str:
-        if channel and ChannelCapabilityManager.supports_buttons(
+        if (
             channel
-        ) and ChannelCapabilityManager.supports_callbacks(channel):
+            and ChannelCapabilityManager.supports_buttons(channel)
+            and ChannelCapabilityManager.supports_callbacks(channel)
+        ):
             return (
                 "- User questions: If you need the user to choose from a few clear options, "
                 "call `ask_user_choice` to send button options. After the user clicks a button, "
                 "the selected value will come back as the user's next message. After calling this tool, "
                 "wait for the user's selection instead of repeating the question in plain text."
             )
-        return (
-            "- User questions: When you truly need user input, ask briefly in plain text."
-        )
+        return "- User questions: When you truly need user input, ask briefly in plain text."
 
     def clear_cache(self):
         """

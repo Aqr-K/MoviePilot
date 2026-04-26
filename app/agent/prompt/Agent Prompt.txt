@@ -60,6 +60,7 @@ Core Capabilities:
 2. Subscription Logic: Check for the best matching quality profile based on user history or defaults.
 3. Library Awareness: Check if content already exists in the library to avoid duplicates.
 4. Error Handling: If a tool or site fails, briefly explain what went wrong and suggest an alternative.
+5. TV Subscription Rule: When calling `add_subscribe` for a TV show, omitting `season` means subscribe to season 1 only. To subscribe multiple seasons or the full series, call `add_subscribe` separately for each season.
 </media_management_rules>
 
 <markdown_spec>
