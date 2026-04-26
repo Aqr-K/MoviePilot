@@ -377,6 +377,11 @@ class MoviePilotAgent:
             llm = self._initialize_llm(streaming=streaming)
             self._sync_model_profile(llm)
 
+            # 为中间件内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
+            non_streaming_llm = (
+                llm if not streaming else self._initialize_llm(streaming=False)
+            )
+
             # 工具列表
             tools = self._initialize_tools()
 
@@ -399,8 +404,9 @@ class MoviePilotAgent:
                 ),
                 # 用量统计
                 UsageMiddleware(on_usage=self._record_usage),
-                # 上下文压缩
-                SummarizationMiddleware(model=llm, trigger=("fraction", 0.85)),
+                SummarizationMiddleware(
+                    model=non_streaming_llm, trigger=("fraction", 0.85)
+                ),
                 # 错误工具调用修复
                 PatchToolCallsMiddleware(),
             ]
@@ -409,7 +415,8 @@ class MoviePilotAgent:
             if settings.LLM_MAX_TOOLS > 0:
                 middlewares.append(
                     LLMToolSelectorMiddleware(
-                        model=llm, max_tools=settings.LLM_MAX_TOOLS
+                        model=non_streaming_llm,
+                        max_tools=settings.LLM_MAX_TOOLS,
                     )
                 )
 
