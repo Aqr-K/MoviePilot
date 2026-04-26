@@ -82,7 +82,7 @@ class PromptManager:
         verbose_spec = ""
         if not settings.AI_AGENT_VERBOSE:
             verbose_spec = (
-                "\n\n[Important Instruction] STRICTLY ENFORCED WHEN VERBOSE MODE IS OFF: "
+                "\n\n[Important Instruction] STRICTLY ENFORCED: "
                 "If tools are needed, DO NOT output any conversational text, explanations, progress updates, "
                 "or acknowledgements before the first tool call or between tool calls. "
                 "Call tools directly without any transitional phrases. "

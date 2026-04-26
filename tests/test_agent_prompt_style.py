@@ -31,7 +31,7 @@ class TestAgentPromptStyle(unittest.TestCase):
             prompt = prompt_manager.get_agent_prompt()
 
         self.assertIn(
-            "STRICTLY ENFORCED WHEN VERBOSE MODE IS OFF",
+            "[Important Instruction] STRICTLY ENFORCED:",
             prompt,
         )
         self.assertIn(
@@ -48,7 +48,7 @@ class TestAgentPromptStyle(unittest.TestCase):
             prompt = prompt_manager.get_agent_prompt()
 
         self.assertNotIn(
-            "STRICTLY ENFORCED WHEN VERBOSE MODE IS OFF",
+            "DO NOT output any conversational text, explanations, progress updates, or acknowledgements before the first tool call or between tool calls",
             prompt,
         )
 
