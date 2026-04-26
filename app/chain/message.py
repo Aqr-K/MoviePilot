@@ -786,6 +786,74 @@ class MessageChain(ChainBase):
                 )
             )
 
+    @staticmethod
+    def _format_token_count(value: Optional[int]) -> str:
+        return f"{value:,}" if value is not None else "未知"
+
+    @classmethod
+    def _format_session_status_text(cls, status: Dict[str, Any]) -> str:
+        context_window_tokens = status.get("context_window_tokens")
+        last_input_tokens = status.get("last_input_tokens")
+        if context_window_tokens and status.get("model_call_count"):
+            context_ratio = status.get("last_context_usage_ratio")
+            if context_ratio is None and last_input_tokens is not None:
+                context_ratio = last_input_tokens / context_window_tokens
+            context_usage_text = (
+                f"{cls._format_token_count(last_input_tokens)} / "
+                f"{cls._format_token_count(context_window_tokens)} "
+                f"({context_ratio * 100:.2f}%)"
+                if context_ratio is not None
+                else f"{cls._format_token_count(last_input_tokens)} / "
+                f"{cls._format_token_count(context_window_tokens)}"
+            )
+        else:
+            context_usage_text = "暂无模型调用数据"
+
+        lines = [
+            f"会话ID: {status.get('session_id') or '未知'}",
+            f"执行状态: {'运行中' if status.get('is_processing') else '空闲'}",
+            f"当前模型: {status.get('model') or '未知'}",
+            f"上下文窗口: {cls._format_token_count(context_window_tokens)} tokens",
+            f"最近一次上下文占用: {context_usage_text}",
+            f"最近一次 tokens: 输入 {cls._format_token_count(status.get('last_input_tokens'))} / 输出 {cls._format_token_count(status.get('last_output_tokens'))} / 总计 {cls._format_token_count(status.get('last_total_tokens'))}",
+            f"当前会话累计 tokens: 输入 {cls._format_token_count(status.get('total_input_tokens'))} / 输出 {cls._format_token_count(status.get('total_output_tokens'))} / 总计 {cls._format_token_count(status.get('total_tokens'))}",
+            f"模型调用次数: {status.get('model_call_count', 0)}",
+            f"排队消息数: {status.get('pending_messages', 0)}",
+            f"最后更新: {status.get('last_updated_at') or '暂无'}",
+        ]
+        return "\n".join(lines)
+
+    def remote_session_status(
+        self,
+        channel: MessageChannel,
+        userid: Union[str, int],
+        source: Optional[str] = None,
+    ):
+        """查询当前用户的智能体会话状态。"""
+        session_info = self._user_sessions.get(userid)
+        if not session_info:
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    title="您当前没有活跃的智能体会话",
+                    userid=userid,
+                )
+            )
+            return
+
+        session_id, _ = session_info
+        status = agent_manager.get_session_status(session_id=session_id)
+        self.post_message(
+            Notification(
+                channel=channel,
+                source=source,
+                title="当前智能体会话状态",
+                text=self._format_session_status_text(status),
+                userid=userid,
+            )
+        )
+
     def _handle_ai_message(
         self,
         text: str,
@@ -857,7 +925,12 @@ class MessageChain(ChainBase):
                     return
             elif images:
                 image_attachments = self._build_image_attachments(images)
-                if original_images and not image_attachments and not user_message and not files:
+                if (
+                    original_images
+                    and not image_attachments
+                    and not user_message
+                    and not files
+                ):
                     self.post_message(
                         Notification(
                             channel=channel,
@@ -940,42 +1013,58 @@ class MessageChain(ChainBase):
                     filename = "input.mp3"
                 elif audio_ref.startswith("wxwork://voice_media_id/"):
                     content = self.run_module(
-                        "download_wechat_media_bytes", media_ref=audio_ref, source=source
+                        "download_wechat_media_bytes",
+                        media_ref=audio_ref,
+                        source=source,
                     )
                     filename = "input.amr"
                 elif audio_ref.startswith("slack://file/"):
                     content = self.run_module(
                         "download_slack_file_bytes", file_ref=audio_ref, source=source
                     )
-                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.ogg"
+                    )
                 elif audio_ref.startswith("discord://file/"):
                     content = self.run_module(
                         "download_discord_file_bytes", file_ref=audio_ref, source=source
                     )
-                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.ogg"
+                    )
                 elif audio_ref.startswith("qq://file/"):
                     content = self.run_module(
                         "download_qq_file_bytes", file_ref=audio_ref, source=source
                     )
-                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.ogg"
+                    )
                 elif audio_ref.startswith("vocechat://file/"):
                     content = self.run_module(
-                        "download_vocechat_file_bytes", file_ref=audio_ref, source=source
+                        "download_vocechat_file_bytes",
+                        file_ref=audio_ref,
+                        source=source,
                     )
-                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.ogg"
+                    )
                 elif audio_ref.startswith("synology://file/"):
                     content = self.run_module(
                         "download_synologychat_file_bytes",
                         file_ref=audio_ref,
                         source=source,
                     )
-                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.ogg"
+                    )
                 elif audio_ref.startswith("wxbot://voice"):
                     continue
                 elif audio_ref.startswith("http"):
                     resp = RequestUtils(timeout=30).get_res(audio_ref)
                     content = resp.content if resp and resp.content else None
-                    filename = self._guess_audio_filename(audio_ref, default="input.ogg")
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.ogg"
+                    )
                 else:
                     logger.debug(
                         "暂不支持的语音引用: channel=%s, source=%s, ref=%s",
@@ -994,7 +1083,9 @@ class MessageChain(ChainBase):
                     )
                     continue
 
-                transcript = VoiceHelper.transcribe_bytes(content=content, filename=filename)
+                transcript = VoiceHelper.transcribe_bytes(
+                    content=content, filename=filename
+                )
                 if transcript:
                     transcripts.append(transcript)
                     logger.info(
@@ -1047,7 +1138,9 @@ class MessageChain(ChainBase):
                 elif img.startswith("tg://file_id/"):
                     file_id = img.replace("tg://file_id/", "")
                     base64_data = self.run_module(
-                        "download_telegram_file_to_base64", file_id=file_id, source=source
+                        "download_telegram_file_to_base64",
+                        file_id=file_id,
+                        source=source,
                     )
                     if base64_data:
                         base64_images.append(f"data:image/jpeg;base64,{base64_data}")

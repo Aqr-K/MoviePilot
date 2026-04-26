@@ -155,6 +155,12 @@ class Command(metaclass=Singleton):
                 "category": "管理",
                 "data": {},
             },
+            "/session_status": {
+                "func": MessageChain().remote_session_status,
+                "description": "会话状态",
+                "category": "智能体",
+                "data": {},
+            },
             "/skills": {
                 "func": SkillsChain().remote_manage,
                 "description": "管理技能",

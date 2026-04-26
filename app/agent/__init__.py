@@ -4,7 +4,8 @@ import re
 import traceback
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -24,6 +25,7 @@ from app.agent.middleware.jobs import JobsMiddleware
 from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
+from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
@@ -39,6 +41,39 @@ from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 class AgentChain(ChainBase):
     pass
+
+
+@dataclass
+class _SessionUsageSnapshot:
+    model: Optional[str] = None
+    context_window_tokens: Optional[int] = None
+    last_input_tokens: int = 0
+    last_output_tokens: int = 0
+    last_total_tokens: int = 0
+    last_context_usage_ratio: Optional[float] = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    model_call_count: int = 0
+    last_updated_at: Optional[datetime] = None
+
+    def to_dict(self, session_id: str) -> dict[str, Any]:
+        return {
+            "session_id": session_id,
+            "model": self.model,
+            "context_window_tokens": self.context_window_tokens,
+            "last_input_tokens": self.last_input_tokens,
+            "last_output_tokens": self.last_output_tokens,
+            "last_total_tokens": self.last_total_tokens,
+            "last_context_usage_ratio": self.last_context_usage_ratio,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_tokens,
+            "model_call_count": self.model_call_count,
+            "last_updated_at": self.last_updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            if self.last_updated_at
+            else None,
+        }
 
 
 class _ThinkTagStripper:
@@ -138,9 +173,91 @@ class MoviePilotAgent:
         self.force_streaming = False
         self.suppress_user_reply = False
         self._streamed_output = ""
+        self._session_usage = _SessionUsageSnapshot()
 
         # 流式token管理
         self.stream_handler = StreamingHandler()
+
+    @staticmethod
+    def _coerce_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _get_model_name(cls, llm: Any) -> Optional[str]:
+        return (
+            getattr(llm, "model", None)
+            or getattr(llm, "model_name", None)
+            or getattr(llm, "model_id", None)
+        )
+
+    @classmethod
+    def _get_context_window_tokens(cls, llm: Any) -> Optional[int]:
+        profile = getattr(llm, "profile", None)
+        if not profile:
+            return None
+        if isinstance(profile, dict):
+            return cls._coerce_int(
+                profile.get("max_input_tokens") or profile.get("input_token_limit")
+            )
+        return cls._coerce_int(
+            getattr(profile, "max_input_tokens", None)
+            or getattr(profile, "input_token_limit", None)
+        )
+
+    def _sync_model_profile(self, llm: Any) -> None:
+        model_name = self._get_model_name(llm)
+        context_window_tokens = self._get_context_window_tokens(llm)
+        if model_name:
+            self._session_usage.model = model_name
+        if context_window_tokens:
+            self._session_usage.context_window_tokens = context_window_tokens
+
+    def _record_usage(self, usage: dict[str, Any]) -> None:
+        if not usage:
+            return
+
+        model_name = usage.get("model")
+        context_window_tokens = self._coerce_int(usage.get("context_window_tokens"))
+        if model_name:
+            self._session_usage.model = model_name
+        if context_window_tokens:
+            self._session_usage.context_window_tokens = context_window_tokens
+
+        self._session_usage.model_call_count += 1
+        self._session_usage.last_updated_at = datetime.now()
+
+        if not usage.get("has_usage"):
+            return
+
+        input_tokens = self._coerce_int(usage.get("input_tokens")) or 0
+        output_tokens = self._coerce_int(usage.get("output_tokens")) or 0
+        total_tokens = self._coerce_int(usage.get("total_tokens"))
+        if total_tokens is None:
+            total_tokens = input_tokens + output_tokens
+
+        self._session_usage.last_input_tokens = input_tokens
+        self._session_usage.last_output_tokens = output_tokens
+        self._session_usage.last_total_tokens = total_tokens
+        self._session_usage.last_context_usage_ratio = usage.get("context_usage_ratio")
+        self._session_usage.total_input_tokens += input_tokens
+        self._session_usage.total_output_tokens += output_tokens
+        self._session_usage.total_tokens += total_tokens
+
+    def get_session_status(self) -> dict[str, Any]:
+        if not self._session_usage.model:
+            self._session_usage.model = settings.LLM_MODEL
+        if not self._session_usage.context_window_tokens:
+            self._session_usage.context_window_tokens = (
+                settings.LLM_MAX_CONTEXT_TOKENS * 1000
+                if settings.LLM_MAX_CONTEXT_TOKENS
+                else None
+            )
+        return self._session_usage.to_dict(self.session_id)
 
     @property
     def is_background(self) -> bool:
@@ -258,6 +375,7 @@ class MoviePilotAgent:
 
             # LLM 模型（用于 agent 执行）
             llm = self._initialize_llm(streaming=streaming)
+            self._sync_model_profile(llm)
 
             # 工具列表
             tools = self._initialize_tools()
@@ -279,6 +397,8 @@ class MoviePilotAgent:
                 ActivityLogMiddleware(
                     activity_dir=str(settings.CONFIG_PATH / "agent" / "activity"),
                 ),
+                # 用量统计
+                UsageMiddleware(on_usage=self._record_usage),
                 # 上下文压缩
                 SummarizationMiddleware(model=llm, trigger=("fraction", 0.85)),
                 # 错误工具调用修复
@@ -607,6 +727,37 @@ class AgentManager:
         self._retry_transfer_timers: Dict[str, asyncio.TimerHandle] = {}
         # 重试整理缓冲区锁
         self._retry_transfer_lock = asyncio.Lock()
+
+    def get_session_status(self, session_id: str) -> dict[str, Any]:
+        """获取会话当前模型与 token 使用状态。"""
+        agent = self.active_agents.get(session_id)
+        if agent:
+            status = agent.get_session_status()
+        else:
+            status = {
+                "session_id": session_id,
+                "model": settings.LLM_MODEL,
+                "context_window_tokens": settings.LLM_MAX_CONTEXT_TOKENS * 1000
+                if settings.LLM_MAX_CONTEXT_TOKENS
+                else None,
+                "last_input_tokens": 0,
+                "last_output_tokens": 0,
+                "last_total_tokens": 0,
+                "last_context_usage_ratio": None,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_tokens": 0,
+                "model_call_count": 0,
+                "last_updated_at": None,
+            }
+
+        queue = self._session_queues.get(session_id)
+        status["pending_messages"] = queue.qsize() if queue else 0
+        status["is_processing"] = (
+            session_id in self._session_workers
+            and not self._session_workers[session_id].done()
+        )
+        return status
 
     @staticmethod
     async def initialize():
