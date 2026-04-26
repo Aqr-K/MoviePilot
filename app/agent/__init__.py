@@ -404,6 +404,7 @@ class MoviePilotAgent:
                 ),
                 # 用量统计
                 UsageMiddleware(on_usage=self._record_usage),
+                # 上下文压缩
                 SummarizationMiddleware(
                     model=non_streaming_llm, trigger=("fraction", 0.85)
                 ),
