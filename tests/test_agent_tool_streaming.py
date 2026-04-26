@@ -1,10 +1,17 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import langchain.agents as langchain_agents
+
+if not hasattr(langchain_agents, "create_agent"):
+    langchain_agents.create_agent = lambda *args, **kwargs: None
 
 from app.agent.callback import StreamingHandler
 from app.agent.tools.base import MoviePilotTool
 from app.core.config import settings
+from app.schemas.message import MessageResponse
+from app.schemas.types import MessageChannel
 
 
 class DummyTool(MoviePilotTool):
@@ -47,6 +54,59 @@ class TestAgentToolStreaming(unittest.TestCase):
 
         self.assertEqual(result, "ok")
         self.assertEqual(buffered_message, "")
+
+    def test_flush_sends_direct_message_via_threadpool(self):
+        handler = StreamingHandler()
+        handler._channel = MessageChannel.Telegram.value
+        handler._source = "telegram"
+        handler._user_id = "10001"
+        handler._username = "tester"
+        handler._streaming_enabled = True
+        handler.emit("hello")
+
+        with patch(
+            "app.agent.callback.run_in_threadpool", new_callable=AsyncMock
+        ) as run_in_threadpool_mock:
+            run_in_threadpool_mock.return_value = MessageResponse(
+                message_id=1,
+                chat_id=2,
+                source="telegram",
+                success=True,
+            )
+
+            asyncio.run(handler._flush())
+
+        self.assertEqual(run_in_threadpool_mock.await_count, 1)
+        self.assertEqual(
+            run_in_threadpool_mock.await_args.args[0].__name__, "send_direct_message"
+        )
+        self.assertTrue(handler.has_sent_message)
+
+    def test_flush_edits_message_via_threadpool(self):
+        handler = StreamingHandler()
+        handler._channel = MessageChannel.Telegram.value
+        handler._streaming_enabled = True
+        handler._message_response = MessageResponse(
+            message_id=1,
+            chat_id=2,
+            source="telegram",
+            success=True,
+        )
+        handler._sent_text = "hello"
+        handler.emit("hello world")
+
+        with patch(
+            "app.agent.callback.run_in_threadpool", new_callable=AsyncMock
+        ) as run_in_threadpool_mock:
+            run_in_threadpool_mock.return_value = True
+
+            asyncio.run(handler._flush())
+
+        self.assertEqual(run_in_threadpool_mock.await_count, 1)
+        self.assertEqual(
+            run_in_threadpool_mock.await_args.args[0].__name__, "edit_message"
+        )
+        self.assertEqual(handler._sent_text, "hello world")
 
 
 if __name__ == "__main__":

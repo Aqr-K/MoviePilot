@@ -2,6 +2,8 @@ import asyncio
 import threading
 from typing import Optional, Tuple
 
+from fastapi.concurrency import run_in_threadpool
+
 from app.chain import ChainBase
 from app.log import logger
 from app.schemas import Notification
@@ -256,7 +258,8 @@ class StreamingHandler:
         try:
             if self._message_response is None:
                 # 第一次发送：发送新消息并获取 message_id
-                response = chain.send_direct_message(
+                response = await run_in_threadpool(
+                    chain.send_direct_message,
                     Notification(
                         channel=self._channel,
                         source=self._source,
@@ -264,7 +267,7 @@ class StreamingHandler:
                         username=self._username,
                         title=self._title,
                         text=current_text,
-                    )
+                    ),
                 )
                 if response and response.success and response.message_id:
                     self._message_response = response
@@ -297,7 +300,8 @@ class StreamingHandler:
 
                     # 如果偏移后还有新内容，立即发送为新消息
                     if current_text:
-                        response = chain.send_direct_message(
+                        response = await run_in_threadpool(
+                            chain.send_direct_message,
                             Notification(
                                 channel=self._channel,
                                 source=self._source,
@@ -305,7 +309,7 @@ class StreamingHandler:
                                 username=self._username,
                                 title=self._title,
                                 text=current_text,
-                            )
+                            ),
                         )
                         if response and response.success and response.message_id:
                             self._message_response = response
@@ -324,7 +328,8 @@ class StreamingHandler:
                     except (ValueError, KeyError):
                         return
 
-                    success = chain.edit_message(
+                    success = await run_in_threadpool(
+                        chain.edit_message,
                         channel=channel_enum,
                         source=self._message_response.source,
                         message_id=self._message_response.message_id,
