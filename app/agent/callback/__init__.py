@@ -182,7 +182,7 @@ class StreamingHandler:
         # 检查是否所有缓冲内容都已发送
         with self._lock:
             # 当前消息的文本 = buffer 中从 _msg_start_offset 开始的部分
-            current_msg_text = self._buffer[self._msg_start_offset :]
+            current_msg_text = self._buffer[self._msg_start_offset:]
             all_sent = (
                 self._message_response is not None
                 and self._sent_text
@@ -248,7 +248,7 @@ class StreamingHandler:
         """
         with self._lock:
             # 当前消息的文本 = buffer 中从 _msg_start_offset 开始的部分
-            current_text = self._buffer[self._msg_start_offset :]
+            current_text = self._buffer[self._msg_start_offset:]
             if not current_text or current_text == self._sent_text:
                 # 没有新内容需要刷新
                 return
@@ -294,7 +294,7 @@ class StreamingHandler:
                     )
                     with self._lock:
                         self._msg_start_offset += len(self._sent_text)
-                        current_text = self._buffer[self._msg_start_offset :]
+                        current_text = self._buffer[self._msg_start_offset:]
                     self._message_response = None
                     self._sent_text = ""
 
