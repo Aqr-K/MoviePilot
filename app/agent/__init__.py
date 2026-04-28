@@ -349,6 +349,14 @@ class MoviePilotAgent:
         except Exception as e:
             logger.debug(f"智能体输出回调失败: {e}")
 
+    def _handle_stream_text(self, text: str):
+        """
+        统一处理一段可见流式文本，确保工具统计注入后的内容会同时进入
+        消息缓冲区和外部流式回调。
+        """
+        emitted_text = self.stream_handler.emit(text)
+        self._emit_output(emitted_text)
+
     def _initialize_tools(self) -> List:
         """
         初始化工具列表
@@ -572,11 +580,12 @@ class MoviePilotAgent:
                     agent=agent,
                     messages={"messages": messages},
                     config=agent_config,
-                    on_token=lambda token: (
-                        self.stream_handler.emit(token),
-                        self._emit_output(token),
-                    ),
+                    on_token=self._handle_stream_text,
                 )
+
+                trailing_tool_summary = self.stream_handler.flush_pending_tool_summary()
+                if trailing_tool_summary:
+                    self._emit_output(trailing_tool_summary)
 
                 # 停止流式输出，返回是否已通过流式编辑发送了所有内容及最终文本
                 (
@@ -588,8 +597,14 @@ class MoviePilotAgent:
                     # 流式输出未能发送全部内容（发送失败等）
                     # 通过常规方式发送剩余内容
                     remaining_text = await self.stream_handler.take()
-                    if remaining_text and not self._streamed_output:
-                        self._emit_output(remaining_text)
+                    if remaining_text:
+                        unsent_text = remaining_text
+                        if self._streamed_output and remaining_text.startswith(
+                            self._streamed_output
+                        ):
+                            unsent_text = remaining_text[len(self._streamed_output) :]
+                        if unsent_text:
+                            self._emit_output(unsent_text)
                     if (
                         remaining_text
                         and not self.suppress_user_reply

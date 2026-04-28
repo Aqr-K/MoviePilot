@@ -69,9 +69,15 @@ class _OpenAIStreamingHandler(StreamingHandler):
         self._event_queue = queue
 
     def emit(self, token: str):
-        super().emit(token)
-        if token and self._event_queue is not None:
-            self._event_queue.put_nowait(token)
+        emitted = super().emit(token)
+        if emitted and self._event_queue is not None:
+            self._event_queue.put_nowait(emitted)
+
+    def flush_pending_tool_summary(self) -> str:
+        emitted = super().flush_pending_tool_summary()
+        if emitted and self._event_queue is not None:
+            self._event_queue.put_nowait(emitted)
+        return emitted
 
     async def start_streaming(
         self,
