@@ -21,12 +21,14 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.agent.callback import StreamingHandler
 from app.agent.memory import memory_manager
 from app.agent.middleware.activity_log import ActivityLogMiddleware
+from app.agent.middleware.hooks import AgentHooksMiddleware
 from app.agent.middleware.jobs import JobsMiddleware
 from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
 from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
+from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
@@ -389,18 +391,20 @@ class MoviePilotAgent:
             middlewares = [
                 # Skills
                 SkillsMiddleware(
-                    sources=[str(settings.CONFIG_PATH / "agent" / "skills")],
+                    sources=[str(agent_runtime_manager.skills_dir)],
                     bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
                 ),
                 # Jobs 任务管理
                 JobsMiddleware(
-                    sources=[str(settings.CONFIG_PATH / "agent" / "jobs")],
+                    sources=[str(agent_runtime_manager.jobs_dir)],
                 ),
-                # 记忆管理（自动扫描 agent 目录下所有 .md 文件）
-                MemoryMiddleware(memory_dir=str(settings.CONFIG_PATH / "agent")),
+                # 结构化 hooks
+                AgentHooksMiddleware(),
+                # 记忆管理（仅扫描 memory 目录，避免与根层 persona/workflow 配置混写）
+                MemoryMiddleware(memory_dir=str(agent_runtime_manager.memory_dir)),
                 # 活动日志
                 ActivityLogMiddleware(
-                    activity_dir=str(settings.CONFIG_PATH / "agent" / "activity"),
+                    activity_dir=str(agent_runtime_manager.activity_dir),
                 ),
                 # 用量统计
                 UsageMiddleware(on_usage=self._record_usage),
@@ -987,6 +991,69 @@ class AgentManager:
             memory_manager.clear_memory(session_id, user_id)
             logger.info(f"会话 {session_id} 的记忆已清空")
 
+    @staticmethod
+    def _build_heartbeat_prompt() -> str:
+        """使用统一 wake 模板源构建心跳任务提示词。"""
+        runtime_config = agent_runtime_manager.load_runtime_config()
+        return runtime_config.render_system_task_message("heartbeat")
+
+    @staticmethod
+    def _build_retry_transfer_template_context(
+        history_ids: list[int],
+    ) -> tuple[str, dict[str, int | str]]:
+        """仅负责把失败重试任务的动态数据映射成模板变量。"""
+        is_batch = len(history_ids) > 1
+        task_type = (
+            "batch_transfer_failed_retry" if is_batch else "transfer_failed_retry"
+        )
+        template_context: dict[str, int | str] = {
+            "history_ids_csv": ", ".join(str(item) for item in history_ids),
+            "history_count": len(history_ids),
+        }
+        if not is_batch:
+            template_context["history_id"] = history_ids[0]
+        return task_type, template_context
+
+    @staticmethod
+    def _build_retry_transfer_prompt(
+        history_ids: list[int],
+    ) -> str:
+        """根据失败记录数量构建统一的重试整理后台任务提示词。"""
+        runtime_config = agent_runtime_manager.load_runtime_config()
+        task_type, template_context = AgentManager._build_retry_transfer_template_context(
+            history_ids
+        )
+        return runtime_config.render_system_task_message(
+            task_type,
+            template_context=template_context,
+        )
+
+    @staticmethod
+    def _build_manual_redo_template_context(history) -> dict[str, int | str]:
+        """仅负责把整理历史对象映射成 SYSTEM_TASKS 需要的模板变量。"""
+        src_fileitem = history.src_fileitem or {}
+        source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
+        source_path = source_path or history.src or ""
+        season_episode = f"{history.seasons or ''}{history.episodes or ''}".strip()
+        # 这里故意只做数据整形，具体行为定义全部交给 SYSTEM_TASKS。
+        return {
+            "history_id": history.id,
+            "current_status": "success" if history.status else "failed",
+            "recognized_title": history.title or "unknown",
+            "media_type": history.type or "unknown",
+            "category": history.category or "unknown",
+            "year": history.year or "unknown",
+            "season_episode": season_episode or "unknown",
+            "source_path": source_path or "unknown",
+            "source_storage": history.src_storage or "local",
+            "destination_path": history.dest or "unknown",
+            "destination_storage": history.dest_storage or "unknown",
+            "transfer_mode": history.mode or "unknown",
+            "tmdbid": history.tmdbid or "none",
+            "doubanid": history.doubanid or "none",
+            "error_message": history.errmsg or "none",
+        }
+
     async def heartbeat_check_jobs(self):
         """
         心跳唤醒：检查并执行待处理的定时任务（Jobs）。
@@ -998,22 +1065,7 @@ class AgentManager:
             user_id = SYSTEM_INTERNAL_USER_ID
 
             logger.info("智能体心跳唤醒：开始检查待处理任务...")
-
-            # 英文提示词，便于大模型理解
-            heartbeat_message = (
-                "[System Heartbeat] Check all jobs in your jobs directory and process pending tasks:\n"
-                "1. List all jobs with status 'pending' or 'in_progress'\n"
-                "2. For 'recurring' jobs, check 'last_run' to determine if it's time to run again\n"
-                "3. For 'once' jobs with status 'pending', execute them now\n"
-                "4. After executing each job, update its status, 'last_run' time, and execution log in the JOB.md file\n"
-                "5. If there are no pending jobs, do NOT generate any response\n\n"
-                "IMPORTANT: This is a background system task, NOT a user conversation. "
-                "Your final response will be broadcast as a notification. "
-                "Only output a brief completion summary listing each executed job and its result. "
-                "Do NOT include greetings, explanations, or conversational text. "
-                "If no jobs were executed, output nothing. "
-                "Respond in Chinese (中文)."
-            )
+            heartbeat_message = self._build_heartbeat_prompt()
 
             await self.process_message(
                 session_id=session_id,
@@ -1096,57 +1148,7 @@ class AgentManager:
         logger.info(
             f"智能体重试整理：开始批量处理失败记录 IDs=[{ids_str}] (group={group_key})"
         )
-
-        if len(history_ids) == 1:
-            # 单条记录，使用原有逻辑
-            retry_message = (
-                f"[System Task - Transfer Failed Retry] A file transfer/organization has failed. "
-                f"Please use the 'transfer-failed-retry' skill to retry the failed transfer.\n\n"
-                f"Failed transfer history record ID: {history_ids[0]}\n\n"
-                f"Follow these steps:\n"
-                f"1. Use `query_transfer_history` with status='failed' to find the record with id={history_ids[0]} "
-                f"and understand the failure details (source path, error message, media info)\n"
-                f"2. Analyze the error message to determine the best retry strategy\n"
-                f"3. If the source file no longer exists, skip this retry and report that the file is missing\n"
-                f"4. Delete the failed history record using `delete_transfer_history` with history_id={history_ids[0]}\n"
-                f"5. Re-identify the media using `recognize_media` with the source file path\n"
-                f"6. If recognition fails, try `search_media` with keywords from the filename\n"
-                f"7. Re-transfer using `transfer_file` with the source path and any identified media info (tmdbid, media_type)\n"
-                f"8. Report the final result\n\n"
-                f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                f"Your final response will be broadcast as a notification. "
-                f"Only output a brief result summary. "
-                f"Do NOT include greetings, explanations, or conversational text. "
-                f"Respond in Chinese (中文)."
-            )
-        else:
-            # 多条记录，使用批量处理逻辑
-            retry_message = (
-                f"[System Task - Batch Transfer Failed Retry] Multiple file transfers from the same source "
-                f"have failed. These files likely belong to the SAME media (e.g., multiple episodes of the same TV show). "
-                f"Please use the 'transfer-failed-retry' skill to retry them efficiently.\n\n"
-                f"Failed transfer history record IDs: {ids_str}\n"
-                f"Total failed records: {len(history_ids)}\n\n"
-                f"Follow these steps:\n"
-                f"1. Use `query_transfer_history` with status='failed' to find ALL records with these IDs "
-                f"and understand the failure details\n"
-                f"2. Since these files are likely from the same media, analyze the FIRST record to determine "
-                f"the media identity and the best retry strategy. The root cause is usually the same for all files.\n"
-                f"3. If the error is about media recognition (e.g., '未识别到媒体信息'), identify the media ONCE "
-                f"using `recognize_media` or `search_media`, then reuse that result (tmdbid, media_type) for all files\n"
-                f"4. For EACH failed record:\n"
-                f"   a. Delete the failed history record using `delete_transfer_history`\n"
-                f"   b. Re-transfer using `transfer_file` with the source path and the identified media info\n"
-                f"5. Report a summary of results (how many succeeded, how many failed)\n\n"
-                f"IMPORTANT OPTIMIZATION: These files share the same media identity. "
-                f"Do NOT call `recognize_media` or `search_media` repeatedly for each file. "
-                f"Identify the media ONCE, then apply to all files.\n\n"
-                f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                f"Your final response will be broadcast as a notification. "
-                f"Only output a brief result summary. "
-                f"Do NOT include greetings, explanations, or conversational text. "
-                f"Respond in Chinese (中文)."
-            )
+        retry_message = self._build_retry_transfer_prompt(history_ids)
 
         try:
             await self.process_message(
@@ -1186,57 +1188,10 @@ class AgentManager:
         """
         构建手动 AI 整理提示词。
         """
-        src_fileitem = history.src_fileitem or {}
-        source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
-        source_path = source_path or history.src or ""
-        season_episode = f"{history.seasons or ''}{history.episodes or ''}".strip()
-
-        return "\n".join(
-            [
-                "[System Task - Manual Transfer Re-Organize]",
-                "A user manually triggered an AI re-organize task from the transfer history page.",
-                "Your goal is to directly fix ONE transfer history record by using MoviePilot tools to analyze, clean up the old history entry if necessary, and organize the source file again.",
-                "",
-                "IMPORTANT:",
-                "1. This is NOT a normal conversation. It is a background execution task.",
-                "2. Do NOT rely on previous chat context. Work only from the record below.",
-                "3. You should complete the re-organize by directly using tools such as `query_transfer_history`, `recognize_media`, `search_media`, `delete_transfer_history`, and `transfer_file`.",
-                "4. Your final response must be a brief Chinese result summary only.",
-                "",
-                "Transfer history record:",
-                f"- History ID: {history.id}",
-                f"- Current status: {'success' if history.status else 'failed'}",
-                f"- Current recognized title: {history.title or 'unknown'}",
-                f"- Media type: {history.type or 'unknown'}",
-                f"- Category: {history.category or 'unknown'}",
-                f"- Year: {history.year or 'unknown'}",
-                f"- Season/Episode: {season_episode or 'unknown'}",
-                f"- Source path: {source_path or 'unknown'}",
-                f"- Source storage: {history.src_storage or 'local'}",
-                f"- Destination path: {history.dest or 'unknown'}",
-                f"- Destination storage: {history.dest_storage or 'unknown'}",
-                f"- Transfer mode: {history.mode or 'unknown'}",
-                f"- Current TMDB ID: {history.tmdbid or 'none'}",
-                f"- Current Douban ID: {history.doubanid or 'none'}",
-                f"- Error message: {history.errmsg or 'none'}",
-                "",
-                "Required workflow:",
-                f"1. Use `query_transfer_history` to locate and inspect the record with id={history.id}, and verify the source path, status, media info, and failure context.",
-                "2. Decide whether the current recognition is trustworthy.",
-                "3. If the source file no longer exists or cannot be safely processed, stop and report the reason.",
-                "4. If the current recognition is wrong or the record should be reorganized, determine the correct media identity first.",
-                "5. Prefer `recognize_media` with the source path. If recognition is not reliable, use `search_media` with keywords from filename/title/year.",
-                "6. Only continue when you have high confidence in the target media.",
-                "7. Before re-organizing, delete the old transfer history record with `delete_transfer_history` so the system will not skip the source file.",
-                "8. Then use `transfer_file` to organize the source path directly.",
-                "9. When calling `transfer_file`, reuse known context when appropriate: source storage, target path, target storage, transfer mode, season, tmdbid/doubanid, and media_type.",
-                "10. If this record is already correct and no re-organize is needed, do not perform destructive actions; simply report that no change is necessary.",
-                "",
-                "Important execution rules:",
-                "- Do NOT reorganize blindly when media identity is uncertain.",
-                "- If the previous record was successful but obviously identified as the wrong media, still use the tool-based flow above instead of `/redo`.",
-                "- Keep the final response short, in Chinese, and focused on outcome.",
-            ]
+        runtime_config = agent_runtime_manager.load_runtime_config()
+        return runtime_config.render_system_task_message(
+            "manual_transfer_redo",
+            template_context=AgentManager._build_manual_redo_template_context(history),
         )
 
     async def manual_redo_transfer(

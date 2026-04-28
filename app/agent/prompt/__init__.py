@@ -7,6 +7,7 @@ from typing import Dict
 
 from app.core.config import settings
 from app.log import logger
+from app.agent.runtime import agent_runtime_manager
 from app.schemas import (
     ChannelCapability,
     ChannelCapabilities,
@@ -59,8 +60,12 @@ class PromptManager:
         :param prefer_voice_reply: 是否优先使用语音回复
         :return: 提示词内容
         """
-        # 基础提示词
-        base_prompt = self.load_prompt("Agent Prompt.txt")
+        # 根层运行时配置由独立装配器负责，避免人格/工作流继续硬编码在单文件 prompt 中。
+        runtime_config = agent_runtime_manager.load_runtime_config()
+        runtime_sections = runtime_config.render_prompt_sections()
+
+        # 基础提示词只保留 MoviePilot 运行时和渠道能力相关约束。
+        base_prompt = self.load_prompt("System Core Prompt.txt")
 
         # 识别渠道
         markdown_spec = ""
@@ -104,6 +109,7 @@ class PromptManager:
             moviepilot_info=moviepilot_info,
             voice_reply_spec=voice_reply_spec,
             button_choice_spec=button_choice_spec,
+            runtime_sections=runtime_sections,
         )
 
         return base_prompt

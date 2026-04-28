@@ -26,6 +26,13 @@ class TestAgentPromptStyle(unittest.TestCase):
             prompt,
         )
 
+    def test_prompt_uses_root_runtime_sections(self):
+        prompt = prompt_manager.get_agent_prompt()
+
+        self.assertIn("<agent_profile>", prompt)
+        self.assertIn("<agent_workflow>", prompt)
+        self.assertIn("Active persona: `default`", prompt)
+
     def test_non_verbose_prompt_requires_silence_until_all_tools_finish(self):
         with patch.object(settings, "AI_AGENT_VERBOSE", False):
             prompt = prompt_manager.get_agent_prompt()

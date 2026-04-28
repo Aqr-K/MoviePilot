@@ -188,7 +188,8 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
     支持多文件记忆组织：用户可以创建多个 `.md` 文件来按主题组织知识。
 
     参数：
-        memory_dir: 记忆文件目录路径。
+        memory_dir: 记忆文件目录路径。建议使用独立的 `config/agent/memory`
+            目录，避免与 persona/workflow 等根层配置混写。
     """
 
     state_schema = MemoryState
@@ -201,7 +202,7 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         """初始化记忆中间件。
 
         参数：
-            memory_dir: 记忆文件目录路径（例如，`"/config/agent"`）。
+            memory_dir: 记忆文件目录路径（例如，`"/config/agent/memory"`）。
                         该目录下所有 `.md` 文件都会被自动加载为记忆。
         """
         self.memory_dir = memory_dir

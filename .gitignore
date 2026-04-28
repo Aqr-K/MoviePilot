@@ -19,6 +19,7 @@ config/cookies/**
 config/app.env
 config/user.db*
 config/sites/**
+config/agent/
 config/logs/
 config/temp/
 config/cache/
