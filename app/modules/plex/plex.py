@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Generator, Any, Union
 from urllib.parse import quote_plus
 
-from plexapi import media
 from plexapi.myplex import MyPlexAccount
 from plexapi.server import PlexServer
 from requests import Response, Session
@@ -315,50 +314,85 @@ class Plex:
             item = self._plex.fetchItem(ekey=ekey)
             if not item:
                 return None
+            # 直接使用当前条目的 art/thumb 作为 Plex 本地图片兜底。
+            # 这样既能兼容 webhook 返回带 /children 的 key，也能避免图片列表为空时彻底没有封面。
+            local_image_url = self.__build_local_image_url(item=item,
+                                                           image_type=image_type,
+                                                           plex_url=plex_url)
             # 如果配置了外网播放地址以及Token，则默认从Plex媒体服务器获取图片，否则返回有外网地址的图片资源
             # Plex外网播放地址这个框里目前可以填两种地址
             #   1. Plex的官方转发地址https://app.plex.tv, 2. 自己处理的端口转发地址
             #   如果使用的是1的官方转发地址,那么就不能走这个逻辑，因为官方转发地址无法获取到图片
             if (self._playhost and "app.plex.tv" not in self._playhost
                     and self._token and plex_url):
-                query = {"X-Plex-Token": self._token}
-                if image_type == "Poster":
-                    if item.thumb:
-                        image_url = UrlUtils.combine_url(host=self._playhost, path=item.thumb, query=query)
-                else:
-                    # 默认使用art也就是Backdrop进行处理
-                    if item.art:
-                        image_url = UrlUtils.combine_url(host=self._playhost, path=item.art, query=query)
-                    # 这里对episode进行特殊处理，实际上episode的Backdrop是Poster
-                    # 也有个别情况，比如机智的凡人小子episode就是Poster，因此这里把episode的优先级降低，默认还是取art
-                    if not image_url and item.TYPE == "episode" and item.thumb:
-                        image_url = UrlUtils.combine_url(host=self._playhost, path=item.thumb, query=query)
+                image_url = local_image_url
             else:
                 if image_type == "Poster":
-                    images = self._plex.fetchItems(ekey=f"{ekey}/posters",
-                                                   cls=media.Poster)
+                    # 这里必须通过 item.posters() 走 Plex 的规范 metadata endpoint，
+                    # 不能直接拼原始 item_id，否则 show webhook 返回 /children 时会变成 /children/posters。
+                    images = item.posters() if hasattr(item, "posters") else []
+                    images = images or []
                 else:
                     # 默认使用art也就是Backdrop进行处理
-                    images = self._plex.fetchItems(ekey=f"{ekey}/arts",
-                                                   cls=media.Art)
+                    # 同上，统一通过 item.arts() 取图片列表，避免 /children/arts 这类错误路径。
+                    images = item.arts() if hasattr(item, "arts") else []
+                    images = images or []
                     # 这里对episode进行特殊处理，实际上episode的Backdrop是Poster
                     # 也有个别情况，比如机智的凡人小子episode就是Poster，因此这里把episode的优先级降低，默认还是取art
                     if not images and item.TYPE == "episode":
-                        images = self._plex.fetchItems(ekey=f"{ekey}/posters",
-                                                       cls=media.Poster)
+                        images = item.posters() if hasattr(item, "posters") else []
+                        images = images or []
                 for image in images:
-                    if hasattr(image, "key") and image.key.startswith("http"):
-                        image_url = image.key
+                    image_key = getattr(image, "key", None)
+                    if image_key and image_key.startswith("http"):
+                        image_url = image_key
                         break
-                    # 如果最后还是找不到，则递归父级进行查找
-                if not image_url and hasattr(item, "parentKey"):
-                    return self.get_remote_image_by_id(item_id=item.parentKey,
+                # 某些 Plex 条目没有可直接外链的图片列表，此时退回到当前条目的实际图片地址。
+                if not image_url and local_image_url:
+                    image_url = local_image_url
+                # 如果最后还是找不到，则递归父级进行查找
+                parent_key = getattr(item, "parentKey", None)
+                if not image_url and parent_key:
+                    return self.get_remote_image_by_id(item_id=parent_key,
                                                        image_type=image_type,
-                                                       depth=depth + 1)
+                                                       depth=depth + 1,
+                                                       plex_url=plex_url)
             return image_url
         except Exception as e:
             logger.error(f"获取封面出错：" + str(e))
         return None
+
+    def __build_local_image_url(
+            self,
+            item: Any,
+            image_type: str,
+            plex_url: Optional[bool] = True
+    ) -> Optional[str]:
+        """
+        构造 Plex 本地图片地址，作为图片列表查询失败时的兜底结果。
+        """
+        if not item or not plex_url or not self._token:
+            return None
+
+        # app.plex.tv 无法直接用于图片获取，因此回退到实际的 Plex 服务地址。
+        image_host = self._playhost if self._playhost and "app.plex.tv" not in self._playhost else self._host
+        if not image_host:
+            return None
+
+        query = {"X-Plex-Token": self._token}
+        item_type = getattr(item, "TYPE", None)
+
+        if image_type == "Poster":
+            image_path = getattr(item, "thumb", None)
+        else:
+            image_path = getattr(item, "art", None)
+            # episode 的背景图经常落在 thumb 上，这里沿用原有特殊处理逻辑。
+            if not image_path and item_type == "episode":
+                image_path = getattr(item, "thumb", None)
+
+        if not image_path:
+            return None
+        return UrlUtils.combine_url(host=image_host, path=image_path, query=query)
 
     def refresh_root_library(self) -> bool:
         """
