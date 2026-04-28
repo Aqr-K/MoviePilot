@@ -49,6 +49,15 @@ class DeleteDownloadTool(MoviePilotTool):
 
         return message
 
+    @staticmethod
+    def _delete_download_sync(
+        hash_value: str, downloader: Optional[str] = None, delete_files: bool = False
+    ) -> bool:
+        """同步删除下载任务，避免下载器客户端阻塞事件循环。"""
+        return DownloadChain().remove_torrents(
+            hashs=[hash_value], downloader=downloader, delete_file=delete_files
+        )
+
     async def run(
         self,
         hash: str,
@@ -61,16 +70,18 @@ class DeleteDownloadTool(MoviePilotTool):
         )
 
         try:
-            download_chain = DownloadChain()
-
             # 仅支持通过hash删除任务
             if len(hash) != 40 or not all(c in "0123456789abcdefABCDEF" for c in hash):
                 return "参数错误：hash 格式无效，请先使用 query_download_tasks 工具获取正确的 hash。"
 
             # 删除下载任务
             # remove_torrents 支持 delete_file 参数，可以控制是否删除文件
-            result = download_chain.remove_torrents(
-                hashs=[hash], downloader=downloader, delete_file=delete_files
+            result = await self.run_blocking(
+                "downloader",
+                self._delete_download_sync,
+                hash,
+                downloader,
+                bool(delete_files),
             )
 
             if result:

@@ -26,24 +26,29 @@ class TestSiteTool(MoviePilotTool):
         site_identifier = kwargs.get("site_identifier")
         return f"测试站点连通性: {site_identifier}"
 
+    @staticmethod
+    def _test_site_sync(site_identifier: int) -> tuple[Optional[str], Optional[str], bool, str]:
+        """在同步线程里执行站点联通测试，避免网络请求卡住事件循环。"""
+        site = SiteOper().get(site_identifier)
+        if not site:
+            return None, None, False, f"未找到站点：{site_identifier}，请使用 query_sites 工具查询可用的站点"
+
+        status, message = SiteChain().test(site.domain)
+        return site.name, site.domain, status, message
+
     async def run(self, site_identifier: int, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: site_identifier={site_identifier}")
 
         try:
-            site_oper = SiteOper()
-            site_chain = SiteChain()
-            site = await site_oper.async_get(site_identifier)
-            
-            if not site:
-                return f"未找到站点：{site_identifier}，请使用 query_sites 工具查询可用的站点"
-            
-            # 测试站点连通性
-            status, message = site_chain.test(site.domain)
-            
+            site_name, site_domain, status, message = await self.run_blocking(
+                "site", self._test_site_sync, site_identifier
+            )
+            if not site_name:
+                return message
             if status:
-                return f"站点连通性测试成功：{site.name} ({site.domain})\n{message}"
+                return f"站点连通性测试成功：{site_name} ({site_domain})\n{message}"
             else:
-                return f"站点连通性测试失败：{site.name} ({site.domain})\n{message}"
+                return f"站点连通性测试失败：{site_name} ({site_domain})\n{message}"
         except Exception as e:
             logger.error(f"测试站点连通性失败: {e}", exc_info=True)
             return f"测试站点连通性时发生错误: {str(e)}"

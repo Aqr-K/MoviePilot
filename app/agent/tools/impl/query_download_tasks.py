@@ -1,7 +1,7 @@
 """查询下载工具"""
 
 import json
-from typing import Optional, Type, List, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 from pydantic import BaseModel, Field
 
@@ -64,6 +64,126 @@ class QueryDownloadTasksTool(MoviePilotTool):
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _apply_download_history(
+        torrent: Union[TransferTorrent, DownloadingTorrent], history: Any
+    ) -> None:
+        """将下载历史中的补充信息回填到下载任务结果中。"""
+        if not history:
+            return
+        if hasattr(torrent, "media"):
+            torrent.media = {
+                "tmdbid": history.tmdbid,
+                "type": history.type,
+                "title": history.title,
+                "season": history.seasons,
+                "episode": history.episodes,
+                "image": history.image,
+            }
+        if hasattr(torrent, "username"):
+            torrent.username = history.username
+        torrent.userid = history.userid
+
+    @classmethod
+    def _load_history_map(
+        cls, torrents: List[Union[TransferTorrent, DownloadingTorrent]]
+    ) -> Dict[str, Any]:
+        """批量加载下载历史，避免逐条查询形成 N+1。"""
+        hashes = [torrent.hash for torrent in torrents if getattr(torrent, "hash", None)]
+        if not hashes:
+            return {}
+        return DownloadHistoryOper().get_by_hashes(hashes)
+
+    @classmethod
+    def _query_downloads_sync(
+        cls,
+        downloader: Optional[str] = None,
+        status: Optional[str] = "all",
+        hash_value: Optional[str] = None,
+        title: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        同步查询下载器和下载历史，整个链路放在线程池中执行。
+        """
+        download_chain = DownloadChain()
+
+        if hash_value:
+            torrents = (
+                download_chain.list_torrents(downloader=downloader, hashs=[hash_value])
+                or []
+            )
+            if not torrents:
+                return {
+                    "message": f"未找到hash为 {hash_value} 的下载任务（该任务可能已完成、已删除或不存在）"
+                }
+
+            history_map = cls._load_history_map(torrents)
+            for torrent in torrents:
+                cls._apply_download_history(torrent, history_map.get(torrent.hash))
+            filtered_downloads = list(torrents)
+        elif title:
+            all_torrents = cls._get_all_torrents(download_chain, downloader)
+            history_map = cls._load_history_map(all_torrents)
+            filtered_downloads = []
+            title_lower = title.lower()
+
+            for torrent in all_torrents:
+                history = history_map.get(torrent.hash)
+                matched = title_lower in (torrent.title or "").lower() or title_lower in (
+                    getattr(torrent, "name", None) or ""
+                ).lower()
+                if not matched and history and history.title:
+                    matched = title_lower in history.title.lower()
+
+                if not matched:
+                    continue
+
+                cls._apply_download_history(torrent, history)
+                filtered_downloads.append(torrent)
+
+            if not filtered_downloads:
+                return {"message": f"未找到标题包含 '{title}' 的下载任务"}
+        else:
+            if status == "downloading":
+                downloads = download_chain.downloading(name=downloader) or []
+                filtered_downloads = [
+                    dl
+                    for dl in downloads
+                    if not downloader or dl.downloader == downloader
+                ]
+            else:
+                all_torrents = cls._get_all_torrents(download_chain, downloader)
+                filtered_downloads = []
+                for torrent in all_torrents:
+                    if downloader and torrent.downloader != downloader:
+                        continue
+                    if status == "completed" and torrent.state not in [
+                        "seeding",
+                        "completed",
+                    ]:
+                        continue
+                    if status == "paused" and torrent.state != "paused":
+                        continue
+                    filtered_downloads.append(torrent)
+
+                history_map = cls._load_history_map(filtered_downloads)
+                for torrent in filtered_downloads:
+                    cls._apply_download_history(torrent, history_map.get(torrent.hash))
+
+        if tag and filtered_downloads:
+            tag_lower = tag.lower()
+            filtered_downloads = [
+                d for d in filtered_downloads if d.tags and tag_lower in d.tags.lower()
+            ]
+            if not filtered_downloads:
+                return {"message": f"未找到标签包含 '{tag}' 的下载任务"}
+
+        if not filtered_downloads:
+            return {"message": "未找到相关下载任务"}
+
+        return {"downloads": filtered_downloads}
+
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据查询参数生成友好的提示消息"""
         downloader = kwargs.get("downloader")
@@ -98,124 +218,19 @@ class QueryDownloadTasksTool(MoviePilotTool):
                   tag: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}, hash={hash}, title={title}, tag={tag}")
         try:
-            download_chain = DownloadChain()
-            
-            # 如果提供了hash，直接查询该hash的任务（不限制状态）
-            if hash:
-                torrents = download_chain.list_torrents(downloader=downloader, hashs=[hash]) or []
-                if not torrents:
-                    return f"未找到hash为 {hash} 的下载任务（该任务可能已完成、已删除或不存在）"
-                # 转换为DownloadingTorrent格式
-                downloads = []
-                for torrent in torrents:
-                    # 获取下载历史信息
-                    history = DownloadHistoryOper().get_by_hash(torrent.hash)
-                    if history:
-                        if hasattr(torrent, "media"):
-                            torrent.media = {
-                                "tmdbid": history.tmdbid,
-                                "type": history.type,
-                                "title": history.title,
-                                "season": history.seasons,
-                                "episode": history.episodes,
-                                "image": history.image,
-                            }
-                        if hasattr(torrent, "username"):
-                            torrent.username = history.username
-                        torrent.userid = history.userid
-                    downloads.append(torrent)
-                filtered_downloads = downloads
-            elif title:
-                # 如果提供了title，查询所有任务并搜索匹配的标题
-                # 查询所有状态的任务
-                all_torrents = self._get_all_torrents(download_chain, downloader)
-                filtered_downloads = []
-                title_lower = title.lower()
-                for torrent in all_torrents:
-                    # 获取下载历史信息
-                    history = DownloadHistoryOper().get_by_hash(torrent.hash)
-                    
-                    # 检查标题或名称是否匹配（包括下载历史中的标题）
-                    matched = False
-                    # 检查torrent的title和name字段
-                    if (title_lower in (torrent.title or "").lower()) or \
-                       (title_lower in (getattr(torrent, "name", None) or "").lower()):
-                        matched = True
-                    # 检查下载历史中的标题
-                    if history and history.title:
-                        if title_lower in history.title.lower():
-                            matched = True
-                    
-                    if matched:
-                        if history:
-                            if hasattr(torrent, "media"):
-                                torrent.media = {
-                                    "tmdbid": history.tmdbid,
-                                    "type": history.type,
-                                    "title": history.title,
-                                    "season": history.seasons,
-                                    "episode": history.episodes,
-                                    "image": history.image,
-                                }
-                            if hasattr(torrent, "username"):
-                                torrent.username = history.username
-                            torrent.userid = history.userid
-                        filtered_downloads.append(torrent)
-                if not filtered_downloads:
-                    return f"未找到标题包含 '{title}' 的下载任务"
-            else:
-                # 根据status决定查询方式
-                if status == "downloading":
-                    # 如果status为下载中，使用downloading方法
-                    downloads = download_chain.downloading(name=downloader) or []
-                    filtered_downloads = []
-                    for dl in downloads:
-                        if downloader and dl.downloader != downloader:
-                            continue
-                        filtered_downloads.append(dl)
-                else:
-                    # 其他状态（completed、paused、all），使用list_torrents查询所有任务
-                    # 查询所有状态的任务
-                    all_torrents = self._get_all_torrents(download_chain, downloader)
-                    filtered_downloads = []
-                    for torrent in all_torrents:
-                        if downloader and torrent.downloader != downloader:
-                            continue
-                        # 根据status过滤
-                        if status == "completed":
-                            # 已完成的任务（state为seeding或completed）
-                            if torrent.state not in ["seeding", "completed"]:
-                                continue
-                        elif status == "paused":
-                            # 已暂停的任务
-                            if torrent.state != "paused":
-                                continue
-                        # status == "all" 时不过滤
-                        # 获取下载历史信息
-                        history = DownloadHistoryOper().get_by_hash(torrent.hash)
-                        if history:
-                            if hasattr(torrent, "media"):
-                                torrent.media = {
-                                    "tmdbid": history.tmdbid,
-                                    "type": history.type,
-                                    "title": history.title,
-                                    "season": history.seasons,
-                                    "episode": history.episodes,
-                                    "image": history.image,
-                                }
-                            if hasattr(torrent, "username"):
-                                torrent.username = history.username
-                            torrent.userid = history.userid
-                        filtered_downloads.append(torrent)
-            # 按tag过滤
-            if tag and filtered_downloads:
-                tag_lower = tag.lower()
-                filtered_downloads = [
-                    d for d in filtered_downloads
-                    if d.tags and tag_lower in d.tags.lower()
-                ]
-                if not filtered_downloads:
-                    return f"未找到标签包含 '{tag}' 的下载任务"
+            payload = await self.run_blocking(
+                "downloader",
+                self._query_downloads_sync,
+                downloader,
+                status,
+                hash,
+                title,
+                tag,
+            )
+            if payload.get("message"):
+                return payload["message"]
+
+            filtered_downloads = payload.get("downloads") or []
             if filtered_downloads:
                 # 限制最多20条结果
                 total_count = len(filtered_downloads)

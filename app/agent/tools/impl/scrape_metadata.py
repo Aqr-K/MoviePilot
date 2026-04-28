@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.media import MediaChain
-from app.core.config import global_vars
 from app.core.metainfo import MetaInfoPath
 from app.log import logger
 from app.schemas import FileItem
@@ -104,15 +103,14 @@ class ScrapeMetadataTool(MoviePilotTool):
                     ensure_ascii=False,
                 )
 
-            # 在线程池中执行同步的刮削操作
-            await global_vars.loop.run_in_executor(
-                None,
-                lambda: media_chain.scrape_metadata(
-                    fileitem=fileitem,
-                    meta=meta,
-                    mediainfo=mediainfo,
-                    overwrite=overwrite,
-                ),
+            # 刮削会包含磁盘写入和外部图片/元数据访问，统一放到 storage 线程池。
+            await self.run_blocking(
+                "storage",
+                media_chain.scrape_metadata,
+                fileitem=fileitem,
+                meta=meta,
+                mediainfo=mediainfo,
+                overwrite=overwrite,
             )
 
             return json.dumps(

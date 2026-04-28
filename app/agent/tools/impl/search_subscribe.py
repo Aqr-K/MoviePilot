@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.chain.subscribe import SubscribeChain
-from app.core.config import global_vars
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
 from app.schemas.types import media_type_to_agent
@@ -81,19 +80,13 @@ class SearchSubscribeTool(MoviePilotTool):
                 subscribe_oper.update(subscribe_id, {"filter_groups": filter_groups})
                 logger.info(f"更新订阅 #{subscribe_id} 的规则组为: {filter_groups}")
 
-            # 调用 SubscribeChain 的 search 方法
-            # search 方法是同步的，需要在异步环境中运行
-            subscribe_chain = SubscribeChain()
-
-            # 在线程池中执行同步的搜索操作
-            # 当 sid 有值时，state 参数会被忽略，直接处理该订阅
-            await global_vars.loop.run_in_executor(
-                None,
-                lambda: subscribe_chain.search(
-                    sid=subscribe_id,
-                    state='R',  # 默认状态，当 sid 有值时此参数会被忽略
-                    manual=manual
-                )
+            # 订阅搜索会触发大量同步站点访问，统一走 subscribe 线程池。
+            await self.run_blocking(
+                "subscribe",
+                SubscribeChain().search,
+                sid=subscribe_id,
+                state="R",  # 当 sid 有值时此参数会被忽略
+                manual=manual,
             )
 
             # 重新获取订阅信息以获取更新后的状态

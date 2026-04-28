@@ -1,5 +1,6 @@
 """查询媒体库工具"""
 
+import asyncio
 import json
 from collections import OrderedDict
 from typing import Optional, Type, Any
@@ -102,6 +103,16 @@ class QueryLibraryExistsTool(MoviePilotTool):
             message += f" [{media_type}]"
         return message
 
+    @staticmethod
+    def _get_media_server_names() -> list[str]:
+        """同步读取已加载媒体服务器名称。"""
+        return sorted(MediaServerHelper().get_services().keys())
+
+    @staticmethod
+    def _query_media_exists(mediainfo, server: Optional[str] = None):
+        """同步查询单个媒体服务器的存在性信息。"""
+        return MediaServerChain().media_exists(mediainfo=mediainfo, server=server)
+
     async def run(self, tmdb_id: Optional[int] = None, douban_id: Optional[str] = None,
                   media_type: Optional[str] = None, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: tmdb_id={tmdb_id}, douban_id={douban_id}, media_type={media_type}")
@@ -116,7 +127,7 @@ class QueryLibraryExistsTool(MoviePilotTool):
                     return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
             media_chain = MediaServerChain()
-            mediainfo = media_chain.recognize_media(
+            mediainfo = await media_chain.async_recognize_media(
                 tmdbid=tmdb_id,
                 doubanid=douban_id,
                 mtype=media_type_enum,
@@ -127,12 +138,22 @@ class QueryLibraryExistsTool(MoviePilotTool):
 
             # 2. 遍历所有媒体服务器，分别查询存在性信息
             server_results = OrderedDict()
-            media_server_helper = MediaServerHelper()
             total_seasons = _filter_regular_seasons(mediainfo.seasons)
-            global_existsinfo = media_chain.media_exists(mediainfo=mediainfo)
+            service_names = self._get_media_server_names()
 
-            for service_name in sorted(media_server_helper.get_services().keys()):
-                existsinfo = media_chain.media_exists(mediainfo=mediainfo, server=service_name)
+            server_checks = await asyncio.gather(
+                *[
+                    self.run_blocking(
+                        "mediaserver",
+                        self._query_media_exists,
+                        mediainfo,
+                        service_name,
+                    )
+                    for service_name in service_names
+                ]
+            )
+
+            for service_name, existsinfo in zip(service_names, server_checks):
                 if not existsinfo:
                     continue
 
@@ -147,21 +168,23 @@ class QueryLibraryExistsTool(MoviePilotTool):
                         "exists": True
                     }
 
-            if global_existsinfo:
-                fallback_server_name = global_existsinfo.server or "local"
-                if fallback_server_name not in server_results:
-                    if global_existsinfo.type == MediaType.TV:
-                        server_results[fallback_server_name] = _build_tv_server_result(
-                            existing_seasons=_filter_regular_seasons(global_existsinfo.seasons),
-                            total_seasons=total_seasons
-                        )
-                    else:
-                        server_results[fallback_server_name] = {
-                            "exists": True
-                        }
-
             if not server_results:
-                return "媒体库中未找到相关媒体"
+                global_existsinfo = await self.run_blocking(
+                    "mediaserver", self._query_media_exists, mediainfo, None
+                )
+                if not global_existsinfo:
+                    return "媒体库中未找到相关媒体"
+
+                fallback_server_name = global_existsinfo.server or "local"
+                if global_existsinfo.type == MediaType.TV:
+                    server_results[fallback_server_name] = _build_tv_server_result(
+                        existing_seasons=_filter_regular_seasons(global_existsinfo.seasons),
+                        total_seasons=total_seasons
+                    )
+                else:
+                    server_results[fallback_server_name] = {
+                        "exists": True
+                    }
 
             # 3. 组装统一的存在性结果，不查询媒体服务器详情
             result_dict = {

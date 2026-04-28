@@ -1,5 +1,5 @@
 import time
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import Column, Integer, String, JSON, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,6 +68,40 @@ class DownloadHistory(Base):
             .order_by(DownloadHistory.date.desc())
             .first()
         )
+
+    @classmethod
+    @db_query
+    def get_by_hashes(cls, db: Session, download_hashes: List[str]):
+        """
+        批量查询多个下载任务的最新历史记录，避免在上层形成 N+1 查询。
+        """
+        normalized_hashes = []
+        seen_hashes = set()
+        for download_hash in download_hashes or []:
+            if not download_hash or download_hash in seen_hashes:
+                continue
+            seen_hashes.add(download_hash)
+            normalized_hashes.append(download_hash)
+
+        if not normalized_hashes:
+            return []
+
+        histories = (
+            db.query(DownloadHistory)
+            .filter(DownloadHistory.download_hash.in_(normalized_hashes))
+            .order_by(DownloadHistory.download_hash, DownloadHistory.date.desc())
+            .all()
+        )
+        latest_histories = {}
+        for history in histories:
+            if history.download_hash and history.download_hash not in latest_histories:
+                latest_histories[history.download_hash] = history
+
+        return [
+            latest_histories[download_hash]
+            for download_hash in normalized_hashes
+            if download_hash in latest_histories
+        ]
 
     @classmethod
     @db_query

@@ -24,36 +24,35 @@ class QueryRuleGroupsTool(MoviePilotTool):
         """根据查询参数生成友好的提示消息"""
         return "查询所有规则组"
 
+    @staticmethod
+    def _load_rule_groups() -> dict:
+        """从内存配置缓存中读取规则组。"""
+        rule_groups = RuleHelper().get_rule_groups()
+        if not rule_groups:
+            return {
+                "message": "未找到任何规则组",
+                "rule_groups": [],
+            }
+
+        simplified_groups = [
+            {
+                "name": group.name,
+                "media_type": group.media_type,
+                "category": group.category,
+            }
+            for group in rule_groups
+        ]
+        return {
+            "message": f"找到 {len(simplified_groups)} 个规则组",
+            "rule_groups": simplified_groups,
+        }
+
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
-        
+
         try:
-            rule_helper = RuleHelper()
-            rule_groups = rule_helper.get_rule_groups()
-            
-            if not rule_groups:
-                return json.dumps({
-                    "message": "未找到任何规则组",
-                    "rule_groups": []
-                }, ensure_ascii=False, indent=2)
-            
-            # 精简字段，过滤掉 rule_string 避免结果过大
-            simplified_groups = []
-            for group in rule_groups:
-                simplified = {
-                    "name": group.name,
-                    "media_type": group.media_type,
-                    "category": group.category
-                }
-                simplified_groups.append(simplified)
-            
-            result = {
-                "message": f"找到 {len(simplified_groups)} 个规则组",
-                "rule_groups": simplified_groups
-            }
-            
+            result = self._load_rule_groups()
             return json.dumps(result, ensure_ascii=False, indent=2)
-            
         except Exception as e:
             error_message = f"查询规则组失败: {str(e)}"
             logger.error(f"查询规则组失败: {e}", exc_info=True)

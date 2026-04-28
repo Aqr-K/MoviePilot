@@ -148,6 +148,12 @@ class SubscribeOper(DbOper):
         """
         Subscribe.delete(self._db, rid=sid)
 
+    async def async_delete(self, sid: int):
+        """
+        异步删除订阅。
+        """
+        await Subscribe.async_delete(self._db, rid=sid)
+
     def update(self, sid: int, payload: dict) -> Subscribe:
         """
         更新订阅

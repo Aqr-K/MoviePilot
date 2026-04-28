@@ -84,6 +84,73 @@ class TransferFileTool(MoviePilotTool):
 
         return message
 
+    @staticmethod
+    def _transfer_file_sync(
+        file_path: str,
+        storage: Optional[str] = "local",
+        target_path: Optional[str] = None,
+        target_storage: Optional[str] = None,
+        media_type: Optional[str] = None,
+        tmdbid: Optional[int] = None,
+        doubanid: Optional[str] = None,
+        season: Optional[int] = None,
+        transfer_type: Optional[str] = None,
+        background: Optional[bool] = False,
+    ) -> str:
+        """
+        文件整理链路包含大量同步磁盘与外部服务调用，需要在线程池中运行。
+        """
+        if not file_path:
+            return "错误：必须提供文件或目录路径"
+
+        if storage == "local":
+            if not file_path.startswith("/") and not (
+                len(file_path) > 1 and file_path[1] == ":"
+            ):
+                file_path = str(Path(file_path).resolve())
+        elif not file_path.startswith("/"):
+            file_path = "/" + file_path
+
+        fileitem = FileItem(
+            storage=storage or "local",
+            path=file_path,
+            type="dir" if file_path.endswith("/") else "file",
+        )
+        target_path_obj = Path(target_path) if target_path else None
+
+        media_type_enum = None
+        if media_type:
+            media_type_enum = MediaType.from_agent(media_type)
+            if not media_type_enum:
+                return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
+
+        state, errormsg = TransferChain().manual_transfer(
+            fileitem=fileitem,
+            target_storage=target_storage,
+            target_path=target_path_obj,
+            tmdbid=tmdbid,
+            doubanid=doubanid,
+            mtype=media_type_enum,
+            season=season,
+            transfer_type=transfer_type,
+            background=background,
+        )
+
+        if state:
+            if background:
+                return f"整理任务已提交到后台运行：{file_path}"
+            return f"整理成功：{file_path}"
+
+        if isinstance(errormsg, list):
+            error_text = f"整理完成，{len(errormsg)} 个文件转移失败"
+            if errormsg:
+                error_text += "：\n" + "\n".join(str(e) for e in errormsg[:5])
+                if len(errormsg) > 5:
+                    error_text += f"\n... 还有 {len(errormsg) - 5} 个错误"
+        else:
+            error_text = str(errormsg)
+        return f"整理失败：{error_text}"
+
     async def run(
         self,
         file_path: str,
@@ -105,73 +172,20 @@ class TransferFileTool(MoviePilotTool):
         )
 
         try:
-            if not file_path:
-                return "错误：必须提供文件或目录路径"
-
-            # 规范化路径
-            if storage == "local":
-                # 本地路径处理
-                if not file_path.startswith("/") and not (
-                    len(file_path) > 1 and file_path[1] == ":"
-                ):
-                    # 相对路径，尝试转换为绝对路径
-                    file_path = str(Path(file_path).resolve())
-            else:
-                # 远程存储路径，确保以/开头
-                if not file_path.startswith("/"):
-                    file_path = "/" + file_path
-
-            # 创建FileItem
-            fileitem = FileItem(
-                storage=storage or "local",
-                path=file_path,
-                type="dir" if file_path.endswith("/") else "file",
+            return await self.run_blocking(
+                "storage",
+                self._transfer_file_sync,
+                file_path,
+                storage,
+                target_path,
+                target_storage,
+                media_type,
+                tmdbid,
+                doubanid,
+                season,
+                transfer_type,
+                background,
             )
-
-            # 处理目标路径
-            target_path_obj = None
-            if target_path:
-                target_path_obj = Path(target_path)
-
-            # 处理媒体类型
-            media_type_enum = None
-            if media_type:
-                media_type_enum = MediaType.from_agent(media_type)
-                if not media_type_enum:
-                    return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
-
-            # 调用整理方法
-            transfer_chain = TransferChain()
-            state, errormsg = transfer_chain.manual_transfer(
-                fileitem=fileitem,
-                target_storage=target_storage,
-                target_path=target_path_obj,
-                tmdbid=tmdbid,
-                doubanid=doubanid,
-                mtype=media_type_enum,
-                season=season,
-                transfer_type=transfer_type,
-                background=background,
-            )
-
-            if not state:
-                # 处理错误信息
-                if isinstance(errormsg, list):
-                    error_text = f"整理完成，{len(errormsg)} 个文件转移失败"
-                    if errormsg:
-                        error_text += f"：\n" + "\n".join(
-                            str(e) for e in errormsg[:5]
-                        )  # 只显示前5个错误
-                        if len(errormsg) > 5:
-                            error_text += f"\n... 还有 {len(errormsg) - 5} 个错误"
-                else:
-                    error_text = str(errormsg)
-                return f"整理失败：{error_text}"
-            else:
-                if background:
-                    return f"整理任务已提交到后台运行：{file_path}"
-                else:
-                    return f"整理成功：{file_path}"
         except Exception as e:
             logger.error(f"整理文件失败: {e}", exc_info=True)
             return f"整理文件时发生错误: {str(e)}"

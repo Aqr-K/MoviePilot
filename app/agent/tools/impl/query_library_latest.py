@@ -1,5 +1,6 @@
 """查询媒体服务器最近入库影片工具"""
 
+import asyncio
 import json
 from typing import Optional, Type
 
@@ -50,6 +51,32 @@ class QueryLibraryLatestTool(MoviePilotTool):
 
         return " | ".join(parts)
 
+    @staticmethod
+    def _get_enabled_servers() -> list[str]:
+        """同步读取启用的媒体服务器列表。"""
+        mediaservers = ServiceConfigHelper.get_mediaserver_configs()
+        return [ms.name for ms in mediaservers if ms.enabled]
+
+    @staticmethod
+    def _load_latest_items(
+        server_name: str, count: int, username: Optional[str] = None
+    ) -> list[dict]:
+        """
+        媒体服务器 SDK 和 requests 调用都是同步的，这里在线程池中转换为可序列化结果。
+        """
+        latest_items = MediaServerChain().latest(
+            server=server_name, count=count, username=username
+        )
+        if not latest_items:
+            return []
+        return [
+            {
+                **item.model_dump(exclude_none=True),
+                "server": server_name,
+            }
+            for item in latest_items
+        ]
+
     async def run(
         self, server: Optional[str] = None, page: Optional[int] = 1, **kwargs
     ) -> str:
@@ -58,37 +85,34 @@ class QueryLibraryLatestTool(MoviePilotTool):
         fetch_count = page * PAGE_SIZE
         logger.info(f"执行工具: {self.name}, 参数: server={server}, page={page}")
         try:
-            media_chain = MediaServerChain()
-            results = []
-
             # 如果没有指定服务器，获取所有启用的媒体服务器
             if not server:
-                mediaservers = ServiceConfigHelper.get_mediaserver_configs()
-                enabled_servers = [ms.name for ms in mediaservers if ms.enabled]
-
+                enabled_servers = self._get_enabled_servers()
                 if not enabled_servers:
                     return "未找到启用的媒体服务器"
-
-                # 遍历所有启用的服务器
-                for server_name in enabled_servers:
-                    latest_items = media_chain.latest(
-                        server=server_name, count=fetch_count, username=self._username
-                    )
-                    if latest_items:
-                        for item in latest_items:
-                            item_dict = item.model_dump(exclude_none=True)
-                            item_dict["server"] = server_name
-                            results.append(item_dict)
-            else:
-                # 查询指定服务器
-                latest_items = media_chain.latest(
-                    server=server, count=fetch_count, username=self._username
+                server_results = await asyncio.gather(
+                    *[
+                        self.run_blocking(
+                            "mediaserver",
+                            self._load_latest_items,
+                            server_name,
+                            fetch_count,
+                            self._username,
+                        )
+                        for server_name in enabled_servers
+                    ]
                 )
-                if latest_items:
-                    for item in latest_items:
-                        item_dict = item.model_dump(exclude_none=True)
-                        item_dict["server"] = server
-                        results.append(item_dict)
+                results = [
+                    item for items in server_results for item in items if items
+                ]
+            else:
+                results = await self.run_blocking(
+                    "mediaserver",
+                    self._load_latest_items,
+                    server,
+                    fetch_count,
+                    self._username,
+                )
 
             if not results:
                 server_info = f"服务器 {server}" if server else "所有服务器"

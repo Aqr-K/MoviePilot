@@ -43,70 +43,68 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
             return f"查询插件 {plugin_id} 的能力"
         return "查询所有插件的能力"
 
-    async def run(self, plugin_id: Optional[str] = None, **kwargs) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: plugin_id={plugin_id}")
-        try:
-            plugin_manager = PluginManager()
-            result = {}
+    @staticmethod
+    def _load_plugin_capabilities(plugin_id: Optional[str] = None) -> dict:
+        """读取运行中插件实例暴露的内存能力信息。"""
+        plugin_manager = PluginManager()
+        result = {}
 
-            # 获取插件命令
-            commands = plugin_manager.get_plugin_commands(pid=plugin_id)
-            if commands:
-                commands_list = []
-                for cmd in commands:
-                    cmd_info = {
-                        "cmd": cmd.get("cmd"),
-                        "desc": cmd.get("desc"),
-                        "plugin_id": cmd.get("pid"),
-                    }
-                    # data 字段可能包含额外参数信息
-                    if cmd.get("data"):
-                        cmd_info["data"] = cmd.get("data")
-                    commands_list.append(cmd_info)
-                result["commands"] = commands_list
+        commands = plugin_manager.get_plugin_commands(pid=plugin_id)
+        if commands:
+            result["commands"] = [
+                {
+                    "cmd": cmd.get("cmd"),
+                    "desc": cmd.get("desc"),
+                    "plugin_id": cmd.get("pid"),
+                    **({"data": cmd.get("data")} if cmd.get("data") else {}),
+                }
+                for cmd in commands
+            ]
 
-            # 获取插件动作
-            actions = plugin_manager.get_plugin_actions(pid=plugin_id)
-            if actions:
-                actions_list = []
-                for action_group in actions:
-                    plugin_actions = {
+        actions = plugin_manager.get_plugin_actions(pid=plugin_id)
+        if actions:
+            actions_list = []
+            for action_group in actions:
+                actions_list.append(
+                    {
                         "plugin_id": action_group.get("plugin_id"),
                         "plugin_name": action_group.get("plugin_name"),
-                        "actions": [],
-                    }
-                    for action in action_group.get("actions", []):
-                        plugin_actions["actions"].append(
+                        "actions": [
                             {
                                 "id": action.get("id"),
                                 "name": action.get("name"),
                             }
-                        )
-                    actions_list.append(plugin_actions)
-                result["actions"] = actions_list
-
-            # 获取插件定时服务
-            services = plugin_manager.get_plugin_services(pid=plugin_id)
-            if services:
-                services_list = []
-                for svc in services:
-                    svc_info = {
-                        "id": svc.get("id"),
-                        "name": svc.get("name"),
+                            for action in action_group.get("actions", [])
+                        ],
                     }
-                    # 包含触发器信息
-                    trigger = svc.get("trigger")
-                    if trigger:
-                        svc_info["trigger"] = str(trigger)
-                    # 包含定时器参数
-                    svc_kwargs = svc.get("kwargs")
-                    if svc_kwargs:
-                        svc_info["trigger_kwargs"] = {
-                            k: str(v) for k, v in svc_kwargs.items()
-                        }
-                    services_list.append(svc_info)
-                result["services"] = services_list
+                )
+            result["actions"] = actions_list
 
+        services = plugin_manager.get_plugin_services(pid=plugin_id)
+        if services:
+            services_list = []
+            for svc in services:
+                svc_info = {
+                    "id": svc.get("id"),
+                    "name": svc.get("name"),
+                }
+                trigger = svc.get("trigger")
+                if trigger:
+                    svc_info["trigger"] = str(trigger)
+                svc_kwargs = svc.get("kwargs")
+                if svc_kwargs:
+                    svc_info["trigger_kwargs"] = {
+                        k: str(v) for k, v in svc_kwargs.items()
+                    }
+                services_list.append(svc_info)
+            result["services"] = services_list
+
+        return result
+
+    async def run(self, plugin_id: Optional[str] = None, **kwargs) -> str:
+        logger.info(f"执行工具: {self.name}, 参数: plugin_id={plugin_id}")
+        try:
+            result = self._load_plugin_capabilities(plugin_id)
             if not result:
                 if plugin_id:
                     return f"插件 {plugin_id} 没有注册任何命令、动作或定时服务"

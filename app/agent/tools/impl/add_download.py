@@ -104,6 +104,29 @@ class AddDownloadTool(MoviePilotTool):
             return None
         return context
 
+    @classmethod
+    async def _async_resolve_cached_context(cls, torrent_ref: str) -> Optional[Context]:
+        """异步读取最近搜索缓存，避免在协程里直接访问同步文件缓存。"""
+        ref = str(torrent_ref).strip()
+        if ":" not in ref:
+            return None
+        try:
+            ref_hash, ref_index = ref.split(":", 1)
+            index = int(ref_index)
+        except (TypeError, ValueError):
+            return None
+
+        if index < 1:
+            return None
+
+        results = await SearchChain().async_last_search_results() or []
+        if index > len(results):
+            return None
+        context = results[index - 1]
+        if not ref_hash or cls._build_torrent_ref(context) != ref_hash:
+            return None
+        return context
+
     @staticmethod
     def _merge_labels_with_system_tag(labels: Optional[str]) -> Optional[str]:
         """合并用户标签与系统默认标签，确保任务可被系统管理"""
@@ -164,6 +187,43 @@ class AddDownloadTool(MoviePilotTool):
 
         return Path(FileURI(storage=dir_conf.storage or "local", path=dir_conf.download_path).uri)
 
+    @staticmethod
+    def _download_direct_sync(
+        torrent_input: str,
+        download_dir: Path,
+        merged_labels: Optional[str],
+        downloader: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        """同步添加磁力下载任务，避免下载器调用阻塞事件循环。"""
+        result = DownloadChain().download(
+            content=torrent_input,
+            download_dir=download_dir,
+            cookie=None,
+            label=merged_labels,
+            downloader=downloader,
+        )
+        if result:
+            _, did, _, error_msg = result
+        else:
+            did, error_msg = None, "未找到下载器"
+        return did, error_msg
+
+    @staticmethod
+    def _download_single_sync(
+        context: Context,
+        downloader: Optional[str],
+        save_path: Optional[str],
+        merged_labels: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        """同步提交带上下文的下载任务，避免站点下载与下载器调用阻塞事件循环。"""
+        return DownloadChain().download_single(
+            context=context,
+            downloader=downloader,
+            save_path=save_path,
+            label=merged_labels,
+            return_detail=True,
+        )
+
     async def run(self, torrent_url: Optional[List[str]] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
@@ -175,14 +235,13 @@ class AddDownloadTool(MoviePilotTool):
             if not torrent_inputs:
                 return "错误：torrent_url 不能为空。"
 
-            download_chain = DownloadChain()
             merged_labels = self._merge_labels_with_system_tag(labels)
             success_count = 0
             failed_messages = []
 
             for torrent_input in torrent_inputs:
                 if self._is_torrent_ref(torrent_input):
-                    cached_context = self._resolve_cached_context(torrent_input)
+                    cached_context = await self._async_resolve_cached_context(torrent_input)
                     if not cached_context or not cached_context.torrent_info:
                         failed_messages.append(f"{torrent_input} 引用无效，请重新使用 get_search_results 查看搜索结果")
                         continue
@@ -232,33 +291,33 @@ class AddDownloadTool(MoviePilotTool):
                             f"{torrent_input} 不是有效的下载内容，非 hash:id 时仅支持 magnet: 开头"
                         )
                         continue
-                    download_dir = self._resolve_direct_download_dir(save_path)
+                    download_dir = await self.run_blocking(
+                        "storage", self._resolve_direct_download_dir, save_path
+                    )
                     if not download_dir:
                         failed_messages.append(f"{torrent_input} 缺少保存路径，且系统未配置可用下载目录")
                         continue
-                    result = download_chain.download(
-                        content=torrent_input,
-                        download_dir=download_dir,
-                        cookie=None,
-                        label=merged_labels,
-                        downloader=downloader
+                    did, error_msg = await self.run_blocking(
+                        "downloader",
+                        self._download_direct_sync,
+                        torrent_input,
+                        download_dir,
+                        merged_labels,
+                        downloader,
                     )
-                    if result:
-                        _, did, _, error_msg = result
-                    else:
-                        did, error_msg = None, "未找到下载器"
                     if did:
                         success_count += 1
                     else:
                         failed_messages.append(self._build_failure_message(torrent_input, error_msg))
                     continue
 
-                did, error_msg = download_chain.download_single(
-                    context=context,
-                    downloader=downloader,
-                    save_path=save_path,
-                    label=merged_labels,
-                    return_detail=True
+                did, error_msg = await self.run_blocking(
+                    "downloader",
+                    self._download_single_sync,
+                    context,
+                    downloader,
+                    save_path,
+                    merged_labels,
                 )
                 if did:
                     success_count += 1

@@ -33,11 +33,15 @@ class QueryCustomIdentifiersTool(MoviePilotTool):
         """生成友好的提示消息"""
         return "查询自定义识别词"
 
+    @staticmethod
+    def _load_custom_identifiers():
+        """从内存配置缓存中读取自定义识别词。"""
+        return SystemConfigOper().get(SystemConfigKey.CustomIdentifiers)
+
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
         try:
-            system_config_oper = SystemConfigOper()
-            identifiers = system_config_oper.get(SystemConfigKey.CustomIdentifiers)
+            identifiers = self._load_custom_identifiers()
             if identifiers:
                 return json.dumps(
                     {

@@ -1,6 +1,10 @@
+import asyncio
 import json
+import threading
 from abc import ABCMeta, abstractmethod
-from typing import Any, Optional
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from typing import Any, Callable, Optional
 
 from langchain_core.tools import BaseTool
 from pydantic import PrivateAttr
@@ -17,6 +21,44 @@ from app.schemas.types import MessageChannel
 
 class ToolChain(ChainBase):
     pass
+
+
+# 将常见的阻塞调用按能力域拆分到独立线程池，避免外部慢 IO 抢占同一批 worker。
+_BLOCKING_BUCKET_LIMITS = {
+    "default": 4,
+    "config": 2,
+    "db": 4,
+    "downloader": 4,
+    "mediaserver": 4,
+    "plugin": 2,
+    "rule": 2,
+    "site": 4,
+    "storage": 4,
+    "subscribe": 2,
+    "workflow": 2,
+}
+_blocking_semaphores = {
+    bucket: asyncio.Semaphore(limit)
+    for bucket, limit in _BLOCKING_BUCKET_LIMITS.items()
+}
+_blocking_executors: dict[str, ThreadPoolExecutor] = {}
+_blocking_executor_lock = threading.Lock()
+
+
+def _get_blocking_executor(bucket: str) -> ThreadPoolExecutor:
+    """按桶懒加载线程池，避免在导入阶段创建过多 worker。"""
+    with _blocking_executor_lock:
+        executor = _blocking_executors.get(bucket)
+        if executor:
+            return executor
+
+        limit = _BLOCKING_BUCKET_LIMITS[bucket]
+        executor = ThreadPoolExecutor(
+            max_workers=limit,
+            thread_name_prefix=f"agent-tool-{bucket}",
+        )
+        _blocking_executors[bucket] = executor
+        return executor
 
 
 class MoviePilotTool(BaseTool, metaclass=ABCMeta):
@@ -130,6 +172,23 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         """子类实现具体的工具执行逻辑"""
         raise NotImplementedError
 
+    @staticmethod
+    async def run_blocking(
+            bucket: str, func: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
+        """
+        在受控线程池中运行阻塞型同步代码，避免拖住 FastAPI 主事件循环。
+        """
+        bucket_name = bucket if bucket in _BLOCKING_BUCKET_LIMITS else "default"
+        semaphore = _blocking_semaphores[bucket_name]
+        bound_call = partial(func, *args, **kwargs)
+
+        async with semaphore:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                _get_blocking_executor(bucket_name), bound_call
+            )
+
     def set_message_attr(self, channel: str, source: str, username: str):
         """
         设置消息属性
@@ -165,6 +224,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if not self._channel or not self._source:
             return None
 
+        # 渠道配置来自 SystemConfigOper 内存缓存，可以直接读取；
+        # 只有用户信息需要走异步数据库查询。
         user_id_str = str(self._user_id) if self._user_id else None
 
         channel_type_map = {
@@ -220,7 +281,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                             return None
 
                         user = (
-                            UserOper().get_by_name(self._username)
+                            await UserOper().async_get_by_name(self._username)
                             if self._username
                             else None
                         )
@@ -235,7 +296,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                         )
                     else:
                         user = (
-                            UserOper().get_by_name(self._username)
+                            await UserOper().async_get_by_name(self._username)
                             if self._username
                             else None
                         )

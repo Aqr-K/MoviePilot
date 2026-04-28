@@ -33,32 +33,32 @@ class QueryInstalledPluginsTool(MoviePilotTool):
         """生成友好的提示消息"""
         return "查询已安装插件"
 
+    @staticmethod
+    def _list_installed_plugins() -> list[dict]:
+        """读取已加载插件的内存快照。"""
+        plugin_manager = PluginManager()
+        local_plugins = plugin_manager.get_local_plugins()
+        installed_plugins = [plugin for plugin in local_plugins if plugin.installed]
+        return [
+            {
+                "id": plugin.id,
+                "plugin_name": plugin.plugin_name,
+                "plugin_desc": plugin.plugin_desc,
+                "plugin_version": plugin.plugin_version,
+                "plugin_author": plugin.plugin_author,
+                "state": plugin.state,
+                "has_page": plugin.has_page,
+            }
+            for plugin in installed_plugins
+        ]
+
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
         try:
-            plugin_manager = PluginManager()
-            local_plugins = plugin_manager.get_local_plugins()
-            # 仅返回已安装的插件
-            installed_plugins = [plugin for plugin in local_plugins if plugin.installed]
-
+            installed_plugins = self._list_installed_plugins()
             if not installed_plugins:
                 return "当前没有已安装的插件"
-
-            plugins_list = []
-            for plugin in installed_plugins:
-                plugins_list.append(
-                    {
-                        "id": plugin.id,
-                        "plugin_name": plugin.plugin_name,
-                        "plugin_desc": plugin.plugin_desc,
-                        "plugin_version": plugin.plugin_version,
-                        "plugin_author": plugin.plugin_author,
-                        "state": plugin.state,
-                        "has_page": plugin.has_page,
-                    }
-                )
-
-            result_json = json.dumps(plugins_list, ensure_ascii=False, indent=2)
+            result_json = json.dumps(installed_plugins, ensure_ascii=False, indent=2)
             return result_json
         except Exception as e:
             logger.error(f"查询已安装插件失败: {e}", exc_info=True)

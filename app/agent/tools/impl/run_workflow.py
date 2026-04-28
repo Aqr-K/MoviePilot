@@ -46,6 +46,13 @@ class RunWorkflowTool(MoviePilotTool):
 
         return message
 
+    @staticmethod
+    def _run_workflow_sync(
+        workflow_id: int, from_begin: Optional[bool] = True
+    ) -> tuple[bool, str]:
+        """同步执行工作流，放到专用线程池避免长流程阻塞 API 响应。"""
+        return WorkflowChain().process(workflow_id, from_begin=from_begin)
+
     async def run(
         self, workflow_id: int, from_begin: Optional[bool] = True, **kwargs
     ) -> str:
@@ -62,10 +69,12 @@ class RunWorkflowTool(MoviePilotTool):
                 if not workflow:
                     return f"未找到工作流：{workflow_id}，请使用 query_workflows 工具查询可用的工作流"
 
-                # 执行工作流
-                workflow_chain = WorkflowChain()
-                state, errmsg = workflow_chain.process(
-                    workflow.id, from_begin=from_begin
+                # 工作流执行链路包含大量同步步骤，统一放到 workflow 线程池。
+                state, errmsg = await self.run_blocking(
+                    "workflow",
+                    self._run_workflow_sync,
+                    workflow.id,
+                    from_begin,
                 )
 
                 if not state:

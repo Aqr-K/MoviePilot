@@ -66,6 +66,38 @@ class ModifyDownloadTool(MoviePilotTool):
             parts.append(f"下载器: {downloader}")
         return " | ".join(parts)
 
+    @staticmethod
+    def _modify_download_sync(
+        hash_value: str,
+        action: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        downloader: Optional[str] = None,
+    ) -> List[str]:
+        """同步修改下载任务状态和标签，避免下载器 SDK 阻塞事件循环。"""
+        download_chain = DownloadChain()
+        results = []
+
+        if tags:
+            tag_result = download_chain.set_torrents_tag(
+                hashs=[hash_value], tags=tags, downloader=downloader
+            )
+            if tag_result:
+                results.append(f"成功设置标签：{', '.join(tags)}")
+            else:
+                results.append("设置标签失败，请检查任务是否存在或下载器是否可用")
+
+        if action:
+            action_result = download_chain.set_downloading(
+                hash_str=hash_value, oper=action, name=downloader
+            )
+            action_desc = "开始" if action == "start" else "暂停"
+            if action_result:
+                results.append(f"成功{action_desc}下载任务")
+            else:
+                results.append(f"{action_desc}下载任务失败，请检查任务是否存在或下载器是否可用")
+
+        return results
+
     async def run(
         self,
         hash: str,
@@ -91,31 +123,14 @@ class ModifyDownloadTool(MoviePilotTool):
             if action and action not in ("start", "stop"):
                 return f"参数错误：action 只支持 'start'（开始下载）或 'stop'（暂停下载），收到: '{action}'。"
 
-            download_chain = DownloadChain()
-            results = []
-
-            # 设置标签
-            if tags:
-                tag_result = download_chain.set_torrents_tag(
-                    hashs=[hash], tags=tags, downloader=downloader
-                )
-                if tag_result:
-                    results.append(f"成功设置标签：{', '.join(tags)}")
-                else:
-                    results.append(f"设置标签失败，请检查任务是否存在或下载器是否可用")
-
-            # 执行开始/暂停操作
-            if action:
-                action_result = download_chain.set_downloading(
-                    hash_str=hash, oper=action, name=downloader
-                )
-                action_desc = "开始" if action == "start" else "暂停"
-                if action_result:
-                    results.append(f"成功{action_desc}下载任务")
-                else:
-                    results.append(
-                        f"{action_desc}下载任务失败，请检查任务是否存在或下载器是否可用"
-                    )
+            results = await self.run_blocking(
+                "downloader",
+                self._modify_download_sync,
+                hash,
+                action,
+                tags,
+                downloader,
+            )
 
             return f"下载任务 {hash}：" + "；".join(results)
 

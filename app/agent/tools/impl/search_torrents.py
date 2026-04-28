@@ -50,6 +50,11 @@ class SearchTorrentsTool(MoviePilotTool):
             message += f" [{media_type}]"
         return message
 
+    @staticmethod
+    def _load_configured_sites() -> List[int]:
+        """同步读取默认搜索站点列表。"""
+        return SystemConfigOper().get(SystemConfigKey.IndexerSites) or []
+
     async def run(self, tmdb_id: Optional[int] = None, douban_id: Optional[str] = None,
                   media_type: Optional[str] = None, area: Optional[str] = None,
                   sites: Optional[List[int]] = None, **kwargs) -> str:
@@ -83,8 +88,7 @@ class SearchTorrentsTool(MoviePilotTool):
             if sites:
                 search_site_ids = sites
             else:
-                configured_sites = SystemConfigOper().get(SystemConfigKey.IndexerSites)
-                search_site_ids = configured_sites if configured_sites else []
+                search_site_ids = self._load_configured_sites()
 
             if filtered_torrents:
                 await search_chain.async_save_cache(filtered_torrents, SEARCH_RESULT_CACHE_FILE)

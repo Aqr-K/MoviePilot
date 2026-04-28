@@ -950,9 +950,13 @@ class DownloadChain(ChainBase):
         torrents = self.list_torrents(downloader=name, status=TorrentStatus.DOWNLOADING)
         if not torrents:
             return []
+
+        history_map = DownloadHistoryOper().get_by_hashes(
+            [torrent.hash for torrent in torrents if torrent.hash]
+        )
         ret_torrents = []
         for torrent in torrents:
-            history = DownloadHistoryOper().get_by_hash(torrent.hash)
+            history = history_map.get(torrent.hash)
             if history:
                 # 媒体信息
                 torrent.media = {

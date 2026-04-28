@@ -333,19 +333,20 @@ class ChainBase(metaclass=ABCMeta):
                     if inspect.iscoroutinefunction(func):
                         result = await func(*args, **kwargs)
                     else:
-                        result = func(*args, **kwargs)
+                        # 系统同步模块在异步路径里也必须切到线程池，避免阻塞共享事件循环。
+                        result = await run_in_threadpool(func, *args, **kwargs)
                 elif ObjectUtils.check_signature(func, result):
                     # 返回结果与方法签名一致，将结果传入
                     if inspect.iscoroutinefunction(func):
                         result = await func(result)
                     else:
-                        result = func(result)
+                        result = await run_in_threadpool(func, result)
                 elif isinstance(result, list):
                     # 返回为列表，有多个模块运行结果时进行合并
                     if inspect.iscoroutinefunction(func):
                         temp = await func(*args, **kwargs)
                     else:
-                        temp = func(*args, **kwargs)
+                        temp = await run_in_threadpool(func, *args, **kwargs)
                     if isinstance(temp, list):
                         result.extend(temp)
                 else:
