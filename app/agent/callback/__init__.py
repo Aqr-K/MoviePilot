@@ -355,7 +355,7 @@ class StreamingHandler:
         prefix = ""
         if self._buffer and last_char != "\n":
             prefix = "\n"
-        return f"{prefix}{summary}\n"
+        return f"{prefix}{summary}\n\n"
 
     @staticmethod
     def _format_tool_stat(category: str, count: int) -> str:
