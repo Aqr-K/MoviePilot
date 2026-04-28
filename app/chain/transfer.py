@@ -1584,6 +1584,45 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
         ]
 
+    @staticmethod
+    def _resolve_download_history(
+        downloadhis: DownloadHistoryOper,
+        file_path: Path,
+        bluray_dir: bool = False,
+        download_hash: Optional[str] = None,
+    ) -> Optional[DownloadHistory]:
+        """
+        根据显式 hash、文件路径或种子根目录回查下载历史。
+        """
+        if download_hash:
+            return downloadhis.get_by_hash(download_hash)
+
+        if bluray_dir:
+            return downloadhis.get_by_path(file_path.as_posix())
+
+        download_file = downloadhis.get_file_by_fullpath(file_path.as_posix())
+        if download_file:
+            return downloadhis.get_by_hash(download_file.download_hash)
+
+        # 多文件种子里的字幕/附加文件可能没有稳定的 fullpath 记录，
+        # 退回到父目录和 savepath 继续查找，尽量补齐同一种子的关联信息。
+        for parent_path in file_path.parents:
+            parent_posix = parent_path.as_posix()
+            download_history = downloadhis.get_by_path(parent_posix)
+            if download_history:
+                return download_history
+
+            download_files = downloadhis.get_files_by_savepath(parent_posix) or []
+            download_hashes = {
+                download_file.download_hash
+                for download_file in download_files
+                if download_file.download_hash
+            }
+            if len(download_hashes) == 1:
+                return downloadhis.get_by_hash(next(iter(download_hashes)))
+
+        return None
+
     def do_transfer(
         self,
         fileitem: FileItem,
@@ -1725,23 +1764,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         continue
 
                 # 提前获取下载历史，以便获取自定义识别词
-                download_history = None
                 downloadhis = DownloadHistoryOper()
-                if download_hash:
-                    # 先按hash查询
-                    download_history = downloadhis.get_by_hash(download_hash)
-                elif bluray_dir:
-                    # 蓝光原盘，按目录名查询
-                    download_history = downloadhis.get_by_path(file_path.as_posix())
-                else:
-                    # 按文件全路径查询
-                    download_file = downloadhis.get_file_by_fullpath(
-                        file_path.as_posix()
-                    )
-                    if download_file:
-                        download_history = downloadhis.get_by_hash(
-                            download_file.download_hash
-                        )
+                download_history = self._resolve_download_history(
+                    downloadhis=downloadhis,
+                    file_path=file_path,
+                    bluray_dir=bluray_dir,
+                    download_hash=download_hash,
+                )
 
                 if not meta:
                     subscribe_custom_words = None
