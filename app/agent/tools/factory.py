@@ -52,11 +52,14 @@ from app.agent.tools.impl.write_file import WriteFileTool
 from app.agent.tools.impl.read_file import ReadFileTool
 from app.agent.tools.impl.browse_webpage import BrowseWebpageTool
 from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTool
+from app.agent.tools.impl.query_market_plugins import QueryMarketPluginsTool
 from app.agent.tools.impl.query_plugin_capabilities import QueryPluginCapabilitiesTool
 from app.agent.tools.impl.query_plugin_config import QueryPluginConfigTool
 from app.agent.tools.impl.update_plugin_config import UpdatePluginConfigTool
 from app.agent.tools.impl.reload_plugin import ReloadPluginTool
 from app.agent.tools.impl.query_plugin_data import QueryPluginDataTool
+from app.agent.tools.impl.install_plugin import InstallPluginTool
+from app.agent.tools.impl.uninstall_plugin import UninstallPluginTool
 from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
 from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
 from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
@@ -149,11 +152,14 @@ class MoviePilotToolFactory:
             ReadFileTool,
             BrowseWebpageTool,
             QueryInstalledPluginsTool,
+            QueryMarketPluginsTool,
             QueryPluginCapabilitiesTool,
             QueryPluginConfigTool,
             UpdatePluginConfigTool,
             ReloadPluginTool,
             QueryPluginDataTool,
+            InstallPluginTool,
+            UninstallPluginTool,
             RunSlashCommandTool,
             ListSlashCommandsTool,
             QueryCustomIdentifiersTool,
