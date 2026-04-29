@@ -228,7 +228,7 @@ class SearchChain(ChainBase):
             output_callback=on_output,
             suppress_user_reply=True,
             persist_output_message=False,
-            suppress_message_channel_dispatch=True,
+            allow_message_tools=False,
         )
         return full_output[0].strip()
 

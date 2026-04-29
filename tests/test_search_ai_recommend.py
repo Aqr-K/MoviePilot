@@ -5,8 +5,6 @@ from types import SimpleNamespace
 from types import ModuleType
 from unittest.mock import AsyncMock, patch
 
-import app.chain as chain_module
-
 
 def _stub_module(name: str, **attrs):
     module = sys.modules.get(name)
@@ -21,11 +19,9 @@ def _stub_module(name: str, **attrs):
 _stub_module("qbittorrentapi", TorrentFilesList=list)
 _stub_module("transmission_rpc", File=object)
 
+from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain.search import SearchChain
-from app.agent_context import agent_execution_context
 from app.core.config import settings
-from app.schemas import Notification
-from app.schemas.types import NotificationType
 
 
 def _make_result(title: str, size: int, seeders: int):
@@ -131,7 +127,7 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("[0, 2]", result)
         self.assertTrue(captured["suppress_user_reply"])
         self.assertFalse(captured["persist_output_message"])
-        self.assertTrue(captured["suppress_message_channel_dispatch"])
+        self.assertFalse(captured["allow_message_tools"])
 
     def test_search_by_title_clears_previous_recommend_state_when_caching(self):
         chain = self._make_chain()
@@ -156,45 +152,22 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(SearchChain._ai_recommend_result)
         self.assertIsNone(SearchChain._ai_recommend_error)
 
-    def test_post_message_skips_channel_dispatch_when_suppressed(self):
-        chain = object.__new__(SearchChain)
-        queue_calls = []
-        event_calls = []
-        saved_messages = []
-        saved_records = []
-        chain.messagehelper = SimpleNamespace(
-            put=lambda *args, **kwargs: saved_messages.append((args, kwargs))
-        )
-        chain.messageoper = SimpleNamespace(
-            add=lambda **kwargs: saved_records.append(kwargs)
-        )
-        chain.messagequeue = SimpleNamespace(
-            send_message=lambda *args, **kwargs: queue_calls.append((args, kwargs))
-        )
-        chain.eventmanager = SimpleNamespace(
-            send_event=lambda *args, **kwargs: event_calls.append((args, kwargs))
-        )
-
-        notification = Notification(
-            mtype=NotificationType.Manual,
-            title="Title",
-            text="Body",
-        )
-
-        with (
-            patch.object(
-                chain_module.MessageTemplateHelper,
-                "render",
-                return_value=notification,
-            ),
-            agent_execution_context(suppress_message_channel_dispatch=True),
+    def test_tool_factory_excludes_message_tools_when_disabled(self):
+        with patch(
+            "app.agent.tools.factory.PluginManager.get_plugin_agent_tools",
+            return_value=[],
         ):
-            chain.post_message(message=notification)
+            tools = MoviePilotToolFactory.create_tools(
+                session_id="test-session",
+                user_id="test-user",
+                allow_message_tools=False,
+            )
 
-        self.assertEqual(1, len(saved_messages))
-        self.assertEqual(1, len(saved_records))
-        self.assertEqual([], queue_calls)
-        self.assertEqual([], event_calls)
+        tool_names = {tool.name for tool in tools}
+        self.assertNotIn("send_message", tool_names)
+        self.assertNotIn("ask_user_choice", tool_names)
+        self.assertNotIn("send_local_file", tool_names)
+        self.assertNotIn("send_voice_message", tool_names)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ class SendMessageInput(BaseModel):
 
 class SendMessageTool(MoviePilotTool):
     name: str = "send_message"
+    sends_message: bool = True
     description: str = "Send notification message to the user through configured notification channels (Telegram, Slack, WeChat, etc.). Supports optional image_url on channels that can send images. Used to inform users about operation results, errors, important updates, or proactively send a relevant image."
     args_schema: Type[BaseModel] = SendMessageInput
     require_admin: bool = True

@@ -12,7 +12,6 @@ from fastapi.concurrency import run_in_threadpool
 from qbittorrentapi import TorrentFilesList
 from transmission_rpc import File
 
-from app.agent_context import is_message_channel_dispatch_suppressed
 from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, TorrentInfo
@@ -1137,9 +1136,6 @@ class ChainBase(metaclass=ABCMeta):
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         self.messageoper.add(**message.model_dump())
-        if is_message_channel_dispatch_suppressed():
-            logger.info("当前上下文已禁用消息渠道派发，仅保存消息记录")
-            return
         dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
         if not dispatch_message.userid and dispatch_message.mtype:
@@ -1257,9 +1253,6 @@ class ChainBase(metaclass=ABCMeta):
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         await self.messageoper.async_add(**message.model_dump())
-        if is_message_channel_dispatch_suppressed():
-            logger.info("当前上下文已禁用消息渠道派发，仅保存消息记录")
-            return
         dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
         if not dispatch_message.userid and dispatch_message.mtype:
@@ -1354,9 +1347,6 @@ class ChainBase(metaclass=ABCMeta):
             message, role="user", note=note_list, title=message.title
         )
         self.messageoper.add(**message.model_dump(), note=note_list)
-        if is_message_channel_dispatch_suppressed():
-            logger.info("当前上下文已禁用消息渠道派发，仅保存媒体消息记录")
-            return None
         dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
             "post_medias_message",
@@ -1379,9 +1369,6 @@ class ChainBase(metaclass=ABCMeta):
             message, role="user", note=note_list, title=message.title
         )
         self.messageoper.add(**message.model_dump(), note=note_list)
-        if is_message_channel_dispatch_suppressed():
-            logger.info("当前上下文已禁用消息渠道派发，仅保存种子消息记录")
-            return None
         dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
             "post_torrents_message",

@@ -45,6 +45,7 @@ class SendLocalFileInput(BaseModel):
 
 class SendLocalFileTool(MoviePilotTool):
     name: str = "send_local_file"
+    sends_message: bool = True
     description: str = (
         "Send a local image or file from the server filesystem to the current user. "
         "Use this when you have generated or identified a local file the user should download."

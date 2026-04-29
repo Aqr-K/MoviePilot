@@ -27,6 +27,7 @@ class SendVoiceMessageInput(BaseModel):
 
 class SendVoiceMessageTool(MoviePilotTool):
     name: str = "send_voice_message"
+    sends_message: bool = True
     description: str = (
         "Send a voice reply to the current user. Use this only when the user explicitly asks for "
         "a voice reply or when spoken playback is clearly better than plain text. On channels "
