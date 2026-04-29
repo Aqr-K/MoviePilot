@@ -84,7 +84,7 @@ class OpenAIVoiceProvider(VoiceProvider):
         if not content:
             return None
         if len(content) > self.MAX_TRANSCRIBE_BYTES:
-            raise ValueError("语音文件超过 25MB，无法识别")
+            raise ValueError("语音文件超过 10MB，无法识别")
 
         try:
             client = self._get_client("stt")
