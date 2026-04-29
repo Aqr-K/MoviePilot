@@ -142,8 +142,11 @@ class VoiceHelper:
         """音频输入输出总开关，以显式配置为准。"""
         return bool(settings.LLM_SUPPORT_AUDIO_INPUT_OUTPUT)
 
-    def _resolve_provider_name(self) -> str:
-        return self._resolve_provider_name()
+    @staticmethod
+    def _resolve_provider_name() -> str:
+        """标准化当前配置的语音 provider 名称。"""
+        provider = settings.AI_VOICE_PROVIDER or "openai"
+        return provider.strip().lower()
 
     @classmethod
     def get_provider(cls, mode: str) -> Optional[VoiceProvider]:
