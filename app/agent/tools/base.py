@@ -113,8 +113,21 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                     if tool_message:
                         self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
                 else:
+                    allow_dispatch_without_context = self._agent_context.get(
+                        "should_dispatch_reply", False
+                    )
                     if self._channel and self._source:
                         # 渠道不支持编辑：取出 Agent 文字 + 工具消息合并独立发送
+                        agent_message = await self._stream_handler.take()
+                        messages = []
+                        if agent_message:
+                            messages.append(agent_message)
+                        if tool_message:
+                            messages.append(f"⚙️ => {tool_message}")
+                        if messages:
+                            merged_message = "\n\n".join(messages)
+                            await self.send_tool_message(merged_message)
+                    elif allow_dispatch_without_context:
                         agent_message = await self._stream_handler.take()
                         messages = []
                         if agent_message:

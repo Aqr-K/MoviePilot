@@ -201,6 +201,32 @@ class TestAgentToolStreaming(unittest.TestCase):
         run_in_threadpool_mock.assert_not_awaited()
         self.assertFalse(handler.has_sent_message)
 
+    def test_flush_without_channel_context_dispatch_allowed_sends_direct_message(self):
+        handler = StreamingHandler()
+        handler._user_id = "10001"
+        handler._username = "tester"
+        handler._streaming_enabled = True
+        handler.set_dispatch_policy(allow_dispatch_without_context=True)
+        handler.emit("hello")
+
+        with patch(
+            "app.agent.callback.run_in_threadpool", new_callable=AsyncMock
+        ) as run_in_threadpool_mock:
+            run_in_threadpool_mock.return_value = MessageResponse(
+                message_id=1,
+                chat_id=2,
+                source="telegram",
+                success=True,
+            )
+
+            asyncio.run(handler._flush())
+
+        self.assertEqual(run_in_threadpool_mock.await_count, 1)
+        self.assertEqual(
+            run_in_threadpool_mock.await_args.args[0].__name__, "send_direct_message"
+        )
+        self.assertTrue(handler.has_sent_message)
+
     def test_verbose_background_tool_call_does_not_post_message(self):
         async def _run():
             tool = DummyTool(session_id="session-1", user_id="10001")
@@ -224,6 +250,32 @@ class TestAgentToolStreaming(unittest.TestCase):
         self.assertEqual(result, "ok")
         send_tool_message.assert_not_awaited()
         self.assertEqual(buffered_message, "（调用了 1 次工具）\n\n")
+
+    def test_verbose_background_dispatch_tool_call_can_post_message(self):
+        async def _run():
+            tool = DummyTool(session_id="session-1", user_id="10001")
+            handler = StreamingHandler()
+            await handler.start_streaming()
+            handler.emit("前置内容")
+            tool.set_stream_handler(handler)
+            tool.set_message_attr(channel=None, source=None, username="tester")
+            tool.set_agent_context({"should_dispatch_reply": True})
+
+            with (
+                patch.object(settings, "AI_AGENT_VERBOSE", True),
+                patch.object(
+                    DummyTool, "send_tool_message", new_callable=AsyncMock
+                ) as send_tool_message,
+            ):
+                result = await tool._arun(explanation="run test tool")
+                buffered_message = await handler.take()
+                return result, buffered_message, send_tool_message
+
+        result, buffered_message, send_tool_message = asyncio.run(_run())
+
+        self.assertEqual(result, "ok")
+        send_tool_message.assert_awaited_once_with("前置内容\n\n⚙️ => run test tool")
+        self.assertEqual(buffered_message, "")
 
 
 if __name__ == "__main__":

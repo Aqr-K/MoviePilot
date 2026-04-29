@@ -474,6 +474,7 @@ class MoviePilotAgent:
             self._tool_context = {
                 "user_reply_sent": False,
                 "reply_mode": None,
+                "should_dispatch_reply": self.should_dispatch_reply,
             }
             self._streamed_output = ""
 
@@ -579,6 +580,9 @@ class MoviePilotAgent:
             agent = self._create_agent(streaming=use_streaming)
 
             if use_streaming:
+                self.stream_handler.set_dispatch_policy(
+                    allow_dispatch_without_context=self.should_dispatch_reply
+                )
                 # 流式模式：渠道支持消息编辑，启动流式输出实时推送 token
                 await self.stream_handler.start_streaming(
                     channel=self.channel,

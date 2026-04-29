@@ -62,8 +62,18 @@ class StreamingHandler:
         self._user_id: Optional[str] = None
         self._username: Optional[str] = None
         self._title: str = ""
+        self._allow_dispatch_without_context = False
         # 非啰嗦模式下的待输出工具统计，等下一段文本到来时再统一补一句摘要
         self._pending_tool_stats: dict[str, dict[str, Any]] = {}
+
+    def set_dispatch_policy(
+        self, allow_dispatch_without_context: bool = False
+    ) -> None:
+        """
+        设置在缺少渠道上下文时是否仍允许向默认通知渠道分发消息。
+        后台 DISPATCH 任务允许，CAPTURE_ONLY 必须禁止。
+        """
+        self._allow_dispatch_without_context = allow_dispatch_without_context
 
     def emit(self, token: str) -> str:
         """
@@ -435,8 +445,11 @@ class StreamingHandler:
             if not current_text or current_text == self._sent_text:
                 # 没有新内容需要刷新
                 return
-            if not self._channel or not self._source:
-                logger.debug("流式输出缺少渠道上下文，仅保留 buffer，不外发消息")
+            if (
+                (not self._channel or not self._source)
+                and not self._allow_dispatch_without_context
+            ):
+                logger.debug("流式输出缺少渠道上下文，当前模式禁止外发消息")
                 return
 
         chain = _StreamChain()
