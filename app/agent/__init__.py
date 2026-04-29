@@ -34,7 +34,6 @@ from app.chain import ChainBase
 from app.core.config import settings
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.llm import LLMHelper
-from app.helper.voice import VoiceHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
@@ -170,7 +169,6 @@ class MoviePilotAgent:
         self.channel = channel
         self.source = source
         self.username = username
-        self.reply_with_voice = False
         self._tool_context: Dict[str, object] = {}
         self.output_callback: Optional[Callable[[str], None]] = None
         self.force_streaming = False
@@ -280,8 +278,6 @@ class MoviePilotAgent:
         """
         if self.is_background:
             return self.force_streaming or callable(self.output_callback)
-        if self.reply_with_voice:
-            return False
         if self.force_streaming or callable(self.output_callback):
             return True
         # 啰嗦模式下始终需要流式输出来捕获工具调用前的 Agent 文字
@@ -379,10 +375,7 @@ class MoviePilotAgent:
         """
         try:
             # 系统提示词
-            system_prompt = prompt_manager.get_agent_prompt(
-                channel=self.channel,
-                prefer_voice_reply=self.reply_with_voice,
-            )
+            system_prompt = prompt_manager.get_agent_prompt(channel=self.channel)
 
             # LLM 模型（用于 agent 执行）
             llm = self._initialize_llm(streaming=streaming)
@@ -460,7 +453,6 @@ class MoviePilotAgent:
                 f"images={len(images) if images else 0}, files={len(files) if files else 0}"
             )
             self._tool_context = {
-                "incoming_voice": self.reply_with_voice,
                 "user_reply_sent": False,
                 "reply_mode": None,
             }
@@ -678,22 +670,6 @@ class MoviePilotAgent:
         """
         通过原渠道发送消息给用户
         """
-        voice_path = None
-        if (
-            self.reply_with_voice
-            and VoiceHelper.resolve_reply_mode(
-                channel=self.channel,
-                source=self.source,
-            )
-            == VoiceHelper.REPLY_MODE_NATIVE
-            and VoiceHelper.is_available("tts")
-        ):
-            # 当用户本轮发来语音且 Agent 未主动调用 send_voice_message 时，
-            # 这里补一层自动语音回复兜底，避免最终仍只返回纯文字。
-            voice_file = await asyncio.to_thread(VoiceHelper.synthesize_speech, message)
-            if voice_file:
-                voice_path = str(voice_file)
-
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
@@ -703,12 +679,6 @@ class MoviePilotAgent:
                 username=self.username,
                 title=title,
                 text=message,
-                voice_path=voice_path,
-                voice_caption=(
-                    message
-                    if voice_path and settings.AI_VOICE_REPLY_WITH_TEXT
-                    else None
-                ),
             )
         )
 
@@ -753,7 +723,6 @@ class _MessageTask:
     channel: Optional[str] = None
     source: Optional[str] = None
     username: Optional[str] = None
-    reply_with_voice: bool = False
 
 
 class AgentManager:
@@ -851,7 +820,6 @@ class AgentManager:
         channel: str = None,
         source: str = None,
         username: str = None,
-        reply_with_voice: bool = False,
     ) -> str:
         """
         处理用户消息：将消息放入会话队列，按顺序依次处理。
@@ -866,7 +834,6 @@ class AgentManager:
             channel=channel,
             source=source,
             username=username,
-            reply_with_voice=reply_with_voice,
         )
 
         # 获取或创建会话队列
@@ -964,7 +931,6 @@ class AgentManager:
                 agent.source = task.source
             if task.username:
                 agent.username = task.username
-        agent.reply_with_voice = task.reply_with_voice
 
         return await agent.process(task.message, images=task.images, files=task.files)
 

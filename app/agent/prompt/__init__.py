@@ -87,13 +87,10 @@ class PromptManager:
             logger.error(f"加载提示词失败: {prompt_name}, 错误: {e}")
             raise
 
-    def get_agent_prompt(
-        self, channel: str = None, prefer_voice_reply: bool = False
-    ) -> str:
+    def get_agent_prompt(self, channel: str = None) -> str:
         """
         获取智能体提示词
         :param channel: 消息渠道（Telegram、微信、Slack等）
-        :param prefer_voice_reply: 是否优先使用语音回复
         :return: 提示词内容
         """
         # 基础提示词只保留 MoviePilot 运行时和渠道能力相关约束。
@@ -132,9 +129,7 @@ class PromptManager:
 
         # MoviePilot系统信息
         moviepilot_info = self._get_moviepilot_info()
-        voice_reply_spec = self._generate_voice_reply_instructions(
-            prefer_voice_reply=prefer_voice_reply
-        )
+        voice_reply_spec = self._generate_voice_reply_instructions()
 
         # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
         base_prompt = base_prompt.format(
@@ -326,17 +321,11 @@ class PromptManager:
         return "\n".join(instructions)
 
     @staticmethod
-    def _generate_voice_reply_instructions(prefer_voice_reply: bool) -> str:
-        if not prefer_voice_reply:
-            return (
-                "- Voice replies: Use normal text replies by default. "
-                "Only call `send_voice_message` when spoken playback is clearly better than plain text."
-            )
+    def _generate_voice_reply_instructions() -> str:
         return (
-            "- Current message context: The user sent a voice message.\n"
-            "- Reply preference: Prioritize calling `send_voice_message` for the main user-facing reply.\n"
-            "- Fallback: If native voice is unavailable on the current channel, `send_voice_message` will fall back to text.\n"
-            "- Do not repeat the same full reply again after calling `send_voice_message`."
+            "- Voice replies: Use normal text replies by default. "
+            "Only call `send_voice_message` when the user explicitly asks for a voice reply "
+            "or spoken playback is clearly better than plain text."
         )
 
     @staticmethod

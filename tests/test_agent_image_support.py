@@ -2,7 +2,6 @@ import base64
 import json
 import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
@@ -15,7 +14,6 @@ from app.agent import MoviePilotAgent, AgentChain
 from app.chain.message import MessageChain
 from app.core.config import settings
 from app.helper.llm import LLMHelper
-from app.helper.voice import VoiceHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule
@@ -218,7 +216,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         handle_ai_message.assert_called_once()
 
-    def test_audio_message_routes_to_agent_with_voice_reply_flag(self):
+    def test_audio_message_routes_to_agent_without_forcing_voice_reply(self):
         chain = MessageChain()
 
         with patch.object(chain, "load_cache", return_value={}), patch.object(
@@ -240,7 +238,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         handle_ai_message.assert_called_once()
         self.assertEqual(handle_ai_message.call_args.kwargs["text"], "帮我推荐一部电影")
-        self.assertTrue(handle_ai_message.call_args.kwargs["reply_with_voice"])
+        self.assertNotIn("reply_with_voice", handle_ai_message.call_args.kwargs)
 
     def test_file_message_routes_to_agent_even_when_global_agent_is_disabled(self):
         chain = MessageChain()
@@ -322,7 +320,7 @@ class AgentImageSupportTest(unittest.TestCase):
             ],
         )
 
-    def test_agent_send_agent_message_auto_converts_to_voice_when_supported(self):
+    def test_agent_send_agent_message_keeps_default_text_reply(self):
         agent = MoviePilotAgent(
             session_id="session-1",
             user_id="user-1",
@@ -330,17 +328,8 @@ class AgentImageSupportTest(unittest.TestCase):
             source="telegram-test",
             username="tester",
         )
-        agent.reply_with_voice = True
 
         with patch.object(
-            VoiceHelper,
-            "resolve_reply_mode",
-            return_value=VoiceHelper.REPLY_MODE_NATIVE,
-        ), patch.object(
-            VoiceHelper, "is_available", return_value=True
-        ), patch.object(
-            VoiceHelper, "synthesize_speech", return_value=Path("/tmp/reply.opus")
-        ), patch.object(
             AgentChain, "async_post_message", new_callable=AsyncMock
         ) as async_post_message:
             import asyncio
@@ -348,7 +337,8 @@ class AgentImageSupportTest(unittest.TestCase):
             asyncio.run(agent.send_agent_message("这是语音回复"))
 
         notification = async_post_message.await_args.args[0]
-        self.assertEqual(notification.voice_path, "/tmp/reply.opus")
+        self.assertIsNone(notification.voice_path)
+        self.assertIsNone(notification.voice_caption)
         self.assertEqual(notification.text, "这是语音回复")
 
     def test_agent_process_wraps_request_as_structured_json(self):

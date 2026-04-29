@@ -28,9 +28,10 @@ class SendVoiceMessageInput(BaseModel):
 class SendVoiceMessageTool(MoviePilotTool):
     name: str = "send_voice_message"
     description: str = (
-        "Send a voice reply to the current user. Prefer this when the user sent a voice message "
-        "or when spoken playback is more natural. On channels without voice support or when TTS "
-        "is unavailable, it automatically falls back to sending the same content as plain text."
+        "Send a voice reply to the current user. Use this only when the user explicitly asks for "
+        "a voice reply or when spoken playback is clearly better than plain text. On channels "
+        "without voice support or when TTS is unavailable, it automatically falls back to sending "
+        "the same content as plain text."
     )
     args_schema: Type[BaseModel] = SendVoiceMessageInput
     require_admin: bool = False

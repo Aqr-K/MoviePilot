@@ -109,8 +109,8 @@ class MessageChain(ChainBase):
         """
         images = CommingMessage.MessageImage.normalize_list(images)
 
-        # 识别语音为文本
-        reply_with_voice = bool(audio_refs)
+        # 语音输入只用于转写为文本，不默认改变回复形式。
+        has_audio_input = bool(audio_refs)
         if audio_refs:
             transcript = self._transcribe_audio_refs(audio_refs, channel, source)
             merged_parts = []
@@ -198,13 +198,12 @@ class MessageChain(ChainBase):
                 username=username,
                 images=images,
                 files=files,
-                reply_with_voice=reply_with_voice,
             )
             return
 
         if (
             settings.AI_AGENT_ENABLE
-            and (settings.AI_AGENT_GLOBAL or images or files or reply_with_voice)
+            and (settings.AI_AGENT_GLOBAL or images or files or has_audio_input)
         ):
             self._handle_ai_message(
                 text=text,
@@ -214,7 +213,6 @@ class MessageChain(ChainBase):
                 username=username,
                 images=images,
                 files=files,
-                reply_with_voice=reply_with_voice,
             )
             return
 
@@ -866,7 +864,6 @@ class MessageChain(ChainBase):
         username: str,
         images: Optional[List[CommingMessage.MessageImage]] = None,
         files: Optional[List[CommingMessage.MessageAttachment]] = None,
-        reply_with_voice: bool = False,
         session_id: Optional[str] = None,
     ) -> None:
         """
@@ -978,7 +975,6 @@ class MessageChain(ChainBase):
                     channel=channel.value if channel else None,
                     source=source,
                     username=username,
-                    reply_with_voice=reply_with_voice,
                 ),
                 global_vars.loop,
             )
