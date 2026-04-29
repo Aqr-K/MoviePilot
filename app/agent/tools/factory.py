@@ -53,6 +53,10 @@ from app.agent.tools.impl.read_file import ReadFileTool
 from app.agent.tools.impl.browse_webpage import BrowseWebpageTool
 from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTool
 from app.agent.tools.impl.query_plugin_capabilities import QueryPluginCapabilitiesTool
+from app.agent.tools.impl.query_plugin_config import QueryPluginConfigTool
+from app.agent.tools.impl.update_plugin_config import UpdatePluginConfigTool
+from app.agent.tools.impl.reload_plugin import ReloadPluginTool
+from app.agent.tools.impl.query_plugin_data import QueryPluginDataTool
 from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
 from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
 from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
@@ -146,6 +150,10 @@ class MoviePilotToolFactory:
             BrowseWebpageTool,
             QueryInstalledPluginsTool,
             QueryPluginCapabilitiesTool,
+            QueryPluginConfigTool,
+            UpdatePluginConfigTool,
+            ReloadPluginTool,
+            QueryPluginDataTool,
             RunSlashCommandTool,
             ListSlashCommandsTool,
             QueryCustomIdentifiersTool,

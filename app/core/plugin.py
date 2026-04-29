@@ -686,6 +686,20 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         SystemConfigOper().set(self._config_key % pid, conf)
         return True
 
+    async def async_save_plugin_config(
+        self, pid: str, conf: dict, force: bool = False
+    ) -> bool:
+        """
+        异步保存插件配置。
+        :param pid: 插件ID
+        :param conf: 配置
+        :param force: 强制保存
+        """
+        if not force and not self._plugins.get(pid):
+            return False
+        await SystemConfigOper().async_set(self._config_key % pid, conf)
+        return True
+
     def delete_plugin_config(self, pid: str) -> bool:
         """
         删除插件配置
