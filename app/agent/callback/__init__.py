@@ -354,7 +354,7 @@ class StreamingHandler:
         last_char = visible_buffer[-1:] if visible_buffer.strip() else ""
         prefix = ""
         if self._buffer and last_char != "\n":
-            prefix = "\n"
+            prefix = "\n\n"
         return f"{prefix}{summary}\n\n"
 
     @staticmethod
