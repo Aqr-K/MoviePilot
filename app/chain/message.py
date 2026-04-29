@@ -910,11 +910,13 @@ class MessageChain(ChainBase):
             session_id = session_id or self._get_or_create_session_id(userid)
             self._bind_session_id(userid, session_id)
 
-            # 下载图片并转为base64
+            # 将可直接输入给 LLM 的附件统一转换为 data URL
             original_images = images
             all_files = list(files or [])
             if images and LLMHelper.supports_image_input():
-                images = self._download_images_to_base64(images, channel, source)
+                images = self._download_attachments_to_data_urls(
+                    images, channel, source
+                )
                 if original_images and not images and not user_message and not files:
                     self.post_message(
                         Notification(
@@ -922,7 +924,7 @@ class MessageChain(ChainBase):
                             source=source,
                             userid=userid,
                             username=username,
-                            title="图片读取失败，请稍后重试",
+                            title="附件读取失败，请稍后重试",
                         )
                     )
                     return
@@ -940,7 +942,7 @@ class MessageChain(ChainBase):
                             source=source,
                             userid=userid,
                             username=username,
-                            title="图片读取失败，请稍后重试",
+                            title="附件读取失败，请稍后重试",
                         )
                     )
                     return
@@ -1120,72 +1122,94 @@ class MessageChain(ChainBase):
             return match.group(1)
         return default
 
-    def _download_images_to_base64(
+    def _download_attachments_to_data_urls(
         self,
-        images: List[CommingMessage.MessageImage],
+        attachments: List[CommingMessage.MessageImage],
         channel: MessageChannel,
         source: str,
-    ) -> List[str]:
+    ) -> Optional[List[str]]:
         """
-        下载图片并转为base64
+        下载可直接提供给 LLM 的附件内容，并统一转换为 data URL。
         """
-        images = CommingMessage.MessageImage.normalize_list(images)
-        if not images:
+        attachments = CommingMessage.MessageImage.normalize_list(attachments)
+        if not attachments:
             return None
-        base64_images = []
-        for image in images:
-            img = image.ref
+        data_urls = []
+        for attachment in attachments:
+            attachment_ref = attachment.ref
             try:
-                if img.startswith("data:"):
-                    base64_images.append(img)
-                elif img.startswith("tg://file_id/"):
-                    file_id = img.replace("tg://file_id/", "")
+                before_count = len(data_urls)
+                if attachment_ref.startswith("data:"):
+                    data_urls.append(attachment_ref)
+                elif attachment_ref.startswith("tg://file_id/"):
+                    file_id = attachment_ref.replace("tg://file_id/", "")
                     base64_data = self.run_module(
                         "download_telegram_file_to_base64",
                         file_id=file_id,
                         source=source,
                     )
                     if base64_data:
-                        base64_images.append(f"data:image/jpeg;base64,{base64_data}")
-                        logger.info(
-                            "图片下载成功: channel=%s, source=%s, input=%s, output=data:image/jpeg;base64...(omitted)",
-                            channel.value if channel else None,
-                            source,
-                            img,
-                        )
-                elif img.startswith("wxwork://media_id/") or img.startswith(
+                        data_urls.append(f"data:image/jpeg;base64,{base64_data}")
+                elif attachment_ref.startswith(
+                    "wxwork://media_id/"
+                ) or attachment_ref.startswith(
                     "wxbot://image/"
                 ):
                     data_url = self.run_module(
                         "download_wechat_image_to_data_url",
-                        image_ref=img,
+                        image_ref=attachment_ref,
                         source=source,
                     )
                     if data_url:
-                        base64_images.append(data_url)
+                        data_urls.append(data_url)
                 elif channel == MessageChannel.Slack:
                     data_url = self.run_module(
-                        "download_slack_file_to_data_url", file_url=img, source=source
-                    )
-                    if data_url:
-                        base64_images.append(data_url)
-                elif img.startswith("vocechat://file/"):
-                    data_url = self.run_module(
-                        "download_vocechat_image_to_data_url",
-                        image_ref=img,
+                        "download_slack_file_to_data_url",
+                        file_url=attachment_ref,
                         source=source,
                     )
                     if data_url:
-                        base64_images.append(data_url)
-                elif img.startswith("http"):
-                    resp = RequestUtils(timeout=30).get_res(img)
+                        data_urls.append(data_url)
+                elif attachment_ref.startswith("vocechat://file/"):
+                    data_url = self.run_module(
+                        "download_vocechat_image_to_data_url",
+                        image_ref=attachment_ref,
+                        source=source,
+                    )
+                    if data_url:
+                        data_urls.append(data_url)
+                elif attachment_ref.startswith("http"):
+                    resp = RequestUtils(timeout=30).get_res(attachment_ref)
                     if resp and resp.content:
                         base64_data = base64.b64encode(resp.content).decode()
                         mime_type = resp.headers.get("Content-Type", "image/jpeg")
-                        base64_images.append(f"data:{mime_type};base64,{base64_data}")
-            except Exception as e:
-                logger.error(f"下载图片失败: {img}, error: {e}")
-        return base64_images if base64_images else None
+                        data_urls.append(f"data:{mime_type};base64,{base64_data}")
+                else:
+                    logger.debug(
+                        "暂不支持直接转换为 data URL 的附件引用: channel=%s, source=%s, ref=%s",
+                        channel.value if channel else None,
+                        source,
+                        attachment_ref,
+                    )
+                    continue
+
+                if len(data_urls) > before_count:
+                    logger.info(
+                        "附件读取成功并已转换为 data URL: channel=%s, source=%s, ref=%s, mime_type=%s",
+                        channel.value if channel else None,
+                        source,
+                        attachment_ref,
+                        attachment.mime_type,
+                    )
+            except Exception as err:
+                logger.error(
+                    "附件读取失败，无法转换为 data URL: channel=%s, source=%s, ref=%s, error=%s",
+                    channel.value if channel else None,
+                    source,
+                    attachment_ref,
+                    err,
+                )
+        return data_urls if data_urls else None
 
     def _build_image_attachments(
         self, images: List[CommingMessage.MessageImage]
@@ -1222,7 +1246,7 @@ class MessageChain(ChainBase):
         source: str,
     ) -> Optional[List[dict]]:
         """
-        下载用户上传的文件，落盘到临时目录，并生成文本镜像供 Agent 使用。
+        下载用户上传的附件，落盘到临时目录，并生成 Agent 可消费的文件描述。
         """
         if not files:
             return None
@@ -1259,7 +1283,7 @@ class MessageChain(ChainBase):
                     }
                 )
             except Exception as err:
-                logger.error(f"准备文件上下文失败: {attachment.ref}, error: {err}")
+                logger.error(f"准备附件上下文失败: {attachment.ref}, error: {err}")
                 payload["error"] = str(err)
             prepared_files.append(payload)
 
@@ -1269,7 +1293,7 @@ class MessageChain(ChainBase):
         self, file_ref: str, channel: MessageChannel, source: str
     ) -> Optional[bytes]:
         """
-        下载消息附件的原始字节。
+        下载消息附件的原始字节内容。
         """
         if not file_ref:
             return None
@@ -1331,7 +1355,7 @@ class MessageChain(ChainBase):
             resp = RequestUtils(timeout=30).get_res(file_ref)
             return resp.content if resp and resp.content else None
         logger.debug(
-            "暂不支持的文件引用: channel=%s, source=%s, ref=%s",
+            "暂不支持的附件引用: channel=%s, source=%s, ref=%s",
             channel.value if channel else None,
             source,
             file_ref,
