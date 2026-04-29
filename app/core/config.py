@@ -516,7 +516,7 @@ class ConfigModel(BaseModel):
     # LLM最大上下文Token数量（K）
     LLM_MAX_CONTEXT_TOKENS: int = 64
     # LLM温度参数
-    LLM_TEMPERATURE: float = 0.1
+    LLM_TEMPERATURE: float = 0.3
     # LLM最大迭代次数
     LLM_MAX_ITERATIONS: int = 128
     # LLM工具调用超时时间（秒）
