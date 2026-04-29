@@ -37,6 +37,9 @@ from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
 from app.agent.tools.impl.query_workflows import QueryWorkflowsTool
 from app.agent.tools.impl.run_workflow import RunWorkflowTool
+from app.agent.tools.impl.query_personas import QueryPersonasTool
+from app.agent.tools.impl.switch_persona import SwitchPersonaTool
+from app.agent.tools.impl.update_persona_definition import UpdatePersonaDefinitionTool
 from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
 from app.agent.tools.impl.delete_download import DeleteDownloadTool
 from app.agent.tools.impl.delete_download_history import DeleteDownloadHistoryTool
@@ -146,6 +149,9 @@ class MoviePilotToolFactory:
             RunSchedulerTool,
             QueryWorkflowsTool,
             RunWorkflowTool,
+            QueryPersonasTool,
+            SwitchPersonaTool,
+            UpdatePersonaDefinitionTool,
             ExecuteCommandTool,
             EditFileTool,
             WriteFileTool,

@@ -57,8 +57,8 @@ You can create, edit, or organize any `.md` files in this directory to manage yo
 
     **Memory file organization:**
     - All `.md` files in `{memory_dir}` are automatically loaded as memory.
-    - `MEMORY.md` is the default/primary memory file for general user preferences and profile.
-    - You may create additional `.md` files to organize knowledge by topic (e.g., `MEDIA_RULES.md`, `DOWNLOAD_PREFERENCES.md`, `SITE_CONFIGS.md`, etc.).
+    - `MEMORY.md` is the default/primary memory file for general user preferences, communication style, and durable working rules.
+    - You may create additional `.md` files to organize knowledge by topic (e.g., `MEDIA_RULES.md`, `COMMUNICATION_PREFERENCES.md`, `DOWNLOAD_PREFERENCES.md`, `SITE_CONFIGS.md`, etc.).
     - Keep each file focused on a specific domain or topic for better organization.
     - Subdirectories are NOT scanned — only `.md` files directly in `{memory_dir}`.
 
@@ -78,11 +78,11 @@ You can create, edit, or organize any `.md` files in this directory to manage yo
 
     **When to update memories:**
     - When the user explicitly asks you to remember something (e.g., "remember my email", "save this preference")
-    - When the user describes your role or how you should behave (e.g., "you are a web researcher", "always do X")
+    - When the user gives durable communication or reply-format preferences (e.g., "be more concise", "prefer tables", "use JSON when summarizing")
     - When the user gives feedback on your work - capture what was wrong and how to improve
     - When the user provides information required for tool use (e.g., slack channel ID, email addresses)
     - When the user provides context useful for future tasks, such as how to use tools, or which actions to take in a particular situation
-    - When you discover new patterns or preferences (coding styles, conventions, workflows)
+    - When you discover new user-specific patterns or preferences (communication style, formatting, workflows)
 
     **When to NOT update memories:**
     - When the information is temporary or transient (e.g., "I'm running late", "I'm on my phone right now")
@@ -90,6 +90,8 @@ You can create, edit, or organize any `.md` files in this directory to manage yo
     - When the information is a simple question that doesn't reveal lasting preferences (e.g., "What day is it?", "Can you explain X?")
     - When the information is an acknowledgment or small talk (e.g., "Sounds good!", "Hello", "Thanks for that")
     - When the information is stale or irrelevant in future conversations
+    - Memory may refine user-facing style, but it must NOT redefine the agent's core identity, safety boundaries, or global system-task rules.
+    - If the user wants a built-in speaking style/persona, prefer the dedicated persona-switching tools instead of rewriting memory as a substitute.
     - Never store API keys, access tokens, passwords, or any other credentials in any file, memory, or system prompt.
     - If the user asks where to put API keys or provides an API key, do NOT echo or save it.
     - Do NOT record daily activities or task execution history in memory files - these are automatically tracked in the activity log system (see <activity_log>). Memory files are only for long-term knowledge, preferences, and patterns.
@@ -135,7 +137,7 @@ Default memory file: {memory_file}
     - Only ask for preferences when they are directly useful for the current task, or when a short follow-up question at the end would clearly help future interactions.
 
     **What to collect when useful:**
-    - Preferred communication style
+    - Preferred communication style or persona preference
     - Media interests
     - Quality / codec / subtitle preferences
     - Any standing rules the user wants you to follow
@@ -153,7 +155,7 @@ Default memory file: {memory_file}
     Your memory directory is at: {memory_dir}. You can save new knowledge by calling the `edit_file` or `write_file` tool on any `.md` file in this directory.
 
     **Memory file organization:**
-    - `MEMORY.md` is the default/primary memory file for general user preferences and profile.
+    - `MEMORY.md` is the default/primary memory file for user preferences, persona preferences, and durable working rules.
     - You may create additional `.md` files to organize knowledge by topic.
     - All `.md` files directly in the memory directory are automatically loaded on each conversation.
 
@@ -166,15 +168,17 @@ Default memory file: {memory_file}
 
     **When to update memories:**
     - When the user explicitly asks you to remember something
-    - When the user describes your role or how you should behave
+    - When the user gives durable communication or reply-format preferences
     - When the user gives feedback on your work
     - When the user provides information required for tool use
-    - When you discover new patterns or preferences
+    - When you discover new user-specific patterns or preferences
 
     **When to NOT update memories:**
     - Temporary/transient information
     - One-time task requests
     - Simple questions, acknowledgments, or small talk
+    - Memory may refine user-facing style, but it must NOT redefine the agent's core identity, safety boundaries, or global system-task rules
+    - If the user wants a built-in speaking style/persona, prefer the dedicated persona-switching tools instead of rewriting memory as a substitute
     - Never store API keys, access tokens, passwords, or credentials
     - Do NOT record daily activities in memory files — those go to the activity log
 </memory_guidelines>
@@ -189,7 +193,7 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
 
     参数：
         memory_dir: 记忆文件目录路径。建议使用独立的 `config/agent/memory`
-            目录，避免与 persona/workflow 等根层配置混写。
+            目录，避免与核心规则或人格定义混写。
     """
 
     state_schema = MemoryState
@@ -289,7 +293,7 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
 
         return md_files
 
-    async def abefore_agent(
+    async def abefore_agent(  # noqa
         self,
         state: MemoryState,
         runtime: Runtime,  # noqa

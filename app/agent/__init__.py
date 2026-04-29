@@ -21,10 +21,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.agent.callback import StreamingHandler
 from app.agent.memory import memory_manager
 from app.agent.middleware.activity_log import ActivityLogMiddleware
-from app.agent.middleware.hooks import AgentHooksMiddleware
 from app.agent.middleware.jobs import JobsMiddleware
 from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
+from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
 from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
@@ -406,9 +406,9 @@ class MoviePilotAgent:
                 JobsMiddleware(
                     sources=[str(agent_runtime_manager.jobs_dir)],
                 ),
-                # 结构化 hooks
-                AgentHooksMiddleware(),
-                # 记忆管理（仅扫描 memory 目录，避免与根层 persona/workflow 配置混写）
+                # 运行时人格与核心规则（动态加载，支持执行中切换人格）
+                RuntimeConfigMiddleware(),
+                # 记忆管理（仅扫描 memory 目录，避免与根层核心规则或人格定义混写）
                 MemoryMiddleware(memory_dir=str(agent_runtime_manager.memory_dir)),
                 # 活动日志
                 ActivityLogMiddleware(
@@ -1008,9 +1008,8 @@ class AgentManager:
 
     @staticmethod
     def _build_heartbeat_prompt() -> str:
-        """使用统一 wake 模板源构建心跳任务提示词。"""
-        runtime_config = agent_runtime_manager.load_runtime_config()
-        return runtime_config.render_system_task_message("heartbeat")
+        """使用程序内置 System Tasks 定义构建心跳任务提示词。"""
+        return prompt_manager.render_system_task_message("heartbeat")
 
     @staticmethod
     def _build_retry_transfer_template_context(
@@ -1034,23 +1033,22 @@ class AgentManager:
         history_ids: list[int],
     ) -> str:
         """根据失败记录数量构建统一的重试整理后台任务提示词。"""
-        runtime_config = agent_runtime_manager.load_runtime_config()
         task_type, template_context = AgentManager._build_retry_transfer_template_context(
             history_ids
         )
-        return runtime_config.render_system_task_message(
+        return prompt_manager.render_system_task_message(
             task_type,
             template_context=template_context,
         )
 
     @staticmethod
     def _build_manual_redo_template_context(history) -> dict[str, int | str]:
-        """仅负责把整理历史对象映射成 SYSTEM_TASKS 需要的模板变量。"""
+        """仅负责把整理历史对象映射成 System Tasks 需要的模板变量。"""
         src_fileitem = history.src_fileitem or {}
         source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
         source_path = source_path or history.src or ""
         season_episode = f"{history.seasons or ''}{history.episodes or ''}".strip()
-        # 这里故意只做数据整形，具体行为定义全部交给 SYSTEM_TASKS。
+        # 这里故意只做数据整形，具体行为定义全部交给内置 System Tasks YAML。
         return {
             "history_id": history.id,
             "current_status": "success" if history.status else "failed",
@@ -1203,8 +1201,7 @@ class AgentManager:
         """
         构建手动 AI 整理提示词。
         """
-        runtime_config = agent_runtime_manager.load_runtime_config()
-        return runtime_config.render_system_task_message(
+        return prompt_manager.render_system_task_message(
             "manual_transfer_redo",
             template_context=AgentManager._build_manual_redo_template_context(history),
         )

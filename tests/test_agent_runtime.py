@@ -4,7 +4,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from app.agent.runtime import AgentRuntimeConfigError, AgentRuntimeManager
+from app.agent.runtime import AgentRuntimeManager
 
 
 class TestAgentRuntimeConfig(unittest.TestCase):
@@ -13,14 +13,14 @@ class TestAgentRuntimeConfig(unittest.TestCase):
         self.addCleanup(self._tempdir.cleanup)
         self.temp_root = Path(self._tempdir.name)
         self.agent_root = self.temp_root / "agent"
-        self.bundled_root = (
-            Path(__file__).resolve().parents[1] / "app" / "agent" / "runtime_defaults"
+        self.defaults_root = (
+            Path(__file__).resolve().parents[1] / "app" / "agent" / "defaults"
         )
 
     def _manager(self) -> AgentRuntimeManager:
         return AgentRuntimeManager(
             agent_root_dir=self.agent_root,
-            bundled_runtime_dir=self.bundled_root,
+            bundled_defaults_dir=self.defaults_root,
         )
 
     def test_load_runtime_config_syncs_defaults_and_parses_sections(self):
@@ -29,12 +29,22 @@ class TestAgentRuntimeConfig(unittest.TestCase):
         runtime_config = manager.load_runtime_config()
 
         self.assertEqual(runtime_config.active_persona, "default")
-        self.assertIn("professional, concise, restrained", runtime_config.profile_text)
+        self.assertIn("professional, concise, restrained", runtime_config.persona.text)
+        self.assertEqual(runtime_config.persona.persona_id, "default")
         self.assertIn(
-            "omitting `season` means subscribe to season 1 only",
-            runtime_config.workflow_text,
+            "concise",
+            [persona.persona_id for persona in runtime_config.available_personas],
         )
         self.assertTrue((self.agent_root / "runtime" / "CURRENT_PERSONA.md").exists())
+        self.assertTrue(
+            (
+                self.agent_root
+                / "runtime"
+                / "personas"
+                / "default"
+                / "PERSONA.md"
+            ).exists()
+        )
 
     def test_legacy_root_markdown_is_migrated_to_memory_directory(self):
         self.agent_root.mkdir(parents=True, exist_ok=True)
@@ -45,12 +55,10 @@ class TestAgentRuntimeConfig(unittest.TestCase):
             textwrap.dedent(
                 """\
                 ---
+                version: 3
                 active_persona: default
-                profile: personas/default/AGENT_PROFILE.md
-                workflow: personas/default/AGENT_WORKFLOW.md
-                hooks: personas/default/AGENT_HOOKS.md
-                system_tasks: system_tasks/SYSTEM_TASKS.md
-                user_preferences: USER_PREFERENCES.md
+                extra_context_files: []
+                deprecated_phrases: []
                 ---
                 """
             ),
@@ -65,40 +73,54 @@ class TestAgentRuntimeConfig(unittest.TestCase):
         self.assertFalse(legacy_persona.exists())
         self.assertTrue((self.agent_root / "runtime" / "CURRENT_PERSONA.md").exists())
 
-    def test_render_system_task_message_uses_unified_system_tasks_definition(self):
-        manager = self._manager()
-        runtime_config = manager.load_runtime_config()
+    def test_obsolete_runtime_files_are_deleted_instead_of_migrated(self):
+        self.agent_root.mkdir(parents=True, exist_ok=True)
+        obsolete_root = self.agent_root / "USER_PREFERENCES.md"
+        obsolete_root.write_text("# Obsolete\n", encoding="utf-8")
 
-        message = runtime_config.render_system_task_message("heartbeat")
+        obsolete_runtime = self.agent_root / "runtime" / "system_tasks" / "SYSTEM_TASKS.md"
+        obsolete_runtime.parent.mkdir(parents=True, exist_ok=True)
+        obsolete_runtime.write_text("# Obsolete Tasks\n", encoding="utf-8")
 
-        self.assertIn("[System Heartbeat]", message)
-        self.assertIn("List all jobs with status 'pending' or 'in_progress'.", message)
-        self.assertIn("Do NOT include greetings, explanations, or conversational text.", message)
-        self.assertIn("If no jobs were executed, output nothing.", message)
-
-    def test_render_system_task_message_renders_template_context(self):
-        manager = self._manager()
-        runtime_config = manager.load_runtime_config()
-
-        message = runtime_config.render_system_task_message(
-            "transfer_failed_retry",
-            template_context={
-                "history_ids_csv": "7",
-                "history_count": 1,
-                "history_id": 7,
-            },
+        obsolete_persona = (
+            self.agent_root
+            / "runtime"
+            / "personas"
+            / "default"
+            / "AGENT_PROFILE.md"
         )
+        obsolete_persona.parent.mkdir(parents=True, exist_ok=True)
+        obsolete_persona.write_text("# Obsolete Persona\n", encoding="utf-8")
 
-        self.assertIn("Failed transfer history record IDs: 7", message)
-        self.assertIn("Total failed records: 1", message)
-        self.assertIn("history_id=7", message)
+        manager = self._manager()
+        manager.ensure_layout()
 
-    def test_missing_template_context_raises_clear_error(self):
+        self.assertFalse(obsolete_root.exists())
+        self.assertFalse(obsolete_runtime.exists())
+        self.assertFalse(obsolete_persona.exists())
+        self.assertFalse((self.agent_root / "memory" / "USER_PREFERENCES.md").exists())
+
+    def test_render_prompt_sections_uses_active_persona(self):
         manager = self._manager()
         runtime_config = manager.load_runtime_config()
 
-        with self.assertRaises(AgentRuntimeConfigError):
-            runtime_config.render_system_task_message("transfer_failed_retry")
+        sections = runtime_config.render_prompt_sections()
+
+        self.assertIn("<agent_persona>", sections)
+        self.assertIn("Active persona: `default`", sections)
+        self.assertIn("`guide`", sections)
+
+    def test_set_active_persona_supports_id_and_alias(self):
+        manager = self._manager()
+        manager.load_runtime_config()
+
+        guide_config = manager.set_active_persona("guide")
+        self.assertEqual(guide_config.active_persona, "guide")
+        self.assertEqual(guide_config.persona.label, "说明型")
+
+        concise_config = manager.set_active_persona("简洁")
+        self.assertEqual(concise_config.active_persona, "concise")
+        self.assertIn("active_persona: concise", concise_config.current_persona_path.read_text(encoding="utf-8"))
 
     def test_invalid_user_runtime_config_falls_back_to_bundled_defaults(self):
         manager = self._manager()
@@ -108,10 +130,10 @@ class TestAgentRuntimeConfig(unittest.TestCase):
             textwrap.dedent(
                 """\
                 ---
+                version: 3
                 active_persona: broken
-                profile: personas/default/AGENT_PROFILE.md
-                hooks: personas/default/AGENT_HOOKS.md
-                system_tasks: system_tasks/SYSTEM_TASKS.md
+                extra_context_files: []
+                deprecated_phrases: []
                 ---
                 """
             ),
@@ -128,19 +150,14 @@ class TestAgentRuntimeConfig(unittest.TestCase):
     def test_deprecated_phrase_warning_is_reported(self):
         self.agent_root.mkdir(parents=True, exist_ok=True)
         runtime_root = self.agent_root / "runtime"
-        shutil.copytree(self.bundled_root, runtime_root)
+        shutil.copytree(self.defaults_root, runtime_root)
         current_persona = runtime_root / "CURRENT_PERSONA.md"
         current_persona.write_text(
             textwrap.dedent(
                 """\
                 ---
-                version: 1
+                version: 3
                 active_persona: default
-                profile: personas/default/AGENT_PROFILE.md
-                workflow: personas/default/AGENT_WORKFLOW.md
-                hooks: personas/default/AGENT_HOOKS.md
-                user_preferences: USER_PREFERENCES.md
-                system_tasks: system_tasks/SYSTEM_TASKS.md
                 extra_context_files: []
                 deprecated_phrases:
                   - professional, concise, restrained
@@ -155,37 +172,11 @@ class TestAgentRuntimeConfig(unittest.TestCase):
         runtime_config = manager.load_runtime_config()
 
         self.assertTrue(
-            any("professional, concise, restrained" in warning for warning in runtime_config.warnings)
+            any(
+                "professional, concise, restrained" in warning
+                for warning in runtime_config.warnings
+            )
         )
-
-    def test_outdated_system_tasks_definition_falls_back_to_bundled_defaults(self):
-        self.agent_root.mkdir(parents=True, exist_ok=True)
-        runtime_root = self.agent_root / "runtime"
-        shutil.copytree(self.bundled_root, runtime_root)
-        system_tasks = runtime_root / "system_tasks" / "SYSTEM_TASKS.md"
-        system_tasks.write_text(
-            textwrap.dedent(
-                """\
-                ---
-                version: 1
-                shared_rules:
-                  - legacy system tasks
-                task_types:
-                  heartbeat:
-                    header: "[Legacy Heartbeat]"
-                    objective: "legacy"
-                ---
-                """
-            ),
-            encoding="utf-8",
-        )
-
-        manager = self._manager()
-        manager.invalidate_cache()
-        runtime_config = manager.load_runtime_config()
-
-        self.assertTrue(runtime_config.used_fallback)
-        self.assertEqual(runtime_config.system_tasks.version, 2)
 
 
 if __name__ == "__main__":

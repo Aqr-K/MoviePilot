@@ -1,4 +1,3 @@
----
 version: 2
 shared_rules:
   - This is a background system task, NOT a user conversation.
@@ -96,13 +95,3 @@ task_types:
       - "Do NOT reorganize blindly when media identity is uncertain."
       - "If the previous record was successful but obviously identified as the wrong media, still use the tool-based flow above instead of `/redo`."
       - "Keep the final response short and focused on outcome."
----
-# SYSTEM_TASKS
-
-这是后台系统任务的唯一定义源。
-
-- `shared_rules` 负责统一口径。
-- `task_types.<type>.context_lines` 负责定义上下文字段展示。
-- `task_types.<type>.steps` 负责定义任务执行步骤。
-- `task_types.<type>.task_rules` 负责定义该任务独有的补充约束。
-- 代码侧只负责触发任务并提供模板变量，不再保存具体行为提示词。
