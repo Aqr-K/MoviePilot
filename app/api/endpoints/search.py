@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, Body, Request
 from fastapi.responses import StreamingResponse
 
 from app import schemas
-from app.chain.agent import AIRecommendChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
 from app.core.config import settings
@@ -204,8 +203,6 @@ async def search_by_id(mediaid: str,
     """
     根据TMDBID/豆瓣ID精确搜索站点资源 tmdb:/douban:/bangumi:
     """
-    # 取消正在运行的AI推荐（会清除数据库缓存）
-
     if mtype:
         media_type = MediaType(mtype)
     else:
@@ -348,8 +345,6 @@ async def search_by_title(keyword: Optional[str] = None,
     """
     根据名称模糊搜索站点资源，支持分页，关键词为空是返回首页资源
     """
-    # 取消正在运行的AI推荐并清除数据库缓存
-
     torrents = await SearchChain().async_search_by_title(
         title=keyword, page=page,
         sites=_parse_site_list(sites),
@@ -393,12 +388,12 @@ async def recommend_search_results(
             "status": "error"
         })
 
-    recommend_chain = AIRecommendChain()
+    recommend_chain = SearchChain()
 
     # 如果是强制模式，先取消并清除旧结果，然后直接启动新任务
     if force:
         # 检查功能是否启用
-        if not settings.AI_AGENT_ENABLE or not settings.AI_RECOMMEND_ENABLED:
+        if not recommend_chain.is_ai_recommend_enabled:
             return schemas.Response(success=True, data={
                 "status": "disabled"
             })
@@ -413,7 +408,7 @@ async def recommend_search_results(
     # 如果是仅检查模式，不传递 filtered_indices（避免触发请求变化检测）
     if check_only:
         # 返回当前运行状态，不做任何任务启动或取消操作
-        current_status = recommend_chain.get_current_status_only()
+        current_status = recommend_chain.get_current_recommend_status_only()
         # 如果有错误，将错误信息放到message中
         if current_status.get("status") == "error":
             error_msg = current_status.pop("error", "未知错误")
@@ -421,7 +416,7 @@ async def recommend_search_results(
         return schemas.Response(success=True, data=current_status)
 
     # 获取当前状态（会检测请求是否变化）
-    status_data = recommend_chain.get_status(filtered_indices, len(results))
+    status_data = recommend_chain.get_recommend_status(filtered_indices, len(results))
 
     # 如果功能未启用，直接返回禁用状态
     if status_data.get("status") == "disabled":
