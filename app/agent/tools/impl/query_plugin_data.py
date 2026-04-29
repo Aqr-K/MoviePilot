@@ -54,8 +54,9 @@ class QueryPluginDataTool(MoviePilotTool):
             return f"查询插件数据: {plugin_id}.{key}"
         return f"查询插件全部数据: {plugin_id}"
 
+    @staticmethod
     async def _query_plugin_data(
-        self, plugin_id: str, key: Optional[str] = None, max_chars: Optional[int] = None
+            plugin_id: str, key: Optional[str] = None, max_chars: Optional[int] = None
     ) -> str:
         """
         插件数据改走异步 ORM 查询，避免再套一层线程池。
