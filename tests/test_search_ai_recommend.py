@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from types import ModuleType
 from unittest.mock import AsyncMock, patch
 
+import app.chain as chain_module
+
 
 def _stub_module(name: str, **attrs):
     module = sys.modules.get(name)
@@ -21,6 +23,9 @@ _stub_module("transmission_rpc", File=object)
 
 from app.chain.search import SearchChain
 from app.core.config import settings
+from app.core.message_context import suppress_message_channel
+from app.schemas import Notification
+from app.schemas.types import NotificationType
 
 
 def _make_result(title: str, size: int, seeders: int):
@@ -98,6 +103,36 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(SearchChain._ai_recommend_running)
         self.assertIsNone(SearchChain._ai_recommend_task)
 
+    async def test_invoke_recommend_llm_disables_output_message_persistence(self):
+        chain = self._make_chain()
+        from app.agent import agent_manager
+        from app.agent.prompt import prompt_manager
+
+        captured = {}
+
+        async def _fake_run_background_prompt(**kwargs):
+            captured.update(kwargs)
+            kwargs["output_callback"]("[0, 2]")
+
+        with (
+            patch.object(
+                prompt_manager,
+                "render_system_task_message",
+                return_value="PROMPT",
+            ),
+            patch.object(
+                agent_manager,
+                "run_background_prompt",
+                new=AsyncMock(side_effect=_fake_run_background_prompt),
+            ),
+        ):
+            result = await chain._invoke_recommend_llm("Candidates")
+
+        self.assertEqual("[0, 2]", result)
+        self.assertTrue(captured["suppress_user_reply"])
+        self.assertFalse(captured["persist_output_message"])
+        self.assertTrue(captured["suppress_message_channel_dispatch"])
+
     def test_search_by_title_clears_previous_recommend_state_when_caching(self):
         chain = self._make_chain()
         removed = []
@@ -120,6 +155,46 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(SearchChain._current_recommend_request_hash)
         self.assertIsNone(SearchChain._ai_recommend_result)
         self.assertIsNone(SearchChain._ai_recommend_error)
+
+    def test_post_message_skips_channel_dispatch_when_suppressed(self):
+        chain = object.__new__(SearchChain)
+        queue_calls = []
+        event_calls = []
+        saved_messages = []
+        saved_records = []
+        chain.messagehelper = SimpleNamespace(
+            put=lambda *args, **kwargs: saved_messages.append((args, kwargs))
+        )
+        chain.messageoper = SimpleNamespace(
+            add=lambda **kwargs: saved_records.append(kwargs)
+        )
+        chain.messagequeue = SimpleNamespace(
+            send_message=lambda *args, **kwargs: queue_calls.append((args, kwargs))
+        )
+        chain.eventmanager = SimpleNamespace(
+            send_event=lambda *args, **kwargs: event_calls.append((args, kwargs))
+        )
+
+        notification = Notification(
+            mtype=NotificationType.Manual,
+            title="Title",
+            text="Body",
+        )
+
+        with (
+            patch.object(
+                chain_module.MessageTemplateHelper,
+                "render",
+                return_value=notification,
+            ),
+            suppress_message_channel(),
+        ):
+            chain.post_message(message=notification)
+
+        self.assertEqual(1, len(saved_messages))
+        self.assertEqual(1, len(saved_records))
+        self.assertEqual([], queue_calls)
+        self.assertEqual([], event_calls)
 
 
 if __name__ == "__main__":

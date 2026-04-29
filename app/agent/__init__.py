@@ -3,6 +3,7 @@ import json
 import re
 import traceback
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -32,6 +33,7 @@ from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
+from app.core.message_context import suppress_message_channel
 from app.helper.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
@@ -172,6 +174,7 @@ class MoviePilotAgent:
         self.output_callback: Optional[Callable[[str], None]] = None
         self.force_streaming = False
         self.suppress_user_reply = False
+        self.persist_output_message = True
         self._streamed_output = ""
         self._session_usage = _SessionUsageSnapshot()
 
@@ -603,7 +606,7 @@ class MoviePilotAgent:
                         and not self._tool_context.get("user_reply_sent")
                     ):
                         await self.send_agent_message(remaining_text)
-                elif streamed_text:
+                elif streamed_text and self.persist_output_message:
                     # 流式输出已发送全部内容，但未记录到数据库，补充保存消息记录
                     await self._save_agent_message_to_db(streamed_text)
 
@@ -986,6 +989,8 @@ class AgentManager:
         session_prefix: str = "__agent_background",
         output_callback: Optional[Callable[[str], None]] = None,
         suppress_user_reply: bool = False,
+        persist_output_message: bool = True,
+        suppress_message_channel_dispatch: bool = False,
     ) -> None:
         """
         以独立后台会话执行一段 prompt。
@@ -1002,9 +1007,15 @@ class AgentManager:
         agent.output_callback = output_callback
         agent.force_streaming = bool(output_callback)
         agent.suppress_user_reply = suppress_user_reply
+        agent.persist_output_message = persist_output_message
 
         try:
-            await agent.process(message)
+            with (
+                suppress_message_channel()
+                if suppress_message_channel_dispatch
+                else nullcontext()
+            ):
+                await agent.process(message)
         finally:
             await agent.cleanup()
             memory_manager.clear_memory(session_id, user_id)

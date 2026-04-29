@@ -131,6 +131,8 @@ def _start_ai_redo_task(history_id: int, prompt: str, progress_key: str):
                 session_prefix=f"__agent_manual_redo_{history_id}",
                 output_callback=update_output,
                 suppress_user_reply=True,
+                persist_output_message=False,
+                suppress_message_channel_dispatch=True,
             )
             progress.update(
                 text="智能助手整理完成",
@@ -175,6 +177,8 @@ def _start_batch_ai_redo_task(
                 session_prefix="__agent_manual_redo_batch",
                 output_callback=update_output,
                 suppress_user_reply=True,
+                persist_output_message=False,
+                suppress_message_channel_dispatch=True,
             )
             progress.update(
                 text="智能助手批量整理完成",
