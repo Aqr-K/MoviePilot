@@ -643,14 +643,20 @@ class MoviePilotAgent:
                     and not self._tool_context.get("user_reply_sent")
                 ):
                     if self.is_background:
-                        if self.persist_output_message:
-                            # 后台任务仅广播最终回复，带标题
-                            await self.send_agent_message(
-                                final_text, title="MoviePilot助手"
-                            )
+                        # 后台任务仅广播最终回复，带标题
+                        await self.send_agent_message(
+                            final_text, title="MoviePilot助手"
+                        )
                     else:
                         # 非流式渠道：发送最终回复
                         await self.send_agent_message(final_text)
+                elif (
+                    final_text
+                    and self.persist_output_message
+                    and not self._tool_context.get("user_reply_sent")
+                ):
+                    title = "MoviePilot助手" if self.is_background else ""
+                    await self._save_agent_message_to_db(final_text, title=title)
 
             # 保存消息
             memory_manager.save_agent_messages(

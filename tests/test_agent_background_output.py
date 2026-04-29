@@ -25,7 +25,7 @@ class _FakeAgent:
 
 
 class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
-    async def test_background_non_streaming_skips_send_when_output_persistence_disabled(self):
+    async def test_background_non_streaming_still_sends_when_reply_not_suppressed(self):
         agent = MoviePilotAgent(session_id="bg-test", user_id="system")
         agent.channel = None
         agent.source = None
@@ -41,11 +41,43 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             [AIMessage(content="后台结果")]
         )
         agent.send_agent_message = AsyncMock()
+        agent._save_agent_message_to_db = AsyncMock()
+
+        with patch.object(memory_manager, "save_agent_messages") as save_messages:
+            await agent._execute_agent([])
+
+        agent.send_agent_message.assert_awaited_once_with(
+            "后台结果", title="MoviePilot助手"
+        )
+        agent._save_agent_message_to_db.assert_not_awaited()
+        save_messages.assert_called_once()
+        self.assertEqual("后台结果", agent._streamed_output)
+
+    async def test_background_non_streaming_persists_without_sending_when_reply_suppressed(self):
+        agent = MoviePilotAgent(session_id="bg-test", user_id="system")
+        agent.channel = None
+        agent.source = None
+        agent.suppress_user_reply = True
+        agent.persist_output_message = True
+        agent._tool_context = {"user_reply_sent": False}
+        agent._streamed_output = ""
+        agent.stream_handler = SimpleNamespace(
+            stop_streaming=AsyncMock(return_value=(False, ""))
+        )
+        agent._should_stream = lambda: False
+        agent._create_agent = lambda streaming=False: _FakeAgent(
+            [AIMessage(content="后台结果")]
+        )
+        agent.send_agent_message = AsyncMock()
+        agent._save_agent_message_to_db = AsyncMock()
 
         with patch.object(memory_manager, "save_agent_messages") as save_messages:
             await agent._execute_agent([])
 
         agent.send_agent_message.assert_not_awaited()
+        agent._save_agent_message_to_db.assert_awaited_once_with(
+            "后台结果", title="MoviePilot助手"
+        )
         save_messages.assert_called_once()
         self.assertEqual("后台结果", agent._streamed_output)
 
