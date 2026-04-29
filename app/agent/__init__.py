@@ -5,6 +5,7 @@ import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from langchain.agents import create_agent
@@ -150,6 +151,15 @@ class _ThinkTagStripper:
             self.buffer = ""
 
 
+class ReplyMode(str, Enum):
+    """
+    Agent 最终回复处理模式。
+    """
+
+    DISPATCH = "dispatch"
+    CAPTURE_ONLY = "capture_only"
+
+
 class MoviePilotAgent:
     """
     MoviePilot AI智能体（基于 LangChain v1 + LangGraph）
@@ -171,7 +181,7 @@ class MoviePilotAgent:
         self._tool_context: Dict[str, object] = {}
         self.output_callback: Optional[Callable[[str], None]] = None
         self.force_streaming = False
-        self.suppress_user_reply = False
+        self.reply_mode = ReplyMode.DISPATCH
         self.persist_output_message = True
         self.allow_message_tools = True
         self._streamed_output = ""
@@ -267,6 +277,13 @@ class MoviePilotAgent:
         是否为后台任务模式（无渠道信息，如定时唤醒）
         """
         return not self.channel or not self.source
+
+    @property
+    def should_dispatch_reply(self) -> bool:
+        """
+        是否应将最终回复真正发送到消息渠道。
+        """
+        return self.reply_mode == ReplyMode.DISPATCH
 
     def _should_stream(self) -> bool:
         """
@@ -490,7 +507,7 @@ class MoviePilotAgent:
         except Exception as e:
             error_message = f"处理消息时发生错误: {str(e)}"
             logger.error(error_message)
-            if self.suppress_user_reply:
+            if not self.should_dispatch_reply:
                 raise
             await self.send_agent_message(error_message)
             return error_message
@@ -543,7 +560,7 @@ class MoviePilotAgent:
         """
         调用 LangGraph Agent 执行推理。
         根据运行环境选择不同的执行模式：
-        - 后台任务模式（无渠道信息）：非流式 LLM + ainvoke，仅广播最终结果
+        - 后台任务模式（无渠道信息）：非流式 LLM + ainvoke，由 reply_mode 决定是发送还是仅捕获
         - 渠道不支持消息编辑：非流式 LLM + ainvoke，完成后发送最终回复
         - 渠道支持消息编辑：流式 LLM + astream，实时推送 token
         """
@@ -602,10 +619,20 @@ class MoviePilotAgent:
                             self._emit_output(unsent_text)
                     if (
                         remaining_text
-                        and not self.suppress_user_reply
+                        and self.should_dispatch_reply
                         and not self._tool_context.get("user_reply_sent")
                     ):
                         await self.send_agent_message(remaining_text)
+                    elif (
+                        remaining_text
+                        and self.persist_output_message
+                        and not self._tool_context.get("user_reply_sent")
+                    ):
+                        title = "MoviePilot助手" if self.is_background else ""
+                        await self._save_agent_message_to_db(
+                            remaining_text,
+                            title=title,
+                        )
                 elif streamed_text and self.persist_output_message:
                     # 流式输出已发送全部内容，但未记录到数据库，补充保存消息记录
                     await self._save_agent_message_to_db(streamed_text)
@@ -639,11 +666,11 @@ class MoviePilotAgent:
 
                 if (
                     final_text
-                    and not self.suppress_user_reply
+                    and self.should_dispatch_reply
                     and not self._tool_context.get("user_reply_sent")
                 ):
                     if self.is_background:
-                        # 后台任务仅广播最终回复，带标题
+                        # 后台任务发送最终回复时统一带标题
                         await self.send_agent_message(
                             final_text, title="MoviePilot助手"
                         )
@@ -732,6 +759,7 @@ class _MessageTask:
     channel: Optional[str] = None
     source: Optional[str] = None
     username: Optional[str] = None
+    reply_mode: ReplyMode = ReplyMode.DISPATCH
 
 
 class AgentManager:
@@ -815,6 +843,7 @@ class AgentManager:
         channel: str = None,
         source: str = None,
         username: str = None,
+        reply_mode: ReplyMode = ReplyMode.DISPATCH,
     ) -> str:
         """
         处理用户消息：将消息放入会话队列，按顺序依次处理。
@@ -829,6 +858,7 @@ class AgentManager:
             channel=channel,
             source=source,
             username=username,
+            reply_mode=reply_mode,
         )
 
         # 获取或创建会话队列
@@ -916,6 +946,7 @@ class AgentManager:
                 source=task.source,
                 username=task.username,
             )
+            agent.reply_mode = task.reply_mode
             self.active_agents[session_id] = agent
         else:
             agent = self.active_agents[session_id]
@@ -926,6 +957,7 @@ class AgentManager:
                 agent.source = task.source
             if task.username:
                 agent.username = task.username
+            agent.reply_mode = task.reply_mode
 
         return await agent.process(task.message, images=task.images, files=task.files)
 
@@ -992,10 +1024,10 @@ class AgentManager:
 
     @staticmethod
     async def run_background_prompt(
-            message: str,
+        message: str,
         session_prefix: str = "__agent_background",
         output_callback: Optional[Callable[[str], None]] = None,
-        suppress_user_reply: bool = False,
+        reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
         persist_output_message: bool = True,
         allow_message_tools: bool = True,
     ) -> None:
@@ -1013,7 +1045,7 @@ class AgentManager:
         )
         agent.output_callback = output_callback
         agent.force_streaming = bool(output_callback)
-        agent.suppress_user_reply = suppress_user_reply
+        agent.reply_mode = reply_mode
         agent.persist_output_message = persist_output_message
         agent.allow_message_tools = allow_message_tools
 
@@ -1048,6 +1080,7 @@ class AgentManager:
                 channel=None,
                 source=None,
                 username=settings.SUPERUSER,
+                reply_mode=ReplyMode.DISPATCH,
             )
 
             # 等待消息队列处理完成

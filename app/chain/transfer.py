@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union, Dict, Callable
 
 from app import schemas
-from app.agent import prompt_manager, agent_manager
+from app.agent import ReplyMode, prompt_manager, agent_manager
 from app.chain import ChainBase
 from app.chain.media import MediaChain
 from app.chain.storage import StorageChain
@@ -688,6 +688,7 @@ class FailedRetryScheduler:
             await agent_manager.run_background_prompt(
                 message=self._build_retry_transfer_prompt(history_ids),
                 session_prefix="__agent_retry_transfer_batch",
+                reply_mode=ReplyMode.DISPATCH,
             )
             logger.info(
                 f"智能体重试整理：批量处理完成 IDs=[{ids_str}] (group={group_key})"

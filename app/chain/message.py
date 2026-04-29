@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Optional, Dict, Union, List
 from urllib.parse import unquote, urlparse
 
-from app.agent import agent_manager, prompt_manager
+from app.agent import ReplyMode, agent_manager, prompt_manager
 from app.chain import ChainBase
 from app.chain.interaction import (
     MediaInteractionChain,
@@ -635,7 +635,7 @@ class MessageChain(ChainBase):
                     message=redo_prompt,
                     session_prefix=f"__agent_manual_redo_{history_id}",
                     output_callback=_capture_output,
-                    suppress_user_reply=True,
+                    reply_mode=ReplyMode.CAPTURE_ONLY,
                 )
                 await self.async_post_message(
                     Notification(

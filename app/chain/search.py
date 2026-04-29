@@ -210,7 +210,7 @@ class SearchChain(ChainBase):
         """
         通过统一后台提示词机制执行资源推荐。
         """
-        from app.agent import agent_manager
+        from app.agent import ReplyMode, agent_manager
         from app.agent.prompt import prompt_manager
 
         prompt = prompt_manager.render_system_task_message(
@@ -226,7 +226,7 @@ class SearchChain(ChainBase):
             message=prompt,
             session_prefix="__agent_search_recommend",
             output_callback=on_output,
-            suppress_user_reply=True,
+            reply_mode=ReplyMode.CAPTURE_ONLY,
             persist_output_message=False,
             allow_message_tools=False,
         )

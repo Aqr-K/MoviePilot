@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app import schemas
-from app.agent import prompt_manager, agent_manager
+from app.agent import ReplyMode, prompt_manager, agent_manager
 from app.chain.storage import StorageChain
 from app.core.config import settings, global_vars
 from app.core.event import eventmanager
@@ -130,7 +130,7 @@ def _start_ai_redo_task(history_id: int, prompt: str, progress_key: str):
                 message=prompt,
                 session_prefix=f"__agent_manual_redo_{history_id}",
                 output_callback=update_output,
-                suppress_user_reply=True,
+                reply_mode=ReplyMode.CAPTURE_ONLY,
                 persist_output_message=False,
                 allow_message_tools=False,
             )
@@ -176,7 +176,7 @@ def _start_batch_ai_redo_task(
                 message=prompt,
                 session_prefix="__agent_manual_redo_batch",
                 output_callback=update_output,
-                suppress_user_reply=True,
+                reply_mode=ReplyMode.CAPTURE_ONLY,
                 persist_output_message=False,
                 allow_message_tools=False,
             )

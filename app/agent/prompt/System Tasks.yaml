@@ -1,7 +1,7 @@
 version: 2
 shared_rules:
   - This is a background system task, NOT a user conversation.
-  - Your final response will be broadcast as a notification.
+  - Your final response will be consumed by the system. Keep it concise and task-focused.
   - Do NOT include greetings, explanations, or conversational text.
   - Respond in Chinese (中文).
 task_types:

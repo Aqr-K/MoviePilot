@@ -20,6 +20,7 @@ _stub_module("qbittorrentapi", TorrentFilesList=list)
 _stub_module("transmission_rpc", File=object)
 
 from app.agent.tools.factory import MoviePilotToolFactory
+from app.agent import ReplyMode
 from app.chain.search import SearchChain
 from app.core.config import settings
 
@@ -125,7 +126,7 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
             result = await chain._invoke_recommend_llm("Candidates")
 
         self.assertEqual("[0, 2]", result)
-        self.assertTrue(captured["suppress_user_reply"])
+        self.assertEqual(ReplyMode.CAPTURE_ONLY, captured["reply_mode"])
         self.assertFalse(captured["persist_output_message"])
         self.assertFalse(captured["allow_message_tools"])
 
