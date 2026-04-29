@@ -335,7 +335,7 @@ class PromptManager:
         return (
             "- Current message context: The user sent a voice message.\n"
             "- Reply preference: Prioritize calling `send_voice_message` for the main user-facing reply.\n"
-            "- Fallback: If voice is unavailable on the current channel, `send_voice_message` will fall back to text.\n"
+            "- Fallback: If native voice is unavailable on the current channel, `send_voice_message` will fall back to text.\n"
             "- Do not repeat the same full reply again after calling `send_voice_message`."
         )
 

@@ -226,14 +226,17 @@ class AgentImageSupportTest(unittest.TestCase):
         ), patch.object(chain.messagehelper, "put"), patch.object(
             chain.messageoper, "add"
         ), patch.object(chain, "_handle_ai_message") as handle_ai_message:
-            chain.handle_message(
-                channel=MessageChannel.Telegram,
-                source="telegram-test",
-                userid="10001",
-                username="tester",
-                text="",
-                audio_refs=["tg://voice_file_id/voice-1"],
-            )
+            with patch.object(settings, "AI_AGENT_ENABLE", True), patch.object(
+                settings, "AI_AGENT_GLOBAL", False
+            ):
+                chain.handle_message(
+                    channel=MessageChannel.Telegram,
+                    source="telegram-test",
+                    userid="10001",
+                    username="tester",
+                    text="",
+                    audio_refs=["tg://voice_file_id/voice-1"],
+                )
 
         handle_ai_message.assert_called_once()
         self.assertEqual(handle_ai_message.call_args.kwargs["text"], "帮我推荐一部电影")
@@ -319,7 +322,7 @@ class AgentImageSupportTest(unittest.TestCase):
             ],
         )
 
-    def test_agent_send_agent_message_does_not_auto_convert_to_voice(self):
+    def test_agent_send_agent_message_auto_converts_to_voice_when_supported(self):
         agent = MoviePilotAgent(
             session_id="session-1",
             user_id="user-1",
@@ -330,6 +333,14 @@ class AgentImageSupportTest(unittest.TestCase):
         agent.reply_with_voice = True
 
         with patch.object(
+            VoiceHelper,
+            "resolve_reply_mode",
+            return_value=VoiceHelper.REPLY_MODE_NATIVE,
+        ), patch.object(
+            VoiceHelper, "is_available", return_value=True
+        ), patch.object(
+            VoiceHelper, "synthesize_speech", return_value=Path("/tmp/reply.opus")
+        ), patch.object(
             AgentChain, "async_post_message", new_callable=AsyncMock
         ) as async_post_message:
             import asyncio
@@ -337,7 +348,7 @@ class AgentImageSupportTest(unittest.TestCase):
             asyncio.run(agent.send_agent_message("这是语音回复"))
 
         notification = async_post_message.await_args.args[0]
-        self.assertIsNone(notification.voice_path)
+        self.assertEqual(notification.voice_path, "/tmp/reply.opus")
         self.assertEqual(notification.text, "这是语音回复")
 
     def test_agent_process_wraps_request_as_structured_json(self):

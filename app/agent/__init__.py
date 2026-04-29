@@ -34,6 +34,7 @@ from app.chain import ChainBase
 from app.core.config import settings
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.llm import LLMHelper
+from app.helper.voice import VoiceHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
@@ -677,6 +678,22 @@ class MoviePilotAgent:
         """
         通过原渠道发送消息给用户
         """
+        voice_path = None
+        if (
+            self.reply_with_voice
+            and VoiceHelper.resolve_reply_mode(
+                channel=self.channel,
+                source=self.source,
+            )
+            == VoiceHelper.REPLY_MODE_NATIVE
+            and VoiceHelper.is_available("tts")
+        ):
+            # 当用户本轮发来语音且 Agent 未主动调用 send_voice_message 时，
+            # 这里补一层自动语音回复兜底，避免最终仍只返回纯文字。
+            voice_file = await asyncio.to_thread(VoiceHelper.synthesize_speech, message)
+            if voice_file:
+                voice_path = str(voice_file)
+
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
@@ -686,6 +703,12 @@ class MoviePilotAgent:
                 username=self.username,
                 title=title,
                 text=message,
+                voice_path=voice_path,
+                voice_caption=(
+                    message
+                    if voice_path and settings.AI_VOICE_REPLY_WITH_TEXT
+                    else None
+                ),
             )
         )
 

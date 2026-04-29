@@ -202,7 +202,10 @@ class MessageChain(ChainBase):
             )
             return
 
-        if settings.AI_AGENT_ENABLE and (settings.AI_AGENT_GLOBAL or images or files):
+        if (
+            settings.AI_AGENT_ENABLE
+            and (settings.AI_AGENT_GLOBAL or images or files or reply_with_voice)
+        ):
             self._handle_ai_message(
                 text=text,
                 channel=channel,
