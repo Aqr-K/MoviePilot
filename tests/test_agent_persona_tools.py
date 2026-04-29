@@ -37,8 +37,9 @@ class TestAgentPersonaTools(unittest.TestCase):
 
         payload = json.loads(result)
         self.assertEqual(payload["active_persona"], "default")
-        self.assertGreaterEqual(payload["count"], 3)
+        self.assertGreaterEqual(payload["count"], 9)
         self.assertTrue(any(persona["persona_id"] == "concise" for persona in payload["personas"]))
+        self.assertTrue(any(persona["persona_id"] == "catgirl" for persona in payload["personas"]))
         self.assertTrue(any(persona["is_active"] for persona in payload["personas"]))
 
     def test_switch_persona_updates_runtime_by_alias(self):
