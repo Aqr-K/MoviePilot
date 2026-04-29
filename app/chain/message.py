@@ -1,16 +1,15 @@
 import asyncio
+import base64
 import mimetypes
 import re
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional, Dict, Union, List
 from urllib.parse import unquote, urlparse
-import uuid
 
-import base64
-
-from app.agent import agent_manager
+from app.agent import agent_manager, prompt_manager
 from app.chain import ChainBase
 from app.chain.interaction import (
     MediaInteractionChain,
@@ -20,6 +19,8 @@ from app.chain.interaction import (
 from app.chain.skills import SkillsChain, skills_interaction_manager
 from app.chain.transfer import TransferChain
 from app.core.config import settings, global_vars
+from app.db.models import TransferHistory
+from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.llm import LLMHelper
 from app.helper.voice import VoiceHelper
 from app.log import logger
@@ -92,17 +93,17 @@ class MessageChain(ChainBase):
         )
 
     def handle_message(
-        self,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        text: str,
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
-        images: Optional[List[CommingMessage.MessageImage]] = None,
-        audio_refs: Optional[List[str]] = None,
-        files: Optional[List[CommingMessage.MessageAttachment]] = None,
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            text: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
+            images: Optional[List[CommingMessage.MessageImage]] = None,
+            audio_refs: Optional[List[str]] = None,
+            files: Optional[List[CommingMessage.MessageAttachment]] = None,
     ) -> None:
         """
         识别消息内容，执行操作
@@ -171,21 +172,21 @@ class MessageChain(ChainBase):
 
         if skills_interaction_manager.get_by_user(userid):
             if SkillsChain().handle_text_interaction(
-                channel=channel,
-                source=source,
-                userid=userid,
-                username=username,
-                text=text,
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    text=text,
             ):
                 return
 
         if media_interaction_manager.get_by_user(userid):
             if MediaInteractionChain().handle_text_interaction(
-                channel=channel,
-                source=source,
-                userid=userid,
-                username=username,
-                text=text,
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    text=text,
             ):
                 return
 
@@ -202,8 +203,8 @@ class MessageChain(ChainBase):
             return
 
         if (
-            settings.AI_AGENT_ENABLE
-            and (settings.AI_AGENT_GLOBAL or images or files or has_audio_input)
+                settings.AI_AGENT_ENABLE
+                and (settings.AI_AGENT_GLOBAL or images or files or has_audio_input)
         ):
             self._handle_ai_message(
                 text=text,
@@ -217,11 +218,11 @@ class MessageChain(ChainBase):
             return
 
         if MediaInteractionChain().handle_text_interaction(
-            channel=channel,
-            source=source,
-            userid=userid,
-            username=username,
-            text=text,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                text=text,
         ):
             return
 
@@ -236,14 +237,14 @@ class MessageChain(ChainBase):
         )
 
     def _handle_callback(
-        self,
-        text: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            text: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
     ) -> None:
         """
         处理按钮回调
@@ -254,44 +255,44 @@ class MessageChain(ChainBase):
         logger.info(f"处理按钮回调：{callback_data}")
 
         if self._handle_transfer_callback(
-            callback_data=callback_data,
-            channel=channel,
-            source=source,
-            userid=userid,
-            username=username,
+                callback_data=callback_data,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
         ):
             return
 
         if SkillsChain().handle_callback_interaction(
-            callback_data=callback_data,
-            channel=channel,
-            source=source,
-            userid=userid,
-            username=username,
-            original_message_id=original_message_id,
-            original_chat_id=original_chat_id,
+                callback_data=callback_data,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
         ):
             return
 
         if MediaInteractionChain().handle_callback_interaction(
-            callback_data=callback_data,
-            channel=channel,
-            source=source,
-            userid=userid,
-            username=username,
-            original_message_id=original_message_id,
-            original_chat_id=original_chat_id,
+                callback_data=callback_data,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
         ):
             return
 
         if self._handle_agent_choice_callback(
-            callback_data=callback_data,
-            channel=channel,
-            source=source,
-            userid=userid,
-            username=username,
-            original_message_id=original_message_id,
-            original_chat_id=original_chat_id,
+                callback_data=callback_data,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
         ):
             return
 
@@ -327,14 +328,14 @@ class MessageChain(ChainBase):
 
     @staticmethod
     def _parse_transfer_callback(
-        callback_data: str,
+            callback_data: str,
     ) -> Optional[tuple[str, int]]:
         """
         解析整理失败通知按钮回调。
         """
         for prefix, action in (
-            ("transfer_retry_", "retry"),
-            ("transfer_ai_retry_", "ai_retry"),
+                ("transfer_retry_", "retry"),
+                ("transfer_ai_retry_", "ai_retry"),
         ):
             if callback_data.startswith(prefix):
                 history_id = callback_data.replace(prefix, "", 1)
@@ -343,12 +344,12 @@ class MessageChain(ChainBase):
         return None
 
     def _handle_transfer_callback(
-        self,
-        callback_data: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
+            self,
+            callback_data: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
     ) -> bool:
         """
         处理整理失败通知中的重试类按钮。
@@ -378,7 +379,7 @@ class MessageChain(ChainBase):
 
     @staticmethod
     def _parse_agent_choice_callback(
-        callback_data: str,
+            callback_data: str,
     ) -> Optional[tuple[str, int]]:
         """
         解析 Agent 按钮选择回调。
@@ -401,14 +402,14 @@ class MessageChain(ChainBase):
         return request_id, int(option_index)
 
     def _handle_agent_choice_callback(
-        self,
-        callback_data: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            callback_data: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
     ) -> bool:
         """
         将 Agent 按钮选择回传为同一会话中的下一条用户消息。
@@ -465,14 +466,14 @@ class MessageChain(ChainBase):
         return True
 
     def _update_interaction_message_feedback(
-        self,
-        channel: MessageChannel,
-        source: str,
-        original_message_id: Optional[Union[str, int]],
-        original_chat_id: Optional[str],
-        prompt: str,
-        selected_label: str,
-        title: Optional[str] = None,
+            self,
+            channel: MessageChannel,
+            source: str,
+            original_message_id: Optional[Union[str, int]],
+            original_chat_id: Optional[str],
+            prompt: str,
+            selected_label: str,
+            title: Optional[str] = None,
     ) -> None:
         """
         在用户点击交互按钮后，立即更新原消息，明确显示已选择的内容。
@@ -494,12 +495,12 @@ class MessageChain(ChainBase):
         )
 
     def _retry_transfer_history(
-        self,
-        history_id: int,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
+            self,
+            history_id: int,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
     ) -> None:
         """
         立即重新整理一条失败的整理记录。
@@ -541,16 +542,46 @@ class MessageChain(ChainBase):
         )
 
     def _take_over_transfer_history_by_ai(
-        self,
-        history_id: int,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
+            self,
+            history_id: int,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
     ) -> None:
         """
         由智能助手接管一条失败的整理记录。
         """
+
+        def __build_manual_redo_prompt(his: TransferHistory) -> str:
+            """构建手动 AI 整理提示词。"""
+
+            src_fileitem = his.src_fileitem or {}
+            source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
+            source_path = source_path or his.src or ""
+            season_episode = f"{his.seasons or ''}{his.episodes or ''}".strip()
+            template_context = {
+                "his_id": his.id,
+                "current_status": "success" if his.status else "failed",
+                "recognized_title": his.title or "unknown",
+                "media_type": his.type or "unknown",
+                "category": his.category or "unknown",
+                "year": his.year or "unknown",
+                "season_episode": season_episode or "unknown",
+                "source_path": source_path or "unknown",
+                "source_storage": his.src_storage or "local",
+                "destination_path": his.dest or "unknown",
+                "destination_storage": his.dest_storage or "unknown",
+                "transfer_mode": his.mode or "unknown",
+                "tmdbid": his.tmdbid or "none",
+                "doubanid": his.doubanid or "none",
+                "error_message": his.errmsg or "none",
+            }
+            return prompt_manager.render_system_task_message(
+                "manual_transfer_redo",
+                template_context=template_context,
+            )
+
         if not settings.AI_AGENT_ENABLE:
             self.post_message(
                 Notification(
@@ -562,6 +593,23 @@ class MessageChain(ChainBase):
                 )
             )
             return
+
+        history = TransferHistoryOper().get(history_id)
+        if not history:
+            self.post_message(
+                Notification(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    title="重新整理失败",
+                    text=f"整理记录 #{history_id} 不存在",
+                    link=settings.MP_DOMAIN("#/history"),
+                )
+            )
+            return
+
+        redo_prompt = __build_manual_redo_prompt(history)
 
         self.post_message(
             Notification(
@@ -583,9 +631,11 @@ class MessageChain(ChainBase):
                 final_output = text_output or ""
 
             try:
-                await agent_manager.manual_redo_transfer(
-                    history_id=history_id,
+                await agent_manager.run_background_prompt(
+                    message=redo_prompt,
+                    session_prefix=f"__agent_manual_redo_{history_id}",
                     output_callback=_capture_output,
+                    suppress_user_reply=True,
                 )
                 await self.async_post_message(
                     Notification(
@@ -595,7 +645,7 @@ class MessageChain(ChainBase):
                         username=username,
                         title="智能助手整理完成",
                         text=final_output.strip()
-                        or f"整理记录 #{history_id} 已由智能助手处理完成。",
+                             or f"整理记录 #{history_id} 已由智能助手处理完成。",
                         link=settings.MP_DOMAIN("#/history"),
                     )
                 )
@@ -650,12 +700,12 @@ class MessageChain(ChainBase):
         self._user_sessions[userid] = (session_id, datetime.now())
 
     def _record_user_message(
-        self,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        text: str,
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            text: str,
     ) -> None:
         """
         保存一条用户消息到消息历史与数据库。
@@ -690,10 +740,10 @@ class MessageChain(ChainBase):
         return False
 
     def remote_clear_session(
-        self,
-        channel: MessageChannel,
-        userid: Union[str, int],
-        source: Optional[str] = None,
+            self,
+            channel: MessageChannel,
+            userid: Union[str, int],
+            source: Optional[str] = None,
     ):
         """
         清除用户会话（远程命令接口）
@@ -735,10 +785,10 @@ class MessageChain(ChainBase):
             )
 
     def remote_stop_agent(
-        self,
-        channel: MessageChannel,
-        userid: Union[str, int],
-        source: Optional[str] = None,
+            self,
+            channel: MessageChannel,
+            userid: Union[str, int],
+            source: Optional[str] = None,
     ):
         """
         应急停止当前正在执行的Agent推理（远程命令接口）。
@@ -805,7 +855,7 @@ class MessageChain(ChainBase):
                 f"({context_ratio * 100:.2f}%)"
                 if context_ratio is not None
                 else f"{cls._format_token_count(last_input_tokens)} / "
-                f"{cls._format_token_count(context_window_tokens)}"
+                     f"{cls._format_token_count(context_window_tokens)}"
             )
         else:
             context_usage_text = "暂无模型调用数据"
@@ -825,10 +875,10 @@ class MessageChain(ChainBase):
         return "\n".join(lines)
 
     def remote_session_status(
-        self,
-        channel: MessageChannel,
-        userid: Union[str, int],
-        source: Optional[str] = None,
+            self,
+            channel: MessageChannel,
+            userid: Union[str, int],
+            source: Optional[str] = None,
     ):
         """查询当前用户的智能体会话状态。"""
         session_info = self._user_sessions.get(userid)
@@ -856,15 +906,15 @@ class MessageChain(ChainBase):
         )
 
     def _handle_ai_message(
-        self,
-        text: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        images: Optional[List[CommingMessage.MessageImage]] = None,
-        files: Optional[List[CommingMessage.MessageAttachment]] = None,
-        session_id: Optional[str] = None,
+            self,
+            text: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            images: Optional[List[CommingMessage.MessageImage]] = None,
+            files: Optional[List[CommingMessage.MessageAttachment]] = None,
+            session_id: Optional[str] = None,
     ) -> None:
         """
         处理AI智能体消息
@@ -928,10 +978,10 @@ class MessageChain(ChainBase):
             elif images:
                 image_attachments = self._build_image_attachments(images)
                 if (
-                    original_images
-                    and not image_attachments
-                    and not user_message
-                    and not files
+                        original_images
+                        and not image_attachments
+                        and not user_message
+                        and not files
                 ):
                     self.post_message(
                         Notification(
@@ -986,7 +1036,7 @@ class MessageChain(ChainBase):
             )
 
     def _transcribe_audio_refs(
-        self, audio_refs: List[str], channel: MessageChannel, source: str
+            self, audio_refs: List[str], channel: MessageChannel, source: str
     ) -> Optional[str]:
         """
         下载并识别语音消息，仅处理当前已接入的渠道。
@@ -1119,10 +1169,10 @@ class MessageChain(ChainBase):
         return default
 
     def _download_attachments_to_data_urls(
-        self,
-        attachments: List[CommingMessage.MessageImage],
-        channel: MessageChannel,
-        source: str,
+            self,
+            attachments: List[CommingMessage.MessageImage],
+            channel: MessageChannel,
+            source: str,
     ) -> Optional[List[str]]:
         """
         下载可直接提供给 LLM 的附件内容，并统一转换为 data URL。
@@ -1147,7 +1197,7 @@ class MessageChain(ChainBase):
                     if base64_data:
                         data_urls.append(f"data:image/jpeg;base64,{base64_data}")
                 elif attachment_ref.startswith(
-                    "wxwork://media_id/"
+                        "wxwork://media_id/"
                 ) or attachment_ref.startswith(
                     "wxbot://image/"
                 ):
@@ -1208,7 +1258,7 @@ class MessageChain(ChainBase):
         return data_urls if data_urls else None
 
     def _build_image_attachments(
-        self, images: List[CommingMessage.MessageImage]
+            self, images: List[CommingMessage.MessageImage]
     ) -> List[CommingMessage.MessageAttachment]:
         """
         将图片引用转换为附件描述，以便按文件方式交给 Agent 处理。
@@ -1235,11 +1285,11 @@ class MessageChain(ChainBase):
         return attachments
 
     def _prepare_agent_files(
-        self,
-        session_id: str,
-        files: Optional[List[CommingMessage.MessageAttachment]],
-        channel: MessageChannel,
-        source: str,
+            self,
+            session_id: str,
+            files: Optional[List[CommingMessage.MessageAttachment]],
+            channel: MessageChannel,
+            source: str,
     ) -> Optional[List[dict]]:
         """
         下载用户上传的附件，落盘到临时目录，并生成 Agent 可消费的文件描述。
@@ -1286,7 +1336,7 @@ class MessageChain(ChainBase):
         return prepared_files or None
 
     def _download_message_file_bytes(
-        self, file_ref: str, channel: MessageChannel, source: str
+            self, file_ref: str, channel: MessageChannel, source: str
     ) -> Optional[bytes]:
         """
         下载消息附件的原始字节内容。
@@ -1359,11 +1409,11 @@ class MessageChain(ChainBase):
         return None
 
     def _save_agent_attachment(
-        self,
-        session_id: str,
-        filename: Optional[str],
-        content: bytes,
-        mime_type: Optional[str] = None,
+            self,
+            session_id: str,
+            filename: Optional[str],
+            content: bytes,
+            mime_type: Optional[str] = None,
     ) -> Path:
         """
         将用户上传文件写入临时目录，并返回本地路径。
@@ -1379,7 +1429,7 @@ class MessageChain(ChainBase):
 
     @staticmethod
     def _sanitize_attachment_name(
-        filename: Optional[str], mime_type: Optional[str] = None
+            filename: Optional[str], mime_type: Optional[str] = None
     ) -> str:
         """
         规范化附件文件名，避免路径穿越和非法字符。
@@ -1449,5 +1499,6 @@ class MessageChain(ChainBase):
             return None
         try:
             return base64.b64decode(payload)
-        except Exception:
+        except Exception as e:
+            logger.error(e)
             return None

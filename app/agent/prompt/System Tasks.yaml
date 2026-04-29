@@ -95,3 +95,45 @@ task_types:
       - "Do NOT reorganize blindly when media identity is uncertain."
       - "If the previous record was successful but obviously identified as the wrong media, still use the tool-based flow above instead of `/redo`."
       - "Keep the final response short and focused on outcome."
+  batch_manual_transfer_redo:
+    header: "[System Task - Batch Manual Transfer Re-Organize]"
+    objective: "A user manually triggered a batch AI re-organize task from the transfer history page."
+    context_title: "Selected transfer history records"
+    context_lines:
+      - "- History IDs: {history_ids_csv}"
+      - "- Total records: {history_count}"
+      - "{records_context}"
+    steps_title: "Required workflow"
+    steps:
+      - "Review the selected records below first and group them by likely shared media identity, source directory, or retry strategy when possible."
+      - "Use the provided record context as the primary source of truth. Call `query_transfer_history` only when you need extra confirmation."
+      - "For each group, decide whether the current recognition is trustworthy."
+      - "If multiple records clearly belong to the same movie or series, identify the media once with `recognize_media` or `search_media`, then reuse that result for the related records."
+      - "If a source file no longer exists or cannot be safely processed, skip that record and note the reason."
+      - "Before re-organizing a record, delete the old transfer history record with `delete_transfer_history` so the system will not skip the source file."
+      - "Then use `transfer_file` to organize the source path directly."
+      - "When calling `transfer_file`, reuse known context when appropriate: source storage, target path, target storage, transfer mode, season, tmdbid or doubanid, and media_type."
+      - "If a record is already correct and no re-organize is needed, do not perform destructive actions; simply mark it as skipped."
+      - "Report only the aggregate outcome, including how many records succeeded, skipped, and failed."
+    task_rules:
+      - "Do NOT assume every selected record belongs to the same media."
+      - "When several records obviously share the same media identity, avoid repeated `recognize_media` or `search_media` calls."
+      - "Process every selected record exactly once."
+      - "Keep the final response short and focused on the aggregate outcome."
+  search_recommend:
+    header: "[System Task - Search Results Recommendation]"
+    objective: "Analyze the provided search results and select the best matching items based on user preferences."
+    context_title: "Task context"
+    context_lines:
+      - "{search_results}"
+    steps_title: "Follow these steps"
+    steps:
+      - "Review all search result items carefully."
+      - "Evaluate each item based on the user preference criteria."
+      - "Select the top items that best match the preferences."
+      - "Return ONLY a JSON array of item indices."
+    task_rules:
+      - "Return ONLY a JSON array of index numbers, e.g., [0, 3, 1]."
+      - "Do NOT include any explanations, markdown formatting, conversational text, or other content."
+      - "Do NOT call any tools. Simply analyze and return the JSON result directly."
+      - "Respond in JSON format only."

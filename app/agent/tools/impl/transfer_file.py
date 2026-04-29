@@ -6,7 +6,6 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.chain.transfer import TransferChain
 from app.log import logger
 from app.schemas import FileItem, MediaType
 
@@ -123,6 +122,8 @@ class TransferFileTool(MoviePilotTool):
             media_type_enum = MediaType.from_agent(media_type)
             if not media_type_enum:
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
+
+        from app.chain.transfer import TransferChain
 
         state, errormsg = TransferChain().manual_transfer(
             fileitem=fileitem,

@@ -32,7 +32,6 @@ from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
-from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
@@ -731,21 +730,12 @@ class AgentManager:
     同一会话的消息按顺序排队处理，不同会话之间互不影响。
     """
 
-    # 批量重试整理的等待时间（秒），同一批次内的失败记录会合并为一次agent调用
-    RETRY_TRANSFER_DEBOUNCE_SECONDS = 300
-
     def __init__(self):
         self.active_agents: Dict[str, MoviePilotAgent] = {}
         # 每个会话的消息队列
         self._session_queues: Dict[str, asyncio.Queue] = {}
         # 每个会话的worker任务
         self._session_workers: Dict[str, asyncio.Task] = {}
-        # 重试整理的 debounce 缓冲区: group_key -> List[history_id]
-        self._retry_transfer_buffer: Dict[str, List[int]] = {}
-        # 重试整理的 debounce 定时器: group_key -> asyncio.TimerHandle
-        self._retry_transfer_timers: Dict[str, asyncio.TimerHandle] = {}
-        # 重试整理缓冲区锁
-        self._retry_transfer_lock = asyncio.Lock()
 
     def get_session_status(self, session_id: str) -> dict[str, Any]:
         """获取会话当前模型与 token 使用状态。"""
@@ -790,11 +780,6 @@ class AgentManager:
         关闭管理器
         """
         await memory_manager.close()
-        # 取消所有重试整理的延迟定时器
-        for timer in self._retry_transfer_timers.values():
-            timer.cancel()
-        self._retry_transfer_timers.clear()
-        self._retry_transfer_buffer.clear()
         # 取消所有会话worker
         for task in self._session_workers.values():
             task.cancel()
@@ -996,65 +981,38 @@ class AgentManager:
             logger.info(f"会话 {session_id} 的记忆已清空")
 
     @staticmethod
+    async def run_background_prompt(
+            message: str,
+        session_prefix: str = "__agent_background",
+        output_callback: Optional[Callable[[str], None]] = None,
+        suppress_user_reply: bool = False,
+    ) -> None:
+        """
+        以独立后台会话执行一段 prompt。
+        """
+        session_id = f"{session_prefix}_{uuid.uuid4().hex[:8]}__"
+        user_id = SYSTEM_INTERNAL_USER_ID
+        agent = MoviePilotAgent(
+            session_id=session_id,
+            user_id=user_id,
+            channel=None,
+            source=None,
+            username=settings.SUPERUSER,
+        )
+        agent.output_callback = output_callback
+        agent.force_streaming = bool(output_callback)
+        agent.suppress_user_reply = suppress_user_reply
+
+        try:
+            await agent.process(message)
+        finally:
+            await agent.cleanup()
+            memory_manager.clear_memory(session_id, user_id)
+
+    @staticmethod
     def _build_heartbeat_prompt() -> str:
         """使用程序内置 System Tasks 定义构建心跳任务提示词。"""
         return prompt_manager.render_system_task_message("heartbeat")
-
-    @staticmethod
-    def _build_retry_transfer_template_context(
-        history_ids: list[int],
-    ) -> tuple[str, dict[str, int | str]]:
-        """仅负责把失败重试任务的动态数据映射成模板变量。"""
-        is_batch = len(history_ids) > 1
-        task_type = (
-            "batch_transfer_failed_retry" if is_batch else "transfer_failed_retry"
-        )
-        template_context: dict[str, int | str] = {
-            "history_ids_csv": ", ".join(str(item) for item in history_ids),
-            "history_count": len(history_ids),
-        }
-        if not is_batch:
-            template_context["history_id"] = history_ids[0]
-        return task_type, template_context
-
-    @staticmethod
-    def _build_retry_transfer_prompt(
-        history_ids: list[int],
-    ) -> str:
-        """根据失败记录数量构建统一的重试整理后台任务提示词。"""
-        task_type, template_context = AgentManager._build_retry_transfer_template_context(
-            history_ids
-        )
-        return prompt_manager.render_system_task_message(
-            task_type,
-            template_context=template_context,
-        )
-
-    @staticmethod
-    def _build_manual_redo_template_context(history) -> dict[str, int | str]:
-        """仅负责把整理历史对象映射成 System Tasks 需要的模板变量。"""
-        src_fileitem = history.src_fileitem or {}
-        source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
-        source_path = source_path or history.src or ""
-        season_episode = f"{history.seasons or ''}{history.episodes or ''}".strip()
-        # 这里故意只做数据整形，具体行为定义全部交给内置 System Tasks YAML。
-        return {
-            "history_id": history.id,
-            "current_status": "success" if history.status else "failed",
-            "recognized_title": history.title or "unknown",
-            "media_type": history.type or "unknown",
-            "category": history.category or "unknown",
-            "year": history.year or "unknown",
-            "season_episode": season_episode or "unknown",
-            "source_path": source_path or "unknown",
-            "source_storage": history.src_storage or "local",
-            "destination_path": history.dest or "unknown",
-            "destination_storage": history.dest_storage or "unknown",
-            "transfer_mode": history.mode or "unknown",
-            "tmdbid": history.tmdbid or "none",
-            "doubanid": history.doubanid or "none",
-            "error_message": history.errmsg or "none",
-        }
 
     async def heartbeat_check_jobs(self):
         """
@@ -1096,135 +1054,6 @@ class AgentManager:
 
         except Exception as e:
             logger.error(f"智能体心跳唤醒失败: {e}")
-
-    async def retry_failed_transfer(self, history_id: int, group_key: str = ""):
-        """
-        触发智能体重新整理失败的历史记录。
-        由文件整理模块在检测到整理失败后调用。
-        同一 group_key 的失败记录会在缓冲期内合并为一次agent调用，避免重复浪费token。
-        :param history_id: 失败的整理历史记录ID
-        :param group_key: 分组键，相同key的记录会被合并处理（如download_hash、源目录等）
-        """
-        if not group_key:
-            group_key = f"_default_{history_id}"
-
-        async with self._retry_transfer_lock:
-            # 将 history_id 加入缓冲区
-            if group_key not in self._retry_transfer_buffer:
-                self._retry_transfer_buffer[group_key] = []
-            if history_id not in self._retry_transfer_buffer[group_key]:
-                self._retry_transfer_buffer[group_key].append(history_id)
-                logger.info(
-                    f"智能体重试整理：记录 ID={history_id} 已加入缓冲区 "
-                    f"(group={group_key}, 当前{len(self._retry_transfer_buffer[group_key])}条)"
-                )
-
-            # 取消该分组的旧定时器
-            if group_key in self._retry_transfer_timers:
-                self._retry_transfer_timers[group_key].cancel()
-
-            # 设置新的延迟定时器
-            loop = asyncio.get_running_loop()
-            self._retry_transfer_timers[group_key] = loop.call_later(
-                self.RETRY_TRANSFER_DEBOUNCE_SECONDS,
-                lambda gk=group_key: asyncio.ensure_future(
-                    self._flush_retry_transfer(gk)
-                ),
-            )
-
-    async def _flush_retry_transfer(self, group_key: str):
-        """
-        延迟定时器到期后，取出该分组的所有 history_id 并合并为一次agent调用。
-        """
-        async with self._retry_transfer_lock:
-            history_ids = self._retry_transfer_buffer.pop(group_key, [])
-            self._retry_transfer_timers.pop(group_key, None)
-
-        if not history_ids:
-            return
-
-        session_id = f"__agent_retry_transfer_batch_{uuid.uuid4().hex[:8]}__"
-        user_id = SYSTEM_INTERNAL_USER_ID
-
-        ids_str = ", ".join(str(i) for i in history_ids)
-        logger.info(
-            f"智能体重试整理：开始批量处理失败记录 IDs=[{ids_str}] (group={group_key})"
-        )
-        retry_message = self._build_retry_transfer_prompt(history_ids)
-
-        try:
-            await self.process_message(
-                session_id=session_id,
-                user_id=user_id,
-                message=retry_message,
-                channel=None,
-                source=None,
-                username=settings.SUPERUSER,
-            )
-
-            # 等待消息队列处理完成
-            if session_id in self._session_queues:
-                await self._session_queues[session_id].join()
-
-            # 等待worker结束
-            if session_id in self._session_workers:
-                try:
-                    await self._session_workers[session_id]
-                except asyncio.CancelledError:
-                    pass
-
-            logger.info(
-                f"智能体重试整理：批量处理完成 IDs=[{ids_str}] (group={group_key})"
-            )
-
-            # 用完即弃，清理资源
-            await self.clear_session(session_id, user_id)
-
-        except Exception as e:
-            logger.error(
-                f"智能体重试整理失败 (IDs=[{ids_str}], group={group_key}): {e}"
-            )
-
-    @staticmethod
-    def _build_manual_redo_prompt(history) -> str:
-        """
-        构建手动 AI 整理提示词。
-        """
-        return prompt_manager.render_system_task_message(
-            "manual_transfer_redo",
-            template_context=AgentManager._build_manual_redo_template_context(history),
-        )
-
-    async def manual_redo_transfer(
-        self,
-        history_id: int,
-        output_callback: Optional[Callable[[str], None]] = None,
-    ) -> None:
-        """
-        手动触发单条历史记录的 AI 整理。
-        """
-        session_id = f"__agent_manual_redo_{history_id}_{uuid.uuid4().hex[:8]}__"
-        user_id = SYSTEM_INTERNAL_USER_ID
-        agent = MoviePilotAgent(
-            session_id=session_id,
-            user_id=user_id,
-            channel=None,
-            source=None,
-            username=settings.SUPERUSER,
-        )
-        agent.output_callback = output_callback
-        agent.force_streaming = True
-        agent.suppress_user_reply = True
-
-        try:
-            history = TransferHistoryOper().get(history_id)
-            if not history:
-                raise ValueError(f"整理记录不存在: {history_id}")
-
-            await agent.process(self._build_manual_redo_prompt(history))
-        finally:
-            await agent.cleanup()
-            memory_manager.clear_memory(session_id, user_id)
 
 
 # 全局智能体管理器实例

@@ -724,8 +724,7 @@ class SkillsChain(ChainBase):
         """
         if request.view == "installed":
             title, text, buttons = self._build_installed_view(
-                request=request,
-                force_market_refresh=force_market_refresh,
+                request=request
             )
         elif request.view == "market":
             title, text, buttons = self._build_market_view(
@@ -735,7 +734,6 @@ class SkillsChain(ChainBase):
         elif request.view == "sources":
             title, text, buttons = self._build_sources_view(
                 request=request,
-                force_market_refresh=force_market_refresh,
             )
         else:
             title, text, buttons = self._build_root_view(
@@ -808,8 +806,7 @@ class SkillsChain(ChainBase):
 
     def _build_installed_view(
         self,
-        request: PendingSkillsInteraction,
-        force_market_refresh: bool = False,  # noqa: ARG002
+        request: PendingSkillsInteraction
     ) -> Tuple[str, str, Optional[List[List[dict]]]]:
         """
         构建已安装技能视图，列出来源和可删除状态。
@@ -971,7 +968,6 @@ class SkillsChain(ChainBase):
     def _build_sources_view(
         self,
         request: PendingSkillsInteraction,
-        force_market_refresh: bool = False,  # noqa: ARG002
     ) -> Tuple[str, str, Optional[List[List[dict]]]]:
         """
         构建技能源管理视图，提供自定义 GitHub 源的增删入口。

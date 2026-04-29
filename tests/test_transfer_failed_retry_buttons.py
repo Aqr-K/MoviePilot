@@ -1,6 +1,7 @@
 import unittest
 import sys
 from types import ModuleType
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.modules.setdefault("qbittorrentapi", ModuleType("qbittorrentapi"))
@@ -74,9 +75,33 @@ class TestTransferFailedRetryButtons(unittest.TestCase):
 
     def test_transfer_ai_retry_callback_schedules_agent_takeover(self):
         chain = MessageChain()
+        history = SimpleNamespace(
+            id=34,
+            status=False,
+            title="Test Show",
+            type="电视剧",
+            category=None,
+            year="2024",
+            seasons="S01",
+            episodes="E01",
+            src="/downloads/Test.Show.S01E01.mkv",
+            src_storage="local",
+            src_fileitem={"path": "/downloads/Test.Show.S01E01.mkv"},
+            dest=None,
+            dest_storage=None,
+            mode="copy",
+            tmdbid=123,
+            doubanid=None,
+            errmsg="未识别到媒体信息",
+        )
 
         with patch.object(settings, "AI_AGENT_ENABLE", True):
-            with patch("app.chain.message.asyncio.run_coroutine_threadsafe") as run_task:
+            with patch(
+                "app.chain.message.TransferHistoryOper"
+            ) as history_oper_cls, patch(
+                "app.chain.message.asyncio.run_coroutine_threadsafe"
+            ) as run_task:
+                history_oper_cls.return_value.get.return_value = history
                 with patch.object(chain, "post_message") as post_message:
                     chain._handle_callback(
                         text="CALLBACK:transfer_ai_retry_34",

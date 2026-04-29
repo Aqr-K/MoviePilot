@@ -77,6 +77,21 @@ class TestAgentPromptStyle(unittest.TestCase):
         self.assertIn("Total failed records: 1", message)
         self.assertIn("history_id=7", message)
 
+    def test_render_batch_manual_transfer_redo_message(self):
+        message = prompt_manager.render_system_task_message(
+            "batch_manual_transfer_redo",
+            template_context={
+                "history_ids_csv": "7, 8",
+                "history_count": 2,
+                "records_context": "Record #7:\n- Source path: /downloads/a.mkv",
+            },
+        )
+
+        self.assertIn("[System Task - Batch Manual Transfer Re-Organize]", message)
+        self.assertIn("History IDs: 7, 8", message)
+        self.assertIn("Total records: 2", message)
+        self.assertIn("Record #7:", message)
+
     def test_missing_system_task_template_context_raises_clear_error(self):
         with self.assertRaises(PromptConfigError):
             prompt_manager.render_system_task_message("transfer_failed_retry")

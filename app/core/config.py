@@ -506,7 +506,7 @@ class ConfigModel(BaseModel):
     # LLM模型名称
     LLM_MODEL: str = "deepseek-chat"
     # 思考模式/深度配置：off/auto/minimal/low/medium/high/max/xhigh
-    LLM_THINKING_LEVEL: Optional[str] = 'off'
+    LLM_THINKING_LEVEL: Optional[str] = "off"
     # LLM是否支持图片输入，开启后消息图片会按多模态输入发送给模型
     LLM_SUPPORT_IMAGE_INPUT: bool = True
     # LLM是否支持音频输入输出，开启后才会启用语音转写与语音回复

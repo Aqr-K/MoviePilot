@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, Body, Request
 from fastapi.responses import StreamingResponse
 
 from app import schemas
+from app.chain.agent import AIRecommendChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
-from app.chain.ai_recommend import AIRecommendChain
 from app.core.config import settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
@@ -73,7 +73,6 @@ async def search_by_id_stream(request: Request,
     """
     根据TMDBID/豆瓣ID渐进式搜索站点资源，返回格式为SSE
     """
-    AIRecommendChain().cancel_ai_recommend()
 
     media_type = MediaType(mtype) if mtype else None
     media_season = int(season) if season else None
@@ -206,8 +205,7 @@ async def search_by_id(mediaid: str,
     根据TMDBID/豆瓣ID精确搜索站点资源 tmdb:/douban:/bangumi:
     """
     # 取消正在运行的AI推荐（会清除数据库缓存）
-    AIRecommendChain().cancel_ai_recommend()
-    
+
     if mtype:
         media_type = MediaType(mtype)
     else:
@@ -332,7 +330,6 @@ async def search_by_title_stream(request: Request,
     """
     根据名称渐进式模糊搜索站点资源，返回格式为SSE
     """
-    AIRecommendChain().cancel_ai_recommend()
 
     event_source = SearchChain().async_search_by_title_stream(
         title=keyword,
@@ -352,8 +349,7 @@ async def search_by_title(keyword: Optional[str] = None,
     根据名称模糊搜索站点资源，支持分页，关键词为空是返回首页资源
     """
     # 取消正在运行的AI推荐并清除数据库缓存
-    AIRecommendChain().cancel_ai_recommend()
-    
+
     torrents = await SearchChain().async_search_by_title(
         title=keyword, page=page,
         sites=_parse_site_list(sites),
@@ -396,9 +392,9 @@ async def recommend_search_results(
         return schemas.Response(success=False, message="没有可用的搜索结果", data={
             "status": "error"
         })
-    
+
     recommend_chain = AIRecommendChain()
-    
+
     # 如果是强制模式，先取消并清除旧结果，然后直接启动新任务
     if force:
         # 检查功能是否启用
@@ -413,7 +409,7 @@ async def recommend_search_results(
         return schemas.Response(success=True, data={
             "status": "running"
         })
-    
+
     # 如果是仅检查模式，不传递 filtered_indices（避免触发请求变化检测）
     if check_only:
         # 返回当前运行状态，不做任何任务启动或取消操作
@@ -423,14 +419,14 @@ async def recommend_search_results(
             error_msg = current_status.pop("error", "未知错误")
             return schemas.Response(success=False, message=error_msg, data=current_status)
         return schemas.Response(success=True, data=current_status)
-    
+
     # 获取当前状态（会检测请求是否变化）
     status_data = recommend_chain.get_status(filtered_indices, len(results))
-    
+
     # 如果功能未启用，直接返回禁用状态
     if status_data.get("status") == "disabled":
         return schemas.Response(success=True, data=status_data)
-    
+
     # 如果是空闲状态，启动新任务
     if status_data["status"] == "idle":
         recommend_chain.start_recommend_task(filtered_indices, len(results), results)
@@ -438,11 +434,11 @@ async def recommend_search_results(
         return schemas.Response(success=True, data={
             "status": "running"
         })
-    
+
     # 如果有错误，将错误信息放到message中
     if status_data.get("status") == "error":
         error_msg = status_data.pop("error", "未知错误")
         return schemas.Response(success=False, message=error_msg, data=status_data)
-    
+
     # 返回当前状态
     return schemas.Response(success=True, data=status_data)

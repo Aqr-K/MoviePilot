@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.log import logger
-from app.scheduler import Scheduler
 
 
 class RunSchedulerInput(BaseModel):
@@ -36,6 +35,8 @@ class RunSchedulerTool(MoviePilotTool):
     @staticmethod
     def _run_scheduler_sync(job_id: str) -> tuple[bool, str]:
         """同步触发定时服务，避免调度器扫描阻塞事件循环。"""
+        from app.scheduler import Scheduler
+
         scheduler = Scheduler()
         for scheduler_item in scheduler.list():
             if scheduler_item.id == job_id:

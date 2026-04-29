@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.log import logger
-from app.scheduler import Scheduler
 
 
 class QuerySchedulersInput(BaseModel):
@@ -27,6 +26,8 @@ class QuerySchedulersTool(MoviePilotTool):
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")
         try:
+            from app.scheduler import Scheduler
+
             scheduler = Scheduler()
             schedulers = scheduler.list()
             if schedulers:
