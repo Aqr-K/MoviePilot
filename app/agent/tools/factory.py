@@ -79,15 +79,6 @@ class MoviePilotToolFactory:
     MoviePilot工具工厂
     """
 
-    _MESSAGE_TOOL_CLASSES = frozenset(
-        {
-            SendMessageTool,
-            AskUserChoiceTool,
-            SendLocalFileTool,
-            SendVoiceMessageTool,
-        }
-    )
-
     @staticmethod
     def _should_enable_choice_tool(channel: str = None) -> bool:
         if not channel:
@@ -191,12 +182,9 @@ class MoviePilotToolFactory:
         )
         # 创建内置工具
         for ToolClass in tool_definitions:
-            if (
-                not allow_message_tools
-                and ToolClass in MoviePilotToolFactory._MESSAGE_TOOL_CLASSES
-            ):
-                continue
             tool = ToolClass(session_id=session_id, user_id=user_id)
+            if not allow_message_tools and getattr(tool, "sends_message", False):
+                continue
             tool.set_message_attr(channel=channel, source=source, username=username)
             tool.set_stream_handler(stream_handler=stream_handler)
             tool.set_agent_context(agent_context=agent_context)
@@ -211,11 +199,6 @@ class MoviePilotToolFactory:
             tool_classes = plugin_info.get("tools", [])
             for ToolClass in tool_classes:
                 try:
-                    if (
-                        not allow_message_tools
-                        and ToolClass in MoviePilotToolFactory._MESSAGE_TOOL_CLASSES
-                    ):
-                        continue
                     # 验证工具类是否继承自 MoviePilotTool
                     if not issubclass(ToolClass, MoviePilotTool):
                         logger.warning(
@@ -224,6 +207,8 @@ class MoviePilotToolFactory:
                         continue
                     # 创建工具实例
                     tool = ToolClass(session_id=session_id, user_id=user_id)
+                    if not allow_message_tools and getattr(tool, "sends_message", False):
+                        continue
                     tool.set_message_attr(
                         channel=channel, source=source, username=username
                     )

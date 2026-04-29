@@ -636,6 +636,8 @@ class MessageChain(ChainBase):
                     session_prefix=f"__agent_manual_redo_{history_id}",
                     output_callback=_capture_output,
                     reply_mode=ReplyMode.CAPTURE_ONLY,
+                    persist_output_message=False,
+                    allow_message_tools=False,
                 )
                 await self.async_post_message(
                     Notification(

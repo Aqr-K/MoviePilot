@@ -435,6 +435,9 @@ class StreamingHandler:
             if not current_text or current_text == self._sent_text:
                 # 没有新内容需要刷新
                 return
+            if not self._channel or not self._source:
+                logger.debug("流式输出缺少渠道上下文，仅保留 buffer，不外发消息")
+                return
 
         chain = _StreamChain()
 

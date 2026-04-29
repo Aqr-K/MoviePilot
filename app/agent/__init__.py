@@ -1029,7 +1029,7 @@ class AgentManager:
         output_callback: Optional[Callable[[str], None]] = None,
         reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
         persist_output_message: bool = True,
-        allow_message_tools: bool = True,
+        allow_message_tools: Optional[bool] = None,
     ) -> None:
         """
         以独立后台会话执行一段 prompt。
@@ -1047,6 +1047,10 @@ class AgentManager:
         agent.force_streaming = bool(output_callback)
         agent.reply_mode = reply_mode
         agent.persist_output_message = persist_output_message
+        if reply_mode == ReplyMode.CAPTURE_ONLY:
+            allow_message_tools = False
+        elif allow_message_tools is None:
+            allow_message_tools = True
         agent.allow_message_tools = allow_message_tools
 
         try:

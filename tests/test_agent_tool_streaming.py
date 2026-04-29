@@ -42,19 +42,19 @@ class TestAgentToolStreaming(unittest.TestCase):
         result, buffered_message = asyncio.run(self._run_tool("prefix"))
 
         self.assertEqual(result, "ok")
-        self.assertEqual(buffered_message, "prefix\n（调用了 1 次工具）\n")
+        self.assertEqual(buffered_message, "prefix\n\n（调用了 1 次工具）\n\n")
 
     def test_non_verbose_tool_call_reuses_existing_newline_before_summary(self):
         result, buffered_message = asyncio.run(self._run_tool("prefix\n"))
 
         self.assertEqual(result, "ok")
-        self.assertEqual(buffered_message, "prefix\n（调用了 1 次工具）\n")
+        self.assertEqual(buffered_message, "prefix\n（调用了 1 次工具）\n\n")
 
     def test_non_verbose_tool_call_emits_summary_even_when_buffer_was_empty(self):
         result, buffered_message = asyncio.run(self._run_tool(""))
 
         self.assertEqual(result, "ok")
-        self.assertEqual(buffered_message, "（调用了 1 次工具）\n")
+        self.assertEqual(buffered_message, "（调用了 1 次工具）\n\n")
 
     def test_non_verbose_tool_summary_is_inserted_before_next_text(self):
         async def _run():
@@ -74,7 +74,7 @@ class TestAgentToolStreaming(unittest.TestCase):
 
         self.assertEqual(
             buffered_message,
-            "让我来检查一下：\n（调用了 1 次工具）\n已经拿到结果",
+            "让我来检查一下：\n\n（调用了 1 次工具）\n\n已经拿到结果",
         )
 
     def test_non_verbose_tool_summary_aggregates_multiple_categories(self):
@@ -109,7 +109,7 @@ class TestAgentToolStreaming(unittest.TestCase):
 
         self.assertEqual(
             buffered_message,
-            "处理中：\n（执行了 2 次搜索，读取了 2 个文件）\n继续分析",
+            "处理中：\n\n（执行了 2 次搜索，读取了 2 个文件）\n\n继续分析",
         )
 
     def test_openai_streaming_handler_flushes_pending_summary_to_queue(self):
@@ -130,7 +130,7 @@ class TestAgentToolStreaming(unittest.TestCase):
 
         emitted, queued, buffered_message = asyncio.run(_run())
 
-        self.assertEqual(emitted, "（读取了 1 个文件）\n")
+        self.assertEqual(emitted, "（读取了 1 个文件）\n\n")
         self.assertEqual(queued, emitted)
         self.assertEqual(buffered_message, emitted)
 
@@ -164,6 +164,7 @@ class TestAgentToolStreaming(unittest.TestCase):
     def test_flush_edits_message_via_threadpool(self):
         handler = StreamingHandler()
         handler._channel = MessageChannel.Telegram.value
+        handler._source = "telegram"
         handler._streaming_enabled = True
         handler._message_response = MessageResponse(
             message_id=1,
@@ -186,6 +187,43 @@ class TestAgentToolStreaming(unittest.TestCase):
             run_in_threadpool_mock.await_args.args[0].__name__, "edit_message"
         )
         self.assertEqual(handler._sent_text, "hello world")
+
+    def test_flush_without_channel_context_does_not_send_direct_message(self):
+        handler = StreamingHandler()
+        handler._streaming_enabled = True
+        handler.emit("hello")
+
+        with patch(
+            "app.agent.callback.run_in_threadpool", new_callable=AsyncMock
+        ) as run_in_threadpool_mock:
+            asyncio.run(handler._flush())
+
+        run_in_threadpool_mock.assert_not_awaited()
+        self.assertFalse(handler.has_sent_message)
+
+    def test_verbose_background_tool_call_does_not_post_message(self):
+        async def _run():
+            tool = DummyTool(session_id="session-1", user_id="10001")
+            handler = StreamingHandler()
+            await handler.start_streaming()
+            tool.set_stream_handler(handler)
+            tool.set_message_attr(channel=None, source=None, username="tester")
+
+            with (
+                patch.object(settings, "AI_AGENT_VERBOSE", True),
+                patch.object(
+                    DummyTool, "send_tool_message", new_callable=AsyncMock
+                ) as send_tool_message,
+            ):
+                result = await tool._arun(explanation="run test tool")
+                buffered_message = await handler.take()
+                return result, buffered_message, send_tool_message
+
+        result, buffered_message, send_tool_message = asyncio.run(_run())
+
+        self.assertEqual(result, "ok")
+        send_tool_message.assert_not_awaited()
+        self.assertEqual(buffered_message, "（调用了 1 次工具）\n\n")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage
 
 from app.agent import MoviePilotAgent, AgentManager, ReplyMode
 from app.agent.memory import memory_manager
+from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
 class _FakeGraphState:
@@ -123,6 +124,31 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             ReplyMode.DISPATCH,
             process_message.await_args.kwargs["reply_mode"],
         )
+
+    async def test_run_background_prompt_forces_disable_message_tools_when_capture_only(self):
+        captured = {}
+
+        async def fake_process(self, message, images=None, files=None):
+            captured["message"] = message
+            captured["reply_mode"] = self.reply_mode
+            captured["allow_message_tools"] = self.allow_message_tools
+            captured["user_id"] = self.user_id
+
+        with (
+            patch.object(MoviePilotAgent, "process", new=fake_process),
+            patch.object(MoviePilotAgent, "cleanup", new=AsyncMock()),
+            patch.object(memory_manager, "clear_memory"),
+        ):
+            await AgentManager.run_background_prompt(
+                message="background task",
+                reply_mode=ReplyMode.CAPTURE_ONLY,
+                allow_message_tools=True,
+            )
+
+        self.assertEqual("background task", captured["message"])
+        self.assertEqual(ReplyMode.CAPTURE_ONLY, captured["reply_mode"])
+        self.assertFalse(captured["allow_message_tools"])
+        self.assertEqual(SYSTEM_INTERNAL_USER_ID, captured["user_id"])
 
 
 if __name__ == "__main__":

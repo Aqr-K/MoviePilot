@@ -113,16 +113,24 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                     if tool_message:
                         self._stream_handler.emit(f"\n\n⚙️ => {tool_message}\n\n")
                 else:
-                    # 渠道不支持编辑：取出 Agent 文字 + 工具消息合并独立发送
-                    agent_message = await self._stream_handler.take()
-                    messages = []
-                    if agent_message:
-                        messages.append(agent_message)
-                    if tool_message:
-                        messages.append(f"⚙️ => {tool_message}")
-                    if messages:
-                        merged_message = "\n\n".join(messages)
-                        await self.send_tool_message(merged_message)
+                    if self._channel and self._source:
+                        # 渠道不支持编辑：取出 Agent 文字 + 工具消息合并独立发送
+                        agent_message = await self._stream_handler.take()
+                        messages = []
+                        if agent_message:
+                            messages.append(agent_message)
+                        if tool_message:
+                            messages.append(f"⚙️ => {tool_message}")
+                        if messages:
+                            merged_message = "\n\n".join(messages)
+                            await self.send_tool_message(merged_message)
+                    else:
+                        # 后台 capture 流程没有渠道上下文，不能把工具提示回灌到默认通知渠道。
+                        self._stream_handler.record_tool_call(
+                            tool_name=self.name,
+                            tool_message=tool_message,
+                            tool_kwargs=kwargs,
+                        )
             else:
                 # 非VERBOSE：不逐条回显工具调用，转为在下一段文本前补一句聚合摘要
                 self._stream_handler.record_tool_call(
