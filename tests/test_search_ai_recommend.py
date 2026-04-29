@@ -22,8 +22,8 @@ _stub_module("qbittorrentapi", TorrentFilesList=list)
 _stub_module("transmission_rpc", File=object)
 
 from app.chain.search import SearchChain
+from app.agent_context import agent_execution_context
 from app.core.config import settings
-from app.core.message_context import suppress_message_channel
 from app.schemas import Notification
 from app.schemas.types import NotificationType
 
@@ -187,7 +187,7 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
                 "render",
                 return_value=notification,
             ),
-            suppress_message_channel(),
+            agent_execution_context(suppress_message_channel_dispatch=True),
         ):
             chain.post_message(message=notification)
 

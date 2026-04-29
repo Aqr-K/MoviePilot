@@ -3,7 +3,6 @@ import json
 import re
 import traceback
 import uuid
-from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -31,9 +30,9 @@ from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
 from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
+from app.agent_context import agent_execution_context
 from app.chain import ChainBase
 from app.core.config import settings
-from app.core.message_context import suppress_message_channel
 from app.helper.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
@@ -175,6 +174,7 @@ class MoviePilotAgent:
         self.force_streaming = False
         self.suppress_user_reply = False
         self.persist_output_message = True
+        self.suppress_message_channel_dispatch = False
         self._streamed_output = ""
         self._session_usage = _SessionUsageSnapshot()
 
@@ -457,6 +457,7 @@ class MoviePilotAgent:
             self._tool_context = {
                 "user_reply_sent": False,
                 "reply_mode": None,
+                "suppress_message_channel_dispatch": self.suppress_message_channel_dispatch,
             }
             self._streamed_output = ""
 
@@ -485,7 +486,10 @@ class MoviePilotAgent:
             messages.append(HumanMessage(content=content))
 
             # 执行推理
-            await self._execute_agent(messages)
+            with agent_execution_context(
+                suppress_message_channel_dispatch=self.suppress_message_channel_dispatch
+            ):
+                await self._execute_agent(messages)
 
         except Exception as e:
             error_message = f"处理消息时发生错误: {str(e)}"
@@ -1008,14 +1012,10 @@ class AgentManager:
         agent.force_streaming = bool(output_callback)
         agent.suppress_user_reply = suppress_user_reply
         agent.persist_output_message = persist_output_message
+        agent.suppress_message_channel_dispatch = suppress_message_channel_dispatch
 
         try:
-            with (
-                suppress_message_channel()
-                if suppress_message_channel_dispatch
-                else nullcontext()
-            ):
-                await agent.process(message)
+            await agent.process(message)
         finally:
             await agent.cleanup()
             memory_manager.clear_memory(session_id, user_id)
