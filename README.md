@@ -1,4 +1,3 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jxxghp-moviepilot-badge.png)](https://mseep.ai/app/jxxghp-moviepilot)
 
 # MoviePilot
 
