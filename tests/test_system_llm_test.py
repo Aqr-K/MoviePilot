@@ -136,8 +136,6 @@ class LlmTestEndpointTest(unittest.TestCase):
             provider="deepseek",
             model="deepseek-chat",
             thinking_level="max",
-            disable_thinking=None,
-            reasoning_effort=None,
             api_key="sk-test",
             base_url="https://api.deepseek.com",
         )
@@ -183,8 +181,6 @@ class LlmTestEndpointTest(unittest.TestCase):
             provider="openai",
             model="gpt-4.1-mini",
             thinking_level="high",
-            disable_thinking=None,
-            reasoning_effort=None,
             api_key="sk-live",
             base_url="https://example.com/v1",
         )
@@ -205,8 +201,6 @@ class LlmTestEndpointTest(unittest.TestCase):
             enabled=True,
             provider="deepseek",
             model="deepseek-v4-pro",
-            disable_thinking=False,
-            reasoning_effort="xhigh",
             api_key="sk-live",
             base_url="https://api.deepseek.com",
         )
@@ -223,8 +217,6 @@ class LlmTestEndpointTest(unittest.TestCase):
             provider="deepseek",
             model="deepseek-v4-pro",
             thinking_level=None,
-            disable_thinking=False,
-            reasoning_effort="xhigh",
             api_key="sk-live",
             base_url="https://api.deepseek.com",
         )

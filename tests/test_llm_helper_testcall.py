@@ -84,8 +84,6 @@ class LlmHelperTestCallTest(unittest.TestCase):
             provider="deepseek",
             model="deepseek-chat",
             thinking_level=None,
-            disable_thinking=None,
-            reasoning_effort=None,
             api_key="sk-test",
             base_url="https://api.deepseek.com",
         )
@@ -132,7 +130,6 @@ class LlmHelperTestCallTest(unittest.TestCase):
                 llm_module.LLMHelper.get_llm(
                     provider="openai",
                     model="kimi-k2.6",
-                    disable_thinking=True,
                     api_key="sk-test",
                     base_url="https://kimi.example.com/v1",
                 )

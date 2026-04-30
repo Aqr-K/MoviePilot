@@ -28,8 +28,6 @@ class LlmTestRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     thinking_level: Optional[str] = None
-    disable_thinking: Optional[bool] = None
-    reasoning_effort: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
 
@@ -231,9 +229,7 @@ async def llm_test(
         enabled=settings.AI_AGENT_ENABLE,
         provider=settings.LLM_PROVIDER,
         model=settings.LLM_MODEL,
-        thinking_level=getattr(settings, "LLM_THINKING_LEVEL", None),
-        disable_thinking=getattr(settings, "LLM_DISABLE_THINKING", None),
-        reasoning_effort=getattr(settings, "LLM_REASONING_EFFORT", None),
+        thinking_level=settings.LLM_THINKING_LEVEL,
         api_key=settings.LLM_API_KEY,
         base_url=settings.LLM_BASE_URL,
     )
@@ -265,8 +261,6 @@ async def llm_test(
             provider=payload.provider,
             model=payload.model,
             thinking_level=payload.thinking_level,
-            disable_thinking=payload.disable_thinking,
-            reasoning_effort=payload.reasoning_effort,
             api_key=payload.api_key,
             base_url=payload.base_url,
         )

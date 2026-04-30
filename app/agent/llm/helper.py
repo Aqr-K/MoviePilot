@@ -471,14 +471,9 @@ class LLMHelper:
     def _resolve_thinking_level(
             cls,
             thinking_level: str | None = None,
-            disable_thinking: bool | None = None,
-            reasoning_effort: str | None = None,
     ) -> str | None:
         """
         统一兼容新旧 thinking 参数。
-
-        新前端只会传 `thinking_level`，但测试和部分旧调用仍可能带
-        `disable_thinking` / `reasoning_effort`，这里集中做一次归一化。
         """
 
         def _normalize(value: str | None) -> str | None:
@@ -504,12 +499,7 @@ class LLMHelper:
         if normalized_thinking_level:
             return normalized_thinking_level
 
-        legacy_effort = _normalize(reasoning_effort)
-        if disable_thinking:
-            return "off"
-        if disable_thinking is False:
-            return legacy_effort or "auto"
-        return legacy_effort
+        return "off"
 
     @classmethod
     async def get_llm(
@@ -518,10 +508,8 @@ class LLMHelper:
             provider: str | None = None,
             model: str | None = None,
             thinking_level: str | None = None,
-            disable_thinking: bool | None = None,
-            reasoning_effort: str | None = None,
-            api_key: str | None = None,
-            base_url: str | None = None,
+            api_key: str | None = settings.LLM_API_KEY,
+            base_url: str | None = settings.LLM_BASE_URL,
     ):
         """
         获取LLM实例
@@ -532,13 +520,7 @@ class LLMHelper:
             是否启用思考模式）。支持的级别包括 "off"（关闭）、"auto"（自动）、"minimal"、"low"、"medium"、"high"、"max"/"xhigh"（最大）。
             不同模型对思考模式的支持和表现不同，具体映射关系请
             参考代码实现。对于不支持思考模式的模型，该参数将被忽略。
-        :param disable_thinking: 兼容旧参数，若传入则会被转换为新的
-            `thinking_level` 语义。
-        :param reasoning_effort: 兼容旧参数，若传入则会被转换为新的
-            `thinking_level` 语义。
-        :param api_key: API Key，默认为
-            配置项LLM_API_KEY。对于某些提供商（
-            如 DeepSeek），可能需要同时提供 base_url。
+        :param api_key: API Key，默认为配置项LLM_API_KEY。对于某些提供商（如 DeepSeek），可能需要同时提供 base_url。
         :param base_url: API Base URL，默认为配置项LLM_BASE_URL。
         :return: LLM实例
         """
@@ -546,8 +528,6 @@ class LLMHelper:
         model_name = model if model is not None else settings.LLM_MODEL
         normalized_thinking_level = cls._resolve_thinking_level(
             thinking_level=thinking_level,
-            disable_thinking=disable_thinking,
-            reasoning_effort=reasoning_effort,
         )
         try:
             # 延迟导入，避免单测在最小 stub 环境下 import `llm.py` 时被 provider
@@ -718,8 +698,6 @@ class LLMHelper:
             provider: str | None = None,
             model: str | None = None,
             thinking_level: str | None = None,
-            disable_thinking: bool | None = None,
-            reasoning_effort: str | None = None,
             api_key: str | None = None,
             base_url: str | None = None,
     ) -> dict:
@@ -734,8 +712,6 @@ class LLMHelper:
             provider=provider_name,
             model=model_name,
             thinking_level=thinking_level,
-            disable_thinking=disable_thinking,
-            reasoning_effort=reasoning_effort,
             api_key=api_key,
             base_url=base_url,
         )
