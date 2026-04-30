@@ -397,12 +397,14 @@ class MoviePilotAgent:
             system_prompt = prompt_manager.get_agent_prompt(channel=self.channel)
 
             # LLM 模型（用于 agent 执行）
-            model = await self._initialize_llm(streaming=streaming)
-            self._sync_model_profile(model)
+            agent_model = await self._initialize_llm(streaming=streaming)
+            self._sync_model_profile(agent_model)
 
-            # 为中间件内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
-            non_streaming_llm = (
-                llm if not streaming else await self._initialize_llm(streaming=False)
+            # 为内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
+            non_streaming_model = (
+                agent_model
+                if not streaming
+                else await self._initialize_llm(streaming=False)
             )
 
             # 工具列表
@@ -435,7 +437,7 @@ class MoviePilotAgent:
                 UsageMiddleware(on_usage=self._record_usage),
                 # 上下文压缩
                 SummarizationMiddleware(
-                    model=non_streaming_llm, trigger=("fraction", 0.85)
+                    model=non_streaming_model, trigger=("fraction", 0.85)
                 ),
                 # 错误工具调用修复
                 PatchToolCallsMiddleware(),
@@ -445,14 +447,14 @@ class MoviePilotAgent:
             if max_tools > 0:
                 middlewares.append(
                     MoviePilotToolSelectorMiddleware(
-                        model=non_streaming_llm,
+                        model=non_streaming_model,
                         max_tools=max_tools,
                         always_include=always_include_tools,
                     )
                 )
 
             return create_agent(
-                model=llm,
+                model=agent_model,
                 tools=tools,
                 system_prompt=system_prompt,
                 middleware=middlewares,
