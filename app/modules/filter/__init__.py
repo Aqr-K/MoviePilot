@@ -4,10 +4,13 @@ from typing import List, Tuple, Union, Dict, Optional
 from app.core.context import TorrentInfo, MediaInfo
 from app.helper.rule import RuleHelper
 from app.log import logger
+import re
+from app.core.metainfo import MetaInfo
 from app.modules import _ModuleBase
 from app.modules.filter.RuleParser import RuleParser
 from app.modules.filter.builtin_rules import BUILTIN_RULE_SET
 from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
+from app.utils.string import StringUtils
 
 
 class FilterModule(_ModuleBase):
@@ -97,7 +100,7 @@ class FilterModule(_ModuleBase):
                     rule_string=group.rule_string,
                     rule_name=group.name,
                     torrent_list=torrent_list
-                    )
+                )
         return torrent_list
 
     def __filter_torrents(self, rule_string: str, rule_name: str,
@@ -244,12 +247,14 @@ class FilterModule(_ModuleBase):
             if len(pub_times) == 1:
                 # 发布时间小于规则
                 if pub_minutes < pub_times[0]:
-                    logger.debug(f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 小于 {pub_times[0]}")
+                    logger.debug(
+                        f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 小于 {pub_times[0]}")
                     return False
             else:
                 # 区间
                 if not (pub_times[0] <= pub_minutes <= pub_times[1]):
-                    logger.debug(f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 不在 {pub_times[0]}-{pub_times[1]} 时间区间")
+                    logger.debug(
+                        f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 不在 {pub_times[0]}-{pub_times[1]} 时间区间")
                     return False
 
         return True
