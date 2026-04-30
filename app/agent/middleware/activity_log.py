@@ -158,9 +158,9 @@ async def _summarize_with_llm(conversation_text: str) -> str | None:
         LLM 生成的摘要字符串，失败时返回 None。
     """
     try:
-        from app.helper.llm import LLMHelper
+        from app.agent.llm import LLMHelper
 
-        llm = LLMHelper.get_llm(streaming=False)
+        llm = await LLMHelper.get_llm(streaming=False)
         prompt = SUMMARY_PROMPT.format(conversation=conversation_text)
         response = await llm.ainvoke(prompt)
         summary = response.content.strip()

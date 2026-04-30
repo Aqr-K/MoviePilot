@@ -21,7 +21,7 @@ from app.chain.transfer import TransferChain
 from app.core.config import settings, global_vars
 from app.db.models import TransferHistory
 from app.db.transferhistory_oper import TransferHistoryOper
-from app.helper.llm import LLMHelper
+from app.agent.llm import LLMHelper
 from app.helper.voice import VoiceHelper
 from app.log import logger
 from app.schemas import Notification, CommingMessage

@@ -1,6 +1,5 @@
 import asyncio
 import json
-import re
 from collections import deque
 from datetime import datetime
 from typing import Any, Optional, Union, Annotated
@@ -12,7 +11,6 @@ from anyio import Path as AsyncPath
 from app.helper.sites import SitesHelper  # noqa  # noqa
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from app import schemas
 from app.chain.mediaserver import MediaServerChain
@@ -31,7 +29,6 @@ from app.db.user_oper import (
     get_current_active_user_async,
 )
 from app.helper.image import ImageHelper
-from app.helper.llm import LLMHelper, LLMTestTimeout
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
@@ -51,15 +48,6 @@ from version import APP_VERSION
 router = APIRouter()
 
 _NETTEST_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
-
-
-class LlmTestRequest(BaseModel):
-    enabled: Optional[bool] = None
-    provider: Optional[str] = None
-    model: Optional[str] = None
-    thinking_level: Optional[str] = None
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
 
 
 def _match_nettest_prefix(url: str, prefix: str) -> bool:
@@ -267,30 +255,6 @@ def _build_nettest_rules() -> list[dict[str, Any]]:
             },
         )
     return rules
-
-
-def _sanitize_llm_test_error(message: str, api_key: Optional[str] = None) -> str:
-    """
-    清理错误信息中的敏感字段，避免回显密钥。
-    """
-    if not message:
-        return "LLM 调用失败"
-
-    sanitized = message
-    if api_key:
-        sanitized = sanitized.replace(api_key, "***")
-    sanitized = re.sub(
-        r"(?i)(api[_-]?key\s*[:=]\s*)([^\s,;]+)",
-        r"\1***",
-        sanitized,
-    )
-    sanitized = re.sub(
-        r"(?i)authorization\s*:\s*bearer\s+[^\s,;]+",
-        "Authorization: ***",
-        sanitized,
-    )
-    return sanitized
-
 
 def _validate_nettest_url(url: str) -> Optional[str]:
     """
@@ -641,87 +605,6 @@ async def set_setting(
         return schemas.Response(success=True)
     else:
         return schemas.Response(success=False, message=f"配置项 '{key}' 不存在")
-
-
-@router.get("/llm-models", summary="获取LLM模型列表", response_model=schemas.Response)
-async def get_llm_models(
-        provider: str,
-        api_key: str,
-        base_url: Optional[str] = None,
-        _: User = Depends(get_current_active_user_async),
-):
-    """
-    获取LLM模型列表
-    """
-    try:
-        models = await asyncio.to_thread(
-            LLMHelper().get_models, provider, api_key, base_url
-        )
-        return schemas.Response(success=True, data=models)
-    except Exception as e:
-        return schemas.Response(success=False, message=str(e))
-
-
-@router.post("/llm-test", summary="测试LLM调用", response_model=schemas.Response)
-async def llm_test(
-        payload: Annotated[Optional[LlmTestRequest], Body()] = None,
-        _: User = Depends(get_current_active_superuser_async),
-):
-    """
-    使用传入配置或当前已保存配置执行一次最小 LLM 调用。
-    """
-    if not payload:
-        return schemas.Response(success=False, message="请配置智能助手LLM相关参数后再进行测试")
-
-    if not payload.provider or not payload.model:
-        return schemas.Response(success=False, message="请配置LLM提供商和模型")
-
-    data = {
-        "provider": payload.provider,
-        "model": payload.model,
-    }
-    if not payload.enabled:
-        return schemas.Response(success=False, message="请先启用智能助手", data=data)
-
-    if not payload.api_key or not payload.api_key.strip():
-        return schemas.Response(
-            success=False,
-            message="请先配置 LLM API Key",
-            data=data,
-        )
-
-    if not payload.model or not payload.model.strip():
-        return schemas.Response(
-            success=False,
-            message="请先配置 LLM 模型",
-            data=data,
-        )
-
-    try:
-        result = await LLMHelper.test_current_settings(
-            provider=payload.provider,
-            model=payload.model,
-            thinking_level=payload.thinking_level,
-            api_key=payload.api_key,
-            base_url=payload.base_url,
-        )
-        if not result.get("reply_preview"):
-            return schemas.Response(
-                success=False,
-                message="模型响应为空"
-            )
-        return schemas.Response(success=True, data=result)
-    except (LLMTestTimeout, TimeoutError) as err:
-        logger.warning(err)
-        return schemas.Response(
-            success=False,
-            message="LLM 调用超时"
-        )
-    except Exception as err:
-        return schemas.Response(
-            success=False,
-            message=_sanitize_llm_test_error(str(err), payload.api_key)
-        )
 
 
 @router.get("/message", summary="实时消息")

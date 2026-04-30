@@ -13,7 +13,7 @@ from app.agent.tools.impl.send_local_file import SendLocalFileInput
 from app.agent import MoviePilotAgent, AgentChain
 from app.chain.message import MessageChain
 from app.core.config import settings
-from app.helper.llm import LLMHelper
+from app.agent.llm import LLMHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule

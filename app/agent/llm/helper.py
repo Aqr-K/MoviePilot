@@ -342,7 +342,7 @@ class LLMHelper:
             return {}
 
         # OpenAI 原生推理模型优先走 LangChain 内置 reasoning_effort。
-        if provider_name == "openai" and model_name.startswith(
+        if provider_name in {"openai", "chatgpt"} and model_name.startswith(
                 ("gpt-5", "o1", "o3", "o4")
         ):
             openai_effort = cls._normalize_openai_reasoning_effort(
@@ -366,11 +366,89 @@ class LLMHelper:
         return bool(settings.LLM_SUPPORT_IMAGE_INPUT)
 
     @staticmethod
-    def get_llm(
+    def _build_legacy_runtime(
+            provider_name: str,
+            model_name: str | None,
+            api_key: str | None = None,
+            base_url: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        在 provider 目录不可用时回退到旧的直接构造逻辑。
+
+        这主要用于单测 stub 环境以及极端的最小运行环境，正常生产路径仍优先
+        走 `LLMProviderManager.resolve_runtime()`。
+        """
+        api_key_value = api_key if api_key is not None else settings.LLM_API_KEY
+        base_url_value = base_url if base_url is not None else settings.LLM_BASE_URL
+        if not api_key_value:
+            raise ValueError("未配置LLM API Key")
+
+        runtime_name = provider_name if provider_name in {"google", "deepseek"} else "openai_compatible"
+        return {
+            "provider_id": provider_name,
+            "runtime": runtime_name,
+            "model_id": model_name,
+            "api_key": api_key_value,
+            "base_url": base_url_value,
+            "default_headers": None,
+            "use_responses_api": None,
+            "model_record": None,
+            "model_metadata": None,
+        }
+
+    @classmethod
+    def _resolve_thinking_level(
+            cls,
+            thinking_level: str | None = None,
+            disable_thinking: bool | None = None,
+            reasoning_effort: str | None = None,
+    ) -> str | None:
+        """
+        统一兼容新旧 thinking 参数。
+
+        新前端只会传 `thinking_level`，但测试和部分旧调用仍可能带
+        `disable_thinking` / `reasoning_effort`，这里集中做一次归一化。
+        """
+
+        def _normalize(value: str | None) -> str | None:
+            normalized = str(value or "").strip().lower()
+            if not normalized:
+                return None
+            alias_map = {
+                "none": "off",
+                "disabled": "off",
+                "disable": "off",
+                "enabled": "auto",
+                "enable": "auto",
+                "default": "auto",
+                "dynamic": "auto",
+            }
+            normalized = alias_map.get(normalized, normalized)
+            if normalized in cls._SUPPORTED_THINKING_LEVELS:
+                return normalized
+            logger.warning(f"忽略不支持的思考级别: {value}")
+            return None
+
+        normalized_thinking_level = _normalize(thinking_level)
+        if normalized_thinking_level:
+            return normalized_thinking_level
+
+        legacy_effort = _normalize(reasoning_effort)
+        if disable_thinking:
+            return "off"
+        if disable_thinking is False:
+            return legacy_effort or "auto"
+        return legacy_effort
+
+    @classmethod
+    async def get_llm(
+            cls,
             streaming: bool = False,
             provider: str | None = None,
             model: str | None = None,
             thinking_level: str | None = None,
+            disable_thinking: bool | None = None,
+            reasoning_effort: str | None = None,
             api_key: str | None = None,
             base_url: str | None = None,
     ):
@@ -383,28 +461,50 @@ class LLMHelper:
             是否启用思考模式）。支持的级别包括 "off"（关闭）、"auto"（自动）、"minimal"、"low"、"medium"、"high"、"max"/"xhigh"（最大）。
             不同模型对思考模式的支持和表现不同，具体映射关系请
             参考代码实现。对于不支持思考模式的模型，该参数将被忽略。
+        :param disable_thinking: 兼容旧参数，若传入则会被转换为新的
+            `thinking_level` 语义。
+        :param reasoning_effort: 兼容旧参数，若传入则会被转换为新的
+            `thinking_level` 语义。
         :param api_key: API Key，默认为
             配置项LLM_API_KEY。对于某些提供商（
             如 DeepSeek），可能需要同时提供 base_url。
         :param base_url: API Base URL，默认为配置项LLM_BASE_URL。
         :return: LLM实例
         """
-        provider_name = str(
-            provider if provider is not None else settings.LLM_PROVIDER
-        ).lower()
+        provider_name = str(provider if provider is not None else settings.LLM_PROVIDER).lower()
         model_name = model if model is not None else settings.LLM_MODEL
-        api_key_value = api_key if api_key is not None else settings.LLM_API_KEY
-        base_url_value = base_url if base_url is not None else settings.LLM_BASE_URL
-        thinking_kwargs = LLMHelper._build_thinking_kwargs(
+        normalized_thinking_level = cls._resolve_thinking_level(
+            thinking_level=thinking_level,
+            disable_thinking=disable_thinking,
+            reasoning_effort=reasoning_effort,
+        )
+        try:
+            # 延迟导入，避免单测在最小 stub 环境下 import `llm.py` 时被 provider
+            # 目录依赖链拖住。
+            from app.agent.llm.provider import LLMProviderManager
+
+            runtime = await LLMProviderManager().resolve_runtime(
+                provider_id=provider_name,
+                model=model_name,
+                api_key=api_key,
+                base_url=base_url,
+            )
+        except Exception as err:
+            logger.debug(f"LLM provider 目录不可用，回退到旧运行时逻辑: {err}")
+            runtime = cls._build_legacy_runtime(
+                provider_name=provider_name,
+                model_name=model_name,
+                api_key=api_key,
+                base_url=base_url,
+            )
+        model_name = runtime.get("model_id") or model_name
+        thinking_kwargs = cls._build_thinking_kwargs(
             provider=provider_name,
             model=model_name,
-            thinking_level=thinking_level
+            thinking_level=normalized_thinking_level,
         )
 
-        if not api_key_value:
-            raise ValueError("未配置LLM API Key")
-
-        if provider_name == "google":
+        if runtime["runtime"] == "google":
             # 修补 Gemini 2.5 思考模型的 thought_signature 兼容性
             _patch_gemini_thought_signature()
 
@@ -420,25 +520,40 @@ class LLMHelper:
 
             model = ChatGoogleGenerativeAI(
                 model=model_name,
-                api_key=api_key_value,
+                api_key=runtime["api_key"],
                 retries=3,
                 temperature=settings.LLM_TEMPERATURE,
                 streaming=streaming,
                 client_args=client_args,
                 **thinking_kwargs,
             )
-        elif provider_name == "deepseek":
+        elif runtime["runtime"] == "deepseek":
             from langchain_deepseek import ChatDeepSeek
 
             _patch_deepseek_reasoning_content_support()
             model = ChatDeepSeek(
                 model=model_name,
-                api_key=api_key_value,
-                api_base=base_url_value,
+                api_key=runtime["api_key"],
+                api_base=runtime["base_url"],
                 max_retries=3,
                 temperature=settings.LLM_TEMPERATURE,
                 streaming=streaming,
                 stream_usage=True,
+                **thinking_kwargs,
+            )
+        elif runtime["runtime"] in {"anthropic_compatible", "copilot_anthropic"}:
+            from langchain_anthropic import ChatAnthropic
+
+            model = ChatAnthropic(
+                model=model_name,
+                api_key=runtime["api_key"],
+                base_url=runtime["base_url"],
+                max_retries=3,
+                temperature=settings.LLM_TEMPERATURE,
+                streaming=streaming,
+                stream_usage=True,
+                anthropic_proxy=settings.PROXY_HOST,
+                default_headers=runtime.get("default_headers"),
                 **thinking_kwargs,
             )
         else:
@@ -446,23 +561,35 @@ class LLMHelper:
 
             model = ChatOpenAI(
                 model=model_name,
-                api_key=api_key_value,
+                api_key=runtime["api_key"],
                 max_retries=3,
-                base_url=base_url_value,
+                base_url=runtime.get("base_url"),
                 temperature=settings.LLM_TEMPERATURE,
                 streaming=streaming,
                 stream_usage=True,
                 openai_proxy=settings.PROXY_HOST,
+                default_headers=runtime.get("default_headers"),
+                use_responses_api=runtime.get("use_responses_api"),
                 **thinking_kwargs,
             )
 
-        # 检查是否有profile
-        if hasattr(model, "profile") and model.profile:
+        # 优先使用 provider / models.dev 目录中的上下文上限，减少用户手填成本。
+        model_profile = getattr(model, "profile", None)
+        if model_profile:
             logger.debug(f"使用LLM模型: {model.model}，Profile: {model.profile}")
         else:
+            model_record = runtime.get("model_record") or {}
+            model_metadata = runtime.get("model_metadata") or {}
+            metadata_limit = model_metadata.get("limit") or {}
+            max_input_tokens = (
+                    model_record.get("input_tokens")
+                    or model_record.get("context_tokens")
+                    or metadata_limit.get("input")
+                    or metadata_limit.get("context")
+                    or settings.LLM_MAX_CONTEXT_TOKENS * 1000
+            )
             model.profile = {
-                "max_input_tokens": settings.LLM_MAX_CONTEXT_TOKENS
-                                    * 1000,  # 转换为token单位
+                "max_input_tokens": int(max_input_tokens),
             }
 
         return model
@@ -514,6 +641,8 @@ class LLMHelper:
             provider: str | None = None,
             model: str | None = None,
             thinking_level: str | None = None,
+            disable_thinking: bool | None = None,
+            reasoning_effort: str | None = None,
             api_key: str | None = None,
             base_url: str | None = None,
     ) -> dict:
@@ -522,16 +651,16 @@ class LLMHelper:
         """
         provider_name = provider if provider is not None else settings.LLM_PROVIDER
         model_name = model if model is not None else settings.LLM_MODEL
-        api_key_value = api_key if api_key is not None else settings.LLM_API_KEY
-        base_url_value = base_url if base_url is not None else settings.LLM_BASE_URL
         start = time.perf_counter()
-        llm = LLMHelper.get_llm(
+        llm = await LLMHelper.get_llm(
             streaming=False,
             provider=provider_name,
             model=model_name,
             thinking_level=thinking_level,
-            api_key=api_key_value,
-            base_url=base_url_value,
+            disable_thinking=disable_thinking,
+            reasoning_effort=reasoning_effort,
+            api_key=api_key,
+            base_url=base_url,
         )
         try:
             response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=timeout)
@@ -556,18 +685,47 @@ class LLMHelper:
             data["reply_preview"] = reply_text[:120]
         return data
 
-    def get_models(
-            self, provider: str, api_key: str, base_url: str = None
-    ) -> List[str]:
-        """获取模型列表"""
+    async def get_models(
+            self,
+            provider: str,
+            api_key: str | None = None,
+            base_url: str | None = None,
+            force_refresh: bool = False,
+    ) -> List[dict[str, Any]]:
+        """
+        获取模型列表。
+
+        返回值会带上 context/supports_reasoning 等元数据，供前端直接渲染并自动
+        回填上下文大小。
+        """
         logger.info(f"获取 {provider} 模型列表...")
-        if provider == "google":
-            return self._get_google_models(api_key)
-        else:
-            return self._get_openai_compatible_models(provider, api_key, base_url)
+        try:
+            from app.agent.llm.provider import LLMProviderManager
+
+            return await LLMProviderManager().list_models(
+                provider_id=provider,
+                api_key=api_key,
+                base_url=base_url,
+                force_refresh=force_refresh,
+            )
+        except Exception as err:
+            logger.debug(f"LLM provider 目录不可用，回退旧模型列表逻辑: {err}")
+            if provider == "google":
+                return [
+                    {"id": model_id, "name": model_id}
+                    for model_id in await self._get_google_models(api_key or "")
+                ]
+            return [
+                {"id": model_id, "name": model_id}
+                for model_id in await self._get_openai_compatible_models(
+                    provider,
+                    api_key or "",
+                    base_url,
+                )
+            ]
 
     @staticmethod
-    def _get_google_models(api_key: str) -> List[str]:
+    async def _get_google_models(api_key: str) -> List[str]:
         """获取Google模型列表（使用 google-genai SDK v1）"""
         try:
             from google import genai
@@ -583,29 +741,32 @@ class LLMHelper:
                 )
 
             client = genai.Client(api_key=api_key, http_options=http_options)
-            models = client.models.list()
-            return [
+            models = await client.aio.models.list()
+            result = [
                 m.name
-                for m in models
+                for m in models.page
                 if m.supported_actions and "generateContent" in m.supported_actions
             ]
+            await client.aio.aclose()
+            return result
         except Exception as e:
             logger.error(f"获取Google模型列表失败：{e}")
             raise e
 
     @staticmethod
-    def _get_openai_compatible_models(
+    async def _get_openai_compatible_models(
             provider: str, api_key: str, base_url: str = None
     ) -> List[str]:
         """获取OpenAI兼容模型列表"""
         try:
-            from openai import OpenAI
+            from openai import AsyncOpenAI
 
             if provider == "deepseek":
                 base_url = base_url or "https://api.deepseek.com"
 
-            client = OpenAI(api_key=api_key, base_url=base_url)
-            models = client.models.list()
+            client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+            models = await client.models.list()
+            await client.close()
             return [model.id for model in models.data]
         except Exception as e:
             logger.error(f"获取 {provider} 模型列表失败：{e}")

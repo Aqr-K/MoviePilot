@@ -4,7 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, patch
 
 
 def _stub_module(name: str, **attrs):
@@ -30,7 +30,7 @@ class _FakeModel:
         return SimpleNamespace(content=self._content)
 
 
-sys.modules.pop("app.helper.llm", None)
+sys.modules.pop("app.agent.llm.helper", None)
 _stub_module(
     "app.core.config",
     settings=SimpleNamespace(
@@ -46,7 +46,7 @@ _stub_module(
 )
 _stub_module("app.log", logger=_DummyLogger())
 
-module_path = Path(__file__).resolve().parents[1] / "app" / "helper" / "llm.py"
+module_path = Path(__file__).resolve().parents[1] / "app" / "agent" / "llm" / "helper.py"
 spec = importlib.util.spec_from_file_location("test_llm_module", module_path)
 llm_module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
@@ -67,7 +67,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
 
     def test_test_current_settings_uses_explicit_snapshot(self):
         fake_model = _FakeModel("OK")
-        get_llm_mock = Mock(return_value=fake_model)
+        get_llm_mock = AsyncMock(return_value=fake_model)
 
         with patch.object(llm_module.LLMHelper, "get_llm", get_llm_mock):
             result = asyncio.run(
@@ -79,7 +79,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
                 )
             )
 
-        get_llm_mock.assert_called_once_with(
+        get_llm_mock.assert_awaited_once_with(
             streaming=False,
             provider="deepseek",
             model="deepseek-chat",
@@ -101,7 +101,9 @@ class LlmHelperTestCallTest(unittest.TestCase):
             ]
         )
 
-        with patch.object(llm_module.LLMHelper, "get_llm", return_value=fake_model):
+        with patch.object(
+            llm_module.LLMHelper, "get_llm", AsyncMock(return_value=fake_model)
+        ):
             result = asyncio.run(
                 llm_module.LLMHelper.test_current_settings(
                     provider="deepseek",
@@ -126,12 +128,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
             sys.modules,
             {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="openai",
-                model="kimi-k2.6",
-                disable_thinking=True,
-                api_key="sk-test",
-                base_url="https://kimi.example.com/v1",
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="kimi-k2.6",
+                    disable_thinking=True,
+                    api_key="sk-test",
+                    base_url="https://kimi.example.com/v1",
+                )
             )
 
         self.assertEqual(len(calls), 1)
@@ -158,12 +162,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
             "_patch_deepseek_reasoning_content_support",
             side_effect=lambda: patch_calls.append(True),
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="deepseek",
-                model="deepseek-v4-pro",
-                thinking_level="xhigh",
-                api_key="sk-test",
-                base_url="https://api.deepseek.com",
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="deepseek",
+                    model="deepseek-v4-pro",
+                    thinking_level="xhigh",
+                    api_key="sk-test",
+                    base_url="https://api.deepseek.com",
+                )
             )
 
         self.assertEqual(len(calls), 1)
@@ -193,12 +199,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
             "_patch_deepseek_reasoning_content_support",
             side_effect=lambda: patch_calls.append(True),
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="deepseek",
-                model="deepseek-v4-flash",
-                thinking_level="off",
-                api_key="sk-test",
-                base_url="https://proxy.example.com",
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="deepseek",
+                    model="deepseek-v4-flash",
+                    thinking_level="off",
+                    api_key="sk-test",
+                    base_url="https://proxy.example.com",
+                )
             )
 
         self.assertEqual(len(calls), 1)
@@ -223,12 +231,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
             sys.modules,
             {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="openai",
-                model="gpt-5-mini",
-                thinking_level="off",
-                api_key="sk-test",
-                base_url="https://api.openai.com/v1",
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5-mini",
+                    thinking_level="off",
+                    api_key="sk-test",
+                    base_url="https://api.openai.com/v1",
+                )
             )
 
         self.assertEqual(len(calls), 1)
@@ -247,12 +257,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
             sys.modules,
             {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="openai",
-                model="gpt-5.4",
-                thinking_level="max",
-                api_key="sk-test",
-                base_url="https://api.openai.com/v1",
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5.4",
+                    thinking_level="max",
+                    api_key="sk-test",
+                    base_url="https://api.openai.com/v1",
+                )
             )
 
         self.assertEqual(len(calls), 1)
@@ -275,12 +287,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
                 )
             },
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="google",
-                model="gemini-2.5-flash",
-                thinking_level="off",
-                api_key="sk-test",
-                base_url=None,
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="google",
+                    model="gemini-2.5-flash",
+                    thinking_level="off",
+                    api_key="sk-test",
+                    base_url=None,
+                )
             )
 
         self.assertEqual(len(calls), 1)
@@ -304,12 +318,14 @@ class LlmHelperTestCallTest(unittest.TestCase):
                 )
             },
         ):
-            llm_module.LLMHelper.get_llm(
-                provider="google",
-                model="gemini-3.1-flash",
-                thinking_level="xhigh",
-                api_key="sk-test",
-                base_url=None,
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="google",
+                    model="gemini-3.1-flash",
+                    thinking_level="xhigh",
+                    api_key="sk-test",
+                    base_url=None,
+                )
             )
 
         self.assertEqual(len(calls), 1)

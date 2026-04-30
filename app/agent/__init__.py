@@ -33,7 +33,7 @@ from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
-from app.helper.llm import LLMHelper
+from app.agent.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
@@ -310,12 +310,12 @@ class MoviePilotAgent:
             return False
 
     @staticmethod
-    def _initialize_llm(streaming: bool = False):
+    async def _initialize_llm(streaming: bool = False):
         """
         初始化 LLM
         :param streaming: 是否启用流式输出
         """
-        return LLMHelper.get_llm(streaming=streaming)
+        return await LLMHelper.get_llm(streaming=streaming)
 
     @staticmethod
     def _extract_text_content(content) -> str:
@@ -387,7 +387,7 @@ class MoviePilotAgent:
             allow_message_tools=self.allow_message_tools,
         )
 
-    def _create_agent(self, streaming: bool = False):
+    async def _create_agent(self, streaming: bool = False):
         """
         创建 LangGraph Agent（使用 create_agent + SummarizationMiddleware）
         :param streaming: 是否启用流式输出
@@ -397,12 +397,12 @@ class MoviePilotAgent:
             system_prompt = prompt_manager.get_agent_prompt(channel=self.channel)
 
             # LLM 模型（用于 agent 执行）
-            llm = self._initialize_llm(streaming=streaming)
+            llm = await self._initialize_llm(streaming=streaming)
             self._sync_model_profile(llm)
 
             # 为中间件内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
             non_streaming_llm = (
-                llm if not streaming else self._initialize_llm(streaming=False)
+                llm if not streaming else await self._initialize_llm(streaming=False)
             )
 
             # 工具列表
@@ -577,7 +577,7 @@ class MoviePilotAgent:
             use_streaming = self._should_stream()
 
             # 创建智能体（根据是否流式传入不同 LLM）
-            agent = self._create_agent(streaming=use_streaming)
+            agent = await self._create_agent(streaming=use_streaming)
 
             if use_streaming:
                 self.stream_handler.set_dispatch_policy(
