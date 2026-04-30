@@ -232,7 +232,7 @@ class LLMProviderManager(metaclass=Singleton):
             ),
             ProviderSpec(
                 id="tencent",
-                name="Tencent",
+                name="腾讯云",
                 runtime="openai_compatible",
                 models_dev_provider_id="tencent-tokenhub",
                 default_base_url="https://tokenhub.tencentmaas.com/v1",
@@ -562,6 +562,18 @@ class LLMProviderManager(metaclass=Singleton):
             else bool(metadata.get("reasoning"))
         )
 
+        if context_tokens:
+            try:
+                ct_int = int(context_tokens)
+                if ct_int % 1024 == 0 or ct_int == 1048576 or ct_int == 2097152:
+                    context_tokens_k = max(1, ct_int // 1024)
+                else:
+                    context_tokens_k = max(1, (ct_int + 999) // 1000)
+            except Exception:
+                context_tokens_k = None
+        else:
+            context_tokens_k = None
+
         return {
             "id": model_id,
             "name": display_name or metadata.get("name") or model_id,
@@ -569,9 +581,7 @@ class LLMProviderManager(metaclass=Singleton):
             "context_tokens": context_tokens,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "context_tokens_k": max(1, int((int(context_tokens) + 999) / 1000))
-            if context_tokens
-            else None,
+            "context_tokens_k": context_tokens_k,
             "supports_reasoning": supports_reasoning,
             "supports_tools": supports_tools,
             "supports_image_input": supports_image_input,
