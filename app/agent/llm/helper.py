@@ -182,6 +182,77 @@ def _patch_deepseek_reasoning_content_support():
     logger.debug("已修补 langchain-deepseek thinking tool-call 的 reasoning_content 回传兼容性")
 
 
+def _patch_openai_responses_instructions_support():
+    """
+    修补 langchain-openai 在使用 use_responses_api=True 时，
+    提取 system 消息为顶层 instructions 字段。
+    由于 Codex 等模型 (Responses API) 强依赖 instructions 字段，
+    如果没有该字段会报 400 "Instructions are required"。
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+    except Exception as err:
+        logger.debug(f"跳过 langchain-openai instructions 修补：{err}")
+        return
+
+    if getattr(ChatOpenAI, "_moviepilot_responses_instructions_patched", False):
+        return
+
+    original_get_request_payload = getattr(ChatOpenAI, "_get_request_payload", None)
+    if not callable(original_get_request_payload):
+        logger.warning("langchain-openai 缺少 _get_request_payload，无法修补 instructions")
+        return
+
+    @wraps(original_get_request_payload)
+    def _patched_get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = original_get_request_payload(self, input_, stop=stop, **kwargs)
+
+        base_url = str(getattr(self, "openai_api_base", "") or "").lower()
+
+        # 处理 GitHub Copilot 端点兼容性
+        if "githubcopilot.com" in base_url:
+            payload.pop("stream_options", None)
+            payload.pop("metadata", None)
+
+        # 处理 ChatGPT 官方 Responses API (Codex) 端点兼容性
+        is_codex = "chatgpt.com/backend-api/codex" in base_url
+        
+        if is_codex and (getattr(self, "use_responses_api", False) or "input" in payload):
+            instructions = payload.get("instructions", "")
+            inputs = payload.get("input", [])
+            new_inputs = []
+
+            for msg in inputs:
+                if isinstance(msg, dict) and msg.get("role") == "system":
+                    content = msg.get("content")
+                    if isinstance(content, str) and content.strip():
+                        if instructions:
+                            instructions += "\n\n" + content
+                        else:
+                            instructions = content
+                else:
+                    new_inputs.append(msg)
+
+            payload["input"] = new_inputs
+            payload["instructions"] = instructions or "You are a helpful assistant."
+            payload["store"] = False
+            
+            # Codex 端点不支持的部分常见补全参数，统一清理避免 400 报错
+            unsupported_keys = [
+                "presence_penalty", "frequency_penalty", "top_p", "n", "user", 
+                "stop", "metadata", "logit_bias", "logprobs", "top_logprobs",
+                "stream_options", "temperature"
+            ]
+            for key in unsupported_keys:
+                payload.pop(key, None)
+
+        return payload
+
+    ChatOpenAI._get_request_payload = _patched_get_request_payload
+    ChatOpenAI._moviepilot_responses_instructions_patched = True
+    logger.debug("已修补 langchain-openai responses API 的 instructions 兼容性")
+
+
 class LLMHelper:
     """LLM模型相关辅助功能"""
 
@@ -558,6 +629,12 @@ class LLMHelper:
             )
         else:
             from langchain_openai import ChatOpenAI
+
+            _patch_openai_responses_instructions_support()
+            
+            # ChatGPT Codex 端点强制要求 stream: True
+            if runtime.get("use_responses_api") and "chatgpt.com/backend-api/codex" in str(runtime.get("base_url") or ""):
+                streaming = True
 
             model = ChatOpenAI(
                 model=model_name,

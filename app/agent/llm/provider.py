@@ -89,7 +89,7 @@ class LLMProviderManager(metaclass=Singleton):
     """统一维护 provider 目录、models.dev 缓存和 OAuth 状态。"""
 
     _MODELS_DEV_URL = "https://models.dev/api.json"
-    _MODELS_DEV_CACHE_TTL = 5 * 60
+    _MODELS_DEV_CACHE_TTL = 12 * 60 * 60
     _CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
     _CHATGPT_ISSUER = "https://auth.openai.com"
     _CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
@@ -202,24 +202,44 @@ class LLMProviderManager(metaclass=Singleton):
                 sort_order=50,
             ),
             ProviderSpec(
-                id="nvidia",
-                name="Nvidia",
-                runtime="openai_compatible",
-                models_dev_provider_id="nvidia",
-                default_base_url="https://integrate.api.nvidia.com/v1",
-                api_key_hint="填写 Nvidia API Key。",
-                description="Nvidia 集成推理平台。",
-                sort_order=60,
-            ),
-            ProviderSpec(
                 id="siliconflow",
                 name="硅基流动",
                 runtime="openai_compatible",
                 models_dev_provider_id="siliconflow",
-                default_base_url="https://api.siliconflow.com/v1",
+                default_base_url="https://api.siliconflow.cn/v1",
                 api_key_hint="填写硅基流动 API Key。",
                 description="SiliconFlow 官方兼容端点。",
+                sort_order=60,
+            ),
+            ProviderSpec(
+                id="alibaba",
+                name="阿里云百炼",
+                runtime="openai_compatible",
+                models_dev_provider_id="alibaba",
+                default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                api_key_hint="填写 DashScope / Alibaba API Key。",
+                description="阿里云百炼兼容端点。",
                 sort_order=70,
+            ),
+            ProviderSpec(
+                id="volcengine",
+                name="火山方舟",
+                runtime="openai_compatible",
+                default_base_url="https://ark.cn-beijing.volces.com/api/v3",
+                api_key_hint="填写火山方舟 API Key。",
+                description="字节跳动火山引擎兼容端点。",
+                sort_order=80,
+            ),
+            ProviderSpec(
+                id="tencent",
+                name="Tencent",
+                runtime="openai_compatible",
+                models_dev_provider_id="tencent-tokenhub",
+                default_base_url="https://tokenhub.tencentmaas.com/v1",
+                api_key_hint="填写 Tencent API Key。",
+                model_list_strategy="models_dev_only",
+                description="腾讯兼容端点。",
+                sort_order=90,
             ),
             ProviderSpec(
                 id="ollama-cloud",
@@ -229,28 +249,28 @@ class LLMProviderManager(metaclass=Singleton):
                 default_base_url="https://ollama.com/v1",
                 api_key_hint="填写 Ollama Cloud API Key。",
                 description="Ollama Cloud 云端模型服务。",
-                sort_order=80,
+                sort_order=100,
             ),
             ProviderSpec(
-                id="alibaba",
-                name="Alibaba",
+                id="nvidia",
+                name="Nvidia",
                 runtime="openai_compatible",
-                models_dev_provider_id="alibaba",
-                default_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-                api_key_hint="填写 DashScope / Alibaba API Key。",
-                description="阿里云百炼兼容端点。",
-                sort_order=90,
+                models_dev_provider_id="nvidia",
+                default_base_url="https://integrate.api.nvidia.com/v1",
+                api_key_hint="填写 Nvidia API Key。",
+                description="Nvidia 集成推理平台。",
+                sort_order=110,
             ),
             ProviderSpec(
                 id="minimax",
                 name="MiniMax",
                 runtime="anthropic_compatible",
                 models_dev_provider_id="minimax",
-                default_base_url="https://api.minimax.io/anthropic/v1",
+                default_base_url="https://api.minimaxi.com/anthropic/v1",
                 api_key_hint="填写 MiniMax API Key。",
                 model_list_strategy="anthropic_compatible",
                 description="MiniMax Anthropic-compatible 端点。",
-                sort_order=100,
+                sort_order=120,
             ),
             ProviderSpec(
                 id="xiaomi",
@@ -260,17 +280,7 @@ class LLMProviderManager(metaclass=Singleton):
                 default_base_url="https://api.xiaomimimo.com/v1",
                 api_key_hint="填写 Xiaomi API Key。",
                 description="小米 Mimo 兼容端点。",
-                sort_order=110,
-            ),
-            ProviderSpec(
-                id="tencent",
-                name="Tencent",
-                runtime="openai_compatible",
-                models_dev_provider_id="tencent",
-                default_base_url="https://api.lkeap.cloud.tencent.com/coding/v3",
-                api_key_hint="填写 Tencent API Key。",
-                description="腾讯兼容端点。",
-                sort_order=120,
+                sort_order=130,
             ),
             ProviderSpec(
                 id="openai",
@@ -640,12 +650,13 @@ class LLMProviderManager(metaclass=Singleton):
             )
         return sorted(results, key=lambda item: item["name"].lower())
 
-    async def _list_models_from_anthropic_compatible(
+    async def _list_models_from_models_dev_only(
             self,
             provider_id: str,
+            transport: str = "openai",
     ) -> list[dict[str, Any]]:
         """
-        Anthropic-compatible 生态没有像 OpenAI 那样统一稳定的 models.list 行为，
+        某些 provider 没有统一稳定的 models.list 行为，
         因此优先读取 models.dev 目录；若未来 provider 暴露标准 models 接口，
         再平滑补充实时刷新即可。
         """
@@ -660,7 +671,7 @@ class LLMProviderManager(metaclass=Singleton):
                     model_id=model_id,
                     display_name=metadata.get("name") or model_id,
                     metadata=metadata,
-                    transport="anthropic",
+                    transport=transport,
                     source="models.dev",
                 )
             )
@@ -832,8 +843,15 @@ class LLMProviderManager(metaclass=Singleton):
             )
 
         if spec.model_list_strategy == "anthropic_compatible":
-            return await self._list_models_from_anthropic_compatible(
+            return await self._list_models_from_models_dev_only(
                 provider_id=provider_id,
+                transport="anthropic",
+            )
+            
+        if spec.model_list_strategy == "models_dev_only":
+            return await self._list_models_from_models_dev_only(
+                provider_id=provider_id,
+                transport="openai",
             )
 
         # openai-compatible / deepseek 默认走官方 models 端点。
@@ -1348,7 +1366,8 @@ class LLMProviderManager(metaclass=Singleton):
             auth = None
             try:
                 auth = await self._resolve_chatgpt_oauth()
-            except Exception:
+            except Exception as err:
+                print(err)
                 pass
 
             if auth:
