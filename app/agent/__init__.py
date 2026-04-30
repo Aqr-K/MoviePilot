@@ -27,7 +27,7 @@ from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
-from app.agent.middleware.tool_selection import MoviePilotToolSelectorMiddleware
+from app.agent.middleware.tool_selection import ToolSelectorMiddleware
 from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
 from app.agent.runtime import agent_runtime_manager
@@ -447,11 +447,11 @@ class MoviePilotAgent:
             # 工具选择
             if max_tools > 0:
                 middlewares.append(
-                    MoviePilotToolSelectorMiddleware(
+                    ToolSelectorMiddleware(
                         model=non_streaming_model,
+                        selection_tools=tools,
                         max_tools=max_tools,
                         always_include=always_include_tools,
-                        selection_tools=tools,
                     )
                 )
 

@@ -95,7 +95,7 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
             ),
             patch.object(
                 agent_module,
-                "MoviePilotToolSelectorMiddleware",
+                "ToolSelectorMiddleware",
                 _FakeToolSelectorMiddleware,
             ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),

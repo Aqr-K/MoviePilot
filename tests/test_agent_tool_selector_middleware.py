@@ -100,7 +100,7 @@ class ToolSelectorMiddlewareTest(unittest.TestCase):
             SimpleNamespace(name="translate", description="Translate text"),
         ]
         model = _FakeModel()
-        middleware = tool_selector_module.MoviePilotToolSelectorMiddleware(
+        middleware = tool_selector_module.ToolSelectorMiddleware(
             max_tools=2,
             selection_tools=tools,
         )
@@ -144,7 +144,7 @@ class ToolSelectorMiddlewareTest(unittest.TestCase):
             SimpleNamespace(name="translate", description="Translate text"),
         ]
         model = _FakeModel(content='{"tools": ["calendar", "search"]}')
-        middleware = tool_selector_module.MoviePilotToolSelectorMiddleware(
+        middleware = tool_selector_module.ToolSelectorMiddleware(
             max_tools=2,
             selection_tools=tools,
         )
@@ -192,7 +192,7 @@ class ToolSelectorMiddlewareTest(unittest.TestCase):
             model_name="gpt-4o-mini",
             base_url="https://api.openai.com/v1",
         )
-        middleware = tool_selector_module.MoviePilotToolSelectorMiddleware(
+        middleware = tool_selector_module.ToolSelectorMiddleware(
             max_tools=2,
             selection_tools=tools,
         )
@@ -240,7 +240,7 @@ class ToolSelectorMiddlewareTest(unittest.TestCase):
         )
 
     def test_normalize_selection_response_accepts_code_fence_json(self):
-        middleware = tool_selector_module.MoviePilotToolSelectorMiddleware()
+        middleware = tool_selector_module.ToolSelectorMiddleware()
         response = SimpleNamespace(
             content=[
                 {
