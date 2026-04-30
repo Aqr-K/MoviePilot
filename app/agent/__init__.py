@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, List, Optional
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     SummarizationMiddleware,
-    LLMToolSelectorMiddleware,
 )
 from langchain_core.messages import (  # noqa: F401
     HumanMessage,
@@ -20,6 +19,7 @@ from langchain_core.messages import (  # noqa: F401
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.callback import StreamingHandler
+from app.agent.llm import LLMHelper
 from app.agent.memory import memory_manager
 from app.agent.middleware.activity_log import ActivityLogMiddleware
 from app.agent.middleware.jobs import JobsMiddleware
@@ -27,13 +27,13 @@ from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
+from app.agent.middleware.tool_selection import MoviePilotToolSelectorMiddleware
 from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
 from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
-from app.agent.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
@@ -110,7 +110,7 @@ class _ThinkTagStripper:
                         on_output(self.buffer[:start_idx])
                         emitted = True
                     self.in_think_tag = True
-                    self.buffer = self.buffer[start_idx + 7 :]
+                    self.buffer = self.buffer[start_idx + 7:]
                 else:
                     # 检查是否以 <think> 的不完整前缀结尾
                     partial_match = False
@@ -130,7 +130,7 @@ class _ThinkTagStripper:
                 end_idx = self.buffer.find("</think>")
                 if end_idx != -1:
                     self.in_think_tag = False
-                    self.buffer = self.buffer[end_idx + 8 :]
+                    self.buffer = self.buffer[end_idx + 8:]
                 else:
                     # 检查是否以 </think> 的不完整前缀结尾
                     partial_match = False
@@ -166,12 +166,12 @@ class MoviePilotAgent:
     """
 
     def __init__(
-        self,
-        session_id: str,
-        user_id: str = None,
-        channel: str = None,
-        source: str = None,
-        username: str = None,
+            self,
+            session_id: str,
+            user_id: str = None,
+            channel: str = None,
+            source: str = None,
+            username: str = None,
     ):
         self.session_id = session_id
         self.user_id = user_id
@@ -200,16 +200,16 @@ class MoviePilotAgent:
             return None
 
     @classmethod
-    def _get_model_name(cls, llm: Any) -> Optional[str]:
+    def _get_model_name(cls, model: Any) -> Optional[str]:
         return (
-            getattr(llm, "model", None)
-            or getattr(llm, "model_name", None)
-            or getattr(llm, "model_id", None)
+                getattr(model, "model", None)
+                or getattr(model, "model_name", None)
+                or getattr(model, "model_id", None)
         )
 
     @classmethod
-    def _get_context_window_tokens(cls, llm: Any) -> Optional[int]:
-        profile = getattr(llm, "profile", None)
+    def _get_context_window_tokens(cls, model: Any) -> Optional[int]:
+        profile = getattr(model, "profile", None)
         if not profile:
             return None
         if isinstance(profile, dict):
@@ -221,9 +221,9 @@ class MoviePilotAgent:
             or getattr(profile, "input_token_limit", None)
         )
 
-    def _sync_model_profile(self, llm: Any) -> None:
-        model_name = self._get_model_name(llm)
-        context_window_tokens = self._get_context_window_tokens(llm)
+    def _sync_model_profile(self, model: Any) -> None:
+        model_name = self._get_model_name(model)
+        context_window_tokens = self._get_context_window_tokens(model)
         if model_name:
             self._session_usage.model = model_name
         if context_window_tokens:
@@ -337,10 +337,10 @@ class MoviePilotAgent:
                     if block.get("thought"):
                         continue
                     if block.get("type") in (
-                        "thinking",
-                        "reasoning_content",
-                        "reasoning",
-                        "thought",
+                            "thinking",
+                            "reasoning_content",
+                            "reasoning",
+                            "thought",
                     ):
                         continue
                     if block.get("type") == "text":
@@ -397,8 +397,8 @@ class MoviePilotAgent:
             system_prompt = prompt_manager.get_agent_prompt(channel=self.channel)
 
             # LLM 模型（用于 agent 执行）
-            llm = await self._initialize_llm(streaming=streaming)
-            self._sync_model_profile(llm)
+            model = await self._initialize_llm(streaming=streaming)
+            self._sync_model_profile(model)
 
             # 为中间件内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
             non_streaming_llm = (
@@ -444,7 +444,7 @@ class MoviePilotAgent:
             # 工具选择
             if max_tools > 0:
                 middlewares.append(
-                    LLMToolSelectorMiddleware(
+                    MoviePilotToolSelectorMiddleware(
                         model=non_streaming_llm,
                         max_tools=max_tools,
                         always_include=always_include_tools,
@@ -463,10 +463,10 @@ class MoviePilotAgent:
             raise e
 
     async def process(
-        self,
-        message: str,
-        images: List[str] = None,
-        files: Optional[List[dict]] = None,
+            self,
+            message: str,
+            images: List[str] = None,
+            files: Optional[List[dict]] = None,
     ) -> str:
         """
         处理用户消息，流式推理并返回 Agent 回复
@@ -519,7 +519,7 @@ class MoviePilotAgent:
             return error_message
 
     async def _stream_agent_tokens(
-        self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
+            self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
     ):
         """
         流式运行智能体，过滤工具调用token和思考内容，将模型生成的内容通过回调输出。
@@ -531,11 +531,11 @@ class MoviePilotAgent:
         stripper = _ThinkTagStripper()
 
         async for chunk in agent.astream(
-            messages,
-            stream_mode="messages",
-            config=config,
-            subgraphs=False,
-            version="v2",
+                messages,
+                stream_mode="messages",
+                config=config,
+                subgraphs=False,
+                version="v2",
         ):
             if chunk["type"] == "messages":
                 token, metadata = chunk["data"]
@@ -621,21 +621,21 @@ class MoviePilotAgent:
                     if remaining_text:
                         unsent_text = remaining_text
                         if self._streamed_output and remaining_text.startswith(
-                            self._streamed_output
+                                self._streamed_output
                         ):
-                            unsent_text = remaining_text[len(self._streamed_output) :]
+                            unsent_text = remaining_text[len(self._streamed_output):]
                         if unsent_text:
                             self._emit_output(unsent_text)
                     if (
-                        remaining_text
-                        and self.should_dispatch_reply
-                        and not self._tool_context.get("user_reply_sent")
+                            remaining_text
+                            and self.should_dispatch_reply
+                            and not self._tool_context.get("user_reply_sent")
                     ):
                         await self.send_agent_message(remaining_text)
                     elif (
-                        remaining_text
-                        and self.persist_output_message
-                        and not self._tool_context.get("user_reply_sent")
+                            remaining_text
+                            and self.persist_output_message
+                            and not self._tool_context.get("user_reply_sent")
                     ):
                         title = "MoviePilot助手" if self.is_background else ""
                         await self._save_agent_message_to_db(
@@ -674,9 +674,9 @@ class MoviePilotAgent:
                     self._emit_output(final_text)
 
                 if (
-                    final_text
-                    and self.should_dispatch_reply
-                    and not self._tool_context.get("user_reply_sent")
+                        final_text
+                        and self.should_dispatch_reply
+                        and not self._tool_context.get("user_reply_sent")
                 ):
                     if self.is_background:
                         # 后台任务发送最终回复时统一带标题
@@ -687,9 +687,9 @@ class MoviePilotAgent:
                         # 非流式渠道：发送最终回复
                         await self.send_agent_message(final_text)
                 elif (
-                    final_text
-                    and self.persist_output_message
-                    and not self._tool_context.get("user_reply_sent")
+                        final_text
+                        and self.persist_output_message
+                        and not self._tool_context.get("user_reply_sent")
                 ):
                     title = "MoviePilot助手" if self.is_background else ""
                     await self._save_agent_message_to_db(final_text, title=title)
@@ -810,8 +810,8 @@ class AgentManager:
         queue = self._session_queues.get(session_id)
         status["pending_messages"] = queue.qsize() if queue else 0
         status["is_processing"] = (
-            session_id in self._session_workers
-            and not self._session_workers[session_id].done()
+                session_id in self._session_workers
+                and not self._session_workers[session_id].done()
         )
         return status
 
@@ -843,16 +843,16 @@ class AgentManager:
         self.active_agents.clear()
 
     async def process_message(
-        self,
-        session_id: str,
-        user_id: str,
-        message: str,
-        images: List[str] = None,
-        files: Optional[List[dict]] = None,
-        channel: str = None,
-        source: str = None,
-        username: str = None,
-        reply_mode: ReplyMode = ReplyMode.DISPATCH,
+            self,
+            session_id: str,
+            user_id: str,
+            message: str,
+            images: List[str] = None,
+            files: Optional[List[dict]] = None,
+            channel: str = None,
+            source: str = None,
+            username: str = None,
+            reply_mode: ReplyMode = ReplyMode.DISPATCH,
     ) -> str:
         """
         处理用户消息：将消息放入会话队列，按顺序依次处理。
@@ -879,8 +879,8 @@ class AgentManager:
 
         # 如果队列中已有等待的消息，通知用户消息已排队
         if queue_size > 0 or (
-            session_id in self._session_workers
-            and not self._session_workers[session_id].done()
+                session_id in self._session_workers
+                and not self._session_workers[session_id].done()
         ):
             logger.info(
                 f"会话 {session_id} 有任务正在处理，消息已排队等待 "
@@ -892,8 +892,8 @@ class AgentManager:
 
         # 确保该会话有一个worker在运行
         if (
-            session_id not in self._session_workers
-            or self._session_workers[session_id].done()
+                session_id not in self._session_workers
+                or self._session_workers[session_id].done()
         ):
             self._session_workers[session_id] = asyncio.create_task(
                 self._session_worker(session_id)
@@ -934,8 +934,8 @@ class AgentManager:
             self._session_workers.pop(session_id, None)  # noqa
             # 如果队列为空，清理队列
             if (
-                session_id in self._session_queues
-                and self._session_queues[session_id].empty()
+                    session_id in self._session_queues
+                    and self._session_queues[session_id].empty()
             ):
                 self._session_queues.pop(session_id, None)
 
@@ -1033,12 +1033,12 @@ class AgentManager:
 
     @staticmethod
     async def run_background_prompt(
-        message: str,
-        session_prefix: str = "__agent_background",
-        output_callback: Optional[Callable[[str], None]] = None,
-        reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
-        persist_output_message: bool = True,
-        allow_message_tools: Optional[bool] = None,
+            message: str,
+            session_prefix: str = "__agent_background",
+            output_callback: Optional[Callable[[str], None]] = None,
+            reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
+            persist_output_message: bool = True,
+            allow_message_tools: Optional[bool] = None,
     ) -> None:
         """
         以独立后台会话执行一段 prompt。
