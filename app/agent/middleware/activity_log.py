@@ -355,7 +355,7 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
 
     def modify_request(self, request: ModelRequest[ContextT]) -> ModelRequest[ContextT]:
         """将活动日志注入系统消息。"""
-        contents = request.state.get("activity_log_contents", {})
+        contents = request.state.get("activity_log_contents", {})  # noqa
         activity_log_prompt = self._format_activity_log(contents)
 
         new_system_message = append_to_system_message(

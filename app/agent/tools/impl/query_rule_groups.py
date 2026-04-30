@@ -1,63 +1,104 @@
-"""查询规则组工具"""
+"""查询过滤规则组工具。"""
 
 import json
-from typing import Optional, Type
+from typing import Optional, Type, List
 
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.helper.rule import RuleHelper
+from app.agent.tools.impl._filter_rule_utils import (
+    collect_rule_group_usages,
+    get_rule_groups,
+    serialize_rule_group,
+    RULE_STRING_SYNTAX,
+)
 from app.log import logger
 
 
 class QueryRuleGroupsInput(BaseModel):
     """查询规则组工具的输入参数模型"""
-    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+
+    explanation: str = Field(
+        ...,
+        description="Clear explanation of why this tool is being used in the current context",
+    )
+    group_names: Optional[List[str]] = Field(
+        None,
+        description="Optional list of rule group names to query. If omitted, return all rule groups.",
+    )
+    include_usage: bool = Field(
+        True,
+        description="Whether to include where each rule group is referenced by global settings or subscriptions.",
+    )
 
 
 class QueryRuleGroupsTool(MoviePilotTool):
     name: str = "query_rule_groups"
-    description: str = "Query all filter rule groups available in the system. Rule groups are used to filter torrents when searching or subscribing. Returns rule group names, media types, and categories, but excludes rule_string to keep results concise."
+    description: str = (
+        "Query filter rule groups (过滤规则组 / 优先级规则组). "
+        "Each rule group contains a rule_string made of built-in rules and/or custom rules. "
+        "Inside one level use '&', '|', '!' and optional parentheses; use '>' between levels. "
+        "Levels are evaluated from left to right, and the first matched level wins. "
+        "The result includes parsed levels and syntax guidance so the agent can learn existing patterns before writing a new rule group."
+    )
     args_schema: Type[BaseModel] = QueryRuleGroupsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
-        """根据查询参数生成友好的提示消息"""
+        group_names = kwargs.get("group_names") or []
+        if group_names:
+            return f"查询规则组: {', '.join(group_names)}"
         return "查询所有规则组"
 
-    @staticmethod
-    def _load_rule_groups() -> dict:
-        """从内存配置缓存中读取规则组。"""
-        rule_groups = RuleHelper().get_rule_groups()
-        if not rule_groups:
-            return {
-                "message": "未找到任何规则组",
-                "rule_groups": [],
-            }
-
-        simplified_groups = [
-            {
-                "name": group.name,
-                "media_type": group.media_type,
-                "category": group.category,
-            }
-            for group in rule_groups
-        ]
-        return {
-            "message": f"找到 {len(simplified_groups)} 个规则组",
-            "rule_groups": simplified_groups,
-        }
-
-    async def run(self, **kwargs) -> str:
+    async def run(
+        self,
+        group_names: Optional[List[str]] = None,
+        include_usage: bool = True,
+        **kwargs,
+    ) -> str:
         logger.info(f"执行工具: {self.name}")
 
         try:
-            result = self._load_rule_groups()
-            return json.dumps(result, ensure_ascii=False, indent=2)
-        except Exception as e:
-            error_message = f"查询规则组失败: {str(e)}"
-            logger.error(f"查询规则组失败: {e}", exc_info=True)
-            return json.dumps({
-                "success": False,
-                "message": error_message,
-                "rule_groups": []
-            }, ensure_ascii=False)
+            rule_groups = get_rule_groups()
+            if group_names:
+                target_names = set(group_names)
+                rule_groups = [
+                    group for group in rule_groups if group.name in target_names
+                ]
+
+            usage_map = {}
+            if include_usage:
+                usage_map = await collect_rule_group_usages(
+                    [group.name for group in rule_groups if group.name]
+                )
+
+            serialized = [
+                serialize_rule_group(group, usage_map.get(group.name))
+                for group in rule_groups
+            ]
+            message = (
+                f"找到 {len(serialized)} 个规则组"
+                if serialized
+                else "未找到任何规则组"
+            )
+
+            return json.dumps(
+                {
+                    "success": True,
+                    "message": message,
+                    "count": len(serialized),
+                    "rule_string_syntax": RULE_STRING_SYNTAX,
+                    "rule_groups": serialized,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        except Exception as exc:
+            logger.error(f"查询规则组失败: {exc}", exc_info=True)
+            return json.dumps(
+                {
+                    "success": False,
+                    "message": f"查询规则组失败: {exc}",
+                    "rule_groups": [],
+                },
+                ensure_ascii=False,
+            )

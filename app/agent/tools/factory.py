@@ -16,6 +16,14 @@ from app.agent.tools.impl.test_site import TestSiteTool
 from app.agent.tools.impl.query_subscribes import QuerySubscribesTool
 from app.agent.tools.impl.query_subscribe_shares import QuerySubscribeSharesTool
 from app.agent.tools.impl.query_rule_groups import QueryRuleGroupsTool
+from app.agent.tools.impl.query_builtin_filter_rules import QueryBuiltinFilterRulesTool
+from app.agent.tools.impl.query_custom_filter_rules import QueryCustomFilterRulesTool
+from app.agent.tools.impl.add_custom_filter_rule import AddCustomFilterRuleTool
+from app.agent.tools.impl.update_custom_filter_rule import UpdateCustomFilterRuleTool
+from app.agent.tools.impl.delete_custom_filter_rule import DeleteCustomFilterRuleTool
+from app.agent.tools.impl.add_rule_group import AddRuleGroupTool
+from app.agent.tools.impl.update_rule_group import UpdateRuleGroupTool
+from app.agent.tools.impl.delete_rule_group import DeleteRuleGroupTool
 from app.agent.tools.impl.query_popular_subscribes import QueryPopularSubscribesTool
 from app.agent.tools.impl.query_subscribe_history import QuerySubscribeHistoryTool
 from app.agent.tools.impl.delete_subscribe import DeleteSubscribeTool
@@ -124,7 +132,15 @@ class MoviePilotToolFactory:
             QuerySubscribesTool,
             QuerySubscribeSharesTool,
             QueryPopularSubscribesTool,
+            QueryBuiltinFilterRulesTool,
+            QueryCustomFilterRulesTool,
             QueryRuleGroupsTool,
+            AddCustomFilterRuleTool,
+            UpdateCustomFilterRuleTool,
+            DeleteCustomFilterRuleTool,
+            AddRuleGroupTool,
+            UpdateRuleGroupTool,
+            DeleteRuleGroupTool,
             QuerySubscribeHistoryTool,
             DeleteSubscribeTool,
             QueryDownloadTasksTool,
