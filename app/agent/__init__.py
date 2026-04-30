@@ -451,6 +451,7 @@ class MoviePilotAgent:
                         model=non_streaming_model,
                         max_tools=max_tools,
                         always_include=always_include_tools,
+                        selection_tools=tools,
                     )
                 )
 

@@ -56,10 +56,17 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
         captured: dict = {}
 
         class _FakeToolSelectorMiddleware:
-            def __init__(self, model, max_tools, always_include=None):
+            def __init__(
+                self,
+                model,
+                max_tools,
+                always_include=None,
+                selection_tools=None,
+            ):
                 self.model = model
                 self.max_tools = max_tools
                 self.always_include = always_include or []
+                self.selection_tools = selection_tools or []
 
         def _fake_create_agent(**kwargs):
             captured.update(kwargs)
@@ -88,7 +95,7 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
             ),
             patch.object(
                 agent_module,
-                "LLMToolSelectorMiddleware",
+                "MoviePilotToolSelectorMiddleware",
                 _FakeToolSelectorMiddleware,
             ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
@@ -114,6 +121,7 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
                 "execute_command",
             ],
         )
+        self.assertEqual(tool_selector_middleware.selection_tools, fake_tools)
 
     def test_non_streaming_agent_reuses_main_llm_for_summary(self):
         agent = agent_module.MoviePilotAgent(session_id="session-1", user_id="10001")
