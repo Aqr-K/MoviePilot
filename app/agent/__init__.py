@@ -172,18 +172,21 @@ class MoviePilotAgent:
             channel: str = None,
             source: str = None,
             username: str = None,
+            replay_mode: ReplyMode = ReplyMode.DISPATCH,
+            persist_output_message: bool = True,
+            allow_message_tools: bool = True,
+            output_callback: Optional[Callable[[str], None]] = None,
     ):
         self.session_id = session_id
         self.user_id = user_id
         self.channel = channel
         self.source = source
         self.username = username
+        self.reply_mode = replay_mode
+        self.persist_output_message = persist_output_message
+        self.allow_message_tools = allow_message_tools
+        self.output_callback = output_callback
         self._tool_context: Dict[str, object] = {}
-        self.output_callback: Optional[Callable[[str], None]] = None
-        self.force_streaming = False
-        self.reply_mode = ReplyMode.DISPATCH
-        self.persist_output_message = True
-        self.allow_message_tools = True
         self._streamed_output = ""
         self._session_usage = _SessionUsageSnapshot()
 
@@ -276,7 +279,7 @@ class MoviePilotAgent:
         """
         是否为后台任务模式（无渠道信息，如定时唤醒）
         """
-        return not self.channel or not self.source
+        return (not self.channel or not self.source) and not callable(self.output_callback)
 
     @property
     def should_dispatch_reply(self) -> bool:
@@ -295,9 +298,7 @@ class MoviePilotAgent:
         - 其他情况不启用流式输出
         """
         if self.is_background:
-            return self.force_streaming or callable(self.output_callback)
-        if self.force_streaming or callable(self.output_callback):
-            return True
+            return False
         # 啰嗦模式下始终需要流式输出来捕获工具调用前的 Agent 文字
         if settings.AI_AGENT_VERBOSE:
             return True
@@ -425,22 +426,22 @@ class MoviePilotAgent:
                 JobsMiddleware(
                     sources=[str(agent_runtime_manager.jobs_dir)],
                 ),
-                # 运行时人格与核心规则（动态加载，支持执行中切换人格）
+                # 运行时人格与核心规则
                 RuntimeConfigMiddleware(),
-                # 记忆管理（仅扫描 memory 目录，避免与根层核心规则或人格定义混写）
+                # 记忆管理
                 MemoryMiddleware(memory_dir=str(agent_runtime_manager.memory_dir)),
                 # 活动日志
                 ActivityLogMiddleware(
                     activity_dir=str(agent_runtime_manager.activity_dir),
                 ),
-                # 用量统计
-                UsageMiddleware(on_usage=self._record_usage),
                 # 上下文压缩
                 SummarizationMiddleware(
                     model=non_streaming_model, trigger=("fraction", 0.85)
                 ),
                 # 错误工具调用修复
                 PatchToolCallsMiddleware(),
+                # 用量统计
+                UsageMiddleware(on_usage=self._record_usage),
             ]
 
             # 工具选择
@@ -606,6 +607,7 @@ class MoviePilotAgent:
                     on_token=self._handle_stream_text,
                 )
 
+                # 输出流式过程中可能残留的工具调用统计信息
                 trailing_tool_summary = self.stream_handler.flush_pending_tool_summary()
                 if trailing_tool_summary:
                     self._emit_output(trailing_tool_summary)
@@ -956,8 +958,8 @@ class AgentManager:
                 channel=task.channel,
                 source=task.source,
                 username=task.username,
+                replay_mode=task.reply_mode,
             )
-            agent.reply_mode = task.reply_mode
             self.active_agents[session_id] = agent
         else:
             agent = self.active_agents[session_id]
@@ -1047,22 +1049,23 @@ class AgentManager:
         """
         session_id = f"{session_prefix}_{uuid.uuid4().hex[:8]}__"
         user_id = SYSTEM_INTERNAL_USER_ID
+
+        if reply_mode == ReplyMode.CAPTURE_ONLY:
+            allow_message_tools = False
+        elif allow_message_tools is None:
+            allow_message_tools = True
+
         agent = MoviePilotAgent(
             session_id=session_id,
             user_id=user_id,
             channel=None,
             source=None,
             username=settings.SUPERUSER,
+            replay_mode=reply_mode,
+            persist_output_message=persist_output_message,
+            output_callback=output_callback,
+            allow_message_tools=allow_message_tools,
         )
-        agent.output_callback = output_callback
-        agent.force_streaming = bool(output_callback)
-        agent.reply_mode = reply_mode
-        agent.persist_output_message = persist_output_message
-        if reply_mode == ReplyMode.CAPTURE_ONLY:
-            allow_message_tools = False
-        elif allow_message_tools is None:
-            allow_message_tools = True
-        agent.allow_message_tools = allow_message_tools
 
         try:
             await agent.process(message)
