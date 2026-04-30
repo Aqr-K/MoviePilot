@@ -407,6 +407,10 @@ class MoviePilotAgent:
 
             # 工具列表
             tools = self._initialize_tools()
+            max_tools = settings.LLM_MAX_TOOLS
+            always_include_tools = (
+                MoviePilotToolFactory.get_tool_selector_always_include_names(tools)
+            )
 
             # 中间件
             middlewares = [
@@ -438,11 +442,12 @@ class MoviePilotAgent:
             ]
 
             # 工具选择
-            if settings.LLM_MAX_TOOLS > 0:
+            if max_tools > 0:
                 middlewares.append(
                     LLMToolSelectorMiddleware(
                         model=non_streaming_llm,
-                        max_tools=settings.LLM_MAX_TOOLS,
+                        max_tools=max_tools,
+                        always_include=always_include_tools,
                     )
                 )
 

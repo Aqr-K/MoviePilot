@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -35,8 +36,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
+            patch.object(agent_module.settings, "LLM_MAX_TOOLS", 0),
         ):
-            agent._create_agent(streaming=True)
+            asyncio.run(agent._create_agent(streaming=True))
 
         summary_middleware = next(
             middleware
@@ -54,19 +56,33 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
         captured: dict = {}
 
         class _FakeToolSelectorMiddleware:
-            def __init__(self, model, max_tools):
+            def __init__(self, model, max_tools, always_include=None):
                 self.model = model
                 self.max_tools = max_tools
+                self.always_include = always_include or []
 
         def _fake_create_agent(**kwargs):
             captured.update(kwargs)
             return object()
 
+        class _FakeTool:
+            def __init__(self, name: str):
+                self.name = name
+
+        fake_tools = [
+            _FakeTool("list_directory"),
+            _FakeTool("write_file"),
+            _FakeTool("read_file"),
+            _FakeTool("edit_file"),
+            _FakeTool("execute_command"),
+            _FakeTool("search_media"),
+        ]
+
         with (
             patch.object(
                 agent, "_initialize_llm", side_effect=[main_llm, non_streaming_llm]
             ),
-            patch.object(agent, "_initialize_tools", return_value=[]),
+            patch.object(agent, "_initialize_tools", return_value=fake_tools),
             patch.object(
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
@@ -78,7 +94,7 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
             patch.object(agent_module.settings, "LLM_MAX_TOOLS", 3),
         ):
-            agent._create_agent(streaming=True)
+            asyncio.run(agent._create_agent(streaming=True))
 
         tool_selector_middleware = next(
             middleware
@@ -87,6 +103,17 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
         )
 
         self.assertIs(tool_selector_middleware.model, non_streaming_llm)
+        self.assertEqual(tool_selector_middleware.max_tools, 3)
+        self.assertEqual(
+            tool_selector_middleware.always_include,
+            [
+                "list_directory",
+                "write_file",
+                "read_file",
+                "edit_file",
+                "execute_command",
+            ],
+        )
 
     def test_non_streaming_agent_reuses_main_llm_for_summary(self):
         agent = agent_module.MoviePilotAgent(session_id="session-1", user_id="10001")
@@ -104,8 +131,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
+            patch.object(agent_module.settings, "LLM_MAX_TOOLS", 0),
         ):
-            agent._create_agent(streaming=False)
+            asyncio.run(agent._create_agent(streaming=False))
 
         summary_middleware = next(
             middleware
@@ -132,8 +160,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
+            patch.object(agent_module.settings, "LLM_MAX_TOOLS", 0),
         ):
-            agent._create_agent(streaming=False)
+            asyncio.run(agent._create_agent(streaming=False))
 
         self.assertTrue(
             any(
