@@ -7,7 +7,7 @@ from urllib.parse import urljoin
 from lxml import etree
 
 from app.chain import ChainBase
-from app.helper.slash import (
+from app.helper.interaction import (
     SlashInteractionManager,
     build_navigation_buttons,
     format_markdown_table,
@@ -1060,8 +1060,9 @@ class SiteChain(ChainBase):
             original_chat_id=original_chat_id,
         )
 
+    @staticmethod
     def _format_site_list(
-        self, site_list: List[Site], channel: Optional[MessageChannel]
+            site_list: List[Site], channel: Optional[MessageChannel]
     ) -> str:
         """
         根据渠道能力格式化站点列表。

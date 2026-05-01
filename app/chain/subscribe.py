@@ -1,6 +1,7 @@
 import copy
 import json
 import random
+import re
 import threading
 import time
 from datetime import datetime
@@ -11,7 +12,7 @@ from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
-from app.helper.slash import (
+from app.helper.interaction import (
     SlashInteractionManager,
     build_navigation_buttons,
     format_markdown_table,

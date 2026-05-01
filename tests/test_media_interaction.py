@@ -9,7 +9,7 @@ sys.modules.setdefault("transmission_rpc", ModuleType("transmission_rpc"))
 setattr(sys.modules["transmission_rpc"], "File", object)
 sys.modules.setdefault("psutil", ModuleType("psutil"))
 
-from app.chain.interaction import MediaInteractionChain, media_interaction_manager
+from app.chain.media import MediaChain, media_interaction_manager
 from app.chain.message import MessageChain
 from app.core.context import MediaInfo
 from app.core.meta import MetaBase
@@ -43,7 +43,7 @@ class TestMediaInteraction(unittest.TestCase):
         self.assertIsNotNone(request)
 
         with patch.object(chain, "_record_user_message"), patch(
-            "app.chain.message.MediaInteractionChain.handle_text_interaction",
+            "app.chain.message.MediaChain.handle_text_interaction",
             return_value=True,
         ) as handle_text, patch.object(chain, "_handle_ai_message") as handle_ai:
             chain.handle_message(
@@ -72,7 +72,7 @@ class TestMediaInteraction(unittest.TestCase):
         )
 
         with patch(
-            "app.chain.message.MediaInteractionChain.handle_callback_interaction",
+            "app.chain.message.MediaChain.handle_callback_interaction",
             return_value=True,
         ) as handle_callback:
             chain._handle_callback(
@@ -86,7 +86,7 @@ class TestMediaInteraction(unittest.TestCase):
         handle_callback.assert_called_once()
 
     def test_media_interaction_starts_search_and_posts_media_list(self):
-        chain = MediaInteractionChain()
+        chain = MediaChain()
         meta = self._build_meta("星际穿越")
         medias = [
             MediaInfo(title="星际穿越", year="2014"),
@@ -94,7 +94,7 @@ class TestMediaInteraction(unittest.TestCase):
         ]
 
         with patch(
-            "app.chain.interaction.MediaChain.search",
+            "app.chain.media.MediaChain.search",
             return_value=(meta, medias),
         ), patch.object(chain, "post_medias_message") as post_medias_message:
             handled = chain.handle_text_interaction(
@@ -119,7 +119,7 @@ class TestMediaInteraction(unittest.TestCase):
         self.assertEqual(len(request.items), 2)
 
     def test_media_interaction_legacy_page_callback_updates_existing_request(self):
-        chain = MediaInteractionChain()
+        chain = MediaChain()
         request = media_interaction_manager.create_or_replace(
             user_id="10001",
             channel=MessageChannel.Telegram,

@@ -24,9 +24,9 @@ from app.schemas.types import (
     ScrapingPolicy,
     SystemConfigKey,
 )
+from app.utils.http import RequestUtils
 from app.utils.mixins import ConfigReloadMixin
 from app.utils.singleton import Singleton
-from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
 recognize_lock = Lock()
@@ -44,10 +44,10 @@ class ScrapingOption:
     policy: ScrapingPolicy = ScrapingPolicy.MISSINGONLY
 
     def __init__(
-        self,
-        type: Union[str, ScrapingTarget],
-        metadata: Union[str, ScrapingMetadata],
-        value: Union[ScrapingPolicy, bool, str],
+            self,
+            type: Union[str, ScrapingTarget],
+            metadata: Union[str, ScrapingMetadata],
+            value: Union[ScrapingPolicy, bool, str],
     ):
         if isinstance(type, ScrapingTarget):
             self.type = type
@@ -105,7 +105,7 @@ class ScrapingConfig:
                 self._policies[tuple(items)] = ScrapingOption(*items, value)
 
     def option(
-        self, item: Union[str, ScrapingTarget], metadata: Union[str, ScrapingMetadata]
+            self, item: Union[str, ScrapingTarget], metadata: Union[str, ScrapingMetadata]
     ) -> ScrapingOption:
 
         if isinstance(item, ScrapingTarget):
@@ -173,11 +173,11 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     def on_config_changed(self):
         self.scraping_policies = ScrapingConfig.from_system_config()
 
+    @staticmethod
     def _should_scrape(
-        self,
-        scraping_option: ScrapingOption,
-        file_exists: bool,
-        global_overwrite: bool = False,
+            scraping_option: ScrapingOption,
+            file_exists: bool,
+            global_overwrite: bool = False,
     ) -> bool:
         """
         判断是否应该执行刮削操作
@@ -211,7 +211,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             return False
 
     def _save_file(
-        self, fileitem: schemas.FileItem, path: Path, content: Union[bytes, str]
+            self, fileitem: schemas.FileItem, path: Path, content: Union[bytes, str]
     ):
         """
         保存或上传文件
@@ -224,7 +224,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             return
         # 使用tempfile创建临时文件
         with NamedTemporaryFile(
-            delete=True, delete_on_close=False, suffix=path.suffix
+                delete=True, delete_on_close=False, suffix=path.suffix
         ) as tmp_file:
             tmp_file_path = Path(tmp_file.name)
             # 写入内容
@@ -248,7 +248,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 logger.warn(f"文件保存失败：{path}")
 
     def _download_and_save_image(
-        self, fileitem: schemas.FileItem, path: Path, url: str
+            self, fileitem: schemas.FileItem, path: Path, url: str
     ):
         """
         流式下载图片并保存到文件
@@ -268,7 +268,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 if r and r.status_code == 200:
                     # 使用tempfile创建临时文件，自动删除
                     with NamedTemporaryFile(
-                        delete=True, delete_on_close=False, suffix=path.suffix
+                            delete=True, delete_on_close=False, suffix=path.suffix
                     ) as tmp_file:
                         tmp_file_path = Path(tmp_file.name)
                         # 流式写入文件
@@ -295,12 +295,12 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             logger.error(f"{url} 图片下载失败：{str(err)}！")
 
     def _get_target_fileitem_and_path(
-        self,
-        current_fileitem: schemas.FileItem,
-        item_type: ScrapingTarget,
-        metadata_type: ScrapingMetadata,
-        filename_hint: Optional[str] = None,
-        parent_fileitem: Optional[schemas.FileItem] = None,
+            self,
+            current_fileitem: schemas.FileItem,
+            item_type: ScrapingTarget,
+            metadata_type: ScrapingMetadata,
+            filename_hint: Optional[str] = None,
+            parent_fileitem: Optional[schemas.FileItem] = None,
     ) -> Tuple[schemas.FileItem, Optional[Path]]:
         """
         根据当前上下文、刮削项类型和元数据类型生成目标 FileItem 和 Path
@@ -318,8 +318,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     # 电影文件NFO: 放在电影文件同级目录，名称与电影文件主体一致，后缀.nfo
                     final_filename = f"{target_dir_path.stem}.nfo"
                     target_dir_item = (
-                        parent_fileitem
-                        or self.storagechain.get_parent_item(current_fileitem)
+                            parent_fileitem
+                            or self.storagechain.get_parent_item(current_fileitem)
                     )
                     if not target_dir_item:
                         logger.error(
@@ -354,8 +354,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 图片通常是放在当前目录 (current_fileitem) 下
         # 如果是 EPISODE 类型的图片（如thumb），通常也是放在文件同级目录，文件名与视频文件一致
         elif (
-            metadata_type in [ScrapingMetadata.THUMB]
-            and item_type == ScrapingTarget.EPISODE
+                metadata_type in [ScrapingMetadata.THUMB]
+                and item_type == ScrapingTarget.EPISODE
         ):
             hint_ext = Path(filename_hint).suffix if filename_hint else ".jpg"
             final_filename = f"{target_dir_path.stem}{hint_ext}"
@@ -380,11 +380,11 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return target_dir_item, target_full_path
 
     def metadata_nfo(
-        self,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        season: Optional[int] = None,
-        episode: Optional[int] = None,
+            self,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            season: Optional[int] = None,
+            episode: Optional[int] = None,
     ) -> Optional[str]:
         """
         获取NFO文件内容文本
@@ -402,8 +402,9 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             episode=episode,
         )
 
+    @staticmethod
     def select_recognize_source(
-        self, log_name: str, log_context: str, native_fn, plugin_fn
+            log_name: str, log_context: str, native_fn, plugin_fn
     ) -> Optional[MediaInfo]:
         """
         选择识别模式，插件优先或原生优先
@@ -436,7 +437,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return mediainfo
 
     def recognize_by_meta(
-        self, metainfo: MetaBase, episode_group: Optional[str] = None
+            self, metainfo: MetaBase, episode_group: Optional[str] = None
     ) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息
@@ -513,7 +514,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return self.recognize_media(meta=org_meta)
 
     def recognize_by_path(
-        self, path: str, episode_group: Optional[str] = None
+            self, path: str, episode_group: Optional[str] = None
     ) -> Optional[Context]:
         """
         根据文件路径识别媒体信息
@@ -577,7 +578,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return meta, medias
 
     def get_tmdbinfo_by_doubanid(
-        self, doubanid: str, mtype: MediaType = None
+            self, doubanid: str, mtype: MediaType = None
     ) -> Optional[dict]:
         """
         根据豆瓣ID获取TMDB信息
@@ -648,7 +649,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return None
 
     def get_doubaninfo_by_tmdbid(
-        self, tmdbid: int, mtype: MediaType = None, season: Optional[int] = None
+            self, tmdbid: int, mtype: MediaType = None, season: Optional[int] = None
     ) -> Optional[dict]:
         """
         根据TMDBID获取豆瓣信息
@@ -752,8 +753,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                             # 收集从根目录到文件的所有父目录
                             current_path = sub_path.parent
                             while (
-                                current_path != root_path
-                                and current_path.is_relative_to(root_path)
+                                    current_path != root_path
+                                    and current_path.is_relative_to(root_path)
                             ):
                                 all_dirs.add(current_path)
                                 current_path = current_path.parent
@@ -805,15 +806,15 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     )
 
     def _scrape_nfo_generic(
-        self,
-        current_fileitem: schemas.FileItem,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        item_type: ScrapingTarget,
-        parent_fileitem: Optional[schemas.FileItem] = None,
-        overwrite: bool = False,
-        season_number: Optional[int] = None,
-        episode_number: Optional[int] = None,
+            self,
+            current_fileitem: schemas.FileItem,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            item_type: ScrapingTarget,
+            parent_fileitem: Optional[schemas.FileItem] = None,
+            overwrite: bool = False,
+            season_number: Optional[int] = None,
+            episode_number: Optional[int] = None,
     ):
         """
         NFO 刮削
@@ -859,14 +860,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 logger.warn(f"{nfo_path.name} NFO 文件生成失败！")
 
     def _scrape_images_generic(
-        self,
-        current_fileitem: schemas.FileItem,
-        mediainfo: MediaInfo,
-        item_type: ScrapingTarget,
-        parent_fileitem: Optional[schemas.FileItem] = None,
-        overwrite: bool = False,
-        season_number: Optional[int] = None,
-        episode_number: Optional[int] = None,
+            self,
+            current_fileitem: schemas.FileItem,
+            mediainfo: MediaInfo,
+            item_type: ScrapingTarget,
+            parent_fileitem: Optional[schemas.FileItem] = None,
+            overwrite: bool = False,
+            season_number: Optional[int] = None,
+            episode_number: Optional[int] = None,
     ):
         """
         图片刮削
@@ -906,14 +907,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
                 # 判断是否匹配当前刮削的季号
                 if item_type == ScrapingTarget.TV and image_name.lower().startswith(
-                    "season"
+                        "season"
                 ):
                     logger.info(f"当前为电视剧根目录刮削，跳过季图片：{image_name}")
                     continue
                 if (
-                    item_type == ScrapingTarget.SEASON
-                    and season_number is not None
-                    and image_name.lower().startswith("season")
+                        item_type == ScrapingTarget.SEASON
+                        and season_number is not None
+                        and image_name.lower().startswith("season")
                 ):
                     # 检查是否只下载当前刮削季的图片
                     image_season_str = (
@@ -921,7 +922,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     )
 
                     if image_season_str is not None and image_season_str != str(
-                        season_number
+                            season_number
                     ).rjust(2, "0"):
                         logger.info(
                             f"当前刮削季为：{season_number}，跳过非本季图片：{image_name}"
@@ -956,14 +957,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 )
 
     def scrape_metadata(
-        self,
-        fileitem: schemas.FileItem,
-        meta: MetaBase = None,
-        mediainfo: MediaInfo = None,
-        init_folder: bool = True,
-        parent: schemas.FileItem = None,
-        overwrite: bool = False,
-        recursive: bool = True,
+            self,
+            fileitem: schemas.FileItem,
+            meta: MetaBase = None,
+            mediainfo: MediaInfo = None,
+            init_folder: bool = True,
+            parent: schemas.FileItem = None,
+            overwrite: bool = False,
+            recursive: bool = True,
     ):
         """
         手动刮削媒体信息
@@ -982,7 +983,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 当前文件路径
         filepath = Path(fileitem.path)
         if fileitem.type == "file" and (
-            not filepath.suffix or filepath.suffix.lower() not in settings.RMT_MEDIAEXT
+                not filepath.suffix or filepath.suffix.lower() not in settings.RMT_MEDIAEXT
         ):
             return
 
@@ -1022,14 +1023,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         logger.info(f"{filepath.name} 刮削完成")
 
     def _handle_movie_scraping(
-        self,
-        fileitem: schemas.FileItem,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        init_folder: bool,
-        parent: schemas.FileItem,
-        overwrite: bool,
-        recursive: bool,
+            self,
+            fileitem: schemas.FileItem,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            init_folder: bool,
+            parent: schemas.FileItem,
+            overwrite: bool,
+            recursive: bool,
     ):
         """
         处理电影刮削
@@ -1051,20 +1052,18 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 meta=meta,
                 mediainfo=mediainfo,
                 init_folder=init_folder,
-                parent=parent,
                 overwrite=overwrite,
                 recursive=recursive,
             )
 
     def _handle_movie_directory(
-        self,
-        fileitem: schemas.FileItem,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        init_folder: bool,
-        parent: schemas.FileItem,
-        overwrite: bool,
-        recursive: bool,
+            self,
+            fileitem: schemas.FileItem,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            init_folder: bool,
+            overwrite: bool,
+            recursive: bool,
     ):
         """
         处理电影目录刮削
@@ -1105,14 +1104,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
 
     def _handle_tv_scraping(
-        self,
-        fileitem: schemas.FileItem,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        init_folder: bool,
-        parent: schemas.FileItem,
-        overwrite: bool,
-        recursive: bool,
+            self,
+            fileitem: schemas.FileItem,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            init_folder: bool,
+            parent: schemas.FileItem,
+            overwrite: bool,
+            recursive: bool,
     ):
         """
         处理电视剧刮削
@@ -1142,12 +1141,12 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
 
     def _handle_tv_episode_file(
-        self,
-        fileitem: schemas.FileItem,
-        filepath: Path,
-        mediainfo: MediaInfo,
-        parent: schemas.FileItem,
-        overwrite: bool,
+            self,
+            fileitem: schemas.FileItem,
+            filepath: Path,
+            mediainfo: MediaInfo,
+            parent: schemas.FileItem,
+            overwrite: bool,
     ):
         """
         处理电视剧集文件刮削
@@ -1191,15 +1190,15 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         )
 
     def _handle_tv_directory(
-        self,
-        fileitem: schemas.FileItem,
-        filepath: Path,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        init_folder: bool,
-        parent: schemas.FileItem,
-        overwrite: bool,
-        recursive: bool,
+            self,
+            fileitem: schemas.FileItem,
+            filepath: Path,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            init_folder: bool,
+            parent: schemas.FileItem,
+            overwrite: bool,
+            recursive: bool,
     ):
         """
         处理电视剧目录刮削
@@ -1209,9 +1208,9 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             files = self.storagechain.list_files(fileitem=fileitem) or []
             for file in files:
                 if (
-                    file.type == "dir"
-                    and file.name not in settings.RENAME_FORMAT_S0_NAMES
-                    and MetaInfo(file.name).begin_season is None
+                        file.type == "dir"
+                        and file.name not in settings.RENAME_FORMAT_S0_NAMES
+                        and MetaInfo(file.name).begin_season is None
                 ):
                     # 电视剧不处理非季子目录
                     continue
@@ -1235,13 +1234,13 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
 
     def _initialize_tv_directory_metadata(
-        self,
-        fileitem: schemas.FileItem,
-        filepath: Path,
-        meta: MetaBase,
-        mediainfo: MediaInfo,
-        parent: schemas.FileItem,
-        overwrite: bool,
+            self,
+            fileitem: schemas.FileItem,
+            filepath: Path,
+            meta: MetaBase,
+            mediainfo: MediaInfo,
+            parent: schemas.FileItem,
+            overwrite: bool,
     ):
         """
         初始化电视剧目录元数据（识别季号并刮削）
@@ -1296,8 +1295,9 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         else:
             logger.warn("无法识别元数据，跳过")
 
+    @staticmethod
     async def async_select_recognize_source(
-        self, log_name: str, log_context: str, native_fn, plugin_fn
+            log_name: str, log_context: str, native_fn, plugin_fn
     ) -> Optional[MediaInfo]:
         """
         选择识别模式，插件优先或原生优先（异步版本）
@@ -1330,7 +1330,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return mediainfo
 
     async def async_recognize_by_meta(
-        self, metainfo: MetaBase, episode_group: Optional[str] = None
+            self, metainfo: MetaBase, episode_group: Optional[str] = None
     ) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息（异步版本）
@@ -1366,7 +1366,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return mediainfo
 
     async def async_recognize_help(
-        self, title: str, org_meta: MetaBase
+            self, title: str, org_meta: MetaBase
     ) -> Optional[MediaInfo]:
         """
         请求辅助识别，返回媒体信息（异步版本）
@@ -1417,7 +1417,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return await self.async_recognize_media(meta=org_meta)
 
     async def async_recognize_by_path(
-        self, path: str, episode_group: Optional[str] = None
+            self, path: str, episode_group: Optional[str] = None
     ) -> Optional[Context]:
         """
         根据文件路径识别媒体信息（异步版本）
@@ -1455,7 +1455,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return Context(meta_info=file_meta, media_info=mediainfo)
 
     async def async_search(
-        self, title: str
+            self, title: str
     ) -> Tuple[Optional[MetaBase], List[MediaInfo]]:
         """
         搜索媒体/人物信息（异步版本）
@@ -1502,7 +1502,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
     @staticmethod
     def _extract_year_from_tmdb(
-        tmdbinfo: dict, season: Optional[int] = None
+            tmdbinfo: dict, season: Optional[int] = None
     ) -> Optional[str]:
         """
         从TMDB信息中提取年份
@@ -1522,11 +1522,11 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return year
 
     def _match_tmdb_with_names(
-        self,
-        meta_names: list,
-        year: Optional[str],
-        mtype: MediaType,
-        season: Optional[int] = None,
+            self,
+            meta_names: list,
+            year: Optional[str],
+            mtype: MediaType,
+            season: Optional[int] = None,
     ) -> Optional[dict]:
         """
         使用名称列表匹配TMDB信息
@@ -1540,11 +1540,11 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return None
 
     async def _async_match_tmdb_with_names(
-        self,
-        meta_names: list,
-        year: Optional[str],
-        mtype: MediaType,
-        season: Optional[int] = None,
+            self,
+            meta_names: list,
+            year: Optional[str],
+            mtype: MediaType,
+            season: Optional[int] = None,
     ) -> Optional[dict]:
         """
         使用名称列表匹配TMDB信息（异步版本）
@@ -1558,7 +1558,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return None
 
     async def async_get_tmdbinfo_by_doubanid(
-        self, doubanid: str, mtype: MediaType = None
+            self, doubanid: str, mtype: MediaType = None
     ) -> Optional[dict]:
         """
         根据豆瓣ID获取TMDB信息（异步版本）
@@ -1629,7 +1629,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return None
 
     async def async_get_doubaninfo_by_tmdbid(
-        self, tmdbid: int, mtype: MediaType = None, season: Optional[int] = None
+            self, tmdbid: int, mtype: MediaType = None, season: Optional[int] = None
     ) -> Optional[dict]:
         """
         根据TMDBID获取豆瓣信息（异步版本）

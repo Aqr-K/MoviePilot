@@ -1,143 +1,16 @@
 import re
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from threading import Lock
-from typing import Dict, List, Optional, Tuple, Union
-import uuid
+from typing import List, Optional, Tuple, Union
 
 from app.chain import ChainBase
-from app.helper.slash import (
+from app.helper.interaction import (
     build_navigation_buttons,
     page_items,
     supports_interaction_buttons,
-    update_or_post_message,
+    update_or_post_message, skills_interaction_manager, PendingSkillsInteraction,
 )
 from app.helper.skill import SkillHelper, SkillInfo
 from app.schemas import Notification
 from app.schemas.types import MessageChannel
-
-
-@dataclass
-class PendingSkillsInteraction:
-    """
-    记录一次 /skills 会话的上下文，便于按钮和文本回复共用同一状态。
-    """
-
-    request_id: str
-    user_id: str
-    channel: Optional[MessageChannel]
-    source: Optional[str]
-    username: Optional[str]
-    view: str = "root"
-    local_page: int = 0
-    market_page: int = 0
-    market_query: str = ""
-    awaiting_input: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.now)
-
-
-class SkillsInteractionManager:
-    """
-    管理用户当前的技能交互状态。
-
-    每个用户同一时间只保留一个有效会话，避免旧按钮继续生效。
-    """
-
-    _ttl = timedelta(hours=24)
-
-    def __init__(self):
-        self._by_id: Dict[str, PendingSkillsInteraction] = {}
-        self._by_user: Dict[str, str] = {}
-        self._lock = Lock()
-
-    def _cleanup_locked(self):
-        """
-        清理超时会话，避免按钮回调无限积累。
-        """
-        expire_before = datetime.now() - self._ttl
-        expired = [
-            request_id
-            for request_id, request in self._by_id.items()
-            if request.created_at < expire_before
-        ]
-        for request_id in expired:
-            request = self._by_id.pop(request_id, None)
-            if request:
-                self._by_user.pop(str(request.user_id), None)
-
-    def create_or_replace(
-        self,
-        user_id: Union[str, int],
-        channel: Optional[MessageChannel],
-        source: Optional[str],
-        username: Optional[str],
-    ) -> PendingSkillsInteraction:
-        """
-        为用户创建新会话，并替换掉旧的技能交互状态。
-        """
-        with self._lock:
-            self._cleanup_locked()
-            user_key = str(user_id)
-            old_request_id = self._by_user.get(user_key)
-            if old_request_id:
-                self._by_id.pop(old_request_id, None)
-            request_id = uuid.uuid4().hex[:12]
-            request = PendingSkillsInteraction(
-                request_id=request_id,
-                user_id=user_key,
-                channel=channel,
-                source=source,
-                username=username,
-            )
-            self._by_id[request_id] = request
-            self._by_user[user_key] = request_id
-            return request
-
-    def get_by_user(
-        self, user_id: Union[str, int]
-    ) -> Optional[PendingSkillsInteraction]:
-        """
-        按用户获取当前有效会话，供纯文本回复路由使用。
-        """
-        with self._lock:
-            self._cleanup_locked()
-            request_id = self._by_user.get(str(user_id))
-            if not request_id:
-                return None
-            return self._by_id.get(request_id)
-
-    def get_by_id(
-        self, request_id: str, user_id: Union[str, int]
-    ) -> Optional[PendingSkillsInteraction]:
-        """
-        按请求 ID 获取会话，并校验会话归属用户。
-        """
-        with self._lock:
-            self._cleanup_locked()
-            request = self._by_id.get(request_id)
-            if not request or str(request.user_id) != str(user_id):
-                return None
-            return request
-
-    def remove(self, request_id: str) -> None:
-        """
-        主动结束会话，释放用户和请求 ID 的双向索引。
-        """
-        with self._lock:
-            request = self._by_id.pop(request_id, None)
-            if request:
-                self._by_user.pop(str(request.user_id), None)
-
-    def clear(self):
-        """
-        清空所有会话，主要用于测试场景。
-        """
-        with self._lock:
-            self._by_id.clear()
-            self._by_user.clear()
-
-
-skills_interaction_manager = SkillsInteractionManager()
 
 
 class SkillsChain(ChainBase):
@@ -153,11 +26,11 @@ class SkillsChain(ChainBase):
         self.skillhelper = SkillHelper()
 
     def remote_manage(
-        self,
-        arg_str: str,
-        channel: MessageChannel,
-        userid: Union[str, int],
-        source: Optional[str] = None,
+            self,
+            arg_str: str,
+            channel: MessageChannel,
+            userid: Union[str, int],
+            source: Optional[str] = None,
     ):
         """
         /skills 入口。创建新会话并渲染首屏菜单。
@@ -205,14 +78,14 @@ class SkillsChain(ChainBase):
         return request_id, action, index
 
     def handle_callback_interaction(
-        self,
-        callback_data: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            callback_data: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
     ) -> bool:
         """
         处理按钮交互，并在同一条消息上刷新当前视图。
@@ -364,12 +237,12 @@ class SkillsChain(ChainBase):
         return True
 
     def handle_text_interaction(
-        self,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        text: str,
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            text: str,
     ) -> bool:
         """
         处理不支持按钮渠道上的文本指令，也兼容用户直接回复文字操作。
@@ -660,42 +533,42 @@ class SkillsChain(ChainBase):
         return True
 
     def _install_market_skill(
-        self,
-        request: PendingSkillsInteraction,
-        page_index: int,
+            self,
+            request: PendingSkillsInteraction,
+            page_index: int,
     ) -> Tuple[bool, str]:
         """
         按当前市场页的可见序号安装技能，避免跨页序号歧义。
         """
         market_skills = self._get_market_skills(request=request)
-        page_items, page, _ = self._page_items(
+        items, page, _ = self._page_items(
             items=market_skills,
             page=request.market_page,
             page_size=self._page_size(request.channel),
         )
         request.market_page = page
-        if page_index < 1 or page_index > len(page_items):
+        if page_index < 1 or page_index > len(items):
             return False, "安装序号无效"
-        return self.skillhelper.install_market_skill(page_items[page_index - 1])
+        return self.skillhelper.install_market_skill(items[page_index - 1])
 
     def _remove_local_skill(
-        self,
-        request: PendingSkillsInteraction,
-        page_index: int,
+            self,
+            request: PendingSkillsInteraction,
+            page_index: int,
     ) -> Tuple[bool, str]:
         """
         按当前已安装页的可见序号删除技能，并拦截内置技能。
         """
         local_skills = self.skillhelper.list_local_skills()
-        page_items, page, _ = self._page_items(
+        items, page, _ = self._page_items(
             items=local_skills,
             page=request.local_page,
             page_size=self._page_size(request.channel),
         )
         request.local_page = page
-        if page_index < 1 or page_index > len(page_items):
+        if page_index < 1 or page_index > len(items):
             return False, "删除序号无效"
-        target = page_items[page_index - 1]
+        target = items[page_index - 1]
         if not target.removable:
             return False, f"技能 {target.id} 是内置技能，不能删除"
         return self.skillhelper.remove_local_skill(target.id)
@@ -713,15 +586,15 @@ class SkillsChain(ChainBase):
         return self.skillhelper.remove_custom_market_source(target.source)
 
     def _render_interaction(
-        self,
-        request: PendingSkillsInteraction,
-        channel: MessageChannel,
-        source: Optional[str],
-        userid: Union[str, int],
-        username: Optional[str],
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
-        force_market_refresh: bool = False,
+            self,
+            request: PendingSkillsInteraction,
+            channel: MessageChannel,
+            source: Optional[str],
+            userid: Union[str, int],
+            username: Optional[str],
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
+            force_market_refresh: bool = False,
     ) -> None:
         """
         根据当前视图生成内容，并选择编辑原消息或发送新消息。
@@ -758,9 +631,9 @@ class SkillsChain(ChainBase):
         )
 
     def _build_root_view(
-        self,
-        request: PendingSkillsInteraction,
-        force_market_refresh: bool = False,
+            self,
+            request: PendingSkillsInteraction,
+            force_market_refresh: bool = False,
     ) -> Tuple[str, str, Optional[List[List[dict]]]]:
         """
         构建根菜单视图，汇总本地技能和市场概览。
@@ -809,14 +682,14 @@ class SkillsChain(ChainBase):
         return "技能管理", "\n".join(text_lines), buttons
 
     def _build_installed_view(
-        self,
-        request: PendingSkillsInteraction
+            self,
+            request: PendingSkillsInteraction
     ) -> Tuple[str, str, Optional[List[List[dict]]]]:
         """
         构建已安装技能视图，列出来源和可删除状态。
         """
         local_skills = self.skillhelper.list_local_skills()
-        page_items, page, total_pages = self._page_items(
+        items, page, total_pages = self._page_items(
             items=local_skills,
             page=request.local_page,
             page_size=self._page_size(request.channel),
@@ -824,11 +697,11 @@ class SkillsChain(ChainBase):
         request.local_page = page
 
         text_lines = [f"第 {page + 1}/{total_pages} 页，共 {len(local_skills)} 个技能"]
-        if not page_items:
+        if not items:
             text_lines.append("")
             text_lines.append("当前没有已安装技能")
         else:
-            for index, skill in enumerate(page_items, start=1):
+            for index, skill in enumerate(items, start=1):
                 action = "可删除" if skill.removable else "内置不可删"
                 text_lines.extend(
                     [
@@ -869,9 +742,9 @@ class SkillsChain(ChainBase):
         return "已安装技能", "\n".join(text_lines), buttons
 
     def _build_market_view(
-        self,
-        request: PendingSkillsInteraction,
-        force_market_refresh: bool = False,
+            self,
+            request: PendingSkillsInteraction,
+            force_market_refresh: bool = False,
     ) -> Tuple[str, str, Optional[List[List[dict]]]]:
         """
         构建技能市场视图，仅展示尚未安装的技能。
@@ -880,7 +753,7 @@ class SkillsChain(ChainBase):
             request=request,
             force_market_refresh=force_market_refresh,
         )
-        page_items, page, total_pages = self._page_items(
+        items, page, total_pages = self._page_items(
             items=market_skills,
             page=request.market_page,
             page_size=self._page_size(request.channel),
@@ -897,14 +770,14 @@ class SkillsChain(ChainBase):
                     "搜索输入中：直接回复关键词即可筛选市场技能，回复 `取消` 结束输入。",
                 ]
             )
-        if not page_items:
+        if not items:
             text_lines.append("")
             if request.market_query:
                 text_lines.append("当前搜索没有匹配的市场技能")
             else:
                 text_lines.append("当前没有可安装的市场技能")
         else:
-            for index, skill in enumerate(page_items, start=1):
+            for index, skill in enumerate(items, start=1):
                 text_lines.extend(
                     [
                         "",
@@ -970,8 +843,8 @@ class SkillsChain(ChainBase):
         return "技能市场", "\n".join(text_lines), buttons
 
     def _build_sources_view(
-        self,
-        request: PendingSkillsInteraction,
+            self,
+            request: PendingSkillsInteraction,
     ) -> Tuple[str, str, Optional[List[List[dict]]]]:
         """
         构建技能源管理视图，提供自定义 GitHub 源的增删入口。
@@ -1052,9 +925,9 @@ class SkillsChain(ChainBase):
 
     @staticmethod
     def _page_items(
-        items: List[SkillInfo],
-        page: int,
-        page_size: int,
+            items: List[SkillInfo],
+            page: int,
+            page_size: int,
     ) -> Tuple[List[SkillInfo], int, int]:
         """
         返回当前页的数据，并把页码钳制到有效范围内。
@@ -1080,9 +953,9 @@ class SkillsChain(ChainBase):
 
     @staticmethod
     def _navigation_buttons(
-        request: PendingSkillsInteraction,
-        page: int,
-        total_pages: int,
+            request: PendingSkillsInteraction,
+            page: int,
+            total_pages: int,
     ) -> List[List[dict]]:
         """
         为分页视图生成上一页和下一页按钮。
@@ -1095,16 +968,16 @@ class SkillsChain(ChainBase):
         )
 
     def _update_or_post_message(
-        self,
-        channel: MessageChannel,
-        source: Optional[str],
-        userid: Union[str, int],
-        username: Optional[str],
-        title: str,
-        text: str,
-        buttons: Optional[List[List[dict]]] = None,
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            channel: MessageChannel,
+            source: Optional[str],
+            userid: Union[str, int],
+            username: Optional[str],
+            title: str,
+            text: str,
+            buttons: Optional[List[List[dict]]] = None,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
     ) -> None:
         """
         优先编辑原消息，编辑失败时再回退为发送新消息。
@@ -1136,9 +1009,9 @@ class SkillsChain(ChainBase):
         return "请输入 1、2、3、搜索 <关键词>、刷新 或 退出"
 
     def _get_market_skills(
-        self,
-        request: PendingSkillsInteraction,
-        force_market_refresh: bool = False,
+            self,
+            request: PendingSkillsInteraction,
+            force_market_refresh: bool = False,
     ) -> List[SkillInfo]:
         """
         获取当前 /skills 会话可见的市场技能，并应用搜索词过滤。
@@ -1183,8 +1056,8 @@ class SkillsChain(ChainBase):
 
     @staticmethod
     def _apply_market_search(
-        request: PendingSkillsInteraction,
-        query: str,
+            request: PendingSkillsInteraction,
+            query: str,
     ) -> None:
         """
         将会话切到市场搜索结果视图，并重置分页状态。
