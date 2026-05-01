@@ -318,7 +318,6 @@ class ChannelCapabilityManager:
         MessageChannel.Wechat: ChannelCapabilities(
             channel=MessageChannel.Wechat,
             capabilities={
-                ChannelCapability.MARKDOWN,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
                 ChannelCapability.MENU_COMMANDS,
@@ -404,7 +403,6 @@ class ChannelCapabilityManager:
         MessageChannel.QQ: ChannelCapabilities(
             channel=MessageChannel.QQ,
             capabilities={
-                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
