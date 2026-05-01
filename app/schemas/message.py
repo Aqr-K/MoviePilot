@@ -263,6 +263,8 @@ class ChannelCapability(Enum):
     CALLBACK_QUERIES = "callback_queries"
     # 支持富文本
     RICH_TEXT = "rich_text"
+    # 支持 Markdown
+    MARKDOWN = "markdown"
     # 支持图片
     IMAGES = "images"
     # 支持链接
@@ -301,6 +303,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.MESSAGE_EDITING,
                 ChannelCapability.MESSAGE_DELETION,
                 ChannelCapability.CALLBACK_QUERIES,
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -315,6 +318,7 @@ class ChannelCapabilityManager:
         MessageChannel.Wechat: ChannelCapabilities(
             channel=MessageChannel.Wechat,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
                 ChannelCapability.MENU_COMMANDS,
@@ -328,6 +332,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.MESSAGE_EDITING,
                 ChannelCapability.MESSAGE_DELETION,
                 ChannelCapability.CALLBACK_QUERIES,
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -348,6 +353,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.MESSAGE_EDITING,
                 ChannelCapability.MESSAGE_DELETION,
                 ChannelCapability.CALLBACK_QUERIES,
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -363,6 +369,7 @@ class ChannelCapabilityManager:
         MessageChannel.SynologyChat: ChannelCapabilities(
             channel=MessageChannel.SynologyChat,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -372,6 +379,7 @@ class ChannelCapabilityManager:
         MessageChannel.VoceChat: ChannelCapabilities(
             channel=MessageChannel.VoceChat,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -386,6 +394,7 @@ class ChannelCapabilityManager:
         MessageChannel.Web: ChannelCapabilities(
             channel=MessageChannel.Web,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -395,6 +404,7 @@ class ChannelCapabilityManager:
         MessageChannel.QQ: ChannelCapabilities(
             channel=MessageChannel.QQ,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -442,6 +452,13 @@ class ChannelCapabilityManager:
         检查渠道是否支持消息编辑
         """
         return cls.supports_capability(channel, ChannelCapability.MESSAGE_EDITING)
+
+    @classmethod
+    def supports_markdown(cls, channel: MessageChannel) -> bool:
+        """
+        检查渠道是否支持 Markdown。
+        """
+        return cls.supports_capability(channel, ChannelCapability.MARKDOWN)
 
     @classmethod
     def supports_deletion(cls, channel: MessageChannel) -> bool:

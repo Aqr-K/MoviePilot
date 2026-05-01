@@ -13,6 +13,18 @@ sys.modules.setdefault("transmission_rpc", ModuleType("transmission_rpc"))
 setattr(sys.modules["transmission_rpc"], "File", object)
 sys.modules.setdefault("psutil", ModuleType("psutil"))
 sys.modules.setdefault("aioshutil", ModuleType("aioshutil"))
+sys.modules.setdefault("pyquery", ModuleType("pyquery"))
+setattr(sys.modules["pyquery"], "PyQuery", object)
+sys.modules.setdefault("cn2an", ModuleType("cn2an"))
+setattr(sys.modules["cn2an"], "cn2an", lambda value, mode=None: value)
+setattr(sys.modules["cn2an"], "an2cn", lambda value, mode=None: str(value))
+sys.modules.setdefault("dateparser", ModuleType("dateparser"))
+setattr(sys.modules["dateparser"], "parse", lambda *args, **kwargs: None)
+sys.modules.setdefault("dateutil", ModuleType("dateutil"))
+dateutil_parser = ModuleType("dateutil.parser")
+setattr(dateutil_parser, "parse", lambda *args, **kwargs: None)
+sys.modules.setdefault("dateutil.parser", dateutil_parser)
+setattr(sys.modules["dateutil"], "parser", dateutil_parser)
 
 from app.chain.message import MessageChain
 from app.chain.skills import SkillsChain, skills_interaction_manager

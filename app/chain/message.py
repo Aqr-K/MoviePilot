@@ -16,7 +16,9 @@ from app.chain.interaction import (
     agent_interaction_manager,
     media_interaction_manager,
 )
+from app.chain.site import SiteChain, site_interaction_manager
 from app.chain.skills import SkillsChain, skills_interaction_manager
+from app.chain.subscribe import SubscribeChain, subscribe_interaction_manager
 from app.chain.transfer import TransferChain
 from app.core.config import settings, global_vars
 from app.db.models import TransferHistory
@@ -170,13 +172,34 @@ class MessageChain(ChainBase):
             )
             return
 
-        if skills_interaction_manager.get_by_user(userid):
+        latest_slash_interaction = self._get_latest_slash_interaction(userid)
+        if latest_slash_interaction == "sites":
+            if SiteChain().handle_text_interaction(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                text=text,
+            ):
+                return
+
+        if latest_slash_interaction == "subscribes":
+            if SubscribeChain().handle_text_interaction(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                text=text,
+            ):
+                return
+
+        if latest_slash_interaction == "skills":
             if SkillsChain().handle_text_interaction(
-                    channel=channel,
-                    source=source,
-                    userid=userid,
-                    username=username,
-                    text=text,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                text=text,
             ):
                 return
 
@@ -274,6 +297,28 @@ class MessageChain(ChainBase):
         ):
             return
 
+        if SiteChain().handle_callback_interaction(
+                callback_data=callback_data,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
+        ):
+            return
+
+        if SubscribeChain().handle_callback_interaction(
+                callback_data=callback_data,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
+        ):
+            return
+
         if MediaInteractionChain().handle_callback_interaction(
                 callback_data=callback_data,
                 channel=channel,
@@ -325,6 +370,24 @@ class MessageChain(ChainBase):
                 title="回调数据格式错误，请检查！",
             )
         )
+
+    @staticmethod
+    def _get_latest_slash_interaction(userid: Union[str, int]) -> Optional[str]:
+        """
+        返回当前用户最近一次激活的 slash 交互类型。
+        """
+        candidates = []
+        for name, manager in (
+            ("sites", site_interaction_manager),
+            ("subscribes", subscribe_interaction_manager),
+            ("skills", skills_interaction_manager),
+        ):
+            request = manager.get_by_user(userid)
+            if request:
+                candidates.append((request.created_at, name))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item[0])[1]
 
     @staticmethod
     def _parse_transfer_callback(

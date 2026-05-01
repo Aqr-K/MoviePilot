@@ -1,4 +1,3 @@
-import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -7,9 +6,14 @@ from typing import Dict, List, Optional, Tuple, Union
 import uuid
 
 from app.chain import ChainBase
+from app.helper.slash import (
+    build_navigation_buttons,
+    page_items,
+    supports_interaction_buttons,
+    update_or_post_message,
+)
 from app.helper.skill import SkillHelper, SkillInfo
 from app.schemas import Notification
-from app.schemas.message import ChannelCapabilityManager
 from app.schemas.types import MessageChannel
 
 
@@ -1055,11 +1059,7 @@ class SkillsChain(ChainBase):
         """
         返回当前页的数据，并把页码钳制到有效范围内。
         """
-        total_pages = max(1, math.ceil(len(items) / page_size)) if page_size else 1
-        page = min(max(0, page), total_pages - 1)
-        start = page * page_size
-        end = start + page_size
-        return items[start:end], page, total_pages
+        return page_items(items=items, page=page, page_size=page_size)
 
     def _page_size(self, channel: Optional[MessageChannel]) -> int:
         """
@@ -1076,11 +1076,7 @@ class SkillsChain(ChainBase):
         """
         判断当前渠道是否同时支持按钮展示和回调。
         """
-        return bool(
-            channel
-            and ChannelCapabilityManager.supports_buttons(channel)
-            and ChannelCapabilityManager.supports_callbacks(channel)
-        )
+        return supports_interaction_buttons(channel)
 
     @staticmethod
     def _navigation_buttons(
@@ -1091,25 +1087,12 @@ class SkillsChain(ChainBase):
         """
         为分页视图生成上一页和下一页按钮。
         """
-        buttons = []
-        nav_row = []
-        if page > 0:
-            nav_row.append(
-                {
-                    "text": "⬅️ 上一页",
-                    "callback_data": f"skills:{request.request_id}:page-prev",
-                }
-            )
-        if page < total_pages - 1:
-            nav_row.append(
-                {
-                    "text": "下一页 ➡️",
-                    "callback_data": f"skills:{request.request_id}:page-next",
-                }
-            )
-        if nav_row:
-            buttons.append(nav_row)
-        return buttons
+        return build_navigation_buttons(
+            prefix="skills",
+            request=request,
+            page=page,
+            total_pages=total_pages,
+        )
 
     def _update_or_post_message(
         self,
@@ -1126,33 +1109,17 @@ class SkillsChain(ChainBase):
         """
         优先编辑原消息，编辑失败时再回退为发送新消息。
         """
-        if (
-            original_message_id
-            and original_chat_id
-            and ChannelCapabilityManager.supports_editing(channel)
-        ):
-            edited = self.edit_message(
-                channel=channel,
-                source=source,
-                message_id=original_message_id,
-                chat_id=original_chat_id,
-                title=title,
-                text=text,
-                buttons=buttons,
-            )
-            if edited:
-                return
-
-        self.post_message(
-            Notification(
-                channel=channel,
-                source=source,
-                userid=userid,
-                username=username,
-                title=title,
-                text=text,
-                buttons=buttons,
-            )
+        update_or_post_message(
+            chain=self,
+            channel=channel,
+            source=source,
+            userid=userid,
+            username=username,
+            title=title,
+            text=text,
+            buttons=buttons,
+            original_message_id=original_message_id,
+            original_chat_id=original_chat_id,
         )
 
     @staticmethod

@@ -50,28 +50,8 @@ class Command(metaclass=Singleton):
             },
             "/sites": {
                 "func": SiteChain().remote_list,
-                "description": "查询站点",
+                "description": "管理站点",
                 "category": "站点",
-                "data": {},
-            },
-            "/site_cookie": {
-                "func": SiteChain().remote_cookie,
-                "description": "更新站点Cookie",
-                "data": {},
-            },
-            "/site_statistic": {
-                "func": SiteChain().remote_refresh_userdatas,
-                "description": "站点数据统计",
-                "data": {},
-            },
-            "/site_enable": {
-                "func": SiteChain().remote_enable,
-                "description": "启用站点",
-                "data": {},
-            },
-            "/site_disable": {
-                "func": SiteChain().remote_disable,
-                "description": "禁用站点",
                 "data": {},
             },
             "/mediaserver_sync": {
@@ -82,31 +62,9 @@ class Command(metaclass=Singleton):
             },
             "/subscribes": {
                 "func": SubscribeChain().remote_list,
-                "description": "查询订阅",
+                "description": "管理订阅",
                 "category": "订阅",
                 "data": {},
-            },
-            "/subscribe_refresh": {
-                "id": "subscribe_refresh",
-                "type": "scheduler",
-                "description": "刷新订阅",
-                "category": "订阅",
-            },
-            "/subscribe_search": {
-                "id": "subscribe_search",
-                "type": "scheduler",
-                "description": "搜索订阅",
-                "category": "订阅",
-            },
-            "/subscribe_delete": {
-                "func": SubscribeChain().remote_delete,
-                "description": "删除订阅",
-                "data": {},
-            },
-            "/subscribe_tmdb": {
-                "id": "subscribe_tmdb",
-                "type": "scheduler",
-                "description": "订阅元数据更新",
             },
             "/downloading": {
                 "func": DownloadChain().remote_downloading,
