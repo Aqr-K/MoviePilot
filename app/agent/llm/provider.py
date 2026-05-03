@@ -45,6 +45,16 @@ class ProviderAuthMethod:
 
 
 @dataclass(frozen=True)
+class ProviderUrlPreset:
+    """前端展示用的 Base URL 预设。"""
+
+    label: str
+    value: str
+    model_list_base_url: Optional[str] = None
+    models_dev_provider_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class ProviderSpec:
     """描述一个可接入的 LLM provider。"""
 
@@ -53,6 +63,7 @@ class ProviderSpec:
     runtime: str
     models_dev_provider_id: Optional[str] = None
     default_base_url: Optional[str] = None
+    base_url_presets: Tuple[ProviderUrlPreset, ...] = ()
     base_url_editable: bool = False
     requires_base_url: bool = False
     supports_api_key: bool = True
@@ -138,7 +149,158 @@ class LLMProviderManager(metaclass=Singleton):
             label="设备码授权",
             description="适合无回调环境，复制设备码到浏览器完成登录。",
         )
-        return (
+        url_preset = ProviderUrlPreset
+        def openai_provider(
+                provider_id: str,
+                name: str,
+                default_base_url: str,
+                sort_order: int,
+                *,
+                models_dev_provider_id: Optional[str] = None,
+                base_url_presets: Tuple[ProviderUrlPreset, ...] = (),
+                api_key_hint: Optional[str] = None,
+                description: Optional[str] = None,
+                model_list_strategy: str = "openai_compatible",
+                api_key_label: str = "API Key",
+        ) -> ProviderSpec:
+            return ProviderSpec(
+                id=provider_id,
+                name=name,
+                runtime="openai_compatible",
+                models_dev_provider_id=models_dev_provider_id or provider_id,
+                default_base_url=default_base_url,
+                base_url_presets=base_url_presets,
+                api_key_label=api_key_label,
+                api_key_hint=api_key_hint or f"填写 {name} API Key。",
+                model_list_strategy=model_list_strategy,
+                description=description or f"{name} OpenAI-compatible 端点。",
+                sort_order=sort_order,
+            )
+
+        def catalog_openai_provider(
+                provider_id: str,
+                name: str,
+                default_base_url: str,
+                sort_order: int,
+                *,
+                models_dev_provider_id: Optional[str] = None,
+                base_url_presets: Tuple[ProviderUrlPreset, ...] = (),
+                api_key_hint: Optional[str] = None,
+                description: Optional[str] = None,
+                api_key_label: str = "API Key",
+        ) -> ProviderSpec:
+            return openai_provider(
+                provider_id=provider_id,
+                name=name,
+                default_base_url=default_base_url,
+                sort_order=sort_order,
+                models_dev_provider_id=models_dev_provider_id,
+                base_url_presets=base_url_presets,
+                api_key_hint=api_key_hint,
+                description=description,
+                model_list_strategy="models_dev_only",
+                api_key_label=api_key_label,
+            )
+
+        def anthropic_provider(
+                provider_id: str,
+                name: str,
+                default_base_url: str,
+                sort_order: int,
+                *,
+                models_dev_provider_id: Optional[str] = None,
+                base_url_presets: Tuple[ProviderUrlPreset, ...] = (),
+                api_key_hint: Optional[str] = None,
+                description: Optional[str] = None,
+        ) -> ProviderSpec:
+            return ProviderSpec(
+                id=provider_id,
+                name=name,
+                runtime="anthropic_compatible",
+                models_dev_provider_id=models_dev_provider_id or provider_id,
+                default_base_url=default_base_url,
+                base_url_presets=base_url_presets,
+                api_key_hint=api_key_hint or f"填写 {name} API Key。",
+                model_list_strategy="anthropic_compatible",
+                description=description or f"{name} Anthropic-compatible 端点。",
+                sort_order=sort_order,
+            )
+
+        catalog_openai_providers = (
+            ("302ai", "302.AI", "https://api.302.ai/v1"),
+            ("abacus", "Abacus", "https://routellm.abacus.ai/v1"),
+            ("abliteration-ai", "abliteration.ai", "https://api.abliteration.ai/v1"),
+            ("baseten", "Baseten", "https://inference.baseten.co/v1"),
+            ("berget", "Berget.AI", "https://api.berget.ai/v1"),
+            ("chutes", "Chutes", "https://llm.chutes.ai/v1"),
+            ("clarifai", "Clarifai", "https://api.clarifai.com/v2/ext/openai/v1"),
+            ("cloudferro-sherlock", "CloudFerro Sherlock", "https://api-sherlock.cloudferro.com/openai/v1/"),
+            ("cloudflare-workers-ai", "Cloudflare Workers AI", "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1"),
+            ("cortecs", "Cortecs", "https://api.cortecs.ai/v1"),
+            ("digitalocean", "DigitalOcean", "https://inference.do-ai.run/v1"),
+            ("dinference", "DInference", "https://api.dinference.com/v1"),
+            ("drun", "D.Run (China)", "https://chat.d.run/v1"),
+            ("evroc", "evroc", "https://models.think.evroc.com/v1"),
+            ("fastrouter", "FastRouter", "https://go.fastrouter.ai/api/v1"),
+            ("fireworks-ai", "Fireworks AI", "https://api.fireworks.ai/inference/v1/"),
+            ("firmware", "Firmware", "https://app.frogbot.ai/api/v1"),
+            ("friendli", "Friendli", "https://api.friendli.ai/serverless/v1"),
+            ("helicone", "Helicone", "https://ai-gateway.helicone.ai/v1"),
+            ("hpc-ai", "HPC-AI", "https://api.hpc-ai.com/inference/v1"),
+            ("huggingface", "Hugging Face", "https://router.huggingface.co/v1"),
+            ("iflowcn", "iFlow", "https://apis.iflow.cn/v1"),
+            ("inception", "Inception", "https://api.inceptionlabs.ai/v1/"),
+            ("inference", "Inference", "https://inference.net/v1"),
+            ("io-net", "IO.NET", "https://api.intelligence.io.solutions/api/v1"),
+            ("jiekou", "Jiekou.AI", "https://api.jiekou.ai/openai"),
+            ("kilo", "Kilo Gateway", "https://api.kilo.ai/api/gateway"),
+            ("kuae-cloud-coding-plan", "KUAE Cloud Coding Plan", "https://coding-plan-endpoint.kuaecloud.net/v1"),
+            ("llama", "Llama", "https://api.llama.com/compat/v1/"),
+            ("llmgateway", "LLM Gateway", "https://api.llmgateway.io/v1"),
+            ("lucidquery", "LucidQuery AI", "https://lucidquery.com/api/v1"),
+            ("meganova", "Meganova", "https://api.meganova.ai/v1"),
+            ("mixlayer", "Mixlayer", "https://models.mixlayer.ai/v1"),
+            ("moark", "Moark", "https://moark.com/v1"),
+            ("modelscope", "ModelScope", "https://api-inference.modelscope.cn/v1"),
+            ("morph", "Morph", "https://api.morphllm.com/v1"),
+            ("nano-gpt", "NanoGPT", "https://nano-gpt.com/api/v1"),
+            ("nebius", "Nebius Token Factory", "https://api.tokenfactory.nebius.com/v1"),
+            ("neuralwatt", "Neuralwatt", "https://api.neuralwatt.com/v1"),
+            ("nova", "Nova", "https://api.nova.amazon.com/v1"),
+            ("novita-ai", "NovitaAI", "https://api.novita.ai/openai"),
+            ("ovhcloud", "OVHcloud AI Endpoints", "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
+            ("perplexity-agent", "Perplexity Agent", "https://api.perplexity.ai/v1"),
+            ("poe", "Poe", "https://api.poe.com/v1"),
+            ("privatemode-ai", "Privatemode AI", "http://localhost:8080/v1"),
+            ("qihang-ai", "QiHang", "https://api.qhaigc.net/v1"),
+            ("qiniu-ai", "Qiniu", "https://api.qnaigc.com/v1"),
+            ("regolo-ai", "Regolo AI", "https://api.regolo.ai/v1"),
+            ("requesty", "Requesty", "https://router.requesty.ai/v1"),
+            ("scaleway", "Scaleway", "https://api.scaleway.ai/v1"),
+            ("stackit", "STACKIT", "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1"),
+            ("stepfun", "StepFun", "https://api.stepfun.com/v1"),
+            ("submodel", "submodel", "https://llm.submodel.ai/v1"),
+            ("synthetic", "Synthetic", "https://api.synthetic.new/openai/v1"),
+            ("the-grid-ai", "The Grid AI", "https://api.thegrid.ai/v1"),
+            ("upstage", "Upstage", "https://api.upstage.ai/v1/solar"),
+            ("vivgrid", "Vivgrid", "https://api.vivgrid.com/v1"),
+            ("vultr", "Vultr", "https://api.vultrinference.com/v1"),
+            ("wafer.ai", "Wafer", "https://pass.wafer.ai/v1"),
+            ("wandb", "Weights & Biases", "https://api.inference.wandb.ai/v1"),
+            ("zenmux", "ZenMux", "https://zenmux.ai/api/v1"),
+        )
+        catalog_openai_overrides = {
+            "cloudflare-workers-ai": {
+                "api_key_hint": "填写 Cloudflare API Token，并将 Base URL 中的 ${CLOUDFLARE_ACCOUNT_ID} 替换为真实账户 ID。",
+                "description": "Cloudflare Workers AI OpenAI-compatible 端点，需要替换账户 ID。",
+            },
+            "privatemode-ai": {
+                "api_key_hint": "如未启用鉴权，可填写任意占位值。",
+                "description": "Privatemode AI 本地 OpenAI-compatible 端点。",
+            },
+        }
+
+        providers = [
             ProviderSpec(
                 id="chatgpt",
                 name="ChatGPT",
@@ -162,6 +324,14 @@ class LLMProviderManager(metaclass=Singleton):
                 description="Gemini / Google AI Studio。",
                 sort_order=20,
             ),
+            anthropic_provider(
+                provider_id="anthropic",
+                name="Anthropic",
+                default_base_url="https://api.anthropic.com/v1",
+                sort_order=25,
+                api_key_hint="填写 Anthropic API Key。",
+                description="Anthropic Claude 官方端点。",
+            ),
             ProviderSpec(
                 id="deepseek",
                 name="DeepSeek",
@@ -172,6 +342,14 @@ class LLMProviderManager(metaclass=Singleton):
                 description="DeepSeek 官方平台。",
                 sort_order=30,
             ),
+            catalog_openai_provider(
+                provider_id="groq",
+                name="Groq",
+                default_base_url="https://api.groq.com/openai/v1",
+                sort_order=35,
+                api_key_hint="填写 Groq API Key。",
+                description="Groq 官方 OpenAI-compatible 端点。",
+            ),
             ProviderSpec(
                 id="openrouter",
                 name="OpenRouter",
@@ -181,6 +359,14 @@ class LLMProviderManager(metaclass=Singleton):
                 api_key_hint="填写 OpenRouter API Key。",
                 description="OpenRouter 聚合模型平台。",
                 sort_order=40,
+            ),
+            catalog_openai_provider(
+                provider_id="xai",
+                name="xAI",
+                default_base_url="https://api.x.ai/v1",
+                sort_order=45,
+                api_key_hint="填写 xAI API Key。",
+                description="xAI 官方 OpenAI-compatible 端点。",
             ),
             ProviderSpec(
                 id="github-copilot",
@@ -201,25 +387,140 @@ class LLMProviderManager(metaclass=Singleton):
                 description="通过 GitHub Copilot 订阅接入。",
                 sort_order=50,
             ),
-            ProviderSpec(
-                id="siliconflow",
-                name="硅基流动",
-                runtime="openai_compatible",
-                models_dev_provider_id="siliconflow",
-                default_base_url="https://api.siliconflow.cn/v1",
-                api_key_hint="填写硅基流动 API Key。",
-                description="SiliconFlow 官方兼容端点。",
-                sort_order=60,
+            catalog_openai_provider(
+                provider_id="github-models",
+                name="GitHub Models",
+                default_base_url="https://models.github.ai/inference",
+                sort_order=55,
+                api_key_label="GitHub Token",
+                api_key_hint="填写具有 GitHub Models 访问权限的 GitHub Token。",
+                description="GitHub Models 推理端点。",
             ),
-            ProviderSpec(
-                id="alibaba",
+            openai_provider(
+                provider_id="siliconflow",
+                name="硅基流动",
+                default_base_url="https://api.siliconflow.cn/v1",
+                sort_order=60,
+                models_dev_provider_id="siliconflow-cn",
+                base_url_presets=(
+                    url_preset(
+                        label="中国大陆",
+                        value="https://api.siliconflow.cn/v1",
+                        models_dev_provider_id="siliconflow-cn",
+                    ),
+                    url_preset(
+                        label="Global",
+                        value="https://api.siliconflow.com/v1",
+                        models_dev_provider_id="siliconflow",
+                    ),
+                ),
+                api_key_hint="填写硅基流动 API Key，可在中国大陆与 Global 端点间切换。",
+                description="SiliconFlow 官方兼容端点。",
+            ),
+            catalog_openai_provider(
+                provider_id="moonshot",
+                name="Moonshot AI",
+                default_base_url="https://api.moonshot.cn/v1",
+                sort_order=62,
+                models_dev_provider_id="moonshotai-cn",
+                base_url_presets=(
+                    url_preset(
+                        label="中国站",
+                        value="https://api.moonshot.cn/v1",
+                        models_dev_provider_id="moonshotai-cn",
+                    ),
+                    url_preset(
+                        label="国际站",
+                        value="https://api.moonshot.ai/v1",
+                        models_dev_provider_id="moonshotai",
+                    ),
+                ),
+                api_key_hint="填写 Moonshot / Kimi API Key，可在中国站与国际站端点间切换。",
+                description="Moonshot / Kimi 官方兼容端点。",
+            ),
+            anthropic_provider(
+                provider_id="kimi-coding",
+                name="Kimi for Coding",
+                default_base_url="https://api.kimi.com/coding/v1",
+                sort_order=63,
+                models_dev_provider_id="kimi-for-coding",
+                api_key_hint="填写 Moonshot / Kimi API Key。",
+                description="Moonshot Kimi Coding Anthropic-compatible 端点。",
+            ),
+            openai_provider(
+                provider_id="zhipu",
+                name="智谱 GLM",
+                default_base_url="https://open.bigmodel.cn/api/paas/v4",
+                sort_order=65,
+                models_dev_provider_id="zhipuai",
+                base_url_presets=(
+                    url_preset(
+                        label="Token Plan / 通用 API",
+                        value="https://open.bigmodel.cn/api/paas/v4",
+                        models_dev_provider_id="zhipuai",
+                    ),
+                    url_preset(
+                        label="Coding Plan",
+                        value="https://open.bigmodel.cn/api/coding/paas/v4",
+                        model_list_base_url="https://open.bigmodel.cn/api/paas/v4",
+                        models_dev_provider_id="zhipuai-coding-plan",
+                    ),
+                ),
+                api_key_hint="填写智谱开放平台 API Key，可在 Token Plan / 通用 API 与 Coding Plan 端点间切换。",
+                description="智谱开放平台国内站，支持通用 API 与 GLM Coding Plan 端点。",
+            ),
+            catalog_openai_provider(
+                provider_id="zai",
+                name="Z.AI",
+                default_base_url="https://api.z.ai/api/paas/v4",
+                sort_order=66,
+                base_url_presets=(
+                    url_preset(
+                        label="Token Plan / 通用 API",
+                        value="https://api.z.ai/api/paas/v4",
+                        models_dev_provider_id="zai",
+                    ),
+                    url_preset(
+                        label="Coding Plan",
+                        value="https://api.z.ai/api/coding/paas/v4",
+                        models_dev_provider_id="zai-coding-plan",
+                    ),
+                ),
+                api_key_hint="填写 Z.AI API Key，可在通用 API 与 Coding Plan 端点间切换。",
+                description="Z.AI 官方端点。",
+            ),
+            openai_provider(
+                provider_id="alibaba",
                 name="阿里云百炼",
-                runtime="openai_compatible",
-                models_dev_provider_id="alibaba",
                 default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                api_key_hint="填写 DashScope / Alibaba API Key。",
-                description="阿里云百炼兼容端点。",
                 sort_order=70,
+                models_dev_provider_id="alibaba-cn",
+                base_url_presets=(
+                    url_preset(
+                        label="中国内地 / 通用",
+                        value="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        models_dev_provider_id="alibaba-cn",
+                    ),
+                    url_preset(
+                        label="国际站 / 通用",
+                        value="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                        models_dev_provider_id="alibaba",
+                    ),
+                    url_preset(
+                        label="中国内地 / Coding Plan",
+                        value="https://coding.dashscope.aliyuncs.com/v1",
+                        model_list_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        models_dev_provider_id="alibaba-coding-plan-cn",
+                    ),
+                    url_preset(
+                        label="国际站 / Coding Plan",
+                        value="https://coding-intl.dashscope.aliyuncs.com/v1",
+                        model_list_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                        models_dev_provider_id="alibaba-coding-plan",
+                    ),
+                ),
+                api_key_hint="填写 DashScope / Alibaba API Key，可在中国内地、国际站与 Coding Plan 端点间切换。",
+                description="阿里云百炼兼容端点。",
             ),
             ProviderSpec(
                 id="volcengine",
@@ -236,7 +537,19 @@ class LLMProviderManager(metaclass=Singleton):
                 runtime="openai_compatible",
                 models_dev_provider_id="tencent-tokenhub",
                 default_base_url="https://tokenhub.tencentmaas.com/v1",
-                api_key_hint="填写 Tencent API Key。",
+                base_url_presets=(
+                    url_preset(
+                        label="TokenHub",
+                        value="https://tokenhub.tencentmaas.com/v1",
+                        models_dev_provider_id="tencent-tokenhub",
+                    ),
+                    url_preset(
+                        label="Coding Plan",
+                        value="https://api.lkeap.cloud.tencent.com/coding/v3",
+                        models_dev_provider_id="tencent-coding-plan",
+                    ),
+                ),
+                api_key_hint="填写 Tencent API Key，可在 TokenHub 与 Coding Plan 端点间切换。",
                 model_list_strategy="models_dev_only",
                 description="腾讯兼容端点。",
                 sort_order=90,
@@ -261,27 +574,125 @@ class LLMProviderManager(metaclass=Singleton):
                 description="Nvidia 集成推理平台。",
                 sort_order=110,
             ),
-            ProviderSpec(
-                id="minimax",
+            catalog_openai_provider(
+                provider_id="opencode",
+                name="OpenCode",
+                default_base_url="https://opencode.ai/zen/v1",
+                sort_order=115,
+                base_url_presets=(
+                    url_preset(
+                        label="Zen",
+                        value="https://opencode.ai/zen/v1",
+                        models_dev_provider_id="opencode",
+                    ),
+                    url_preset(
+                        label="Go",
+                        value="https://opencode.ai/zen/go/v1",
+                        models_dev_provider_id="opencode-go",
+                    ),
+                ),
+                api_key_hint="填写 OpenCode API Key，可在 Zen 与 Go 端点间切换。",
+                description="OpenCode Zen / Go 端点。",
+            ),
+            anthropic_provider(
+                provider_id="minimax",
                 name="MiniMax",
-                runtime="anthropic_compatible",
-                models_dev_provider_id="minimax",
                 default_base_url="https://api.minimaxi.com/anthropic/v1",
-                api_key_hint="填写 MiniMax API Key。",
-                model_list_strategy="anthropic_compatible",
-                description="MiniMax Anthropic-compatible 端点。",
                 sort_order=120,
+                models_dev_provider_id="minimax-cn",
+                base_url_presets=(
+                    url_preset(
+                        label="中国内地 / 通用",
+                        value="https://api.minimaxi.com/anthropic/v1",
+                        models_dev_provider_id="minimax-cn",
+                    ),
+                    url_preset(
+                        label="国际站 / 通用",
+                        value="https://api.minimax.io/anthropic/v1",
+                        models_dev_provider_id="minimax",
+                    ),
+                ),
+                api_key_hint="填写 MiniMax API Key，可在中国内地与国际站通用端点间切换。",
+                description="MiniMax Anthropic-compatible 通用端点。",
             ),
-            ProviderSpec(
-                id="xiaomi",
+            anthropic_provider(
+                provider_id="minimax-coding",
+                name="MiniMax Coding Plan",
+                default_base_url="https://api.minimaxi.com/anthropic/v1",
+                sort_order=121,
+                models_dev_provider_id="minimax-cn-coding-plan",
+                base_url_presets=(
+                    url_preset(
+                        label="中国内地 / Coding Plan",
+                        value="https://api.minimaxi.com/anthropic/v1",
+                        models_dev_provider_id="minimax-cn-coding-plan",
+                    ),
+                    url_preset(
+                        label="国际站 / Coding Plan",
+                        value="https://api.minimax.io/anthropic/v1",
+                        models_dev_provider_id="minimax-coding-plan",
+                    ),
+                ),
+                api_key_hint="填写 MiniMax API Key，可在中国内地与国际站 Coding Plan 目录间切换。",
+                description="MiniMax Coding Plan Anthropic-compatible 端点。",
+            ),
+            catalog_openai_provider(
+                provider_id="xiaomi",
                 name="Xiaomi",
-                runtime="openai_compatible",
-                models_dev_provider_id="xiaomi",
                 default_base_url="https://api.xiaomimimo.com/v1",
-                api_key_hint="填写 Xiaomi API Key。",
-                description="小米 Mimo 兼容端点。",
                 sort_order=130,
+                base_url_presets=(
+                    url_preset(
+                        label="标准端点",
+                        value="https://api.xiaomimimo.com/v1",
+                        models_dev_provider_id="xiaomi",
+                    ),
+                    url_preset(
+                        label="Token Plan / 中国",
+                        value="https://token-plan-cn.xiaomimimo.com/v1",
+                        models_dev_provider_id="xiaomi-token-plan-cn",
+                    ),
+                    url_preset(
+                        label="Token Plan / 新加坡",
+                        value="https://token-plan-sgp.xiaomimimo.com/v1",
+                        models_dev_provider_id="xiaomi-token-plan-sgp",
+                    ),
+                    url_preset(
+                        label="Token Plan / 欧洲",
+                        value="https://token-plan-ams.xiaomimimo.com/v1",
+                        models_dev_provider_id="xiaomi-token-plan-ams",
+                    ),
+                ),
+                api_key_hint="填写 Xiaomi API Key，可在标准端点与各区域 Token Plan 端点间切换。",
+                description="小米 Mimo 兼容端点。",
             ),
+            catalog_openai_provider(
+                provider_id="lmstudio",
+                name="LM Studio",
+                default_base_url="http://127.0.0.1:1234/v1",
+                sort_order=135,
+                api_key_hint="如未启用鉴权，可填写任意占位值。",
+                description="LM Studio 本地 OpenAI-compatible 端点。",
+            ),
+        ]
+
+        for sort_order, (provider_id, name, base_url) in enumerate(
+                catalog_openai_providers,
+                start=200,
+        ):
+            overrides = catalog_openai_overrides.get(provider_id, {})
+            providers.append(
+                catalog_openai_provider(
+                    provider_id=provider_id,
+                    name=name,
+                    default_base_url=base_url,
+                    sort_order=sort_order,
+                    api_key_hint=overrides.get("api_key_hint"),
+                    description=overrides.get("description"),
+                )
+            )
+
+        providers.append(
             ProviderSpec(
                 id="openai",
                 name="OpenAI Compatible",
@@ -292,9 +703,10 @@ class LLMProviderManager(metaclass=Singleton):
                 supports_api_key=True,
                 api_key_hint="通用 OpenAI-compatible 兜底入口，需要手动填写 Base URL。",
                 description="通用 OpenAI-compatible 模型服务。",
-                sort_order=200,
-            ),
+                sort_order=1000,
+            )
         )
+        return tuple(providers)
 
     def list_providers(self) -> list[dict[str, Any]]:
         """返回前端可渲染的 provider 目录。"""
@@ -305,7 +717,14 @@ class LLMProviderManager(metaclass=Singleton):
                     "id": spec.id,
                     "name": spec.name,
                     "runtime": spec.runtime,
-                    "default_base_url": spec.default_base_url or "",
+                    "default_base_url": self._default_base_url_for_provider(spec) or "",
+                    "base_url_presets": [
+                        {
+                            "label": preset.label,
+                            "value": self._sanitize_base_url(preset.value) or "",
+                        }
+                        for preset in spec.base_url_presets
+                    ],
                     "base_url_editable": spec.base_url_editable,
                     "requires_base_url": spec.requires_base_url,
                     "supports_api_key": spec.supports_api_key,
@@ -343,6 +762,65 @@ class LLMProviderManager(metaclass=Singleton):
         if not value:
             return None
         return value.rstrip("/")
+
+    @classmethod
+    def _default_base_url_for_provider(cls, spec: ProviderSpec) -> Optional[str]:
+        default_base_url = cls._sanitize_base_url(spec.default_base_url)
+        if default_base_url:
+            return default_base_url
+        if not spec.base_url_presets:
+            return None
+        return cls._sanitize_base_url(spec.base_url_presets[0].value)
+
+    @classmethod
+    def _resolve_provider_model_list_base_url(
+            cls, spec: ProviderSpec, base_url: Optional[str]
+    ) -> Optional[str]:
+        normalized_base_url = cls._sanitize_base_url(base_url)
+        if normalized_base_url:
+            for preset in spec.base_url_presets:
+                preset_value = cls._sanitize_base_url(preset.value)
+                if normalized_base_url != preset_value:
+                    continue
+                return cls._sanitize_base_url(preset.model_list_base_url) or preset_value
+            return normalized_base_url
+
+        default_base_url = cls._default_base_url_for_provider(spec)
+        if default_base_url:
+            for preset in spec.base_url_presets:
+                preset_value = cls._sanitize_base_url(preset.value)
+                if preset_value != default_base_url:
+                    continue
+                return cls._sanitize_base_url(preset.model_list_base_url) or preset_value
+        return default_base_url
+
+    @classmethod
+    def _resolve_provider_models_dev_provider_id(
+            cls, spec: ProviderSpec, base_url: Optional[str]
+    ) -> Optional[str]:
+        normalized_base_url = cls._sanitize_base_url(base_url)
+        if normalized_base_url:
+            for preset in spec.base_url_presets:
+                preset_value = cls._sanitize_base_url(preset.value)
+                if normalized_base_url != preset_value:
+                    continue
+                return preset.models_dev_provider_id or spec.models_dev_provider_id
+            return spec.models_dev_provider_id
+
+        default_base_url = cls._default_base_url_for_provider(spec)
+        if default_base_url:
+            for preset in spec.base_url_presets:
+                preset_value = cls._sanitize_base_url(preset.value)
+                if preset_value != default_base_url:
+                    continue
+                return preset.models_dev_provider_id or spec.models_dev_provider_id
+        return spec.models_dev_provider_id
+
+    def resolve_model_list_base_url(
+            self, provider_id: str, base_url: Optional[str]
+    ) -> Optional[str]:
+        spec = self.get_provider(provider_id)
+        return self._resolve_provider_model_list_base_url(spec, base_url)
 
     @staticmethod
     def _httpx_proxy_key() -> str:
@@ -492,16 +970,22 @@ class LLMProviderManager(metaclass=Singleton):
                     return cached
                 raise LLMProviderError(f"获取 models.dev 数据失败: {err}") from err
 
-    async def _models_dev_provider_payload(self, provider_id: str) -> dict[str, Any]:
+    async def _models_dev_provider_payload(
+            self, provider_id: str, base_url: Optional[str] = None
+    ) -> dict[str, Any]:
         spec = self.get_provider(provider_id)
-        if not spec.models_dev_provider_id:
+        models_dev_provider_id = self._resolve_provider_models_dev_provider_id(
+            spec,
+            base_url,
+        )
+        if not models_dev_provider_id:
             return {}
-        return (await self.get_models_dev_data()).get(spec.models_dev_provider_id, {}) or {}
+        return (await self.get_models_dev_data()).get(models_dev_provider_id, {}) or {}
 
     async def _models_dev_model(
-            self, provider_id: str, model_id: str
+            self, provider_id: str, model_id: str, base_url: Optional[str] = None
     ) -> dict[str, Any] | None:
-        payload = await self._models_dev_provider_payload(provider_id)
+        payload = await self._models_dev_provider_payload(provider_id, base_url=base_url)
         models = payload.get("models") if isinstance(payload, dict) else None
         if not isinstance(models, dict):
             return None
@@ -649,7 +1133,11 @@ class LLMProviderManager(metaclass=Singleton):
         results = []
         response = await client.models.list()
         for model in response.data:
-            metadata = await self._models_dev_model(provider_id, model.id) or {}
+            metadata = await self._models_dev_model(
+                provider_id,
+                model.id,
+                base_url=base_url,
+            ) or {}
             results.append(
                 self._normalize_model_record(
                     model_id=model.id,
@@ -664,13 +1152,14 @@ class LLMProviderManager(metaclass=Singleton):
             self,
             provider_id: str,
             transport: str = "openai",
+            base_url: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
         某些 provider 没有统一稳定的 models.list 行为，
         因此优先读取 models.dev 目录；若未来 provider 暴露标准 models 接口，
         再平滑补充实时刷新即可。
         """
-        payload = await self._models_dev_provider_payload(provider_id)
+        payload = await self._models_dev_provider_payload(provider_id, base_url=base_url)
         models = payload.get("models") if isinstance(payload, dict) else None
         if not isinstance(models, dict):
             raise LLMProviderError(f"{provider_id} 暂无可用模型目录")
@@ -825,10 +1314,11 @@ class LLMProviderManager(metaclass=Singleton):
     ) -> list[dict[str, Any]]:
         """返回标准化后的模型目录。"""
         spec = self.get_provider(provider_id)
-        if force_refresh and spec.models_dev_provider_id:
+        if self._resolve_provider_models_dev_provider_id(spec, base_url):
             # 对依赖 models.dev 的 provider 主动刷新一次缓存，保证“刷新模型列表”
             # 在使用目录型 provider 时也能拿到最新参数。
-            await self.get_models_dev_data(force_refresh=True)
+            if force_refresh:
+                await self.get_models_dev_data(force_refresh=True)
         runtime = await self.resolve_runtime(
             provider_id,
             model=None,
@@ -848,7 +1338,10 @@ class LLMProviderManager(metaclass=Singleton):
             return await self._list_models_from_openai_compatible(
                 provider_id="chatgpt",
                 api_key=runtime["api_key"],
-                base_url=runtime["base_url"],
+                base_url=self._resolve_provider_model_list_base_url(
+                    spec,
+                    runtime["base_url"],
+                ),
                 default_headers=runtime.get("default_headers"),
             )
 
@@ -856,28 +1349,40 @@ class LLMProviderManager(metaclass=Singleton):
             return await self._list_models_from_models_dev_only(
                 provider_id=provider_id,
                 transport="anthropic",
+                base_url=base_url,
             )
             
         if spec.model_list_strategy == "models_dev_only":
             return await self._list_models_from_models_dev_only(
                 provider_id=provider_id,
                 transport="openai",
+                base_url=base_url,
             )
 
         # openai-compatible / deepseek 默认走官方 models 端点。
         return await self._list_models_from_openai_compatible(
             provider_id=provider_id,
             api_key=runtime["api_key"],
-            base_url=runtime["base_url"],
+            base_url=self._resolve_provider_model_list_base_url(
+                spec,
+                runtime["base_url"],
+            ),
             default_headers=runtime.get("default_headers"),
         )
 
     async def resolve_model_metadata(
-            self, provider_id: str, model_id: Optional[str]
+            self,
+            provider_id: str,
+            model_id: Optional[str],
+            base_url: Optional[str] = None,
     ) -> dict[str, Any] | None:
         if not model_id:
             return None
-        metadata = await self._models_dev_model(provider_id, model_id)
+        metadata = await self._models_dev_model(
+            provider_id,
+            model_id,
+            base_url=base_url,
+        )
         if metadata:
             return metadata
         if provider_id == "chatgpt":
@@ -1366,7 +1871,11 @@ class LLMProviderManager(metaclass=Singleton):
             "runtime": spec.runtime,
             "model_id": model,
             "model_record": model_record,
-            "model_metadata": await self.resolve_model_metadata(provider_id, model),
+            "model_metadata": await self.resolve_model_metadata(
+                provider_id,
+                model,
+                base_url=base_url,
+            ),
             "default_headers": None,
             "use_responses_api": None,
             "auth_mode": "api_key",
@@ -1401,7 +1910,8 @@ class LLMProviderManager(metaclass=Singleton):
                     {
                         "runtime": "openai_compatible",
                         "api_key": normalized_api_key,
-                        "base_url": normalized_base_url or spec.default_base_url,
+                        "base_url": normalized_base_url
+                                    or self._default_base_url_for_provider(spec),
                         "auth_mode": "api_key",
                     }
                 )
@@ -1448,7 +1958,9 @@ class LLMProviderManager(metaclass=Singleton):
             return result
 
         if spec.runtime == "anthropic_compatible":
-            effective_base_url = normalized_base_url or spec.default_base_url
+            effective_base_url = normalized_base_url or self._default_base_url_for_provider(
+                spec
+            )
             if not normalized_api_key:
                 raise LLMProviderAuthError(f"{spec.name} 需要填写 API Key")
             if not effective_base_url:
@@ -1464,7 +1976,7 @@ class LLMProviderManager(metaclass=Singleton):
             )
             return result
 
-        effective_base_url = normalized_base_url or spec.default_base_url
+        effective_base_url = normalized_base_url or self._default_base_url_for_provider(spec)
         if spec.requires_base_url and not effective_base_url:
             raise LLMProviderAuthError(f"{spec.name} 需要填写 Base URL")
         if not normalized_api_key:

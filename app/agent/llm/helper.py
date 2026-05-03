@@ -768,12 +768,25 @@ class LLMHelper:
                     {"id": model_id, "name": model_id}
                     for model_id in await self._get_google_models(api_key or "")
                 ]
+            model_list_base_url = base_url
+            try:
+                from app.agent.llm.provider import LLMProviderManager
+
+                model_list_base_url = (
+                    LLMProviderManager().resolve_model_list_base_url(
+                        provider_id=provider,
+                        base_url=base_url,
+                    )
+                    or base_url
+                )
+            except Exception:
+                model_list_base_url = base_url
             return [
                 {"id": model_id, "name": model_id}
                 for model_id in await self._get_openai_compatible_models(
                     provider,
                     api_key or "",
-                    base_url,
+                    model_list_base_url,
                 )
             ]
 
