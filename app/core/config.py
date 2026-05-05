@@ -1066,6 +1066,12 @@ class GlobalVar(object):
         """
         self.STOP_EVENT.set()
 
+    def resume_system(self):
+        """
+        恢复系统运行标记。
+        """
+        self.STOP_EVENT.clear()
+
     @property
     def is_system_stopped(self):
         """
