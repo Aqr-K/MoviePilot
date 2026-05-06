@@ -1312,8 +1312,9 @@ def _collect_downloader_config() -> Optional[dict[str, Any]]:
     config_name = _prompt_text("下载器名称", default=downloader_type)
     if downloader_type == "qbittorrent":
         host = _prompt_text("qBittorrent 地址", default="http://127.0.0.1:8080")
-        username = _prompt_text("qBittorrent 用户名", default="admin")
-        password = _prompt_text("qBittorrent 密码", secret=True)
+        apikey = _prompt_text("qBittorrent API Key（可选，5.2+ 推荐）", allow_empty=True, default="")
+        username = _prompt_text("qBittorrent 用户名", default="admin") if not apikey else ""
+        password = _prompt_text("qBittorrent 密码", secret=True, allow_empty=bool(apikey)) if not apikey else ""
         category = _prompt_yes_no("是否启用 qBittorrent 分类", default=False)
         return {
             "name": config_name,
@@ -1322,6 +1323,7 @@ def _collect_downloader_config() -> Optional[dict[str, Any]]:
             "enabled": True,
             "config": {
                 "host": host,
+                "apikey": apikey,
                 "username": username,
                 "password": password,
                 "category": category,
