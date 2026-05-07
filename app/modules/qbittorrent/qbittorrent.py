@@ -58,11 +58,10 @@ class Qbittorrent:
                 pass
         return getattr(data, key, None)
 
-    @staticmethod
-    def __normalize_cookie(cookie: Any) -> dict:
+    def __normalize_cookie(self, cookie: Any) -> dict:
         result = {}
         for key in ("domain", "path", "name", "value", "expirationDate"):
-            value = Qbittorrent.__get_mapping_value(cookie, key)
+            value = self.__get_mapping_value(cookie, key)
             if value not in (None, ""):
                 result[key] = value
         return result
@@ -94,16 +93,15 @@ class Qbittorrent:
             for morsel in raw_cookies.values()
         ]
 
-    @staticmethod
-    def __parse_add_torrent_response(response: Any) -> Tuple[bool, List[str]]:
+    def __parse_add_torrent_response(self, response: Any) -> Tuple[bool, List[str]]:
         if not response:
             return False, []
         if isinstance(response, str):
             return "Ok" in response, []
 
-        success_count = Qbittorrent.__get_mapping_value(response, "success_count") or 0
-        pending_count = Qbittorrent.__get_mapping_value(response, "pending_count") or 0
-        added_torrent_ids = Qbittorrent.__get_mapping_value(response, "added_torrent_ids") or []
+        success_count = self.__get_mapping_value(response, "success_count") or 0
+        pending_count = self.__get_mapping_value(response, "pending_count") or 0
+        added_torrent_ids = self.__get_mapping_value(response, "added_torrent_ids") or []
         if not isinstance(added_torrent_ids, list):
             added_torrent_ids = list(added_torrent_ids)
         added_torrent_ids = [str(torrent_id) for torrent_id in added_torrent_ids if torrent_id]
