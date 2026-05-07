@@ -10,7 +10,7 @@ import threading
 from asyncio import AbstractEventLoop
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from dotenv import set_key
 from pydantic import BaseModel, Field, ConfigDict, model_validator
@@ -126,8 +126,8 @@ class ConfigModel(BaseModel):
     DB_SQLITE_MAX_OVERFLOW: int = 50
     # PostgreSQL 主机地址
     DB_POSTGRESQL_HOST: str = "localhost"
-    # PostgreSQL 端口
-    DB_POSTGRESQL_PORT: int = 5432
+    # PostgreSQL 端口；使用 Unix Socket 时可留空
+    DB_POSTGRESQL_PORT: str = "5432"
     # PostgreSQL 数据库名
     DB_POSTGRESQL_DATABASE: str = "moviepilot"
     # PostgreSQL 用户名
@@ -142,7 +142,7 @@ class ConfigModel(BaseModel):
     # ==================== 缓存配置 ====================
     # 缓存类型，支持 cachetools 和 redis，默认使用 cachetools
     CACHE_BACKEND_TYPE: str = "cachetools"
-    # 缓存连接字符串，仅外部缓存（如 Redis、Memcached）需要
+    # 缓存连接字符串，仅外部缓存（如 Redis、Memcached）需要，支持 Redis Unix Socket URL
     CACHE_BACKEND_URL: Optional[str] = "redis://localhost:6379"
     # Redis 缓存最大内存限制，未配置时，如开启大内存模式时为 "1024mb"，未开启时为 "256mb"
     CACHE_REDIS_MAXMEMORY: Optional[str] = None
@@ -920,6 +920,39 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 "https": self.PROXY_HOST,
             }
         return None
+
+    @property
+    def DB_POSTGRESQL_SOCKET_MODE(self) -> bool:
+        host = (self.DB_POSTGRESQL_HOST or "").strip()
+        return host.startswith("/")
+
+    @property
+    def DB_POSTGRESQL_TARGET(self) -> str:
+        if self.DB_POSTGRESQL_SOCKET_MODE:
+            target = f"socket {self.DB_POSTGRESQL_HOST}"
+            if self.DB_POSTGRESQL_PORT:
+                target = f"{target} (port {self.DB_POSTGRESQL_PORT})"
+            return target
+        if self.DB_POSTGRESQL_PORT:
+            return f"{self.DB_POSTGRESQL_HOST}:{self.DB_POSTGRESQL_PORT}"
+        return self.DB_POSTGRESQL_HOST
+
+    def DB_POSTGRESQL_URL(self, driver: Optional[str] = None) -> str:
+        scheme = "postgresql" if not driver else f"postgresql+{driver}"
+        username = quote(str(self.DB_POSTGRESQL_USERNAME), safe="")
+        database = quote(str(self.DB_POSTGRESQL_DATABASE), safe="")
+        auth = username
+        if self.DB_POSTGRESQL_PASSWORD:
+            auth = f"{auth}:{quote(str(self.DB_POSTGRESQL_PASSWORD), safe='')}"
+
+        if self.DB_POSTGRESQL_SOCKET_MODE:
+            query = {"host": self.DB_POSTGRESQL_HOST}
+            if self.DB_POSTGRESQL_PORT:
+                query["port"] = self.DB_POSTGRESQL_PORT
+            return f"{scheme}://{auth}@/{database}?{urlencode(query)}"
+
+        port = f":{self.DB_POSTGRESQL_PORT}" if self.DB_POSTGRESQL_PORT else ""
+        return f"{scheme}://{auth}@{self.DB_POSTGRESQL_HOST}{port}/{database}"
 
     @property
     def PROXY_SERVER(self):
