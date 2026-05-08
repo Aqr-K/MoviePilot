@@ -210,6 +210,42 @@ class LlmProviderRegistryTest(unittest.TestCase):
         self.assertEqual([item["id"] for item in models], ["frog-1"])
         self.assertEqual(models[0]["source"], "models.dev")
 
+    def test_builtin_provider_includes_baidu_qianfan_base_url_presets(self):
+        manager = LLMProviderManager()
+
+        provider = manager.get_provider("baidu-qianfan-coding-plan")
+
+        self.assertEqual(provider.name, "百度千帆")
+        self.assertEqual(provider.runtime, "openai_compatible")
+        self.assertEqual(provider.default_base_url, "https://qianfan.baidubce.com/v2")
+        self.assertEqual(
+            tuple((preset.label, preset.value) for preset in provider.base_url_presets),
+            (
+                ("通用 API", "https://qianfan.baidubce.com/v2"),
+                ("Coding Plan", "https://qianfan.baidubce.com/v2/coding"),
+            ),
+        )
+        self.assertIsNone(provider.models_dev_provider_id)
+        self.assertFalse(provider.supports_model_refresh)
+
+    def test_builtin_provider_includes_jdcloud_base_url_presets(self):
+        manager = LLMProviderManager()
+
+        provider = manager.get_provider("jdcloud")
+
+        self.assertEqual(provider.name, "京东云")
+        self.assertEqual(provider.runtime, "openai_compatible")
+        self.assertEqual(provider.default_base_url, "https://modelservice.jdcloud.com/v1")
+        self.assertEqual(
+            tuple((preset.label, preset.value) for preset in provider.base_url_presets),
+            (
+                ("通用 API", "https://modelservice.jdcloud.com/v1"),
+                ("Coding Plan", "https://modelservice.jdcloud.com/coding/openai/v1"),
+            ),
+        )
+        self.assertIsNone(provider.models_dev_provider_id)
+        self.assertFalse(provider.supports_model_refresh)
+
 
 if __name__ == "__main__":
     unittest.main()

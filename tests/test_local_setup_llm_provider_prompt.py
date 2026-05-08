@@ -184,6 +184,27 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
 
         self.assertEqual(provider, "my-provider_01")
 
+    def test_fallback_provider_choices_include_baidu_and_jdcloud(self):
+        module = load_local_setup_module()
+
+        self.assertEqual(
+            module.LLM_PROVIDER_FALLBACK_CHOICES["baidu-qianfan-coding-plan"],
+            "百度千帆",
+        )
+        self.assertEqual(module.LLM_PROVIDER_FALLBACK_CHOICES["jdcloud"], "京东云")
+
+    def test_local_setup_defaults_include_baidu_and_jdcloud_base_urls(self):
+        module = load_local_setup_module()
+
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["baidu-qianfan-coding-plan"]["base_url"],
+            "https://qianfan.baidubce.com/v2",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["jdcloud"]["base_url"],
+            "https://modelservice.jdcloud.com/v1",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

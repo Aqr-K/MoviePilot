@@ -71,6 +71,10 @@ LLM_PROVIDER_DEFAULTS = {
         "model": "claude-sonnet-4-0",
         "base_url": "https://api.anthropic.com/v1",
     },
+    "baidu-qianfan-coding-plan": {
+        "model": "",
+        "base_url": "https://qianfan.baidubce.com/v2",
+    },
     "openrouter": {
         "model": "openai/gpt-4.1-mini",
         "base_url": "https://openrouter.ai/api/v1",
@@ -79,14 +83,20 @@ LLM_PROVIDER_DEFAULTS = {
         "model": "llama-3.3-70b-versatile",
         "base_url": "https://api.groq.com/openai/v1",
     },
+    "jdcloud": {
+        "model": "",
+        "base_url": "https://modelservice.jdcloud.com/v1",
+    },
 }
 LLM_PROVIDER_FALLBACK_CHOICES = {
     "deepseek": "DeepSeek",
     "openai": "OpenAI Compatible",
     "google": "Google",
     "anthropic": "Anthropic",
+    "baidu-qianfan-coding-plan": "百度千帆",
     "openrouter": "OpenRouter",
     "groq": "Groq",
+    "jdcloud": "京东云",
 }
 RUNTIME_PACKAGE = {
     "name": "moviepilot-frontend-runtime",

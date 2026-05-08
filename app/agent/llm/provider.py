@@ -279,67 +279,17 @@ class LLMProviderManager(metaclass=Singleton):
             )
 
         catalog_openai_providers = (
-            ("302ai", "302.AI", "https://api.302.ai/v1"),
-            ("abacus", "Abacus", "https://routellm.abacus.ai/v1"),
-            ("abliteration-ai", "abliteration.ai", "https://api.abliteration.ai/v1"),
-            ("baseten", "Baseten", "https://inference.baseten.co/v1"),
-            ("berget", "Berget.AI", "https://api.berget.ai/v1"),
-            ("chutes", "Chutes", "https://llm.chutes.ai/v1"),
-            ("clarifai", "Clarifai", "https://api.clarifai.com/v2/ext/openai/v1"),
-            ("cloudferro-sherlock", "CloudFerro Sherlock", "https://api-sherlock.cloudferro.com/openai/v1/"),
-            ("cloudflare-workers-ai", "Cloudflare Workers AI", "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1"),
-            ("cortecs", "Cortecs", "https://api.cortecs.ai/v1"),
-            ("digitalocean", "DigitalOcean", "https://inference.do-ai.run/v1"),
-            ("dinference", "DInference", "https://api.dinference.com/v1"),
-            ("drun", "D.Run (China)", "https://chat.d.run/v1"),
-            ("evroc", "evroc", "https://models.think.evroc.com/v1"),
-            ("fastrouter", "FastRouter", "https://go.fastrouter.ai/api/v1"),
-            ("fireworks-ai", "Fireworks AI", "https://api.fireworks.ai/inference/v1/"),
-            ("firmware", "Firmware", "https://app.frogbot.ai/api/v1"),
-            ("friendli", "Friendli", "https://api.friendli.ai/serverless/v1"),
-            ("helicone", "Helicone", "https://ai-gateway.helicone.ai/v1"),
-            ("hpc-ai", "HPC-AI", "https://api.hpc-ai.com/inference/v1"),
             ("huggingface", "Hugging Face", "https://router.huggingface.co/v1"),
-            ("iflowcn", "iFlow", "https://apis.iflow.cn/v1"),
-            ("inception", "Inception", "https://api.inceptionlabs.ai/v1/"),
-            ("inference", "Inference", "https://inference.net/v1"),
-            ("io-net", "IO.NET", "https://api.intelligence.io.solutions/api/v1"),
-            ("jiekou", "Jiekou.AI", "https://api.jiekou.ai/openai"),
+            ("jiekou", "接口 AI", "https://api.jiekou.ai/openai"),
             ("kilo", "Kilo Gateway", "https://api.kilo.ai/api/gateway"),
-            ("kuae-cloud-coding-plan", "KUAE Cloud Coding Plan", "https://coding-plan-endpoint.kuaecloud.net/v1"),
             ("llama", "Llama", "https://api.llama.com/compat/v1/"),
             ("llmgateway", "LLM Gateway", "https://api.llmgateway.io/v1"),
-            ("lucidquery", "LucidQuery AI", "https://lucidquery.com/api/v1"),
-            ("meganova", "Meganova", "https://api.meganova.ai/v1"),
-            ("mixlayer", "Mixlayer", "https://models.mixlayer.ai/v1"),
-            ("moark", "Moark", "https://moark.com/v1"),
             ("modelscope", "ModelScope", "https://api-inference.modelscope.cn/v1"),
-            ("morph", "Morph", "https://api.morphllm.com/v1"),
-            ("nano-gpt", "NanoGPT", "https://nano-gpt.com/api/v1"),
-            ("nebius", "Nebius Token Factory", "https://api.tokenfactory.nebius.com/v1"),
-            ("neuralwatt", "Neuralwatt", "https://api.neuralwatt.com/v1"),
             ("nova", "Nova", "https://api.nova.amazon.com/v1"),
-            ("novita-ai", "NovitaAI", "https://api.novita.ai/openai"),
-            ("ovhcloud", "OVHcloud AI Endpoints", "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
-            ("perplexity-agent", "Perplexity Agent", "https://api.perplexity.ai/v1"),
+            ("fireworks-ai", "Fireworks AI", "https://api.fireworks.ai/inference/v1/"),
             ("poe", "Poe", "https://api.poe.com/v1"),
-            ("privatemode-ai", "Privatemode AI", "http://localhost:8080/v1"),
-            ("qihang-ai", "QiHang", "https://api.qhaigc.net/v1"),
-            ("qiniu-ai", "Qiniu", "https://api.qnaigc.com/v1"),
-            ("regolo-ai", "Regolo AI", "https://api.regolo.ai/v1"),
-            ("requesty", "Requesty", "https://router.requesty.ai/v1"),
-            ("scaleway", "Scaleway", "https://api.scaleway.ai/v1"),
-            ("stackit", "STACKIT", "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1"),
-            ("stepfun", "StepFun", "https://api.stepfun.com/v1"),
-            ("submodel", "submodel", "https://llm.submodel.ai/v1"),
-            ("synthetic", "Synthetic", "https://api.synthetic.new/openai/v1"),
-            ("the-grid-ai", "The Grid AI", "https://api.thegrid.ai/v1"),
-            ("upstage", "Upstage", "https://api.upstage.ai/v1/solar"),
-            ("vivgrid", "Vivgrid", "https://api.vivgrid.com/v1"),
-            ("vultr", "Vultr", "https://api.vultrinference.com/v1"),
-            ("wafer.ai", "Wafer", "https://pass.wafer.ai/v1"),
-            ("wandb", "Weights & Biases", "https://api.inference.wandb.ai/v1"),
-            ("zenmux", "ZenMux", "https://zenmux.ai/api/v1"),
+            ("qihang-ai", "启航 AI", "https://api.qhaigc.net/v1"),
+            ("qiniu-ai", "七牛", "https://api.qnaigc.com/v1"),
         )
         catalog_openai_overrides = {
             "cloudflare-workers-ai": {
@@ -353,6 +303,18 @@ class LLMProviderManager(metaclass=Singleton):
         }
 
         providers = [
+            ProviderSpec(
+                id="openai",
+                name="OpenAI 兼容",
+                runtime="openai_compatible",
+                default_base_url="",
+                base_url_editable=True,
+                requires_base_url=True,
+                supports_api_key=True,
+                api_key_hint="通用 OpenAI-compatible 兜底入口，需要手动填写 Base URL。",
+                description="通用 OpenAI-compatible 模型服务。",
+                sort_order=1,
+            ),
             ProviderSpec(
                 id="chatgpt",
                 name="ChatGPT",
@@ -575,6 +537,46 @@ class LLMProviderManager(metaclass=Singleton):
                 description="阿里云百炼兼容端点。",
             ),
             ProviderSpec(
+                id="baidu-qianfan-coding-plan",
+                name="百度千帆",
+                runtime="openai_compatible",
+                default_base_url="https://qianfan.baidubce.com/v2",
+                base_url_presets=(
+                    url_preset(
+                        label="通用 API",
+                        value="https://qianfan.baidubce.com/v2",
+                    ),
+                    url_preset(
+                        label="Coding Plan",
+                        value="https://qianfan.baidubce.com/v2/coding",
+                    ),
+                ),
+                api_key_hint="填写百度千帆 API Key，可在通用 API 与 Coding Plan 端点间切换。通用 API 请使用 https://qianfan.baidubce.com/v2；Coding Plan 请切换到 https://qianfan.baidubce.com/v2/coding。",
+                supports_model_refresh=False,
+                description="百度千帆 OpenAI-compatible V2 端点，支持通用 API 与 Coding Plan 地址预设。",
+                sort_order=72,
+            ),
+            ProviderSpec(
+                id="jdcloud",
+                name="京东云",
+                runtime="openai_compatible",
+                default_base_url="https://modelservice.jdcloud.com/v1",
+                base_url_presets=(
+                    url_preset(
+                        label="通用 API",
+                        value="https://modelservice.jdcloud.com/v1",
+                    ),
+                    url_preset(
+                        label="Coding Plan",
+                        value="https://modelservice.jdcloud.com/coding/openai/v1",
+                    ),
+                ),
+                api_key_hint="填写京东云 JoyBuilder API Key。通用 API 请使用 https://modelservice.jdcloud.com/v1；Coding Plan 请切换到 https://modelservice.jdcloud.com/coding/openai/v1，不要把 /v1 当成 Coding Plan 地址。",
+                supports_model_refresh=False,
+                description="京东云 JoyBuilder OpenAI-compatible 端点，支持通用 API 与 Coding Plan 地址预设。",
+                sort_order=74,
+            ),
+            ProviderSpec(
                 id="volcengine",
                 name="火山方舟",
                 runtime="openai_compatible",
@@ -718,14 +720,6 @@ class LLMProviderManager(metaclass=Singleton):
                 api_key_hint="填写 Xiaomi API Key，可在标准端点与各区域 Token Plan 端点间切换。",
                 description="小米 Mimo 兼容端点。",
             ),
-            catalog_openai_provider(
-                provider_id="lmstudio",
-                name="LM Studio",
-                default_base_url="http://127.0.0.1:1234/v1",
-                sort_order=135,
-                api_key_hint="如未启用鉴权，可填写任意占位值。",
-                description="LM Studio 本地 OpenAI-compatible 端点。",
-            ),
         ]
 
         for sort_order, (provider_id, name, base_url) in enumerate(
@@ -743,21 +737,6 @@ class LLMProviderManager(metaclass=Singleton):
                     description=overrides.get("description"),
                 )
             )
-
-        providers.append(
-            ProviderSpec(
-                id="openai",
-                name="OpenAI Compatible",
-                runtime="openai_compatible",
-                default_base_url="",
-                base_url_editable=True,
-                requires_base_url=True,
-                supports_api_key=True,
-                api_key_hint="通用 OpenAI-compatible 兜底入口，需要手动填写 Base URL。",
-                description="通用 OpenAI-compatible 模型服务。",
-                sort_order=1000,
-            )
-        )
         return tuple(providers)
 
     def _cached_models_dev_payload(self) -> dict[str, Any]:
