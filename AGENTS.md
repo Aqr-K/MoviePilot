@@ -1,152 +1,152 @@
 # MoviePilot AI Agent Guide
 
-本文件用于统一在 MoviePilot 仓库内工作的 AI Agent 行为。除非更深层目录存在新的 `AGENTS.md` 覆盖，以下规则适用于整个仓库。
+This file defines the default behavior for AI agents working in the MoviePilot repository. Unless a deeper directory provides another `AGENTS.md`, these rules apply to the entire repo.
 
-## 1. 项目定位
+## 1. Project Scope
 
-- 本仓库是 MoviePilot 的后端、CLI、MCP/API、Docker 与 AI skills 仓库。
-- 后端基于 FastAPI，主要代码位于 `app/`。
-- 前端源码不在本仓库，前端源仓库是 `MoviePilot-Frontend`；
-- 本仓库还包含本地 CLI、数据库迁移、开发文档、测试、Docker 相关脚本与 AI skills。
+- This repository contains the MoviePilot backend, CLI, MCP/API, Docker assets, and AI skills.
+- The backend is based on FastAPI, with most code under `app/`.
+- Frontend source code is not in this repository. The frontend source repository is `MoviePilot-Frontend`.
+- This repository also includes the local CLI, database migrations, developer docs, tests, Docker scripts, and AI skills.
 
-## 2. 工作原则
+## 2. Working Principles
 
-- 先阅读相关实现、测试和文档，再修改代码；不要凭目录名猜行为。
-- 采用最小正确改动，优先复用现有函数、模式与命名。
-- 不做与当前任务无关的大规模重构、批量重命名或样式清扫。
-- 新增抽象前先判断是否真的会被复用；能放在现有函数、现有类、现有链路中的，不要额外拆层。
-- 工作区可能存在用户未提交修改；不要回滚、覆盖或整理你未理解的内容。
-- 默认使用中文输出结论、验证结果和风险说明。
+- Read the relevant implementation, tests, and docs before changing code. Do not infer behavior from directory names alone.
+- Prefer the smallest correct change. Reuse existing functions, patterns, and naming whenever possible.
+- Do not perform unrelated large refactors, mass renames, or formatting-only cleanup.
+- Before adding a new abstraction, check whether it is actually reusable. If the logic fits well inside an existing function, class, or flow, keep it there.
+- The worktree may contain user changes. Do not revert, overwrite, or reorganize changes you do not fully understand.
+- Default to writing conclusions, validation results, and risk notes in Chinese unless the user asks otherwise.
 
-## 3. 关键目录说明
+## 3. Key Directories
 
-- `app/api/endpoints/`：HTTP 接口入口，处理鉴权、参数、响应和少量简单 CRUD。
-- `app/chain/`：业务编排层，承接搜索、识别、订阅、下载、消息交互等用例。
-- `app/modules/`：动态加载的系统模块层，封装下载器、媒体服务器、消息渠道及其他可插拔能力。
-- `app/helper/`：可复用的低层辅助逻辑，不承载完整业务编排。
-- `app/core/config.py`：环境变量、部署参数、启动级配置。
-- `app/schemas/types.py`：`SystemConfigKey`、模块类型、枚举等共享类型定义。
-- `app/db/`：数据库模型、会话和 `*_oper.py` 数据访问封装。
-- `moviepilot`：本地 CLI 入口与帮助文本。
-- `database/versions/`：Alembic 迁移脚本。
-- `docs/`：CLI、MCP/API、开发流程等文档。
-- `skills/`：可供 AI agent 使用的 skills 定义和脚本。
-- `tests/`：pytest 测试与少量手动测试脚本。
-- `config/`、`.moviepilot.env`、`*.db`：本地配置或运行数据，除非用户明确要求，否则不要修改或提交。
+- `app/api/endpoints/`: HTTP entrypoints. Handles auth, parameters, responses, and simple CRUD.
+- `app/chain/`: Business orchestration layer for search, recognition, subscriptions, downloads, messaging flows, and similar use cases.
+- `app/modules/`: Dynamically loaded system modules. Encapsulates pluggable downloaders, media servers, message channels, and other backend capabilities.
+- `app/helper/`: Reusable low-level helper logic. Not a place for full business orchestration.
+- `app/core/config.py`: Environment variables, deployment parameters, and startup-level settings.
+- `app/schemas/types.py`: Shared enums and types such as `SystemConfigKey` and module categories.
+- `app/db/`: Database models, sessions, and `*_oper.py` data access wrappers.
+- `moviepilot`: Local CLI entrypoint and help text.
+- `database/versions/`: Alembic migration scripts.
+- `docs/`: CLI, MCP/API, and development workflow documentation.
+- `skills/`: AI agent skills and related scripts.
+- `tests/`: Pytest tests and a few manual test scripts.
+- `config/`, `.moviepilot.env`, and `*.db`: Local config or runtime data. Do not modify or commit them unless the user explicitly asks for it.
 
-## 4. 分层与访问边界
+## 4. Layering And Access Boundaries
 
-### API / Endpoint 层
+### API / Endpoint Layer
 
-- endpoint 只处理 HTTP 相关内容：鉴权、参数解析、响应模型、流式输出适配、简单输入校验。
-- 简单列表、详情、开关读写、纯 CRUD 型接口，可以直接调用 `app/db/` 或已有 `helper`。
-- 涉及跨模块调度、事件发送、缓存、搜索识别下载联动、复杂业务判断时，应该下沉到 `chain` 层。
-- 新增接口优先放进现有领域文件；只有出现新的顶层资源域时，才新增 endpoint 文件。
-- 新增 endpoint 后要同步注册到 `app/api/apiv1.py`。
+- Endpoints should only handle HTTP concerns: auth, parameter parsing, response models, streaming adaptation, and simple input validation.
+- Simple list, detail, toggle, settings read/write, and pure CRUD endpoints may directly call `app/db/` or an existing `helper`.
+- If the logic coordinates multiple modules, triggers events, touches caches, or combines search, recognition, subscription, or download workflows, move it into `chain`.
+- Prefer adding new endpoints to an existing domain file. Create a new endpoint file only when introducing a new top-level resource domain.
+- After adding a new endpoint, register it in `app/api/apiv1.py`.
 
-### Chain 层
+### Chain Layer
 
-- `chain` 是业务编排层，服务于 API、CLI、消息交互、agent、调度器等多个入口。
-- `chain` 负责组合 `module`、`helper`、`db`、事件、缓存和其它稳定的 `chain` 能力。
-- 在 `chain` 内优先通过 `run_module()` / `async_run_module()` 触发模块能力；只有确实需要枚举模块、取实例、做健康检查时，再直接使用 `ModuleManager` 或相关 helper。
-- `chain` 应聚焦用例与流程，不应承载底层协议细节、HTTP 请求对象或页面参数拼装细节。
-- 新增 `chain` 前先判断：这是不是一个会被多个入口复用的业务用例，或者需要协调多个模块/多种资源。如果只是单个 endpoint 的短逻辑，不要新建 `chain`。
-- `chain` 之间可以复用，但要避免新增环依赖。
+- `chain` is the business orchestration layer shared by API, CLI, message interaction, agents, schedulers, and similar entrypoints.
+- `chain` is responsible for composing `module`, `helper`, `db`, events, caches, and other stable `chain` capabilities.
+- Inside `chain`, prefer calling module capabilities through `run_module()` or `async_run_module()`. Only use `ModuleManager` or similar helpers directly when you truly need to enumerate modules, inspect instances, or run health checks.
+- `chain` should focus on use cases and workflows. It should not hold low-level protocol details, HTTP request objects, or page-specific parameter assembly.
+- Before adding a new `chain`, ask whether this is a reusable business use case shared by multiple entrypoints, or a flow that coordinates multiple modules or resources. If it is just short logic for one endpoint, do not create a new `chain`.
+- `chain` may call other `chain` classes when reusing stable domain logic, but avoid introducing new circular dependencies.
 
-### Module 层
+### Module Layer
 
-- `module` 是可插拔能力实现层，通过 `ModuleManager` 动态发现和加载。
-- 适合放在 `module` 的内容：新下载器、新媒体服务器、新消息渠道、新识别/过滤/文件管理类系统能力，或任何需要启停、优先级、配置开关、独立测试的实现。
-- 新增 `module` 时，应遵循现有基类约定，实现或对齐 `init_module()`、`init_setting()`、`get_name()`、`get_type()`、`get_subtype()`、`get_priority()`、`test()`、`stop()` 等接口。
-- `module` 应聚焦单一后端或单一能力实现，返回领域结果，不返回 HTTP 响应，不感知 endpoint、鉴权或 FastAPI 请求对象。
-- `chain -> module` 是主路径。仓库中存在少量历史性的 `module -> chain` 反向依赖；新增代码不要继续扩大这种模式。若模块也需要复用一段业务判断，优先上移到 `chain` 或下沉到 `helper`。
-- 不要新增 `module -> module` 的直接耦合；多模块协同应由 `chain` 组织。
+- `module` is the pluggable capability layer discovered and loaded by `ModuleManager`.
+- Put logic in `module` when it represents a new downloader, media server, message channel, recognition backend, filtering backend, file-management backend, or any other capability that needs lifecycle management, priority, configuration switches, or independent testing.
+- New modules should follow the existing base-class contract and implement or align with `init_module()`, `init_setting()`, `get_name()`, `get_type()`, `get_subtype()`, `get_priority()`, `test()`, and `stop()`.
+- A `module` should focus on one backend or one capability implementation. It should return domain results, not HTTP responses, and should not depend on endpoint auth or FastAPI request objects.
+- `chain -> module` is the intended main direction. The repository contains a small number of historical `module -> chain` usages. Do not expand that pattern in new code. If a module needs shared business logic, prefer moving that logic up into `chain` or down into `helper`.
+- Do not add direct `module -> module` coupling for new code. Cross-module orchestration should be handled by `chain`.
 
-### Helper 层
+### Helper Layer
 
-- `helper` 适合承载可复用的低层支撑逻辑，例如路径处理、配置聚合、站点索引读取、协议客户端包装、限流、缓存辅助、页面解析等。
-- 只有当逻辑会被多处复用，或本身就是一个独立的低层问题时，才新增 `helper`。
-- 如果逻辑只在一个 `chain` 或一个 `module` 内使用，优先留在原文件中，避免把 `helper` 变成杂物箱。
-- 如果一段代码已经需要配置开关、运行时装载、优先级、独立测试入口或多实现分发，它更像 `module`，而不是 `helper`。
-- `helper` 不应演变为新的业务编排层；完整业务流程仍应放在 `chain`。
+- `helper` is for reusable low-level support logic such as path handling, config aggregation, site index loading, protocol wrappers, rate limiting, cache helpers, and page parsing.
+- Add a new `helper` only when the logic is reused in multiple places, or when it is clearly a standalone low-level concern.
+- If logic is used only by a single `chain` or a single `module`, prefer keeping it in the original file instead of turning `helper` into a dumping ground.
+- If the code needs configuration switches, runtime loading, priorities, independent test entrypoints, or multi-implementation dispatch, it is probably a `module`, not a `helper`.
+- `helper` must not become another orchestration layer. Full business workflows still belong in `chain`.
 
-### 推荐调用方向
+### Preferred Call Directions
 
-- 首选方向：`endpoint/CLI/agent/command -> chain -> module/helper/db`
-- 允许方向：`chain -> chain`，前提是复用稳定领域能力且不引入环依赖。
-- 谨慎方向：`endpoint -> db/model/oper/helper`，仅限简单查询、简单 CRUD 或输入校正。
-- 避免方向：`module -> chain`、`module -> module`、`helper -> chain`、`helper -> endpoint`。
+- Preferred direction: `endpoint/CLI/agent/command -> chain -> module/helper/db`
+- Allowed direction: `chain -> chain`, as long as the reused logic is stable and does not introduce cycles.
+- Cautious direction: `endpoint -> db/model/oper/helper`, only for simple queries, simple CRUD, or input normalization.
+- Avoid for new code: `module -> chain`, `module -> module`, `helper -> chain`, `helper -> endpoint`.
 
-## 5. 新增能力如何落点
+## 5. Where New Capabilities Should Go
 
-- 场景：新增一个搜索、识别、订阅、下载、消息交互之类的业务流程。
-  处理：优先放到 `app/chain/`，让 API、CLI、agent 或调度器复用同一套编排逻辑。
-- 场景：新增一个下载器、媒体服务器、消息渠道或其他可插拔后端接入。
-  处理：放到 `app/modules/`；如涉及新的模块类别或子类型，同步检查 `app/schemas/types.py` 与相关 schema。
-- 场景：新增一个对外 HTTP API。
-  处理：放到 `app/api/endpoints/`，注册 `app/api/apiv1.py`，补齐鉴权、schema、文档和测试；复杂逻辑下沉到 `chain`。
-- 场景：新增一个低层通用工具、解析器、配置读取器或协议包装。
-  处理：放到 `app/helper/`；前提是它不是一次性逻辑，也不是完整业务用例。
-- 场景：新增一个部署级、环境级、启动前确定的配置项，例如端口、路径、代理、开关、密钥、第三方服务地址。
-  处理：放到 `app/core/config.py` 的 `ConfigModel` / `Settings`。
-- 场景：新增一个运行时业务配置、用户可编辑规则、系统持久化选项。
-  处理：优先使用 `SystemConfigKey` + `SystemConfigOper`，不要散落裸字符串 key。
-- 场景：配置变更后需要自动重载长生命周期对象。
-  处理：在对应 `chain`、`module`、`helper` 或管理类上补 `CONFIG_WATCH`、`on_config_changed()`、必要时补 `get_reload_name()`。
-- 场景：只是在一个 `chain`/`module` 内多出几十行私有逻辑。
-  处理：优先提炼为当前文件内的私有函数或私有方法，不要默认新建 `helper`。
+- Scenario: adding a new business workflow such as search, recognition, subscription, download orchestration, or message interaction.
+  Action: prefer `app/chain/` so API, CLI, agents, and schedulers can share the same orchestration logic.
+- Scenario: adding a new downloader, media server, message channel, or other pluggable backend integration.
+  Action: put it in `app/modules/`. If this introduces a new module category or subtype, also check `app/schemas/types.py` and related schemas.
+- Scenario: adding a new public HTTP API.
+  Action: put it in `app/api/endpoints/`, register it in `app/api/apiv1.py`, and add auth, schemas, docs, and tests. Move complex logic into `chain`.
+- Scenario: adding a new low-level utility, parser, config reader, or protocol wrapper.
+  Action: put it in `app/helper/`, but only if it is not a one-off implementation and not a full business use case.
+- Scenario: adding a deployment-level, environment-level, or startup-time config such as ports, paths, proxies, switches, keys, or third-party service addresses.
+  Action: put it in `ConfigModel` or `Settings` inside `app/core/config.py`.
+- Scenario: adding a runtime business config, user-editable rule, or persistent system option.
+  Action: prefer `SystemConfigKey` plus `SystemConfigOper`. Do not scatter raw string keys.
+- Scenario: a config change should automatically reload a long-lived object.
+  Action: add `CONFIG_WATCH`, `on_config_changed()`, and `get_reload_name()` where appropriate on the related `chain`, `module`, `helper`, or manager class.
+- Scenario: adding a few dozen lines of private logic inside one `chain` or `module`.
+  Action: prefer a private function or private method in the same file. Do not create a new `helper` by default.
 
-## 6. 代码与注释要求
+## 6. Code And Comment Requirements
 
-- 保持现有代码风格，不引入没有明确收益的新抽象层。
-- 仓库当前风格中，大量类和方法使用简短 docstring；新增公开类、公开方法时，优先沿用所在文件的现有风格。
-- 注释和 docstring 默认使用中文，若文件周边已经稳定使用英文，则与周边保持一致。
-- 注释要解释“为什么这样做”以及“不直观的约束”，例如边界条件、兼容性原因、调用顺序、缓存/重载语义、外部系统限制。
-- 不要写逐行翻译式注释，不要解释显而易见的赋值、分支或简单调用。
-- 复杂注释优先写在代码块之前，避免长篇行尾注释。
-- 修改代码时，同步更新或删除已经过时的注释；不要留下与实现不一致的说明。
-- 不要加入无上下文的 TODO/FIXME；只有在当前任务无法一并处理、且这条备注对后续维护确实有帮助时才保留。
-- 不要添加“修改开始/修改结束”“这里很重要”之类没有信息密度的注释。
+- Preserve the existing code style. Do not introduce a new abstraction layer without a clear payoff.
+- The repository already uses short docstrings for many public classes and methods. For new public classes and methods, follow the local style of the surrounding file.
+- Comments and docstrings should default to Chinese. If the surrounding file is already consistently in English, match the local style.
+- Comments should explain why the code is written that way and what non-obvious constraints exist, such as edge cases, compatibility reasons, call ordering, cache or reload semantics, and external system limitations.
+- Do not write line-by-line translation comments. Do not comment obvious assignments, branches, or straightforward calls.
+- For complex notes, place the comment above the code block instead of using long end-of-line comments.
+- When changing code, update or remove stale comments so the documentation stays aligned with the implementation.
+- Do not add TODO or FIXME without context. Only keep one if it is genuinely useful and cannot be addressed as part of the current task.
+- Do not add noisy comments like "change starts here", "change ends here", or "this is important".
 
-## 7. 依赖与环境约定
+## 7. Dependency And Environment Conventions
 
-- 目标 Python 版本为 `3.11+`；当前 CI 使用 Python `3.12`。
-- 依赖源文件是 `requirements.in`。
-- `requirements.txt` 是通过 `pip-compile requirements.in` 生成的锁定文件，不要手工维护内容。
-- 安装依赖使用：`pip install -r requirements.txt`。
-- 新增或升级依赖时：
-  1. 先修改 `requirements.in`
-  2. 再执行 `pip-compile requirements.in`
-  3. 最后补跑相关测试与安全检查
+- Target Python version is `3.11+`. Current CI uses Python `3.12`.
+- The dependency source file is `requirements.in`.
+- `requirements.txt` is the lock file generated by `pip-compile requirements.in`. Do not maintain it manually.
+- Install dependencies with `pip install -r requirements.txt`.
+- When adding or upgrading dependencies:
+  1. Update `requirements.in`
+  2. Run `pip-compile requirements.in`
+  3. Run the relevant tests and security checks
 
-## 8. 联动修改规则
+## 8. Coupled Updates
 
-- 修复 bug 时，优先补一个能复现问题的测试；新增功能时，优先补最小覆盖测试。
-- 变更 CLI 行为时，同时检查并更新：`moviepilot`、`docs/cli.md`、相关测试。
-- 变更 MCP/REST API、工具暴露或 AI 交互行为时，同时检查并更新：`docs/mcp-api.md`、相关 `skills/*/SKILL.md` 或脚本、相关测试。
-- 变更开发流程、依赖管理或安全检查方式时，同时更新 `docs/development-setup.md`。
-- 涉及数据库结构变化时，补充 `database/versions/` 迁移脚本；不要只改模型不改迁移。
-- 变更用户可见配置、默认值或初始化流程时，同时检查相关文档、帮助文本、setup/init 流程和测试。
-- 新增 skill 时，遵循现有 `skills/<name>/SKILL.md` 结构，保留 YAML front matter，并优先使用相对 `SKILL.md` 的脚本路径描述。
+- When fixing a bug, prefer adding a test that reproduces it. When adding a feature, prefer the smallest useful test coverage.
+- When changing CLI behavior, also check and update `moviepilot`, `docs/cli.md`, and related tests.
+- When changing MCP or REST API behavior, exposed tools, or AI interaction behavior, also check and update `docs/mcp-api.md`, related `skills/*/SKILL.md` files or scripts, and related tests.
+- When changing development workflow, dependency management, or security-check procedures, also update `docs/development-setup.md`.
+- When changing database structure, add an Alembic migration under `database/versions/`. Do not update models without a migration.
+- When changing user-visible config, defaults, or initialization flow, also check related docs, help text, setup or init flows, and tests.
+- When adding a new skill, follow the existing `skills/<name>/SKILL.md` structure, keep the YAML front matter, and prefer script paths relative to the `SKILL.md` file.
 
-## 9. 验证要求
+## 9. Validation Requirements
 
-- 至少运行与当前改动直接相关的测试，例如：`pytest tests/test_xxx.py`。
-- 影响公共模块、初始化流程、CLI 或 agent 运行时时，扩大测试范围。
-- Python 代码改动后，至少确认不会为 `pylint app/` 引入新的错误级问题。
-- 变更 CLI 时，至少验证相关帮助输出，例如：`moviepilot help` 或对应子命令帮助。
-- 变更依赖时，补跑：`pip-compile requirements.in` 与 `safety check -r requirements.txt --policy-file=safety.policy.yml`。
-- 如果本次只修改文档，明确说明未运行测试即可；不要伪造验证结果。
+- Run at least the tests directly related to the change, for example `pytest tests/test_xxx.py`.
+- If the change affects common modules, startup flow, CLI, or agent runtime behavior, expand the validation scope.
+- After Python code changes, at minimum ensure the change does not introduce new error-level issues in `pylint app/`.
+- When changing CLI behavior, validate the relevant help output such as `moviepilot help` or the specific subcommand help.
+- When changing dependencies, also run `pip-compile requirements.in` and `safety check -r requirements.txt --policy-file=safety.policy.yml`.
+- If the task only changes documentation, explicitly say that tests were not run. Do not claim checks that were not executed.
 
-## 10. 提交与发布约定
+## 10. Commit And Release Conventions
 
-- 只有在用户明确要求提交时才创建 commit。
-- commit message 优先使用 Conventional Commits，例如：`feat: ...`、`fix: ...`、`docs: ...`。
-- 这样做不是形式要求；仓库的发布流水线会按 Conventional Commits 生成 changelog 分类。
-- 不要顺手修改版本号、发布配置或 Docker 发布流程，除非任务明确涉及这些内容。
+- Only create a commit when the user explicitly asks for one.
+- Prefer Conventional Commits such as `feat: ...`, `fix: ...`, and `docs: ...`.
+- This is not just stylistic. The release workflow uses Conventional Commits to categorize changelog entries.
+- Do not casually change version numbers, release settings, or Docker release flow unless the task explicitly involves them.
 
-## 11. 输出要求
+## 11. Output Requirements
 
-- 结果说明聚焦三件事：改了什么、怎么验证的、还有什么风险。
-- 不写空泛总结，不把未执行的检查写成“已完成”。
-- 若发现兼容性影响、配置迁移风险或用户数据风险，必须明确指出。
+- Result summaries should focus on three things: what changed, how it was validated, and what risks remain.
+- Do not write vague summaries. Do not describe unexecuted checks as completed.
+- If there is compatibility impact, config migration risk, or user-data risk, call it out explicitly.
