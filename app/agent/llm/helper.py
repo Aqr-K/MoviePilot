@@ -449,22 +449,18 @@ class LLMHelper:
         这主要用于单测 stub 环境以及极端的最小运行环境，正常生产路径仍优先
         走 `LLMProviderManager.resolve_runtime()`。
         """
-        normalized_provider_name = str(provider_name or "").strip().lower()
-        if normalized_provider_name == "minimax-coding":
-            normalized_provider_name = "minimax"
-
         api_key_value = api_key if api_key is not None else settings.LLM_API_KEY
         base_url_value = base_url if base_url is not None else settings.LLM_BASE_URL
         if not api_key_value:
             raise ValueError("未配置LLM API Key")
 
         runtime_name = (
-            normalized_provider_name
-            if normalized_provider_name in {"google", "deepseek"}
+            provider_name
+            if provider_name in {"google", "deepseek"}
             else "openai_compatible"
         )
         return {
-            "provider_id": normalized_provider_name,
+            "provider_id": provider_name,
             "runtime": runtime_name,
             "model_id": model_name,
             "api_key": api_key_value,
