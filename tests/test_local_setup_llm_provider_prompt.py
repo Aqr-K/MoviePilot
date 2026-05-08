@@ -68,6 +68,7 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
             provider="frogbot",
             api_key="sk-frog",
             base_url="https://override.example.com/v1",
+            base_url_preset="",
             runtime_python=Path("/tmp/runtime-python"),
         )
         model_prompt.assert_called_once_with(models, default="")
@@ -203,6 +204,66 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
         self.assertEqual(
             module.LLM_PROVIDER_DEFAULTS["jdcloud"]["base_url"],
             "https://modelservice.jdcloud.com/v1",
+        )
+
+    def test_collect_agent_config_prompts_for_duplicate_base_url_presets(self):
+        module = load_local_setup_module()
+
+        provider_definitions = [
+            {
+                "id": "minimax",
+                "name": "MiniMax",
+                "default_base_url": "https://api.minimaxi.com/anthropic/v1",
+                "api_key_label": "API Key",
+                "base_url_presets": [
+                    {
+                        "id": "minimax-cn-general",
+                        "label": "中国内地 / 通用",
+                        "value": "https://api.minimaxi.com/anthropic/v1",
+                    },
+                    {
+                        "id": "minimax-cn-coding",
+                        "label": "中国内地 / Coding Plan",
+                        "value": "https://api.minimaxi.com/anthropic/v1",
+                    },
+                ],
+            }
+        ]
+
+        with patch.object(module, "print_step"), patch.object(
+            module, "_prompt_yes_no", side_effect=[True, False, True]
+        ), patch.object(
+            module, "_load_llm_provider_definitions", return_value=provider_definitions
+        ), patch.object(
+            module, "_prompt_provider_choice", return_value="minimax"
+        ), patch.object(
+            module, "_prompt_text", side_effect=["https://api.minimaxi.com/anthropic/v1"]
+        ), patch.object(
+            module, "_prompt_secret_text", return_value="sk-minimax"
+        ), patch.object(
+            module, "_load_llm_models", return_value=[]
+        ) as load_models, patch.object(
+            module, "_prompt_model_choice", return_value="MiniMax-M1"
+        ), patch.object(
+            module, "read_env_value", return_value=None
+        ), patch.object(
+            module, "_env_default", side_effect=lambda key, default="": default
+        ), patch.object(
+            module, "_env_bool", side_effect=lambda key, default: default
+        ), patch.object(
+            module, "_env_llm_thinking_level_default", return_value="auto"
+        ), patch.object(
+            module, "_prompt_choice", side_effect=["auto", "minimax-cn-coding"]
+        ):
+            config = module._collect_agent_config()
+
+        self.assertEqual(config["LLM_BASE_URL_PRESET"], "minimax-cn-coding")
+        load_models.assert_called_once_with(
+            provider="minimax",
+            api_key="sk-minimax",
+            base_url="https://api.minimaxi.com/anthropic/v1",
+            base_url_preset="minimax-cn-coding",
+            runtime_python=None,
         )
 
 

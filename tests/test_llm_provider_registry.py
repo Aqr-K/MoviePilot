@@ -246,6 +246,54 @@ class LlmProviderRegistryTest(unittest.TestCase):
         self.assertIsNone(provider.models_dev_provider_id)
         self.assertFalse(provider.supports_model_refresh)
 
+    def test_builtin_minimax_provider_merges_general_and_coding_presets(self):
+        manager = LLMProviderManager()
+
+        provider = manager.get_provider("minimax")
+        serialized = manager.list_providers()
+        minimax_payload = next(item for item in serialized if item["id"] == "minimax")
+
+        self.assertEqual(provider.name, "MiniMax")
+        self.assertEqual(provider.runtime, "anthropic_compatible")
+        self.assertEqual(
+            tuple((preset.id, preset.label, preset.value) for preset in provider.base_url_presets),
+            (
+                ("minimax-cn-general", "中国内地 / 通用", "https://api.minimaxi.com/anthropic/v1"),
+                ("minimax-global-general", "国际站 / 通用", "https://api.minimax.io/anthropic/v1"),
+                ("minimax-cn-coding", "中国内地 / Coding Plan", "https://api.minimaxi.com/anthropic/v1"),
+                ("minimax-global-coding", "国际站 / Coding Plan", "https://api.minimax.io/anthropic/v1"),
+            ),
+        )
+        self.assertEqual(
+            tuple(item["id"] for item in minimax_payload["base_url_presets"]),
+            (
+                "minimax-cn-general",
+                "minimax-global-general",
+                "minimax-cn-coding",
+                "minimax-global-coding",
+            ),
+        )
+
+    def test_minimax_coding_alias_resolves_to_minimax_provider(self):
+        manager = LLMProviderManager()
+
+        provider = manager.get_provider("minimax-coding")
+
+        self.assertEqual(provider.id, "minimax")
+
+    def test_resolve_models_dev_provider_id_prefers_minimax_preset_id(self):
+        manager = LLMProviderManager()
+        provider = manager.get_provider("minimax")
+
+        self.assertEqual(
+            manager._resolve_provider_models_dev_provider_id(
+                provider,
+                base_url="https://api.minimaxi.com/anthropic/v1",
+                base_url_preset_id="minimax-cn-coding",
+            ),
+            "minimax-cn-coding-plan",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

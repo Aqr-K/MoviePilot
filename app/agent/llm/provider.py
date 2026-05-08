@@ -48,6 +48,7 @@ class ProviderAuthMethod:
 class ProviderUrlPreset:
     """前端展示用的 Base URL 预设。"""
 
+    id: str
     label: str
     value: str
     model_list_base_url: Optional[str] = None
@@ -418,11 +419,13 @@ class LLMProviderManager(metaclass=Singleton):
                 models_dev_provider_id="siliconflow-cn",
                 base_url_presets=(
                     url_preset(
+                        id="siliconflow-cn",
                         label="中国大陆",
                         value="https://api.siliconflow.cn/v1",
                         models_dev_provider_id="siliconflow-cn",
                     ),
                     url_preset(
+                        id="siliconflow-global",
                         label="Global",
                         value="https://api.siliconflow.com/v1",
                         models_dev_provider_id="siliconflow",
@@ -439,11 +442,13 @@ class LLMProviderManager(metaclass=Singleton):
                 models_dev_provider_id="moonshotai-cn",
                 base_url_presets=(
                     url_preset(
+                        id="moonshot-cn",
                         label="中国站",
                         value="https://api.moonshot.cn/v1",
                         models_dev_provider_id="moonshotai-cn",
                     ),
                     url_preset(
+                        id="moonshot-global",
                         label="国际站",
                         value="https://api.moonshot.ai/v1",
                         models_dev_provider_id="moonshotai",
@@ -469,11 +474,13 @@ class LLMProviderManager(metaclass=Singleton):
                 models_dev_provider_id="zhipuai",
                 base_url_presets=(
                     url_preset(
+                        id="zhipu-general",
                         label="Token Plan / 通用 API",
                         value="https://open.bigmodel.cn/api/paas/v4",
                         models_dev_provider_id="zhipuai",
                     ),
                     url_preset(
+                        id="zhipu-coding",
                         label="Coding Plan",
                         value="https://open.bigmodel.cn/api/coding/paas/v4",
                         model_list_base_url="https://open.bigmodel.cn/api/paas/v4",
@@ -490,11 +497,13 @@ class LLMProviderManager(metaclass=Singleton):
                 sort_order=66,
                 base_url_presets=(
                     url_preset(
+                        id="zai-general",
                         label="Token Plan / 通用 API",
                         value="https://api.z.ai/api/paas/v4",
                         models_dev_provider_id="zai",
                     ),
                     url_preset(
+                        id="zai-coding",
                         label="Coding Plan",
                         value="https://api.z.ai/api/coding/paas/v4",
                         models_dev_provider_id="zai-coding-plan",
@@ -511,22 +520,26 @@ class LLMProviderManager(metaclass=Singleton):
                 models_dev_provider_id="alibaba-cn",
                 base_url_presets=(
                     url_preset(
+                        id="alibaba-cn-general",
                         label="中国内地 / 通用",
                         value="https://dashscope.aliyuncs.com/compatible-mode/v1",
                         models_dev_provider_id="alibaba-cn",
                     ),
                     url_preset(
+                        id="alibaba-global-general",
                         label="国际站 / 通用",
                         value="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
                         models_dev_provider_id="alibaba",
                     ),
                     url_preset(
+                        id="alibaba-cn-coding",
                         label="中国内地 / Coding Plan",
                         value="https://coding.dashscope.aliyuncs.com/v1",
                         model_list_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
                         models_dev_provider_id="alibaba-coding-plan-cn",
                     ),
                     url_preset(
+                        id="alibaba-global-coding",
                         label="国际站 / Coding Plan",
                         value="https://coding-intl.dashscope.aliyuncs.com/v1",
                         model_list_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
@@ -543,10 +556,12 @@ class LLMProviderManager(metaclass=Singleton):
                 default_base_url="https://qianfan.baidubce.com/v2",
                 base_url_presets=(
                     url_preset(
+                        id="baidu-qianfan-general",
                         label="通用 API",
                         value="https://qianfan.baidubce.com/v2",
                     ),
                     url_preset(
+                        id="baidu-qianfan-coding",
                         label="Coding Plan",
                         value="https://qianfan.baidubce.com/v2/coding",
                     ),
@@ -563,10 +578,12 @@ class LLMProviderManager(metaclass=Singleton):
                 default_base_url="https://modelservice.jdcloud.com/v1",
                 base_url_presets=(
                     url_preset(
+                        id="jdcloud-general",
                         label="通用 API",
                         value="https://modelservice.jdcloud.com/v1",
                     ),
                     url_preset(
+                        id="jdcloud-coding",
                         label="Coding Plan",
                         value="https://modelservice.jdcloud.com/coding/openai/v1",
                     ),
@@ -593,11 +610,13 @@ class LLMProviderManager(metaclass=Singleton):
                 default_base_url="https://tokenhub.tencentmaas.com/v1",
                 base_url_presets=(
                     url_preset(
+                        id="tencent-tokenhub",
                         label="TokenHub",
                         value="https://tokenhub.tencentmaas.com/v1",
                         models_dev_provider_id="tencent-tokenhub",
                     ),
                     url_preset(
+                        id="tencent-coding",
                         label="Coding Plan",
                         value="https://api.lkeap.cloud.tencent.com/coding/v3",
                         models_dev_provider_id="tencent-coding-plan",
@@ -635,11 +654,13 @@ class LLMProviderManager(metaclass=Singleton):
                 sort_order=115,
                 base_url_presets=(
                     url_preset(
+                        id="opencode-zen",
                         label="Zen",
                         value="https://opencode.ai/zen/v1",
                         models_dev_provider_id="opencode",
                     ),
                     url_preset(
+                        id="opencode-go",
                         label="Go",
                         value="https://opencode.ai/zen/go/v1",
                         models_dev_provider_id="opencode-go",
@@ -656,39 +677,32 @@ class LLMProviderManager(metaclass=Singleton):
                 models_dev_provider_id="minimax-cn",
                 base_url_presets=(
                     url_preset(
+                        id="minimax-cn-general",
                         label="中国内地 / 通用",
                         value="https://api.minimaxi.com/anthropic/v1",
                         models_dev_provider_id="minimax-cn",
                     ),
                     url_preset(
+                        id="minimax-global-general",
                         label="国际站 / 通用",
                         value="https://api.minimax.io/anthropic/v1",
                         models_dev_provider_id="minimax",
                     ),
-                ),
-                api_key_hint="填写 MiniMax API Key，可在中国内地与国际站通用端点间切换。",
-                description="MiniMax Anthropic-compatible 通用端点。",
-            ),
-            anthropic_provider(
-                provider_id="minimax-coding",
-                name="MiniMax Coding Plan",
-                default_base_url="https://api.minimaxi.com/anthropic/v1",
-                sort_order=121,
-                models_dev_provider_id="minimax-cn-coding-plan",
-                base_url_presets=(
                     url_preset(
+                        id="minimax-cn-coding",
                         label="中国内地 / Coding Plan",
                         value="https://api.minimaxi.com/anthropic/v1",
                         models_dev_provider_id="minimax-cn-coding-plan",
                     ),
                     url_preset(
+                        id="minimax-global-coding",
                         label="国际站 / Coding Plan",
                         value="https://api.minimax.io/anthropic/v1",
                         models_dev_provider_id="minimax-coding-plan",
                     ),
                 ),
-                api_key_hint="填写 MiniMax API Key，可在中国内地与国际站 Coding Plan 目录间切换。",
-                description="MiniMax Coding Plan Anthropic-compatible 端点。",
+                api_key_hint="填写 MiniMax API Key，可在中国内地、国际站、通用与 Coding Plan 目录间切换。",
+                description="MiniMax Anthropic-compatible 端点，支持通用与 Coding Plan 目录预设。",
             ),
             catalog_openai_provider(
                 provider_id="xiaomi",
@@ -697,21 +711,25 @@ class LLMProviderManager(metaclass=Singleton):
                 sort_order=130,
                 base_url_presets=(
                     url_preset(
+                        id="xiaomi-standard",
                         label="标准端点",
                         value="https://api.xiaomimimo.com/v1",
                         models_dev_provider_id="xiaomi",
                     ),
                     url_preset(
+                        id="xiaomi-token-plan-cn",
                         label="Token Plan / 中国",
                         value="https://token-plan-cn.xiaomimimo.com/v1",
                         models_dev_provider_id="xiaomi-token-plan-cn",
                     ),
                     url_preset(
+                        id="xiaomi-token-plan-sgp",
                         label="Token Plan / 新加坡",
                         value="https://token-plan-sgp.xiaomimimo.com/v1",
                         models_dev_provider_id="xiaomi-token-plan-sgp",
                     ),
                     url_preset(
+                        id="xiaomi-token-plan-ams",
                         label="Token Plan / 欧洲",
                         value="https://token-plan-ams.xiaomimimo.com/v1",
                         models_dev_provider_id="xiaomi-token-plan-ams",
@@ -932,11 +950,12 @@ class LLMProviderManager(metaclass=Singleton):
     async def _get_provider_async(
             self, provider_id: str, force_refresh: bool = False
     ) -> ProviderSpec:
+        normalized_provider_id = self._normalize_provider_id(provider_id)
         try:
-            return self.get_provider(provider_id)
+            return self.get_provider(normalized_provider_id)
         except LLMProviderError:
             await self.get_models_dev_data(force_refresh=force_refresh)
-            return self.get_provider(provider_id)
+            return self.get_provider(normalized_provider_id)
 
     def _serialize_provider(self, spec: ProviderSpec) -> dict[str, Any]:
         return {
@@ -946,6 +965,7 @@ class LLMProviderManager(metaclass=Singleton):
             "default_base_url": self._default_base_url_for_provider(spec) or "",
             "base_url_presets": [
                 {
+                    "id": preset.id,
                     "label": preset.label,
                     "value": self._sanitize_base_url(preset.value) or "",
                 }
@@ -989,7 +1009,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     def get_provider(self, provider_id: str) -> ProviderSpec:
         """按 provider id 获取定义。"""
-        normalized = (provider_id or "").strip().lower()
+        normalized = self._normalize_provider_id(provider_id)
         for spec in self._provider_specs():
             if spec.id == normalized:
                 return spec
@@ -1014,9 +1034,39 @@ class LLMProviderManager(metaclass=Singleton):
         return cls._sanitize_base_url(spec.base_url_presets[0].value)
 
     @classmethod
-    def _resolve_provider_model_list_base_url(
-            cls, spec: ProviderSpec, base_url: Optional[str]
+    def _normalize_provider_id(cls, provider_id: str) -> str:
+        normalized = (provider_id or "").strip().lower()
+        if normalized == "minimax-coding":
+            return "minimax"
+        return normalized
+
+    @classmethod
+    def _normalize_base_url_preset_id(
+            cls, provider_id: str, base_url_preset_id: Optional[str]
     ) -> Optional[str]:
+        normalized_provider_id = cls._normalize_provider_id(provider_id)
+        normalized_preset_id = str(base_url_preset_id or "").strip().lower() or None
+        if not normalized_preset_id:
+            return None
+        if normalized_provider_id == "minimax" and normalized_preset_id == "minimax-coding":
+            return "minimax-cn-coding"
+        return normalized_preset_id
+
+    @classmethod
+    def _resolve_provider_model_list_base_url(
+            cls,
+            spec: ProviderSpec,
+            base_url: Optional[str],
+            base_url_preset_id: Optional[str] = None,
+    ) -> Optional[str]:
+        normalized_preset_id = cls._normalize_base_url_preset_id(spec.id, base_url_preset_id)
+        if normalized_preset_id:
+            for preset in spec.base_url_presets:
+                if preset.id != normalized_preset_id:
+                    continue
+                preset_value = cls._sanitize_base_url(preset.value)
+                return cls._sanitize_base_url(preset.model_list_base_url) or preset_value
+
         normalized_base_url = cls._sanitize_base_url(base_url)
         if normalized_base_url:
             for preset in spec.base_url_presets:
@@ -1037,8 +1087,18 @@ class LLMProviderManager(metaclass=Singleton):
 
     @classmethod
     def _resolve_provider_models_dev_provider_id(
-            cls, spec: ProviderSpec, base_url: Optional[str]
+            cls,
+            spec: ProviderSpec,
+            base_url: Optional[str],
+            base_url_preset_id: Optional[str] = None,
     ) -> Optional[str]:
+        normalized_preset_id = cls._normalize_base_url_preset_id(spec.id, base_url_preset_id)
+        if normalized_preset_id:
+            for preset in spec.base_url_presets:
+                if preset.id != normalized_preset_id:
+                    continue
+                return preset.models_dev_provider_id or spec.models_dev_provider_id
+
         normalized_base_url = cls._sanitize_base_url(base_url)
         if normalized_base_url:
             for preset in spec.base_url_presets:
@@ -1058,10 +1118,17 @@ class LLMProviderManager(metaclass=Singleton):
         return spec.models_dev_provider_id
 
     def resolve_model_list_base_url(
-            self, provider_id: str, base_url: Optional[str]
+            self,
+            provider_id: str,
+            base_url: Optional[str],
+            base_url_preset_id: Optional[str] = None,
     ) -> Optional[str]:
         spec = self.get_provider(provider_id)
-        return self._resolve_provider_model_list_base_url(spec, base_url)
+        return self._resolve_provider_model_list_base_url(
+            spec,
+            base_url,
+            base_url_preset_id=base_url_preset_id,
+        )
 
     @staticmethod
     def _httpx_proxy_key() -> str:
@@ -1212,21 +1279,33 @@ class LLMProviderManager(metaclass=Singleton):
                 raise LLMProviderError(f"获取 models.dev 数据失败: {err}") from err
 
     async def _models_dev_provider_payload(
-            self, provider_id: str, base_url: Optional[str] = None
+            self,
+            provider_id: str,
+            base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any]:
         spec = await self._get_provider_async(provider_id)
         models_dev_provider_id = self._resolve_provider_models_dev_provider_id(
             spec,
             base_url,
+            base_url_preset_id=base_url_preset_id,
         )
         if not models_dev_provider_id:
             return {}
         return (await self.get_models_dev_data()).get(models_dev_provider_id, {}) or {}
 
     async def _models_dev_model(
-            self, provider_id: str, model_id: str, base_url: Optional[str] = None
+            self,
+            provider_id: str,
+            model_id: str,
+            base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any] | None:
-        payload = await self._models_dev_provider_payload(provider_id, base_url=base_url)
+        payload = await self._models_dev_provider_payload(
+            provider_id,
+            base_url=base_url,
+            base_url_preset_id=base_url_preset_id,
+        )
         models = payload.get("models") if isinstance(payload, dict) else None
         if not isinstance(models, dict):
             return None
@@ -1394,13 +1473,18 @@ class LLMProviderManager(metaclass=Singleton):
             provider_id: str,
             transport: str = "openai",
             base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
         某些 provider 没有统一稳定的 models.list 行为，
         因此优先读取 models.dev 目录；若未来 provider 暴露标准 models 接口，
         再平滑补充实时刷新即可。
         """
-        payload = await self._models_dev_provider_payload(provider_id, base_url=base_url)
+        payload = await self._models_dev_provider_payload(
+            provider_id,
+            base_url=base_url,
+            base_url_preset_id=base_url_preset_id,
+        )
         models = payload.get("models") if isinstance(payload, dict) else None
         if not isinstance(models, dict):
             raise LLMProviderError(f"{provider_id} 暂无可用模型目录")
@@ -1551,11 +1635,16 @@ class LLMProviderManager(metaclass=Singleton):
             provider_id: str,
             api_key: Optional[str] = None,
             base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
             force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
         """返回标准化后的模型目录。"""
         spec = await self._get_provider_async(provider_id, force_refresh=force_refresh)
-        if self._resolve_provider_models_dev_provider_id(spec, base_url):
+        if self._resolve_provider_models_dev_provider_id(
+                spec,
+                base_url,
+                base_url_preset_id=base_url_preset_id,
+        ):
             # 对依赖 models.dev 的 provider 主动刷新一次缓存，保证“刷新模型列表”
             # 在使用目录型 provider 时也能拿到最新参数。
             if force_refresh:
@@ -1565,6 +1654,7 @@ class LLMProviderManager(metaclass=Singleton):
             model=None,
             api_key=api_key,
             base_url=base_url,
+            base_url_preset_id=base_url_preset_id,
         )
 
         if spec.model_list_strategy == "google":
@@ -1582,6 +1672,7 @@ class LLMProviderManager(metaclass=Singleton):
                 base_url=self._resolve_provider_model_list_base_url(
                     spec,
                     runtime["base_url"],
+                    base_url_preset_id=base_url_preset_id,
                 ),
                 default_headers=runtime.get("default_headers"),
             )
@@ -1591,6 +1682,7 @@ class LLMProviderManager(metaclass=Singleton):
                 provider_id=provider_id,
                 transport="anthropic",
                 base_url=base_url,
+                base_url_preset_id=base_url_preset_id,
             )
             
         if spec.model_list_strategy == "models_dev_only":
@@ -1598,6 +1690,7 @@ class LLMProviderManager(metaclass=Singleton):
                 provider_id=provider_id,
                 transport="openai",
                 base_url=base_url,
+                base_url_preset_id=base_url_preset_id,
             )
 
         # openai-compatible / deepseek 默认走官方 models 端点。
@@ -1607,6 +1700,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url=self._resolve_provider_model_list_base_url(
                 spec,
                 runtime["base_url"],
+                base_url_preset_id=base_url_preset_id,
             ),
             default_headers=runtime.get("default_headers"),
         )
@@ -1616,6 +1710,7 @@ class LLMProviderManager(metaclass=Singleton):
             provider_id: str,
             model_id: Optional[str],
             base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any] | None:
         if not model_id:
             return None
@@ -1623,6 +1718,7 @@ class LLMProviderManager(metaclass=Singleton):
             provider_id,
             model_id,
             base_url=base_url,
+            base_url_preset_id=base_url_preset_id,
         )
         if metadata:
             return metadata
@@ -2079,13 +2175,19 @@ class LLMProviderManager(metaclass=Singleton):
             model: Optional[str],
             api_key: Optional[str] = None,
             base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         解析 provider 运行时参数。
 
         返回统一结构，供 `LLMHelper` 创建具体 LangChain 模型实例时使用。
         """
-        spec = await self._get_provider_async(provider_id)
+        normalized_provider_id = self._normalize_provider_id(provider_id)
+        normalized_base_url_preset_id = self._normalize_base_url_preset_id(
+            normalized_provider_id,
+            base_url_preset_id,
+        )
+        spec = await self._get_provider_async(normalized_provider_id)
         normalized_api_key = str(api_key or "").strip() or None
         normalized_base_url = self._sanitize_base_url(base_url)
         model_record = None
@@ -2095,9 +2197,10 @@ class LLMProviderManager(metaclass=Singleton):
                     (
                         item
                         for item in await self.list_models(
-                        provider_id,
+                        normalized_provider_id,
                         api_key=api_key,
                         base_url=base_url,
+                        base_url_preset_id=normalized_base_url_preset_id,
                     )
                         if item["id"] == model
                     ),
@@ -2108,21 +2211,22 @@ class LLMProviderManager(metaclass=Singleton):
                 model_record = None
 
         result: dict[str, Any] = {
-            "provider_id": provider_id,
+            "provider_id": normalized_provider_id,
             "runtime": spec.runtime,
             "model_id": model,
             "model_record": model_record,
             "model_metadata": await self.resolve_model_metadata(
-                provider_id,
+                normalized_provider_id,
                 model,
                 base_url=base_url,
+                base_url_preset_id=normalized_base_url_preset_id,
             ),
             "default_headers": None,
             "use_responses_api": None,
             "auth_mode": "api_key",
         }
 
-        if provider_id == "chatgpt":
+        if normalized_provider_id == "chatgpt":
             auth = None
             try:
                 auth = await self._resolve_chatgpt_oauth()
@@ -2160,7 +2264,7 @@ class LLMProviderManager(metaclass=Singleton):
 
             raise LLMProviderAuthError("请提供 API Key 或完成 ChatGPT 授权")
 
-        if provider_id == "github-copilot":
+        if normalized_provider_id == "github-copilot":
             auth = self.get_saved_auth("github-copilot")
             if auth and auth.get("type") == "oauth":
                 token = auth.get("refresh_token") or auth.get("access_token")
