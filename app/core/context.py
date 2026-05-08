@@ -152,6 +152,8 @@ class TorrentInfo:
 
 @dataclass
 class MediaInfo:
+    # 内部标记：是否命中本地识别缓存，不参与序列化
+    recognize_cache_hit = False
     # 来源：themoviedb、douban、bangumi
     source: str = None
     # 类型 电影、电视剧

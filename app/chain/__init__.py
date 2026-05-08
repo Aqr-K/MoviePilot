@@ -415,6 +415,48 @@ class ChainBase(metaclass=ABCMeta):
             and not any([tmdbid, doubanid, bangumiid])
         )
 
+    @staticmethod
+    def _snapshot_recognize_cache_meta(meta: Optional[MetaBase]) -> Optional[MetaBase]:
+        """
+        保存共享识别前的本地缓存关键元数据，用于共享成功后回填正缓存覆盖负缓存。
+        """
+        if not meta:
+            return None
+        return copy.deepcopy(meta)
+
+    @staticmethod
+    def _update_local_recognize_cache(
+            self,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+    ) -> None:
+        """
+        共享识别成功后回填本地识别缓存，避免名称负缓存导致后续重复回查共享。
+        """
+        if not meta or not mediainfo:
+            return
+        self.run_module(
+            "update_recognize_cache",
+            meta=meta,
+            mediainfo=mediainfo,
+        )
+
+    async def _async_update_local_recognize_cache(
+            self,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+    ) -> None:
+        """
+        异步回填本地识别缓存。
+        """
+        if not meta or not mediainfo:
+            return
+        await self.async_run_module(
+            "async_update_recognize_cache",
+            meta=meta,
+            mediainfo=mediainfo,
+        )
+
     def recognize_media(
             self,
             meta: MetaBase = None,
@@ -460,10 +502,12 @@ class ChainBase(metaclass=ABCMeta):
                 cache=cache,
             )
         if mediainfo:
-            share_helper.report(meta=meta, mediainfo=mediainfo)
+            if not mediainfo.recognize_cache_hit:
+                share_helper.report(meta=meta, mediainfo=mediainfo)
             return mediainfo
 
         if self._can_use_media_recognize_share(meta, tmdbid, doubanid, bangumiid):
+            shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
             shared_item = share_helper.query(meta=meta, mtype=mtype)
             shared_params = share_helper.to_recognize_params(shared_item)
             if shared_params:
@@ -479,7 +523,9 @@ class ChainBase(metaclass=ABCMeta):
                         cache=cache,
                     )
                 if mediainfo:
-                    share_helper.report(meta=meta, mediainfo=mediainfo)
+                    self._update_local_recognize_cache(shared_cache_meta, mediainfo)
+                    if not mediainfo.recognize_cache_hit:
+                        share_helper.report(meta=meta, mediainfo=mediainfo)
                     return mediainfo
         return None
 
@@ -528,10 +574,12 @@ class ChainBase(metaclass=ABCMeta):
                 cache=cache,
             )
         if mediainfo:
-            await share_helper.async_report(meta=meta, mediainfo=mediainfo)
+            if not mediainfo.recognize_cache_hit:
+                await share_helper.async_report(meta=meta, mediainfo=mediainfo)
             return mediainfo
 
         if self._can_use_media_recognize_share(meta, tmdbid, doubanid, bangumiid):
+            shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
             shared_item = await share_helper.async_query(meta=meta, mtype=mtype)
             shared_params = share_helper.to_recognize_params(shared_item)
             if shared_params:
@@ -547,7 +595,9 @@ class ChainBase(metaclass=ABCMeta):
                         cache=cache,
                     )
                 if mediainfo:
-                    await share_helper.async_report(meta=meta, mediainfo=mediainfo)
+                    await self._async_update_local_recognize_cache(shared_cache_meta, mediainfo)
+                    if not mediainfo.recognize_cache_hit:
+                        await share_helper.async_report(meta=meta, mediainfo=mediainfo)
                     return mediainfo
         return None
 

@@ -39,7 +39,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         """
         if not meta:
             return None
-        keyword = getattr(meta, "original_name", None) or getattr(meta, "name", None)
+        keyword = meta.original_name or meta.name
         if keyword:
             keyword = str(keyword).strip()
         return keyword or None
@@ -77,7 +77,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         """
         if media_type != "tv":
             return None
-        season = getattr(meta, "begin_season", None)
+        season = meta.begin_season if meta else None
         if season is None and mediainfo:
             season = mediainfo.season
         try:
@@ -93,7 +93,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         """
         提取年份
         """
-        year = getattr(meta, "year", None) or (mediainfo.year if mediainfo else None)
+        year = (meta.year if meta else None) or (mediainfo.year if mediainfo else None)
         if year is None:
             return None
         year_text = str(year).strip()
