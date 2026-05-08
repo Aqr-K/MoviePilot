@@ -39,7 +39,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         """
         if not meta:
             return None
-        keyword = getattr(meta, "name", None)
+        keyword = getattr(meta, "original_name", None) or getattr(meta, "name", None)
         if keyword:
             keyword = str(keyword).strip()
         return keyword or None

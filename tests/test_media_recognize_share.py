@@ -13,6 +13,7 @@ sys.modules.setdefault("psutil", ModuleType("psutil"))
 from app.chain import ChainBase
 from app.core.context import MediaInfo
 from app.core.meta import MetaBase
+from app.helper.recognize import MediaRecognizeShareHelper
 from app.schemas.types import MediaType
 
 
@@ -86,7 +87,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
         second_call = run_module.call_args_list[1]
         self.assertEqual(second_call.kwargs["tmdbid"], 200)
         self.assertEqual(second_call.kwargs["mtype"], MediaType.TV)
-        self.assertEqual(meta.begin_season, 1)
+        self.assertIsNone(meta.begin_season)
 
     def test_async_query_shared_result_when_local_recognize_failed(self):
         """
@@ -125,7 +126,30 @@ class TestMediaRecognizeShare(unittest.TestCase):
         self.assertIs(result, shared_media)
         self.assertEqual(async_run_module.await_count, 2)
         query_mock.assert_awaited_once_with(meta=meta, mtype=None)
-        self.assertEqual(meta.begin_season, 2)
+        self.assertIsNone(meta.begin_season)
+
+    def test_query_and_report_prefer_original_name_keyword(self):
+        """
+        查询和上报共享识别时应优先使用未应用识别词的识别名称
+        """
+        helper = MediaRecognizeShareHelper()
+        meta = self._build_meta("应用识别词后的名称", MediaType.TV)
+        meta.original_name = "未应用识别词的名称"
+        meta.year = "2024"
+        meta.begin_season = 1
+        mediainfo = MediaInfo(
+            title="测试剧集",
+            year="2024",
+            tmdb_id=400,
+            type=MediaType.TV,
+            season=1,
+        )
+
+        query_params = helper._build_query_params(meta=meta)
+        report_payload = helper._build_report_payload(meta=meta, mediainfo=mediainfo)
+
+        self.assertEqual(query_params["keyword"], "未应用识别词的名称")
+        self.assertEqual(report_payload["keyword"], "未应用识别词的名称")
 
 
 if __name__ == "__main__":
