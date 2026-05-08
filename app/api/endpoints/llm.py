@@ -98,7 +98,7 @@ async def get_llm_providers(
     返回前端可直接渲染的 provider 目录。
     """
     try:
-        providers = LLMProviderManager().list_providers()
+        providers = await LLMProviderManager().list_providers_async()
         return schemas.Response(success=True, data=providers)
     except Exception as err:
         return schemas.Response(success=False, message=str(err))

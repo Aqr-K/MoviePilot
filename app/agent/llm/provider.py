@@ -117,6 +117,58 @@ class LLMProviderManager(metaclass=Singleton):
         "gpt-5.4-mini",
         "gpt-5.5",
     }
+    _MODELS_DEV_DYNAMIC_SKIP_IDS = {
+        "aihubmix",
+        "amazon-bedrock",
+        "azure",
+        "azure-cognitive-services",
+        "cloudflare-ai-gateway",
+        "cohere",
+        "gitlab",
+        "google-vertex",
+        "google-vertex-anthropic",
+        "kiro",
+        "sap-ai-core",
+        "v0",
+        "vercel",
+    }
+    _MODELS_DEV_DYNAMIC_PROVIDER_OVERRIDES = {
+        "bailing": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.tbox.cn/api/llm/v1",
+            "description": "Bailing OpenAI-compatible 端点。",
+        },
+        "cerebras": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.cerebras.ai/v1",
+            "description": "Cerebras 官方兼容端点。",
+        },
+        "deepinfra": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.deepinfra.com/v1/openai",
+            "description": "DeepInfra 官方兼容端点。",
+        },
+        "mistral": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.mistral.ai/v1",
+            "description": "Mistral 官方兼容端点。",
+        },
+        "perplexity": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.perplexity.ai/v1",
+            "description": "Perplexity 官方兼容端点。",
+        },
+        "togetherai": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.together.xyz/v1",
+            "description": "Together AI 官方兼容端点。",
+        },
+        "venice": {
+            "runtime": "openai_compatible",
+            "default_base_url": "https://api.venice.ai/api/v1",
+            "description": "Venice AI 官方兼容端点。",
+        },
+    }
 
     def __init__(self):
         self._lock = threading.RLock()
@@ -130,7 +182,7 @@ class LLMProviderManager(metaclass=Singleton):
         )
 
     @staticmethod
-    def _provider_specs() -> tuple[ProviderSpec, ...]:
+    def _builtin_provider_specs() -> tuple[ProviderSpec, ...]:
         """
         返回受支持的 provider 定义。
 
@@ -708,43 +760,253 @@ class LLMProviderManager(metaclass=Singleton):
         )
         return tuple(providers)
 
+    def _cached_models_dev_payload(self) -> dict[str, Any]:
+        if isinstance(self._models_dev_data, dict):
+            return self._models_dev_data
+
+        try:
+            if not self._models_dev_cache_path.exists():
+                return {}
+            payload = json.loads(self._models_dev_cache_path.read_text(encoding="utf-8"))
+        except Exception as err:
+            logger.warning(f"读取 models.dev provider 缓存失败: {err}")
+            return {}
+
+        if not isinstance(payload, dict):
+            return {}
+
+        self._models_dev_data = payload
+        return payload
+
+    @staticmethod
+    def _models_dev_env_names(payload: dict[str, Any]) -> tuple[str, ...]:
+        raw_env_names = payload.get("env")
+        if not isinstance(raw_env_names, list):
+            return ()
+        env_names = []
+        for item in raw_env_names:
+            value = str(item or "").strip()
+            if value:
+                env_names.append(value)
+        return tuple(env_names)
+
+    @classmethod
+    def _models_dev_reserved_provider_ids(
+            cls, specs: tuple[ProviderSpec, ...]
+    ) -> set[str]:
+        reserved_ids: set[str] = set()
+        for spec in specs:
+            if spec.models_dev_provider_id:
+                reserved_ids.add(spec.models_dev_provider_id)
+            for preset in spec.base_url_presets:
+                if preset.models_dev_provider_id:
+                    reserved_ids.add(preset.models_dev_provider_id)
+        return reserved_ids
+
+    @staticmethod
+    def _dynamic_api_key_label(env_names: tuple[str, ...]) -> str:
+        first_env = env_names[0].upper() if env_names else ""
+        if "TOKEN" in first_env and "KEY" not in first_env:
+            return "API Token"
+        return "API Key"
+
+    @classmethod
+    def _normalize_models_dev_base_url(
+            cls, runtime: str, base_url: Optional[str]
+    ) -> Optional[str]:
+        normalized = cls._sanitize_base_url(base_url)
+        if not normalized:
+            return None
+
+        suffixes = {
+            "openai_compatible": (
+                "/chat/completions",
+                "/completions",
+                "/responses",
+                "/embeddings",
+                "/audio/speech",
+                "/audio/transcriptions",
+            ),
+            "anthropic_compatible": (
+                "/messages",
+            ),
+        }
+
+        for suffix in suffixes.get(runtime, ()): 
+            if normalized.endswith(suffix):
+                normalized = normalized[: -len(suffix)]
+                break
+        return cls._sanitize_base_url(normalized)
+
+    @classmethod
+    def _models_dev_dynamic_provider_spec(
+            cls,
+            provider_id: str,
+            payload: dict[str, Any],
+            sort_order: int,
+    ) -> ProviderSpec | None:
+        normalized_id = str(provider_id or "").strip().lower()
+        if not normalized_id or normalized_id in cls._MODELS_DEV_DYNAMIC_SKIP_IDS:
+            return None
+
+        override = cls._MODELS_DEV_DYNAMIC_PROVIDER_OVERRIDES.get(normalized_id, {})
+        npm_package = str(payload.get("npm") or "").strip()
+        runtime = override.get("runtime")
+        if not runtime:
+            if npm_package == "@ai-sdk/openai-compatible":
+                runtime = "openai_compatible"
+            elif npm_package == "@ai-sdk/anthropic":
+                runtime = "anthropic_compatible"
+            else:
+                return None
+
+        model_list_strategy = override.get("model_list_strategy")
+        if not model_list_strategy:
+            model_list_strategy = (
+                "anthropic_compatible"
+                if runtime == "anthropic_compatible"
+                else "models_dev_only"
+            )
+
+        default_base_url = cls._normalize_models_dev_base_url(
+            runtime=runtime,
+            base_url=override.get("default_base_url") or payload.get("api"),
+        )
+        requires_base_url = not bool(default_base_url)
+        env_names = cls._models_dev_env_names(payload)
+        api_key_label = override.get("api_key_label") or cls._dynamic_api_key_label(
+            env_names
+        )
+        name = str(payload.get("name") or override.get("name") or normalized_id).strip()
+        description = override.get("description")
+        if not description:
+            transport_name = "Anthropic-compatible" if runtime == "anthropic_compatible" else "OpenAI-compatible"
+            description = f"{name} {transport_name} 端点（来自 models.dev 目录）。"
+
+        api_key_hint = override.get("api_key_hint")
+        if not api_key_hint:
+            api_key_hint = f"填写 {name} {api_key_label}。"
+            if requires_base_url:
+                api_key_hint = f"填写 {name} {api_key_label}，并手动填写 Base URL。"
+
+        return ProviderSpec(
+            id=normalized_id,
+            name=name,
+            runtime=runtime,
+            models_dev_provider_id=normalized_id,
+            default_base_url=default_base_url,
+            base_url_editable=True,
+            requires_base_url=requires_base_url,
+            api_key_label=api_key_label,
+            api_key_hint=api_key_hint,
+            model_list_strategy=model_list_strategy,
+            description=description,
+            sort_order=sort_order,
+        )
+
+    def _dynamic_provider_specs(
+            self, builtin_specs: tuple[ProviderSpec, ...]
+    ) -> tuple[ProviderSpec, ...]:
+        payload = self._cached_models_dev_payload()
+        if not payload:
+            return ()
+
+        explicit_ids = {spec.id for spec in builtin_specs}
+        reserved_ids = self._models_dev_reserved_provider_ids(builtin_specs)
+        candidates: list[tuple[str, str, dict[str, Any]]] = []
+
+        for provider_id, provider_payload in payload.items():
+            normalized_id = str(provider_id or "").strip().lower()
+            if not normalized_id or not isinstance(provider_payload, dict):
+                continue
+            if normalized_id in explicit_ids or normalized_id in reserved_ids:
+                continue
+
+            spec = self._models_dev_dynamic_provider_spec(
+                provider_id=normalized_id,
+                payload=provider_payload,
+                sort_order=0,
+            )
+            if not spec:
+                continue
+            candidates.append((spec.name.lower(), normalized_id, provider_payload))
+
+        dynamic_specs = []
+        for sort_order, (_, provider_id, provider_payload) in enumerate(
+                sorted(candidates),
+                start=700,
+        ):
+            spec = self._models_dev_dynamic_provider_spec(
+                provider_id=provider_id,
+                payload=provider_payload,
+                sort_order=sort_order,
+            )
+            if not spec:
+                continue
+            dynamic_specs.append(spec)
+        return tuple(dynamic_specs)
+
+    def _provider_specs(self) -> tuple[ProviderSpec, ...]:
+        builtin_specs = self._builtin_provider_specs()
+        return builtin_specs + self._dynamic_provider_specs(builtin_specs)
+
+    async def _get_provider_async(
+            self, provider_id: str, force_refresh: bool = False
+    ) -> ProviderSpec:
+        try:
+            return self.get_provider(provider_id)
+        except LLMProviderError:
+            await self.get_models_dev_data(force_refresh=force_refresh)
+            return self.get_provider(provider_id)
+
+    def _serialize_provider(self, spec: ProviderSpec) -> dict[str, Any]:
+        return {
+            "id": spec.id,
+            "name": spec.name,
+            "runtime": spec.runtime,
+            "default_base_url": self._default_base_url_for_provider(spec) or "",
+            "base_url_presets": [
+                {
+                    "label": preset.label,
+                    "value": self._sanitize_base_url(preset.value) or "",
+                }
+                for preset in spec.base_url_presets
+            ],
+            "base_url_editable": spec.base_url_editable,
+            "requires_base_url": spec.requires_base_url,
+            "supports_api_key": spec.supports_api_key,
+            "api_key_label": spec.api_key_label,
+            "api_key_hint": spec.api_key_hint,
+            "supports_model_refresh": spec.supports_model_refresh,
+            "oauth_methods": [
+                {
+                    "id": method.id,
+                    "type": method.type,
+                    "label": method.label,
+                    "description": method.description,
+                }
+                for method in spec.oauth_methods
+            ],
+            "description": spec.description,
+            "auth_status": self.get_auth_status(spec.id),
+        }
+
+    async def list_providers_async(
+            self, force_refresh: bool = False
+    ) -> list[dict[str, Any]]:
+        """返回前端可渲染的 provider 目录，并优先补齐 models.dev 动态平台。"""
+        try:
+            await self.get_models_dev_data(force_refresh=force_refresh)
+        except Exception as err:
+            logger.debug(f"加载 models.dev provider 目录失败，回退内置列表: {err}")
+        return self.list_providers()
+
     def list_providers(self) -> list[dict[str, Any]]:
         """返回前端可渲染的 provider 目录。"""
-        providers = []
-        for spec in sorted(self._provider_specs(), key=lambda item: item.sort_order):
-            providers.append(
-                {
-                    "id": spec.id,
-                    "name": spec.name,
-                    "runtime": spec.runtime,
-                    "default_base_url": self._default_base_url_for_provider(spec) or "",
-                    "base_url_presets": [
-                        {
-                            "label": preset.label,
-                            "value": self._sanitize_base_url(preset.value) or "",
-                        }
-                        for preset in spec.base_url_presets
-                    ],
-                    "base_url_editable": spec.base_url_editable,
-                    "requires_base_url": spec.requires_base_url,
-                    "supports_api_key": spec.supports_api_key,
-                    "api_key_label": spec.api_key_label,
-                    "api_key_hint": spec.api_key_hint,
-                    "supports_model_refresh": spec.supports_model_refresh,
-                    "oauth_methods": [
-                        {
-                            "id": method.id,
-                            "type": method.type,
-                            "label": method.label,
-                            "description": method.description,
-                        }
-                        for method in spec.oauth_methods
-                    ],
-                    "description": spec.description,
-                    "auth_status": self.get_auth_status(spec.id),
-                }
-            )
-        return providers
+        return [
+            self._serialize_provider(spec)
+            for spec in sorted(self._provider_specs(), key=lambda item: item.sort_order)
+        ]
 
     def get_provider(self, provider_id: str) -> ProviderSpec:
         """按 provider id 获取定义。"""
@@ -973,7 +1235,7 @@ class LLMProviderManager(metaclass=Singleton):
     async def _models_dev_provider_payload(
             self, provider_id: str, base_url: Optional[str] = None
     ) -> dict[str, Any]:
-        spec = self.get_provider(provider_id)
+        spec = await self._get_provider_async(provider_id)
         models_dev_provider_id = self._resolve_provider_models_dev_provider_id(
             spec,
             base_url,
@@ -1313,7 +1575,7 @@ class LLMProviderManager(metaclass=Singleton):
             force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
         """返回标准化后的模型目录。"""
-        spec = self.get_provider(provider_id)
+        spec = await self._get_provider_async(provider_id, force_refresh=force_refresh)
         if self._resolve_provider_models_dev_provider_id(spec, base_url):
             # 对依赖 models.dev 的 provider 主动刷新一次缓存，保证“刷新模型列表”
             # 在使用目录型 provider 时也能拿到最新参数。
@@ -1449,7 +1711,7 @@ class LLMProviderManager(metaclass=Singleton):
 
         API Key 方式已经由普通设置表单覆盖，这里只处理需要交互式授权的 provider。
         """
-        provider = self.get_provider(provider_id)
+        provider = await self._get_provider_async(provider_id)
         method = next(
             (item for item in provider.oauth_methods if item.id == method_id),
             None,
@@ -1844,7 +2106,7 @@ class LLMProviderManager(metaclass=Singleton):
 
         返回统一结构，供 `LLMHelper` 创建具体 LangChain 模型实例时使用。
         """
-        spec = self.get_provider(provider_id)
+        spec = await self._get_provider_async(provider_id)
         normalized_api_key = str(api_key or "").strip() or None
         normalized_base_url = self._sanitize_base_url(base_url)
         model_record = None
