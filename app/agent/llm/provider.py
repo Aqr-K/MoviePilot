@@ -172,6 +172,7 @@ class LLMProviderManager(metaclass=Singleton):
     }
 
     def __init__(self):
+        """初始化管理器实例及各类锁和缓存变量。"""
         self._lock = threading.RLock()
         self._models_dev_lock = asyncio.Lock()
         self._pending_sessions: dict[str, PendingAuthSession] = {}
@@ -749,6 +750,7 @@ class LLMProviderManager(metaclass=Singleton):
         return tuple(providers)
 
     def _cached_models_dev_payload(self) -> dict[str, Any]:
+        """获取缓存的 models.dev payload。"""
         if isinstance(self._models_dev_data, dict):
             return self._models_dev_data
 
@@ -772,6 +774,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _models_dev_env_names(payload: dict[str, Any]) -> tuple[str, ...]:
+        """从 models.dev 数据中提取支持的环境变量名。"""
         raw_env_names = payload.get("env")
         if not isinstance(raw_env_names, list):
             return ()
@@ -786,6 +789,7 @@ class LLMProviderManager(metaclass=Singleton):
     def _models_dev_reserved_provider_ids(
             cls, specs: tuple[ProviderSpec, ...]
     ) -> set[str]:
+        """获取所有已保留的 models_dev_provider_id 集合。"""
         reserved_ids: set[str] = set()
         for spec in specs:
             if spec.models_dev_provider_id:
@@ -797,6 +801,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _dynamic_api_key_label(env_names: tuple[str, ...]) -> str:
+        """根据环境变量名动态推断 API Key 标签名称。"""
         first_env = env_names[0].upper() if env_names else ""
         if "TOKEN" in first_env and "KEY" not in first_env:
             return "API Token"
@@ -806,6 +811,7 @@ class LLMProviderManager(metaclass=Singleton):
     def _normalize_models_dev_base_url(
             cls, runtime: str, base_url: Optional[str]
     ) -> Optional[str]:
+        """规范化从 models.dev 获取的 Base URL。"""
         normalized = cls._sanitize_base_url(base_url)
         if not normalized:
             return None
@@ -837,6 +843,7 @@ class LLMProviderManager(metaclass=Singleton):
             payload: dict[str, Any],
             sort_order: int,
     ) -> ProviderSpec | None:
+        """根据 models.dev 数据动态生成 ProviderSpec 实例。"""
         normalized_id = str(provider_id or "").strip().lower()
         if not normalized_id or normalized_id in cls._MODELS_DEV_DYNAMIC_SKIP_IDS:
             return None
@@ -899,6 +906,7 @@ class LLMProviderManager(metaclass=Singleton):
     def _dynamic_provider_specs(
             self, builtin_specs: tuple[ProviderSpec, ...]
     ) -> tuple[ProviderSpec, ...]:
+        """获取从 models.dev 动态加载的所有 ProviderSpec 实例。"""
         payload = self._cached_models_dev_payload()
         if not payload:
             return ()
@@ -939,12 +947,14 @@ class LLMProviderManager(metaclass=Singleton):
         return tuple(dynamic_specs)
 
     def _provider_specs(self) -> tuple[ProviderSpec, ...]:
+        """获取所有支持的 ProviderSpec，包括内置和动态加载的。"""
         builtin_specs = self._builtin_provider_specs()
         return builtin_specs + self._dynamic_provider_specs(builtin_specs)
 
     async def _get_provider_async(
             self, provider_id: str, force_refresh: bool = False
     ) -> ProviderSpec:
+        """异步获取指定 provider 的 ProviderSpec 实例。"""
         normalized_provider_id = self._normalize_provider_id(provider_id)
         try:
             return self.get_provider(normalized_provider_id)
@@ -953,6 +963,7 @@ class LLMProviderManager(metaclass=Singleton):
             return self.get_provider(normalized_provider_id)
 
     def _serialize_provider(self, spec: ProviderSpec) -> dict[str, Any]:
+        """将 ProviderSpec 序列化为前端可用的字典。"""
         return {
             "id": spec.id,
             "name": spec.name,
@@ -1014,6 +1025,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _sanitize_base_url(base_url: Optional[str]) -> Optional[str]:
+        """清理 Base URL 中多余的空格和结尾斜杠。"""
         if base_url is None:
             return None
         value = str(base_url).strip()
@@ -1023,6 +1035,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @classmethod
     def _default_base_url_for_provider(cls, spec: ProviderSpec) -> Optional[str]:
+        """获取 provider 的默认 Base URL。"""
         default_base_url = cls._sanitize_base_url(spec.default_base_url)
         if default_base_url:
             return default_base_url
@@ -1032,6 +1045,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @classmethod
     def _normalize_provider_id(cls, provider_id: str) -> str:
+        """规范化 provider_id 以兼容旧版配置。"""
         normalized = (provider_id or "").strip().lower()
         if normalized == "minimax-coding":
             return "minimax"
@@ -1043,6 +1057,7 @@ class LLMProviderManager(metaclass=Singleton):
     def _normalize_base_url_preset_id(
             cls, provider_id: str, base_url_preset_id: Optional[str]
     ) -> Optional[str]:
+        """规范化 Base URL 预设 ID。"""
         normalized_provider_id = cls._normalize_provider_id(provider_id)
         normalized_preset_id = str(base_url_preset_id or "").strip().lower() or None
         if not normalized_preset_id:
@@ -1060,6 +1075,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str],
             base_url_preset_id: Optional[str] = None,
     ) -> Optional[ProviderUrlPreset]:
+        """根据给定的参数解析出适用的 Base URL 预设。"""
         normalized_preset_id = cls._normalize_base_url_preset_id(spec.id, base_url_preset_id)
         if normalized_preset_id:
             for preset in spec.base_url_presets:
@@ -1089,6 +1105,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str],
             base_url_preset_id: Optional[str] = None,
     ) -> str:
+        """解析提供商最终适用的 runtime。"""
         preset = cls._resolve_provider_preset(spec, base_url, base_url_preset_id)
         return preset.runtime or spec.runtime if preset else spec.runtime
 
@@ -1099,6 +1116,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str],
             base_url_preset_id: Optional[str] = None,
     ) -> str:
+        """解析获取模型列表的策略。"""
         preset = cls._resolve_provider_preset(spec, base_url, base_url_preset_id)
         return preset.model_list_strategy or spec.model_list_strategy if preset else spec.model_list_strategy
 
@@ -1109,6 +1127,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str],
             base_url_preset_id: Optional[str] = None,
     ) -> Optional[str]:
+        """解析用于获取模型列表的 Base URL。"""
         preset = cls._resolve_provider_preset(spec, base_url, base_url_preset_id)
         if preset:
             preset_value = cls._sanitize_base_url(preset.value)
@@ -1127,6 +1146,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str],
             base_url_preset_id: Optional[str] = None,
     ) -> Optional[str]:
+        """解析对应的 models.dev provider id。"""
         preset = cls._resolve_provider_preset(spec, base_url, base_url_preset_id)
         if preset:
             return preset.models_dev_provider_id or spec.models_dev_provider_id
@@ -1143,6 +1163,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str],
             base_url_preset_id: Optional[str] = None,
     ) -> Optional[str]:
+        """解析对外暴露的用于获取模型列表的 Base URL。"""
         spec = self.get_provider(provider_id)
         return self._resolve_provider_model_list_base_url(
             spec,
@@ -1157,6 +1178,7 @@ class LLMProviderManager(metaclass=Singleton):
         return "proxy" if "proxy" in params else "proxies"
 
     def _build_httpx_kwargs(self) -> dict[str, Any]:
+        """构造用于 httpx 客户端的参数，如代理等。"""
         kwargs: dict[str, Any] = {"timeout": self._DEFAULT_TIMEOUT}
         if settings.PROXY_HOST:
             kwargs[self._httpx_proxy_key()] = settings.PROXY_HOST
@@ -1164,6 +1186,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _read_agent_config() -> dict[str, Any]:
+        """读取 AI Agent 配置信息。"""
         config = SystemConfigOper().get(SystemConfigKey.AIAgentConfig)
         if isinstance(config, dict):
             return config
@@ -1183,6 +1206,7 @@ class LLMProviderManager(metaclass=Singleton):
         )
 
     def _get_auth_store(self) -> dict[str, Any]:
+        """获取所有鉴权数据。"""
         config = self._read_agent_config()
         auth_store = config.get("provider_auth")
         if isinstance(auth_store, dict):
@@ -1230,6 +1254,7 @@ class LLMProviderManager(metaclass=Singleton):
         }
 
     async def _load_models_dev_from_disk(self) -> dict[str, Any] | None:
+        """从磁盘缓存加载 models.dev 数据。"""
         try:
             if not self._models_dev_cache_path.exists():
                 return None
@@ -1242,6 +1267,7 @@ class LLMProviderManager(metaclass=Singleton):
             return None
 
     def _load_bundled_models_dev_payload(self) -> dict[str, Any] | None:
+        """从随代码附带的离线文件加载 models.dev 数据。"""
         try:
             if not self._MODELS_DEV_BUNDLED_PATH.exists():
                 return None
@@ -1255,6 +1281,7 @@ class LLMProviderManager(metaclass=Singleton):
         return payload if isinstance(payload, dict) else None
 
     async def _write_models_dev_to_disk(self, payload: dict[str, Any]) -> None:
+        """将 models.dev 数据写入磁盘缓存。"""
         try:
             self._models_dev_cache_path.parent.mkdir(parents=True, exist_ok=True)
             async with aiofiles.open(
@@ -1265,6 +1292,7 @@ class LLMProviderManager(metaclass=Singleton):
             logger.warning(f"写入 models.dev 缓存失败: {err}")
 
     async def _fetch_models_dev(self) -> dict[str, Any]:
+        """通过网络请求获取最新 models.dev 数据。"""
         headers = {"User-Agent": "MoviePilot/1.0"}
         async with httpx.AsyncClient(**self._build_httpx_kwargs()) as client:
             response = await client.get(self._MODELS_DEV_URL, headers=headers)
@@ -1322,6 +1350,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str] = None,
             base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any]:
+        """获取指定 provider 在 models.dev 中的完整负载。"""
         spec = await self._get_provider_async(provider_id)
         models_dev_provider_id = self._resolve_provider_models_dev_provider_id(
             spec,
@@ -1339,6 +1368,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str] = None,
             base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any] | None:
+        """获取指定模型的 models.dev 元数据。"""
         payload = await self._models_dev_provider_payload(
             provider_id,
             base_url=base_url,
@@ -1435,12 +1465,14 @@ class LLMProviderManager(metaclass=Singleton):
         }
 
     def _normalize_base_url_for_anthropic(self, base_url: str) -> str:
+        """对 Anthropic 的 Base URL 进行适配处理。"""
         normalized = self._sanitize_base_url(base_url) or ""
         if normalized.endswith("/v1"):
             return normalized[:-3]
         return normalized
 
     async def _list_models_from_google(self, api_key: str) -> list[dict[str, Any]]:
+        """从 Google AI Studio 获取模型列表。"""
         from google import genai
         from google.genai.types import HttpOptions
 
@@ -1479,6 +1511,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: str,
             default_headers: Optional[dict[str, str]] = None,
     ) -> list[dict[str, Any]]:
+        """通过 OpenAI 兼容接口获取模型列表。"""
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
@@ -1559,6 +1592,7 @@ class LLMProviderManager(metaclass=Singleton):
         return headers
 
     async def _list_models_from_copilot(self, token: str) -> list[dict[str, Any]]:
+        """从 GitHub Copilot 端点获取模型列表。"""
         async with httpx.AsyncClient(**self._build_httpx_kwargs()) as client:
             response = await client.get(
                 "https://api.githubcopilot.com/models",
@@ -1628,6 +1662,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str] = None,
             base_url_preset_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
+        """获取开启 OAuth 的 ChatGPT 模型列表。"""
         # ChatGPT OAuth 仍然是 chatgpt provider 专属能力，但模型目录不再维护
         # 一份内部名单，直接跟随当前 provider 对应的 models.dev 数据。
         payload = await self._models_dev_provider_payload(
@@ -1742,6 +1777,7 @@ class LLMProviderManager(metaclass=Singleton):
             base_url: Optional[str] = None,
             base_url_preset_id: Optional[str] = None,
     ) -> dict[str, Any] | None:
+        """解析并返回指定模型在 models.dev 中的元数据。"""
         if not model_id:
             return None
         metadata = await self._models_dev_model(
@@ -1761,6 +1797,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _jwt_claims(token: str) -> dict[str, Any]:
+        """解析 JWT token 内容（不验证签名）。"""
         try:
             return jwt.decode(token, options={"verify_signature": False})
         except Exception as err:
@@ -1769,6 +1806,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _extract_chatgpt_account_id(token_payload: dict[str, Any]) -> Optional[str]:
+        """从 ChatGPT 的 Token payload 中提取 account id。"""
         if token_payload.get("chatgpt_account_id"):
             return token_payload["chatgpt_account_id"]
         auth_payload = token_payload.get("https://api.openai.com/auth") or {}
@@ -1782,6 +1820,7 @@ class LLMProviderManager(metaclass=Singleton):
     def _chatgpt_authorize_url(
             self, redirect_uri: str, challenge: str, state: str
     ) -> str:
+        """构建 ChatGPT OAuth 授权链接。"""
         query = urlencode(
             {
                 "response_type": "code",
@@ -1800,6 +1839,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _pkce_pair() -> tuple[str, str]:
+        """生成 PKCE verifier 和 challenge。"""
         verifier = secrets.token_urlsafe(64).replace("=", "")
         digest = hashlib.sha256(verifier.encode("utf-8")).digest()
         challenge = base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
@@ -1958,6 +1998,7 @@ class LLMProviderManager(metaclass=Singleton):
     async def _mark_session_success(
             self, session: PendingAuthSession, auth_data: dict[str, Any]
     ) -> None:
+        """标记授权会话为成功，并保存认证信息。"""
         auth_data["updated_at"] = int(time.time())
         await self.save_auth(session.provider_id, auth_data)
         session.status = "authorized"
@@ -1965,6 +2006,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     @staticmethod
     def _mark_session_error(session: PendingAuthSession, message: str) -> None:
+        """标记授权会话为失败，并记录错误信息。"""
         session.status = "failed"
         session.message = message
 
@@ -2054,6 +2096,7 @@ class LLMProviderManager(metaclass=Singleton):
     async def _exchange_chatgpt_code_for_tokens(
             self, code: str, redirect_uri: str, code_verifier: str
     ) -> dict[str, Any]:
+        """使用 authorization code 交换 ChatGPT 令牌。"""
         async with httpx.AsyncClient(**self._build_httpx_kwargs()) as client:
             response = await client.post(
                 f"{self._CHATGPT_ISSUER}/oauth/token",
@@ -2070,6 +2113,7 @@ class LLMProviderManager(metaclass=Singleton):
             return response.json()
 
     async def _refresh_chatgpt_tokens(self, refresh_token: str) -> dict[str, Any]:
+        """刷新 ChatGPT 的 access_token。"""
         async with httpx.AsyncClient(**self._build_httpx_kwargs()) as client:
             response = await client.post(
                 f"{self._CHATGPT_ISSUER}/oauth/token",
@@ -2084,6 +2128,7 @@ class LLMProviderManager(metaclass=Singleton):
             return response.json()
 
     async def _poll_chatgpt_device_auth(self, session: PendingAuthSession) -> None:
+        """轮询 ChatGPT Device Auth 状态。"""
         async with httpx.AsyncClient(**self._build_httpx_kwargs()) as client:
             response = await client.post(
                 f"{self._CHATGPT_ISSUER}/api/accounts/deviceauth/token",
@@ -2127,6 +2172,7 @@ class LLMProviderManager(metaclass=Singleton):
         )
 
     async def _poll_copilot_device_auth(self, session: PendingAuthSession) -> None:
+        """轮询 GitHub Copilot Device Auth 状态。"""
         async with httpx.AsyncClient(**self._build_httpx_kwargs()) as client:
             response = await client.post(
                 "https://github.com/login/oauth/access_token",
@@ -2172,6 +2218,7 @@ class LLMProviderManager(metaclass=Singleton):
             raise LLMProviderAuthError(f"GitHub Copilot 授权失败: {error}")
 
     async def _resolve_chatgpt_oauth(self) -> dict[str, Any]:
+        """解析并返回 ChatGPT OAuth 鉴权，支持自动刷新 Token。"""
         auth = self.get_saved_auth("chatgpt")
         if not auth or auth.get("type") != "oauth":
             raise LLMProviderAuthError("尚未完成 ChatGPT Plus/Pro 授权")
