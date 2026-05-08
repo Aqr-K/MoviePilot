@@ -104,7 +104,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     _MODELS_DEV_URL = "https://models.dev/api.json"
     _MODELS_DEV_BUNDLED_PATH = Path(__file__).with_name("models.json")
-    _MODELS_DEV_CACHE_TTL = 12 * 60 * 60
+    _MODELS_DEV_CACHE_TTL = 7 * 24 * 60 * 60
     _CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
     _CHATGPT_ISSUER = "https://auth.openai.com"
     _CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
