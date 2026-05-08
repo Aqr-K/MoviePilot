@@ -21,6 +21,7 @@ from app.core.module import ModuleManager
 from app.core.plugin import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
+from app.helper.recognize import MediaRecognizeShareHelper
 from app.helper.message import MessageHelper, MessageQueueManager, MessageTemplateHelper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
@@ -398,6 +399,22 @@ class ChainBase(metaclass=ABCMeta):
             method, result, *args, **kwargs
         )
 
+    @staticmethod
+    def _can_use_media_recognize_share(
+            meta: Optional[MetaBase],
+            tmdbid: Optional[int],
+            doubanid: Optional[str],
+            bangumiid: Optional[int],
+    ) -> bool:
+        """
+        仅在名称识别场景下使用共享识别，显式ID识别不再重复回查
+        """
+        return bool(
+            settings.MEDIA_RECOGNIZE_SHARE
+            and meta
+            and not any([tmdbid, doubanid, bangumiid])
+        )
+
     def recognize_media(
             self,
             meta: MetaBase = None,
@@ -430,8 +447,9 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid = None
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
+        share_helper = MediaRecognizeShareHelper()
         with fresh(not cache):
-            return self.run_module(
+            mediainfo = self.run_module(
                 "recognize_media",
                 meta=meta,
                 mtype=mtype,
@@ -441,6 +459,29 @@ class ChainBase(metaclass=ABCMeta):
                 episode_group=episode_group,
                 cache=cache,
             )
+        if mediainfo:
+            share_helper.report(meta=meta, mediainfo=mediainfo)
+            return mediainfo
+
+        if self._can_use_media_recognize_share(meta, tmdbid, doubanid, bangumiid):
+            shared_item = share_helper.query(meta=meta, mtype=mtype)
+            shared_params = share_helper.to_recognize_params(shared_item)
+            if shared_params:
+                with fresh(not cache):
+                    mediainfo = self.run_module(
+                        "recognize_media",
+                        meta=meta,
+                        mtype=shared_params.get("mtype") or mtype,
+                        tmdbid=shared_params.get("tmdbid"),
+                        doubanid=shared_params.get("doubanid"),
+                        bangumiid=shared_params.get("bangumiid"),
+                        episode_group=episode_group,
+                        cache=cache,
+                    )
+                if mediainfo:
+                    share_helper.report(meta=meta, mediainfo=mediainfo)
+                    return mediainfo
+        return None
 
     async def async_recognize_media(
             self,
@@ -474,8 +515,9 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid = None
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
+        share_helper = MediaRecognizeShareHelper()
         async with async_fresh(not cache):
-            return await self.async_run_module(
+            mediainfo = await self.async_run_module(
                 "async_recognize_media",
                 meta=meta,
                 mtype=mtype,
@@ -485,6 +527,29 @@ class ChainBase(metaclass=ABCMeta):
                 episode_group=episode_group,
                 cache=cache,
             )
+        if mediainfo:
+            await share_helper.async_report(meta=meta, mediainfo=mediainfo)
+            return mediainfo
+
+        if self._can_use_media_recognize_share(meta, tmdbid, doubanid, bangumiid):
+            shared_item = await share_helper.async_query(meta=meta, mtype=mtype)
+            shared_params = share_helper.to_recognize_params(shared_item)
+            if shared_params:
+                async with async_fresh(not cache):
+                    mediainfo = await self.async_run_module(
+                        "async_recognize_media",
+                        meta=meta,
+                        mtype=shared_params.get("mtype") or mtype,
+                        tmdbid=shared_params.get("tmdbid"),
+                        doubanid=shared_params.get("doubanid"),
+                        bangumiid=shared_params.get("bangumiid"),
+                        episode_group=episode_group,
+                        cache=cache,
+                    )
+                if mediainfo:
+                    await share_helper.async_report(meta=meta, mediainfo=mediainfo)
+                    return mediainfo
+        return None
 
     def match_doubaninfo(
             self,

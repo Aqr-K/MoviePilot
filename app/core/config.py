@@ -378,10 +378,14 @@ class ConfigModel(BaseModel):
     SCRAP_FOLLOW_TMDB: bool = True
     # 优先使用辅助识别
     RECOGNIZE_PLUGIN_FIRST: bool = False
+    # 共享使用媒体识别数据
+    MEDIA_RECOGNIZE_SHARE: bool = True
 
     # ==================== 服务地址配置 ====================
     # 服务器地址，对应 https://github.com/jxxghp/MoviePilot-Server 项目
     MP_SERVER_HOST: str = "https://movie-pilot.org"
+    # 共享媒体识别API地址，留空时默认拼接为 MP_SERVER_HOST + /recognize/share
+    MEDIA_RECOGNIZE_SHARE_API: Optional[str] = None
 
     # ==================== 个性化 ====================
     # 登录页面电影海报,tmdb/bing/mediaserver
