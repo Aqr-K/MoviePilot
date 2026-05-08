@@ -103,6 +103,7 @@ class LLMProviderManager(metaclass=Singleton):
     """统一维护 provider 目录、models.dev 缓存和 OAuth 状态。"""
 
     _MODELS_DEV_URL = "https://models.dev/api.json"
+    _MODELS_DEV_BUNDLED_PATH = Path(__file__).with_name("models.json")
     _MODELS_DEV_CACHE_TTL = 12 * 60 * 60
     _CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
     _CHATGPT_ISSUER = "https://auth.openai.com"
@@ -753,11 +754,15 @@ class LLMProviderManager(metaclass=Singleton):
 
         try:
             if not self._models_dev_cache_path.exists():
-                return {}
-            payload = json.loads(self._models_dev_cache_path.read_text(encoding="utf-8"))
+                payload = None
+            else:
+                payload = json.loads(self._models_dev_cache_path.read_text(encoding="utf-8"))
         except Exception as err:
             logger.warning(f"读取 models.dev provider 缓存失败: {err}")
-            return {}
+            payload = None
+
+        if not isinstance(payload, dict):
+            payload = self._load_bundled_models_dev_payload()
 
         if not isinstance(payload, dict):
             return {}
@@ -1236,6 +1241,19 @@ class LLMProviderManager(metaclass=Singleton):
             logger.warning(f"读取 models.dev 缓存失败: {err}")
             return None
 
+    def _load_bundled_models_dev_payload(self) -> dict[str, Any] | None:
+        try:
+            if not self._MODELS_DEV_BUNDLED_PATH.exists():
+                return None
+            payload = json.loads(
+                self._MODELS_DEV_BUNDLED_PATH.read_text(encoding="utf-8")
+            )
+        except Exception as err:
+            logger.warning(f"读取本地 models.dev 离线文件失败: {err}")
+            return None
+
+        return payload if isinstance(payload, dict) else None
+
     async def _write_models_dev_to_disk(self, payload: dict[str, Any]) -> None:
         try:
             self._models_dev_cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1291,6 +1309,11 @@ class LLMProviderManager(metaclass=Singleton):
                     self._models_dev_data = cached
                     self._models_dev_loaded_at = now
                     return cached
+                bundled = self._load_bundled_models_dev_payload()
+                if isinstance(bundled, dict):
+                    self._models_dev_data = bundled
+                    self._models_dev_loaded_at = now
+                    return bundled
                 raise LLMProviderError(f"获取 models.dev 数据失败: {err}") from err
 
     async def _models_dev_provider_payload(

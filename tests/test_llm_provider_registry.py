@@ -210,6 +210,47 @@ class LlmProviderRegistryTest(unittest.TestCase):
         self.assertEqual([item["id"] for item in models], ["frog-1"])
         self.assertEqual(models[0]["source"], "models.dev")
 
+    def test_get_models_dev_data_falls_back_to_bundled_file_when_fetch_and_cache_fail(self):
+        manager = LLMProviderManager()
+        payload = {
+            "frogbot": {
+                "id": "frogbot",
+                "name": "FrogBot",
+                "npm": "@ai-sdk/openai-compatible",
+                "models": {},
+            }
+        }
+
+        with patch.object(manager, "_fetch_models_dev", AsyncMock(side_effect=RuntimeError("offline"))), patch.object(
+            manager, "_load_models_dev_from_disk", AsyncMock(return_value=None)
+        ), patch.object(manager, "_load_bundled_models_dev_payload", return_value=payload):
+            data = asyncio.run(manager.get_models_dev_data(force_refresh=True))
+
+        self.assertEqual(data, payload)
+        self.assertEqual(manager._models_dev_data, payload)
+
+    def test_cached_models_dev_payload_falls_back_to_bundled_file(self):
+        manager = LLMProviderManager()
+        payload = {
+            "frogbot": {
+                "id": "frogbot",
+                "name": "FrogBot",
+                "npm": "@ai-sdk/openai-compatible",
+                "api": "https://app.frogbot.ai/api/v1",
+                "models": {},
+            }
+        }
+
+        missing_cache_path = Path(f"/tmp/llm-provider-cache-missing-{id(manager)}.json")
+
+        with patch.object(manager, "_models_dev_cache_path", missing_cache_path), patch.object(
+            manager, "_load_bundled_models_dev_payload", return_value=payload
+        ):
+            provider = manager.get_provider("frogbot")
+
+        self.assertEqual(provider.id, "frogbot")
+        self.assertEqual(provider.default_base_url, "https://app.frogbot.ai/api/v1")
+
     def test_builtin_provider_includes_baidu_qianfan_base_url_presets(self):
         manager = LLMProviderManager()
 
