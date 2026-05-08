@@ -185,7 +185,7 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
 
         self.assertEqual(provider, "my-provider_01")
 
-    def test_fallback_provider_choices_include_baidu_and_jdcloud(self):
+    def test_fallback_provider_choices_include_baidu_jdcloud_and_wanqing(self):
         module = load_local_setup_module()
 
         self.assertEqual(
@@ -193,8 +193,12 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
             "百度千帆",
         )
         self.assertEqual(module.LLM_PROVIDER_FALLBACK_CHOICES["jdcloud"], "京东云")
+        self.assertEqual(
+            module.LLM_PROVIDER_FALLBACK_CHOICES["kuaishou-wanqing"],
+            "快手万擎",
+        )
 
-    def test_local_setup_defaults_include_baidu_and_jdcloud_base_urls(self):
+    def test_local_setup_defaults_include_baidu_jdcloud_and_wanqing_base_urls(self):
         module = load_local_setup_module()
 
         self.assertEqual(
@@ -204,6 +208,14 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
         self.assertEqual(
             module.LLM_PROVIDER_DEFAULTS["jdcloud"]["base_url"],
             "https://modelservice.jdcloud.com/v1",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["kuaishou-wanqing"]["base_url"],
+            "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["kuaishou-wanqing"]["base_url_preset"],
+            "kuaishou-wanqing-usage",
         )
 
     def test_collect_agent_config_prompts_for_duplicate_base_url_presets(self):

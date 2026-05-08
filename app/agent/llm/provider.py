@@ -616,6 +616,29 @@ class LLMProviderManager(metaclass=Singleton):
                 sort_order=150,
             ),
             ProviderSpec(
+                id="kuaishou-wanqing",
+                name="快手万擎",
+                runtime="openai_compatible",
+                default_base_url="https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
+                base_url_presets=(
+                    url_preset(
+                        id="kuaishou-wanqing-usage",
+                        label="按量计费",
+                        value="https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
+                    ),
+                    url_preset(
+                        id="kuaishou-wanqing-coding",
+                        label="Coding Plan",
+                        value="https://wanqing.streamlakeapi.com/api/gateway/coding/v1",
+                    ),
+                ),
+                api_key_hint="填写快手万擎 API Key；模型名称请填写万擎控制台或 OpenClaw 配置中的 model ID。",
+                supports_model_refresh=False,
+                model_list_strategy="manual",
+                description="快手万擎 OpenAI-compatible 端点，支持按量计费与 Coding Plan 地址预设。",
+                sort_order=155,
+            ),
+            ProviderSpec(
                 id="volcengine",
                 name="火山方舟",
                 runtime="openai_compatible",
@@ -1710,6 +1733,11 @@ class LLMProviderManager(metaclass=Singleton):
             # 在使用目录型 provider 时也能拿到最新参数。
             if force_refresh:
                 await self.get_models_dev_data(force_refresh=True)
+
+        if resolved_model_list_strategy == "manual":
+            # 万擎等推理点型平台没有稳定的全局模型目录，模型 ID 需要用户从控制台复制。
+            return []
+
         runtime = await self.resolve_runtime(
             provider_id,
             model=None,

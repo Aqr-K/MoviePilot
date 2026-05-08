@@ -87,6 +87,11 @@ LLM_PROVIDER_DEFAULTS = {
         "model": "",
         "base_url": "https://modelservice.jdcloud.com/v1",
     },
+    "kuaishou-wanqing": {
+        "model": "",
+        "base_url": "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
+        "base_url_preset": "kuaishou-wanqing-usage",
+    },
 }
 LLM_PROVIDER_FALLBACK_CHOICES = {
     "deepseek": "DeepSeek",
@@ -97,6 +102,7 @@ LLM_PROVIDER_FALLBACK_CHOICES = {
     "openrouter": "OpenRouter",
     "groq": "Groq",
     "jdcloud": "京东云",
+    "kuaishou-wanqing": "快手万擎",
 }
 RUNTIME_PACKAGE = {
     "name": "moviepilot-frontend-runtime",
@@ -1200,8 +1206,6 @@ def _llm_provider_defaults(
     provider_definitions: list[dict[str, Any]],
 ) -> dict[str, str]:
     normalized_provider = str(provider or "").strip().lower()
-    if normalized_provider == "kimi-coding":
-        normalized_provider = "moonshot"
     defaults = dict(LLM_PROVIDER_DEFAULTS.get(normalized_provider) or {})
     provider_meta = next(
         (
@@ -1233,8 +1237,6 @@ def _llm_provider_meta(
     provider_definitions: list[dict[str, Any]],
 ) -> dict[str, Any]:
     normalized_provider = str(provider or "").strip().lower()
-    if normalized_provider == "kimi-coding":
-        normalized_provider = "moonshot"
     provider_meta = next(
         (
             item
@@ -1788,8 +1790,6 @@ def _collect_agent_config(
     provider_definitions = _load_llm_provider_definitions(runtime_python=runtime_python)
     provider_choices = _llm_provider_choice_map(provider_definitions)
     current_provider = _env_default("LLM_PROVIDER", "deepseek").lower()
-    if current_provider == "kimi-coding":
-        current_provider = "moonshot"
     if current_provider not in provider_choices:
         current_provider = "deepseek"
 

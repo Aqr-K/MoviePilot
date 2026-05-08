@@ -287,6 +287,61 @@ class LlmProviderRegistryTest(unittest.TestCase):
         self.assertIsNone(provider.models_dev_provider_id)
         self.assertFalse(provider.supports_model_refresh)
 
+    def test_builtin_provider_includes_kuaishou_wanqing_endpoint(self):
+        manager = LLMProviderManager()
+
+        provider = manager.get_provider("kuaishou-wanqing")
+
+        self.assertEqual(provider.name, "快手万擎")
+        self.assertEqual(provider.runtime, "openai_compatible")
+        self.assertEqual(
+            provider.default_base_url,
+            "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
+        )
+        self.assertEqual(
+            tuple((preset.id, preset.label, preset.value) for preset in provider.base_url_presets),
+            (
+                (
+                    "kuaishou-wanqing-usage",
+                    "按量计费",
+                    "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
+                ),
+                (
+                    "kuaishou-wanqing-coding",
+                    "Coding Plan",
+                    "https://wanqing.streamlakeapi.com/api/gateway/coding/v1",
+                ),
+            ),
+        )
+        self.assertEqual(provider.model_list_strategy, "manual")
+        self.assertFalse(provider.supports_model_refresh)
+
+    def test_kuaishou_wanqing_coding_preset_resolves_runtime_base_url(self):
+        manager = LLMProviderManager()
+
+        runtime = asyncio.run(
+            manager.resolve_runtime(
+                provider_id="kuaishou-wanqing",
+                model="kat-coder-pro-v2",
+                api_key="sk-test",
+                base_url="https://wanqing.streamlakeapi.com/api/gateway/coding/v1",
+                base_url_preset_id="kuaishou-wanqing-coding",
+            )
+        )
+
+        self.assertEqual(runtime["runtime"], "openai_compatible")
+        self.assertEqual(
+            runtime["base_url"],
+            "https://wanqing.streamlakeapi.com/api/gateway/coding/v1",
+        )
+
+    def test_kuaishou_wanqing_models_are_manual_input(self):
+        manager = LLMProviderManager()
+
+        models = asyncio.run(manager.list_models(provider_id="kuaishou-wanqing"))
+
+        self.assertEqual(models, [])
+
     def test_builtin_minimax_provider_merges_general_and_coding_presets(self):
         manager = LLMProviderManager()
 
