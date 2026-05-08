@@ -113,6 +113,21 @@ RUNTIME_PACKAGE = {
         "express-http-proxy": "^2.0.0",
     },
 }
+
+
+def _repo_frontend_version() -> str:
+    version_file = ROOT / "version.py"
+    module_name = f"moviepilot_version_{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(module_name, version_file)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"无法加载版本文件：{version_file}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    frontend_version = str(getattr(module, "FRONTEND_VERSION", "") or "").strip()
+    if not frontend_version:
+        raise RuntimeError(f"版本文件未定义有效的 FRONTEND_VERSION：{version_file}")
+    return frontend_version
 LOCAL_FRONTEND_SERVICE_SCRIPT = textwrap.dedent(
     """
     const http = require('node:http')
@@ -687,6 +702,7 @@ def _remove_path(path: Path) -> None:
 
 
 def _resolve_frontend_release(frontend_version: str) -> tuple[str, str]:
+    frontend_version = (frontend_version or "").strip() or _repo_frontend_version()
     if frontend_version == "latest":
         release = fetch_json(FRONTEND_LATEST_API)
     else:
@@ -3482,7 +3498,7 @@ def build_parser() -> argparse.ArgumentParser:
         "install-frontend", help="下载前端 release 并安装本地运行时"
     )
     frontend_parser.add_argument(
-        "--version", default="latest", help="前端版本，默认 latest"
+        "--version", help="前端版本，默认使用 version.py 中的 FRONTEND_VERSION"
     )
     frontend_parser.add_argument(
         "--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本"
@@ -3535,7 +3551,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--recreate", action="store_true", help="删除并重建虚拟环境"
     )
     setup_parser.add_argument(
-        "--frontend-version", default="latest", help="前端版本，默认 latest"
+        "--frontend-version", help="前端版本，默认使用 version.py 中的 FRONTEND_VERSION"
     )
     setup_parser.add_argument(
         "--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本"
@@ -3592,7 +3608,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ref", default="latest", help="后端 Git 版本，默认 latest"
     )
     update_parser.add_argument(
-        "--frontend-version", default="latest", help="前端版本，默认 latest"
+        "--frontend-version", help="前端版本，默认使用 version.py 中的 FRONTEND_VERSION"
     )
     update_parser.add_argument(
         "--node-version", default=DEFAULT_NODE_VERSION, help="本地 Node 运行时版本"
