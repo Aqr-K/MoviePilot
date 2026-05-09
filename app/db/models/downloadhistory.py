@@ -1,7 +1,7 @@
 import time
 from typing import List, Optional
 
-from sqlalchemy import Column, Integer, String, JSON, select
+from sqlalchemy import Column, Integer, String, JSON, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -336,6 +336,33 @@ class DownloadHistory(Base):
             .all()
         )
 
+    @classmethod
+    @db_update
+    def delete_before(
+        cls,
+        db: Session,
+        before_time: str,
+        limit: Optional[int] = 500,
+    ) -> int:
+        """
+        分批删除指定时间之前的下载历史。
+        """
+        ids = [
+            row[0]
+            for row in db.query(cls.id)
+            .filter(cls.date < before_time)
+            .order_by(cls.id.asc())
+            .limit(limit)
+            .all()
+        ]
+        if not ids:
+            return 0
+        return (
+            db.query(cls)
+            .filter(cls.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
+
 
 class DownloadFiles(Base):
     """
@@ -398,4 +425,37 @@ class DownloadFiles(Base):
     def delete_by_fullpath(cls, db: Session, fullpath: str):
         db.query(cls).filter(cls.fullpath == fullpath, cls.state == 1).update(
             {"state": 0}
+        )
+
+    @classmethod
+    @db_update
+    def delete_orphans(
+        cls,
+        db: Session,
+        limit: Optional[int] = 500,
+    ) -> int:
+        """
+        分批删除已找不到父下载历史的文件记录。
+
+        downloadfiles 没有时间字段，无法安全地按时间直接裁剪，
+        因此只清理明确失去父记录的孤儿数据。
+        """
+        ids = [
+            row[0]
+            for row in db.query(cls.id)
+            .outerjoin(
+                DownloadHistory,
+                DownloadHistory.download_hash == cls.download_hash,
+            )
+            .filter(DownloadHistory.id.is_(None))
+            .order_by(cls.id.asc())
+            .limit(limit)
+            .all()
+        ]
+        if not ids:
+            return 0
+        return (
+            db.query(cls)
+            .filter(cls.id.in_(ids))
+            .delete(synchronize_session=False)
         )

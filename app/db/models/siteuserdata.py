@@ -5,7 +5,7 @@ from sqlalchemy import Column, Integer, String, Float, JSON, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.db import db_query, Base, get_id_column, async_db_query
+from app.db import db_query, db_update, Base, get_id_column, async_db_query
 
 
 class SiteUserData(Base):
@@ -129,3 +129,31 @@ class SiteUserData(Base):
                 (cls.updated_day == subquery.c.latest_update_day)
             ).order_by(cls.updated_time.desc()))
         return result.scalars().all()
+
+    @classmethod
+    @db_update
+    def delete_before(
+        cls,
+        db: Session,
+        before_day: str,
+        limit: Optional[int] = 500,
+    ) -> int:
+        """
+        分批删除指定日期之前的站点用户快照。
+        """
+        ids = [
+            row[0]
+            for row in db.query(cls.id)
+            .filter(cls.updated_day < before_day)
+            .order_by(cls.id.asc())
+            .limit(limit)
+            .all()
+        ]
+        if not ids:
+            return 0
+        deleted = (
+            db.query(cls)
+            .filter(cls.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
+        return deleted

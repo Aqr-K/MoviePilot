@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app import schemas
 from app.chain import ChainBase
+from app.chain.data_cleanup import DataCleanupChain
 from app.chain.mediaserver import MediaServerChain
 from app.chain.recommend import RecommendChain
 from app.chain.site import SiteChain
@@ -143,6 +144,11 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 "clear_cache": {
                     "name": "缓存清理",
                     "func": self.clear_cache,
+                    "running": False,
+                },
+                "data_cleanup": {
+                    "name": "数据表清理",
+                    "func": DataCleanupChain().cleanup,
                     "running": False,
                 },
                 "user_auth": {
@@ -343,6 +349,17 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 name="缓存清理",
                 hours=settings.CONF.meta / 3600,
                 kwargs={"job_id": "clear_cache"},
+            )
+
+            # 数据表清理服务，每天凌晨执行一次
+            self._scheduler.add_job(
+                self.start,
+                "cron",
+                id="data_cleanup",
+                name="数据表清理",
+                hour=3,
+                minute=30,
+                kwargs={"job_id": "data_cleanup"},
             )
 
             # 定时检查用户认证，每隔10分钟

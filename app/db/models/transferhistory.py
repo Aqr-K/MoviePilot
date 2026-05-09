@@ -344,3 +344,30 @@ class TransferHistory(Base):
         查询某时间之后的转移历史
         """
         return db.query(cls).filter(cls.date > date).order_by(cls.id.desc()).all()
+
+    @classmethod
+    @db_update
+    def delete_before(
+        cls,
+        db: Session,
+        before_time: str,
+        limit: Optional[int] = 500,
+    ) -> int:
+        """
+        分批删除指定时间之前的整理历史。
+        """
+        ids = [
+            row[0]
+            for row in db.query(cls.id)
+            .filter(cls.date < before_time)
+            .order_by(cls.id.asc())
+            .limit(limit)
+            .all()
+        ]
+        if not ids:
+            return 0
+        return (
+            db.query(cls)
+            .filter(cls.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
