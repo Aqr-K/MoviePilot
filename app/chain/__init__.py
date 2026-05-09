@@ -523,8 +523,6 @@ class ChainBase(metaclass=ABCMeta):
                     )
                 if mediainfo:
                     self._update_local_recognize_cache(shared_cache_meta, mediainfo)
-                    if not mediainfo.recognize_cache_hit:
-                        share_helper.report(meta=meta, mediainfo=mediainfo)
                     return mediainfo
         return None
 
@@ -595,8 +593,6 @@ class ChainBase(metaclass=ABCMeta):
                     )
                 if mediainfo:
                     await self._async_update_local_recognize_cache(shared_cache_meta, mediainfo)
-                    if not mediainfo.recognize_cache_hit:
-                        await share_helper.async_report(meta=meta, mediainfo=mediainfo)
                     return mediainfo
         return None
 
