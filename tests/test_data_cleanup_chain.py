@@ -7,12 +7,12 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.chain.data_cleanup import DataCleanupChain
 from app.db import Base
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.message import Message
 from app.db.models.siteuserdata import SiteUserData
 from app.db.models.transferhistory import TransferHistory
+from app.scheduler import SchedulerChain
 
 
 class DataCleanupChainTest(unittest.TestCase):
@@ -135,7 +135,7 @@ class DataCleanupChainTest(unittest.TestCase):
             db.commit()
 
         with patch("app.chain.data_cleanup.SessionFactory", self.SessionFactory):
-            report = DataCleanupChain().cleanup(batch_size=1)
+            report = SchedulerChain().cleanup(batch_size=1)
 
         self.assertEqual(report["tables"]["message"]["deleted"], 3)
         self.assertEqual(report["tables"]["message"]["batches"], 3)
@@ -172,7 +172,7 @@ class DataCleanupChainTest(unittest.TestCase):
             db.commit()
 
         with patch("app.chain.data_cleanup.SessionFactory", self.SessionFactory):
-            report = DataCleanupChain().cleanup(batch_size=10)
+            report = SchedulerChain().cleanup(batch_size=10)
 
         self.assertEqual(report["tables"]["transferhistory"]["deleted"], 0)
 
