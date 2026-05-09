@@ -424,7 +424,6 @@ class ChainBase(metaclass=ABCMeta):
             return None
         return copy.deepcopy(meta)
 
-    @staticmethod
     def _update_local_recognize_cache(
             self,
             meta: Optional[MetaBase],

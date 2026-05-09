@@ -153,8 +153,8 @@ class TestMediaRecognizeShare(unittest.TestCase):
         with patch.object(
             self.chain,
             "run_module",
-            side_effect=[None, shared_media],
-        ), patch(
+            side_effect=[None, shared_media, None],
+        ) as run_module_mock, patch(
             "app.chain.MediaRecognizeShareHelper.query",
             return_value={"type": "movie", "tmdbid": 700},
         ), patch(
@@ -169,19 +169,17 @@ class TestMediaRecognizeShare(unittest.TestCase):
         ), patch(
             "app.chain.MediaRecognizeShareHelper.report",
             return_value=False,
-        ), patch.object(
-            self.chain,
-            "_update_local_recognize_cache",
-        ) as backfill_mock:
+        ):
             result = self.chain.recognize_media(meta=meta, cache=False)
 
         self.assertIs(result, shared_media)
-        backfill_mock.assert_called_once()
-        backfill_meta, backfill_media = backfill_mock.call_args.args
-        self.assertIsNot(backfill_meta, meta)
-        self.assertEqual(backfill_meta.name, meta.name)
-        self.assertEqual(backfill_meta.type, meta.type)
-        self.assertIs(backfill_media, shared_media)
+        self.assertEqual(run_module_mock.call_count, 3)
+        update_call = run_module_mock.call_args_list[2]
+        self.assertEqual(update_call.args[0], "update_recognize_cache")
+        self.assertIsNot(update_call.kwargs["meta"], meta)
+        self.assertEqual(update_call.kwargs["meta"].name, meta.name)
+        self.assertEqual(update_call.kwargs["meta"].type, meta.type)
+        self.assertIs(update_call.kwargs["mediainfo"], shared_media)
 
     def test_query_and_report_prefer_original_name_keyword(self):
         """
