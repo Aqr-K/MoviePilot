@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, JSON, select
+from sqlalchemy import Column, Integer, String, JSON, Index, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -29,11 +29,15 @@ class Message(Base):
     # 用户ID
     userid = Column(String)
     # 登记时间
-    reg_time = Column(String, index=True)
+    reg_time = Column(String)
     # 消息方向：0-接收息，1-发送消息
     action = Column(Integer)
     # 附件json
     note = Column(JSON)
+
+    __table_args__ = (
+        Index('ix_message_reg_time_id', 'reg_time', 'id'),
+    )
 
     @classmethod
     @db_query

@@ -1,7 +1,7 @@
 import time
 from typing import List, Optional
 
-from sqlalchemy import Column, Integer, String, JSON, select, func
+from sqlalchemy import Column, Integer, String, JSON, Index, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,7 @@ class DownloadHistory(Base):
     # 下载器
     downloader = Column(String)
     # 下载任务Hash
-    download_hash = Column(String, index=True)
+    download_hash = Column(String)
     # 种子名称
     torrent_name = Column(String)
     # 种子描述
@@ -58,6 +58,11 @@ class DownloadHistory(Base):
     episode_group = Column(String)
     # 自定义识别词（用于整理时应用）
     custom_words = Column(String)
+
+    __table_args__ = (
+        Index('ix_downloadhistory_download_hash_date', 'download_hash', 'date'),
+        Index('ix_downloadhistory_date_id', 'date', 'id'),
+    )
 
     @classmethod
     @db_query
@@ -373,9 +378,9 @@ class DownloadFiles(Base):
     # 下载器
     downloader = Column(String)
     # 下载任务Hash
-    download_hash = Column(String, index=True)
+    download_hash = Column(String)
     # 完整路径
-    fullpath = Column(String, index=True)
+    fullpath = Column(String)
     # 保存路径
     savepath = Column(String, index=True)
     # 文件相对路径/名称
@@ -384,6 +389,11 @@ class DownloadFiles(Base):
     torrentname = Column(String)
     # 状态 0-已删除 1-正常
     state = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        Index('ix_downloadfiles_download_hash_state', 'download_hash', 'state'),
+        Index('ix_downloadfiles_fullpath_id', 'fullpath', 'id'),
+    )
 
     @classmethod
     @db_query

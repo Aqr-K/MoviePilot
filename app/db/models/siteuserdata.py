@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Float, JSON, func, or_, select
+from sqlalchemy import Column, Integer, String, Float, JSON, Index, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -14,7 +14,7 @@ class SiteUserData(Base):
     """
     id = get_id_column()
     # 站点域名
-    domain = Column(String, index=True)
+    domain = Column(String)
     # 站点名称
     name = Column(String)
     # 用户名
@@ -50,9 +50,14 @@ class SiteUserData(Base):
     # 错误信息
     err_msg = Column(String)
     # 更新日期
-    updated_day = Column(String, index=True, default=datetime.now().strftime('%Y-%m-%d'))
+    updated_day = Column(String, default=datetime.now().strftime('%Y-%m-%d'))
     # 更新时间
     updated_time = Column(String, default=datetime.now().strftime('%H:%M:%S'))
+
+    __table_args__ = (
+        Index('ix_siteuserdata_updated_day_id', 'updated_day', 'id'),
+        Index('ix_siteuserdata_domain_updated_day_updated_time', 'domain', 'updated_day', 'updated_time'),
+    )
 
     @classmethod
     @db_query

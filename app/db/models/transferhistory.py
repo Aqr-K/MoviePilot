@@ -1,7 +1,7 @@
 import time
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Boolean, func, or_, JSON, select
+from sqlalchemy import Column, Integer, String, Boolean, Index, func, or_, JSON, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -54,11 +54,16 @@ class TransferHistory(Base):
     # 转移失败信息
     errmsg = Column(String)
     # 时间
-    date = Column(String, index=True)
+    date = Column(String)
     # 文件清单，以JSON存储
     files = Column(JSON, default=list)
     # 剧集组
     episode_group = Column(String)
+
+    __table_args__ = (
+        Index('ix_transferhistory_status_date', 'status', 'date'),
+        Index('ix_transferhistory_date_id', 'date', 'id'),
+    )
 
     @classmethod
     @db_query

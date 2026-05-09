@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, JSON
+from sqlalchemy import Column, Integer, String, JSON, Index
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ class MediaServerItem(Base):
     # 年份
     year = Column(String)
     # TMDBID
-    tmdbid = Column(Integer, index=True)
+    tmdbid = Column(Integer)
     # IMDBID
     imdbid = Column(String, index=True)
     # TVDBID
@@ -42,6 +42,10 @@ class MediaServerItem(Base):
     note = Column(JSON)
     # 同步时间
     lst_mod_date = Column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    __table_args__ = (
+        Index('ix_mediaserveritem_tmdbid_item_type', 'tmdbid', 'item_type'),
+    )
 
     @classmethod
     @db_query

@@ -15,10 +15,10 @@ def get_id_column():
     """
     if settings.DB_TYPE.lower() == "postgresql":
         # PostgreSQL使用SERIAL类型，让数据库自动处理序列
-        return Column(Integer, Identity(start=1, cycle=True), primary_key=True, index=True)
+        return Column(Integer, Identity(start=1, cycle=True), primary_key=True)
     else:
         # SQLite使用Sequence
-        return Column(Integer, Sequence('id'), primary_key=True, index=True)
+        return Column(Integer, Sequence('id'), primary_key=True)
 
 
 def _get_database_engine(is_async: bool = False):
