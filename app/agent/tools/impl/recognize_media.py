@@ -60,7 +60,10 @@ class RecognizeMediaTool(MoviePilotTool):
                         "message": "文件路径不能为空"
                     }, ensure_ascii=False)
                 
-                context = await media_chain.async_recognize_by_path(path)
+                context = await media_chain.async_recognize_by_path(
+                    path,
+                    obtain_images=False,
+                )
                 if context:
                     return self._format_context_result(context, "文件")
                 else:
@@ -73,7 +76,10 @@ class RecognizeMediaTool(MoviePilotTool):
             elif title:
                 # 种子标题识别
                 metainfo = MetaInfo(title, subtitle)
-                mediainfo = await media_chain.async_recognize_by_meta(metainfo)
+                mediainfo = await media_chain.async_recognize_by_meta(
+                    metainfo,
+                    obtain_images=False,
+                )
                 if mediainfo:
                     context = Context(meta_info=metainfo, media_info=mediainfo)
                     return self._format_context_result(context, "种子")

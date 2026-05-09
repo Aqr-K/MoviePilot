@@ -255,7 +255,10 @@ async def search_by_id_stream(request: Request,
                 if media_season:
                     meta.type = MediaType.TV
                     meta.begin_season = media_season
-                mediainfo = await media_chain.async_recognize_media(meta=meta)
+                mediainfo = await media_chain.async_recognize_by_meta(
+                    meta,
+                    obtain_images=False,
+                )
                 if mediainfo:
                     if settings.RECOGNIZE_SOURCE == "themoviedb":
                         torrents = search_chain.async_search_by_id_stream(tmdbid=mediainfo.tmdb_id,
@@ -388,7 +391,10 @@ async def search_by_id(mediaid: str,
             if media_season:
                 meta.type = MediaType.TV
                 meta.begin_season = media_season
-            mediainfo = await media_chain.async_recognize_media(meta=meta)
+            mediainfo = await media_chain.async_recognize_by_meta(
+                meta,
+                obtain_images=False,
+            )
             if mediainfo:
                 if settings.RECOGNIZE_SOURCE == "themoviedb":
                     torrents = await search_chain.async_search_by_id(tmdbid=mediainfo.tmdb_id, mtype=media_type,

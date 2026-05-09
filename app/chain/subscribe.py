@@ -194,7 +194,11 @@ class SubscribeChain(ChainBase):
 
         # 使用名称识别兜底
         if not mediainfo:
-            mediainfo = self.recognize_media(meta=metainfo, episode_group=episode_group)
+            mediainfo = MediaChain().recognize_by_meta(
+                metainfo,
+                episode_group=episode_group,
+                obtain_images=False,
+            )
 
         # 识别失败
         if not mediainfo:
@@ -371,7 +375,11 @@ class SubscribeChain(ChainBase):
 
         # 使用名称识别兜底
         if not mediainfo:
-            mediainfo = await self.async_recognize_media(meta=metainfo, episode_group=episode_group)
+            mediainfo = await MediaChain().async_recognize_by_meta(
+                metainfo,
+                episode_group=episode_group,
+                obtain_images=False,
+            )
 
         # 识别失败
         if not mediainfo:
@@ -827,7 +835,10 @@ class SubscribeChain(ChainBase):
                                                    and not context.media_info.douban_id)) and context.media_recognize_fail_count < 3:
                         logger.debug(
                             f'尝试重新识别种子：{context.torrent_info.title}，当前失败次数：{context.media_recognize_fail_count}/3')
-                        re_mediainfo = self.recognize_media(meta=context.meta_info)
+                        re_mediainfo = MediaChain().recognize_by_meta(
+                            context.meta_info,
+                            obtain_images=False,
+                        )
                         if re_mediainfo:
                             # 清理多余信息
                             re_mediainfo.clear()
@@ -939,8 +950,11 @@ class SubscribeChain(ChainBase):
                                     # 更新元数据缓存
                                     _context.meta_info = torrent_meta
                                     # 重新识别媒体信息
-                                    torrent_mediainfo = self.recognize_media(meta=torrent_meta,
-                                                                             episode_group=subscribe.episode_group)
+                                    torrent_mediainfo = MediaChain().recognize_by_meta(
+                                        torrent_meta,
+                                        episode_group=subscribe.episode_group,
+                                        obtain_images=False,
+                                    )
                                     if torrent_mediainfo:
                                         # 清理多余信息
                                         torrent_mediainfo.clear()

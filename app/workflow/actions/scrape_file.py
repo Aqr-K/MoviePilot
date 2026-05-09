@@ -65,7 +65,10 @@ class ScrapeFileAction(BaseAction):
                 continue
             meta = MetaInfoPath(Path(fileitem.path))
             mediachain = MediaChain()
-            mediainfo = mediachain.recognize_media(meta)
+            mediainfo = mediachain.recognize_by_meta(
+                meta,
+                obtain_images=False,
+            )
             if not mediainfo:
                 _failed_count += 1
                 logger.info(f"{fileitem.path} 未识别到媒体信息，无法刮削")

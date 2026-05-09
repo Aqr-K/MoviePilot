@@ -465,10 +465,12 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid: Optional[int] = None,
             episode_group: Optional[str] = None,
             cache: bool = True,
+            share_meta: MetaBase = None,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片
         :param meta:     识别的元数据
+        :param share_meta: 共享识别查询/上报使用的原始元数据
         :param mtype:    识别的媒体类型，与tmdbid配套
         :param tmdbid:   tmdbid
         :param doubanid: 豆瓣ID
@@ -488,6 +490,7 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid = None
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
+        share_query_meta = share_meta or meta
         share_helper = MediaRecognizeShareHelper()
         with fresh(not cache):
             mediainfo = self.run_module(
@@ -502,12 +505,22 @@ class ChainBase(metaclass=ABCMeta):
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
-                share_helper.report(meta=meta, mediainfo=mediainfo)
+                share_helper.report(
+                    meta=meta,
+                    mediainfo=mediainfo,
+                    keyword_meta=share_query_meta,
+                )
             return mediainfo
 
-        if self._can_use_media_recognize_share(meta, tmdbid, doubanid, bangumiid):
+        if self._can_use_media_recognize_share(
+                share_query_meta, tmdbid, doubanid, bangumiid
+        ):
             shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
-            shared_item = share_helper.query(meta=meta, mtype=mtype)
+            shared_item = share_helper.query(
+                meta=meta,
+                mtype=mtype,
+                keyword_meta=share_query_meta,
+            )
             shared_params = share_helper.to_recognize_params(shared_item)
             if shared_params:
                 with fresh(not cache):
@@ -535,10 +548,12 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid: Optional[int] = None,
             episode_group: Optional[str] = None,
             cache: bool = True,
+            share_meta: MetaBase = None,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片（异步版本）
         :param meta:     识别的元数据
+        :param share_meta: 共享识别查询/上报使用的原始元数据
         :param mtype:    识别的媒体类型，与tmdbid配套
         :param tmdbid:   tmdbid
         :param doubanid: 豆瓣ID
@@ -558,6 +573,7 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid = None
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
+        share_query_meta = share_meta or meta
         share_helper = MediaRecognizeShareHelper()
         async with async_fresh(not cache):
             mediainfo = await self.async_run_module(
@@ -572,12 +588,22 @@ class ChainBase(metaclass=ABCMeta):
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
-                await share_helper.async_report(meta=meta, mediainfo=mediainfo)
+                await share_helper.async_report(
+                    meta=meta,
+                    mediainfo=mediainfo,
+                    keyword_meta=share_query_meta,
+                )
             return mediainfo
 
-        if self._can_use_media_recognize_share(meta, tmdbid, doubanid, bangumiid):
+        if self._can_use_media_recognize_share(
+                share_query_meta, tmdbid, doubanid, bangumiid
+        ):
             shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
-            shared_item = await share_helper.async_query(meta=meta, mtype=mtype)
+            shared_item = await share_helper.async_query(
+                meta=meta,
+                mtype=mtype,
+                keyword_meta=share_query_meta,
+            )
             shared_params = share_helper.to_recognize_params(shared_item)
             if shared_params:
                 async with async_fresh(not cache):

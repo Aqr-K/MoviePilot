@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import FileResponse, Response
 
 from app import schemas
+from app.chain.media import MediaChain
 from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain
 from app.core.config import settings
@@ -199,7 +200,10 @@ def rename(fileitem: schemas.FileItem,
                     continue
                 sub_path = Path(f"{fileitem.path}{sub_file.name}")
                 meta = MetaInfoPath(sub_path)
-                mediainfo = transferchain.recognize_media(meta)
+                mediainfo = MediaChain().recognize_by_meta(
+                    meta,
+                    obtain_images=False,
+                )
                 if not mediainfo:
                     progress.end()
                     return schemas.Response(success=False, message=f"{sub_path.name} 未识别到媒体信息")

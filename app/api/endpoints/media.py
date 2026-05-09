@@ -202,7 +202,11 @@ async def seasons(mediaid: Optional[str] = None,
         meta = MetaInfo(title)
         if year:
             meta.year = year
-        mediainfo = await MediaChain().async_recognize_media(meta, mtype=MediaType.TV)
+        meta.type = MediaType.TV
+        mediainfo = await MediaChain().async_recognize_by_meta(
+            meta,
+            obtain_images=False,
+        )
         if mediainfo:
             if settings.RECOGNIZE_SOURCE == "themoviedb":
                 seasons_info = await TmdbChain().async_tmdb_seasons(tmdbid=mediainfo.tmdb_id)
@@ -261,7 +265,10 @@ async def detail(mediaid: str, type_name: str, title: Optional[str] = None, year
                 meta.year = year
             if mtype:
                 meta.type = mtype
-            mediainfo = await mediachain.async_recognize_media(meta=meta)
+            mediainfo = await mediachain.async_recognize_by_meta(
+                meta,
+                obtain_images=False,
+            )
     # 识别
     if mediainfo:
         await mediachain.async_obtain_images(mediainfo)

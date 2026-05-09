@@ -278,7 +278,10 @@ class TorrentsChain(ChainBase):
                                 and torrent.category == MediaType.TV.value:
                             meta.type = MediaType.TV
                         # 识别媒体信息
-                        mediainfo: MediaInfo = MediaChain().recognize_by_meta(meta)
+                        mediainfo: MediaInfo = MediaChain().recognize_by_meta(
+                            meta,
+                            obtain_images=False,
+                        )
                         if not mediainfo:
                             logger.warn(f'{torrent.title} 未识别到媒体信息')
                             # 存储空的媒体信息

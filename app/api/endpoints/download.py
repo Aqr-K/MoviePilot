@@ -76,12 +76,17 @@ def add(
     # 元数据
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
-    mediainfo = MediaChain().select_recognize_source(
-                    log_name=torrent_in.title,
-                    log_context=torrent_in.title,
-                    native_fn=lambda: MediaChain().recognize_media(meta=metainfo, tmdbid=tmdbid, doubanid=doubanid),
-                    plugin_fn=lambda: MediaChain().recognize_help(title=torrent_in.title, org_meta=metainfo)
-                )
+    if tmdbid or doubanid:
+        mediainfo = MediaChain().recognize_media(
+            meta=metainfo,
+            tmdbid=tmdbid,
+            doubanid=doubanid,
+        )
+    else:
+        mediainfo = MediaChain().recognize_by_meta(
+            metainfo,
+            obtain_images=False,
+        )
     if not mediainfo:
         return schemas.Response(success=False, message="无法识别媒体信息")
     # 种子信息

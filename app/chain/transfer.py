@@ -1289,7 +1289,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                                 mediainfo.category = download_history.media_category
                 else:
                     # 识别媒体信息
-                    mediainfo = MediaChain().recognize_by_meta(task.meta)
+                    mediainfo = MediaChain().recognize_by_meta(
+                        task.meta,
+                        obtain_images=False,
+                    )
 
                 # 更新媒体图片
                 if mediainfo:
@@ -2269,9 +2272,12 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 # 更新媒体图片
                 self.obtain_images(mediainfo=mediainfo)
         else:
-            mediainfo = MediaChain().recognize_by_path(
-                str(src_path), episode_group=history.episode_group
+            recognize_context = MediaChain().recognize_by_path(
+                str(src_path),
+                episode_group=history.episode_group,
+                obtain_images=False,
             )
+            mediainfo = recognize_context.media_info if recognize_context else None
         if not mediainfo:
             return False, f"未识别到媒体信息，类型：{mtype.value}，id：{mediaid}"
         # 重新执行整理

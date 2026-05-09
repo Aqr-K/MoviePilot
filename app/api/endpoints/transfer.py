@@ -31,7 +31,10 @@ def query_name(path: str, filetype: str,
     :param _: Token校验
     """
     meta = MetaInfoPath(Path(path))
-    mediainfo = MediaChain().recognize_media(meta)
+    mediainfo = MediaChain().recognize_by_meta(
+        meta,
+        obtain_images=False,
+    )
     if not mediainfo:
         return schemas.Response(success=False, message="未识别到媒体信息")
     new_path = TransferChain().recommend_name(meta=meta, mediainfo=mediainfo)

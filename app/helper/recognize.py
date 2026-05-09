@@ -114,12 +114,15 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
 
     @classmethod
     def _build_query_params(
-            cls, meta: Optional[MetaBase], mtype: Optional[MediaType] = None
+            cls,
+            meta: Optional[MetaBase],
+            mtype: Optional[MediaType] = None,
+            keyword_meta: Optional[MetaBase] = None,
     ) -> Optional[dict]:
         """
         组装共享识别查询参数
         """
-        keyword = cls._extract_keyword(meta)
+        keyword = cls._extract_keyword(keyword_meta or meta)
         if not keyword:
             return None
 
@@ -137,7 +140,10 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
 
     @classmethod
     def _build_report_payload(
-            cls, meta: Optional[MetaBase], mediainfo: Optional[MediaInfo]
+            cls,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+            keyword_meta: Optional[MetaBase] = None,
     ) -> Optional[dict]:
         """
         组装共享识别上报载荷
@@ -145,7 +151,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         if not meta or not mediainfo:
             return None
 
-        keyword = cls._extract_keyword(meta)
+        keyword = cls._extract_keyword(keyword_meta or meta)
         media_type = cls._extract_media_type(meta=meta, mediainfo=mediainfo)
         if not keyword or not media_type:
             return None
@@ -197,7 +203,12 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         """
         return bool(settings.MEDIA_RECOGNIZE_SHARE)
 
-    def query(self, meta: Optional[MetaBase], mtype: Optional[MediaType] = None) -> Optional[dict]:
+    def query(
+            self,
+            meta: Optional[MetaBase],
+            mtype: Optional[MediaType] = None,
+            keyword_meta: Optional[MetaBase] = None,
+    ) -> Optional[dict]:
         """
         查询共享识别结果
         """
@@ -205,7 +216,11 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
             return None
 
         api_url = self._build_api_url()
-        params = self._build_query_params(meta=meta, mtype=mtype)
+        params = self._build_query_params(
+            meta=meta,
+            mtype=mtype,
+            keyword_meta=keyword_meta,
+        )
         if not api_url or not params:
             return None
 
@@ -236,7 +251,10 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         return item
 
     async def async_query(
-            self, meta: Optional[MetaBase], mtype: Optional[MediaType] = None
+            self,
+            meta: Optional[MetaBase],
+            mtype: Optional[MediaType] = None,
+            keyword_meta: Optional[MetaBase] = None,
     ) -> Optional[dict]:
         """
         异步查询共享识别结果
@@ -245,7 +263,11 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
             return None
 
         api_url = self._build_api_url()
-        params = self._build_query_params(meta=meta, mtype=mtype)
+        params = self._build_query_params(
+            meta=meta,
+            mtype=mtype,
+            keyword_meta=keyword_meta,
+        )
         if not api_url or not params:
             return None
 
@@ -275,7 +297,12 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
             logger.info(f"共享媒体识别命中：{params.get('keyword')} - {item}")
         return item
 
-    def report(self, meta: Optional[MetaBase], mediainfo: Optional[MediaInfo]) -> bool:
+    def report(
+            self,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+            keyword_meta: Optional[MetaBase] = None,
+    ) -> bool:
         """
         上报共享识别结果
         """
@@ -283,7 +310,11 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
             return False
 
         api_url = self._build_api_url()
-        payload = self._build_report_payload(meta=meta, mediainfo=mediainfo)
+        payload = self._build_report_payload(
+            meta=meta,
+            mediainfo=mediainfo,
+            keyword_meta=keyword_meta,
+        )
         if not api_url or not payload:
             return False
 
@@ -309,7 +340,10 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
         return result.get("code") == 0
 
     async def async_report(
-            self, meta: Optional[MetaBase], mediainfo: Optional[MediaInfo]
+            self,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+            keyword_meta: Optional[MetaBase] = None,
     ) -> bool:
         """
         异步上报共享识别结果
@@ -318,7 +352,11 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
             return False
 
         api_url = self._build_api_url()
-        payload = self._build_report_payload(meta=meta, mediainfo=mediainfo)
+        payload = self._build_report_payload(
+            meta=meta,
+            mediainfo=mediainfo,
+            keyword_meta=keyword_meta,
+        )
         if not api_url or not payload:
             return False
 
