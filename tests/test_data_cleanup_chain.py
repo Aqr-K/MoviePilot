@@ -12,6 +12,7 @@ from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.message import Message
 from app.db.models.siteuserdata import SiteUserData
 from app.db.models.transferhistory import TransferHistory
+from app.core.config import settings
 from app.scheduler import SchedulerChain
 
 
@@ -30,6 +31,18 @@ class DataCleanupChainTest(unittest.TestCase):
     def tearDown(self):
         self.engine.dispose()
         self.temp_dir.cleanup()
+
+    @staticmethod
+    def _cleanup_settings(**overrides):
+        defaults = {
+            "DATA_CLEANUP_ENABLE": True,
+            "DATA_CLEANUP_MESSAGE_DAYS": 90,
+            "DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS": 180,
+            "DATA_CLEANUP_SITE_USERDATA_DAYS": 180,
+            "DATA_CLEANUP_TRANSFER_HISTORY_DAYS": 365 * 3,
+        }
+        defaults.update(overrides)
+        return patch.multiple(settings, **defaults)
 
     def test_cleanup_removes_expired_rows_in_batches(self):
         """
@@ -134,7 +147,7 @@ class DataCleanupChainTest(unittest.TestCase):
             )
             db.commit()
 
-        with patch("app.chain.data_cleanup.SessionFactory", self.SessionFactory):
+        with self._cleanup_settings(), patch("app.scheduler.SessionFactory", self.SessionFactory):
             report = SchedulerChain().cleanup(batch_size=1)
 
         self.assertEqual(report["tables"]["message"]["deleted"], 3)
@@ -171,10 +184,100 @@ class DataCleanupChainTest(unittest.TestCase):
             )
             db.commit()
 
-        with patch("app.chain.data_cleanup.SessionFactory", self.SessionFactory):
+        with self._cleanup_settings(), patch("app.scheduler.SessionFactory", self.SessionFactory):
             report = SchedulerChain().cleanup(batch_size=10)
 
         self.assertEqual(report["tables"]["transferhistory"]["deleted"], 0)
 
         with self.SessionFactory() as db:
             self.assertEqual(db.query(TransferHistory).count(), 1)
+
+    def test_cleanup_skips_when_disabled(self):
+        """
+        总开关关闭时应跳过清理。
+        """
+        now = datetime.now()
+        old_message_time = (now - timedelta(days=120)).strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.SessionFactory() as db:
+            db.add(Message(reg_time=old_message_time, title="old"))
+            db.commit()
+
+        with self._cleanup_settings(DATA_CLEANUP_ENABLE=False), patch(
+            "app.scheduler.SessionFactory", self.SessionFactory
+        ):
+            report = SchedulerChain().cleanup(batch_size=10)
+
+        self.assertFalse(report["enabled"])
+        self.assertEqual(report["skipped_reason"], "disabled")
+        self.assertEqual(report["total_deleted"], 0)
+
+        with self.SessionFactory() as db:
+            self.assertEqual(db.query(Message).count(), 1)
+
+    def test_cleanup_respects_per_table_retention_days(self):
+        """
+        各表保留期应使用当前配置值。
+        """
+        now = datetime.now()
+        old_message_time = (now - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
+        keep_message_time = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.SessionFactory() as db:
+            db.add_all(
+                [
+                    Message(reg_time=old_message_time, title="old"),
+                    Message(reg_time=keep_message_time, title="keep"),
+                ]
+            )
+            db.commit()
+
+        with self._cleanup_settings(DATA_CLEANUP_MESSAGE_DAYS=7), patch(
+            "app.scheduler.SessionFactory", self.SessionFactory
+        ):
+            report = SchedulerChain().cleanup(batch_size=10)
+
+        self.assertEqual(report["tables"]["message"]["retention_days"], 7)
+        self.assertEqual(report["tables"]["message"]["deleted"], 1)
+
+        with self.SessionFactory() as db:
+            self.assertEqual(db.query(Message).count(), 1)
+
+    def test_cleanup_skips_table_when_retention_days_is_zero(self):
+        """
+        单表保留期为 0 时应跳过该表及其附属孤儿记录清理。
+        """
+        now = datetime.now()
+        old_download_time = (now - timedelta(days=240)).strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.SessionFactory() as db:
+            db.add(
+                DownloadHistory(
+                    path="/downloads/old",
+                    type="电影",
+                    title="old",
+                    download_hash="hash-old",
+                    date=old_download_time,
+                )
+            )
+            db.add(
+                DownloadFiles(
+                    download_hash="hash-orphan",
+                    fullpath="/downloads/orphan/file.mkv",
+                    savepath="/downloads/orphan",
+                    filepath="file.mkv",
+                )
+            )
+            db.commit()
+
+        with self._cleanup_settings(DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS=0), patch(
+            "app.scheduler.SessionFactory", self.SessionFactory
+        ):
+            report = SchedulerChain().cleanup(batch_size=10)
+
+        self.assertTrue(report["tables"]["downloadhistory"]["skipped"])
+        self.assertTrue(report["tables"]["downloadfiles"]["skipped"])
+
+        with self.SessionFactory() as db:
+            self.assertEqual(db.query(DownloadHistory).count(), 1)
+            self.assertEqual(db.query(DownloadFiles).count(), 1)

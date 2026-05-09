@@ -53,95 +53,48 @@ class SchedulerChain(ChainBase):
     """
     # 每批处理的记录数，避免一次性删除过多数据导致性能问题
     DEFAULT_BATCH_SIZE = 500
-    # 消息保留期，单位：天
-    MESSAGE_RETENTION_DAYS = 90
-    # 下载历史保留期，单位：天
-    DOWNLOAD_HISTORY_RETENTION_DAYS = 180
-    # 站点用户数据保留期，单位：天
-    SITE_USERDATA_RETENTION_DAYS = 180
-    # 下载转移历史保留期，单位：天
-    TRANSFER_HISTORY_RETENTION_DAYS = 365 * 3
 
     def cleanup(self, batch_size: Optional[int] = None) -> Dict[str, Any]:
         """
-        按预设保留期执行分批清理。
+        按配置保留期执行分批清理。
         """
         started_at = datetime.now()
         batch_size = batch_size or self.DEFAULT_BATCH_SIZE
         if batch_size <= 0:
             batch_size = self.DEFAULT_BATCH_SIZE
 
-        message_cutoff = (
-                started_at - timedelta(days=self.MESSAGE_RETENTION_DAYS)
-        ).strftime("%Y-%m-%d %H:%M:%S")
-        download_history_cutoff = (
-                started_at - timedelta(days=self.DOWNLOAD_HISTORY_RETENTION_DAYS)
-        ).strftime("%Y-%m-%d %H:%M:%S")
-        site_userdata_cutoff = (
-                started_at - timedelta(days=self.SITE_USERDATA_RETENTION_DAYS)
-        ).strftime("%Y-%m-%d")
-        transfer_history_cutoff = (
-                started_at - timedelta(days=self.TRANSFER_HISTORY_RETENTION_DAYS)
-        ).strftime("%Y-%m-%d %H:%M:%S")
-
         report: Dict[str, Any] = {
             "started_at": started_at.strftime("%Y-%m-%d %H:%M:%S"),
             "batch_size": batch_size,
+            "enabled": bool(settings.DATA_CLEANUP_ENABLE),
             "tables": {},
             "total_deleted": 0,
         }
+
+        if not settings.DATA_CLEANUP_ENABLE:
+            report["skipped_reason"] = "disabled"
+            logger.info("数据表清理总开关未开启，跳过执行")
+            return report
+
         errors = []
 
-        plans = [
-            {
-                "name": "message",
-                "cutoff": message_cutoff,
-                "handler": lambda db: Message.delete_before(
-                    db=db,
-                    before_time=message_cutoff,
-                    limit=batch_size,
-                ),
-            },
-            {
-                "name": "downloadhistory",
-                "cutoff": download_history_cutoff,
-                "handler": lambda db: DownloadHistory.delete_before(
-                    db=db,
-                    before_time=download_history_cutoff,
-                    limit=batch_size,
-                ),
-            },
-            {
-                "name": "downloadfiles",
-                "cutoff": "follow-parent-history",
-                "handler": lambda db: DownloadFiles.delete_orphans(
-                    db=db,
-                    limit=batch_size,
-                ),
-            },
-            {
-                "name": "siteuserdata",
-                "cutoff": site_userdata_cutoff,
-                "handler": lambda db: SiteUserData.delete_before(
-                    db=db,
-                    before_day=site_userdata_cutoff,
-                    limit=batch_size,
-                ),
-            },
-            {
-                "name": "transferhistory",
-                "cutoff": transfer_history_cutoff,
-                "handler": lambda db: TransferHistory.delete_before(
-                    db=db,
-                    before_time=transfer_history_cutoff,
-                    limit=batch_size,
-                ),
-            },
-        ]
+        plans = self._build_cleanup_plans(started_at=started_at, batch_size=batch_size)
 
         with SessionFactory() as db:
             for plan in plans:
                 name = plan["name"]
+                retention_days = plan["retention_days"]
+                if retention_days <= 0:
+                    report["tables"][name] = {
+                        "deleted": 0,
+                        "batches": 0,
+                        "cutoff": None,
+                        "retention_days": retention_days,
+                        "skipped": True,
+                        "reason": "retention_days<=0",
+                    }
+                    continue
+
                 try:
                     table_report = self._cleanup_in_batches(
                         db=db,
@@ -149,6 +102,7 @@ class SchedulerChain(ChainBase):
                         delete_batch=plan["handler"],
                     )
                     table_report["cutoff"] = plan["cutoff"]
+                    table_report["retention_days"] = retention_days
                     report["tables"][name] = table_report
                     report["total_deleted"] += table_report["deleted"]
                 except Exception as err:
@@ -158,6 +112,7 @@ class SchedulerChain(ChainBase):
                         "deleted": 0,
                         "batches": 0,
                         "cutoff": plan["cutoff"],
+                        "retention_days": retention_days,
                         "error": str(err),
                     }
 
@@ -170,6 +125,95 @@ class SchedulerChain(ChainBase):
 
         logger.info(f"数据表清理完成：{json.dumps(report, ensure_ascii=False)}")
         return report
+
+    @staticmethod
+    def _normalize_retention_days(retention_days: Any) -> int:
+        try:
+            normalized_days = int(retention_days or 0)
+        except (TypeError, ValueError):
+            return 0
+        return max(normalized_days, 0)
+
+    def _build_cleanup_plans(
+            self,
+            started_at: datetime,
+            batch_size: int,
+    ) -> List[Dict[str, Any]]:
+        message_days = self._normalize_retention_days(settings.DATA_CLEANUP_MESSAGE_DAYS)
+        download_history_days = self._normalize_retention_days(
+            settings.DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS
+        )
+        site_userdata_days = self._normalize_retention_days(
+            settings.DATA_CLEANUP_SITE_USERDATA_DAYS
+        )
+        transfer_history_days = self._normalize_retention_days(
+            settings.DATA_CLEANUP_TRANSFER_HISTORY_DAYS
+        )
+
+        message_cutoff = (
+            started_at - timedelta(days=message_days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        download_history_cutoff = (
+            started_at - timedelta(days=download_history_days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        site_userdata_cutoff = (
+            started_at - timedelta(days=site_userdata_days)
+        ).strftime("%Y-%m-%d")
+        transfer_history_cutoff = (
+            started_at - timedelta(days=transfer_history_days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        return [
+            {
+                "name": "message",
+                "retention_days": message_days,
+                "cutoff": message_cutoff,
+                "handler": lambda db: Message.delete_before(
+                    db=db,
+                    before_time=message_cutoff,
+                    limit=batch_size,
+                ),
+            },
+            {
+                "name": "downloadhistory",
+                "retention_days": download_history_days,
+                "cutoff": download_history_cutoff,
+                "handler": lambda db: DownloadHistory.delete_before(
+                    db=db,
+                    before_time=download_history_cutoff,
+                    limit=batch_size,
+                ),
+            },
+            {
+                "name": "downloadfiles",
+                "retention_days": download_history_days,
+                "cutoff": "follow-parent-history",
+                "handler": lambda db: DownloadFiles.delete_orphans(
+                    db=db,
+                    limit=batch_size,
+                ),
+            },
+            {
+                "name": "siteuserdata",
+                "retention_days": site_userdata_days,
+                "cutoff": site_userdata_cutoff,
+                "handler": lambda db: SiteUserData.delete_before(
+                    db=db,
+                    before_day=site_userdata_cutoff,
+                    limit=batch_size,
+                ),
+            },
+            {
+                "name": "transferhistory",
+                "retention_days": transfer_history_days,
+                "cutoff": transfer_history_cutoff,
+                "handler": lambda db: TransferHistory.delete_before(
+                    db=db,
+                    before_time=transfer_history_cutoff,
+                    limit=batch_size,
+                ),
+            },
+        ]
 
     @staticmethod
     def _cleanup_in_batches(
@@ -215,6 +259,11 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
         "SITEDATA_REFRESH_INTERVAL",
         "AI_AGENT_ENABLE",
         "AI_AGENT_JOB_INTERVAL",
+        "DATA_CLEANUP_ENABLE",
+        "DATA_CLEANUP_MESSAGE_DAYS",
+        "DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS",
+        "DATA_CLEANUP_SITE_USERDATA_DAYS",
+        "DATA_CLEANUP_TRANSFER_HISTORY_DAYS",
     }
 
     def __init__(self):
@@ -507,15 +556,16 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             )
 
             # 数据表清理服务，每天凌晨执行一次
-            self._scheduler.add_job(
-                self.start,
-                "cron",
-                id="data_cleanup",
-                name="数据表清理",
-                hour=3,
-                minute=30,
-                kwargs={"job_id": "data_cleanup"},
-            )
+            if settings.DATA_CLEANUP_ENABLE:
+                self._scheduler.add_job(
+                    self.start,
+                    "cron",
+                    id="data_cleanup",
+                    name="数据表清理",
+                    hour=3,
+                    minute=30,
+                    kwargs={"job_id": "data_cleanup"},
+                )
 
             # 定时检查用户认证，每隔10分钟
             self._scheduler.add_job(

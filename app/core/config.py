@@ -139,6 +139,18 @@ class ConfigModel(BaseModel):
     # PostgreSQL 连接池溢出数量
     DB_POSTGRESQL_MAX_OVERFLOW: int = 50
 
+    # ==================== 数据清理配置 ====================
+    # 是否启用数据表定时清理
+    DATA_CLEANUP_ENABLE: bool = False
+    # 消息表保留天数，0为不清理
+    DATA_CLEANUP_MESSAGE_DAYS: int = 90
+    # 下载历史表保留天数，0为不清理
+    DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS: int = 180
+    # 站点用户数据表保留天数，0为不清理
+    DATA_CLEANUP_SITE_USERDATA_DAYS: int = 180
+    # 整理历史表保留天数，0为不清理
+    DATA_CLEANUP_TRANSFER_HISTORY_DAYS: int = 365 * 3
+
     # ==================== 缓存配置 ====================
     # 缓存类型，支持 cachetools 和 redis，默认使用 cachetools
     CACHE_BACKEND_TYPE: str = "cachetools"
