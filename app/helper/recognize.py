@@ -232,7 +232,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
 
         item = self._parse_response_item(payload)
         if item:
-            logger.info(f"共享媒体识别命中：{params.get('keyword')}")
+            logger.info(f"共享媒体识别命中：{params.get('keyword')} - {item}")
         return item
 
     async def async_query(
@@ -272,7 +272,7 @@ class MediaRecognizeShareHelper(metaclass=WeakSingleton):
 
         item = self._parse_response_item(payload)
         if item:
-            logger.info(f"共享媒体识别命中：{params.get('keyword')}")
+            logger.info(f"共享媒体识别命中：{params.get('keyword')} - {item}")
         return item
 
     def report(self, meta: Optional[MetaBase], mediainfo: Optional[MediaInfo]) -> bool:
