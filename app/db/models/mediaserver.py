@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
-from sqlalchemy import Column, Integer, String, JSON, Index
+from sqlalchemy import Column, Integer, String, JSON, Index, or_
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -44,6 +44,7 @@ class MediaServerItem(Base):
     lst_mod_date = Column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     __table_args__ = (
+        Index('ux_mediaserveritem_server_item_id', 'server', 'item_id', unique=True),
         Index('ix_mediaserveritem_tmdbid_item_type', 'tmdbid', 'item_type'),
     )
 
@@ -53,12 +54,33 @@ class MediaServerItem(Base):
         return db.query(cls).filter(cls.item_id == item_id).first()
 
     @classmethod
+    @db_query
+    def get_by_server_itemid(cls, db: Session, server: str, item_id: str):
+        return db.query(cls).filter(cls.server == server,
+                                    cls.item_id == item_id).first()
+
+    @classmethod
     @db_update
     def empty(cls, db: Session, server: Optional[str] = None):
         if server is None:
-            db.query(cls).delete()
+            db.query(cls).delete(synchronize_session=False)
         else:
-            db.query(cls).filter(cls.server == server).delete()
+            db.query(cls).filter(cls.server == server).delete(synchronize_session=False)
+
+    @classmethod
+    @db_update
+    def delete_stale(cls, db: Session, server: str, sync_time: str):
+        return db.query(cls).filter(cls.server == server,
+                                    or_(cls.lst_mod_date.is_(None),
+                                        cls.lst_mod_date != sync_time)).delete(synchronize_session=False)
+
+    @classmethod
+    @db_update
+    def delete_excluded_servers(cls, db: Session, servers: List[str]):
+        if not servers:
+            return db.query(cls).delete(synchronize_session=False)
+        return db.query(cls).filter(or_(cls.server.is_(None),
+                                        ~cls.server.in_(servers))).delete(synchronize_session=False)
 
     @classmethod
     @db_query
