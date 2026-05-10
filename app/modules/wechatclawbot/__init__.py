@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from app.core.cache import TTLCache
 from app.core.context import Context, MediaInfo
 from app.log import logger
 from app.modules import _MessageBase, _ModuleBase
@@ -10,6 +11,16 @@ from app.schemas.types import MessageChannel, ModuleType
 
 
 class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
+    def __init__(self):
+        """初始化模块级去重缓存，拦截 iLink 偶发的重复回放消息。"""
+        super().__init__()
+        # iLink 偶发会重复回放同一条 update，这里按 message_id 做渠道内幂等保护。
+        self._recent_message_ids = TTLCache(
+            region="wechatclawbot_message_dedup",
+            maxsize=8192,
+            ttl=7 * 24 * 60 * 60,
+        )
+
     def init_module(self) -> None:
         """初始化模块。"""
         self.stop()
@@ -108,6 +119,18 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
             )
         return normalized or None
 
+    def _is_duplicate_message(
+        self, source: str, message_id: Optional[Union[str, int]]
+    ) -> bool:
+        """按渠道名和消息ID判断是否重复，避免重复回放再次进入业务链路。"""
+        if message_id in (None, ""):
+            return False
+        cache_key = f"{source}:{message_id}"
+        if self._recent_message_ids.exists(cache_key):
+            return True
+        self._recent_message_ids.set(cache_key, True)
+        return False
+
     def message_parser(
         self, source: str, body: Any, form: Any, args: Any
     ) -> Optional[CommingMessage]:
@@ -131,12 +154,21 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
         if not user_id:
             return None
 
+        message_id = message.get("message_id")
         text = str(message.get("text") or "").strip()
         username = str(message.get("username") or user_id).strip() or user_id
         images = CommingMessage.MessageImage.normalize_list(message.get("images"))
         audio_refs = self._normalize_audio_refs(message.get("audio_refs"))
         files = self._normalize_files(message.get("files"))
         if not text and not images and not audio_refs and not files:
+            return None
+        if self._is_duplicate_message(client_config.name, message_id):
+            logger.info(
+                "忽略重复的微信 ClawBot 消息：source=%s, userid=%s, message_id=%s",
+                client_config.name,
+                user_id,
+                message_id,
+            )
             return None
 
         admins = [
@@ -152,7 +184,8 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
 
         logger.info(
             f"收到来自 {client_config.name} 的微信 ClawBot 消息："
-            f"userid={user_id}, text={text}, images={len(images) if images else 0}, "
+            f"userid={user_id}, message_id={message_id}, text={text}, "
+            f"images={len(images) if images else 0}, "
             f"audios={len(audio_refs) if audio_refs else 0}, files={len(files) if files else 0}"
         )
         return CommingMessage(
@@ -161,7 +194,7 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
             userid=user_id,
             username=username,
             text=text,
-            message_id=message.get("message_id"),
+            message_id=message_id,
             chat_id=str(message.get("chat_id") or "") or None,
             images=images,
             audio_refs=audio_refs,
