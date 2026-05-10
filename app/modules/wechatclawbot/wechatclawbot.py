@@ -1340,6 +1340,11 @@ class WechatClawBot:
     _qrcode_ttl_seconds = 240
     _active_target_ttl_seconds = 24 * 60 * 60
 
+    @classmethod
+    def _build_cache_key(cls, config_name: str) -> str:
+        safe_name = hashlib.md5(str(config_name or "wechatclawbot").encode("utf-8")).hexdigest()[:12]
+        return f"__wechatclawbot_state_{safe_name}__"
+
     def __init__(
         self,
         WECHATCLAWBOT_BASE_URL: Optional[str] = None,
@@ -1363,8 +1368,7 @@ class WechatClawBot:
             self._poll_timeout = max(10, int(WECHATCLAWBOT_POLL_TIMEOUT or 25))
         except Exception:
             self._poll_timeout = 25
-        safe_name = hashlib.md5(self._config_name.encode("utf-8")).hexdigest()[:12]
-        self._cache_key = f"__wechatclawbot_state_{safe_name}__"
+        self._cache_key = self._build_cache_key(self._config_name)
         self._filecache = FileCache()
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -1732,6 +1736,36 @@ class WechatClawBot:
         if not self._state.get("bot_token"):
             return False, "未登录，请先扫码完成绑定"
         return self._build_client().test_connection()
+
+    @classmethod
+    def migrate_cached_state(
+        cls,
+        old_name: Optional[str],
+        new_name: Optional[str],
+        cleanup_old: bool = False,
+        overwrite: bool = False,
+    ) -> Tuple[bool, str]:
+        """迁移配置重命名后的登录缓存，默认复制而不是删除旧缓存。"""
+        source_name = str(old_name or "").strip()
+        target_name = str(new_name or "").strip()
+        if not source_name or not target_name:
+            return False, "旧名称或新名称不能为空"
+        if source_name == target_name:
+            return True, "通知名称未变化，无需迁移登录缓存"
+
+        cache = FileCache()
+        source_key = cls._build_cache_key(source_name)
+        target_key = cls._build_cache_key(target_name)
+        source_state = cache.get(source_key)
+        if not source_state:
+            return True, "未找到可迁移的微信 ClawBot 登录缓存"
+        if cache.exists(target_key) and not overwrite:
+            return True, "新名称下已存在登录缓存，跳过迁移"
+
+        cache.set(target_key, source_state)
+        if cleanup_old:
+            cache.delete(source_key)
+        return True, f"已将微信 ClawBot 登录缓存从 {source_name} 迁移到 {target_name}"
 
     @staticmethod
     def _decode_ref_payload(ref: str, kind: str) -> Optional[Dict[str, Any]]:

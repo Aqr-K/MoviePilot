@@ -214,3 +214,25 @@ def test_wechatclawbot(
         return schemas.Response(success=False, message=errmsg)
     state, message = client.test_connection()
     return schemas.Response(success=state, message=message)
+
+
+@router.post(
+    "/wechatclawbot/migrate",
+    summary="迁移微信 ClawBot 登录缓存",
+    response_model=schemas.Response,
+)
+def migrate_wechatclawbot_cache(
+        old_source: str,
+        new_source: str,
+        cleanup_old: bool = False,
+        overwrite: bool = False,
+        _: User = Depends(get_current_active_superuser),
+):
+    """在通知名称变更时迁移对应的微信 ClawBot 登录缓存。"""
+    success, message = WechatClawBot.migrate_cached_state(
+        old_name=old_source,
+        new_name=new_source,
+        cleanup_old=cleanup_old,
+        overwrite=overwrite,
+    )
+    return schemas.Response(success=success, message=message)
