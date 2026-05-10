@@ -451,7 +451,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             self,
             metainfo: MetaBase,
             episode_group: Optional[str] = None,
-            obtain_images: bool = True,
+            obtain_images: bool = False,
     ) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息
@@ -576,7 +576,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             self,
             path: str,
             episode_group: Optional[str] = None,
-            obtain_images: bool = True,
+            obtain_images: bool = False,
     ) -> Optional[Context]:
         """
         根据文件路径识别媒体信息
@@ -1386,7 +1386,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             self,
             metainfo: MetaBase,
             episode_group: Optional[str] = None,
-            obtain_images: bool = True,
+            obtain_images: bool = False,
     ) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息（异步版本）
@@ -1510,7 +1510,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             self,
             path: str,
             episode_group: Optional[str] = None,
-            obtain_images: bool = True,
+            obtain_images: bool = False,
     ) -> Optional[Context]:
         """
         根据文件路径识别媒体信息（异步版本）

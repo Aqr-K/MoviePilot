@@ -91,7 +91,10 @@ class ScrapeMetadataTool(MoviePilotTool):
             media_chain = MediaChain()
             scrape_path = Path(path)
             meta = MetaInfoPath(scrape_path)
-            mediainfo = await media_chain.async_recognize_by_meta(meta)
+            mediainfo = await media_chain.async_recognize_by_meta(
+                meta,
+                obtain_images=True,
+            )
 
             if not mediainfo:
                 return json.dumps(

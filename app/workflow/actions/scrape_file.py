@@ -67,7 +67,7 @@ class ScrapeFileAction(BaseAction):
             mediachain = MediaChain()
             mediainfo = mediachain.recognize_by_meta(
                 meta,
-                obtain_images=False,
+                obtain_images=True,
             )
             if not mediainfo:
                 _failed_count += 1

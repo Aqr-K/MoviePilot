@@ -1291,10 +1291,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     # 识别媒体信息
                     mediainfo = MediaChain().recognize_by_meta(
                         task.meta,
-                        obtain_images=False,
+                        obtain_images=True,
                     )
 
-                # 更新媒体图片
+                # 补充图片，确保整理后直接进入刮削的媒体信息已带图片地址。
                 if mediainfo:
                     self.obtain_images(mediainfo=mediainfo)
 
