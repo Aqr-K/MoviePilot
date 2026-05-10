@@ -1,10 +1,10 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.modules.wechatclawbot import WechatClawBotModule
-from app.modules.wechatclawbot.wechatclawbot import ILinkClient
+from app.modules.wechatclawbot.wechatclawbot import ILinkClient, WechatClawBot
 
 
 class WechatClawBotTest(unittest.TestCase):
@@ -56,6 +56,157 @@ class WechatClawBotTest(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertEqual(first.message_id, "msg-1001")
         self.assertIsNone(second)
+
+    def test_ilink_extract_updates_keeps_empty_sync_buf(self):
+        client = ILinkClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            bot_token="token",
+            sync_buf="cursor-old",
+        )
+
+        items, sync_buf = client._extract_updates(
+            {
+                "ret": 0,
+                "get_updates_buf": "",
+                "msgs": [
+                    {
+                        "message_id": "msg-1001",
+                        "from_user_id": "wxid_user_1",
+                        "item_list": [{"type": 1, "text_item": {"text": "你好"}}],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(sync_buf, "")
+        self.assertEqual(len(items), 1)
+
+    def test_ilink_poll_updates_resets_sync_buf_when_server_returns_empty_cursor(self):
+        client = ILinkClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            bot_token="token",
+            sync_buf="cursor-old",
+        )
+        response = MagicMock()
+        response.json.return_value = {
+            "ret": 0,
+            "get_updates_buf": "",
+            "msgs": [
+                {
+                    "message_id": "msg-1001",
+                    "from_user_id": "wxid_user_1",
+                    "item_list": [{"type": 1, "text_item": {"text": "你好"}}],
+                }
+            ],
+        }
+
+        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+            messages, sync_buf, result = client.poll_updates()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(sync_buf, "")
+        self.assertEqual(client.sync_buf, "")
+        self.assertEqual(len(messages), 1)
+
+    def test_ilink_poll_updates_rejects_noncanonical_nested_success_payload(self):
+        client = ILinkClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            bot_token="token",
+            sync_buf="cursor-old",
+        )
+        response = MagicMock()
+        response.json.return_value = {
+            "ret": 0,
+            "data": {
+                "get_updates_buf": "cursor-new",
+                "messages": [
+                    {
+                        "message_id": "msg-1001",
+                        "from_user_id": "wxid_user_1",
+                        "item_list": [{"type": 1, "text_item": {"text": "你好"}}],
+                    }
+                ],
+            },
+        }
+
+        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+            messages, sync_buf, result = client.poll_updates()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["message"], "轮询响应结构非官方，缺少顶层 msgs 字段")
+        self.assertEqual(sync_buf, "cursor-old")
+        self.assertEqual(client.sync_buf, "cursor-old")
+        self.assertEqual(messages, [])
+
+    def test_ilink_poll_updates_rejects_failed_payload_even_if_it_contains_messages(self):
+        client = ILinkClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            bot_token="token",
+            sync_buf="cursor-old",
+        )
+        failed_response = MagicMock()
+        failed_response.json.return_value = {
+            "ret": -2,
+            "errmsg": "cursor invalid",
+            "data": {
+                "sync_buf": "cursor-old",
+                "messages": [
+                    {
+                        "message_id": "msg-dup-1",
+                        "from_user_id": "wxid_user_1",
+                        "item_list": [{"type": 1, "text_item": {"text": "旧消息"}}],
+                    }
+                ],
+            },
+        }
+
+        with patch(
+            "app.modules.wechatclawbot.wechatclawbot.RequestUtils.post",
+            return_value=failed_response,
+        ) as mock_post:
+            messages, sync_buf, result = client.poll_updates()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["message"], "cursor invalid")
+        self.assertEqual(sync_buf, "cursor-old")
+        self.assertEqual(client.sync_buf, "cursor-old")
+        self.assertEqual(messages, [])
+        mock_post.assert_called_once()
+        request_body = mock_post.call_args.kwargs["json"]
+        self.assertIn("get_updates_buf", request_body)
+        self.assertNotIn("sync_buf", request_body)
+        self.assertNotIn("syncBuf", request_body)
+
+    def test_wechatclawbot_send_msg_uses_plain_text_payload(self):
+        state = {
+            "bot_token": None,
+            "account_id": None,
+            "sync_buf": None,
+            "qrcode": {},
+            "known_targets": {},
+            "user_context_tokens": {},
+            "base_url": "https://ilinkai.weixin.qq.com",
+        }
+        with patch.object(WechatClawBot, "_load_state", return_value=state):
+            bot = WechatClawBot(name="wechatclawbot-test", auto_start_polling=False)
+
+        mock_client = MagicMock()
+        mock_client.send_text.return_value = True
+
+        with patch.object(bot, "_build_client", return_value=mock_client):
+            result = bot.send_msg(
+                title="测试标题",
+                text="测试正文",
+                userid="wxid_user_1",
+                link="https://example.com/detail",
+            )
+
+        self.assertTrue(result)
+        mock_client.send_text.assert_called_once_with(
+            to_user="wxid_user_1",
+            text="测试标题\n\n测试正文\n\n查看详情：https://example.com/detail",
+            context_token=None,
+        )
 
 
 if __name__ == "__main__":

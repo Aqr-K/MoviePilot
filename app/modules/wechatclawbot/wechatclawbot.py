@@ -170,6 +170,19 @@ class ILinkClient:
                 return obj.get(key)
         return None
 
+    @staticmethod
+    def _pick_present_value(obj: Dict[str, Any], keys: List[str]) -> Optional[Any]:
+        """
+        获取已存在的字段值，允许空字符串和 0 作为有效值。
+
+        sync_buf 这类游标字段可能会被服务端明确置为空串，表示游标已经回到初始状态。
+        这里不能复用默认的“忽略空字符串”逻辑，否则会错误沿用上一轮旧游标。
+        """
+        for key in keys:
+            if key in obj and obj.get(key) is not None:
+                return obj.get(key)
+        return None
+
     @classmethod
     def _find_first_value(
         cls, data: Any, keys: List[str], max_depth: int = 5
@@ -368,27 +381,6 @@ class ILinkClient:
             {"touser": user_id, "msgtype": "text", "text": text},
             {"to": user_id, "type": "text", "content": text},
             {"to_user_id": user_id, "msg_type": "text", "content": text},
-        ]
-
-    @staticmethod
-    def _build_markdown_payloads(user_id: str, text: str) -> List[Dict[str, Any]]:
-        return [
-            {
-                "to_user": user_id,
-                "msg_type": "markdown",
-                "markdown": {"content": text},
-            },
-            {
-                "touser": user_id,
-                "msgtype": "markdown",
-                "markdown": {"content": text},
-            },
-            {"to": user_id, "type": "markdown", "content": text},
-            {
-                "to_user": user_id,
-                "message_type": "markdown",
-                "markdown": {"content": text},
-            },
         ]
 
     @staticmethod
@@ -785,20 +777,6 @@ class ILinkClient:
             *self._build_text_payloads(str(to_user), text),
         ]
         return self._send_payload_candidates(to_user=to_user, payload_candidates=payload_candidates)
-
-    def send_markdown(
-        self, to_user: str, text: str, context_token: Optional[str] = None
-    ) -> bool:
-        if not self.bot_token:
-            logger.warning("发送 Markdown 失败：bot token 未配置")
-            return False
-        if not to_user or not text:
-            logger.warning("发送 Markdown 失败：to_user 或 text 为空")
-            return False
-        payload_candidates = self._build_markdown_payloads(str(to_user), text)
-        if self._send_payload_candidates(to_user=to_user, payload_candidates=payload_candidates):
-            return True
-        return self.send_text(to_user=to_user, text=text, context_token=context_token)
 
     def send_image_text_png(
         self,
@@ -1260,48 +1238,75 @@ class ILinkClient:
     def _extract_updates(
         self, payload: Dict[str, Any]
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """从轮询响应中提取消息列表和下一轮使用的 sync_buf 游标。"""
-        data = payload.get("data") or payload.get("result") or payload
-        sync_buf = (
-            data.get("get_updates_buf")
-            or payload.get("get_updates_buf")
-            or data.get("sync_buf")
-            or data.get("syncBuf")
-            or payload.get("sync_buf")
-            or payload.get("syncBuf")
-            or self._find_first_value(
-                data,
-                ["get_updates_buf", "sync_buf", "syncBuf", "cursor", "offset", "next_sync_buf"],
-            )
-        )
-        list_keys = [
-            "msgs",
-            "updates",
-            "messages",
-            "items",
-            "events",
-            "msg_list",
-            "msgList",
-            "add_msgs",
-            "addMsgs",
-            "records",
-            "list",
-        ]
-        candidates = [data.get(key) for key in list_keys] + [payload.get(key) for key in list_keys]
-        for candidate in candidates:
-            if isinstance(candidate, list):
-                return candidate, sync_buf
-        nested = self._find_first_list(data, prefer_keys=list_keys)
-        if isinstance(nested, list):
-            return nested, sync_buf
-        if isinstance(data, list):
-            return data, sync_buf
-        if isinstance(data, dict):
-            for key in ["message", "msg", "event", "item"]:
-                item = data.get(key)
-                if isinstance(item, dict):
-                    return [item], sync_buf
+        """按官方 getupdates 协议提取顶层 msgs 与 get_updates_buf。"""
+        sync_buf = self._pick_present_value(payload, ["get_updates_buf"])
+        items = payload.get("msgs")
+        if isinstance(items, list):
+            return items, sync_buf
         return [], sync_buf
+
+    def _has_canonical_poll_shape(self, payload: Dict[str, Any]) -> bool:
+        """官方响应至少应包含顶层 msgs 列表。"""
+        return isinstance(payload.get("msgs"), list)
+
+    def _is_poll_success(self, payload: Dict[str, Any]) -> bool:
+        """
+        判断 getupdates 是否明确成功。
+
+        轮询接口不能沿用“只要没有明显报错就算成功”的宽松策略，否则服务端返回旧消息列表、
+        但状态码其实失败时，会被误判为可消费响应，导致旧消息再次进入业务链路。
+        """
+        if not payload:
+            return False
+        code = self._find_first_value(
+            payload, ["errcode", "code", "ret", "result_code", "status_code"]
+        )
+        if code is not None:
+            try:
+                return int(str(code)) == 0
+            except Exception:
+                return str(code).strip().lower() in {"0", "ok", "success", "succeed"}
+        success_flag = self._find_first_value(
+            payload, ["success", "ok", "is_success"]
+        )
+        if isinstance(success_flag, bool):
+            return success_flag
+        if success_flag is not None:
+            return str(success_flag).strip().lower() in {
+                "1",
+                "true",
+                "ok",
+                "success",
+                "succeed",
+            }
+        state = self._find_first_value(payload, ["status", "state"])
+        if state is not None:
+            lowered = str(state).strip().lower()
+            if lowered in {"ok", "success", "succeed", "done"}:
+                return True
+            if lowered in {"failed", "fail", "error", "denied", "blocked"}:
+                return False
+        return False
+
+    def _build_poll_result(
+        self,
+        success: bool,
+        payload: Optional[Dict[str, Any]] = None,
+        message: Optional[str] = None,
+        item_count: int = 0,
+        parsed_count: int = 0,
+    ) -> Dict[str, Any]:
+        payload = payload or {}
+        resolved_message = message or self._find_first_value(
+            payload, ["errmsg", "message", "error", "error_msg", "detail"]
+        )
+        return {
+            "success": success,
+            "raw": payload,
+            "message": self._short_text(resolved_message) if resolved_message else None,
+            "item_count": item_count,
+            "parsed_count": parsed_count,
+        }
 
     def poll_updates(
         self, timeout_seconds: int = 25
@@ -1316,27 +1321,39 @@ class ILinkClient:
             return [], self.sync_buf, {"success": False, "message": "bot token 未配置"}
         url = f"{self.base_url}/ilink/bot/getupdates"
         payload = {}
-        body_candidates = [
-            {"get_updates_buf": self.sync_buf or ""},
-            {"sync_buf": self.sync_buf, "timeout": timeout_seconds},
-            {"syncBuf": self.sync_buf, "timeout": timeout_seconds},
-            {"sync_buf": self.sync_buf, "wait": timeout_seconds},
-        ]
-        for body in body_candidates:
-            request_body = self._with_base_info(body)
-            resp = RequestUtils(
-                headers=self._headers(auth_required=True),
-                timeout=timeout_seconds + 10,
-            ).post(url, json=request_body)
-            payload = self._json(resp)
-            if payload and self._ok(payload):
-                break
-            if payload and self._find_first_list(
-                payload, prefer_keys=["updates", "messages", "items", "events", "add_msgs", "msgs"]
-            ):
-                break
+        request_body = self._with_base_info({"get_updates_buf": self.sync_buf or ""})
+        resp = RequestUtils(
+            headers=self._headers(auth_required=True),
+            timeout=timeout_seconds + 10,
+        ).post(url, json=request_body)
+        payload = self._json(resp)
+        success = bool(payload and self._is_poll_success(payload))
+        last_message = None
+        if payload and not success:
+            last_message = self._find_first_value(
+                payload, ["errmsg", "message", "error", "error_msg", "detail"]
+            ) or self._short_text(payload)
         if not payload:
-            return [], self.sync_buf, {"success": False, "message": "轮询返回空响应"}
+            return [], self.sync_buf, self._build_poll_result(
+                success=False,
+                message="轮询返回空响应",
+            )
+        if not success:
+            return [], self.sync_buf, self._build_poll_result(
+                success=False,
+                payload=payload,
+                message=last_message or "轮询响应未明确成功",
+            )
+        if not self._has_canonical_poll_shape(payload):
+            logger.warning(
+                "getupdates 返回非官方结构，已拒绝消费: %s",
+                self._short_text(payload),
+            )
+            return [], self.sync_buf, self._build_poll_result(
+                success=False,
+                payload=payload,
+                message="轮询响应结构非官方，缺少顶层 msgs 字段",
+            )
         items, sync_buf = self._extract_updates(payload)
         parsed: List[ILinkIncomingMessage] = []
         for item in items:
@@ -1345,13 +1362,12 @@ class ILinkClient:
                 parsed.append(message)
         if sync_buf is not None:
             self.sync_buf = str(sync_buf)
-        return parsed, self.sync_buf, {
-            "success": self._ok(payload),
-            "raw": payload,
-            "message": payload.get("errmsg") or payload.get("message"),
-            "item_count": len(items),
-            "parsed_count": len(parsed),
-        }
+        return parsed, self.sync_buf, self._build_poll_result(
+            success=True,
+            payload=payload,
+            item_count=len(items),
+            parsed_count=len(parsed),
+        )
 
     def test_connection(self) -> Tuple[bool, str]:
         if not self.bot_token:
@@ -1549,14 +1565,14 @@ class WechatClawBot:
         return [chunk for chunk in chunks if chunk]
 
     @staticmethod
-    def _compose_markdown(
+    def _compose_text(
         title: Optional[str] = None,
         text: Optional[str] = None,
         link: Optional[str] = None,
     ) -> str:
         parts = []
         if title:
-            parts.append(f"## {title}")
+            parts.append(str(title).strip())
         if text:
             parts.append(str(text).replace("\n\n", "\n"))
         if link:
@@ -1994,7 +2010,7 @@ class WechatClawBot:
             logger.warning("未找到可发送的微信 ClawBot 目标")
             return False
         image_bytes = self._load_remote_image(image) if image else None
-        content = self._compose_markdown(title=title, text=text, link=link)
+        content = self._compose_text(title=title, text=text, link=link)
         ok = False
         for target in targets:
             context_token = self._get_context_token(target)
@@ -2015,7 +2031,7 @@ class WechatClawBot:
                 client = self._build_client()
                 sent = True
                 for chunk in self._split_content(content):
-                    if not client.send_markdown(
+                    if not client.send_text(
                         to_user=target,
                         text=chunk,
                         context_token=context_token,
@@ -2044,7 +2060,7 @@ class WechatClawBot:
         targets = self._get_targets(userid=userid)
         if not targets:
             return False
-        caption = self._compose_markdown(title=title, text=text)
+        caption = self._compose_text(title=title, text=text)
         ok = False
         for target in targets:
             context_token = self._get_context_token(target)
@@ -2052,7 +2068,7 @@ class WechatClawBot:
             client = self._build_client()
             if caption:
                 for chunk in self._split_content(caption):
-                    if not client.send_markdown(
+                    if not client.send_text(
                         to_user=target,
                         text=chunk,
                         context_token=context_token,
