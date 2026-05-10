@@ -167,6 +167,24 @@ class ILinkClient:
         return text
 
     @staticmethod
+    def _normalize_qrcode_url(value: Any) -> Optional[str]:
+        """规范化二维码展示字段，兼容图片 URL、data URL 与裸 base64。"""
+        if value is None:
+            return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+        lowered = raw.lower()
+        if lowered.startswith("data:image/"):
+            return raw
+        if lowered.startswith("//"):
+            return f"https:{raw}"
+        # 某些实现会直接返回二维码图片的 base64 内容，这里自动补齐 data URL 前缀
+        if len(raw) >= 128 and re.fullmatch(r"[A-Za-z0-9+/=_-]+", raw):
+            return f"data:image/png;base64,{raw}"
+        return raw
+
+    @staticmethod
     def _pick_value(obj: Dict[str, Any], keys: List[str]) -> Optional[Any]:
         for key in keys:
             if key in obj and obj.get(key) not in (None, ""):
@@ -667,6 +685,7 @@ class ILinkClient:
             or data.get("qrcode_img_url")
             or data.get("qr_img")
         )
+        qrcode_url = self._normalize_qrcode_url(qrcode_url)
         if not qrcode_url and qrcode:
             qrcode_url = f"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode={qrcode}&bot_type=3"
         return {
@@ -749,6 +768,15 @@ class ILinkClient:
             "token": token,
             "account_id": account_id,
             "base_url": base_url,
+            "qrcode_url": self._normalize_qrcode_url(
+                data.get("qrcode_url")
+                or data.get("url")
+                or data.get("qrcodeUrl")
+                or data.get("qr_url")
+                or data.get("qrcode_img_content")
+                or data.get("qrcode_img_url")
+                or data.get("qr_img")
+            ),
             "raw": payload,
             "message": payload.get("errmsg") or payload.get("message"),
         }
