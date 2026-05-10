@@ -11,6 +11,7 @@ from app.core.security import verify_token
 from app.db.models.user import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user
+from app.helper.directory import DirectoryHelper
 from app.schemas.types import SystemConfigKey
 
 router = APIRouter()
@@ -138,6 +139,29 @@ async def clients(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     if downloaders:
         return [{"name": d.get("name"), "type": d.get("type")} for d in downloaders if d.get("enabled")]
     return []
+
+
+@router.get("/paths", summary="查询可用下载路径", response_model=List[schemas.DownloadDirectory])
+def paths(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    查询可直接用于下载接口 save_path 参数的下载路径
+    """
+    return [
+        schemas.DownloadDirectory(
+            name=dir_info.name,
+            storage=dir_info.storage or "local",
+            download_path=dir_info.download_path,
+            save_path=schemas.FileURI(
+                storage=dir_info.storage or "local",
+                path=dir_info.download_path,
+            ).uri,
+            priority=dir_info.priority,
+            media_type=dir_info.media_type,
+            media_category=dir_info.media_category,
+        )
+        for dir_info in DirectoryHelper().get_download_dirs()
+        if dir_info.download_path
+    ]
 
 
 @router.delete("/{hashString}", summary="删除下载任务", response_model=schemas.Response)
