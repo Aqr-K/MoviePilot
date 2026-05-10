@@ -15,6 +15,8 @@ from app.utils.url import UrlUtils
 
 
 class Ugreen:
+    LIBRARY_PATH_PAGE_LIMIT = 200
+
     _username: Optional[str] = None
     _password: Optional[str] = None
 
@@ -171,11 +173,13 @@ class Ugreen:
         if not self.is_configured():
             return False
 
+        self._libraries = {}
+        self._library_paths = {}
+
         # 关闭旧连接（不主动登出，避免破坏可复用会话）
         self.disconnect(logout=False)
 
         if self.__restore_persisted_session():
-            self.get_librarys()
             return True
 
         self._api = Api(host=self._host, verify_ssl=self._verify_ssl)
@@ -191,7 +195,6 @@ class Ugreen:
         # 登录成功后持久化参数，下次优先复用
         self.__save_persisted_session()
         logger.debug(f"{self._username} 成功登录绿联影视")
-        self.get_librarys()
         return True
 
     def disconnect(self, logout: bool = False):
@@ -204,6 +207,8 @@ class Ugreen:
             self._api = None
             self._userinfo = None
             logger.debug(f"{self._username} 已断开绿联影视")
+        self._libraries = {}
+        self._library_paths = {}
 
     @staticmethod
     def __normalize_dir_path(path: Union[str, Path, None]) -> str:
@@ -487,7 +492,7 @@ class Ugreen:
 
         paths: dict[str, str] = {}
         page = 1
-        while True:
+        while page <= self.LIBRARY_PATH_PAGE_LIMIT:
             data = self._api.poster_wall_get_folder(page=page, page_size=100)
             if not data:
                 break
@@ -501,6 +506,12 @@ class Ugreen:
             if data.get("is_last_page"):
                 break
             page += 1
+
+        if page > self.LIBRARY_PATH_PAGE_LIMIT:
+            # 部分固件分页标志异常时会无限返回下一页，这里加硬限制避免阻塞调用方。
+            logger.warning(
+                f"绿联影视 {self._username} 媒体库目录分页超过上限 {self.LIBRARY_PATH_PAGE_LIMIT} 页，停止继续加载"
+            )
 
         return paths
 
