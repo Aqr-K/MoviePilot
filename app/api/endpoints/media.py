@@ -9,7 +9,7 @@ from app.chain.tmdb import TmdbChain
 from app.core.config import settings
 from app.core.context import Context
 from app.core.event import eventmanager
-from app.core.metainfo import MetaInfo, MetaInfoPath
+from app.core.metainfo import MetaInfo
 from app.core.security import verify_token, verify_apitoken
 from app.db.models import User
 from app.db.user_oper import get_current_active_user, get_current_active_superuser
@@ -121,16 +121,19 @@ def scrape(fileitem: schemas.FileItem,
         return schemas.Response(success=False, message="刮削路径无效")
     chain = MediaChain()
     # 识别媒体信息
-    scrape_path = Path(fileitem.path)
-    meta = MetaInfoPath(scrape_path)
-    mediainfo = chain.recognize_by_meta(meta, obtain_images=True)
-    if not mediainfo:
+    context = chain.recognize_by_path(fileitem.path, obtain_images=True)
+    if not context or not context.media_info:
         return schemas.Response(success=False, message="刮削失败，无法识别媒体信息")
     if storage == "local":
-        if not scrape_path.exists():
+        if not Path(fileitem.path).exists():
             return schemas.Response(success=False, message="刮削路径不存在")
     # 手动刮削 (暂时使用同步版本，可以后续优化为异步)
-    chain.scrape_metadata(fileitem=fileitem, meta=meta, mediainfo=mediainfo, overwrite=True)
+    chain.scrape_metadata(
+        fileitem=fileitem,
+        meta=context.meta_info,
+        mediainfo=context.media_info,
+        overwrite=True
+    )
     return schemas.Response(success=True, message=f"{fileitem.path} 刮削完成")
 
 

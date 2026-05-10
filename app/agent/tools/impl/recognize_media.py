@@ -49,8 +49,7 @@ class RecognizeMediaTool(MoviePilotTool):
         
         try:
             media_chain = MediaChain()
-            context = None
-            
+
             # 根据提供的参数选择识别方式
             if path:
                 # 文件路径识别
