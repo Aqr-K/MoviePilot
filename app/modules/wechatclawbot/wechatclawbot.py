@@ -19,7 +19,6 @@ from Crypto.Util.Padding import pad
 from app.core.cache import FileCache
 from app.core.config import settings
 from app.core.context import Context, MediaInfo
-from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.log import logger
 from app.utils.http import RequestUtils
@@ -1987,9 +1986,10 @@ class WechatClawBot:
                     context_token=context_token,
                 )
             else:
+                client = self._build_client()
                 sent = True
                 for chunk in self._split_content(content):
-                    if not self._build_client().send_markdown(
+                    if not client.send_markdown(
                         to_user=target,
                         text=chunk,
                         context_token=context_token,
@@ -2023,9 +2023,10 @@ class WechatClawBot:
         for target in targets:
             context_token = self._get_context_token(target)
             sent = True
+            client = self._build_client()
             if caption:
                 for chunk in self._split_content(caption):
-                    if not self._build_client().send_markdown(
+                    if not client.send_markdown(
                         to_user=target,
                         text=chunk,
                         context_token=context_token,
