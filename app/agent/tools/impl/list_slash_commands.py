@@ -33,7 +33,7 @@ class ListSlashCommandsTool(MoviePilotTool):
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成友好的提示消息"""
-        return "正在查询所有可用命令"
+        return "查询所有可用命令"
 
     async def run(self, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}")

@@ -79,7 +79,7 @@ class QuerySubscribesTool(MoviePilotTool):
         media_type = kwargs.get("media_type", "all")
         page = kwargs.get("page", 1)
 
-        parts = ["正在查询订阅"]
+        parts = ["查询订阅"]
 
         # 根据状态过滤条件生成提示
         if status != "all":

@@ -41,11 +41,33 @@ class UpdateSiteCookieTool(MoviePilotTool):
         username = kwargs.get("username", "")
         two_step_code = kwargs.get("two_step_code")
 
-        message = f"正在更新站点Cookie: {site_identifier} (用户: {username})"
+        message = f"更新站点Cookie: {site_identifier} (用户: {username})"
         if two_step_code:
             message += " [需要两步验证]"
 
         return message
+
+    @staticmethod
+    def _update_site_cookie_sync(
+        site_identifier: int,
+        username: str,
+        password: str,
+        two_step_code: Optional[str] = None,
+    ) -> tuple[Optional[str], bool, str]:
+        """
+        在同步线程里执行站点登录和 Cookie 更新，避免网络登录阻塞协程。
+        """
+        site = SiteOper().get(site_identifier)
+        if not site:
+            return None, False, f"未找到站点：{site_identifier}，请使用 query_sites 工具查询可用的站点"
+
+        status, message = SiteChain().update_cookie(
+            site_info=site,
+            username=username,
+            password=password,
+            two_step_code=two_step_code,
+        )
+        return site.name, status, message
 
     async def run(
         self,
@@ -60,25 +82,21 @@ class UpdateSiteCookieTool(MoviePilotTool):
         )
 
         try:
-            site_oper = SiteOper()
-            site_chain = SiteChain()
-            site = await site_oper.async_get(site_identifier)
-
-            if not site:
-                return f"未找到站点：{site_identifier}，请使用 query_sites 工具查询可用的站点"
-
-            # 更新站点Cookie和UA
-            status, message = site_chain.update_cookie(
-                site_info=site,
-                username=username,
-                password=password,
-                two_step_code=two_step_code,
+            site_name, status, message = await self.run_blocking(
+                "site",
+                self._update_site_cookie_sync,
+                site_identifier,
+                username,
+                password,
+                two_step_code,
             )
+            if not site_name:
+                return message
 
             if status:
-                return f"站点【{site.name}】Cookie和UA更新成功\n{message}"
+                return f"站点【{site_name}】Cookie和UA更新成功\n{message}"
             else:
-                return f"站点【{site.name}】Cookie和UA更新失败\n错误原因：{message}"
+                return f"站点【{site_name}】Cookie和UA更新失败\n错误原因：{message}"
         except Exception as e:
             logger.error(f"更新站点Cookie和UA失败: {e}", exc_info=True)
             return f"更新站点Cookie和UA时发生错误: {str(e)}"

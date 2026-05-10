@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import List, Any, Optional, AsyncIterator
 
@@ -7,7 +8,6 @@ from fastapi.responses import StreamingResponse
 from app import schemas
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
-from app.chain.ai_recommend import AIRecommendChain
 from app.core.config import settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
@@ -17,6 +17,9 @@ from app.schemas import MediaRecognizeConvertEventData
 from app.schemas.types import MediaType, ChainEventType
 
 router = APIRouter()
+
+_SSE_APPEND_FLUSH_INTERVAL = 1
+_SSE_APPEND_MAX_ITEMS = 48
 
 
 def _parse_site_list(sites: Optional[str]) -> Optional[List[int]]:
@@ -33,14 +36,97 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _merge_append_event(pending_event: Optional[dict], event: dict) -> dict:
+    """
+    合并短时间内连续到达的 append 事件，降低前端刷新频率。
+    """
+    items = list(event.get("items") or [])
+    if not pending_event:
+        merged_event = dict(event)
+        merged_event["items"] = items
+        return merged_event
+
+    merged_event = dict(pending_event)
+    merged_event.update({
+        key: value
+        for key, value in event.items()
+        if key != "items"
+    })
+    merged_event["type"] = "append"
+    merged_event["items"] = [*(pending_event.get("items") or []), *items]
+    return merged_event
+
+
+async def _iter_batched_search_events(event_source: AsyncIterator[dict]) -> AsyncIterator[dict]:
+    """
+    对搜索流事件做轻量批处理，避免站点结果集中返回时产生过密 SSE。
+    """
+    iterator = event_source.__aiter__()
+    pending_append_event: Optional[dict] = None
+    next_event_task: Optional[asyncio.Task] = None
+
+    try:
+        while True:
+            if next_event_task is None:
+                next_event_task = asyncio.create_task(anext(iterator))
+
+            timeout = _SSE_APPEND_FLUSH_INTERVAL if pending_append_event else None
+            done, _ = await asyncio.wait({next_event_task}, timeout=timeout)
+
+            if not done:
+                if pending_append_event:
+                    yield pending_append_event
+                    pending_append_event = None
+                continue
+
+            try:
+                event = next_event_task.result()
+            except StopAsyncIteration:
+                next_event_task = None
+                break
+            finally:
+                if next_event_task and next_event_task.done():
+                    next_event_task = None
+
+            if event.get("type") == "append":
+                pending_append_event = _merge_append_event(pending_append_event, event)
+                if len(pending_append_event.get("items") or []) >= _SSE_APPEND_MAX_ITEMS:
+                    yield pending_append_event
+                    pending_append_event = None
+                continue
+
+            if pending_append_event:
+                yield pending_append_event
+                pending_append_event = None
+
+            yield event
+    finally:
+        if next_event_task and not next_event_task.done():
+            next_event_task.cancel()
+            await asyncio.gather(next_event_task, return_exceptions=True)
+
+    if pending_append_event:
+        yield pending_append_event
+
+
 async def _stream_search_events(request: Request, event_source: AsyncIterator[dict]):
     """
     输出搜索SSE事件
     """
     try:
-        async for event in event_source:
+        has_sent_final_replace = False
+        async for event in _iter_batched_search_events(event_source):
             if await request.is_disconnected():
                 break
+            # 精确搜索会先发送 replace，再发送 done。done 再带整包 items 只会重复占用带宽和前端内存。
+            if event.get("type") == "replace" and event.get("items"):
+                has_sent_final_replace = True
+            elif event.get("type") == "done" and has_sent_final_replace and event.get("stage") == "done" and event.get("items"):
+                event = {
+                    key: value
+                    for key, value in event.items()
+                    if key != "items"
+                }
             yield _sse_event(event)
     except Exception as err:
         logger.error(f"渐进式搜索出错：{err}", exc_info=True)
@@ -73,7 +159,6 @@ async def search_by_id_stream(request: Request,
     """
     根据TMDBID/豆瓣ID渐进式搜索站点资源，返回格式为SSE
     """
-    AIRecommendChain().cancel_ai_recommend()
 
     media_type = MediaType(mtype) if mtype else None
     media_season = int(season) if season else None
@@ -170,7 +255,10 @@ async def search_by_id_stream(request: Request,
                 if media_season:
                     meta.type = MediaType.TV
                     meta.begin_season = media_season
-                mediainfo = await media_chain.async_recognize_media(meta=meta)
+                mediainfo = await media_chain.async_recognize_by_meta(
+                    meta,
+                    obtain_images=False,
+                )
                 if mediainfo:
                     if settings.RECOGNIZE_SOURCE == "themoviedb":
                         torrents = search_chain.async_search_by_id_stream(tmdbid=mediainfo.tmdb_id,
@@ -205,9 +293,6 @@ async def search_by_id(mediaid: str,
     """
     根据TMDBID/豆瓣ID精确搜索站点资源 tmdb:/douban:/bangumi:
     """
-    # 取消正在运行的AI推荐（会清除数据库缓存）
-    AIRecommendChain().cancel_ai_recommend()
-    
     if mtype:
         media_type = MediaType(mtype)
     else:
@@ -306,7 +391,10 @@ async def search_by_id(mediaid: str,
             if media_season:
                 meta.type = MediaType.TV
                 meta.begin_season = media_season
-            mediainfo = await media_chain.async_recognize_media(meta=meta)
+            mediainfo = await media_chain.async_recognize_by_meta(
+                meta,
+                obtain_images=False,
+            )
             if mediainfo:
                 if settings.RECOGNIZE_SOURCE == "themoviedb":
                     torrents = await search_chain.async_search_by_id(tmdbid=mediainfo.tmdb_id, mtype=media_type,
@@ -332,7 +420,6 @@ async def search_by_title_stream(request: Request,
     """
     根据名称渐进式模糊搜索站点资源，返回格式为SSE
     """
-    AIRecommendChain().cancel_ai_recommend()
 
     event_source = SearchChain().async_search_by_title_stream(
         title=keyword,
@@ -351,9 +438,6 @@ async def search_by_title(keyword: Optional[str] = None,
     """
     根据名称模糊搜索站点资源，支持分页，关键词为空是返回首页资源
     """
-    # 取消正在运行的AI推荐并清除数据库缓存
-    AIRecommendChain().cancel_ai_recommend()
-    
     torrents = await SearchChain().async_search_by_title(
         title=keyword, page=page,
         sites=_parse_site_list(sites),
@@ -396,13 +480,13 @@ async def recommend_search_results(
         return schemas.Response(success=False, message="没有可用的搜索结果", data={
             "status": "error"
         })
-    
-    recommend_chain = AIRecommendChain()
-    
+
+    recommend_chain = SearchChain()
+
     # 如果是强制模式，先取消并清除旧结果，然后直接启动新任务
     if force:
         # 检查功能是否启用
-        if not settings.AI_AGENT_ENABLE or not settings.AI_RECOMMEND_ENABLED:
+        if not recommend_chain.is_ai_recommend_enabled:
             return schemas.Response(success=True, data={
                 "status": "disabled"
             })
@@ -413,24 +497,24 @@ async def recommend_search_results(
         return schemas.Response(success=True, data={
             "status": "running"
         })
-    
+
     # 如果是仅检查模式，不传递 filtered_indices（避免触发请求变化检测）
     if check_only:
         # 返回当前运行状态，不做任何任务启动或取消操作
-        current_status = recommend_chain.get_current_status_only()
+        current_status = recommend_chain.get_current_recommend_status_only()
         # 如果有错误，将错误信息放到message中
         if current_status.get("status") == "error":
             error_msg = current_status.pop("error", "未知错误")
             return schemas.Response(success=False, message=error_msg, data=current_status)
         return schemas.Response(success=True, data=current_status)
-    
+
     # 获取当前状态（会检测请求是否变化）
-    status_data = recommend_chain.get_status(filtered_indices, len(results))
-    
+    status_data = recommend_chain.get_recommend_status(filtered_indices, len(results))
+
     # 如果功能未启用，直接返回禁用状态
     if status_data.get("status") == "disabled":
         return schemas.Response(success=True, data=status_data)
-    
+
     # 如果是空闲状态，启动新任务
     if status_data["status"] == "idle":
         recommend_chain.start_recommend_task(filtered_indices, len(results), results)
@@ -438,11 +522,11 @@ async def recommend_search_results(
         return schemas.Response(success=True, data={
             "status": "running"
         })
-    
+
     # 如果有错误，将错误信息放到message中
     if status_data.get("status") == "error":
         error_msg = status_data.pop("error", "未知错误")
         return schemas.Response(success=False, message=error_msg, data=status_data)
-    
+
     # 返回当前状态
     return schemas.Response(success=True, data=status_data)

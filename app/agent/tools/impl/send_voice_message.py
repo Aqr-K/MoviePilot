@@ -8,10 +8,8 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool, ToolChain
 from app.core.config import settings
 from app.helper.voice import VoiceHelper
-from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
-from app.schemas.types import MessageChannel
 
 
 class SendVoiceMessageInput(BaseModel):
@@ -29,10 +27,12 @@ class SendVoiceMessageInput(BaseModel):
 
 class SendVoiceMessageTool(MoviePilotTool):
     name: str = "send_voice_message"
+    sends_message: bool = True
     description: str = (
-        "Send a voice reply to the current user. Prefer this when the user sent a voice message "
-        "or when spoken playback is more natural. On channels without voice support or when TTS "
-        "is unavailable, it automatically falls back to sending the same content as plain text."
+        "Send a voice reply to the current user. Use this only when the user explicitly asks for "
+        "a voice reply or when spoken playback is clearly better than plain text. On channels "
+        "without voice support or when TTS is unavailable, it automatically falls back to sending "
+        "the same content as plain text."
     )
     args_schema: Type[BaseModel] = SendVoiceMessageInput
     require_admin: bool = False
@@ -41,19 +41,7 @@ class SendVoiceMessageTool(MoviePilotTool):
         message = kwargs.get("message") or ""
         if len(message) > 40:
             message = message[:40] + "..."
-        return f"正在发送语音回复: {message}"
-
-    def _supports_real_voice_reply(self) -> bool:
-        channel = self._channel or ""
-        if channel == MessageChannel.Telegram.value:
-            return True
-        if channel != MessageChannel.Wechat.value:
-            return False
-        for config in ServiceConfigHelper.get_notification_configs():
-            if config.name != self._source:
-                continue
-            return (config.config or {}).get("WECHAT_MODE", "app") != "bot"
-        return False
+        return f"发送语音回复: {message}"
 
     async def run(self, message: str, **kwargs) -> str:
         if not message:
@@ -62,11 +50,23 @@ class SendVoiceMessageTool(MoviePilotTool):
         voice_path = None
         used_voice = False
         channel = self._channel or ""
-        if self._supports_real_voice_reply() and VoiceHelper.is_available("tts"):
+        reply_mode = VoiceHelper.resolve_reply_mode(
+            channel=channel,
+            source=self._source,
+        )
+        fallback_reason = "当前渠道不支持语音回复"
+        if not VoiceHelper.is_enabled():
+            fallback_reason = "当前未启用音频输入输出"
+        if (
+            reply_mode == VoiceHelper.REPLY_MODE_NATIVE
+            and VoiceHelper.is_available("tts")
+        ):
             voice_file = await asyncio.to_thread(VoiceHelper.synthesize_speech, message)
             if voice_file:
                 voice_path = str(voice_file)
                 used_voice = True
+        elif reply_mode == VoiceHelper.REPLY_MODE_NATIVE:
+            fallback_reason = "当前未配置可用的语音合成能力"
 
         logger.info(
             "执行工具: %s, channel=%s, use_voice=%s, text_len=%s",
@@ -85,7 +85,11 @@ class SendVoiceMessageTool(MoviePilotTool):
                 username=self._username,
                 text=message,
                 voice_path=voice_path,
-                voice_caption=message if settings.AI_VOICE_REPLY_WITH_TEXT else None,
+                voice_caption=(
+                    message
+                    if voice_path and settings.AI_VOICE_REPLY_WITH_TEXT
+                    else None
+                ),
             )
         )
         self._agent_context["user_reply_sent"] = True
@@ -93,4 +97,4 @@ class SendVoiceMessageTool(MoviePilotTool):
 
         if used_voice:
             return "语音回复已发送"
-        return "当前未使用语音通道，已自动回退为文字回复"
+        return f"{fallback_reason}，已自动回退为文字回复"

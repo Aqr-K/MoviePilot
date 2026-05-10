@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Union, List, Dict, Set
+from typing import Optional, Union, List, Dict, Set, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.types import ContentType, NotificationType, MessageChannel
 
@@ -28,6 +28,61 @@ class CommingMessage(BaseModel):
     """
     外来消息
     """
+
+    class MessageImage(BaseModel):
+        """
+        外来消息图片
+        """
+
+        ref: str
+        name: Optional[str] = None
+        mime_type: Optional[str] = None
+        size: Optional[int] = None
+
+        @classmethod
+        def from_value(cls, value: Any) -> Optional["CommingMessage.MessageImage"]:
+            if value is None:
+                return None
+            if isinstance(value, cls):
+                return value
+            if isinstance(value, str):
+                return cls(ref=value)
+            if isinstance(value, dict):
+                ref = (
+                    value.get("ref")
+                    or value.get("url")
+                    or value.get("image_url")
+                    or value.get("file_url")
+                )
+                if not ref:
+                    return None
+                size = value.get("size")
+                try:
+                    size = int(size) if size is not None else None
+                except (TypeError, ValueError):
+                    size = None
+                return cls(
+                    ref=ref,
+                    name=value.get("name") or value.get("filename"),
+                    mime_type=value.get("mime_type") or value.get("content_type"),
+                    size=size,
+                )
+            return None
+
+        @classmethod
+        def normalize_list(
+            cls, values: Optional[Any]
+        ) -> Optional[List["CommingMessage.MessageImage"]]:
+            if not values:
+                return None
+            if not isinstance(values, list):
+                values = [values]
+            normalized = []
+            for value in values:
+                item = cls.from_value(value)
+                if item:
+                    normalized.append(item)
+            return normalized or None
 
     class MessageAttachment(BaseModel):
         """
@@ -64,11 +119,18 @@ class CommingMessage(BaseModel):
     # 完整的回调查询信息（原始数据）
     callback_query: Optional[Dict] = None
     # 图片列表（图片URL或file_id）
-    images: Optional[List[str]] = None
+    images: Optional[List[MessageImage]] = None
     # 语音/音频引用列表
     audio_refs: Optional[List[str]] = None
     # 文件附件列表
     files: Optional[List[MessageAttachment]] = None
+
+    @field_validator("images", mode="before")
+    @classmethod
+    def _normalize_images(
+        cls, value: Any
+    ) -> Optional[List["CommingMessage.MessageImage"]]:
+        return cls.MessageImage.normalize_list(value)
 
     def to_dict(self):
         """
@@ -201,6 +263,8 @@ class ChannelCapability(Enum):
     CALLBACK_QUERIES = "callback_queries"
     # 支持富文本
     RICH_TEXT = "rich_text"
+    # 支持 Markdown
+    MARKDOWN = "markdown"
     # 支持图片
     IMAGES = "images"
     # 支持链接
@@ -239,6 +303,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.MESSAGE_EDITING,
                 ChannelCapability.MESSAGE_DELETION,
                 ChannelCapability.CALLBACK_QUERIES,
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -266,6 +331,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.MESSAGE_EDITING,
                 ChannelCapability.MESSAGE_DELETION,
                 ChannelCapability.CALLBACK_QUERIES,
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -286,6 +352,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.MESSAGE_EDITING,
                 ChannelCapability.MESSAGE_DELETION,
                 ChannelCapability.CALLBACK_QUERIES,
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -301,6 +368,7 @@ class ChannelCapabilityManager:
         MessageChannel.SynologyChat: ChannelCapabilities(
             channel=MessageChannel.SynologyChat,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -310,6 +378,7 @@ class ChannelCapabilityManager:
         MessageChannel.VoceChat: ChannelCapabilities(
             channel=MessageChannel.VoceChat,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -324,6 +393,7 @@ class ChannelCapabilityManager:
         MessageChannel.Web: ChannelCapabilities(
             channel=MessageChannel.Web,
             capabilities={
+                ChannelCapability.MARKDOWN,
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
@@ -380,6 +450,13 @@ class ChannelCapabilityManager:
         检查渠道是否支持消息编辑
         """
         return cls.supports_capability(channel, ChannelCapability.MESSAGE_EDITING)
+
+    @classmethod
+    def supports_markdown(cls, channel: MessageChannel) -> bool:
+        """
+        检查渠道是否支持 Markdown。
+        """
+        return cls.supports_capability(channel, ChannelCapability.MARKDOWN)
 
     @classmethod
     def supports_deletion(cls, channel: MessageChannel) -> bool:

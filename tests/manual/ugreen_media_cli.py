@@ -21,7 +21,7 @@ if __name__ == "__main__" and __package__ is None:
 
 import requests
 
-from app.utils.ugreen_crypto import UgreenCrypto
+from app.modules.ugreen.crypto import UgreenCrypto
 
 
 class UgreenLoginError(Exception):

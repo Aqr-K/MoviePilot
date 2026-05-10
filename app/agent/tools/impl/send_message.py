@@ -37,6 +37,7 @@ class SendMessageInput(BaseModel):
 
 class SendMessageTool(MoviePilotTool):
     name: str = "send_message"
+    sends_message: bool = True
     description: str = "Send notification message to the user through configured notification channels (Telegram, Slack, WeChat, etc.). Supports optional image_url on channels that can send images. Used to inform users about operation results, errors, important updates, or proactively send a relevant image."
     args_schema: Type[BaseModel] = SendMessageInput
     require_admin: bool = True
@@ -52,12 +53,12 @@ class SendMessageTool(MoviePilotTool):
             message = message[:50] + "..."
 
         if title and image_url:
-            return f"正在发送图文消息: [{title}] {message}"
+            return f"发送图文消息: [{title}] {message}"
         if title:
-            return f"正在发送消息: [{title}] {message}"
+            return f"发送消息: [{title}] {message}"
         if image_url:
-            return f"正在发送图片消息: {message}"
-        return f"正在发送消息: {message}"
+            return f"发送图片消息: {message}"
+        return f"发送消息: {message}"
 
     async def run(
         self,

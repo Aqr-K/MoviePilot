@@ -1,5 +1,8 @@
 import asyncio
+import hashlib
+import json
 import random
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -21,6 +24,7 @@ from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import NotExistMediaInfo
 from app.schemas.types import MediaType, ProgressKey, SystemConfigKey, EventType
+from app.utils.string import StringUtils
 
 
 class SearchChain(ChainBase):
@@ -29,7 +33,293 @@ class SearchChain(ChainBase):
     """
 
     __result_temp_file = "__search_result__"
-    __ai_result_temp_file = "__ai_search_result__"
+    __ai_indices_cache_file = "__ai_recommend_indices__"
+
+    _ai_recommend_running = False
+    _ai_recommend_task: Optional[asyncio.Task] = None
+    _current_recommend_request_hash: Optional[str] = None
+    _ai_recommend_result: Optional[List[int]] = None
+    _ai_recommend_error: Optional[str] = None
+
+    @property
+    def is_ai_recommend_enabled(self) -> bool:
+        """
+        检查AI推荐功能是否已启用。
+        """
+        return settings.AI_AGENT_ENABLE and settings.AI_RECOMMEND_ENABLED
+
+    @staticmethod
+    def _calculate_recommend_request_hash(
+        filtered_indices: Optional[List[int]], search_results_count: int
+    ) -> str:
+        """
+        计算当前推荐请求哈希，用于识别筛选条件是否变化。
+        """
+        request_data = {
+            "filtered_indices": filtered_indices or [],
+            "search_results_count": search_results_count,
+        }
+        return hashlib.md5(
+            json.dumps(request_data, sort_keys=True).encode()
+        ).hexdigest()
+
+    def _build_ai_recommend_status(self) -> Dict[str, Any]:
+        """
+        构建AI推荐状态字典。
+        """
+        state = type(self)
+        if not self.is_ai_recommend_enabled:
+            return {"status": "disabled"}
+
+        if state._ai_recommend_running:
+            return {"status": "running"}
+
+        if state._ai_recommend_result is None:
+            cached_indices = self.load_cache(self.__ai_indices_cache_file)
+            if cached_indices is not None:
+                state._ai_recommend_result = cached_indices
+
+        if state._ai_recommend_result is not None:
+            return {"status": "completed", "results": state._ai_recommend_result}
+
+        if state._ai_recommend_error is not None:
+            return {"status": "error", "error": state._ai_recommend_error}
+
+        return {"status": "idle"}
+
+    def get_current_recommend_status_only(self) -> Dict[str, Any]:
+        """
+        获取当前推荐状态，不校验请求是否变化。
+        """
+        return self._build_ai_recommend_status()
+
+    def get_recommend_status(
+        self, filtered_indices: Optional[List[int]], search_results_count: int
+    ) -> Dict[str, Any]:
+        """
+        获取AI推荐状态，并在筛选条件变化时返回 idle。
+        """
+        state = type(self)
+        request_hash = self._calculate_recommend_request_hash(
+            filtered_indices, search_results_count
+        )
+        if request_hash != state._current_recommend_request_hash:
+            return {"status": "idle"} if self.is_ai_recommend_enabled else {"status": "disabled"}
+        return self._build_ai_recommend_status()
+
+    def cancel_ai_recommend(self):
+        """
+        取消当前AI推荐任务并清空缓存状态。
+        """
+        state = type(self)
+        if state._ai_recommend_task and not state._ai_recommend_task.done():
+            state._ai_recommend_task.cancel()
+        state._ai_recommend_running = False
+        state._ai_recommend_task = None
+        state._current_recommend_request_hash = None
+        state._ai_recommend_result = None
+        state._ai_recommend_error = None
+        self.remove_cache(self.__ai_indices_cache_file)
+
+    @staticmethod
+    def _normalize_ai_indices(ai_indices: List[Any]) -> List[int]:
+        """
+        过滤模型返回的非法或重复索引，保留原顺序。
+        """
+        normalized = []
+        seen = set()
+        for index in ai_indices:
+            try:
+                value = int(index)
+            except (TypeError, ValueError):
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        return normalized
+
+    @staticmethod
+    def _extract_recommend_items(
+        filtered_indices: Optional[List[int]], results: List[Any]
+    ) -> tuple[List[str], List[int]]:
+        """
+        构建发送给模型的候选列表和索引映射。
+        """
+        items: List[str] = []
+        valid_indices: List[int] = []
+        max_items = settings.AI_RECOMMEND_MAX_ITEMS or 50
+
+        if filtered_indices:
+            results_to_process = [
+                results[index] for index in filtered_indices if 0 <= index < len(results)
+            ]
+        else:
+            results_to_process = results
+
+        for index, torrent in enumerate(results_to_process):
+            if len(items) >= max_items:
+                break
+            if not torrent.torrent_info:
+                continue
+
+            valid_indices.append(index)
+            item_info = {
+                "index": index,
+                "title": torrent.torrent_info.title or "未知",
+                "size": (
+                    StringUtils.format_size(torrent.torrent_info.size)
+                    if torrent.torrent_info.size
+                    else "0 B"
+                ),
+                "seeders": torrent.torrent_info.seeders or 0,
+            }
+            items.append(json.dumps(item_info, ensure_ascii=False))
+
+        return items, valid_indices
+
+    @staticmethod
+    def _restore_original_indices(
+        ai_indices: List[int],
+        filtered_indices: Optional[List[int]],
+        valid_indices: List[int],
+        results_count: int,
+    ) -> List[int]:
+        """
+        将模型输出的局部索引映射回原始搜索结果索引。
+        """
+        original_indices = []
+        seen = set()
+
+        for index in ai_indices:
+            if not 0 <= index < len(valid_indices):
+                continue
+            original_index = (
+                filtered_indices[valid_indices[index]]
+                if filtered_indices
+                else valid_indices[index]
+            )
+            if not 0 <= original_index < results_count or original_index in seen:
+                continue
+            seen.add(original_index)
+            original_indices.append(original_index)
+
+        return original_indices
+
+    async def _invoke_recommend_llm(self, search_results_text: str) -> str:
+        """
+        通过统一后台提示词机制执行资源推荐。
+        """
+        from app.agent import ReplyMode, agent_manager
+        from app.agent.prompt import prompt_manager
+
+        prompt = prompt_manager.render_system_task_message(
+            "search_recommend",
+            template_context={"search_results": search_results_text},
+        )
+        full_output = [""]
+
+        def on_output(text: str):
+            full_output[0] = text
+
+        await agent_manager.run_background_prompt(
+            message=prompt,
+            session_prefix="__agent_search_recommend",
+            output_callback=on_output,
+            reply_mode=ReplyMode.CAPTURE_ONLY,
+            persist_output_message=False,
+            allow_message_tools=False,
+        )
+        return full_output[0].strip()
+
+    def start_recommend_task(
+        self,
+        filtered_indices: Optional[List[int]],
+        search_results_count: int,
+        results: List[Any],
+    ) -> None:
+        """
+        启动AI推荐任务。
+        """
+        if not self.is_ai_recommend_enabled:
+            logger.warning("AI推荐功能未启用，跳过任务执行")
+            return
+
+        state = type(self)
+        request_hash = self._calculate_recommend_request_hash(
+            filtered_indices, search_results_count
+        )
+        if request_hash == state._current_recommend_request_hash:
+            return
+
+        self.cancel_ai_recommend()
+        state._current_recommend_request_hash = request_hash
+
+        async def run_recommend():
+            current_task = asyncio.current_task()
+
+            def is_current_request() -> bool:
+                return state._current_recommend_request_hash == request_hash
+
+            try:
+                state._ai_recommend_running = True
+
+                items, valid_indices = self._extract_recommend_items(
+                    filtered_indices=filtered_indices,
+                    results=results,
+                )
+                if not items:
+                    if is_current_request():
+                        state._ai_recommend_error = "没有可用于AI推荐的资源"
+                    return
+
+                user_preference = (
+                    settings.AI_RECOMMEND_USER_PREFERENCE
+                    or "Prefer high-quality resources with more seeders"
+                )
+                search_results_text = (
+                    f"User Preference: {user_preference}\n\n"
+                    f"Candidate Resources:\n{chr(10).join(items)}"
+                )
+                ai_response = await self._invoke_recommend_llm(search_results_text)
+                if not ai_response:
+                    if is_current_request():
+                        state._ai_recommend_error = "AI推荐未返回结果"
+                    return
+
+                json_match = re.search(r"\[.*?]", ai_response, re.DOTALL)
+                if not json_match:
+                    raise ValueError(f"无法从响应中提取JSON数组: {ai_response}")
+
+                ai_indices = json.loads(json_match.group())
+                if not isinstance(ai_indices, list):
+                    raise ValueError(f"AI返回格式错误: {ai_response}")
+
+                original_indices = self._restore_original_indices(
+                    ai_indices=self._normalize_ai_indices(ai_indices),
+                    filtered_indices=filtered_indices,
+                    valid_indices=valid_indices,
+                    results_count=len(results),
+                )
+                if not is_current_request():
+                    logger.info("AI推荐结果已过期，丢弃旧结果")
+                    return
+
+                state._ai_recommend_result = original_indices
+                self.save_cache(original_indices, self.__ai_indices_cache_file)
+                logger.info(f"AI推荐完成: {len(original_indices)}项")
+            except asyncio.CancelledError:
+                logger.info("AI推荐任务被取消")
+            except Exception as err:
+                logger.error(f"AI推荐任务失败: {err}")
+                if is_current_request():
+                    state._ai_recommend_error = str(err)
+            finally:
+                if state._ai_recommend_task == current_task:
+                    state._ai_recommend_running = False
+                    state._ai_recommend_task = None
+
+        state._ai_recommend_task = asyncio.create_task(run_recommend())
 
     def search_by_id(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                      mtype: MediaType = None, area: Optional[str] = "title", season: Optional[int] = None,
@@ -44,6 +334,8 @@ class SearchChain(ChainBase):
         :param sites: 站点ID列表
         :param cache_local: 是否缓存到本地
         """
+        if cache_local:
+            self.cancel_ai_recommend()
         mediainfo = self.recognize_media(tmdbid=tmdbid, doubanid=doubanid, mtype=mtype)
         if not mediainfo:
             logger.error(f'{tmdbid} 媒体信息识别失败！')
@@ -70,6 +362,8 @@ class SearchChain(ChainBase):
         :param sites: 站点ID列表
         :param cache_local: 是否缓存到本地
         """
+        if cache_local:
+            self.cancel_ai_recommend()
         if title:
             logger.info(f'开始搜索资源，关键词：{title} ...')
         else:
@@ -80,8 +374,13 @@ class SearchChain(ChainBase):
             logger.warn(f'{title} 未搜索到资源')
             return []
         # 组装上下文
-        contexts = [Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
-                            torrent_info=torrent) for torrent in torrents]
+        contexts = [
+            Context(
+                meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                torrent_info=torrent,
+                resource_source="search",
+            ) for torrent in torrents
+        ]
         # 保存到本地文件
         if cache_local:
             self.save_cache(contexts, self.__result_temp_file)
@@ -99,18 +398,6 @@ class SearchChain(ChainBase):
         """
         return await self.async_load_cache(self.__result_temp_file)
 
-    async def async_last_ai_results(self) -> Optional[List[Context]]:
-        """
-        异步获取上次AI推荐结果
-        """
-        return await self.async_load_cache(self.__ai_result_temp_file)
-
-    async def async_save_ai_results(self, results: List[Context]):
-        """
-        异步保存AI推荐结果
-        """
-        await self.async_save_cache(results, self.__ai_result_temp_file)
-
     async def async_search_by_id(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                                  mtype: MediaType = None, area: Optional[str] = "title", season: Optional[int] = None,
                                  sites: List[int] = None, cache_local: bool = False) -> List[Context]:
@@ -124,6 +411,8 @@ class SearchChain(ChainBase):
         :param sites: 站点ID列表
         :param cache_local: 是否缓存到本地
         """
+        if cache_local:
+            self.cancel_ai_recommend()
         mediainfo = await self.async_recognize_media(tmdbid=tmdbid, doubanid=doubanid, mtype=mtype)
         if not mediainfo:
             logger.error(f'{tmdbid} 媒体信息识别失败！')
@@ -150,6 +439,8 @@ class SearchChain(ChainBase):
         :param sites: 站点ID列表
         :param cache_local: 是否缓存到本地
         """
+        if cache_local:
+            self.cancel_ai_recommend()
         if title:
             logger.info(f'开始搜索资源，关键词：{title} ...')
         else:
@@ -160,8 +451,13 @@ class SearchChain(ChainBase):
             logger.warn(f'{title} 未搜索到资源')
             return []
         # 组装上下文
-        contexts = [Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
-                            torrent_info=torrent) for torrent in torrents]
+        contexts = [
+            Context(
+                meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                torrent_info=torrent,
+                resource_source="search",
+            ) for torrent in torrents
+        ]
         # 保存到本地文件
         if cache_local:
             await self.async_save_cache(contexts, self.__result_temp_file)
@@ -173,6 +469,8 @@ class SearchChain(ChainBase):
         """
         根据标题渐进式搜索资源，不识别不过滤，按站点完成顺序返回结果
         """
+        if cache_local:
+            self.cancel_ai_recommend()
         if title:
             logger.info(f'开始渐进式搜索资源，关键词：{title} ...')
         else:
@@ -182,8 +480,11 @@ class SearchChain(ChainBase):
         async for event in self.__async_search_all_sites_stream(keyword=title, sites=sites, page=page):
             result = event.pop("items", []) or []
             batch_contexts = [
-                Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
-                        torrent_info=torrent)
+                Context(
+                    meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                    torrent_info=torrent,
+                    resource_source="search",
+                )
                 for torrent in result
             ]
             if batch_contexts:
@@ -214,6 +515,8 @@ class SearchChain(ChainBase):
         """
         根据TMDBID/豆瓣ID渐进式搜索资源，先返回站点原始候选，再返回过滤匹配后的最终结果
         """
+        if cache_local:
+            self.cancel_ai_recommend()
         mediainfo = await self.async_recognize_media(tmdbid=tmdbid, doubanid=doubanid, mtype=mtype)
         if not mediainfo:
             logger.error(f'{tmdbid} 媒体信息识别失败！')
@@ -302,6 +605,66 @@ class SearchChain(ChainBase):
                                         torrent_list=torrent_list,
                                         mediainfo=mediainfo) or []
 
+        def __do_site_filter(torrent_list: List[TorrentInfo]) -> List[TorrentInfo]:
+            """
+            执行单个站点的过滤流程
+            """
+            if not torrent_list:
+                return []
+
+            filtered_torrents = torrent_list
+            if filter_params:
+                torrenthelper = TorrentHelper()
+                filtered_torrents = [
+                    torrent for torrent in filtered_torrents
+                    if torrenthelper.filter_torrent(torrent, filter_params)
+                ]
+
+            if rule_groups and filtered_torrents:
+                filtered_torrents = __do_filter(filtered_torrents)
+
+            return filtered_torrents
+
+        def __do_parallel_filter(torrent_list: List[TorrentInfo]) -> List[TorrentInfo]:
+            """
+            按站点并发执行过滤，保持站点内顺序不变
+            """
+            if not torrent_list or (not filter_params and not rule_groups):
+                return torrent_list
+
+            site_torrents: Dict[Tuple[Optional[int], Optional[str]], List[TorrentInfo]] = {}
+            for torrent in torrent_list:
+                site_key = (torrent.site, torrent.site_name)
+                if site_key not in site_torrents:
+                    site_torrents[site_key] = []
+                site_torrents[site_key].append(torrent)
+
+            if len(site_torrents) <= 1:
+                return __do_site_filter(torrent_list)
+
+            finished_count = 0
+            filtered_by_site: Dict[Tuple[Optional[int], Optional[str]], List[TorrentInfo]] = {}
+            max_workers = min(len(site_torrents), settings.CONF.threadpool or len(site_torrents))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                all_tasks = {
+                    executor.submit(__do_site_filter, site_torrent_list): site_key
+                    for site_key, site_torrent_list in site_torrents.items()
+                }
+                for future in as_completed(all_tasks):
+                    finished_count += 1
+                    filtered_by_site[all_tasks[future]] = future.result() or []
+                    progress.update(
+                        value=finished_count / len(site_torrents) * 50,
+                        text=f'正在过滤，已完成 {finished_count} / {len(site_torrents)} 个站点 ...'
+                    )
+
+            filtered_ids = {
+                id(torrent)
+                for filtered_torrents in filtered_by_site.values()
+                for torrent in filtered_torrents
+            }
+            return [torrent for torrent in torrent_list if id(torrent) in filtered_ids]
+
         if not torrents:
             logger.warn(f'{keyword or mediainfo.title} 未搜索到资源')
             return []
@@ -315,14 +678,14 @@ class SearchChain(ChainBase):
         # 匹配订阅附加参数
         if filter_params:
             logger.info(f'开始附加参数过滤，附加参数：{filter_params} ...')
-            torrents = [torrent for torrent in torrents if TorrentHelper().filter_torrent(torrent, filter_params)]
         # 开始过滤规则过滤
         if rule_groups is None:
             # 取搜索过滤规则
             rule_groups: List[str] = SystemConfigOper().get(SystemConfigKey.SearchFilterRuleGroups)
         if rule_groups:
             logger.info(f'开始过滤规则/剧集过滤，使用规则组：{rule_groups} ...')
-            torrents = __do_filter(torrents)
+        torrents = __do_parallel_filter(torrents)
+        if rule_groups:
             if not torrents:
                 logger.warn(f'{keyword or mediainfo.title} 没有符合过滤规则的资源')
                 return []
@@ -368,7 +731,7 @@ class SearchChain(ChainBase):
                         and mediainfo.imdb_id \
                         and torrent.imdbid == mediainfo.imdb_id:
                     logger.info(f'{mediainfo.title} 通过IMDBID匹配到资源：{torrent.site_name} - {torrent.title}')
-                    _match_torrents.append((torrent, torrent_meta))
+                    _match_torrents.append((torrent, torrent_meta, "imdbid"))
                     continue
 
                 # 比对种子
@@ -376,7 +739,7 @@ class SearchChain(ChainBase):
                                                torrent_meta=torrent_meta,
                                                torrent=torrent):
                     # 匹配成功
-                    _match_torrents.append((torrent, torrent_meta))
+                    _match_torrents.append((torrent, torrent_meta, "title"))
                     continue
             # 匹配完成
             logger.info(f"匹配完成，共匹配到 {len(_match_torrents)} 个资源")
@@ -386,9 +749,17 @@ class SearchChain(ChainBase):
             # 去掉mediainfo中多余的数据
             mediainfo.clear()
             # 组装上下文
-            contexts = [Context(torrent_info=t[0],
-                                media_info=mediainfo,
-                                meta_info=t[1]) for t in _match_torrents]
+            contexts = [
+                Context(
+                    torrent_info=t[0],
+                    media_info=mediainfo,
+                    meta_info=t[1],
+                    resource_source="search",
+                    match_source=t[2],
+                    candidate_recognized=False,
+                    media_info_is_target=True,
+                ) for t in _match_torrents
+            ]
         finally:
             torrents.clear()
             del torrents
@@ -566,8 +937,8 @@ class SearchChain(ChainBase):
                 ) or []
             )
             search_count += 1
-            # 有结果则停止
-            if torrents:
+            # 未开启多名称搜索时，有结果则停止
+            if not settings.SEARCH_MULTIPLE_NAME and torrents:
                 logger.info(f"共搜索到 {len(torrents)} 个资源，停止搜索")
                 break
 
@@ -639,9 +1010,13 @@ class SearchChain(ChainBase):
                 result = event.pop("items", []) or []
                 torrents.extend(result)
                 batch_contexts = [
-                    Context(meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
-                            media_info=mediainfo,
-                            torrent_info=torrent)
+                    Context(
+                        meta_info=MetaInfo(title=torrent.title, subtitle=torrent.description),
+                        media_info=mediainfo,
+                        torrent_info=torrent,
+                        resource_source="search",
+                        media_info_is_target=True,
+                    )
                     for torrent in result
                 ]
                 candidate_contexts.extend(batch_contexts)
@@ -654,7 +1029,7 @@ class SearchChain(ChainBase):
                 }
 
             search_count += 1
-            if torrents:
+            if not settings.SEARCH_MULTIPLE_NAME and torrents:
                 logger.info(f"共搜索到 {len(torrents)} 个资源，停止搜索")
                 break
 

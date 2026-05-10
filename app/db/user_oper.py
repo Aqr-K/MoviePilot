@@ -108,6 +108,12 @@ class UserOper(DbOper):
         """
         return User.get_by_name(self._db, name)
 
+    async def async_get_by_name(self, name: str) -> User:
+        """
+        异步根据用户名获取用户。
+        """
+        return await User.async_get_by_name(self._db, name)
+
     def get_permissions(self, name: str) -> dict:
         """
         获取用户权限

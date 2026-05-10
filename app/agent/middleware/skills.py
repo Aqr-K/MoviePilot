@@ -310,7 +310,8 @@ def _extract_version(skill_md: Path) -> int:
     """从 SKILL.md 文件中快速提取 version 字段，无法提取时返回 0。"""
     try:
         content = skill_md.read_text(encoding="utf-8")
-    except Exception:
+    except Exception as err:
+        print(err)
         return 0
     match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
     if not match:

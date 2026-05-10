@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.log import logger
-from app.scheduler import Scheduler
 
 
 class RunSchedulerInput(BaseModel):
@@ -31,28 +30,29 @@ class RunSchedulerTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据运行参数生成友好的提示消息"""
         job_id = kwargs.get("job_id", "")
-        return f"正在运行定时服务 (ID: {job_id})"
+        return f"运行定时服务 (ID: {job_id})"
+
+    @staticmethod
+    def _run_scheduler_sync(job_id: str) -> tuple[bool, str]:
+        """同步触发定时服务，避免调度器扫描阻塞事件循环。"""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        for scheduler_item in scheduler.list():
+            if scheduler_item.id == job_id:
+                scheduler.start(job_id)
+                return True, scheduler_item.name
+        return False, ""
 
     async def run(self, job_id: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: job_id={job_id}")
 
         try:
-            scheduler = Scheduler()
-            # 检查定时服务是否存在
-            schedulers = scheduler.list()
-            job_exists = False
-            job_name = None
-            for s in schedulers:
-                if s.id == job_id:
-                    job_exists = True
-                    job_name = s.name
-                    break
-
+            job_exists, job_name = await self.run_blocking(
+                "workflow", self._run_scheduler_sync, job_id
+            )
             if not job_exists:
                 return f"定时服务 ID {job_id} 不存在，请使用 query_schedulers 工具查询可用的定时服务"
-
-            # 运行定时服务
-            scheduler.start(job_id)
 
             return f"成功触发定时服务：{job_name} (ID: {job_id})"
         except Exception as e:

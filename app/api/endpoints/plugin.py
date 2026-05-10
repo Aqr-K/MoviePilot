@@ -155,9 +155,13 @@ async def all_plugins(_: User = Depends(get_current_active_superuser_async),
 
     # 未安装的本地插件
     not_installed_plugins = [plugin for plugin in local_plugins if not plugin.installed]
+    # 本地插件仓库目录中的插件
+    local_repo_plugins = plugin_manager.get_local_repo_plugins()
     # 在线插件
     online_plugins = await plugin_manager.async_get_online_plugins(force)
-    if not online_plugins:
+    candidate_plugins = plugin_manager.process_plugins_list(online_plugins + local_repo_plugins, []) \
+        if online_plugins or local_repo_plugins else []
+    if not candidate_plugins:
         # 没有获取在线插件
         if state == "market":
             # 返回未安装的本地插件
@@ -169,7 +173,7 @@ async def all_plugins(_: User = Depends(get_current_active_superuser_async),
     # 已安装插件IDS
     _installed_ids = [plugin.id for plugin in installed_plugins]
     # 未安装的线上插件或者有更新的插件
-    for plugin in online_plugins:
+    for plugin in candidate_plugins:
         if plugin.id not in _installed_ids:
             market_plugins.append(plugin)
         elif plugin.has_update:
@@ -229,11 +233,15 @@ async def install(plugin_id: str,
     # 首先检查插件是否已经存在，并且是否强制安装，否则只进行安装统计
     plugin_helper = PluginHelper()
     if not force and plugin_id in PluginManager().get_plugin_ids():
-        await plugin_helper.async_install_reg(pid=plugin_id)
+        await plugin_helper.async_install_reg(pid=plugin_id, repo_url=repo_url)
     else:
         # 插件不存在或需要强制安装，下载安装并注册插件
         if repo_url:
-            state, msg = await plugin_helper.async_install(pid=plugin_id, repo_url=repo_url)
+            state, msg = await plugin_helper.async_install(
+                pid=plugin_id,
+                repo_url=repo_url,
+                force_install=force
+            )
             # 安装失败则直接响应
             if not state:
                 return schemas.Response(success=False, message=msg)

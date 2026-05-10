@@ -1,152 +1,33 @@
-import re
+from copy import deepcopy
 from typing import List, Tuple, Union, Dict, Optional
 
 from app.core.context import TorrentInfo, MediaInfo
-from app.core.metainfo import MetaInfo
 from app.helper.rule import RuleHelper
 from app.log import logger
+import re
+from app.core.metainfo import MetaInfo
 from app.modules import _ModuleBase
 from app.modules.filter.RuleParser import RuleParser
+from app.modules.filter.builtin_rules import BUILTIN_RULE_SET
 from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
 from app.utils.string import StringUtils
 
 
 class FilterModule(_ModuleBase):
     CONFIG_WATCH = {SystemConfigKey.CustomFilterRules.value}
-    # 规则解析器
-    parser: RuleParser = None
-    # 媒体信息
-    media: MediaInfo = None
 
-    # 内置规则集
-    rule_set: Dict[str, dict] = {
-        # 蓝光原盘
-        "BLU": {
-            "include": [r'(?i)(\bBlu-?Ray\b.*\b(?:VC-?1|AVC|MPEG-?2)\b|\b(?:UHD|4K|2160p)\b(?:.*Blu-?Ray)?.*\b(?:HEVC|H\.?265)\b|\bBlu-?Ray\b.*\b(?:UHD|4K|2160p)\b.*\b(?:HEVC|H\.?265)\b|\b(?:COMPLETE|FULL)\b.*\b(?:(?:UHD|4K|2160p)\b.*)?Blu-?Ray\b|\b(BD25|BD50|BD66|BD100|BDMV|MiniBD)\b)'],
-            "exclude": [r'(?i)(\b[XH]\.?264\b|\b[XH]\.?265\b|\bWEB-?DL\b|\bWEB-?RIP\b|\bHDTV(?:RIP)?\b|\bREMUX\b|\bBDRip\b|\bBRRip\b|\bHDRip\b|\bENCODE\b|\b(?<!WEB-|HDTV)RIP\b)']
-        },
-        # 4K
-        "4K": {
-            "include": [r'4k|2160p|x2160'],
-            "exclude": []
-        },
-        # 1080P
-        "1080P": {
-            "include": [r'1080[pi]|x1080'],
-            "exclude": []
-        },
-        # 720P
-        "720P": {
-            "include": [r'720[pi]|x720'],
-            "exclude": []
-        },
-        # 中字
-        "CNSUB": {
-            "include": [
-                r'[中国國繁简](/|\s|\\|\|)?[繁简英粤]|[英简繁](/|\s|\\|\|)?[中繁简]'
-                r'|繁體|简体|[中国國][字配]|国语|國語|中文|中字|简日|繁日|简繁|繁体'
-                r'|([\s,.-\[])(chs|cht)(|[\s,.-\]])'
-                r'|(?<![a-z0-9])(gb|big5)(?![a-z0-9])'],
-            "exclude": [],
-            "tmdb": {
-                "original_language": "zh,cn"
-            }
-        },
-        # 官种
-        "GZ": {
-            "include": [r'官方', r'官种', r'官组'],
-            "match": ["labels"]
-        },
-        # 特效字幕
-        "SPECSUB": {
-            "include": [r'特效'],
-            "exclude": []
-        },
-        # BluRay
-        "BLURAY": {
-            "include": [r'Blu-?Ray'],
-            "exclude": []
-        },
-        # UHD
-        "UHD": {
-            "include": [r'UHD|UltraHD'],
-            "exclude": []
-        },
-        # H265
-        "H265": {
-            "include": [r'[Hx].?265|HEVC'],
-            "exclude": []
-        },
-        # H264
-        "H264": {
-            "include": [r'[Hx].?264|AVC'],
-            "exclude": []
-        },
-        # 杜比视界
-        "DOLBY": {
-            "include": [r"Dolby[\s.]+Vision|DOVI|[\s.]+DV[\s.]+|杜比视界"],
-            "exclude": []
-        },
-        # 杜比全景声
-        "ATMOS": {
-            "include": [r"Dolby[\s.+]+Atmos|Atmos|杜比全景[声聲]"],
-            "exclude": []
-        },
-        # HDR
-        "HDR": {
-            "include": [r"[\s.]+HDR[\s.]+|HDR10|HDR10\+"],
-            "exclude": []
-        },
-        # SDR
-        "SDR": {
-            "include": [r"[\s.]+SDR[\s.]+"],
-            "exclude": []
-        },
-        # 重编码
-        "REMUX": {
-            "include": [r'REMUX'],
-            "exclude": []
-        },
-        # WEB-DL
-        "WEBDL": {
-            "include": [r'WEB-?DL|WEB-?RIP'],
-            "exclude": []
-        },
-        # 免费
-        "FREE": {
-            "downloadvolumefactor": 0
-        },
-        # 国语配音
-        "CNVOI": {
-            "include": [r'[国國][语語]配音|[国國]配|[国國][语語]'],
-            "exclude": [],
-            "tmdb": {
-                "original_language": "zh"
-            }
-        },
-        # 粤语配音
-        "HKVOI": {
-            "include": [r'粤语配音|粤语'],
-            "exclude": []
-        },
-        # 60FPS
-        "60FPS": {
-            "include": [r'60fps|60帧'],
-            "exclude": []
-        },
-        # 3D
-        "3D": {
-            "include": [r'3D'],
-            "exclude": []
-        },
-    }
+    # 保留一份只读内置规则定义，方便查询工具准确区分“内置规则”和“自定义规则”。
+    builtin_rule_set: Dict[str, dict] = deepcopy(BUILTIN_RULE_SET)
+    # 运行期规则集 = 内置规则 + 自定义规则覆盖。
+    rule_set: Dict[str, dict] = {}
 
     def __init__(self):
         super().__init__()
         self.rulehelper = RuleHelper()
 
     def init_module(self) -> None:
-        self.parser = RuleParser()
+        # 每次重载都先恢复为纯内置规则，避免旧的自定义规则残留在内存里。
+        self.rule_set = deepcopy(self.builtin_rule_set)
         self.__init_custom_rules()
 
     def __init_custom_rules(self):
@@ -204,7 +85,7 @@ class FilterModule(_ModuleBase):
         """
         if not rule_groups:
             return torrent_list
-        self.media = mediainfo
+        parser = RuleParser()
         # 查询规则表详情
         groups = self.rulehelper.get_rule_group_by_media(media=mediainfo, group_names=rule_groups)
         if groups:
@@ -213,12 +94,16 @@ class FilterModule(_ModuleBase):
                 torrent_list = self.__filter_torrents(
                     rule_string=group.rule_string,
                     rule_name=group.name,
-                    torrent_list=torrent_list
-                    )
+                    torrent_list=torrent_list,
+                    mediainfo=mediainfo,
+                    parser=parser,
+                )
         return torrent_list
 
     def __filter_torrents(self, rule_string: str, rule_name: str,
-                          torrent_list: List[TorrentInfo]) -> List[TorrentInfo]:
+                          torrent_list: List[TorrentInfo],
+                          mediainfo: MediaInfo,
+                          parser: RuleParser) -> List[TorrentInfo]:
         """
         过滤种子
         """
@@ -226,7 +111,7 @@ class FilterModule(_ModuleBase):
         ret_torrents = []
         for torrent in torrent_list:
             # 能命中优先级的才返回
-            if not self.__get_order(torrent, rule_string):
+            if not self.__get_order(torrent, rule_string, mediainfo, parser):
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} {torrent.description or ''} "
                              f"不匹配 {rule_name} 过滤规则")
                 continue
@@ -234,7 +119,8 @@ class FilterModule(_ModuleBase):
 
         return ret_torrents
 
-    def __get_order(self, torrent: TorrentInfo, rule_str: str) -> Optional[TorrentInfo]:
+    def __get_order(self, torrent: TorrentInfo, rule_str: str,
+                    mediainfo: MediaInfo, parser: RuleParser) -> Optional[TorrentInfo]:
         """
         获取种子匹配的规则优先级，值越大越优先，未匹配时返回None
         """
@@ -247,8 +133,8 @@ class FilterModule(_ModuleBase):
 
         for rule_group in rule_groups:
             # 解析规则组
-            parsed_group = self.parser.parse(rule_group.strip())
-            if self.__match_group(torrent, parsed_group.as_list()[0]):
+            parsed_group = parser.parse(rule_group.strip())
+            if self.__match_group(torrent, parsed_group.as_list()[0], mediainfo):
                 # 出现匹配时中断
                 matched = True
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} 优先级为 {100 - res_order + 1}")
@@ -259,27 +145,31 @@ class FilterModule(_ModuleBase):
 
         return None if not matched else torrent
 
-    def __match_group(self, torrent: TorrentInfo, rule_group: Union[list, str]) -> Optional[bool]:
+    def __match_group(self, torrent: TorrentInfo, rule_group: Union[list, str],
+                      mediainfo: MediaInfo) -> Optional[bool]:
         """
         判断种子是否匹配规则组
         """
         if not isinstance(rule_group, list):
             # 不是列表，说明是规则名称
-            return self.__match_rule(torrent, rule_group)
+            return self.__match_rule(torrent, rule_group, mediainfo)
         elif isinstance(rule_group, list) and len(rule_group) == 1:
             # 只有一个规则项
-            return self.__match_group(torrent, rule_group[0])
+            return self.__match_group(torrent, rule_group[0], mediainfo)
         elif rule_group[0] == "not":
             # 非操作
-            return not self.__match_group(torrent, rule_group[1:])
+            return not self.__match_group(torrent, rule_group[1:], mediainfo)
         elif rule_group[1] == "and":
             # 与操作
-            return self.__match_group(torrent, rule_group[0]) and self.__match_group(torrent, rule_group[2:])
+            return self.__match_group(torrent, rule_group[0], mediainfo) \
+                and self.__match_group(torrent, rule_group[2:], mediainfo)
         elif rule_group[1] == "or":
             # 或操作
-            return self.__match_group(torrent, rule_group[0]) or self.__match_group(torrent, rule_group[2:])
+            return self.__match_group(torrent, rule_group[0], mediainfo) \
+                or self.__match_group(torrent, rule_group[2:], mediainfo)
 
-    def __match_rule(self, torrent: TorrentInfo, rule_name: str) -> bool:
+    def __match_rule(self, torrent: TorrentInfo, rule_name: str,
+                     mediainfo: MediaInfo) -> bool:
         """
         判断种子是否匹配规则项
         """
@@ -290,7 +180,7 @@ class FilterModule(_ModuleBase):
         # TMDB规则
         tmdb = self.rule_set[rule_name].get("tmdb")
         # 符合TMDB规则的直接返回True，即不过滤
-        if tmdb and self.__match_tmdb(tmdb):
+        if tmdb and self.__match_tmdb(tmdb, mediainfo):
             logger.debug(f"种子 {torrent.site_name} - {torrent.title} 符合 {rule_name} 的TMDB规则，匹配成功")
             return True
         # 匹配项：标题、副标题、标签
@@ -361,28 +251,31 @@ class FilterModule(_ModuleBase):
             if len(pub_times) == 1:
                 # 发布时间小于规则
                 if pub_minutes < pub_times[0]:
-                    logger.debug(f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 小于 {pub_times[0]}")
+                    logger.debug(
+                        f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 小于 {pub_times[0]}")
                     return False
             else:
                 # 区间
                 if not (pub_times[0] <= pub_minutes <= pub_times[1]):
-                    logger.debug(f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 不在 {pub_times[0]}-{pub_times[1]} 时间区间")
+                    logger.debug(
+                        f"种子 {torrent.site_name} - {torrent.title} 发布时间 {pub_minutes} 不在 {pub_times[0]}-{pub_times[1]} 时间区间")
                     return False
 
         return True
 
-    def __match_tmdb(self, tmdb: dict) -> bool:
+    @staticmethod
+    def __match_tmdb(tmdb: dict, mediainfo: MediaInfo) -> bool:
         """
         判断种子是否匹配TMDB规则
         """
 
         def __get_media_value(key: str):
             try:
-                return getattr(self.media, key)
+                return getattr(mediainfo, key)
             except ValueError:
                 return ""
 
-        if not self.media:
+        if not mediainfo:
             return False
 
         for attr, value in tmdb.items():

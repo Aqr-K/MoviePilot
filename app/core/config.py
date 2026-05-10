@@ -10,7 +10,7 @@ import threading
 from asyncio import AbstractEventLoop
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from dotenv import set_key
 from pydantic import BaseModel, Field, ConfigDict, model_validator
@@ -126,8 +126,8 @@ class ConfigModel(BaseModel):
     DB_SQLITE_MAX_OVERFLOW: int = 50
     # PostgreSQL 主机地址
     DB_POSTGRESQL_HOST: str = "localhost"
-    # PostgreSQL 端口
-    DB_POSTGRESQL_PORT: int = 5432
+    # PostgreSQL 端口；使用 Unix Socket 时可留空
+    DB_POSTGRESQL_PORT: str = "5432"
     # PostgreSQL 数据库名
     DB_POSTGRESQL_DATABASE: str = "moviepilot"
     # PostgreSQL 用户名
@@ -139,10 +139,22 @@ class ConfigModel(BaseModel):
     # PostgreSQL 连接池溢出数量
     DB_POSTGRESQL_MAX_OVERFLOW: int = 50
 
+    # ==================== 数据清理配置 ====================
+    # 是否启用数据表定时清理
+    DATA_CLEANUP_ENABLE: bool = False
+    # 消息表保留天数，0为不清理
+    DATA_CLEANUP_MESSAGE_DAYS: int = 90
+    # 下载历史表保留天数，0为不清理
+    DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS: int = 180
+    # 站点用户数据表保留天数，0为不清理
+    DATA_CLEANUP_SITE_USERDATA_DAYS: int = 180
+    # 整理历史表保留天数，0为不清理
+    DATA_CLEANUP_TRANSFER_HISTORY_DAYS: int = 365 * 3
+
     # ==================== 缓存配置 ====================
     # 缓存类型，支持 cachetools 和 redis，默认使用 cachetools
     CACHE_BACKEND_TYPE: str = "cachetools"
-    # 缓存连接字符串，仅外部缓存（如 Redis、Memcached）需要
+    # 缓存连接字符串，仅外部缓存（如 Redis、Memcached）需要，支持 Redis Unix Socket URL
     CACHE_BACKEND_URL: Optional[str] = "redis://localhost:6379"
     # Redis 缓存最大内存限制，未配置时，如开启大内存模式时为 "1024mb"，未开启时为 "256mb"
     CACHE_REDIS_MAXMEMORY: Optional[str] = None
@@ -378,10 +390,14 @@ class ConfigModel(BaseModel):
     SCRAP_FOLLOW_TMDB: bool = True
     # 优先使用辅助识别
     RECOGNIZE_PLUGIN_FIRST: bool = False
+    # 共享使用媒体识别数据
+    MEDIA_RECOGNIZE_SHARE: bool = True
 
     # ==================== 服务地址配置 ====================
     # 服务器地址，对应 https://github.com/jxxghp/MoviePilot-Server 项目
     MP_SERVER_HOST: str = "https://movie-pilot.org"
+    # 共享媒体识别API地址，留空时默认拼接为 MP_SERVER_HOST + /recognize/share
+    MEDIA_RECOGNIZE_SHARE_API: Optional[str] = None
 
     # ==================== 个性化 ====================
     # 登录页面电影海报,tmdb/bing/mediaserver
@@ -417,6 +433,17 @@ class ConfigModel(BaseModel):
     PLUGIN_STATISTIC_SHARE: bool = True
     # 是否开启插件热加载
     PLUGIN_AUTO_RELOAD: bool = False
+    # 本地插件仓库目录，多个地址使用,分隔
+    PLUGIN_LOCAL_REPO_PATHS: Optional[str] = None
+
+    # ==================== 技能配置 ====================
+    # 技能市场仓库地址，多个地址使用,分隔
+    SKILL_MARKET: str = (
+        "https://clawhub.ai,"
+        "https://github.com/openai/skills,"
+        "https://github.com/anthropics/skills,"
+        "https://github.com/vercel-labs/agent-skills"
+    )
 
     # ==================== Github & PIP ====================
     # Github token，提高请求api限流阈值 ghp_****
@@ -490,18 +517,26 @@ class ConfigModel(BaseModel):
     AI_AGENT_ENABLE: bool = False
     # 合局AI智能体
     AI_AGENT_GLOBAL: bool = False
-    # LLM提供商 (openai/google/deepseek)
+    # LLM提供商（支持内置 provider，以及从 models.dev 动态补充的平台）
     LLM_PROVIDER: str = "deepseek"
     # LLM模型名称
     LLM_MODEL: str = "deepseek-chat"
+    # 思考模式/深度配置：off/auto/minimal/low/medium/high/max/xhigh
+    LLM_THINKING_LEVEL: Optional[str] = "off"
+    # LLM是否支持图片输入，开启后消息图片会按多模态输入发送给模型
+    LLM_SUPPORT_IMAGE_INPUT: bool = True
+    # LLM是否支持音频输入输出，开启后才会启用语音转写与语音回复
+    LLM_SUPPORT_AUDIO_INPUT_OUTPUT: bool = False
     # LLM API密钥
     LLM_API_KEY: Optional[str] = None
     # LLM基础URL（用于自定义API端点）
     LLM_BASE_URL: Optional[str] = "https://api.deepseek.com"
+    # LLM Base URL 预设标识，用于区分同一 Base URL 下的不同模型目录
+    LLM_BASE_URL_PRESET: Optional[str] = None
     # LLM最大上下文Token数量（K）
     LLM_MAX_CONTEXT_TOKENS: int = 64
     # LLM温度参数
-    LLM_TEMPERATURE: float = 0.1
+    LLM_TEMPERATURE: float = 0.3
     # LLM最大迭代次数
     LLM_MAX_ITERATIONS: int = 128
     # LLM工具调用超时时间（秒）
@@ -538,24 +573,12 @@ class ConfigModel(BaseModel):
     # AI智能体自动重试整理失败记录开关
     AI_AGENT_RETRY_TRANSFER: bool = False
 
-    # 语音能力提供商（当前仅支持 openai）
+    # 语音能力提供商（当前仅支持 openai/openai-compatible）
     AI_VOICE_PROVIDER: str = "openai"
-    # 语音识别提供商，未设置时回退到 AI_VOICE_PROVIDER
-    AI_VOICE_STT_PROVIDER: Optional[str] = None
-    # 语音合成提供商，未设置时回退到 AI_VOICE_PROVIDER
-    AI_VOICE_TTS_PROVIDER: Optional[str] = None
-    # 语音能力 API 密钥，未设置且 LLM_PROVIDER=openai 时回退使用 LLM_API_KEY
+    # 语音能力共享 API 密钥，未设置且 LLM_PROVIDER=openai 时回退使用 LLM_API_KEY
     AI_VOICE_API_KEY: Optional[str] = None
-    # 语音识别 API 密钥，未设置时回退到 AI_VOICE_API_KEY
-    AI_VOICE_STT_API_KEY: Optional[str] = None
-    # 语音合成 API 密钥，未设置时回退到 AI_VOICE_API_KEY
-    AI_VOICE_TTS_API_KEY: Optional[str] = None
-    # 语音能力基础URL，未设置且 LLM_PROVIDER=openai 时回退使用 LLM_BASE_URL
+    # 语音能力共享基础URL，未设置且 LLM_PROVIDER=openai 时回退使用 LLM_BASE_URL
     AI_VOICE_BASE_URL: Optional[str] = None
-    # 语音识别基础URL，未设置时回退到 AI_VOICE_BASE_URL
-    AI_VOICE_STT_BASE_URL: Optional[str] = None
-    # 语音合成基础URL，未设置时回退到 AI_VOICE_BASE_URL
-    AI_VOICE_TTS_BASE_URL: Optional[str] = None
     # 语音转文字模型
     AI_VOICE_STT_MODEL: str = "gpt-4o-mini-transcribe"
     # 文字转语音模型
@@ -917,6 +940,39 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         return None
 
     @property
+    def DB_POSTGRESQL_SOCKET_MODE(self) -> bool:
+        host = (self.DB_POSTGRESQL_HOST or "").strip()
+        return host.startswith("/")
+
+    @property
+    def DB_POSTGRESQL_TARGET(self) -> str:
+        if self.DB_POSTGRESQL_SOCKET_MODE:
+            target = f"socket {self.DB_POSTGRESQL_HOST}"
+            if self.DB_POSTGRESQL_PORT:
+                target = f"{target} (port {self.DB_POSTGRESQL_PORT})"
+            return target
+        if self.DB_POSTGRESQL_PORT:
+            return f"{self.DB_POSTGRESQL_HOST}:{self.DB_POSTGRESQL_PORT}"
+        return self.DB_POSTGRESQL_HOST
+
+    def DB_POSTGRESQL_URL(self, driver: Optional[str] = None) -> str:
+        scheme = "postgresql" if not driver else f"postgresql+{driver}"
+        username = quote(str(self.DB_POSTGRESQL_USERNAME), safe="")
+        database = quote(str(self.DB_POSTGRESQL_DATABASE), safe="")
+        auth = username
+        if self.DB_POSTGRESQL_PASSWORD:
+            auth = f"{auth}:{quote(str(self.DB_POSTGRESQL_PASSWORD), safe='')}"
+
+        if self.DB_POSTGRESQL_SOCKET_MODE:
+            query = {"host": self.DB_POSTGRESQL_HOST}
+            if self.DB_POSTGRESQL_PORT:
+                query["port"] = self.DB_POSTGRESQL_PORT
+            return f"{scheme}://{auth}@/{database}?{urlencode(query)}"
+
+        port = f":{self.DB_POSTGRESQL_PORT}" if self.DB_POSTGRESQL_PORT else ""
+        return f"{scheme}://{auth}@{self.DB_POSTGRESQL_HOST}{port}/{database}"
+
+    @property
     def PROXY_SERVER(self):
         if self.PROXY_HOST:
             try:
@@ -1044,13 +1100,28 @@ class GlobalVar(object):
     # 需应急停止文件整理
     EMERGENCY_STOP_TRANSFER: List[str] = []
     # 当前事件循环
-    CURRENT_EVENT_LOOP: AbstractEventLoop = asyncio.get_event_loop()
+    CURRENT_EVENT_LOOP: AbstractEventLoop = None
+
+    @classmethod
+    def _get_event_loop(cls) -> AbstractEventLoop:
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
 
     def stop_system(self):
         """
         停止系统
         """
         self.STOP_EVENT.set()
+
+    def resume_system(self):
+        """
+        恢复系统运行标记。
+        """
+        self.STOP_EVENT.clear()
 
     @property
     def is_system_stopped(self):
@@ -1114,6 +1185,8 @@ class GlobalVar(object):
         """
         当前循环
         """
+        if self.CURRENT_EVENT_LOOP is None:
+            self.CURRENT_EVENT_LOOP = self._get_event_loop()
         return self.CURRENT_EVENT_LOOP
 
     def set_loop(self, loop: AbstractEventLoop):

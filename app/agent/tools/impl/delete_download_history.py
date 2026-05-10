@@ -30,7 +30,7 @@ class DeleteDownloadHistoryTool(MoviePilotTool):
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         history_id = kwargs.get("history_id")
-        return f"正在删除下载历史记录 ID: {history_id}"
+        return f"删除下载历史记录 ID: {history_id}"
 
     async def run(self, history_id: int, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: history_id={history_id}")

@@ -38,6 +38,21 @@ class PluginDataOper(DbOper):
         else:
             return PluginData.get_plugin_data(self._db, plugin_id)
 
+    async def async_get_data(self, plugin_id: str, key: Optional[str] = None) -> Any:
+        """
+        异步获取插件数据。
+        :param plugin_id: 插件id
+        :param key: 数据key
+        """
+        if key:
+            data = await PluginData.async_get_plugin_data_by_key(
+                self._db, plugin_id, key
+            )
+            if not data:
+                return None
+            return data.value
+        return await PluginData.async_get_plugin_data(self._db, plugin_id)
+
     def del_data(self, plugin_id: str, key: Optional[str] = None) -> Any:
         """
         删除插件数据
@@ -61,3 +76,10 @@ class PluginDataOper(DbOper):
         :param plugin_id: 插件id
         """
         return PluginData.get_plugin_data_by_plugin_id(self._db, plugin_id)
+
+    async def async_get_data_all(self, plugin_id: str) -> Any:
+        """
+        异步获取插件所有数据。
+        :param plugin_id: 插件id
+        """
+        return await PluginData.async_get_plugin_data_by_plugin_id(self._db, plugin_id)

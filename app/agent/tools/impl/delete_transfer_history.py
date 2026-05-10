@@ -30,28 +30,24 @@ class DeleteTransferHistoryTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据参数生成友好的提示消息"""
         history_id = kwargs.get("history_id")
-        return f"正在删除整理历史记录: ID={history_id}"
+        return f"删除整理历史记录: ID={history_id}"
 
     async def run(self, history_id: int, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: history_id={history_id}")
 
         try:
             transferhis = TransferHistoryOper()
-
-            # 查询历史记录是否存在
-            history = transferhis.get(history_id)
+            history = await transferhis.async_get(history_id)
             if not history:
                 return f"错误：整理历史记录不存在，ID={history_id}"
 
-            # 保存信息用于返回
             title = history.title or "未知"
             src = history.src or "未知"
             status = "成功" if history.status else "失败"
-
-            # 删除记录
-            transferhis.delete(history_id)
-
-            return f"已删除整理历史记录：ID={history_id}，标题={title}，源路径={src}，状态={status}"
+            await transferhis.async_delete(history_id)
+            return (
+                f"已删除整理历史记录：ID={history_id}，标题={title}，源路径={src}，状态={status}"
+            )
         except Exception as e:
             logger.error(f"删除整理历史记录失败: {e}", exc_info=True)
             return f"删除整理历史记录时发生错误: {str(e)}"

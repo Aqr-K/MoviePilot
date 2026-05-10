@@ -21,6 +21,7 @@ from app.core.module import ModuleManager
 from app.core.plugin import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
+from app.helper.recognize import MediaRecognizeShareHelper
 from app.helper.message import MessageHelper, MessageQueueManager, MessageTemplateHelper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
@@ -38,6 +39,7 @@ from app.schemas import (
     TransferDirectoryConf,
     MessageResponse,
 )
+from app.utils.identity import normalize_internal_user_id
 from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     TorrentStatus,
@@ -118,6 +120,21 @@ class ChainBase(metaclass=ABCMeta):
         删除缓存，同时删除Redis和本地缓存
         """
         self.filecache.delete(filename)
+
+    @staticmethod
+    def _normalize_notification_for_dispatch(
+            message: Notification
+    ) -> Notification:
+        """
+        规范化待发送的通知消息。
+        后台任务会复用内部占位用户ID作为会话身份，这里在真正发送前清空，
+        让消息重新走默认通知路由或基于 targets 的目标解析。
+        """
+        dispatch_message = copy.deepcopy(message)
+        dispatch_message.userid = normalize_internal_user_id(
+            dispatch_message.userid
+        )
+        return dispatch_message
 
     async def async_remove_cache(self, filename: str) -> None:
         """
@@ -317,19 +334,20 @@ class ChainBase(metaclass=ABCMeta):
                     if inspect.iscoroutinefunction(func):
                         result = await func(*args, **kwargs)
                     else:
-                        result = func(*args, **kwargs)
+                        # 系统同步模块在异步路径里也必须切到线程池，避免阻塞共享事件循环。
+                        result = await run_in_threadpool(func, *args, **kwargs)
                 elif ObjectUtils.check_signature(func, result):
                     # 返回结果与方法签名一致，将结果传入
                     if inspect.iscoroutinefunction(func):
                         result = await func(result)
                     else:
-                        result = func(result)
+                        result = await run_in_threadpool(func, result)
                 elif isinstance(result, list):
                     # 返回为列表，有多个模块运行结果时进行合并
                     if inspect.iscoroutinefunction(func):
                         temp = await func(*args, **kwargs)
                     else:
-                        temp = func(*args, **kwargs)
+                        temp = await run_in_threadpool(func, *args, **kwargs)
                     if isinstance(temp, list):
                         result.extend(temp)
                 else:
@@ -381,6 +399,63 @@ class ChainBase(metaclass=ABCMeta):
             method, result, *args, **kwargs
         )
 
+    @staticmethod
+    def _can_use_media_recognize_share(
+            meta: Optional[MetaBase],
+            tmdbid: Optional[int],
+            doubanid: Optional[str],
+            bangumiid: Optional[int],
+    ) -> bool:
+        """
+        仅在名称识别场景下使用共享识别，显式ID识别不再重复回查
+        """
+        return bool(
+            settings.MEDIA_RECOGNIZE_SHARE
+            and meta
+            and not any([tmdbid, doubanid, bangumiid])
+        )
+
+    @staticmethod
+    def _snapshot_recognize_cache_meta(meta: Optional[MetaBase]) -> Optional[MetaBase]:
+        """
+        保存共享识别前的本地缓存关键元数据，用于共享成功后回填正缓存覆盖负缓存。
+        """
+        if not meta:
+            return None
+        return copy.deepcopy(meta)
+
+    def _update_local_recognize_cache(
+            self,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+    ) -> None:
+        """
+        共享识别成功后回填本地识别缓存，避免名称负缓存导致后续重复回查共享。
+        """
+        if not meta or not mediainfo:
+            return
+        self.run_module(
+            "update_recognize_cache",
+            meta=meta,
+            mediainfo=mediainfo,
+        )
+
+    async def _async_update_local_recognize_cache(
+            self,
+            meta: Optional[MetaBase],
+            mediainfo: Optional[MediaInfo],
+    ) -> None:
+        """
+        异步回填本地识别缓存。
+        """
+        if not meta or not mediainfo:
+            return
+        await self.async_run_module(
+            "async_update_recognize_cache",
+            meta=meta,
+            mediainfo=mediainfo,
+        )
+
     def recognize_media(
             self,
             meta: MetaBase = None,
@@ -390,10 +465,12 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid: Optional[int] = None,
             episode_group: Optional[str] = None,
             cache: bool = True,
+            share_meta: MetaBase = None,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片
         :param meta:     识别的元数据
+        :param share_meta: 共享识别查询/上报使用的原始元数据
         :param mtype:    识别的媒体类型，与tmdbid配套
         :param tmdbid:   tmdbid
         :param doubanid: 豆瓣ID
@@ -413,8 +490,10 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid = None
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
+        share_query_meta = share_meta or meta
+        share_helper = MediaRecognizeShareHelper()
         with fresh(not cache):
-            return self.run_module(
+            mediainfo = self.run_module(
                 "recognize_media",
                 meta=meta,
                 mtype=mtype,
@@ -424,6 +503,41 @@ class ChainBase(metaclass=ABCMeta):
                 episode_group=episode_group,
                 cache=cache,
             )
+        if mediainfo:
+            if not mediainfo.recognize_cache_hit:
+                share_helper.report(
+                    meta=meta,
+                    mediainfo=mediainfo,
+                    keyword_meta=share_query_meta,
+                )
+            return mediainfo
+
+        if self._can_use_media_recognize_share(
+                share_query_meta, tmdbid, doubanid, bangumiid
+        ):
+            shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
+            shared_item = share_helper.query(
+                meta=meta,
+                mtype=mtype,
+                keyword_meta=share_query_meta,
+            )
+            shared_params = share_helper.to_recognize_params(shared_item)
+            if shared_params:
+                with fresh(not cache):
+                    mediainfo = self.run_module(
+                        "recognize_media",
+                        meta=meta,
+                        mtype=shared_params.get("mtype") or mtype,
+                        tmdbid=shared_params.get("tmdbid"),
+                        doubanid=shared_params.get("doubanid"),
+                        bangumiid=shared_params.get("bangumiid"),
+                        episode_group=episode_group,
+                        cache=cache,
+                    )
+                if mediainfo:
+                    self._update_local_recognize_cache(shared_cache_meta, mediainfo)
+                    return mediainfo
+        return None
 
     async def async_recognize_media(
             self,
@@ -434,10 +548,12 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid: Optional[int] = None,
             episode_group: Optional[str] = None,
             cache: bool = True,
+            share_meta: MetaBase = None,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片（异步版本）
         :param meta:     识别的元数据
+        :param share_meta: 共享识别查询/上报使用的原始元数据
         :param mtype:    识别的媒体类型，与tmdbid配套
         :param tmdbid:   tmdbid
         :param doubanid: 豆瓣ID
@@ -457,8 +573,10 @@ class ChainBase(metaclass=ABCMeta):
             bangumiid = None
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
+        share_query_meta = share_meta or meta
+        share_helper = MediaRecognizeShareHelper()
         async with async_fresh(not cache):
-            return await self.async_run_module(
+            mediainfo = await self.async_run_module(
                 "async_recognize_media",
                 meta=meta,
                 mtype=mtype,
@@ -468,6 +586,41 @@ class ChainBase(metaclass=ABCMeta):
                 episode_group=episode_group,
                 cache=cache,
             )
+        if mediainfo:
+            if not mediainfo.recognize_cache_hit:
+                await share_helper.async_report(
+                    meta=meta,
+                    mediainfo=mediainfo,
+                    keyword_meta=share_query_meta,
+                )
+            return mediainfo
+
+        if self._can_use_media_recognize_share(
+                share_query_meta, tmdbid, doubanid, bangumiid
+        ):
+            shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
+            shared_item = await share_helper.async_query(
+                meta=meta,
+                mtype=mtype,
+                keyword_meta=share_query_meta,
+            )
+            shared_params = share_helper.to_recognize_params(shared_item)
+            if shared_params:
+                async with async_fresh(not cache):
+                    mediainfo = await self.async_run_module(
+                        "async_recognize_media",
+                        meta=meta,
+                        mtype=shared_params.get("mtype") or mtype,
+                        tmdbid=shared_params.get("tmdbid"),
+                        doubanid=shared_params.get("doubanid"),
+                        bangumiid=shared_params.get("bangumiid"),
+                        episode_group=episode_group,
+                        cache=cache,
+                    )
+                if mediainfo:
+                    await self._async_update_local_recognize_cache(shared_cache_meta, mediainfo)
+                    return mediainfo
+        return None
 
     def match_doubaninfo(
             self,
@@ -1119,10 +1272,13 @@ class ChainBase(metaclass=ABCMeta):
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         self.messageoper.add(**message.model_dump())
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
-        if not message.userid and message.mtype:
+        if not dispatch_message.userid and dispatch_message.mtype:
             # 消息隔离设置
-            notify_action = ServiceConfigHelper.get_notification_switch(message.mtype)
+            notify_action = ServiceConfigHelper.get_notification_switch(
+                dispatch_message.mtype
+            )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
                 actions = notify_action.split(",")
@@ -1131,7 +1287,7 @@ class ChainBase(metaclass=ABCMeta):
                 send_orignal = False
                 useroper = UserOper()
                 for action in actions:
-                    send_message = copy.deepcopy(message)
+                    send_message = copy.deepcopy(dispatch_message)
                     if action == "admin" and not admin_sended:
                         # 仅发送管理员
                         logger.info(f"{send_message.mtype} 的消息已设置发送给管理员")
@@ -1186,13 +1342,13 @@ class ChainBase(metaclass=ABCMeta):
         # 发送消息事件
         self.eventmanager.send_event(
             etype=EventType.NoticeMessage,
-            data={**message.model_dump(), "type": message.mtype},
+            data={**dispatch_message.model_dump(), "type": dispatch_message.mtype},
         )
         # 按原消息发送
         self.messagequeue.send_message(
             "post_message",
-            message=message,
-            immediately=True if message.userid else False,
+            message=dispatch_message,
+            immediately=True if dispatch_message.userid else False,
             **kwargs,
         )
 
@@ -1233,10 +1389,13 @@ class ChainBase(metaclass=ABCMeta):
         # 保存消息
         self.messagehelper.put(message, role="user", title=message.title)
         await self.messageoper.async_add(**message.model_dump())
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
-        if not message.userid and message.mtype:
+        if not dispatch_message.userid and dispatch_message.mtype:
             # 消息隔离设置
-            notify_action = ServiceConfigHelper.get_notification_switch(message.mtype)
+            notify_action = ServiceConfigHelper.get_notification_switch(
+                dispatch_message.mtype
+            )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
                 actions = notify_action.split(",")
@@ -1245,7 +1404,7 @@ class ChainBase(metaclass=ABCMeta):
                 send_orignal = False
                 useroper = UserOper()
                 for action in actions:
-                    send_message = copy.deepcopy(message)
+                    send_message = copy.deepcopy(dispatch_message)
                     if action == "admin" and not admin_sended:
                         # 仅发送管理员
                         logger.info(f"{send_message.mtype} 的消息已设置发送给管理员")
@@ -1300,13 +1459,13 @@ class ChainBase(metaclass=ABCMeta):
         # 发送消息事件
         await self.eventmanager.async_send_event(
             etype=EventType.NoticeMessage,
-            data={**message.model_dump(), "type": message.mtype},
+            data={**dispatch_message.model_dump(), "type": dispatch_message.mtype},
         )
         # 按原消息发送
         await self.messagequeue.async_send_message(
             "post_message",
-            message=message,
-            immediately=True if message.userid else False,
+            message=dispatch_message,
+            immediately=True if dispatch_message.userid else False,
             **kwargs,
         )
 
@@ -1324,11 +1483,12 @@ class ChainBase(metaclass=ABCMeta):
             message, role="user", note=note_list, title=message.title
         )
         self.messageoper.add(**message.model_dump(), note=note_list)
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
             "post_medias_message",
-            message=message,
+            message=dispatch_message,
             medias=medias,
-            immediately=True if message.userid else False,
+            immediately=True if dispatch_message.userid else False,
         )
 
     def post_torrents_message(
@@ -1345,11 +1505,12 @@ class ChainBase(metaclass=ABCMeta):
             message, role="user", note=note_list, title=message.title
         )
         self.messageoper.add(**message.model_dump(), note=note_list)
+        dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
             "post_torrents_message",
-            message=message,
+            message=dispatch_message,
             torrents=torrents,
-            immediately=True if message.userid else False,
+            immediately=True if dispatch_message.userid else False,
         )
 
     def delete_message(
@@ -1383,6 +1544,7 @@ class ChainBase(metaclass=ABCMeta):
             chat_id: Union[str, int],
             text: str,
             title: Optional[str] = None,
+            buttons: Optional[List[List[dict]]] = None,
     ) -> bool:
         """
         编辑已发送的消息
@@ -1392,6 +1554,7 @@ class ChainBase(metaclass=ABCMeta):
         :param chat_id: 聊天ID
         :param text: 新的消息内容
         :param title: 消息标题
+        :param buttons: 更新后的按钮列表
         :return: 编辑是否成功
         """
         return self.run_module(
@@ -1402,6 +1565,7 @@ class ChainBase(metaclass=ABCMeta):
             chat_id=chat_id,
             text=text,
             title=title,
+            buttons=buttons,
         )
 
     def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:
@@ -1411,7 +1575,10 @@ class ChainBase(metaclass=ABCMeta):
         :param message: 消息体
         :return: 消息响应（包含message_id, chat_id等）
         """
-        return self.run_module("send_direct_message", message=message)
+        return self.run_module(
+            "send_direct_message",
+            message=self._normalize_notification_for_dispatch(message),
+        )
 
     def metadata_img(
             self,

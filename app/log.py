@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import queue
 import sys
 import threading
@@ -407,11 +408,12 @@ class LoggerManager:
         for handler in _logger.handlers:
             _logger.removeHandler(handler)
 
-        # 只设置终端日志（文件日志由 NonBlockingFileHandler 处理）
-        console_handler = logging.StreamHandler()
-        console_formatter = CustomFormatter(log_settings.LOG_CONSOLE_FORMAT)
-        console_handler.setFormatter(console_formatter)
-        _logger.addHandler(console_handler)
+        # 本地 CLI 已经有独立的 stdio 滚动日志时，不再把业务日志重复打一份到控制台。
+        if os.getenv("MOVIEPILOT_DISABLE_CONSOLE_LOG") != "1":
+            console_handler = logging.StreamHandler()
+            console_formatter = CustomFormatter(log_settings.LOG_CONSOLE_FORMAT)
+            console_handler.setFormatter(console_formatter)
+            _logger.addHandler(console_handler)
 
         # 禁止向父级log传递
         _logger.propagate = False

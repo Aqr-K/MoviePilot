@@ -21,7 +21,7 @@ Use this skill to identify user intent and dispatch the corresponding system or 
 - The user describes an action in natural language, for example:
   - "Sync sites" → `/cookiecloud`
   - "Show my subscriptions" → `/subscribes`
-  - "Refresh subscriptions" → `/subscribe_refresh`
+  - "Refresh subscriptions" → `/subscribes refresh`
   - "What's downloading?" → `/downloading`
   - "Organize downloaded files" → `/transfer`
   - "Clear cache" → `/clear_cache`
@@ -58,7 +58,8 @@ If the user's description involves a specific plugin's functionality, additional
 
 Some commands support additional arguments (space-separated after the command), for example:
 - `/redo <history_id>` — Manually re-organize a specific record
-- `/subscribe_delete <name>` — Delete a specific subscription
+- `/sites disable <site_id>` — Disable one or more sites
+- `/subscribes delete <subscribe_id>` — Delete one or more subscriptions
 
 Use `run_slash_command` to execute the command in the format `/command_name arg1 arg2`.
 

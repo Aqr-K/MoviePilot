@@ -273,7 +273,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         return None
 
     @staticmethod
-    def _extract_images(msg: dict) -> Optional[List[str]]:
+    def _extract_images(msg: dict) -> Optional[List[CommingMessage.MessageImage]]:
         """
         从Telegram消息中提取图片file_id
         """
@@ -283,14 +283,27 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
             largest_photo = photo[-1]
             file_id = largest_photo.get("file_id")
             if file_id:
-                images.append(f"tg://file_id/{file_id}")
+                images.append(
+                    CommingMessage.MessageImage(
+                        ref=f"tg://file_id/{file_id}",
+                        mime_type="image/jpeg",
+                        size=largest_photo.get("file_size"),
+                    )
+                )
 
         document = msg.get("document")
         if document:
             file_id = document.get("file_id")
             mime_type = document.get("mime_type", "")
             if file_id and mime_type.startswith("image/"):
-                images.append(f"tg://file_id/{file_id}")
+                images.append(
+                    CommingMessage.MessageImage(
+                        ref=f"tg://file_id/{file_id}",
+                        name=document.get("file_name"),
+                        mime_type=document.get("mime_type"),
+                        size=document.get("file_size"),
+                    )
+                )
 
         return images if images else None
 
@@ -551,6 +564,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         chat_id: Union[str, int],
         text: str,
         title: Optional[str] = None,
+        buttons: Optional[List[List[dict]]] = None,
     ) -> bool:
         """
         编辑消息
@@ -560,6 +574,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         :param chat_id: 聊天ID
         :param text: 新的消息内容
         :param title: 消息标题
+        :param buttons: 新的按钮列表
         :return: 编辑是否成功
         """
         if channel != self._channel:
@@ -574,6 +589,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     message_id=message_id,
                     text=text,
                     title=title,
+                    buttons=buttons,
                 )
                 if result:
                     return True

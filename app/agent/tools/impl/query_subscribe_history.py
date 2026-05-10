@@ -44,7 +44,7 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
         name = kwargs.get("name")
         page = kwargs.get("page", 1)
 
-        parts = ["正在查询订阅历史"]
+        parts = ["查询订阅历史"]
 
         if media_type != "all":
             parts.append(f"类型: {media_type}")

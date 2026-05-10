@@ -30,7 +30,7 @@ class QueryWorkflowsTool(MoviePilotTool):
         name = kwargs.get("name")
         trigger_type = kwargs.get("trigger_type", "all")
         
-        parts = ["正在查询工作流"]
+        parts = ["查询工作流"]
         
         if state != "all":
             state_map = {"W": "等待", "R": "运行中", "P": "暂停", "S": "成功", "F": "失败"}
@@ -115,9 +115,7 @@ class QueryWorkflowsTool(MoviePilotTool):
                         "last_time": wf.last_time,
                         "current_action": wf.current_action
                     }
-                    # 如果有结果，添加结果信息
-                    if wf.result:
-                        simplified["result"] = wf.result
+                    # wf.result 往往是执行日志或上下文快照，不适合作为列表查询结果返回。
                     simplified_workflows.append(simplified)
                 
                 result_json = json.dumps(simplified_workflows, ensure_ascii=False, indent=2)

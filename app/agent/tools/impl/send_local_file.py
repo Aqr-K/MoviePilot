@@ -45,6 +45,7 @@ class SendLocalFileInput(BaseModel):
 
 class SendLocalFileTool(MoviePilotTool):
     name: str = "send_local_file"
+    sends_message: bool = True
     description: str = (
         "Send a local image or file from the server filesystem to the current user. "
         "Use this when you have generated or identified a local file the user should download."
@@ -55,7 +56,7 @@ class SendLocalFileTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         file_path = kwargs.get("file_path", "")
         file_name = Path(file_path).name if file_path else "未知文件"
-        return f"正在发送本地附件: {file_name}"
+        return f"发送本地附件: {file_name}"
 
     async def run(
         self,

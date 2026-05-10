@@ -835,6 +835,7 @@ class Telegram:
             message_id: Union[str, int],
             text: str,
             title: Optional[str] = None,
+            buttons: Optional[List[List[dict]]] = None,
     ) -> Optional[bool]:
         """
         编辑Telegram消息（公开方法）
@@ -842,6 +843,7 @@ class Telegram:
         :param message_id: 消息ID
         :param text: 新的消息内容
         :param title: 消息标题
+        :param buttons: 新的按钮列表
         :return: 编辑是否成功
         """
         if not self._bot:
@@ -861,6 +863,7 @@ class Telegram:
                 chat_id=str(chat_id),
                 message_id=int(message_id),
                 text=caption,
+                buttons=buttons,
             )
         except Exception as e:
             logger.error(f"编辑Telegram消息异常: {str(e)}")

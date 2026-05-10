@@ -33,7 +33,7 @@ class QueryTransferHistoryTool(MoviePilotTool):
         status = kwargs.get("status", "all")
         page = kwargs.get("page", 1)
 
-        parts = ["正在查询整理历史"]
+        parts = ["查询整理历史"]
 
         if title:
             parts.append(f"标题: {title}")
@@ -62,8 +62,8 @@ class QueryTransferHistoryTool(MoviePilotTool):
             if page is None or page < 1:
                 page = 1
 
-            # 每页记录数
-            count = 50
+            # 每页固定 30 条，与工具说明保持一致，避免整理路径等字段撑大上下文。
+            count = 30
 
             # 获取数据库会话
             async with AsyncSessionFactory() as db:

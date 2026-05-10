@@ -6,7 +6,7 @@ import unittest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from app.utils.ugreen_crypto import UgreenCrypto
+from app.modules.ugreen.crypto import UgreenCrypto
 
 
 def _generate_rsa_keys() -> tuple[str, rsa.RSAPrivateKey]:

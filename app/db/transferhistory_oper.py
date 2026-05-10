@@ -20,6 +20,12 @@ class TransferHistoryOper(DbOper):
         """
         return TransferHistory.get(self._db, historyid)
 
+    async def async_get(self, historyid: int) -> TransferHistory:
+        """
+        异步获取转移历史。
+        """
+        return await TransferHistory.async_get(self._db, historyid)
+
     def get_by_title(self, title: str) -> List[TransferHistory]:
         """
         按标题查询转移记录
@@ -92,6 +98,12 @@ class TransferHistoryOper(DbOper):
         删除转移记录
         """
         TransferHistory.delete(self._db, historyid)
+
+    async def async_delete(self, historyid):
+        """
+        异步删除转移记录。
+        """
+        await TransferHistory.async_delete(self._db, historyid)
 
     def truncate(self):
         """

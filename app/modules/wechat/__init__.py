@@ -189,9 +189,9 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                 media_id = DomUtils.tag_value(root_node, "MediaId")
                 pic_url = DomUtils.tag_value(root_node, "PicUrl")
                 if media_id:
-                    images = [f"wxwork://media_id/{media_id}"]
+                    images = [CommingMessage.MessageImage(ref=f"wxwork://media_id/{media_id}")]
                 elif pic_url:
-                    images = [pic_url]
+                    images = [CommingMessage.MessageImage(ref=pic_url)]
                 logger.info(
                     f"收到来自 {client_config.name} 的微信图片消息：userid={user_id}, images={len(images) if images else 0}"
                 )

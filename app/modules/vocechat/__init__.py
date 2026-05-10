@@ -162,7 +162,9 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
         return None
 
     @classmethod
-    def _extract_images(cls, detail: dict) -> Optional[List[str]]:
+    def _extract_images(
+        cls, detail: dict
+    ) -> Optional[List[CommingMessage.MessageImage]]:
         content_type = detail.get("content_type") or ""
         if content_type != "vocechat/file":
             return None
@@ -194,9 +196,23 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
         if not is_image:
             return None
         if isinstance(direct_url, str) and direct_url.startswith("http"):
-            return [direct_url]
+            return [
+                CommingMessage.MessageImage(
+                    ref=direct_url,
+                    name=properties.get("name") or properties.get("filename"),
+                    mime_type=mime_type or None,
+                    size=properties.get("size"),
+                )
+            ]
         if isinstance(file_path, str) and file_path:
-            return [f"vocechat://file/{quote(file_path, safe='')}"]
+            return [
+                CommingMessage.MessageImage(
+                    ref=f"vocechat://file/{quote(file_path, safe='')}",
+                    name=properties.get("name") or properties.get("filename"),
+                    mime_type=mime_type or None,
+                    size=properties.get("size"),
+                )
+            ]
         return None
 
     @classmethod

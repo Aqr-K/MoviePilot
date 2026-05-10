@@ -6,6 +6,7 @@ import importlib.util
 import inspect
 import os
 import posixpath
+import shutil
 import sys
 import threading
 import time
@@ -38,7 +39,7 @@ from app.utils.system import SystemUtils
 
 class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     """插件管理器"""
-    CONFIG_WATCH = {"DEV", "PLUGIN_AUTO_RELOAD"}
+    CONFIG_WATCH = {"DEV", "PLUGIN_AUTO_RELOAD", "PLUGIN_LOCAL_REPO_PATHS"}
 
     def __init__(self):
         # 插件列表
@@ -51,6 +52,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         self._monitor_thread: Optional[threading.Thread] = None
         # 监控停止事件
         self._stop_monitor_event = threading.Event()
+        # 本地插件同步写入运行目录后的短时忽略窗口
+        self._recent_local_sync: Dict[str, float] = {}
         # 开发者模式监测插件修改
         if settings.DEV or settings.PLUGIN_AUTO_RELOAD:
             self.__start_monitor()
@@ -138,16 +141,19 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             logger.info(f"正在停止插件 {pid}...")
             plugin_obj = self._running_plugins.get(pid)
             if not plugin_obj:
+                # 指定插件可能在上次加载时已导入模块但初始化失败，此时不会进入运行态列表。
+                # 仍需继续清理类缓存和 sys.modules，避免后续热重载反复复用旧模块。
                 logger.debug(f"插件 {pid} 不存在或未加载")
-                return
-            plugins = {pid: plugin_obj}
+                plugins = {}
+            else:
+                plugins = {pid: plugin_obj}
         else:
             logger.info("正在停止所有插件...")
             plugins = self._running_plugins
         for plugin_id, plugin in plugins.items():
             eventmanager.disable_event_handler(type(plugin))
             self.__stop_plugin(plugin)
-        # 清空对像
+        # 清空对象
         if pid:
             # 清空指定插件
             self._plugins.pop(pid, None)
@@ -308,11 +314,14 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         运行 watchfiles 监视器的主循环。
         """
         # 监视插件目录
-        plugins_path = str(settings.ROOT_PATH / "app" / "plugins")
+        plugin_paths = [str(settings.ROOT_PATH / "app" / "plugins")]
+        for local_repo_path in PluginHelper.get_local_repo_paths():
+            if local_repo_path.exists() and local_repo_path.is_dir():
+                plugin_paths.append(str(local_repo_path))
         logger.info(">>> 监控线程已启动，准备进入watch循环...")
         # 使用 watchfiles 监视目录变化，并响应变化事件
         # Todo: yield_on_timeout = True 时，每秒检查停止事件，会返回空集合；后续可以考虑用来做心跳之类的功能？
-        for changes in watch(plugins_path, stop_event=self._stop_monitor_event, rust_timeout=1000,
+        for changes in watch(*plugin_paths, stop_event=self._stop_monitor_event, rust_timeout=1000,
                              yield_on_timeout=True):
             # 如果收到停止事件，退出循环
             if not changes:
@@ -320,18 +329,56 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
             # 处理变化事件
             plugins_to_reload = set()
+            local_plugins_to_sync = {}
             for _change_type, path_str in changes:
                 event_path = Path(path_str)
 
-                # 跳过非 .py 文件以及 pycache 目录中的文件
-                if not event_path.name.endswith(".py") or "__pycache__" in event_path.parts:
+                # 跳过 pycache 目录中的文件
+                if "__pycache__" in event_path.parts:
+                    continue
+
+                if event_path.name == "requirements.txt":
+                    candidate = self._get_local_plugin_candidate_from_path(event_path)
+                    if candidate:
+                        if candidate.get("compatible") is False:
+                            logger.info(
+                                f"检测到本地插件 {candidate.get('id')} 依赖文件变化，"
+                                f"但跳过处理：{candidate.get('skip_reason')}"
+                            )
+                            continue
+                        logger.warn(f"检测到本地插件 {candidate.get('id')} 依赖文件变化，请重新安装本地插件以安装依赖")
+                    continue
+
+                # 跳过非 .py 文件
+                if not event_path.name.endswith(".py"):
                     continue
 
                 # 解析插件ID
-                pid = self._get_plugin_id_from_path(event_path)
-                # 跳过无效插件文件
-                if pid:
-                    # 收集需要重载的插件ID，自动去重，避免重复重载
+                runtime_pid = self._get_plugin_id_from_path(event_path)
+                local_candidate = self._get_local_plugin_candidate_from_path(event_path) if not runtime_pid else None
+                if runtime_pid:
+                    last_sync_time = self._recent_local_sync.get(runtime_pid)
+                    if last_sync_time and time.time() - last_sync_time < 2:
+                        logger.debug(f"忽略本地插件同步产生的运行目录变化：{runtime_pid}")
+                        continue
+                    # 运行目录变化只重载，不能反向触发本地同步。
+                    plugins_to_reload.add(runtime_pid)
+                elif local_candidate:
+                    if local_candidate.get("compatible") is False:
+                        package_version = local_candidate.get("package_version")
+                        source_root = f"plugins.{package_version}" if package_version else "plugins"
+                        logger.info(
+                            f"检测到本地插件 {local_candidate.get('id')} 文件变化，来源：{source_root}，"
+                            f"文件：{event_path}，但跳过同步：{local_candidate.get('skip_reason')}"
+                        )
+                        continue
+                    local_plugins_to_sync[local_candidate.get("id")] = (local_candidate, event_path)
+
+            for pid, (candidate, event_path) in local_plugins_to_sync.items():
+                package_version = candidate.get("package_version")
+                source_root = f"plugins.{package_version}" if package_version else "plugins"
+                logger.info(f"检测到本地插件 {pid} 文件变化，来源：{source_root}，文件：{event_path}")
+                if self._sync_local_plugin_if_installed(pid, candidate):
                     plugins_to_reload.add(pid)
 
             # 触发重载
@@ -351,6 +398,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         :return: 插件ID字符串，如果不是有效插件文件则返回 None。
         """
         try:
+            event_path = event_path.resolve()
             plugins_root = settings.ROOT_PATH / "app" / "plugins"
             # 确保修改的文件在 plugins 目录下
             if not event_path.is_relative_to(plugins_root):
@@ -388,6 +436,78 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         except Exception as e:
             logger.error(f"从路径解析插件ID时出错: {e}")
             return None
+
+    @staticmethod
+    def _get_local_plugin_candidate_from_path(event_path: Path) -> Optional[dict]:
+        """
+        根据本地插件仓库路径解析具体插件候选，保留 plugins/plugins.v2 来源差异
+        """
+        try:
+            event_path = event_path.resolve()
+            for local_repo_path in PluginHelper.get_local_repo_paths():
+                if not local_repo_path.exists() or not local_repo_path.is_dir():
+                    continue
+                if not event_path.is_relative_to(local_repo_path):
+                    continue
+                try:
+                    relative_parts = event_path.relative_to(local_repo_path).parts
+                except (ValueError, IndexError):
+                    continue
+                if len(relative_parts) < 2:
+                    continue
+                if relative_parts[0] == "plugins":
+                    package_version = ""
+                elif relative_parts[0].startswith("plugins."):
+                    package_version = relative_parts[0].split(".", 1)[1]
+                else:
+                    continue
+                plugin_dir_name = relative_parts[1]
+                candidate = PluginHelper().get_local_plugin_candidate(
+                    pid=plugin_dir_name,
+                    package_version=package_version,
+                    repo_path=local_repo_path,
+                    strict_compat=False
+                )
+                if candidate:
+                    return candidate
+            return None
+        except Exception as e:
+            logger.error(f"从本地插件仓库路径解析插件候选时出错: {e}")
+            return None
+
+    @staticmethod
+    def _sync_local_plugin_if_installed(pid: str, candidate: Optional[dict] = None) -> bool:
+        """
+        已安装本地插件源码变化时，同步到运行目录
+        """
+        installed_plugins = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+        if pid not in installed_plugins:
+            logger.info(f"本地插件 {pid} 尚未安装，跳过自动同步和热重载")
+            return False
+
+        candidate = candidate or PluginHelper().get_local_plugin_candidate(pid)
+        if not candidate:
+            return False
+
+        source_dir = Path(candidate.get("path"))
+        dest_dir = settings.ROOT_PATH / "app" / "plugins" / pid.lower()
+        try:
+            if source_dir.resolve() == dest_dir.resolve():
+                return True
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir, ignore_errors=True)
+            shutil.copytree(
+                source_dir,
+                dest_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+            )
+            PluginManager()._recent_local_sync[pid] = time.time()
+            logger.info(f"已同步本地插件 {pid}：{source_dir} -> {dest_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"同步本地插件 {pid} 失败：{e}")
+            return False
 
     @staticmethod
     def __stop_plugin(plugin: Any):
@@ -484,11 +604,14 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         # 获取已安装插件列表
         install_plugins = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
-        # 获取在线插件列表
+        # 获取远程和本地仓库来源插件列表
         online_plugins = self.get_online_plugins()
+        local_repo_plugins = self.get_local_repo_plugins()
+        candidate_plugins = self.process_plugins_list(online_plugins + local_repo_plugins, []) \
+            if online_plugins or local_repo_plugins else []
         # 确定需要安装的插件
         plugins_to_install = [
-            plugin for plugin in online_plugins
+            plugin for plugin in candidate_plugins
             if plugin.id in install_plugins and not self.is_plugin_exists(plugin.id, plugin.plugin_version)
         ]
 
@@ -564,6 +687,20 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if not force and not self._plugins.get(pid):
             return False
         SystemConfigOper().set(self._config_key % pid, conf)
+        return True
+
+    async def async_save_plugin_config(
+        self, pid: str, conf: dict, force: bool = False
+    ) -> bool:
+        """
+        异步保存插件配置。
+        :param pid: 插件ID
+        :param conf: 配置
+        :param force: 强制保存
+        """
+        if not force and not self._plugins.get(pid):
+            return False
+        await SystemConfigOper().async_set(self._config_key % pid, conf)
         return True
 
     def delete_plugin_config(self, pid: str) -> bool:
@@ -1041,7 +1178,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     else:
                         base_version_plugins.extend(plugins)  # 收集 v1 版本插件
 
-        return self._process_plugins_list(higher_version_plugins, base_version_plugins)
+        result = self.process_plugins_list(higher_version_plugins, base_version_plugins)
+        logger.info(f"获取到 {len(result)} 个线上插件")
+        return result
 
     def get_local_plugins(self) -> List[schemas.Plugin]:
         """
@@ -1116,6 +1255,38 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         plugins.sort(key=lambda x: x.plugin_order if hasattr(x, "plugin_order") else 0)
         return plugins
 
+    def get_local_repo_plugins(self) -> List[schemas.Plugin]:
+        """
+        获取本地插件仓库目录中的插件信息
+        """
+        plugins = []
+        installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+        local_candidates = PluginHelper().get_local_plugin_candidates()
+        if not local_candidates:
+            return []
+        for pid, plugin_info in local_candidates.items():
+            package_version = plugin_info.get("package_version")
+            plugin = self._process_plugin_info(
+                pid=pid,
+                plugin_info=plugin_info,
+                market=PluginHelper.make_local_repo_url(
+                    pid,
+                    plugin_info.get("repo_path"),
+                    package_version
+                ),
+                installed_apps=installed_apps,
+                add_time=0,
+                package_version=package_version
+            )
+            if not plugin:
+                continue
+            plugin.is_local = True
+            plugins.append(plugin)
+
+        plugins.sort(key=lambda x: x.plugin_order if hasattr(x, "plugin_order") else 0)
+        logger.info(f"获取到 {len(plugins)} 个本地插件")
+        return plugins
+
     @staticmethod
     def is_plugin_exists(pid: str, version: str = None) -> bool:
         """
@@ -1180,8 +1351,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         return ret_plugins
 
     @staticmethod
-    def _process_plugins_list(higher_version_plugins: List[schemas.Plugin],
-                              base_version_plugins: List[schemas.Plugin]) -> List[schemas.Plugin]:
+    def process_plugins_list(higher_version_plugins: List[schemas.Plugin],
+                             base_version_plugins: List[schemas.Plugin]) -> List[schemas.Plugin]:
         """
         处理插件列表：合并、去重、排序、保留最高版本
         :param higher_version_plugins: 高版本插件列表
@@ -1194,20 +1365,41 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 将未出现在高版本插件列表中的 v1 插件加入 all_plugins
         higher_plugin_ids = {f"{p.id}{p.plugin_version}" for p in higher_version_plugins}
         all_plugins.extend([p for p in base_version_plugins if f"{p.id}{p.plugin_version}" not in higher_plugin_ids])
-        # 去重
-        all_plugins = list({f"{p.id}{p.plugin_version}": p for p in all_plugins}.values())
-        # 所有插件按 repo 在设置中的顺序排序
-        all_plugins.sort(
-            key=lambda x: settings.PLUGIN_MARKET.split(",").index(x.repo_url) if x.repo_url else 0
-        )
-        # 相同 ID 的插件保留版本号最大的版本
-        max_versions = {}
-        for p in all_plugins:
-            if p.id not in max_versions or StringUtils.compare_version(p.plugin_version, ">", max_versions[p.id]):
-                max_versions[p.id] = p.plugin_version
-        result = [p for p in all_plugins if p.plugin_version == max_versions[p.id]]
-        logger.info(f"共获取到 {len(result)} 个线上插件")
-        return result
+        markets = [item for item in settings.PLUGIN_MARKET.split(",") if item]
+
+        def repo_order(plugin: schemas.Plugin) -> int:
+            if PluginHelper.is_local_repo_url(plugin.repo_url):
+                return len(markets) + 1
+            if plugin.repo_url in markets:
+                return markets.index(plugin.repo_url)
+            return len(markets)
+
+        # 去重：同 ID + 版本优先保留市场来源，其次按来源顺序稳定保留。
+        dedup_plugins = {}
+        for plugin in sorted(all_plugins, key=repo_order):
+            key = f"{plugin.id}{plugin.plugin_version}"
+            exists = dedup_plugins.get(key)
+            if not exists:
+                dedup_plugins[key] = plugin
+                continue
+            if PluginHelper.is_local_repo_url(exists.repo_url) and not PluginHelper.is_local_repo_url(plugin.repo_url):
+                dedup_plugins[key] = plugin
+
+        # 相同 ID 的插件保留版本号最大的版本；同版本市场来源优先。
+        result_by_id = {}
+        for plugin in sorted(dedup_plugins.values(), key=repo_order):
+            exists = result_by_id.get(plugin.id)
+            if not exists:
+                result_by_id[plugin.id] = plugin
+                continue
+            if StringUtils.compare_version(plugin.plugin_version, ">", exists.plugin_version):
+                result_by_id[plugin.id] = plugin
+            elif plugin.plugin_version == exists.plugin_version \
+                    and PluginHelper.is_local_repo_url(exists.repo_url) \
+                    and not PluginHelper.is_local_repo_url(plugin.repo_url):
+                result_by_id[plugin.id] = plugin
+
+        return list(result_by_id.values())
 
     def _process_plugin_info(self, pid: str, plugin_info: dict, market: str,
                              installed_apps: List[str], add_time: int,
@@ -1354,7 +1546,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     else:
                         base_version_plugins.extend(plugins)  # 收集 v1 版本插件
 
-        return self._process_plugins_list(higher_version_plugins, base_version_plugins)
+        result = self.process_plugins_list(higher_version_plugins, base_version_plugins)
+        logger.info(f"获取到 {len(result)} 个线上插件")
+        return result
 
     async def async_get_plugins_from_market(self, market: str,
                                             package_version: Optional[str] = None,

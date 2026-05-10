@@ -10,6 +10,9 @@ def init_db():
     """
     初始化数据库
     """
+    # 确保所有模型都已注册到 Base.metadata 中
+    import app.db.models  # noqa: F401
+
     # 全量建表
     Base.metadata.create_all(bind=Engine) # noqa
 
@@ -25,10 +28,7 @@ def update_db():
         
         # 根据数据库类型设置不同的URL
         if settings.DB_TYPE.lower() == "postgresql":
-            if settings.DB_POSTGRESQL_PASSWORD:
-                db_url = f"postgresql://{settings.DB_POSTGRESQL_USERNAME}:{settings.DB_POSTGRESQL_PASSWORD}@{settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE}"
-            else:
-                db_url = f"postgresql://{settings.DB_POSTGRESQL_USERNAME}@{settings.DB_POSTGRESQL_HOST}:{settings.DB_POSTGRESQL_PORT}/{settings.DB_POSTGRESQL_DATABASE}"
+            db_url = settings.DB_POSTGRESQL_URL()
         else:
             db_location = settings.CONFIG_PATH / 'user.db'
             db_url = f"sqlite:///{db_location}"

@@ -1,13 +1,16 @@
+import asyncio
 import importlib
 import io
 import json
 import shutil
 import site
 import sys
+import threading
 import traceback
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set, Callable, Awaitable
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import aiofiles
 import aioshutil
@@ -26,10 +29,12 @@ from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.singleton import WeakSingleton
+from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 from app.utils.url import UrlUtils
 
 PLUGIN_DIR = Path(settings.ROOT_PATH) / "app" / "plugins"
+LOCAL_REPO_PREFIX = "local://"
 
 
 class PluginHelper(metaclass=WeakSingleton):
@@ -41,6 +46,8 @@ class PluginHelper(metaclass=WeakSingleton):
     _install_reg = f"{settings.MP_SERVER_HOST}/plugin/install/{{pid}}"
     _install_report = f"{settings.MP_SERVER_HOST}/plugin/install"
     _install_statistic = f"{settings.MP_SERVER_HOST}/plugin/statistic"
+    # 串行化运行期依赖安装，避免多个 pip 子进程和导入缓存刷新互相踩踏。
+    _pip_install_lock = threading.Lock()
 
     def __init__(self):
         self.systemconfig = SystemConfigOper()
@@ -48,6 +55,262 @@ class PluginHelper(metaclass=WeakSingleton):
             if not self.systemconfig.get(SystemConfigKey.PluginInstallReport):
                 if self.install_report():
                     self.systemconfig.set(SystemConfigKey.PluginInstallReport, "1")
+
+    @staticmethod
+    def is_local_repo_url(repo_url: Optional[str]) -> bool:
+        """
+        判断是否为本地插件来源标识
+        """
+        return bool(repo_url and repo_url.startswith(LOCAL_REPO_PREFIX))
+
+    @staticmethod
+    def make_local_repo_url(pid: str, repo_path: Optional[Path] = None,
+                            package_version: Optional[str] = None) -> str:
+        """
+        生成本地插件安装来源标识
+        """
+        repo_url = f"{LOCAL_REPO_PREFIX}{quote(pid, safe='')}"
+        params = []
+        if repo_path:
+            params.append(f"path={quote(str(repo_path), safe='/:~')}")
+        if package_version:
+            params.append(f"version={quote(package_version, safe='')}")
+        if params:
+            repo_url = f"{repo_url}?{'&'.join(params)}"
+        return repo_url
+
+    @staticmethod
+    def parse_local_repo_url(repo_url: str) -> Optional[str]:
+        """
+        从本地插件来源标识中解析插件ID
+        """
+        if not PluginHelper.is_local_repo_url(repo_url):
+            return None
+        try:
+            parts = urlsplit(repo_url)
+            pid = unquote(parts.netloc or parts.path.strip("/"))
+        except Exception:
+            pid = repo_url[len(LOCAL_REPO_PREFIX):].split("?", 1)[0].strip("/")
+        return pid or None
+
+    @staticmethod
+    def parse_local_repo_path(repo_url: str) -> Optional[Path]:
+        """
+        从本地插件来源标识中解析仓库路径
+        """
+        if not PluginHelper.is_local_repo_url(repo_url):
+            return None
+        try:
+            values = parse_qs(urlsplit(repo_url).query).get("path")
+            if not values:
+                return None
+            path = Path(values[0]).expanduser()
+            if not path.is_absolute():
+                path = settings.ROOT_PATH / path
+            return path.resolve()
+        except Exception:
+            return None
+
+    @staticmethod
+    def parse_local_repo_package_version(repo_url: str) -> Optional[str]:
+        """
+        从本地插件来源标识中解析 package 版本
+        """
+        if not PluginHelper.is_local_repo_url(repo_url):
+            return None
+        try:
+            values = parse_qs(urlsplit(repo_url).query).get("version")
+            if not values:
+                return None
+            return values[0]
+        except Exception:
+            return None
+
+    @staticmethod
+    def sanitize_repo_url_for_statistic(repo_url: Optional[str]) -> Optional[str]:
+        """
+        统计上报前脱敏 repo_url，避免泄露本地仓库绝对路径
+        """
+        if not repo_url:
+            return repo_url
+        if not PluginHelper.is_local_repo_url(repo_url):
+            return repo_url
+
+        pid = PluginHelper.parse_local_repo_url(repo_url)
+        if not pid:
+            return LOCAL_REPO_PREFIX.rstrip("/")
+
+        return PluginHelper.make_local_repo_url(
+            pid=pid,
+            package_version=PluginHelper.parse_local_repo_package_version(repo_url)
+        )
+
+    @staticmethod
+    def get_local_repo_paths() -> List[Path]:
+        """
+        获取本地插件仓库目录列表
+        """
+        if not settings.PLUGIN_LOCAL_REPO_PATHS:
+            return []
+        paths = []
+        for item in settings.PLUGIN_LOCAL_REPO_PATHS.split(","):
+            local_repo_path = item.strip()
+            if not local_repo_path:
+                continue
+            path = Path(local_repo_path).expanduser()
+            if not path.is_absolute():
+                path = settings.ROOT_PATH / path
+            paths.append(path.resolve())
+        return paths
+
+    @staticmethod
+    def __get_local_package(repo_path: Path, package_version: Optional[str] = None) -> Optional[Dict[str, dict]]:
+        """
+        从本地插件仓库读取 package.json 或 package.{version}.json
+        """
+        package_file = repo_path / (
+            f"package.{package_version}.json" if package_version else "package.json"
+        )
+        if not package_file.exists():
+            return {}
+        try:
+            content = package_file.read_text(encoding="utf-8")
+            payload = json.loads(content)
+        except Exception as e:
+            logger.warn(f"读取本地插件包 {package_file} 失败：{e}")
+            return None
+        if not isinstance(payload, dict):
+            logger.warn(f"本地插件包 {package_file} 格式不正确")
+            return None
+        return payload
+
+    @staticmethod
+    def __get_local_plugin_dir(repo_path: Path, pid: str, package_version: Optional[str]) -> Path:
+        plugin_root = f"plugins.{package_version}" if package_version else "plugins"
+        return repo_path / plugin_root / pid.lower()
+
+    def get_local_plugin_candidates(self) -> Dict[str, dict]:
+        """
+        扫描本地插件仓库，按插件ID保留版本号最高的候选
+        """
+        candidates: Dict[str, dict] = {}
+        for repo_order, repo_path in enumerate(self.get_local_repo_paths()):
+            if not repo_path.exists() or not repo_path.is_dir():
+                logger.warn(f"本地插件仓库目录不存在或不可读：{repo_path}")
+                continue
+
+            package_candidates = []
+            if settings.VERSION_FLAG:
+                package_candidates.append((settings.VERSION_FLAG, self.__get_local_package(repo_path,
+                                                                                           settings.VERSION_FLAG)))
+            package_candidates.append(("", self.__get_local_package(repo_path)))
+
+            for package_version, local_plugins in package_candidates:
+                if local_plugins is None:
+                    continue
+                for pid, plugin_info in local_plugins.items():
+                    if not isinstance(plugin_info, dict):
+                        continue
+                    # package.json 中的旧结构需要声明兼容当前版本。
+                    if (
+                            not package_version
+                            and settings.VERSION_FLAG
+                            and plugin_info.get(settings.VERSION_FLAG) is not True
+                    ):
+                        continue
+
+                    plugin_dir = self.__get_local_plugin_dir(repo_path, pid, package_version)
+                    if not plugin_dir.is_dir():
+                        logger.debug(f"跳过本地插件 {pid}：插件目录不存在 {plugin_dir}")
+                        continue
+
+                    candidate = plugin_info.copy()
+                    candidate["id"] = pid
+                    candidate["package_version"] = package_version
+                    candidate["repo_order"] = repo_order
+                    candidate["repo_path"] = repo_path
+                    candidate["path"] = plugin_dir
+                    candidate_version = str(candidate.get("version") or "0")
+
+                    existing = candidates.get(pid)
+                    if not existing:
+                        candidates[pid] = candidate
+                        continue
+
+                    existing_version = str(existing.get("version") or "0")
+                    if StringUtils.compare_version(candidate_version, ">", existing_version):
+                        candidates[pid] = candidate
+                    elif (
+                        candidate_version == existing_version
+                        and repo_order < int(existing.get("repo_order", repo_order))
+                    ):
+                        logger.info(f"本地插件 {pid} 存在同版本来源，使用靠前目录：{repo_path}")
+                        candidates[pid] = candidate
+
+        return candidates
+
+    def get_local_plugin_candidate(self, pid: str, package_version: Optional[str] = None,
+                                   repo_path: Optional[Path] = None,
+                                   strict_compat: bool = True) -> Optional[dict]:
+        """
+        获取指定插件ID的本地插件候选
+        """
+        if not pid:
+            return None
+        if package_version is not None or repo_path is not None:
+            repo_paths = [repo_path.resolve()] if repo_path else self.get_local_repo_paths()
+            package_versions = [package_version] if package_version is not None else []
+            if package_version is None:
+                if settings.VERSION_FLAG:
+                    package_versions.append(settings.VERSION_FLAG)
+                package_versions.append("")
+            selected_candidate = None
+            for repo_order, local_repo_path in enumerate(self.get_local_repo_paths()):
+                if local_repo_path not in repo_paths:
+                    continue
+                for current_package_version in package_versions:
+                    local_plugins = self.__get_local_package(local_repo_path, current_package_version or "")
+                    if not local_plugins:
+                        continue
+                    for candidate_pid, plugin_info in local_plugins.items():
+                        if candidate_pid.lower() != pid.lower() or not isinstance(plugin_info, dict):
+                            continue
+                        is_compatible = not (
+                                not current_package_version
+                                and settings.VERSION_FLAG
+                                and plugin_info.get(settings.VERSION_FLAG) is not True
+                        )
+                        if not is_compatible and strict_compat:
+                            continue
+                        plugin_dir = self.__get_local_plugin_dir(local_repo_path, candidate_pid,
+                                                                 current_package_version or "")
+                        if not plugin_dir.is_dir():
+                            continue
+                        candidate = plugin_info.copy()
+                        candidate["id"] = candidate_pid
+                        candidate["package_version"] = current_package_version or ""
+                        candidate["repo_order"] = repo_order
+                        candidate["repo_path"] = local_repo_path
+                        candidate["path"] = plugin_dir
+                        if not is_compatible:
+                            candidate["compatible"] = False
+                            candidate["skip_reason"] = f"package.json 未声明 {settings.VERSION_FLAG} 兼容"
+                        if package_version is not None:
+                            return candidate
+                        if not selected_candidate:
+                            selected_candidate = candidate
+                            continue
+                        selected_version = str(selected_candidate.get("version") or "0")
+                        candidate_version = str(candidate.get("version") or "0")
+                        if StringUtils.compare_version(candidate_version, ">", selected_version):
+                            selected_candidate = candidate
+            return selected_candidate
+
+        candidates = self.get_local_plugin_candidates()
+        for candidate_pid, candidate in candidates.items():
+            if candidate_pid.lower() == pid.lower():
+                return candidate
+        return None
 
     @staticmethod
     def __parse_plugin_index_response(content: str) -> Optional[Dict[str, dict]]:
@@ -169,7 +432,7 @@ class PluginHelper(metaclass=WeakSingleton):
             timeout=5
         ).post(install_reg_url, json={
             "plugin_id": pid,
-            "repo_url": repo_url
+            "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
         })
         if res is not None and res.status_code == 200:
             return True
@@ -186,7 +449,10 @@ class PluginHelper(metaclass=WeakSingleton):
         if items:
             for pid, repo_url in items:
                 if pid:
-                    payload_plugins.append({"plugin_id": pid, "repo_url": repo_url})
+                    payload_plugins.append({
+                        "plugin_id": pid,
+                        "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
+                    })
         else:
             plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
             if not plugins:
@@ -214,6 +480,9 @@ class PluginHelper(metaclass=WeakSingleton):
         :param force_install: 是否强制安装插件，默认不启用，启用时不进行备份和恢复操作
         :return: (是否成功, 错误信息)
         """
+        if self.is_local_repo_url(repo_url):
+            return self.install_local(pid=pid, repo_url=repo_url, force_install=force_install)
+
         if SystemUtils.is_frozen():
             return False, "可执行文件模式下，只能安装本地插件"
 
@@ -270,6 +539,56 @@ class PluginHelper(metaclass=WeakSingleton):
                 return self.__prepare_content_via_filelist_sync(pid.lower(), user_repo, package_version)
 
             return self.__install_flow_sync(pid, force_install, prepare_filelist, repo_url)
+
+    def install_local(self, pid: str, repo_url: str = "", force_install: bool = False) -> Tuple[bool, str]:
+        """
+        从本地插件仓库目录安装插件
+        """
+        local_pid = self.parse_local_repo_url(repo_url) if repo_url else pid
+        if not local_pid or local_pid.lower() != pid.lower():
+            return False, "本地插件来源与插件ID不匹配"
+
+        repo_path = self.parse_local_repo_path(repo_url) if repo_url else None
+        package_version = self.parse_local_repo_package_version(repo_url) if repo_url else None
+        candidate = self.get_local_plugin_candidate(
+            pid,
+            package_version=package_version,
+            repo_path=repo_path
+        )
+        if not candidate:
+            return False, f"未找到本地插件：{pid}"
+
+        source_dir = Path(candidate.get("path"))
+        dest_dir = PLUGIN_DIR / pid.lower()
+        try:
+            if source_dir.resolve() == dest_dir.resolve():
+                return False, "本地插件来源不能与运行目录相同"
+        except Exception:
+            return False, "本地插件来源路径无效"
+
+        def prepare_local() -> Tuple[bool, str]:
+            try:
+                shutil.copytree(
+                    source_dir,
+                    dest_dir,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+                )
+                return True, ""
+            except Exception as e:
+                logger.error(f"复制本地插件 {pid} 失败：{e}")
+                return False, f"复制本地插件失败：{e}"
+
+        return self.__install_flow_sync(
+            pid=pid,
+            force_install=force_install,
+            prepare_content=prepare_local,
+            repo_url=repo_url or self.make_local_repo_url(
+                pid,
+                candidate.get("repo_path"),
+                candidate.get("package_version")
+            )
+        )
 
     def __get_file_list(self, pid: str, user_repo: str, package_version: Optional[str] = None) -> \
             Tuple[Optional[list], Optional[str]]:
@@ -458,6 +777,37 @@ class PluginHelper(metaclass=WeakSingleton):
         if plugin_dir.exists():
             shutil.rmtree(plugin_dir, ignore_errors=True)
 
+    @staticmethod
+    def refresh_persistent_plugin_backup(pid: str) -> bool:
+        """
+        刷新插件持久化备份目录，供 docker 重置后恢复使用
+        """
+        if not SystemUtils.is_docker():
+            return True
+
+        plugin_dir = PLUGIN_DIR / pid.lower()
+        if not plugin_dir.exists():
+            logger.warn(f"{pid} 插件目录不存在，跳过刷新插件备份")
+            return False
+
+        backup_root = settings.CONFIG_PATH / "plugins_backup"
+        backup_dir = backup_root / pid.lower()
+        try:
+            backup_root.mkdir(parents=True, exist_ok=True)
+            if backup_dir.exists():
+                shutil.rmtree(backup_dir, ignore_errors=True)
+            shutil.copytree(
+                plugin_dir,
+                backup_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+            )
+            logger.info(f"已刷新插件备份: {pid}")
+            return True
+        except Exception as e:
+            logger.error(f"刷新插件备份失败: {pid} - {e}")
+            return False
+
     def __collect_plugin_wheels_dirs(self) -> List[Path]:
         """
         收集已安装插件目录下可用的 wheels 目录，供批量依赖安装时复用。
@@ -526,28 +876,24 @@ class PluginHelper(metaclass=WeakSingleton):
             strategies.append(("代理", base_cmd + ["--proxy", settings.PROXY_HOST]))
         strategies.append(("直连", base_cmd))
 
-        # 记录当前已安装的包，以便后续刷新
-        before_installation = set(sys.modules.keys())
-
-        # 遍历策略进行安装
-        for strategy_name, pip_command in strategies:
-            logger.debug(f"[PIP] 尝试使用策略：{strategy_name} 安装依赖，命令：{' '.join(pip_command)}")
-            success, message = SystemUtils.execute_with_subprocess(pip_command)
-            if success:
-                logger.debug(f"[PIP] 策略：{strategy_name} 安装依赖成功，输出：{message}")
-                # 安装成功后刷新Python的模块系统
-                importlib.reload(site)
-                # 获取新安装的模块
-                current_modules = set(sys.modules.keys())
-                new_modules = current_modules - before_installation
-                # 重新加载新安装的模块
-                for module in new_modules:
-                    if module in sys.modules:
-                        del sys.modules[module]
-                logger.debug(f"[PIP] 已刷新导入系统，新加载的模块: {new_modules}")
-                return True, message
-            else:
-                logger.error(f"[PIP] 策略：{strategy_name} 安装依赖失败，错误信息：{message}")
+        # pip 会修改当前解释器的 site-packages，安装与缓存刷新必须串行，避免运行态模块被并发安装窗口污染。
+        with PluginHelper._pip_install_lock:
+            loaded_modules_before_install = set(sys.modules.keys())
+            # 遍历策略进行安装
+            for strategy_name, pip_command in strategies:
+                logger.debug(f"[PIP] 尝试使用策略：{strategy_name} 安装依赖，命令：{' '.join(pip_command)}")
+                success, message = SystemUtils.execute_with_subprocess(pip_command)
+                if success:
+                    logger.debug(f"[PIP] 策略：{strategy_name} 安装依赖成功，输出：{message}")
+                    # 刷新导入系统即可发现新安装依赖，同时保持安装窗口内的运行态模块缓存稳定。
+                    importlib.reload(site)
+                    importlib.invalidate_caches()
+                    loaded_modules_after_install = set(sys.modules.keys())
+                    loaded_modules_during_install = loaded_modules_after_install - loaded_modules_before_install
+                    logger.debug(f"[PIP] 已刷新导入系统，新加载的模块: {loaded_modules_during_install}")
+                    return True, message
+                else:
+                    logger.error(f"[PIP] 策略：{strategy_name} 安装依赖失败，错误信息：{message}")
 
         return False, "[PIP] 所有策略均安装依赖失败，请检查网络连接或 PIP 配置"
 
@@ -623,10 +969,10 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"{pid} 准备插件内容失败：{message}")
             if backup_dir:
                 self.__restore_plugin(pid, backup_dir)
-                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
+                logger.warn(f"{pid} 插件安装失败，已还原备份插件")
             else:
                 self.__remove_old_plugin(pid)
-                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
+                logger.warn(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, message
 
         dependencies_exist, dep_ok, dep_msg = self.__install_dependencies_if_required(pid)
@@ -634,13 +980,14 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"{pid} 依赖安装失败：{dep_msg}")
             if backup_dir:
                 self.__restore_plugin(pid, backup_dir)
-                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
+                logger.warn(f"{pid} 插件安装失败，已还原备份插件")
             else:
                 self.__remove_old_plugin(pid)
-                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
+                logger.warn(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
         self.install_reg(pid, repo_url)
+        self.refresh_persistent_plugin_backup(pid)
         return True, ""
 
     def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
@@ -1029,7 +1376,7 @@ class PluginHelper(metaclass=WeakSingleton):
             timeout=5
         ).post(install_reg_url, json={
             "plugin_id": pid,
-            "repo_url": repo_url
+            "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
         })
         if res is not None and res.status_code == 200:
             return True
@@ -1046,7 +1393,10 @@ class PluginHelper(metaclass=WeakSingleton):
         if items:
             for pid, repo_url in items:
                 if pid:
-                    payload_plugins.append({"plugin_id": pid, "repo_url": repo_url})
+                    payload_plugins.append({
+                        "plugin_id": pid,
+                        "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
+                    })
         else:
             plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
             if not plugins:
@@ -1418,6 +1768,9 @@ class PluginHelper(metaclass=WeakSingleton):
         :param force_install: 是否强制安装插件，默认不启用，启用时不进行备份和恢复操作
         :return: (是否成功, 错误信息)
         """
+        if self.is_local_repo_url(repo_url):
+            return await asyncio.to_thread(self.install_local, pid, repo_url, force_install)
+
         if SystemUtils.is_frozen():
             return False, "可执行文件模式下，只能安装本地插件"
 
@@ -1505,10 +1858,10 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"{pid} 准备插件内容失败：{message}")
             if backup_dir:
                 await self.__async_restore_plugin(pid, backup_dir)
-                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
+                logger.warn(f"{pid} 插件安装失败，已还原备份插件")
             else:
                 await self.__async_remove_old_plugin(pid)
-                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
+                logger.warn(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, message
 
         dependencies_exist, dep_ok, dep_msg = await self.__async_install_dependencies_if_required(pid)
@@ -1516,13 +1869,14 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"{pid} 依赖安装失败：{dep_msg}")
             if backup_dir:
                 await self.__async_restore_plugin(pid, backup_dir)
-                logger.warning(f"{pid} 插件安装失败，已还原备份插件")
+                logger.warn(f"{pid} 插件安装失败，已还原备份插件")
             else:
                 await self.__async_remove_old_plugin(pid)
-                logger.warning(f"{pid} 已清理对应插件目录，请尝试重新安装")
+                logger.warn(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
         await self.async_install_reg(pid, repo_url)
+        await asyncio.to_thread(self.refresh_persistent_plugin_backup, pid)
         return True, ""
 
     def __prepare_content_via_filelist_sync(self, pid: str, user_repo: str,

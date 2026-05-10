@@ -57,8 +57,8 @@ You can create, edit, or organize any `.md` files in this directory to manage yo
 
     **Memory file organization:**
     - All `.md` files in `{memory_dir}` are automatically loaded as memory.
-    - `MEMORY.md` is the default/primary memory file for general user preferences and profile.
-    - You may create additional `.md` files to organize knowledge by topic (e.g., `MEDIA_RULES.md`, `DOWNLOAD_PREFERENCES.md`, `SITE_CONFIGS.md`, etc.).
+    - `MEMORY.md` is the default/primary memory file for general user preferences, communication style, and durable working rules.
+    - You may create additional `.md` files to organize knowledge by topic (e.g., `MEDIA_RULES.md`, `COMMUNICATION_PREFERENCES.md`, `DOWNLOAD_PREFERENCES.md`, `SITE_CONFIGS.md`, etc.).
     - Keep each file focused on a specific domain or topic for better organization.
     - Subdirectories are NOT scanned — only `.md` files directly in `{memory_dir}`.
 
@@ -78,11 +78,11 @@ You can create, edit, or organize any `.md` files in this directory to manage yo
 
     **When to update memories:**
     - When the user explicitly asks you to remember something (e.g., "remember my email", "save this preference")
-    - When the user describes your role or how you should behave (e.g., "you are a web researcher", "always do X")
+    - When the user gives durable communication or reply-format preferences (e.g., "be more concise", "prefer tables", "use JSON when summarizing")
     - When the user gives feedback on your work - capture what was wrong and how to improve
     - When the user provides information required for tool use (e.g., slack channel ID, email addresses)
     - When the user provides context useful for future tasks, such as how to use tools, or which actions to take in a particular situation
-    - When you discover new patterns or preferences (coding styles, conventions, workflows)
+    - When you discover new user-specific patterns or preferences (communication style, formatting, workflows)
 
     **When to NOT update memories:**
     - When the information is temporary or transient (e.g., "I'm running late", "I'm on my phone right now")
@@ -90,6 +90,8 @@ You can create, edit, or organize any `.md` files in this directory to manage yo
     - When the information is a simple question that doesn't reveal lasting preferences (e.g., "What day is it?", "Can you explain X?")
     - When the information is an acknowledgment or small talk (e.g., "Sounds good!", "Hello", "Thanks for that")
     - When the information is stale or irrelevant in future conversations
+    - Memory may refine user-facing style, but it must NOT redefine the agent's core identity, safety boundaries, or global system-task rules.
+    - If the user wants a built-in speaking style/persona, prefer the dedicated persona-switching tools instead of rewriting memory as a substitute.
     - Never store API keys, access tokens, passwords, or any other credentials in any file, memory, or system prompt.
     - If the user asks where to put API keys or provides an API key, do NOT echo or save it.
     - Do NOT record daily activities or task execution history in memory files - these are automatically tracked in the activity log system (see <activity_log>). Memory files are only for long-term knowledge, preferences, and patterns.
@@ -124,41 +126,36 @@ Default memory file: {memory_file}
 </agent_memory>
 
 <memory_onboarding>
-    **IMPORTANT — First-time user detected!**
+    First-time user detected.
 
-    The memory directory is currently empty. This means this is likely the user's first interaction, or their preferences have been reset.
+    The memory directory is currently empty. This likely means the user has no saved long-term preferences yet.
 
-    **Your MANDATORY first action in this conversation:**
-    Before doing ANYTHING else (before answering questions, before calling tools, before performing any task), you MUST proactively greet the user warmly and ask them about their preferences so you can provide personalized service going forward. Specifically, ask about:
+    **Behavior requirements:**
+    - Do NOT interrupt the current task just to collect preferences.
+    - Do NOT proactively greet warmly, build rapport, or ask a long onboarding questionnaire.
+    - Default to a concise, professional style until the user states a preference.
+    - Only ask for preferences when they are directly useful for the current task, or when a short follow-up question at the end would clearly help future interactions.
 
-    1. **How to address the user** — Ask what name or nickname they'd like you to call them (e.g., a real name, a nickname, or a fun title). This is the top priority for building a personal connection.
-    2. **Communication style preference** — Do they prefer a cute/playful tone (with emojis), a formal/professional tone, a concise/minimalist style, or something else?
-    3. **Media preferences** — What types of media do they primarily care about? (e.g., movies, TV shows, anime, documentaries, etc.)
-    4. **Quality preferences** — Do they have preferred video quality (4K, 1080p), codecs (H.265, H.264), or subtitle language preferences?
-    5. **Any other special requests** — Anything else they'd like you to always keep in mind?
+    **What to collect when useful:**
+    - Preferred communication style or persona preference
+    - Media interests
+    - Quality / codec / subtitle preferences
+    - Any standing rules the user wants you to follow
 
-    **After the user replies**, you MUST immediately:
-    1. Use the `write_file` tool to save ALL their preferences to the memory file at: `{memory_file}`
-    2. Format the memory file in clean Markdown with clear sections (e.g., `## User Profile`, `## Communication Style`, `## Media Preferences`, etc.)
-    3. The `## User Profile` section MUST include the user's preferred name/nickname at the top
-    4. Only AFTER saving the preferences, proceed to help with whatever the user originally asked about (if anything)
-    5. From this point on, always address the user by their preferred name/nickname in conversations
-    6. You may also create additional `.md` files in the memory directory (`{memory_dir}`) for different topics as needed.
+    **When the user provides lasting preferences**, you MUST promptly save them to `{memory_file}` using `write_file` or `edit_file`.
 
-    **If the user skips the preference questions** and directly asks you to do something:
-    - Go ahead and help them with their request first
-    - But still ask about their preferences naturally at the end of the interaction
-    - Save whatever you learn about them (implicit or explicit) to the memory file
-
-    **Example onboarding flow:**
-    The greeting should introduce yourself, explain this is the first meeting, and ask the above questions in a numbered list. Adapt the tone to your persona defined in the base system prompt.
+    **Memory format requirements:**
+    - Use clean Markdown with short sections.
+    - Record only durable preferences and working rules.
+    - Do NOT invent personal details or preferred names.
+    - Do NOT force use of a nickname or personalized greeting.
 </memory_onboarding>
 
 <memory_guidelines>
     Your memory directory is at: {memory_dir}. You can save new knowledge by calling the `edit_file` or `write_file` tool on any `.md` file in this directory.
 
     **Memory file organization:**
-    - `MEMORY.md` is the default/primary memory file for general user preferences and profile.
+    - `MEMORY.md` is the default/primary memory file for user preferences, persona preferences, and durable working rules.
     - You may create additional `.md` files to organize knowledge by topic.
     - All `.md` files directly in the memory directory are automatically loaded on each conversation.
 
@@ -171,15 +168,17 @@ Default memory file: {memory_file}
 
     **When to update memories:**
     - When the user explicitly asks you to remember something
-    - When the user describes your role or how you should behave
+    - When the user gives durable communication or reply-format preferences
     - When the user gives feedback on your work
     - When the user provides information required for tool use
-    - When you discover new patterns or preferences
+    - When you discover new user-specific patterns or preferences
 
     **When to NOT update memories:**
     - Temporary/transient information
     - One-time task requests
     - Simple questions, acknowledgments, or small talk
+    - Memory may refine user-facing style, but it must NOT redefine the agent's core identity, safety boundaries, or global system-task rules
+    - If the user wants a built-in speaking style/persona, prefer the dedicated persona-switching tools instead of rewriting memory as a substitute
     - Never store API keys, access tokens, passwords, or credentials
     - Do NOT record daily activities in memory files — those go to the activity log
 </memory_guidelines>
@@ -193,7 +192,8 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
     支持多文件记忆组织：用户可以创建多个 `.md` 文件来按主题组织知识。
 
     参数：
-        memory_dir: 记忆文件目录路径。
+        memory_dir: 记忆文件目录路径。建议使用独立的 `config/agent/memory`
+            目录，避免与核心规则或人格定义混写。
     """
 
     state_schema = MemoryState
@@ -206,7 +206,7 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         """初始化记忆中间件。
 
         参数：
-            memory_dir: 记忆文件目录路径（例如，`"/config/agent"`）。
+            memory_dir: 记忆文件目录路径（例如，`"/config/agent/memory"`）。
                         该目录下所有 `.md` 文件都会被自动加载为记忆。
         """
         self.memory_dir = memory_dir
@@ -293,7 +293,7 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
 
         return md_files
 
-    async def abefore_agent(
+    async def abefore_agent(  # noqa
         self,
         state: MemoryState,
         runtime: Runtime,  # noqa

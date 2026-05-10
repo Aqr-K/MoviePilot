@@ -45,7 +45,7 @@ class RunSlashCommandTool(MoviePilotTool):
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成友好的提示消息"""
         command = kwargs.get("command", "")
-        return f"正在执行命令: {command}"
+        return f"执行命令: {command}"
 
     async def run(self, command: str, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: command={command}")

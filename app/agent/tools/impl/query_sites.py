@@ -37,7 +37,7 @@ class QuerySitesTool(MoviePilotTool):
         status = kwargs.get("status", "all")
         name = kwargs.get("name")
 
-        parts = ["正在查询站点"]
+        parts = ["查询站点"]
 
         if status != "all":
             status_map = {"active": "已启用", "inactive": "已禁用"}

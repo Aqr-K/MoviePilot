@@ -4,12 +4,13 @@ import re
 import traceback
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     SummarizationMiddleware,
-    LLMToolSelectorMiddleware,
 )
 from langchain_core.messages import (  # noqa: F401
     HumanMessage,
@@ -18,25 +19,63 @@ from langchain_core.messages import (  # noqa: F401
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.callback import StreamingHandler
+from app.agent.llm import LLMHelper
 from app.agent.memory import memory_manager
 from app.agent.middleware.activity_log import ActivityLogMiddleware
 from app.agent.middleware.jobs import JobsMiddleware
 from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
+from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
+from app.agent.middleware.tool_selection import ToolSelectorMiddleware
+from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
+from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
-from app.helper.llm import LLMHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
 from app.schemas.types import MessageChannel
+from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
 class AgentChain(ChainBase):
     pass
+
+
+@dataclass
+class _SessionUsageSnapshot:
+    model: Optional[str] = None
+    context_window_tokens: Optional[int] = None
+    last_input_tokens: int = 0
+    last_output_tokens: int = 0
+    last_total_tokens: int = 0
+    last_context_usage_ratio: Optional[float] = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    model_call_count: int = 0
+    last_updated_at: Optional[datetime] = None
+
+    def to_dict(self, session_id: str) -> dict[str, Any]:
+        return {
+            "session_id": session_id,
+            "model": self.model,
+            "context_window_tokens": self.context_window_tokens,
+            "last_input_tokens": self.last_input_tokens,
+            "last_output_tokens": self.last_output_tokens,
+            "last_total_tokens": self.last_total_tokens,
+            "last_context_usage_ratio": self.last_context_usage_ratio,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_tokens,
+            "model_call_count": self.model_call_count,
+            "last_updated_at": self.last_updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            if self.last_updated_at
+            else None,
+        }
 
 
 class _ThinkTagStripper:
@@ -112,36 +151,142 @@ class _ThinkTagStripper:
             self.buffer = ""
 
 
+class ReplyMode(str, Enum):
+    """
+    Agent 最终回复处理模式。
+    """
+
+    DISPATCH = "dispatch"
+    CAPTURE_ONLY = "capture_only"
+
+
 class MoviePilotAgent:
     """
     MoviePilot AI智能体（基于 LangChain v1 + LangGraph）
     """
 
     def __init__(
-        self,
-        session_id: str,
-        user_id: str = None,
-        channel: str = None,
-        source: str = None,
-        username: str = None,
+            self,
+            session_id: str,
+            user_id: str = None,
+            channel: str = None,
+            source: str = None,
+            username: str = None,
+            replay_mode: ReplyMode = ReplyMode.DISPATCH,
+            persist_output_message: bool = True,
+            allow_message_tools: bool = True,
+            output_callback: Optional[Callable[[str], None]] = None,
     ):
         self.session_id = session_id
         self.user_id = user_id
         self.channel = channel
         self.source = source
         self.username = username
-        self.reply_with_voice = False
+        self.reply_mode = replay_mode
+        self.persist_output_message = persist_output_message
+        self.allow_message_tools = allow_message_tools
+        self.output_callback = output_callback
         self._tool_context: Dict[str, object] = {}
+        self._streamed_output = ""
+        self._session_usage = _SessionUsageSnapshot()
 
         # 流式token管理
         self.stream_handler = StreamingHandler()
+
+    @staticmethod
+    def _coerce_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _get_model_name(cls, model: Any) -> Optional[str]:
+        return (
+                getattr(model, "model", None)
+                or getattr(model, "model_name", None)
+                or getattr(model, "model_id", None)
+        )
+
+    @classmethod
+    def _get_context_window_tokens(cls, model: Any) -> Optional[int]:
+        profile = getattr(model, "profile", None)
+        if not profile:
+            return None
+        if isinstance(profile, dict):
+            return cls._coerce_int(
+                profile.get("max_input_tokens") or profile.get("input_token_limit")
+            )
+        return cls._coerce_int(
+            getattr(profile, "max_input_tokens", None)
+            or getattr(profile, "input_token_limit", None)
+        )
+
+    def _sync_model_profile(self, model: Any) -> None:
+        model_name = self._get_model_name(model)
+        context_window_tokens = self._get_context_window_tokens(model)
+        if model_name:
+            self._session_usage.model = model_name
+        if context_window_tokens:
+            self._session_usage.context_window_tokens = context_window_tokens
+
+    def _record_usage(self, usage: dict[str, Any]) -> None:
+        if not usage:
+            return
+
+        model_name = usage.get("model")
+        context_window_tokens = self._coerce_int(usage.get("context_window_tokens"))
+        if model_name:
+            self._session_usage.model = model_name
+        if context_window_tokens:
+            self._session_usage.context_window_tokens = context_window_tokens
+
+        self._session_usage.model_call_count += 1
+        self._session_usage.last_updated_at = datetime.now()
+
+        if not usage.get("has_usage"):
+            return
+
+        input_tokens = self._coerce_int(usage.get("input_tokens")) or 0
+        output_tokens = self._coerce_int(usage.get("output_tokens")) or 0
+        total_tokens = self._coerce_int(usage.get("total_tokens"))
+        if total_tokens is None:
+            total_tokens = input_tokens + output_tokens
+
+        self._session_usage.last_input_tokens = input_tokens
+        self._session_usage.last_output_tokens = output_tokens
+        self._session_usage.last_total_tokens = total_tokens
+        self._session_usage.last_context_usage_ratio = usage.get("context_usage_ratio")
+        self._session_usage.total_input_tokens += input_tokens
+        self._session_usage.total_output_tokens += output_tokens
+        self._session_usage.total_tokens += total_tokens
+
+    def get_session_status(self) -> dict[str, Any]:
+        if not self._session_usage.model:
+            self._session_usage.model = settings.LLM_MODEL
+        if not self._session_usage.context_window_tokens:
+            self._session_usage.context_window_tokens = (
+                settings.LLM_MAX_CONTEXT_TOKENS * 1000
+                if settings.LLM_MAX_CONTEXT_TOKENS
+                else None
+            )
+        return self._session_usage.to_dict(self.session_id)
 
     @property
     def is_background(self) -> bool:
         """
         是否为后台任务模式（无渠道信息，如定时唤醒）
         """
-        return not self.channel or not self.source
+        return (not self.channel or not self.source) and not callable(self.output_callback)
+
+    @property
+    def should_dispatch_reply(self) -> bool:
+        """
+        是否应将最终回复真正发送到消息渠道。
+        """
+        return self.reply_mode == ReplyMode.DISPATCH
 
     def _should_stream(self) -> bool:
         """
@@ -153,8 +298,6 @@ class MoviePilotAgent:
         - 其他情况不启用流式输出
         """
         if self.is_background:
-            return False
-        if self.reply_with_voice:
             return False
         # 啰嗦模式下始终需要流式输出来捕获工具调用前的 Agent 文字
         if settings.AI_AGENT_VERBOSE:
@@ -168,12 +311,12 @@ class MoviePilotAgent:
             return False
 
     @staticmethod
-    def _initialize_llm(streaming: bool = False):
+    async def _initialize_llm(streaming: bool = False):
         """
         初始化 LLM
         :param streaming: 是否启用流式输出
         """
-        return LLMHelper.get_llm(streaming=streaming)
+        return await LLMHelper.get_llm(streaming=streaming)
 
     @staticmethod
     def _extract_text_content(content) -> str:
@@ -195,10 +338,10 @@ class MoviePilotAgent:
                     if block.get("thought"):
                         continue
                     if block.get("type") in (
-                        "thinking",
-                        "reasoning_content",
-                        "reasoning",
-                        "thought",
+                            "thinking",
+                            "reasoning_content",
+                            "reasoning",
+                            "thought",
                     ):
                         continue
                     if block.get("type") == "text":
@@ -207,6 +350,28 @@ class MoviePilotAgent:
                         text_parts.append(str(block))
             return "".join(text_parts)
         return str(content)
+
+    def _emit_output(self, text: str):
+        """
+        输出当前流式文本到外部回调。
+        """
+        if not text:
+            return
+        self._streamed_output += text
+        if not callable(self.output_callback):
+            return
+        try:
+            self.output_callback(self._streamed_output)
+        except Exception as e:
+            logger.debug(f"智能体输出回调失败: {e}")
+
+    def _handle_stream_text(self, text: str):
+        """
+        统一处理一段可见流式文本，确保工具统计注入后的内容会同时进入
+        消息缓冲区和外部流式回调。
+        """
+        emitted_text = self.stream_handler.emit(text)
+        self._emit_output(emitted_text)
 
     def _initialize_tools(self) -> List:
         """
@@ -220,59 +385,78 @@ class MoviePilotAgent:
             username=self.username,
             stream_handler=self.stream_handler,
             agent_context=self._tool_context,
+            allow_message_tools=self.allow_message_tools,
         )
 
-    def _create_agent(self, streaming: bool = False):
+    async def _create_agent(self, streaming: bool = False):
         """
         创建 LangGraph Agent（使用 create_agent + SummarizationMiddleware）
         :param streaming: 是否启用流式输出
         """
         try:
             # 系统提示词
-            system_prompt = prompt_manager.get_agent_prompt(
-                channel=self.channel,
-                prefer_voice_reply=self.reply_with_voice,
-            )
+            system_prompt = prompt_manager.get_agent_prompt(channel=self.channel)
 
             # LLM 模型（用于 agent 执行）
-            llm = self._initialize_llm(streaming=streaming)
+            agent_model = await self._initialize_llm(streaming=streaming)
+            self._sync_model_profile(agent_model)
+
+            # 为内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
+            non_streaming_model = (
+                agent_model
+                if not streaming
+                else await self._initialize_llm(streaming=False)
+            )
 
             # 工具列表
             tools = self._initialize_tools()
+            max_tools = settings.LLM_MAX_TOOLS
+            always_include_tools = (
+                MoviePilotToolFactory.get_tool_selector_always_include_names(tools)
+            )
 
             # 中间件
             middlewares = [
                 # Skills
                 SkillsMiddleware(
-                    sources=[str(settings.CONFIG_PATH / "agent" / "skills")],
+                    sources=[str(agent_runtime_manager.skills_dir)],
                     bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
                 ),
                 # Jobs 任务管理
                 JobsMiddleware(
-                    sources=[str(settings.CONFIG_PATH / "agent" / "jobs")],
+                    sources=[str(agent_runtime_manager.jobs_dir)],
                 ),
-                # 记忆管理（自动扫描 agent 目录下所有 .md 文件）
-                MemoryMiddleware(memory_dir=str(settings.CONFIG_PATH / "agent")),
+                # 运行时人格与核心规则
+                RuntimeConfigMiddleware(),
+                # 记忆管理
+                MemoryMiddleware(memory_dir=str(agent_runtime_manager.memory_dir)),
                 # 活动日志
                 ActivityLogMiddleware(
-                    activity_dir=str(settings.CONFIG_PATH / "agent" / "activity"),
+                    activity_dir=str(agent_runtime_manager.activity_dir),
                 ),
                 # 上下文压缩
-                SummarizationMiddleware(model=llm, trigger=("fraction", 0.85)),
+                SummarizationMiddleware(
+                    model=non_streaming_model, trigger=("fraction", 0.85)
+                ),
                 # 错误工具调用修复
                 PatchToolCallsMiddleware(),
+                # 用量统计
+                UsageMiddleware(on_usage=self._record_usage),
             ]
 
             # 工具选择
-            if settings.LLM_MAX_TOOLS > 0:
+            if max_tools > 0:
                 middlewares.append(
-                    LLMToolSelectorMiddleware(
-                        model=llm, max_tools=settings.LLM_MAX_TOOLS
+                    ToolSelectorMiddleware(
+                        model=non_streaming_model,
+                        selection_tools=tools,
+                        max_tools=max_tools,
+                        always_include=always_include_tools,
                     )
                 )
 
             return create_agent(
-                model=llm,
+                model=agent_model,
                 tools=tools,
                 system_prompt=system_prompt,
                 middleware=middlewares,
@@ -283,10 +467,10 @@ class MoviePilotAgent:
             raise e
 
     async def process(
-        self,
-        message: str,
-        images: List[str] = None,
-        files: Optional[List[dict]] = None,
+            self,
+            message: str,
+            images: List[str] = None,
+            files: Optional[List[dict]] = None,
     ) -> str:
         """
         处理用户消息，流式推理并返回 Agent 回复
@@ -297,10 +481,11 @@ class MoviePilotAgent:
                 f"images={len(images) if images else 0}, files={len(files) if files else 0}"
             )
             self._tool_context = {
-                "incoming_voice": self.reply_with_voice,
                 "user_reply_sent": False,
                 "reply_mode": None,
+                "should_dispatch_reply": self.should_dispatch_reply,
             }
+            self._streamed_output = ""
 
             # 获取历史消息
             messages = memory_manager.get_agent_messages(
@@ -332,11 +517,13 @@ class MoviePilotAgent:
         except Exception as e:
             error_message = f"处理消息时发生错误: {str(e)}"
             logger.error(error_message)
+            if not self.should_dispatch_reply:
+                raise
             await self.send_agent_message(error_message)
             return error_message
 
     async def _stream_agent_tokens(
-        self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
+            self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
     ):
         """
         流式运行智能体，过滤工具调用token和思考内容，将模型生成的内容通过回调输出。
@@ -346,41 +533,25 @@ class MoviePilotAgent:
         :param on_token: 收到有效 token 时的回调
         """
         stripper = _ThinkTagStripper()
-        # 非VERBOSE模式下，跟踪当前langgraph_step以检测中间步骤的模型输出
-        # 当模型在工具调用之前输出的"计划/思考"文本，会在检测到tool_call时被清除
-        current_model_step = -1
-        has_emitted_in_step = False
 
         async for chunk in agent.astream(
-            messages,
-            stream_mode="messages",
-            config=config,
-            subgraphs=False,
-            version="v2",
+                messages,
+                stream_mode="messages",
+                config=config,
+                subgraphs=False,
+                version="v2",
         ):
             if chunk["type"] == "messages":
                 token, metadata = chunk["data"]
                 if not token or not hasattr(token, "tool_call_chunks"):
                     continue
 
-                # 获取当前步骤信息
-                step = metadata.get("langgraph_step", -1) if metadata else -1
-
                 if token.tool_call_chunks:
-                    # 检测到工具调用token：说明当前步骤是中间步骤
-                    # 非VERBOSE模式下，清除该步骤之前输出的"计划/思考"文本
-                    if not settings.AI_AGENT_VERBOSE and has_emitted_in_step:
-                        self.stream_handler.reset()
-                        stripper.reset()
-                        has_emitted_in_step = False
+                    # 清除 stripper 内部缓冲中可能残留的 <think> 标签中间状态
+                    stripper.reset()
                     continue
 
                 # 以下处理纯文本token（tool_call_chunks为空）
-
-                # 检测步骤变化，重置步骤内emit跟踪
-                if step != current_model_step:
-                    current_model_step = step
-                    has_emitted_in_step = False
 
                 # 跳过模型思考/推理内容（如 DeepSeek R1 的 reasoning_content）
                 additional = getattr(token, "additional_kwargs", None)
@@ -391,8 +562,7 @@ class MoviePilotAgent:
                     # content 可能是字符串或内容块列表，过滤掉思考类型的块
                     content = self._extract_text_content(token.content)
                     if content:
-                        if stripper.process(content, on_token):
-                            has_emitted_in_step = True
+                        stripper.process(content, on_token)
 
         stripper.flush(on_token)
 
@@ -400,7 +570,7 @@ class MoviePilotAgent:
         """
         调用 LangGraph Agent 执行推理。
         根据运行环境选择不同的执行模式：
-        - 后台任务模式（无渠道信息）：非流式 LLM + ainvoke，仅广播最终结果
+        - 后台任务模式（无渠道信息）：非流式 LLM + ainvoke，由 reply_mode 决定是发送还是仅捕获
         - 渠道不支持消息编辑：非流式 LLM + ainvoke，完成后发送最终回复
         - 渠道支持消息编辑：流式 LLM + astream，实时推送 token
         """
@@ -416,9 +586,12 @@ class MoviePilotAgent:
             use_streaming = self._should_stream()
 
             # 创建智能体（根据是否流式传入不同 LLM）
-            agent = self._create_agent(streaming=use_streaming)
+            agent = await self._create_agent(streaming=use_streaming)
 
             if use_streaming:
+                self.stream_handler.set_dispatch_policy(
+                    allow_dispatch_without_context=self.should_dispatch_reply
+                )
                 # 流式模式：渠道支持消息编辑，启动流式输出实时推送 token
                 await self.stream_handler.start_streaming(
                     channel=self.channel,
@@ -432,8 +605,13 @@ class MoviePilotAgent:
                     agent=agent,
                     messages={"messages": messages},
                     config=agent_config,
-                    on_token=self.stream_handler.emit,
+                    on_token=self._handle_stream_text,
                 )
+
+                # 输出流式过程中可能残留的工具调用统计信息
+                trailing_tool_summary = self.stream_handler.flush_pending_tool_summary()
+                if trailing_tool_summary:
+                    self._emit_output(trailing_tool_summary)
 
                 # 停止流式输出，返回是否已通过流式编辑发送了所有内容及最终文本
                 (
@@ -445,9 +623,31 @@ class MoviePilotAgent:
                     # 流式输出未能发送全部内容（发送失败等）
                     # 通过常规方式发送剩余内容
                     remaining_text = await self.stream_handler.take()
-                    if remaining_text and not self._tool_context.get("user_reply_sent"):
+                    if remaining_text:
+                        unsent_text = remaining_text
+                        if self._streamed_output and remaining_text.startswith(
+                                self._streamed_output
+                        ):
+                            unsent_text = remaining_text[len(self._streamed_output):]
+                        if unsent_text:
+                            self._emit_output(unsent_text)
+                    if (
+                            remaining_text
+                            and self.should_dispatch_reply
+                            and not self._tool_context.get("user_reply_sent")
+                    ):
                         await self.send_agent_message(remaining_text)
-                elif streamed_text:
+                    elif (
+                            remaining_text
+                            and self.persist_output_message
+                            and not self._tool_context.get("user_reply_sent")
+                    ):
+                        title = "MoviePilot助手" if self.is_background else ""
+                        await self._save_agent_message_to_db(
+                            remaining_text,
+                            title=title,
+                        )
+                elif streamed_text and self.persist_output_message:
                     # 流式输出已发送全部内容，但未记录到数据库，补充保存消息记录
                     await self._save_agent_message_to_db(streamed_text)
 
@@ -475,15 +675,29 @@ class MoviePilotAgent:
                             final_text = text.strip()
                             break
 
-                if final_text and not self._tool_context.get("user_reply_sent"):
+                if final_text and not self._streamed_output:
+                    self._emit_output(final_text)
+
+                if (
+                        final_text
+                        and self.should_dispatch_reply
+                        and not self._tool_context.get("user_reply_sent")
+                ):
                     if self.is_background:
-                        # 后台任务仅广播最终回复，带标题
+                        # 后台任务发送最终回复时统一带标题
                         await self.send_agent_message(
                             final_text, title="MoviePilot助手"
                         )
                     else:
                         # 非流式渠道：发送最终回复
                         await self.send_agent_message(final_text)
+                elif (
+                        final_text
+                        and self.persist_output_message
+                        and not self._tool_context.get("user_reply_sent")
+                ):
+                    title = "MoviePilot助手" if self.is_background else ""
+                    await self._save_agent_message_to_db(final_text, title=title)
 
             # 保存消息
             memory_manager.save_agent_messages(
@@ -506,16 +720,12 @@ class MoviePilotAgent:
         """
         通过原渠道发送消息给用户
         """
-        user_id = self.user_id
-        if self.user_id == "system":
-            user_id = None
-
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
                 source=self.source,
                 mtype=NotificationType.Agent,
-                userid=user_id,
+                userid=self.user_id,
                 username=self.username,
                 title=title,
                 text=message,
@@ -563,7 +773,7 @@ class _MessageTask:
     channel: Optional[str] = None
     source: Optional[str] = None
     username: Optional[str] = None
-    reply_with_voice: bool = False
+    reply_mode: ReplyMode = ReplyMode.DISPATCH
 
 
 class AgentManager:
@@ -572,21 +782,43 @@ class AgentManager:
     同一会话的消息按顺序排队处理，不同会话之间互不影响。
     """
 
-    # 批量重试整理的等待时间（秒），同一批次内的失败记录会合并为一次agent调用
-    RETRY_TRANSFER_DEBOUNCE_SECONDS = 300
-
     def __init__(self):
         self.active_agents: Dict[str, MoviePilotAgent] = {}
         # 每个会话的消息队列
         self._session_queues: Dict[str, asyncio.Queue] = {}
         # 每个会话的worker任务
         self._session_workers: Dict[str, asyncio.Task] = {}
-        # 重试整理的 debounce 缓冲区: group_key -> List[history_id]
-        self._retry_transfer_buffer: Dict[str, List[int]] = {}
-        # 重试整理的 debounce 定时器: group_key -> asyncio.TimerHandle
-        self._retry_transfer_timers: Dict[str, asyncio.TimerHandle] = {}
-        # 重试整理缓冲区锁
-        self._retry_transfer_lock = asyncio.Lock()
+
+    def get_session_status(self, session_id: str) -> dict[str, Any]:
+        """获取会话当前模型与 token 使用状态。"""
+        agent = self.active_agents.get(session_id)
+        if agent:
+            status = agent.get_session_status()
+        else:
+            status = {
+                "session_id": session_id,
+                "model": settings.LLM_MODEL,
+                "context_window_tokens": settings.LLM_MAX_CONTEXT_TOKENS * 1000
+                if settings.LLM_MAX_CONTEXT_TOKENS
+                else None,
+                "last_input_tokens": 0,
+                "last_output_tokens": 0,
+                "last_total_tokens": 0,
+                "last_context_usage_ratio": None,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_tokens": 0,
+                "model_call_count": 0,
+                "last_updated_at": None,
+            }
+
+        queue = self._session_queues.get(session_id)
+        status["pending_messages"] = queue.qsize() if queue else 0
+        status["is_processing"] = (
+                session_id in self._session_workers
+                and not self._session_workers[session_id].done()
+        )
+        return status
 
     @staticmethod
     async def initialize():
@@ -600,11 +832,6 @@ class AgentManager:
         关闭管理器
         """
         await memory_manager.close()
-        # 取消所有重试整理的延迟定时器
-        for timer in self._retry_transfer_timers.values():
-            timer.cancel()
-        self._retry_transfer_timers.clear()
-        self._retry_transfer_buffer.clear()
         # 取消所有会话worker
         for task in self._session_workers.values():
             task.cancel()
@@ -621,16 +848,16 @@ class AgentManager:
         self.active_agents.clear()
 
     async def process_message(
-        self,
-        session_id: str,
-        user_id: str,
-        message: str,
-        images: List[str] = None,
-        files: Optional[List[dict]] = None,
-        channel: str = None,
-        source: str = None,
-        username: str = None,
-        reply_with_voice: bool = False,
+            self,
+            session_id: str,
+            user_id: str,
+            message: str,
+            images: List[str] = None,
+            files: Optional[List[dict]] = None,
+            channel: str = None,
+            source: str = None,
+            username: str = None,
+            reply_mode: ReplyMode = ReplyMode.DISPATCH,
     ) -> str:
         """
         处理用户消息：将消息放入会话队列，按顺序依次处理。
@@ -645,7 +872,7 @@ class AgentManager:
             channel=channel,
             source=source,
             username=username,
-            reply_with_voice=reply_with_voice,
+            reply_mode=reply_mode,
         )
 
         # 获取或创建会话队列
@@ -657,8 +884,8 @@ class AgentManager:
 
         # 如果队列中已有等待的消息，通知用户消息已排队
         if queue_size > 0 or (
-            session_id in self._session_workers
-            and not self._session_workers[session_id].done()
+                session_id in self._session_workers
+                and not self._session_workers[session_id].done()
         ):
             logger.info(
                 f"会话 {session_id} 有任务正在处理，消息已排队等待 "
@@ -670,8 +897,8 @@ class AgentManager:
 
         # 确保该会话有一个worker在运行
         if (
-            session_id not in self._session_workers
-            or self._session_workers[session_id].done()
+                session_id not in self._session_workers
+                or self._session_workers[session_id].done()
         ):
             self._session_workers[session_id] = asyncio.create_task(
                 self._session_worker(session_id)
@@ -712,8 +939,8 @@ class AgentManager:
             self._session_workers.pop(session_id, None)  # noqa
             # 如果队列为空，清理队列
             if (
-                session_id in self._session_queues
-                and self._session_queues[session_id].empty()
+                    session_id in self._session_queues
+                    and self._session_queues[session_id].empty()
             ):
                 self._session_queues.pop(session_id, None)
 
@@ -732,6 +959,7 @@ class AgentManager:
                 channel=task.channel,
                 source=task.source,
                 username=task.username,
+                replay_mode=task.reply_mode,
             )
             self.active_agents[session_id] = agent
         else:
@@ -743,7 +971,7 @@ class AgentManager:
                 agent.source = task.source
             if task.username:
                 agent.username = task.username
-        agent.reply_with_voice = task.reply_with_voice
+            agent.reply_mode = task.reply_mode
 
         return await agent.process(task.message, images=task.images, files=task.files)
 
@@ -808,6 +1036,49 @@ class AgentManager:
             memory_manager.clear_memory(session_id, user_id)
             logger.info(f"会话 {session_id} 的记忆已清空")
 
+    @staticmethod
+    async def run_background_prompt(
+            message: str,
+            session_prefix: str = "__agent_background",
+            output_callback: Optional[Callable[[str], None]] = None,
+            reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
+            persist_output_message: bool = True,
+            allow_message_tools: Optional[bool] = None,
+    ) -> None:
+        """
+        以独立后台会话执行一段 prompt。
+        """
+        session_id = f"{session_prefix}_{uuid.uuid4().hex[:8]}__"
+        user_id = SYSTEM_INTERNAL_USER_ID
+
+        if reply_mode == ReplyMode.CAPTURE_ONLY:
+            allow_message_tools = False
+        elif allow_message_tools is None:
+            allow_message_tools = True
+
+        agent = MoviePilotAgent(
+            session_id=session_id,
+            user_id=user_id,
+            channel=None,
+            source=None,
+            username=settings.SUPERUSER,
+            replay_mode=reply_mode,
+            persist_output_message=persist_output_message,
+            output_callback=output_callback,
+            allow_message_tools=allow_message_tools,
+        )
+
+        try:
+            await agent.process(message)
+        finally:
+            await agent.cleanup()
+            memory_manager.clear_memory(session_id, user_id)
+
+    @staticmethod
+    def _build_heartbeat_prompt() -> str:
+        """使用程序内置 System Tasks 定义构建心跳任务提示词。"""
+        return prompt_manager.render_system_task_message("heartbeat")
+
     async def heartbeat_check_jobs(self):
         """
         心跳唤醒：检查并执行待处理的定时任务（Jobs）。
@@ -816,25 +1087,10 @@ class AgentManager:
         try:
             # 每次使用唯一的 session_id，避免共享上下文
             session_id = f"__agent_heartbeat_{uuid.uuid4().hex[:12]}__"
-            user_id = "system"
+            user_id = SYSTEM_INTERNAL_USER_ID
 
             logger.info("智能体心跳唤醒：开始检查待处理任务...")
-
-            # 英文提示词，便于大模型理解
-            heartbeat_message = (
-                "[System Heartbeat] Check all jobs in your jobs directory and process pending tasks:\n"
-                "1. List all jobs with status 'pending' or 'in_progress'\n"
-                "2. For 'recurring' jobs, check 'last_run' to determine if it's time to run again\n"
-                "3. For 'once' jobs with status 'pending', execute them now\n"
-                "4. After executing each job, update its status, 'last_run' time, and execution log in the JOB.md file\n"
-                "5. If there are no pending jobs, do NOT generate any response\n\n"
-                "IMPORTANT: This is a background system task, NOT a user conversation. "
-                "Your final response will be broadcast as a notification. "
-                "Only output a brief completion summary listing each executed job and its result. "
-                "Do NOT include greetings, explanations, or conversational text. "
-                "If no jobs were executed, output nothing. "
-                "Respond in Chinese (中文)."
-            )
+            heartbeat_message = self._build_heartbeat_prompt()
 
             await self.process_message(
                 session_id=session_id,
@@ -843,6 +1099,7 @@ class AgentManager:
                 channel=None,
                 source=None,
                 username=settings.SUPERUSER,
+                reply_mode=ReplyMode.DISPATCH,
             )
 
             # 等待消息队列处理完成
@@ -863,145 +1120,6 @@ class AgentManager:
 
         except Exception as e:
             logger.error(f"智能体心跳唤醒失败: {e}")
-
-    async def retry_failed_transfer(self, history_id: int, group_key: str = ""):
-        """
-        触发智能体重新整理失败的历史记录。
-        由文件整理模块在检测到整理失败后调用。
-        同一 group_key 的失败记录会在缓冲期内合并为一次agent调用，避免重复浪费token。
-        :param history_id: 失败的整理历史记录ID
-        :param group_key: 分组键，相同key的记录会被合并处理（如download_hash、源目录等）
-        """
-        if not group_key:
-            group_key = f"_default_{history_id}"
-
-        async with self._retry_transfer_lock:
-            # 将 history_id 加入缓冲区
-            if group_key not in self._retry_transfer_buffer:
-                self._retry_transfer_buffer[group_key] = []
-            if history_id not in self._retry_transfer_buffer[group_key]:
-                self._retry_transfer_buffer[group_key].append(history_id)
-                logger.info(
-                    f"智能体重试整理：记录 ID={history_id} 已加入缓冲区 "
-                    f"(group={group_key}, 当前{len(self._retry_transfer_buffer[group_key])}条)"
-                )
-
-            # 取消该分组的旧定时器
-            if group_key in self._retry_transfer_timers:
-                self._retry_transfer_timers[group_key].cancel()
-
-            # 设置新的延迟定时器
-            loop = asyncio.get_running_loop()
-            self._retry_transfer_timers[group_key] = loop.call_later(
-                self.RETRY_TRANSFER_DEBOUNCE_SECONDS,
-                lambda gk=group_key: asyncio.ensure_future(
-                    self._flush_retry_transfer(gk)
-                ),
-            )
-
-    async def _flush_retry_transfer(self, group_key: str):
-        """
-        延迟定时器到期后，取出该分组的所有 history_id 并合并为一次agent调用。
-        """
-        async with self._retry_transfer_lock:
-            history_ids = self._retry_transfer_buffer.pop(group_key, [])
-            self._retry_transfer_timers.pop(group_key, None)
-
-        if not history_ids:
-            return
-
-        session_id = f"__agent_retry_transfer_batch_{uuid.uuid4().hex[:8]}__"
-        user_id = "system"
-
-        ids_str = ", ".join(str(i) for i in history_ids)
-        logger.info(
-            f"智能体重试整理：开始批量处理失败记录 IDs=[{ids_str}] (group={group_key})"
-        )
-
-        if len(history_ids) == 1:
-            # 单条记录，使用原有逻辑
-            retry_message = (
-                f"[System Task - Transfer Failed Retry] A file transfer/organization has failed. "
-                f"Please use the 'transfer-failed-retry' skill to retry the failed transfer.\n\n"
-                f"Failed transfer history record ID: {history_ids[0]}\n\n"
-                f"Follow these steps:\n"
-                f"1. Use `query_transfer_history` with status='failed' to find the record with id={history_ids[0]} "
-                f"and understand the failure details (source path, error message, media info)\n"
-                f"2. Analyze the error message to determine the best retry strategy\n"
-                f"3. If the source file no longer exists, skip this retry and report that the file is missing\n"
-                f"4. Delete the failed history record using `delete_transfer_history` with history_id={history_ids[0]}\n"
-                f"5. Re-identify the media using `recognize_media` with the source file path\n"
-                f"6. If recognition fails, try `search_media` with keywords from the filename\n"
-                f"7. Re-transfer using `transfer_file` with the source path and any identified media info (tmdbid, media_type)\n"
-                f"8. Report the final result\n\n"
-                f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                f"Your final response will be broadcast as a notification. "
-                f"Only output a brief result summary. "
-                f"Do NOT include greetings, explanations, or conversational text. "
-                f"Respond in Chinese (中文)."
-            )
-        else:
-            # 多条记录，使用批量处理逻辑
-            retry_message = (
-                f"[System Task - Batch Transfer Failed Retry] Multiple file transfers from the same source "
-                f"have failed. These files likely belong to the SAME media (e.g., multiple episodes of the same TV show). "
-                f"Please use the 'transfer-failed-retry' skill to retry them efficiently.\n\n"
-                f"Failed transfer history record IDs: {ids_str}\n"
-                f"Total failed records: {len(history_ids)}\n\n"
-                f"Follow these steps:\n"
-                f"1. Use `query_transfer_history` with status='failed' to find ALL records with these IDs "
-                f"and understand the failure details\n"
-                f"2. Since these files are likely from the same media, analyze the FIRST record to determine "
-                f"the media identity and the best retry strategy. The root cause is usually the same for all files.\n"
-                f"3. If the error is about media recognition (e.g., '未识别到媒体信息'), identify the media ONCE "
-                f"using `recognize_media` or `search_media`, then reuse that result (tmdbid, media_type) for all files\n"
-                f"4. For EACH failed record:\n"
-                f"   a. Delete the failed history record using `delete_transfer_history`\n"
-                f"   b. Re-transfer using `transfer_file` with the source path and the identified media info\n"
-                f"5. Report a summary of results (how many succeeded, how many failed)\n\n"
-                f"IMPORTANT OPTIMIZATION: These files share the same media identity. "
-                f"Do NOT call `recognize_media` or `search_media` repeatedly for each file. "
-                f"Identify the media ONCE, then apply to all files.\n\n"
-                f"IMPORTANT: This is a background system task, NOT a user conversation. "
-                f"Your final response will be broadcast as a notification. "
-                f"Only output a brief result summary. "
-                f"Do NOT include greetings, explanations, or conversational text. "
-                f"Respond in Chinese (中文)."
-            )
-
-        try:
-
-            await self.process_message(
-                session_id=session_id,
-                user_id=user_id,
-                message=retry_message,
-                channel=None,
-                source=None,
-                username=settings.SUPERUSER,
-            )
-
-            # 等待消息队列处理完成
-            if session_id in self._session_queues:
-                await self._session_queues[session_id].join()
-
-            # 等待worker结束
-            if session_id in self._session_workers:
-                try:
-                    await self._session_workers[session_id]
-                except asyncio.CancelledError:
-                    pass
-
-            logger.info(
-                f"智能体重试整理：批量处理完成 IDs=[{ids_str}] (group={group_key})"
-            )
-
-            # 用完即弃，清理资源
-            await self.clear_session(session_id, user_id)
-
-        except Exception as e:
-            logger.error(
-                f"智能体重试整理失败 (IDs=[{ids_str}], group={group_key}): {e}"
-            )
 
 
 # 全局智能体管理器实例

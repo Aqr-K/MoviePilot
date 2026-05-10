@@ -1,4 +1,5 @@
 .idea/
+.DS_Store
 *.c
 *.so
 *.pyd
@@ -15,11 +16,16 @@ app/helper/*.bin
 app/plugins/**
 !app/plugins/__init__.py
 config/cookies/**
+config/app.env
 config/user.db*
 config/sites/**
+config/agent/
 config/logs/
 config/temp/
 config/cache/
+.runtime/
+public/
+.moviepilot.env
 *.pyc
 *.log
 .vscode

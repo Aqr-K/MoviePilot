@@ -660,10 +660,11 @@ class TransHandler:
         new_file_type = ""
 
         # 识别字幕语言
-        if re.search(_zhcn_sub_re, sub_item.name, re.I):
-            new_file_type = ".chi.zh-cn"
-        elif re.search(_zhtw_sub_re, sub_item.name, re.I):
+        # 先识别繁中，避免“繁体中文/繁中字”等名称被后面的“中文/中字”简中兜底规则误判。
+        if re.search(_zhtw_sub_re, sub_item.name, re.I):
             new_file_type = ".zh-tw"
+        elif re.search(_zhcn_sub_re, sub_item.name, re.I):
+            new_file_type = ".chi.zh-cn"
         elif re.search(_ja_sub_re, sub_item.name, re.I):
             new_file_type = ".ja"
         elif re.search(_eng_sub_re, sub_item.name, re.I):

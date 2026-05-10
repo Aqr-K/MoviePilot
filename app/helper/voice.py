@@ -13,7 +13,7 @@ from app.log import logger
 class VoiceProvider(ABC):
     """语音 provider 抽象层。"""
 
-    MAX_TRANSCRIBE_BYTES = 25 * 1024 * 1024
+    MAX_TRANSCRIBE_BYTES = 10 * 1024 * 1024
 
     @property
     @abstractmethod
@@ -45,25 +45,14 @@ class OpenAIVoiceProvider(VoiceProvider):
         return "openai"
 
     @staticmethod
-    def _resolve_credentials(mode: str) -> tuple[Optional[str], Optional[str]]:
-        mode = mode.lower()
-        provider = (
-            settings.AI_VOICE_STT_PROVIDER
-            if mode == "stt"
-            else settings.AI_VOICE_TTS_PROVIDER
-        ) or settings.AI_VOICE_PROVIDER
-        provider = (provider or "").strip().lower()
+    def _resolve_provider_name() -> str:
+        provider = settings.AI_VOICE_PROVIDER or "openai"
+        return provider.strip().lower()
 
-        api_key = (
-            settings.AI_VOICE_STT_API_KEY
-            if mode == "stt"
-            else settings.AI_VOICE_TTS_API_KEY
-        ) or settings.AI_VOICE_API_KEY
-        base_url = (
-            settings.AI_VOICE_STT_BASE_URL
-            if mode == "stt"
-            else settings.AI_VOICE_TTS_BASE_URL
-        ) or settings.AI_VOICE_BASE_URL
+    def _resolve_credentials(self) -> tuple[Optional[str], Optional[str]]:
+        provider = self._resolve_provider_name()
+        api_key = settings.AI_VOICE_API_KEY
+        base_url = settings.AI_VOICE_BASE_URL
 
         if (
             not api_key
@@ -78,24 +67,24 @@ class OpenAIVoiceProvider(VoiceProvider):
     def _get_client(self, mode: str):
         from openai import OpenAI
 
-        api_key, base_url = self._resolve_credentials(mode)
+        api_key, base_url = self._resolve_credentials()
         if not api_key:
             raise ValueError(f"{mode.upper()} provider 未配置 API Key")
         return OpenAI(api_key=api_key, base_url=base_url, max_retries=3)
 
     def is_available_for_stt(self) -> bool:
-        api_key, _ = self._resolve_credentials("stt")
+        api_key, _ = self._resolve_credentials()
         return bool(api_key)
 
     def is_available_for_tts(self) -> bool:
-        api_key, _ = self._resolve_credentials("tts")
+        api_key, _ = self._resolve_credentials()
         return bool(api_key)
 
     def transcribe_bytes(self, content: bytes, filename: str = "input.ogg") -> Optional[str]:
         if not content:
             return None
         if len(content) > self.MAX_TRANSCRIBE_BYTES:
-            raise ValueError("语音文件超过 25MB，无法识别")
+            raise ValueError("语音文件超过 10MB，无法识别")
 
         try:
             client = self._get_client("stt")
@@ -136,29 +125,32 @@ class OpenAIVoiceProvider(VoiceProvider):
 
 
 class VoiceHelper:
-    """统一语音入口，负责按 STT/TTS provider 路由。"""
+    """统一语音入口，负责音频能力判断与 STT/TTS provider 路由。"""
 
     _providers: Dict[str, VoiceProvider] = {
         "openai": OpenAIVoiceProvider(),
     }
+    REPLY_MODE_NATIVE = "native_voice"
+    REPLY_MODE_TEXT = "text"
 
     @classmethod
     def register_provider(cls, provider: VoiceProvider) -> None:
         cls._providers[provider.name.lower()] = provider
 
     @staticmethod
-    def _resolve_provider_name(mode: str) -> str:
-        mode = mode.lower()
-        provider = (
-            settings.AI_VOICE_STT_PROVIDER
-            if mode == "stt"
-            else settings.AI_VOICE_TTS_PROVIDER
-        ) or settings.AI_VOICE_PROVIDER
-        return (provider or "openai").strip().lower()
+    def is_enabled() -> bool:
+        """音频输入输出总开关，以显式配置为准。"""
+        return bool(settings.LLM_SUPPORT_AUDIO_INPUT_OUTPUT)
+
+    @staticmethod
+    def _resolve_provider_name() -> str:
+        """标准化当前配置的语音 provider 名称。"""
+        provider = settings.AI_VOICE_PROVIDER or "openai"
+        return provider.strip().lower()
 
     @classmethod
     def get_provider(cls, mode: str) -> Optional[VoiceProvider]:
-        provider_name = cls._resolve_provider_name(mode)
+        provider_name = cls._resolve_provider_name()
         provider = cls._providers.get(provider_name)
         if provider:
             return provider
@@ -171,6 +163,8 @@ class VoiceHelper:
 
     @classmethod
     def is_available(cls, mode: Optional[str] = None) -> bool:
+        if not cls.is_enabled():
+            return False
         if mode:
             provider = cls.get_provider(mode)
             if not provider:
@@ -183,7 +177,48 @@ class VoiceHelper:
         return cls.is_available("stt") or cls.is_available("tts")
 
     @classmethod
+    def supports_native_voice_reply(
+        cls, channel: Optional[str], source: Optional[str]
+    ) -> bool:
+        """
+        判断当前渠道是否支持原生语音消息发送。
+        """
+        if not channel:
+            return False
+
+        from app.helper.service import ServiceConfigHelper
+        from app.schemas.types import MessageChannel
+
+        try:
+            channel_enum = MessageChannel(channel)
+        except (TypeError, ValueError):
+            return False
+
+        if channel_enum == MessageChannel.Telegram:
+            return True
+        if channel_enum != MessageChannel.Wechat:
+            return False
+
+        # 企业微信 bot 模式不支持发送语音，只有应用模式可用。
+        for config in ServiceConfigHelper.get_notification_configs():
+            if config.name != source:
+                continue
+            return (config.config or {}).get("WECHAT_MODE", "app") != "bot"
+        return False
+
+    @classmethod
+    def resolve_reply_mode(cls, channel: Optional[str], source: Optional[str]) -> str:
+        """
+        仅在支持原生语音回复的渠道上发送音频，其余渠道统一回退文字。
+        """
+        if cls.supports_native_voice_reply(channel=channel, source=source):
+            return cls.REPLY_MODE_NATIVE
+        return cls.REPLY_MODE_TEXT
+
+    @classmethod
     def transcribe_bytes(cls, content: bytes, filename: str = "input.ogg") -> Optional[str]:
+        if not cls.is_enabled():
+            return None
         provider = cls.get_provider("stt")
         if not provider:
             return None
@@ -191,6 +226,8 @@ class VoiceHelper:
 
     @classmethod
     def synthesize_speech(cls, text: str) -> Optional[Path]:
+        if not cls.is_enabled():
+            return None
         provider = cls.get_provider("tts")
         if not provider:
             return None

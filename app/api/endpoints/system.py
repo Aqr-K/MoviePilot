@@ -1,9 +1,9 @@
 import asyncio
 import json
-import re
 from collections import deque
 from datetime import datetime
-from typing import Optional, Union, Annotated
+from typing import Any, Optional, Union, Annotated
+from urllib.parse import urljoin, urlparse
 
 import aiofiles
 import pillow_avif  # noqa 用于自动注册AVIF支持
@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request, Re
 from fastapi.responses import StreamingResponse
 
 from app import schemas
+from app.chain.media import MediaChain
 from app.chain.mediaserver import MediaServerChain
 from app.chain.search import SearchChain
 from app.chain.system import SystemChain
@@ -28,14 +29,13 @@ from app.db.user_oper import (
     get_current_active_superuser_async,
     get_current_active_user_async,
 )
-from app.helper.llm import LLMHelper
+from app.helper.image import ImageHelper
 from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
 from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
-from app.helper.image import ImageHelper
 from app.log import logger
 from app.scheduler import Scheduler
 from app.schemas import ConfigChangeEventData
@@ -48,14 +48,289 @@ from version import APP_VERSION
 
 router = APIRouter()
 
+_NETTEST_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+
+
+def _match_nettest_prefix(url: str, prefix: str) -> bool:
+    """
+    判断目标URL是否仍然落在允许的协议、主机、端口和路径前缀内。
+
+    nettest 会在服务端手动处理重定向，因此这里需要一个比简单 startswith
+    更严格的匹配，避免不同端口或同名路径被误判为白名单内跳转。
+    """
+    parsed_url = urlparse(url)
+    parsed_prefix = urlparse(prefix)
+    if parsed_url.scheme.lower() != parsed_prefix.scheme.lower():
+        return False
+    if (parsed_url.hostname or "").lower() != (parsed_prefix.hostname or "").lower():
+        return False
+    url_port = parsed_url.port or (443 if parsed_url.scheme.lower() == "https" else 80)
+    prefix_port = parsed_prefix.port or (443 if parsed_prefix.scheme.lower() == "https" else 80)
+    if url_port != prefix_port:
+        return False
+    return parsed_url.path.startswith(parsed_prefix.path or "/")
+
+
+def _build_nettest_rules() -> list[dict[str, Any]]:
+    """
+    构建系统内置的网络测试目标。
+
+    这里集中维护“前端允许显示哪些测试项”和“后端允许访问哪些远端地址”。
+    前端只拿到展示所需的 id/name/icon；真正的 URL、代理策略、内容校验规则
+    和重定向白名单都保留在服务端，避免再出现用户可控 SSRF。
+    """
+    github_proxy = UrlUtils.standardize_base_url(settings.GITHUB_PROXY or "")
+    pip_proxy = UrlUtils.standardize_base_url(
+        settings.PIP_PROXY or "https://pypi.org/simple/"
+    )
+    tmdb_key = settings.TMDB_API_KEY
+    tmdb_domain = settings.TMDB_API_DOMAIN or "api.themoviedb.org"
+
+    github_readme_url = "https://github.com/jxxghp/MoviePilot/blob/v2/README.md"
+    raw_readme_url = "https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/README.md"
+
+    rules = [
+        {
+            "id": "tmdb_api",
+            "name": "api.themoviedb.org",
+            "icon": "tmdb",
+            "url": f"https://api.themoviedb.org/3/movie/550?api_key={tmdb_key}",
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                "https://api.themoviedb.org/3/",
+            ],
+        },
+        {
+            "id": "tmdb_api_alt",
+            "name": "api.tmdb.org",
+            "icon": "tmdb",
+            "url": f"https://api.tmdb.org/3/movie/550?api_key={tmdb_key}",
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                "https://api.tmdb.org/3/",
+            ],
+        },
+        {
+            "id": "tmdb_web",
+            "name": "www.themoviedb.org",
+            "icon": "tmdb",
+            "url": "https://www.themoviedb.org",
+            "proxy": True,
+            "allowed_redirect_prefixes": ["https://www.themoviedb.org/"],
+        },
+        {
+            "id": "tvdb_api",
+            "name": "api.thetvdb.com",
+            "icon": "tvdb",
+            "url": "https://api.thetvdb.com/series/81189",
+            "proxy": True,
+            "allowed_redirect_prefixes": ["https://api.thetvdb.com/"],
+        },
+        {
+            "id": "fanart_api",
+            "name": "webservice.fanart.tv",
+            "icon": "fanart",
+            "url": "https://webservice.fanart.tv",
+            "proxy": True,
+            "allowed_redirect_prefixes": ["https://webservice.fanart.tv/"],
+        },
+        {
+            "id": "telegram_api",
+            "name": "api.telegram.org",
+            "icon": "telegram",
+            "url": "https://api.telegram.org",
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                "https://api.telegram.org/",
+                "https://core.telegram.org/",
+            ],
+        },
+        {
+            "id": "wechat_api",
+            "name": "qyapi.weixin.qq.com",
+            "icon": "wechat",
+            "url": "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+            "proxy": False,
+            "allowed_redirect_prefixes": ["https://qyapi.weixin.qq.com/"],
+        },
+        {
+            "id": "douban_api",
+            "name": "frodo.douban.com",
+            "icon": "douban",
+            "url": "https://frodo.douban.com",
+            "proxy": False,
+            "allowed_redirect_prefixes": [
+                "https://frodo.douban.com/",
+                "https://www.douban.com/doubanapp/frodo",
+            ],
+        },
+        {
+            "id": "slack_api",
+            "name": "slack.com",
+            "icon": "slack",
+            "url": "https://slack.com",
+            "proxy": False,
+            "allowed_redirect_prefixes": [
+                "https://slack.com/",
+                "https://www.slack.com/",
+            ],
+        },
+        {
+            "id": "pip_proxy",
+            "name": "pypi.org",
+            "icon": "python",
+            "url": f"{pip_proxy}rsa/",
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                pip_proxy,
+                "https://pypi.org/simple/",
+            ],
+            "expected_text": "pypi:repository-version",
+            "invalid_message": "PIP加速代理已失效，请检查配置",
+            "proxy_name": "PIP加速代理",
+        },
+        {
+            "id": "github_proxy_web",
+            "name": "github.com",
+            "icon": "github",
+            "url": f"{github_proxy}{github_readme_url}" if github_proxy else github_readme_url,
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                "https://github.com/",
+                *((f"{github_proxy}https://github.com/",) if github_proxy else ()),
+            ],
+            "expected_text": "MoviePilot",
+            "invalid_message": "Github加速代理已失效，请检查配置" if github_proxy else "无效响应",
+            "proxy_name": "Github加速代理" if github_proxy else "",
+            "headers": settings.GITHUB_HEADERS,
+        },
+        {
+            "id": "github_api",
+            "name": "api.github.com",
+            "icon": "github",
+            "url": "https://api.github.com",
+            "proxy": True,
+            "allowed_redirect_prefixes": ["https://api.github.com/"],
+            "headers": settings.GITHUB_HEADERS,
+        },
+        {
+            "id": "github_codeload",
+            "name": "codeload.github.com",
+            "icon": "github",
+            "url": "https://codeload.github.com",
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                "https://codeload.github.com/",
+                "https://github.com/",
+            ],
+            "headers": settings.GITHUB_HEADERS,
+        },
+        {
+            "id": "github_proxy_raw",
+            "name": "raw.githubusercontent.com",
+            "icon": "github",
+            "url": f"{github_proxy}{raw_readme_url}" if github_proxy else raw_readme_url,
+            "proxy": True,
+            "allowed_redirect_prefixes": [
+                "https://raw.githubusercontent.com/",
+                *((f"{github_proxy}https://raw.githubusercontent.com/",) if github_proxy else ()),
+            ],
+            "expected_text": "MoviePilot",
+            "invalid_message": "Github加速代理已失效，请检查配置" if github_proxy else "无效响应",
+            "proxy_name": "Github加速代理" if github_proxy else "",
+            "headers": settings.GITHUB_HEADERS,
+        },
+    ]
+    if tmdb_domain not in {"api.themoviedb.org", "api.tmdb.org"}:
+        rules.insert(
+            2,
+            {
+                "id": "tmdb_api_configured",
+                "name": tmdb_domain,
+                "icon": "tmdb",
+                "url": f"https://{tmdb_domain}/3/movie/550?api_key={tmdb_key}",
+                "proxy": True,
+                "allowed_redirect_prefixes": [
+                    f"https://{tmdb_domain}/3/",
+                ],
+            },
+        )
+    return rules
+
+def _validate_nettest_url(url: str) -> Optional[str]:
+    """
+    对实际请求地址做基础安全校验。
+
+    即使请求来自服务端内置规则，这里仍保留一层兜底校验，防止配置项被拼出
+    非 HTTPS、带凭据或不在内置目标集合中的地址。
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https":
+        return "测试地址仅支持 HTTPS"
+    if not parsed.netloc:
+        return "测试地址无效"
+    if parsed.username or parsed.password:
+        return "测试地址不支持携带账号信息"
+    if not _get_nettest_rule(url):
+        return "测试地址不在允许的测试目标列表中"
+    return None
+
+
+def _get_nettest_rule(url: Optional[str] = None, target_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """
+    根据 target_id 或历史兼容参数匹配网络测试规则。
+
+    现在的主路径是 target_id。保留 url 参数是为了兼容旧前端或未升级的调用方，
+    但匹配结果仍然只能落到服务端预定义规则上。
+    """
+    for rule in _build_nettest_rules():
+        if target_id and rule.get("id") == target_id:
+            return rule
+        if url and rule.get("url") == url:
+            return rule
+    return None
+
+
+def _is_allowed_nettest_redirect(url: str, rule: dict[str, Any]) -> bool:
+    """
+    校验重定向目标是否仍属于当前测试项允许的跳转范围。
+
+    nettest 不再信任客户端跟随重定向，而是只允许在该测试项自己的白名单内跳转，
+    这样既能兼容正常 30x，又不会把安全边界重新放开。
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    return any(
+        _match_nettest_prefix(url, prefix)
+        for prefix in rule.get("allowed_redirect_prefixes", [])
+    )
+
+
+async def _close_nettest_response(response: Any) -> None:
+    """
+    安静地关闭 httpx 响应对象。
+
+    nettest 在手动处理重定向时会提前结束部分响应读取，这里统一做资源回收，
+    避免连接泄漏干扰后续测试。
+    """
+    if response is None or not hasattr(response, "aclose"):
+        return
+    try:
+        await response.aclose()
+    except Exception as err:
+        logger.debug(f"关闭网络测试响应失败: {err}")
+
 
 async def fetch_image(
-    url: str,
-    proxy: Optional[bool] = None,
-    use_cache: bool = False,
-    if_none_match: Optional[str] = None,
-    cookies: Optional[str | dict] = None,
-    allowed_domains: Optional[set[str]] = None,
+        url: str,
+        proxy: Optional[bool] = None,
+        use_cache: bool = False,
+        if_none_match: Optional[str] = None,
+        cookies: Optional[str | dict] = None,
+        allowed_domains: Optional[set[str]] = None,
 ) -> Optional[Response]:
     """
     处理图片缓存逻辑，支持HTTP缓存和磁盘缓存
@@ -77,6 +352,7 @@ async def fetch_image(
         use_cache=use_cache,
         cookies=cookies,
     )
+
     if content:
         # 检查 If-None-Match
         etag = HashUtils.md5(content)
@@ -89,16 +365,17 @@ async def fetch_image(
             media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
             headers=headers,
         )
+    return None
 
 
 @router.get("/img/{proxy}", summary="图片代理")
 async def proxy_img(
-    imgurl: str,
-    proxy: bool = False,
-    cache: bool = False,
-    use_cookies: bool = False,
-    if_none_match: Annotated[str | None, Header()] = None,
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        imgurl: str,
+        proxy: bool = False,
+        cache: bool = False,
+        use_cookies: bool = False,
+        if_none_match: Annotated[str | None, Header()] = None,
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ) -> Response:
     """
     图片代理，可选是否使用代理服务器，支持 HTTP 缓存
@@ -127,9 +404,9 @@ async def proxy_img(
 
 @router.get("/cache/image", summary="图片缓存")
 async def cache_img(
-    url: str,
-    if_none_match: Annotated[str | None, Header()] = None,
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        url: str,
+        if_none_match: Annotated[str | None, Header()] = None,
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ) -> Response:
     """
     本地缓存图片文件，支持 HTTP 缓存，如果启用全局图片缓存，则使用磁盘缓存
@@ -182,6 +459,7 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
     info = settings.model_dump(
         include={
             "AI_AGENT_ENABLE",
+            "LLM_SUPPORT_AUDIO_INPUT_OUTPUT",
             "RECOGNIZE_SOURCE",
             "SEARCH_SOURCE",
             "AI_RECOMMEND_ENABLED",
@@ -191,6 +469,7 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
     # 智能助手总开关未开启，智能推荐状态强制返回False
     if not settings.AI_AGENT_ENABLE:
         info["AI_RECOMMEND_ENABLED"] = False
+        info["LLM_SUPPORT_AUDIO_INPUT_OUTPUT"] = False
 
     # 追加用户唯一ID和订阅分享管理权限
     share_admin = SubscribeHelper().is_admin_user()
@@ -223,7 +502,7 @@ async def get_env_setting(_: User = Depends(get_current_active_user_async)):
 
 @router.post("/env", summary="更新系统配置", response_model=schemas.Response)
 async def set_env_setting(
-    env: dict, _: User = Depends(get_current_active_superuser_async)
+        env: dict, _: User = Depends(get_current_active_superuser_async)
 ):
     """
     更新系统环境变量（仅管理员）
@@ -258,9 +537,9 @@ async def set_env_setting(
 
 @router.get("/progress/{process_type}", summary="实时进度")
 async def get_progress(
-    request: Request,
-    process_type: str,
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        request: Request,
+        process_type: str,
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ):
     """
     实时获取处理进度，返回格式为SSE
@@ -295,9 +574,9 @@ async def get_setting(key: str, _: User = Depends(get_current_active_user_async)
 
 @router.post("/setting/{key}", summary="更新系统设置", response_model=schemas.Response)
 async def set_setting(
-    key: str,
-    value: Annotated[Union[list, dict, bool, int, str] | None, Body()] = None,
-    _: User = Depends(get_current_active_superuser_async),
+        key: str,
+        value: Annotated[Union[list, dict, bool, int, str] | None, Body()] = None,
+        _: User = Depends(get_current_active_superuser_async),
 ):
     """
     更新系统设置（仅管理员）
@@ -329,30 +608,11 @@ async def set_setting(
         return schemas.Response(success=False, message=f"配置项 '{key}' 不存在")
 
 
-@router.get("/llm-models", summary="获取LLM模型列表", response_model=schemas.Response)
-async def get_llm_models(
-    provider: str,
-    api_key: str,
-    base_url: Optional[str] = None,
-    _: User = Depends(get_current_active_user_async),
-):
-    """
-    获取LLM模型列表
-    """
-    try:
-        models = await asyncio.to_thread(
-            LLMHelper().get_models, provider, api_key, base_url
-        )
-        return schemas.Response(success=True, data=models)
-    except Exception as e:
-        return schemas.Response(success=False, message=str(e))
-
-
 @router.get("/message", summary="实时消息")
 async def get_message(
-    request: Request,
-    role: Optional[str] = "system",
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        request: Request,
+        role: Optional[str] = "system",
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ):
     """
     实时获取系统消息，返回格式为SSE
@@ -375,10 +635,10 @@ async def get_message(
 
 @router.get("/logging", summary="实时日志")
 async def get_logging(
-    request: Request,
-    length: Optional[int] = 50,
-    logfile: Optional[str] = "moviepilot.log",
-    _: schemas.TokenPayload = Depends(verify_resource_token),
+        request: Request,
+        length: Optional[int] = 50,
+        logfile: Optional[str] = "moviepilot.log",
+        _: schemas.TokenPayload = Depends(verify_resource_token),
 ):
     """
     实时获取系统日志
@@ -389,7 +649,7 @@ async def get_logging(
     log_path = base_path / logfile
 
     if not await SecurityUtils.async_is_safe_path(
-        base_path=base_path, user_path=log_path, allowed_suffixes={".log"}
+            base_path=base_path, user_path=log_path, allowed_suffixes={".log"}
     ):
         raise HTTPException(status_code=404, detail="Not Found")
 
@@ -406,7 +666,7 @@ async def get_logging(
 
             # 读取历史日志
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                    log_path, mode="r", encoding="utf-8", errors="ignore"
             ) as f:
                 # 优化大文件读取策略
                 if file_size > 100 * 1024:
@@ -418,7 +678,7 @@ async def get_logging(
                     # 找到第一个完整的行
                     first_newline = content.find("\n")
                     if first_newline != -1:
-                        content = content[first_newline + 1 :]
+                        content = content[first_newline + 1:]
                 else:
                     # 小文件直接读取全部内容
                     content = await f.read()
@@ -426,7 +686,7 @@ async def get_logging(
                 # 按行分割并添加到队列，只保留非空行
                 lines = [line.strip() for line in content.splitlines() if line.strip()]
                 # 只取最后N行
-                for line in lines[-max(length, 50) :]:
+                for line in lines[-max(length, 50):]:
                     lines_queue.append(line)
 
             # 输出历史日志
@@ -435,7 +695,7 @@ async def get_logging(
 
             # 实时监听新日志
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                    log_path, mode="r", encoding="utf-8", errors="ignore"
             ) as f:
                 # 移动文件指针到文件末尾，继续监听新增内容
                 await f.seek(0, 2)
@@ -474,7 +734,7 @@ async def get_logging(
         try:
             # 使用 aiofiles 异步读取文件
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                    log_path, mode="r", encoding="utf-8", errors="ignore"
             ) as file:
                 text = await file.read()
             # 倒序输出
@@ -506,10 +766,10 @@ async def latest_version(_: schemas.TokenPayload = Depends(verify_token)):
 
 @router.get("/ruletest", summary="过滤规则测试", response_model=schemas.Response)
 def ruletest(
-    title: str,
-    rulegroup_name: str,
-    subtitle: Optional[str] = None,
-    _: schemas.TokenPayload = Depends(verify_token),
+        title: str,
+        rulegroup_name: str,
+        subtitle: Optional[str] = None,
+        _: schemas.TokenPayload = Depends(verify_token),
 ):
     """
     过滤规则测试，规则类型 1-订阅，2-洗版，3-搜索
@@ -526,7 +786,10 @@ def ruletest(
         )
 
     # 根据标题查询媒体信息
-    media_info = SearchChain().recognize_media(MetaInfo(title=title, subtitle=subtitle))
+    media_info = MediaChain().recognize_by_meta(
+        MetaInfo(title=title, subtitle=subtitle),
+        obtain_images=False,
+    )
     if not media_info:
         return schemas.Response(success=False, message="未识别到媒体信息！")
 
@@ -541,72 +804,106 @@ def ruletest(
     )
 
 
+@router.get("/nettest/targets", summary="获取网络测试目标", response_model=schemas.Response)
+async def nettest_targets(_: schemas.TokenPayload = Depends(verify_token)):
+    """
+    获取网络测试目标。
+
+    这里只返回前端渲染所需的最小信息，避免把可请求 URL、内容校验规则和
+    跳转白名单暴露给客户端。
+    """
+    return schemas.Response(
+        success=True,
+        data=[
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "icon": item["icon"],
+            }
+            for item in _build_nettest_rules()
+        ],
+    )
+
+
 @router.get("/nettest", summary="测试网络连通性")
 async def nettest(
-    url: str,
-    proxy: bool,
-    include: Optional[str] = None,
-    _: schemas.TokenPayload = Depends(verify_token),
+        target_id: Optional[str] = None,
+        url: Optional[str] = None,
+        include: Optional[str] = None,
+        _: schemas.TokenPayload = Depends(verify_token),
 ):
     """
-    测试网络连通性
+    测试内置目标的网络连通性。
+
+    `target_id` 是当前前端使用的正式入口。`url/proxy/include` 仅作兼容保留，
+    其中 `include` 不再参与客户端可控的内容匹配，具体校验由服务端规则决定。
     """
+    target = _get_nettest_rule(url=url, target_id=target_id)
+    if not target:
+        return schemas.Response(success=False, message="测试目标不存在")
     # 记录开始的毫秒数
     start_time = datetime.now()
-    headers = None
-    # 当前使用的加速代理
-    proxy_name = ""
-    if "github" in url:
-        # 这是github的连通性测试
-        headers = settings.GITHUB_HEADERS
-    if "{GITHUB_PROXY}" in url:
-        url = url.replace(
-            "{GITHUB_PROXY}", UrlUtils.standardize_base_url(settings.GITHUB_PROXY or "")
-        )
-        if settings.GITHUB_PROXY:
-            proxy_name = "Github加速代理"
-    if "{PIP_PROXY}" in url:
-        url = url.replace(
-            "{PIP_PROXY}",
-            UrlUtils.standardize_base_url(
-                settings.PIP_PROXY or "https://pypi.org/simple/"
-            ),
-        )
-        if settings.PIP_PROXY:
-            proxy_name = "PIP加速代理"
-    url = url.replace("{TMDBAPIKEY}", settings.TMDB_API_KEY)
-    result = await AsyncRequestUtils(
-        proxies=settings.PROXY if proxy else None,
-        headers=headers,
+    url = target["url"]
+    invalid_message = _validate_nettest_url(url)
+    if invalid_message:
+        logger.warning(f"拦截不安全的网络测试地址: {url}")
+        return schemas.Response(success=False, message=invalid_message)
+    if include:
+        logger.debug("nettest include 参数已忽略，改为服务端固定校验")
+
+    request_utils = AsyncRequestUtils(
+        proxies=settings.PROXY if target.get("proxy") else None,
+        headers=target.get("headers"),
         timeout=10,
         ua=settings.NORMAL_USER_AGENT,
-    ).get_res(url)
+        verify=True,
+        follow_redirects=False,
+    )
+    result = None
+    current_url = url
+    redirect_count = 0
+    while redirect_count <= 3:
+        result = await request_utils.get_res(current_url, allow_redirects=False)
+        if result is None:
+            break
+        if result.status_code not in _NETTEST_REDIRECT_STATUS_CODES:
+            break
+        location = result.headers.get("location")
+        if not location:
+            break
+        next_url = urljoin(current_url, location)
+        if not _is_allowed_nettest_redirect(next_url, target):
+            await _close_nettest_response(result)
+            logger.warning(f"拦截网络测试重定向: {current_url} -> {next_url}")
+            return schemas.Response(success=False, message="测试目标发生了未授权跳转")
+        await _close_nettest_response(result)
+        current_url = next_url
+        redirect_count += 1
+    if redirect_count > 3:
+        return schemas.Response(success=False, message="测试目标重定向次数过多")
     # 计时结束的毫秒数
     end_time = datetime.now()
     time = round((end_time - start_time).total_seconds() * 1000)
     # 计算相关秒数
     if result is None:
         return schemas.Response(
-            success=False, message=f"{proxy_name}无法连接", data={"time": time}
+            success=False,
+            message=f"{target.get('proxy_name') or target.get('name')}无法连接",
+            data={"time": time},
         )
     elif result.status_code == 200:
-        if include and not re.search(r"%s" % include, result.text, re.IGNORECASE):
-            # 通常是被加速代理跳转到其它页面了
-            logger.error(f"{url} 的响应内容不匹配包含规则 {include}")
-            if proxy_name:
-                message = f"{proxy_name}已失效，请检查配置"
-            else:
-                message = f"无效响应，不匹配 {include}"
+        expected_text = target.get("expected_text")
+        if expected_text and expected_text.lower() not in (result.text or "").lower():
             return schemas.Response(
                 success=False,
-                message=message,
+                message=target.get("invalid_message") or "无效响应",
                 data={"time": time},
             )
         return schemas.Response(success=True, data={"time": time})
     else:
-        if proxy_name:
+        if target.get("proxy_name"):
             # 加速代理失败
-            message = f"{proxy_name}已失效，错误码：{result.status_code}"
+            message = f"{target['proxy_name']}已失效，错误码：{result.status_code}"
         else:
             message = f"错误码：{result.status_code}"
             if "github" in url:
@@ -657,6 +954,30 @@ def restart_system(_: User = Depends(get_current_active_superuser)):
     global_vars.stop_system()
     # 执行重启
     ret, msg = SystemHelper.restart()
+    if not ret:
+        global_vars.resume_system()
+    return schemas.Response(success=ret, message=msg)
+
+
+@router.post("/upgrade", summary="升级并重启系统", response_model=schemas.Response)
+def upgrade_system(
+        mode: Annotated[str | None, Body()] = None,
+        _: User = Depends(get_current_active_superuser),
+):
+    """
+    触发系统升级并重启（仅管理员）
+
+    - 当前已开启自动升级时：直接重启，由启动流程完成升级。
+    - 当前未开启自动升级时：写入一次性升级标记，本次重启后仅执行一次升级。
+    """
+    if not SystemHelper.can_restart():
+        return schemas.Response(success=False, message="当前运行环境不支持升级操作！")
+
+    # 标识停止事件
+    global_vars.stop_system()
+    ret, msg = SystemHelper.upgrade(mode=mode or "release")
+    if not ret:
+        global_vars.resume_system()
     return schemas.Response(success=ret, message=msg)
 
 

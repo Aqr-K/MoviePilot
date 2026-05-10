@@ -29,7 +29,7 @@ class SearchPersonCreditsTool(MoviePilotTool):
         """根据搜索参数生成友好的提示消息"""
         person_id = kwargs.get("person_id", "")
         source = kwargs.get("source", "")
-        return f"正在搜索人物参演作品: {source} ID {person_id}"
+        return f"搜索人物参演作品: {source} ID {person_id}"
 
     async def run(self, person_id: int, source: str, page: Optional[int] = 1, **kwargs) -> str:
         logger.info(f"执行工具: {self.name}, 参数: person_id={person_id}, source={source}, page={page}")
