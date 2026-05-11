@@ -1351,7 +1351,8 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"安装依赖项时发生错误：{e}")
             return False, f"安装依赖项时发生错误：{e}"
 
-    def __get_installed_packages(self) -> Dict[str, Version]:
+    @classmethod
+    def __get_installed_packages(cls) -> Dict[str, Version]:
         """
         获取已安装的包及其版本
         使用 importlib.metadata 获取当前环境中已安装的包，标准化包名并转换版本信息
@@ -1364,7 +1365,7 @@ class PluginHelper(metaclass=WeakSingleton):
                 name = dist.metadata.get("Name")
                 if not name:
                     continue
-                pkg_name = self.__standardize_pkg_name(name)
+                pkg_name = cls.__standardize_pkg_name(name)
                 version_str = dist.metadata.get("Version") or getattr(dist, "version", None)
                 if not version_str:
                     continue
