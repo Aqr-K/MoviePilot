@@ -9,6 +9,7 @@ from app.modules.jellyfin.jellyfin import Jellyfin
 from app.modules.plex.plex import Plex
 from app.modules.trimemedia.trimemedia import TrimeMedia
 from app.modules.ugreen.ugreen import Ugreen
+from app.modules.zspace.zspace import ZSpace
 
 
 class _FakeResponse:
@@ -151,6 +152,31 @@ class MediaServerTvStaleItemIdTest(unittest.TestCase):
         self.assertEqual(item_id, "new-series-id")
         self.assertEqual(episodes, {1: [1]})
         client._Jellyfin__get_jellyfin_series_id_by_name.assert_called_once_with("测试剧集", "2026")
+
+    def test_zspace_tv_episodes_fallback_when_cached_item_id_missing(self):
+        """极影视缓存ID失效时，应重新搜索剧集ID后再查询集信息。"""
+        client = ZSpace.__new__(ZSpace)
+        client._host = "http://zspace.local/"
+        client._apikey = "api-key"
+        client.user = "user-id"
+        client.get_iteminfo = Mock(side_effect=[None, SimpleNamespace(tmdbid=12345)])
+        client._Emby__get_emby_series_id_by_name = Mock(return_value="new-series-id")
+
+        with patch("app.modules.emby.emby.RequestUtils") as request_utils_cls:
+            request_utils_cls.return_value.get_res.return_value = _FakeResponse({
+                "Items": [{"ParentIndexNumber": 1, "IndexNumber": 1}]
+            })
+
+            item_id, episodes = client.get_tv_episodes(
+                item_id="old-series-id",
+                title="测试剧集",
+                year="2026",
+                tmdb_id=12345,
+            )
+
+        self.assertEqual(item_id, "new-series-id")
+        self.assertEqual(episodes, {1: [1]})
+        client._Emby__get_emby_series_id_by_name.assert_called_once_with("测试剧集", "2026")
 
     def test_ugreen_tv_episodes_fallback_when_cached_item_id_missing(self):
         """绿联缓存ID失效时，应重新搜索剧集ID后再查询集信息。"""

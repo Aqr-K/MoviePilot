@@ -1685,6 +1685,7 @@ def _collect_media_server_config() -> Optional[dict[str, Any]]:
         {
             "skip": "跳过",
             "emby": "Emby",
+            "zspace": "极影视",
             "jellyfin": "Jellyfin",
             "plex": "Plex",
         },
@@ -1696,6 +1697,7 @@ def _collect_media_server_config() -> Optional[dict[str, Any]]:
     config_name = _prompt_text("媒体服务器名称", default=server_type)
     default_host = {
         "emby": "http://127.0.0.1:8096",
+        "zspace": "http://127.0.0.1:8096",
         "jellyfin": "http://127.0.0.1:8096",
         "plex": "http://127.0.0.1:32400",
     }[server_type]
@@ -1706,6 +1708,12 @@ def _collect_media_server_config() -> Optional[dict[str, Any]]:
         config = {
             "host": host,
             "token": _prompt_text("Plex Token", secret=True),
+        }
+    elif server_type == "zspace":
+        config = {
+            "host": host,
+            "username": _prompt_text("极影视 用户名"),
+            "password": _prompt_text("极影视 密码", secret=True),
         }
     else:
         config = {

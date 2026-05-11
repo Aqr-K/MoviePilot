@@ -332,6 +332,8 @@ class DownloaderType(Enum):
 class MediaServerType(Enum):
     # Emby
     Emby = "Emby"
+    # 极影视
+    ZSpace = "ZSpace"
     # Jellyfin
     Jellyfin = "Jellyfin"
     # Plex
