@@ -77,11 +77,11 @@ class ZSpace:
             self.folders = []
             self.serverid = None
             return False
-        self.folders = self.get_emby_folders()
+        self.folders = self.get_library_folders()
         self.serverid = self.get_server_id()
         return True
 
-    def get_emby_folders(self) -> List[dict]:
+    def get_library_folders(self) -> List[dict]:
         """
         获取极影视媒体库路径列表
         """
@@ -102,7 +102,7 @@ class ZSpace:
             logger.error(f"连接Library/SelectableMediaFolders 出错：{e}")
             return []
 
-    def get_emby_virtual_folders(self) -> List[dict]:
+    def get_virtual_folders(self) -> List[dict]:
         """
         获取极影视媒体库所有路径列表（包含共享路径）
         """
@@ -116,7 +116,7 @@ class ZSpace:
             res = RequestUtils().get_res(url, params)
             if res:
                 library_items = res.json().get("Items")
-                librarys = []
+                libraries = []
                 for library_item in library_items or []:
                     library_id = library_item.get('ItemId')
                     library_name = library_item.get('Name')
@@ -129,12 +129,12 @@ class ZSpace:
                             library_paths.append(path.get('Path'))
 
                     if library_name and library_paths:
-                        librarys.append({
+                        libraries.append({
                             'Id': library_id,
                             'Name': library_name,
                             'Path': library_paths
                         })
-                return librarys
+                return libraries
             else:
                 logger.error("Library/VirtualFolders/Query 未获取到返回数据")
                 return []
@@ -142,7 +142,7 @@ class ZSpace:
             logger.error(f"连接Library/VirtualFolders/Query 出错：{e}")
             return []
 
-    def __get_emby_librarys(self, username: Optional[str] = None) -> List[dict]:
+    def __get_library_views(self, username: Optional[str] = None) -> List[dict]:
         """
         获取极影视媒体库列表
         """
@@ -175,7 +175,7 @@ class ZSpace:
         if not self._host or not self._apikey:
             return []
         libraries = []
-        for library in self.__get_emby_librarys(username) or []:
+        for library in self.__get_library_views(username) or []:
             if hidden and self._sync_libraries and "all" not in self._sync_libraries \
                     and library.get("Id") not in self._sync_libraries:
                 continue
@@ -315,7 +315,7 @@ class ZSpace:
             logger.error(f"连接Items/Counts出错：{e}")
             return schemas.Statistic()
 
-    def __get_emby_series_id_by_name(self, name: str, year: str) -> Optional[str]:
+    def __get_series_id_by_name(self, name: str, year: str) -> Optional[str]:
         """
         根据名称查询极影视中剧集的 SeriesId
         :param name: 标题
@@ -414,7 +414,7 @@ class ZSpace:
             return None, None
         cached_item_id = item_id
         if not item_id:
-            item_id = self.__get_emby_series_id_by_name(title, year)
+            item_id = self.__get_series_id_by_name(title, year)
             if item_id is None:
                 return None, None
             if not item_id:
@@ -422,7 +422,7 @@ class ZSpace:
         item_info = self.get_iteminfo(item_id)
         if not item_info and cached_item_id and title:
             logger.warning(f"极影视缓存的电视剧媒体ID {cached_item_id} 已失效，尝试按标题重新搜索：{title}")
-            item_id = self.__get_emby_series_id_by_name(title, year)
+            item_id = self.__get_series_id_by_name(title, year)
             if item_id is None:
                 return None, None
             if not item_id:
@@ -516,7 +516,7 @@ class ZSpace:
             logger.error(f"连接Items/Id/Images出错：{e}")
             return None
 
-    def __refresh_emby_library_by_id(self, item_id: str) -> bool:
+    def __refresh_library_by_id(self, item_id: str) -> bool:
         """
         通知极影视刷新一个项目的媒体库
         """
@@ -569,18 +569,18 @@ class ZSpace:
         logger.info("开始刷新极影视媒体库...")
         library_ids = []
         for item in items:
-            library_id = self.__get_emby_library_id_by_item(item)
+            library_id = self.__get_library_id_by_item(item)
             if library_id and library_id not in library_ids:
                 library_ids.append(library_id)
         if "/" in library_ids:
             return self.refresh_root_library()
         for library_id in library_ids:
             if library_id != "/":
-                return self.__refresh_emby_library_by_id(library_id)
+                return self.__refresh_library_by_id(library_id)
         logger.info("极影视媒体库刷新完成")
         return True
 
-    def __get_emby_library_id_by_item(self, item: schemas.RefreshMediaItem) -> Optional[str]:
+    def __get_library_id_by_item(self, item: schemas.RefreshMediaItem) -> Optional[str]:
         """
         根据媒体信息查询在哪个媒体库，返回要刷新的位置的ID
         :param item: {title, year, type, category, target_path}
@@ -588,7 +588,7 @@ class ZSpace:
         if not item.title or not item.year or not item.type:
             return None
         if item.type != MediaType.MOVIE.value:
-            item_id = self.__get_emby_series_id_by_name(item.title, item.year)
+            item_id = self.__get_series_id_by_name(item.title, item.year)
             if item_id:
                 return item_id
         else:
@@ -1009,7 +1009,7 @@ class ZSpace:
         if not self._host or not self._apikey:
             return []
         library_folders = []
-        for library in self.get_emby_virtual_folders() or []:
+        for library in self.get_virtual_folders() or []:
             if self._sync_libraries and library.get("Id") not in self._sync_libraries:
                 continue
             library_folders += [folder for folder in library.get("Path")]
