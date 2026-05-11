@@ -1,4 +1,5 @@
 import json
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -232,6 +233,126 @@ class WechatClawBotTest(unittest.TestCase):
         mock_client.send_text.assert_called_once_with(
             to_user="wxid_user_1",
             text="测试标题\n\n测试正文\n\n查看详情：https://example.com/detail",
+            context_token=None,
+        )
+
+    def test_wechatclawbot_send_msg_prefers_text_when_text_and_image_coexist(self):
+        state = {
+            "bot_token": None,
+            "account_id": None,
+            "sync_buf": None,
+            "qrcode": {},
+            "known_targets": {},
+            "user_context_tokens": {},
+            "base_url": "https://ilinkai.weixin.qq.com",
+        }
+        with patch.object(WechatClawBot, "_load_state", return_value=state):
+            bot = WechatClawBot(name="wechatclawbot-test", auto_start_polling=False)
+
+        mock_client = MagicMock()
+        mock_client.send_text.return_value = True
+        mock_client.send_image_png.return_value = True
+        mock_client.send_image_text_png.return_value = True
+
+        with (
+            patch.object(bot, "_build_client", return_value=mock_client),
+            patch.object(bot, "_load_remote_image", return_value=b"image-bytes") as mock_load_image,
+        ):
+            result = bot.send_msg(
+                title="测试标题",
+                text="测试正文",
+                image="https://example.com/test.png",
+                userid="wxid_user_1",
+            )
+
+        self.assertTrue(result)
+        mock_load_image.assert_not_called()
+        mock_client.send_text.assert_called_once_with(
+            to_user="wxid_user_1",
+            text="测试标题\n\n测试正文",
+            context_token=None,
+        )
+        mock_client.send_image_png.assert_not_called()
+        mock_client.send_image_text_png.assert_not_called()
+
+    def test_wechatclawbot_send_file_prefers_image_when_image_file_has_caption(self):
+        state = {
+            "bot_token": None,
+            "account_id": None,
+            "sync_buf": None,
+            "qrcode": {},
+            "known_targets": {},
+            "user_context_tokens": {},
+            "base_url": "https://ilinkai.weixin.qq.com",
+        }
+        with patch.object(WechatClawBot, "_load_state", return_value=state):
+            bot = WechatClawBot(name="wechatclawbot-test", auto_start_polling=False)
+
+        mock_client = MagicMock()
+        mock_client.send_text.return_value = True
+        mock_client.send_image_png.return_value = True
+
+        with tempfile.NamedTemporaryFile(suffix=".png") as image_file:
+            image_file.write(b"\x89PNG\r\n\x1a\nfake-png")
+            image_file.flush()
+            with (
+                patch.object(bot, "_build_client", return_value=mock_client),
+                patch.object(bot, "_guess_mime_type", return_value="image/png"),
+            ):
+                result = bot.send_file(
+                    file_path=image_file.name,
+                    title="图片标题",
+                    text="图片说明",
+                    userid="wxid_user_1",
+                )
+
+        self.assertTrue(result)
+        mock_client.send_text.assert_not_called()
+        mock_client.send_image_png.assert_called_once_with(
+            to_user="wxid_user_1",
+            image_bytes=b"\x89PNG\r\n\x1a\nfake-png",
+            context_token=None,
+        )
+
+    def test_wechatclawbot_send_file_prefers_file_when_generic_file_has_caption(self):
+        state = {
+            "bot_token": None,
+            "account_id": None,
+            "sync_buf": None,
+            "qrcode": {},
+            "known_targets": {},
+            "user_context_tokens": {},
+            "base_url": "https://ilinkai.weixin.qq.com",
+        }
+        with patch.object(WechatClawBot, "_load_state", return_value=state):
+            bot = WechatClawBot(name="wechatclawbot-test", auto_start_polling=False)
+
+        mock_client = MagicMock()
+        mock_client.send_text.return_value = True
+        mock_client.send_file_bytes.return_value = True
+
+        with tempfile.NamedTemporaryFile(suffix=".txt") as text_file:
+            text_file.write(b"plain-text")
+            text_file.flush()
+            with (
+                patch.object(bot, "_build_client", return_value=mock_client),
+                patch.object(bot, "_guess_mime_type", return_value="text/plain"),
+            ):
+                result = bot.send_file(
+                    file_path=text_file.name,
+                    file_name="report.txt",
+                    title="文件标题",
+                    text="文件说明",
+                    userid="wxid_user_1",
+                )
+
+        self.assertTrue(result)
+        mock_client.send_text.assert_not_called()
+        mock_client.send_file_bytes.assert_called_once_with(
+            to_user="wxid_user_1",
+            file_bytes=b"plain-text",
+            file_name="report.txt",
+            mime_type="text/plain",
             context_token=None,
         )
 

@@ -31,6 +31,7 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
 
     @staticmethod
     def get_name() -> str:
+        """获取模块名称。"""
         return "微信 ClawBot"
 
     @staticmethod
@@ -68,10 +69,12 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
         return True, ""
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
+        """初始化模块设置。"""
         pass
 
     @staticmethod
     def _load_json(body: Any) -> Optional[dict]:
+        """将内容解析为 JSON 字典。"""
         if isinstance(body, dict):
             payload = body
         elif isinstance(body, bytes):
@@ -84,6 +87,7 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
 
     @staticmethod
     def _normalize_audio_refs(audio_refs: Any) -> Optional[List[str]]:
+        """标准化音频引用列表。"""
         if not audio_refs:
             return None
         if not isinstance(audio_refs, list):
@@ -93,6 +97,7 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
 
     @staticmethod
     def _normalize_files(files: Any) -> Optional[List[CommingMessage.MessageAttachment]]:
+        """标准化文件附件列表。"""
         if not files:
             return None
         if not isinstance(files, list):
