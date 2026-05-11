@@ -45,6 +45,46 @@ class ZSpace:
         if not self.reconnect():
             logger.error(f"请检查极影视服务端地址 {host}")
 
+    @staticmethod
+    def __get_client_authorization() -> str:
+        """
+        构造客户端标识头。
+
+        极影视兼容 Emby 登录接口时，需要携带客户端、设备和版本信息，
+        这里统一复用一份固定头，避免各接口散落重复字符串。
+        """
+        return 'MediaBrowser Client="MoviePilot", Device="requests", DeviceId="1", Version="1.0.0"'
+
+    @staticmethod
+    def __get_user_authorization(user_id: Union[str, int]) -> str:
+        """
+        构造用户态授权头。
+
+        保留这个组装函数，便于后续需要显式传递用户态 Authorization 头时复用。
+        当前极影视兼容 Emby 实测主要依赖 `X-Emby-Token`，这里不默认附带该头，
+        避免部分实现把非 GUID 的用户 ID 校验为非法格式。
+        """
+        return f'Emby UserId="{user_id}", Client="MoviePilot", Device="requests", DeviceId="1", Version="1.0.0"'
+
+    def __request_utils(self,
+                        timeout: Optional[int] = None,
+                        include_token: bool = True,
+                        headers: Optional[dict] = None) -> RequestUtils:
+        """
+        统一构造极影视请求客户端。
+
+        极影视这里使用用户名密码登录获取 AccessToken，后续 API 请求优先通过
+        `X-Emby-Token` 请求头传递 token，而不是把登录 token 当成静态 API Key。
+        """
+        request_headers = {
+            "X-Emby-Authorization": self.__get_client_authorization()
+        }
+        if include_token and self._apikey:
+            request_headers["X-Emby-Token"] = self._apikey
+        if headers:
+            request_headers.update(headers)
+        return RequestUtils(headers=request_headers, timeout=timeout)
+
     def is_inactive(self) -> bool:
         """
         判断是否需要重连
@@ -88,11 +128,8 @@ class ZSpace:
         if not self._host or not self._apikey:
             return []
         url = f"{self._host}emby/Library/SelectableMediaFolders"
-        params = {
-            'api_key': self._apikey
-        }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 return res.json()
             else:
@@ -109,11 +146,8 @@ class ZSpace:
         if not self._host or not self._apikey:
             return []
         url = f"{self._host}emby/Library/VirtualFolders/Query"
-        params = {
-            'api_key': self._apikey
-        }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 library_items = res.json().get("Items")
                 libraries = []
@@ -155,9 +189,8 @@ class ZSpace:
         if not user:
             return []
         url = f"{self._host}emby/Users/{user}/Views"
-        params = {"api_key": self._apikey}
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 return res.json().get("Items")
             else:
@@ -207,12 +240,9 @@ class ZSpace:
         """
         if not self._host or not self._apikey:
             return None
-        url = f"{self._host}Users"
-        params = {
-            "api_key": self._apikey
-        }
+        url = f"{self._host}emby/Users"
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 users = res.json()
                 if isinstance(users, list):
@@ -252,12 +282,9 @@ class ZSpace:
         """
         if not self._host or not self._apikey:
             return None
-        url = f"{self._host}System/Info"
-        params = {
-            'api_key': self._apikey
-        }
+        url = f"{self._host}emby/System/Info"
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 return res.json().get("Id")
             else:
@@ -273,11 +300,8 @@ class ZSpace:
         if not self._host or not self._apikey:
             return 0
         url = f"{self._host}emby/Users/Query"
-        params = {
-            'api_key': self._apikey
-        }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 count = res.json().get("TotalRecordCount")
                 if count:
@@ -296,11 +320,8 @@ class ZSpace:
         if not self._host or not self._apikey:
             return schemas.Statistic()
         url = f"{self._host}emby/Items/Counts"
-        params = {
-            'api_key': self._apikey
-        }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res:
                 result = res.json()
                 return schemas.Statistic(
@@ -332,11 +353,10 @@ class ZSpace:
             "Recursive": "true",
             "SearchTerm": name,
             "Limit": 10,
-            "IncludeSearchTypes": "false",
-            "api_key": self._apikey
+            "IncludeSearchTypes": "false"
         }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url, params=params)
             if res:
                 res_items = res.json().get("Items")
                 if res_items:
@@ -370,11 +390,10 @@ class ZSpace:
             "Recursive": "true",
             "SearchTerm": title,
             "Limit": 10,
-            "IncludeSearchTypes": "false",
-            "api_key": self._apikey
+            "IncludeSearchTypes": "false"
         }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url, params=params)
             if res:
                 res_items = res.json().get("Items")
                 if res_items:
@@ -439,10 +458,9 @@ class ZSpace:
             url = f"{self._host}emby/Shows/{item_id}/Episodes"
             params = {
                 "Season": season,
-                "IsMissing": "false",
-                "api_key": self._apikey
+                "IsMissing": "false"
             }
-            res_json = RequestUtils().get_res(url, params)
+            res_json = self.__request_utils().get_res(url, params=params)
             if res_json:
                 tv_item = res_json.json()
                 res_items = tv_item.get("Items")
@@ -475,11 +493,8 @@ class ZSpace:
         if not self._host or not self._apikey:
             return None
         url = f"{self._host}emby/Items/{item_id}/RemoteImages"
-        params = {
-            "api_key": self._apikey
-        }
         try:
-            res = RequestUtils(timeout=10).get_res(url, params)
+            res = self.__request_utils(timeout=10).get_res(url)
             if res:
                 images = res.json().get("Images")
                 if images:
@@ -503,9 +518,9 @@ class ZSpace:
             logger.error("极影视外网播放地址未能获取或为空")
             return None
 
-        url = f"{self._playhost}Items/{item_id}/Images/{image_type}"
+        url = f"{self._playhost}emby/Items/{item_id}/Images/{image_type}"
         try:
-            res = RequestUtils().get_res(url)
+            res = self.__request_utils().get_res(url)
             if res and res.status_code != 404:
                 logger.info(f"影片图片链接:{res.url}")
                 return res.url
@@ -524,11 +539,10 @@ class ZSpace:
             return False
         url = f"{self._host}emby/Items/{item_id}/Refresh"
         params = {
-            "Recursive": "true",
-            "api_key": self._apikey
+            "Recursive": "true"
         }
         try:
-            res = RequestUtils().post_res(url, params=params)
+            res = self.__request_utils().post_res(url, params=params)
             if res:
                 return True
             else:
@@ -545,11 +559,8 @@ class ZSpace:
         if not self._host or not self._apikey:
             return False
         url = f"{self._host}emby/Library/Refresh"
-        params = {
-            "api_key": self._apikey
-        }
         try:
-            res = RequestUtils().post_res(url, params=params)
+            res = self.__request_utils().post_res(url)
             if res:
                 return True
             else:
@@ -662,11 +673,8 @@ class ZSpace:
         if not self._host or not self._apikey or not self.user:
             return None
         url = f"{self._host}emby/Users/{self.user}/Items/{itemid}"
-        params = {
-            "api_key": self._apikey
-        }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url)
             if res and res.status_code == 200:
                 iteminfo = self.__format_item_info(res.json())
                 return iteminfo
@@ -690,7 +698,6 @@ class ZSpace:
         url = f"{self._host}emby/Users/{self.user}/Items"
         params = {
             "ParentId": parent,
-            "api_key": self._apikey,
             "Fields": "ProviderIds,OriginalTitle,ProductionYear,Path,UserDataPlayCount,UserDataLastPlayedDate,ParentId"
         }
         if limit is not None and limit != -1:
@@ -699,7 +706,7 @@ class ZSpace:
                 "Limit": limit
             })
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url, params=params)
             if not res or res.status_code != 200:
                 return None
             items = res.json().get("Items") or []
@@ -807,7 +814,8 @@ class ZSpace:
 
     def get_data(self, url: str) -> Optional[Response]:
         """
-        自定义URL从媒体服务器获取数据，其中[HOST]、[APIKEY]、[USER]会被替换成实际的值
+        自定义URL从媒体服务器获取数据，其中[HOST]、[APIKEY]、[USER]会被替换成实际的值。
+        极影视这里的 [APIKEY] 实际替换为登录返回的 AccessToken，以兼容现有占位符。
         :param url: 请求地址
         """
         if not self._host or not self._apikey:
@@ -816,14 +824,15 @@ class ZSpace:
             .replace("[APIKEY]", self._apikey or '') \
             .replace("[USER]", self.user or '')
         try:
-            return RequestUtils(content_type="application/json").get_res(url=url)
+            return self.__request_utils(headers={"Content-Type": "application/json"}).get_res(url=url)
         except Exception as e:
             logger.error(f"连接极影视出错：{e}")
             return None
 
     def post_data(self, url: str, data: Optional[str] = None, headers: dict = None) -> Optional[Response]:
         """
-        自定义URL从媒体服务器获取数据，其中[HOST]、[APIKEY]、[USER]会被替换成实际的值
+        自定义URL从媒体服务器获取数据，其中[HOST]、[APIKEY]、[USER]会被替换成实际的值。
+        极影视这里的 [APIKEY] 实际替换为登录返回的 AccessToken，以兼容现有占位符。
         :param url: 请求地址
         :param data: 请求数据
         :param headers: 请求头
@@ -834,9 +843,7 @@ class ZSpace:
             .replace("[APIKEY]", self._apikey or '') \
             .replace("[USER]", self.user or '')
         try:
-            return RequestUtils(
-                headers=headers,
-            ).post_res(url=url, data=data)
+            return self.__request_utils(headers=headers).post_res(url=url, data=data)
         except Exception as e:
             logger.error(f"连接极影视出错：{e}")
             return None
@@ -864,7 +871,7 @@ class ZSpace:
             host_url = self._playhost or self._host
         else:
             host_url = self._host
-        return f"{host_url}Items/{item_id}/" \
+        return f"{host_url}emby/Items/{item_id}/" \
                f"Images/Backdrop?tag={image_tag}&api_key={self._apikey}"
 
     def __get_local_image_by_id(self, item_id: str) -> str:
@@ -874,7 +881,7 @@ class ZSpace:
         """
         if not self._host or not self._apikey:
             return ""
-        return f"{self._host}Items/{item_id}/Images/Primary"
+        return f"{self._host}emby/Items/{item_id}/Images/Primary?api_key={self._apikey}"
 
     def get_resume(self, num: Optional[int] = 12, username: Optional[str] = None) -> Optional[
         List[schemas.MediaServerPlayItem]]:
@@ -889,15 +896,14 @@ class ZSpace:
             user = self.user
         if not user:
             return []
-        url = f"{self._host}Users/{user}/Items/Resume"
+        url = f"{self._host}emby/Users/{user}/Items/Resume"
         params = {
             "Limit": 100,
             "MediaTypes": "Video",
-            "Fields": "ProductionYear,Path",
-            "api_key": self._apikey,
+            "Fields": "ProductionYear,Path"
         }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url, params=params)
             if res:
                 result = res.json().get("Items") or []
                 ret_resume = []
@@ -960,15 +966,14 @@ class ZSpace:
             user = self.user
         if not user:
             return []
-        url = f"{self._host}Users/{user}/Items/Latest"
+        url = f"{self._host}emby/Users/{user}/Items/Latest"
         params = {
             "Limit": 100,
             "MediaTypes": "Video",
-            "Fields": "ProductionYear,Path,BackdropImageTags",
-            "api_key": self._apikey
+            "Fields": "ProductionYear,Path,BackdropImageTags"
         }
         try:
-            res = RequestUtils().get_res(url, params)
+            res = self.__request_utils().get_res(url, params=params)
             if res:
                 result = res.json() or []
                 ret_latest = []
@@ -1023,14 +1028,13 @@ class ZSpace:
             return None, None
         url = f"{self._host}emby/Users/AuthenticateByName"
         try:
-            res = RequestUtils(headers={
-                'X-Emby-Authorization': 'MediaBrowser Client="MoviePilot", '
-                                        'Device="requests", '
-                                        'DeviceId="1", '
-                                        'Version="1.0.0"',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }).post_res(
+            res = self.__request_utils(
+                include_token=False,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            ).post_res(
                 url=url,
                 data=json.dumps({
                     "Username": username,
@@ -1055,20 +1059,19 @@ class ZSpace:
         """
         if not self._host or not self._apikey:
             return None
-        url = f"{self._host}emby/Users/Me"
-        params = {
-            "api_key": self._apikey
-        }
-        try:
-            res = RequestUtils().get_res(url, params)
-            if res:
-                result = res.json()
-                if isinstance(result, dict):
-                    return result
-            else:
-                logger.error("Users/Me 未获取到返回数据")
-        except Exception as e:
-            logger.error(f"连接Users/Me出错：{e}")
+        urls = []
+        if self.user:
+            urls.append(f"{self._host}emby/Users/{self.user}")
+        urls.append(f"{self._host}emby/Users/Me")
+        for url in urls:
+            try:
+                res = self.__request_utils().get_res(url)
+                if res:
+                    result = res.json()
+                    if isinstance(result, dict):
+                        return result
+            except Exception as e:
+                logger.error(f"连接 {url} 出错：{e}")
         return None
 
     def __get_current_user_id(self) -> Optional[str]:
