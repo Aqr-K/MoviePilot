@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from app.core.cache import TTLCache
 from app.core.context import Context, MediaInfo
@@ -295,7 +295,3 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
                     title=message.title,
                     link=message.link,
                 )
-
-    def register_commands(self, commands: Dict[str, dict]):
-        """微信 ClawBot 不支持原生菜单命令，统一走文本交互。"""
-        logger.debug("微信 ClawBot 不支持原生菜单命令，跳过命令注册")

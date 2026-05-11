@@ -56,6 +56,7 @@ _SharedTransportKey = Tuple[
     int,                    # max_connections
     int,                    # keepalive_expiry
 ]
+
 # 共享底层 transport 桶，按事件循环和配置区分，支持 LRU 淘汰
 _shared_async_transports: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, collections.OrderedDict[_SharedTransportKey, httpx.AsyncHTTPTransport]] = weakref.WeakKeyDictionary()
 # 不同线程各自驱动的事件循环并发首次写入外层弱字典时，需要互斥保护

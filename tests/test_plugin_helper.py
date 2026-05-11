@@ -7,6 +7,8 @@ from types import ModuleType
 from unittest import TestCase
 from unittest.mock import patch
 
+from packaging.version import Version
+
 
 class PluginHelperTest(TestCase):
 
@@ -117,3 +119,107 @@ class PluginHelperTest(TestCase):
 
         self.assertEqual([], errors)
         self.assertEqual(1, max_active_installs)
+
+    def test_pip_install_rejects_conflicting_runtime_dependency(self):
+        """
+        验证插件如果试图覆盖主程序核心依赖，会在真正执行 pip 前被直接拒绝。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            requirements_file = Path(temp_dir) / "requirements.txt"
+            requirements_file.write_text("fastapi<0.1\n", encoding="utf-8")
+            with patch.object(
+                    PluginHelper,
+                    "_PluginHelper__get_installed_packages",
+                    return_value={"fastapi": Version("0.115.14")}
+            ):
+                success, message = PluginHelper.pip_install_with_fallback(requirements_file)
+
+        self.assertFalse(success)
+        self.assertIn("主程序核心依赖", message)
+        self.assertIn("fastapi", message)
+
+    def test_pip_install_uses_runtime_constraints_file(self):
+        """
+        验证插件依赖安装会固定当前运行环境已安装版本，防止共享 venv 被升级或降级。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        seen_constraints = []
+
+        def fake_execute(cmd):
+            if cmd[:4] == [sys.executable, "-m", "pip", "install"]:
+                constraint_index = cmd.index("-c") + 1
+                constraint_file = Path(cmd[constraint_index])
+                seen_constraints.append(constraint_file)
+                self.assertTrue(constraint_file.exists())
+                self.assertIn("fastapi==0.115.14", constraint_file.read_text(encoding="utf-8"))
+                return True, "ok"
+            return True, "ok"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            requirements_file = Path(temp_dir) / "requirements.txt"
+            requirements_file.write_text("demo-package\n", encoding="utf-8")
+            with patch.object(
+                    PluginHelper,
+                    "_PluginHelper__get_installed_packages",
+                    return_value={"fastapi": Version("0.115.14")}
+            ):
+                with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
+                    success, message = PluginHelper.pip_install_with_fallback(requirements_file)
+
+        self.assertTrue(success)
+        self.assertEqual("ok", message)
+        self.assertEqual(1, len(seen_constraints))
+        self.assertFalse(seen_constraints[0].exists())
+
+    def test_pip_install_repairs_runtime_when_healthcheck_fails(self):
+        """
+        验证插件依赖安装后若破坏运行环境，会先恢复主程序依赖，再向上层返回失败。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        repair_commands = []
+        healthcheck_failed = False
+
+        def fake_execute(cmd):
+            nonlocal healthcheck_failed
+            if cmd[:4] == [sys.executable, "-m", "pip", "install"]:
+                if "-c" not in cmd:
+                    repair_commands.append(cmd)
+                    return True, "repaired"
+                return True, "installed"
+            if cmd[:4] == [sys.executable, "-m", "pip", "check"]:
+                if not healthcheck_failed:
+                    healthcheck_failed = True
+                    return False, "broken"
+                return True, "healthy"
+            if len(cmd) >= 3 and cmd[1] == "-c":
+                return True, "probe ok"
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            requirements_file = Path(temp_dir) / "requirements.txt"
+            requirements_file.write_text("demo-package\n", encoding="utf-8")
+            with patch.object(
+                    PluginHelper,
+                    "_PluginHelper__get_installed_packages",
+                    return_value={"fastapi": Version("0.115.14")}
+            ):
+                with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
+                    success, message = PluginHelper.pip_install_with_fallback(requirements_file)
+
+        self.assertFalse(success)
+        self.assertIn("已自动恢复主程序依赖", message)
+        self.assertEqual(1, len(repair_commands))
+        self.assertIn("runtime-constraints-", repair_commands[0][-1])
