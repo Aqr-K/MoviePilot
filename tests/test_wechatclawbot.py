@@ -108,6 +108,33 @@ class WechatClawBotTest(unittest.TestCase):
         self.assertEqual(client.sync_buf, "")
         self.assertEqual(len(messages), 1)
 
+    def test_ilink_poll_updates_accepts_canonical_payload_without_explicit_success_flag(self):
+        client = ILinkClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            bot_token="token",
+            sync_buf="cursor-old",
+        )
+        response = MagicMock()
+        response.json.return_value = {
+            "sync_buf": "cursor-new",
+            "msgs": [
+                {
+                    "message_id": "msg-1002",
+                    "from_user_id": "wxid_user_2",
+                    "item_list": [{"type": 1, "text_item": {"text": "收到"}}],
+                }
+            ],
+        }
+
+        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+            messages, sync_buf, result = client.poll_updates()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(sync_buf, "cursor-new")
+        self.assertEqual(client.sync_buf, "cursor-new")
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].text, "收到")
+
     def test_ilink_poll_updates_rejects_noncanonical_nested_success_payload(self):
         client = ILinkClient(
             base_url="https://ilinkai.weixin.qq.com",
