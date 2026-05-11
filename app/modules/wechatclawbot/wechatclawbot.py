@@ -1426,7 +1426,10 @@ class ILinkClient:
         payload = self._json(resp)
         if self._ok(payload):
             return True, "连接正常"
-        return False, payload.get("errmsg") or payload.get("message") or "连接失败"
+        err_message = payload.get("errmsg") or payload.get("message") or "连接失败"
+        if "ilink_user_id required" in str(err_message).strip().lower():
+            return True, "连接正常"
+        return False, err_message
 
 
 class WechatClawBot:

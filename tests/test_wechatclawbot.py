@@ -205,6 +205,23 @@ class WechatClawBotTest(unittest.TestCase):
         self.assertNotIn("sync_buf", request_body)
         self.assertNotIn("syncBuf", request_body)
 
+    def test_ilink_test_connection_accepts_getconfig_ilink_user_id_limitation(self):
+        client = ILinkClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            bot_token="token",
+        )
+        response = MagicMock()
+        response.json.return_value = {
+            "ret": -1,
+            "errmsg": "ilink_user_id required",
+        }
+
+        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+            ok, message = client.test_connection()
+
+        self.assertTrue(ok)
+        self.assertIn("iLink 自检接口要求额外的 ilink_user_id", message)
+
     def test_wechatclawbot_send_msg_uses_plain_text_payload(self):
         state = {
             "bot_token": None,
