@@ -14,20 +14,17 @@ class _FakeResponse:
 
 class ZSpaceMediaServerTest(unittest.TestCase):
     def test_reconnect_uses_username_password_login(self):
-        login_request_utils = Mock()
-        login_request_utils.post_res.return_value = _FakeResponse({
+        request_utils = Mock()
+        request_utils.post_res.return_value = _FakeResponse({
             "AccessToken": "zspace-token",
             "User": {"Id": "user-id"},
         })
-        emby_request_utils = Mock()
-        emby_request_utils.get_res.side_effect = [
+        request_utils.get_res.side_effect = [
             _FakeResponse([]),
             _FakeResponse({"Id": "server-id"}),
         ]
 
-        with patch("app.modules.zspace.zspace.RequestUtils", return_value=login_request_utils), patch(
-            "app.modules.emby.emby.RequestUtils", return_value=emby_request_utils
-        ):
+        with patch("app.modules.zspace.zspace.RequestUtils", return_value=request_utils):
             client = ZSpace(
                 host="http://zspace.local",
                 username="admin",
@@ -40,11 +37,14 @@ class ZSpaceMediaServerTest(unittest.TestCase):
 
     def test_get_user_falls_back_to_current_login_user(self):
         client = ZSpace.__new__(ZSpace)
+        client._host = "http://zspace.local/"
+        client._apikey = "zspace-token"
         client._username = "admin"
         client.user = "current-user-id"
         client._ZSpace__get_current_user = Mock(return_value={"Id": "current-user-id", "Name": "admin"})
 
-        with patch("app.modules.emby.emby.Emby.get_user", return_value=None):
+        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+            request_utils_cls.return_value.get_res.return_value = _FakeResponse({"invalid": True})
             user_id = client.get_user("admin")
 
         self.assertEqual(user_id, "current-user-id")

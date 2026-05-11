@@ -160,9 +160,9 @@ class MediaServerTvStaleItemIdTest(unittest.TestCase):
         client._apikey = "api-key"
         client.user = "user-id"
         client.get_iteminfo = Mock(side_effect=[None, SimpleNamespace(tmdbid=12345)])
-        client._Emby__get_emby_series_id_by_name = Mock(return_value="new-series-id")
+        client._ZSpace__get_emby_series_id_by_name = Mock(return_value="new-series-id")
 
-        with patch("app.modules.emby.emby.RequestUtils") as request_utils_cls:
+        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse({
                 "Items": [{"ParentIndexNumber": 1, "IndexNumber": 1}]
             })
@@ -176,7 +176,7 @@ class MediaServerTvStaleItemIdTest(unittest.TestCase):
 
         self.assertEqual(item_id, "new-series-id")
         self.assertEqual(episodes, {1: [1]})
-        client._Emby__get_emby_series_id_by_name.assert_called_once_with("测试剧集", "2026")
+        client._ZSpace__get_emby_series_id_by_name.assert_called_once_with("测试剧集", "2026")
 
     def test_ugreen_tv_episodes_fallback_when_cached_item_id_missing(self):
         """绿联缓存ID失效时，应重新搜索剧集ID后再查询集信息。"""
