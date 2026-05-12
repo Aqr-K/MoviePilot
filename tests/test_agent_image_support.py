@@ -611,6 +611,49 @@ class AgentImageSupportTest(unittest.TestCase):
             source="wechat-test",
         )
 
+    def test_download_images_routes_feishu_refs_to_module_downloader(self):
+        chain = MessageChain()
+
+        with patch.object(
+            chain,
+            "run_module",
+            return_value="data:image/png;base64,feishu123",
+        ) as run_module:
+            data_urls = chain._download_attachments_to_data_urls(
+                attachments=[
+                    CommingMessage.MessageImage(
+                        ref="feishu://image/img_v2_xxx",
+                        mime_type="image/png",
+                    )
+                ],
+                channel=MessageChannel.Feishu,
+                source="feishu-test",
+            )
+
+        self.assertEqual(data_urls, ["data:image/png;base64,feishu123"])
+        run_module.assert_called_once_with(
+            "download_feishu_image_to_data_url",
+            image_ref="feishu://image/img_v2_xxx",
+            source="feishu-test",
+        )
+
+    def test_download_message_file_bytes_supports_feishu_refs(self):
+        chain = MessageChain()
+
+        with patch.object(chain, "run_module", return_value=b"feishu-file") as run_module:
+            content = chain._download_message_file_bytes(
+                file_ref="feishu://file/file_xxx/report.pdf",
+                channel=MessageChannel.Feishu,
+                source="feishu-test",
+            )
+
+        self.assertEqual(content, b"feishu-file")
+        run_module.assert_called_once_with(
+            "download_feishu_file_bytes",
+            file_ref="feishu://file/file_xxx/report.pdf",
+            source="feishu-test",
+        )
+
     def test_wechat_message_parser_extracts_image_media_id(self):
         module = WechatModule()
         xml_message = b"""

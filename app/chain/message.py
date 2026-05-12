@@ -5,6 +5,7 @@ import mimetypes
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional, Dict, Union, List, Tuple
@@ -46,6 +47,13 @@ class MessageChain(ChainBase):
     _user_sessions: Dict[Union[str, int], tuple] = {}
     # 会话超时时间（分钟）
     _session_timeout_minutes: int = 24 * 60
+
+    @dataclass
+    class _ProcessingMarker:
+        channel: MessageChannel
+        source: str
+        message_id: str
+        reaction_id: str
 
     def process(self, body: Any, form: Any, args: Any) -> None:
         """
@@ -150,6 +158,46 @@ class MessageChain(ChainBase):
                 username=username,
                 text=text,
             )
+
+        processing_marker = self._mark_message_processing_started(
+            channel=channel,
+            source=source,
+            original_message_id=original_message_id,
+            text=text,
+        )
+
+        try:
+            self._handle_message_core(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                text=text,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
+                images=images,
+                audio_refs=audio_refs,
+                files=files,
+                has_audio_input=has_audio_input,
+            )
+        finally:
+            self._mark_message_processing_finished(processing_marker)
+
+    def _handle_message_core(
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            text: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
+            images: Optional[List[CommingMessage.MessageImage]] = None,
+            audio_refs: Optional[List[str]] = None,
+            files: Optional[List[CommingMessage.MessageAttachment]] = None,
+            has_audio_input: bool = False,
+    ) -> None:
+        """执行实际消息路由，便于统一包裹处理中状态。"""
 
         if text.startswith("CALLBACK:"):
             if ChannelCapabilityManager.supports_callbacks(channel):
@@ -262,6 +310,49 @@ class MessageChain(ChainBase):
                 "channel": channel,
                 "source": source,
             },
+        )
+
+    def _mark_message_processing_started(
+            self,
+            channel: MessageChannel,
+            source: str,
+            original_message_id: Optional[Union[str, int]],
+            text: str,
+    ) -> Optional[_ProcessingMarker]:
+        """为支持的渠道标记“消息正在处理”。"""
+        if channel != MessageChannel.Feishu:
+            return None
+        if not original_message_id or not text or text.startswith("CALLBACK:"):
+            return None
+
+        reaction_id = self.run_module(
+            "add_feishu_message_reaction",
+            message_id=str(original_message_id),
+            emoji_type="GLANCE",
+            source=source,
+        )
+        if not reaction_id:
+            return None
+
+        return self._ProcessingMarker(
+            channel=channel,
+            source=source,
+            message_id=str(original_message_id),
+            reaction_id=str(reaction_id),
+        )
+
+    def _mark_message_processing_finished(
+            self,
+            marker: Optional[_ProcessingMarker],
+    ) -> None:
+        """清理渠道“消息正在处理”标记。"""
+        if not marker:
+            return
+        self.run_module(
+            "delete_feishu_message_reaction",
+            message_id=marker.message_id,
+            reaction_id=marker.reaction_id,
+            source=marker.source,
         )
 
     def _handle_callback(
@@ -1098,12 +1189,14 @@ class MessageChain(ChainBase):
                 ),
                 global_vars.loop,
             )
+            return
 
         except Exception as e:
             logger.error(f"处理AI智能体消息失败: {e}")
             self.messagehelper.put(
                 f"AI智能体处理失败: {str(e)}", role="system", title="MoviePilot助手"
             )
+            return
 
     def _transcribe_audio_refs(
             self, audio_refs: List[str], channel: MessageChannel, source: str
@@ -1289,6 +1382,14 @@ class MessageChain(ChainBase):
                     )
                     if data_url:
                         data_urls.append(data_url)
+                elif attachment_ref.startswith("feishu://image/"):
+                    data_url = self.run_module(
+                        "download_feishu_image_to_data_url",
+                        image_ref=attachment_ref,
+                        source=source,
+                    )
+                    if data_url:
+                        data_urls.append(data_url)
                 elif channel == MessageChannel.Slack:
                     data_url = self.run_module(
                         "download_slack_file_to_data_url",
@@ -1461,6 +1562,10 @@ class MessageChain(ChainBase):
         if file_ref.startswith("wxclaw://file/") or file_ref.startswith("wxclaw://voice/"):
             return self.run_module(
                 "download_wechat_media_bytes", media_ref=file_ref, source=source
+            )
+        if file_ref.startswith("feishu://file/"):
+            return self.run_module(
+                "download_feishu_file_bytes", file_ref=file_ref, source=source
             )
         if file_ref.startswith("slack://file/"):
             return self.run_module(

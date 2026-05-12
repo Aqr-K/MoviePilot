@@ -92,12 +92,34 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             userid, chat_id, receive_id_type = self._resolve_message_target(message)
             client: Feishu = self.get_instance(conf.name)
             if client:
-                client.send_notification(
-                    message=message,
-                    userid=userid,
-                    chat_id=chat_id,
-                    receive_id_type=receive_id_type,
-                )
+                if message.file_path:
+                    client.send_file(
+                        file_path=message.file_path,
+                        userid=userid,
+                        chat_id=chat_id,
+                        title=message.title,
+                        text=message.text,
+                        file_name=message.file_name,
+                        receive_id_type=receive_id_type,
+                        original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                    )
+                elif message.voice_path:
+                    client.send_voice(
+                        voice_path=message.voice_path,
+                        userid=userid,
+                        chat_id=chat_id,
+                        caption=message.voice_caption,
+                        receive_id_type=receive_id_type,
+                        original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                    )
+                else:
+                    client.send_notification(
+                        message=message,
+                        userid=userid,
+                        chat_id=chat_id,
+                        receive_id_type=receive_id_type,
+                        original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                    )
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         for conf in self.get_configs().values():
@@ -162,12 +184,34 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             client: Feishu = self.get_instance(conf.name)
             if not client:
                 continue
-            result = client.send_notification(
-                message=message,
-                userid=userid,
-                chat_id=chat_id,
-                receive_id_type=receive_id_type,
-            )
+            if message.file_path:
+                result = client.send_file(
+                    file_path=message.file_path,
+                    userid=userid,
+                    chat_id=chat_id,
+                    title=message.title,
+                    text=message.text,
+                    file_name=message.file_name,
+                    receive_id_type=receive_id_type,
+                    original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                )
+            elif message.voice_path:
+                result = client.send_voice(
+                    voice_path=message.voice_path,
+                    userid=userid,
+                    chat_id=chat_id,
+                    caption=message.voice_caption,
+                    receive_id_type=receive_id_type,
+                    original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                )
+            else:
+                result = client.send_notification(
+                    message=message,
+                    userid=userid,
+                    chat_id=chat_id,
+                    receive_id_type=receive_id_type,
+                    original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                )
             if result and result.get("success"):
                 return MessageResponse(
                     message_id=result.get("message_id"),
@@ -177,3 +221,69 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
                     success=True,
                 )
         return None
+
+    def download_feishu_image_to_data_url(self, image_ref: str, source: str) -> Optional[str]:
+        if not image_ref or not image_ref.startswith("feishu://image/"):
+            return None
+        client_config = self.get_config(source)
+        if not client_config:
+            return None
+        client = self.get_instance(client_config.name)
+        if not client:
+            return None
+        image_key = image_ref.replace("feishu://image/", "", 1)
+        downloaded = client._download_image_bytes(image_key)
+        if not downloaded:
+            return None
+        content, _, content_type = downloaded
+        mime_type = content_type or "image/jpeg"
+        import base64
+
+        return f"data:{mime_type};base64,{base64.b64encode(content).decode()}"
+
+    def download_feishu_file_bytes(self, file_ref: str, source: str) -> Optional[bytes]:
+        if not file_ref or not file_ref.startswith("feishu://file/"):
+            return None
+        client_config = self.get_config(source)
+        if not client_config:
+            return None
+        client = self.get_instance(client_config.name)
+        if not client:
+            return None
+        parts = file_ref.replace("feishu://file/", "", 1).split("/", 1)
+        file_key = parts[0].strip() if parts else ""
+        if not file_key:
+            return None
+        downloaded = client._download_file_bytes(file_key)
+        if not downloaded:
+            return None
+        content, _, _ = downloaded
+        return content
+
+    def add_feishu_message_reaction(
+            self,
+            message_id: str,
+            emoji_type: str,
+            source: str,
+    ) -> Optional[str]:
+        client_config = self.get_config(source)
+        if not client_config:
+            return None
+        client = self.get_instance(client_config.name)
+        if not client:
+            return None
+        return client.add_message_reaction(message_id=message_id, emoji_type=emoji_type)
+
+    def delete_feishu_message_reaction(
+            self,
+            message_id: str,
+            reaction_id: str,
+            source: str,
+    ) -> bool:
+        client_config = self.get_config(source)
+        if not client_config:
+            return False
+        client = self.get_instance(client_config.name)
+        if not client:
+            return False
+        return client.delete_message_reaction(message_id=message_id, reaction_id=reaction_id)
