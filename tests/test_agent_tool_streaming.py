@@ -12,7 +12,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.api.endpoints.openai import _OpenAIStreamingHandler
 from app.core.config import settings
 from app.schemas.message import MessageResponse
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, NotificationType
 
 
 class DummyTool(MoviePilotTool):
@@ -159,6 +159,10 @@ class TestAgentToolStreaming(unittest.TestCase):
         self.assertEqual(
             run_in_threadpool_mock.await_args.args[0].__name__, "send_direct_message"
         )
+        self.assertEqual(
+            run_in_threadpool_mock.await_args.args[1].mtype,
+            NotificationType.Agent,
+        )
         self.assertTrue(handler.has_sent_message)
 
     def test_flush_edits_message_via_threadpool(self):
@@ -187,6 +191,38 @@ class TestAgentToolStreaming(unittest.TestCase):
             run_in_threadpool_mock.await_args.args[0].__name__, "edit_message"
         )
         self.assertEqual(handler._sent_text, "hello world")
+
+    def test_stop_streaming_uses_generic_finalize_message(self):
+        handler = StreamingHandler()
+        handler._message_response = MessageResponse(
+            message_id="om_stream",
+            chat_id="oc_stream",
+            channel=MessageChannel.Feishu,
+            source="feishu-main",
+            metadata={"feishu_streaming": {"card_id": "card_stream", "sequence": 2}},
+            success=True,
+        )
+        handler._sent_text = "hello"
+        handler._buffer = "hello"
+        handler._streaming_enabled = True
+
+        with patch(
+            "app.agent.callback.run_in_threadpool", new_callable=AsyncMock
+        ) as run_in_threadpool_mock, patch.object(
+            handler, "_cancel_flush_task", new_callable=AsyncMock
+        ), patch.object(
+            handler, "_flush", new_callable=AsyncMock
+        ):
+            asyncio.run(handler.stop_streaming())
+
+        self.assertEqual(run_in_threadpool_mock.await_count, 1)
+        self.assertEqual(
+            run_in_threadpool_mock.await_args.args[0].__name__, "finalize_message"
+        )
+        self.assertEqual(
+            run_in_threadpool_mock.await_args.args[1].message_id,
+            "om_stream",
+        )
 
     def test_flush_without_channel_context_does_not_send_direct_message(self):
         handler = StreamingHandler()

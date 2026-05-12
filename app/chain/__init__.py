@@ -1585,6 +1585,16 @@ class ChainBase(metaclass=ABCMeta):
             message=self._normalize_notification_for_dispatch(message),
         )
 
+    def finalize_message(
+            self,
+            response: MessageResponse,
+    ) -> bool:
+        """
+        对已发送消息执行渠道收尾动作。
+        例如关闭流式卡片状态；无特殊收尾的渠道直接返回 False。
+        """
+        return self.run_module("finalize_message", response=response)
+
     def metadata_img(
             self,
             mediainfo: MediaInfo,

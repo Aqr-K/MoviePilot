@@ -305,16 +305,18 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             return False
         return client.delete_message_reaction(message_id=message_id, reaction_id=reaction_id)
 
-    def close_feishu_streaming_card(
-            self,
-            card_id: str,
-            sequence: int,
-            source: str,
-    ) -> bool:
-        client_config = self.get_config(source)
+    def finalize_message(self, response: MessageResponse) -> bool:
+        if response.channel != self._channel or not isinstance(response.metadata, dict):
+            return False
+        stream_meta = response.metadata.get("feishu_streaming") or {}
+        card_id = str(stream_meta.get("card_id") or "").strip()
+        if not card_id:
+            return False
+        client_config = self.get_config(response.source)
         if not client_config:
             return False
         client = self.get_instance(client_config.name)
         if not client:
             return False
+        sequence = int(stream_meta.get("sequence") or 1) + 1
         return client.close_streaming_card(card_id=card_id, sequence=sequence)

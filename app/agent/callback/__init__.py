@@ -12,7 +12,7 @@ from app.schemas.message import (
     ChannelCapabilityManager,
     ChannelCapability,
 )
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, NotificationType
 
 
 class _StreamChain(ChainBase):
@@ -212,22 +212,11 @@ class StreamingHandler:
         await self._flush()
 
         message_response = self._message_response
-        if (
-            message_response
-            and message_response.channel == MessageChannel.Feishu
-            and isinstance(message_response.metadata, dict)
-        ):
-            stream_meta = message_response.metadata.get("feishu_streaming") or {}
-            card_id = str(stream_meta.get("card_id") or "").strip()
-            sequence = int(stream_meta.get("sequence") or 1) + 1
-            if card_id:
-                await run_in_threadpool(
-                    _StreamChain().run_module,
-                    "close_feishu_streaming_card",
-                    card_id=card_id,
-                    sequence=sequence,
-                    source=message_response.source,
-                )
+        if message_response:
+            await run_in_threadpool(
+                _StreamChain().finalize_message,
+                message_response,
+            )
 
         # 检查是否所有缓冲内容都已发送
         with self._lock:
@@ -480,6 +469,7 @@ class StreamingHandler:
                     Notification(
                         channel=self._channel,
                         source=self._source,
+                        mtype=NotificationType.Agent,
                         userid=self._user_id,
                         username=self._username,
                         title=self._title,
@@ -522,6 +512,7 @@ class StreamingHandler:
                             Notification(
                                 channel=self._channel,
                                 source=self._source,
+                                mtype=NotificationType.Agent,
                                 userid=self._user_id,
                                 username=self._username,
                                 title=self._title,

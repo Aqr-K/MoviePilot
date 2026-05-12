@@ -21,7 +21,7 @@ if "Pinyin2Hanzi" not in sys.modules:
 from app.modules.feishu import FeishuModule
 from app.modules.feishu.feishu import Feishu
 from app.schemas import Notification
-from app.schemas.message import ChannelCapability, ChannelCapabilityManager
+from app.schemas.message import ChannelCapability, ChannelCapabilityManager, MessageResponse
 from app.schemas.types import MessageChannel, NotificationType
 
 
@@ -586,15 +586,30 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(reaction_id, "reaction_2")
         self.assertTrue(deleted)
 
-    def test_module_close_streaming_card_delegates_to_client(self):
+    def test_module_finalize_message_closes_streaming_card(self):
         module = FeishuModule()
+        module._channel = MessageChannel.Feishu
         client = MagicMock()
         client.close_streaming_card.return_value = True
 
         with patch.object(module, "get_config", return_value=SimpleNamespace(name="feishu-main")), patch.object(
             module, "get_instance", return_value=client
         ):
-            success = module.close_feishu_streaming_card("card_stream", 4, "feishu-main")
+            success = module.finalize_message(
+                MessageResponse(
+                    message_id="om_stream",
+                    chat_id="oc_stream",
+                    channel=MessageChannel.Feishu,
+                    source="feishu-main",
+                    metadata={
+                        "feishu_streaming": {
+                            "card_id": "card_stream",
+                            "sequence": 3,
+                        }
+                    },
+                    success=True,
+                )
+            )
 
         self.assertTrue(success)
         client.close_streaming_card.assert_called_once_with(card_id="card_stream", sequence=4)
