@@ -27,6 +27,7 @@ class QueryCustomIdentifiersTool(MoviePilotTool):
         "Returns the list of identifier rules used for preprocessing torrent/file names before media recognition. "
         "Use this tool to check existing rules before adding new ones to avoid duplicates."
     )
+    require_admin: bool = True
     args_schema: Type[BaseModel] = QueryCustomIdentifiersInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

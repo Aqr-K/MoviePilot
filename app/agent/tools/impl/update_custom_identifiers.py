@@ -52,6 +52,7 @@ class UpdateCustomIdentifiersTool(MoviePilotTool):
         "Lines starting with '#' are comments. "
         "The replacement target supports: {[tmdbid=xxx;type=movie/tv;s=xxx;e=xxx]} for direct TMDB ID matching."
     )
+    require_admin: bool = True
     args_schema: Type[BaseModel] = UpdateCustomIdentifiersInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

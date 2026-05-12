@@ -23,7 +23,12 @@ class MoviePilotToolsManager:
     MoviePilot工具管理器（用于HTTP API）
     """
 
-    def __init__(self, user_id: str = "api_user", session_id: str = uuid.uuid4()):
+    def __init__(
+        self,
+        user_id: str = "api_user",
+        session_id: str = uuid.uuid4(),
+        is_admin: bool = True,
+    ):
         """
         初始化工具管理器
 
@@ -33,6 +38,7 @@ class MoviePilotToolsManager:
         """
         self.user_id = user_id
         self.session_id = session_id
+        self.is_admin = is_admin
         self.tools: List[Any] = []
         self._load_tools()
 
@@ -64,6 +70,8 @@ class MoviePilotToolsManager:
         """
         tools_list = []
         for tool in self.tools:
+            if getattr(tool, "_require_admin", False) and not self.is_admin:
+                continue
             # 获取工具的输入参数模型
             args_schema = getattr(tool, "args_schema", None)
             if args_schema:
@@ -215,6 +223,13 @@ class MoviePilotToolsManager:
 
         return normalized
 
+    def _check_tool_permission(self, tool_instance: Any) -> Optional[str]:
+        """为 HTTP/MCP/CLI 入口补齐 require_admin 门禁。"""
+
+        if getattr(tool_instance, "_require_admin", False) and not self.is_admin:
+            return "抱歉，您没有执行此工具的权限。只有系统管理员才能执行工具操作。"
+        return None
+
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         """
         调用工具
@@ -235,6 +250,10 @@ class MoviePilotToolsManager:
             return error_msg
 
         try:
+            permission_error = self._check_tool_permission(tool_instance)
+            if permission_error:
+                return json.dumps({"error": permission_error}, ensure_ascii=False)
+
             # 规范化参数类型
             normalized_arguments = self._normalize_arguments(tool_instance, arguments)
 

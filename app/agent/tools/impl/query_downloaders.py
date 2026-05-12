@@ -19,6 +19,7 @@ class QueryDownloadersInput(BaseModel):
 class QueryDownloadersTool(MoviePilotTool):
     name: str = "query_downloaders"
     description: str = "Query downloader configuration and list all available downloaders. Shows downloader status, connection details, and configuration settings."
+    require_admin: bool = True
     args_schema: Type[BaseModel] = QueryDownloadersInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:

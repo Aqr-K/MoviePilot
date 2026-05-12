@@ -24,6 +24,7 @@ class QueryDirectorySettingsInput(BaseModel):
 class QueryDirectorySettingsTool(MoviePilotTool):
     name: str = "query_directory_settings"
     description: str = "Query system directory configuration settings (NOT file listings). Returns configured directory paths, storage types, transfer modes, and other directory-related settings. Use 'list_directory' to list actual files and folders in a directory."
+    require_admin: bool = True
     args_schema: Type[BaseModel] = QueryDirectorySettingsInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
