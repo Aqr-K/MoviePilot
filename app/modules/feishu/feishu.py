@@ -7,11 +7,10 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
     CreateMessageRequest,
     CreateMessageRequestBody,
+    PatchMessageRequest,
+    PatchMessageRequestBody,
     P2ImMessageReceiveV1,
-    UpdateMessageRequest,
-    UpdateMessageRequestBody,
 )
-from lark_oapi.card.model import Card
 from lark_oapi.core.const import FEISHU_DOMAIN
 from lark_oapi.core.enum import LogLevel
 from lark_oapi.event.callback.model.p2_card_action_trigger import (
@@ -58,6 +57,7 @@ class Feishu:
         self._stop_event = threading.Event()
         self._ws_thread: Optional[threading.Thread] = None
         self._user_chat_mapping: Dict[str, str] = {}
+        self._user_receive_id_type_mapping: Dict[str, str] = {}
         self._chat_open_mapping: Dict[str, str] = {}
 
         if not self._app_id or not self._app_secret:
@@ -131,7 +131,8 @@ class Feishu:
 
         threading.Thread(target=_run, daemon=True).start()
 
-    def _extract_message_text(self, message) -> str:
+    @staticmethod
+    def _extract_message_text(message) -> str:
         """从飞书事件消息体中提取可读文本。"""
         raw_content = getattr(message, "content", None)
         if not raw_content:
@@ -154,6 +155,19 @@ class Feishu:
             return
         self._user_chat_mapping[normalized_userid] = normalized_chat_id
         self._chat_open_mapping[normalized_chat_id] = normalized_userid
+
+    def _remember_user_id_type(
+        self,
+        open_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """记住用户对应的飞书 ID 类型，避免回消息时误用 open_id/user_id。"""
+        normalized_open_id = (open_id or "").strip()
+        normalized_user_id = (user_id or "").strip()
+        if normalized_open_id:
+            self._user_receive_id_type_mapping[normalized_open_id] = "open_id"
+        if normalized_user_id:
+            self._user_receive_id_type_mapping[normalized_user_id] = "user_id"
 
     def _on_message(self, data: P2ImMessageReceiveV1) -> None:
         """处理飞书长连接收到的普通消息事件。"""
@@ -180,6 +194,7 @@ class Feishu:
             },
         }
         userid = open_id or user_id
+        self._remember_user_id_type(open_id=open_id, user_id=user_id)
         self._remember_target(userid=userid, chat_id=chat_id)
         logger.info(
             "收到来自 %s 的飞书消息：userid=%s, chat_id=%s, text=%s",
@@ -216,6 +231,10 @@ class Feishu:
             },
         }
         userid = payload["sender"].get("open_id") or payload["sender"].get("user_id")
+        self._remember_user_id_type(
+            open_id=payload["sender"].get("open_id"),
+            user_id=payload["sender"].get("user_id"),
+        )
         self._remember_target(userid=userid, chat_id=payload.get("chat_id"))
         logger.info(
             "收到来自 %s 的飞书按钮回调：userid=%s, callback_data=%s",
@@ -296,7 +315,12 @@ class Feishu:
             return None
 
         if text.startswith("/") and self._admins and str(userid) not in self._admins:
-            self.send_text("只有管理员才有权限执行此命令", userid=str(userid))
+            self.send_text(
+                "只有管理员才有权限执行此命令",
+                userid=str(userid),
+                chat_id=message.get("chat_id"),
+                receive_id_type="open_id" if open_id else "user_id",
+            )
             return None
 
         return CommingMessage(
@@ -309,15 +333,28 @@ class Feishu:
             chat_id=message.get("chat_id"),
         )
 
-    def _resolve_target(self, userid: Optional[str] = None, chat_id: Optional[str] = None) -> Tuple[str, str]:
+    def _resolve_target(
+        self,
+        userid: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        receive_id_type: Optional[str] = None,
+    ) -> Tuple[str, str]:
         """解析飞书发送目标，优先走显式用户，其次回退默认配置。"""
         resolved_userid = (userid or "").strip() or None
         resolved_chat_id = (chat_id or "").strip() or None
+        normalized_receive_id_type = (receive_id_type or "").strip() or None
         if not resolved_userid and not resolved_chat_id:
             resolved_userid = self._default_open_id
             resolved_chat_id = self._default_chat_id
+            if resolved_userid and not normalized_receive_id_type:
+                normalized_receive_id_type = "open_id"
+        if normalized_receive_id_type == "chat_id" and resolved_chat_id:
+            return resolved_chat_id, "chat_id"
         if resolved_userid:
-            return resolved_userid, "open_id"
+            if normalized_receive_id_type in {"open_id", "user_id"}:
+                return resolved_userid, normalized_receive_id_type
+            remembered_type = self._user_receive_id_type_mapping.get(resolved_userid)
+            return resolved_userid, remembered_type or "open_id"
         if resolved_chat_id:
             return resolved_chat_id, "chat_id"
         raise ValueError("未找到可发送的飞书目标")
@@ -414,11 +451,26 @@ class Feishu:
             "chat_id": getattr(data, "chat_id", None),
         }
 
-    def send_text(self, text: str, userid: Optional[str] = None, chat_id: Optional[str] = None) -> Optional[dict]:
+    def send_text(
+        self,
+        text: str,
+        userid: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        receive_id_type: Optional[str] = None,
+    ) -> Optional[dict]:
         """发送纯文本消息。"""
         try:
-            receive_id, receive_id_type = self._resolve_target(userid=userid, chat_id=chat_id)
-            result = self._send_message(receive_id, receive_id_type, "text", {"text": text})
+            receive_id, resolved_receive_id_type = self._resolve_target(
+                userid=userid,
+                chat_id=chat_id,
+                receive_id_type=receive_id_type,
+            )
+            result = self._send_message(
+                receive_id,
+                resolved_receive_id_type,
+                "text",
+                {"text": text},
+            )
         except Exception as err:
             logger.error(f"飞书文本消息发送失败：{err}")
             return {"success": False}
@@ -428,7 +480,13 @@ class Feishu:
         result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
         return result
 
-    def send_notification(self, message: Notification, userid: Optional[str] = None, chat_id: Optional[str] = None) -> Optional[dict]:
+    def send_notification(
+        self,
+        message: Notification,
+        userid: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        receive_id_type: Optional[str] = None,
+    ) -> Optional[dict]:
         """发送通知消息，优先使用交互卡片承载按钮。"""
         payload = self._build_card(
             title=message.title,
@@ -437,8 +495,17 @@ class Feishu:
             buttons=message.buttons,
         )
         try:
-            receive_id, receive_id_type = self._resolve_target(userid=userid, chat_id=chat_id)
-            result = self._send_message(receive_id, receive_id_type, "interactive", {"card": payload})
+            receive_id, resolved_receive_id_type = self._resolve_target(
+                userid=userid,
+                chat_id=chat_id,
+                receive_id_type=receive_id_type,
+            )
+            result = self._send_message(
+                receive_id,
+                resolved_receive_id_type,
+                "interactive",
+                payload,
+            )
         except Exception as err:
             logger.error(f"飞书通知发送失败：{err}")
             return {"success": False}
@@ -455,13 +522,12 @@ class Feishu:
 
         card = self._build_card(title=title, text=text, link=None, buttons=buttons)
         try:
-            response = self._api_client.im.v1.message.update(
-                UpdateMessageRequest.builder()
+            response = self._api_client.im.v1.message.patch(
+                PatchMessageRequest.builder()
                 .message_id(message_id)
                 .request_body(
-                    UpdateMessageRequestBody.builder()
-                    .msg_type("interactive")
-                    .content(json.dumps({"card": card}, ensure_ascii=False))
+                    PatchMessageRequestBody.builder()
+                    .content(json.dumps(card, ensure_ascii=False))
                     .build()
                 )
                 .build()
@@ -478,7 +544,14 @@ class Feishu:
             logger.error(f"飞书消息更新失败：{err}")
         return False
 
-    def send_medias_message(self, message: Notification, medias: List[MediaInfo]) -> Optional[dict]:
+    def send_medias_message(
+        self,
+        message: Notification,
+        medias: List[MediaInfo],
+        userid: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        receive_id_type: Optional[str] = None,
+    ) -> Optional[dict]:
         """发送媒体列表消息，复用通知发送链路。"""
         lines = []
         for index, media in enumerate(medias[:10], start=1):
@@ -492,9 +565,21 @@ class Feishu:
             userid=message.userid,
             targets=message.targets,
         )
-        return self.send_notification(proxy_message, userid=message.userid)
+        return self.send_notification(
+            proxy_message,
+            userid=userid or message.userid,
+            chat_id=chat_id,
+            receive_id_type=receive_id_type,
+        )
 
-    def send_torrents_message(self, message: Notification, torrents: List[Context]) -> Optional[dict]:
+    def send_torrents_message(
+        self,
+        message: Notification,
+        torrents: List[Context],
+        userid: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        receive_id_type: Optional[str] = None,
+    ) -> Optional[dict]:
         """发送种子列表消息，复用通知发送链路。"""
         lines = []
         for index, torrent in enumerate(torrents[:10], start=1):
@@ -509,4 +594,9 @@ class Feishu:
             userid=message.userid,
             targets=message.targets,
         )
-        return self.send_notification(proxy_message, userid=message.userid)
+        return self.send_notification(
+            proxy_message,
+            userid=userid or message.userid,
+            chat_id=chat_id,
+            receive_id_type=receive_id_type,
+        )

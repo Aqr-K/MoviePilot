@@ -1,7 +1,4 @@
-import asyncio
-import json
-import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from app.core.context import Context, MediaInfo
 from app.log import logger
@@ -54,8 +51,31 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         """通知模块通过系统通知配置控制实例化，这里不额外设置环境开关。"""
         return None
 
+    @staticmethod
+    def _resolve_message_target(
+            message: Notification,
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """优先使用 open_id，其次回退 user_id 或 chat_id。"""
+        userid = str(message.userid).strip() if message.userid else None
+        chat_id = None
+        receive_id_type = "open_id" if userid else None
+
+        targets = message.targets or {}
+        if not userid and targets:
+            open_id = str(targets.get("feishu_openid") or "").strip() or None
+            user_id = str(targets.get("feishu_userid") or "").strip() or None
+            chat_id = str(targets.get("feishu_chat_id") or "").strip() or None
+            if open_id:
+                userid = open_id
+                receive_id_type = "open_id"
+            elif user_id:
+                userid = user_id
+                receive_id_type = "user_id"
+
+        return userid, chat_id, receive_id_type
+
     def message_parser(
-        self, source: str, body: Any, form: Any, args: Any
+            self, source: str, body: Any, form: Any, args: Any
     ) -> Optional[CommingMessage]:
         client_config = self.get_config(source)
         if not client_config:
@@ -69,45 +89,55 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
-            targets = message.targets
-            userid = message.userid
-            chat_id = None
-            if not userid and targets is not None:
-                userid = targets.get("feishu_userid") or targets.get("feishu_openid")
-                chat_id = targets.get("feishu_chat_id")
+            userid, chat_id, receive_id_type = self._resolve_message_target(message)
             client: Feishu = self.get_instance(conf.name)
             if client:
                 client.send_notification(
                     message=message,
-                    userid=str(userid).strip() if userid else None,
-                    chat_id=str(chat_id).strip() if chat_id else None,
+                    userid=userid,
+                    chat_id=chat_id,
+                    receive_id_type=receive_id_type,
                 )
 
     def post_medias_message(self, message: Notification, medias: List[MediaInfo]) -> None:
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
+            userid, chat_id, receive_id_type = self._resolve_message_target(message)
             client: Feishu = self.get_instance(conf.name)
             if client:
-                client.send_medias_message(message=message, medias=medias)
+                client.send_medias_message(
+                    message=message,
+                    medias=medias,
+                    userid=userid,
+                    chat_id=chat_id,
+                    receive_id_type=receive_id_type,
+                )
 
     def post_torrents_message(self, message: Notification, torrents: List[Context]) -> None:
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
+            userid, chat_id, receive_id_type = self._resolve_message_target(message)
             client: Feishu = self.get_instance(conf.name)
             if client:
-                client.send_torrents_message(message=message, torrents=torrents)
+                client.send_torrents_message(
+                    message=message,
+                    torrents=torrents,
+                    userid=userid,
+                    chat_id=chat_id,
+                    receive_id_type=receive_id_type,
+                )
 
     def edit_message(
-        self,
-        channel: MessageChannel,
-        source: str,
-        message_id: Union[str, int],
-        chat_id: Union[str, int],
-        text: str,
-        title: Optional[str] = None,
-        buttons: Optional[List[List[dict]]] = None,
+            self,
+            channel: MessageChannel,
+            source: str,
+            message_id: Union[str, int],
+            chat_id: Union[str, int],
+            text: str,
+            title: Optional[str] = None,
+            buttons: Optional[List[List[dict]]] = None,
     ) -> bool:
         if channel != self._channel:
             return False
@@ -116,10 +146,10 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
                 continue
             client: Feishu = self.get_instance(conf.name)
             if client and client.edit_message(
-                message_id=str(message_id),
-                title=title,
-                text=text,
-                buttons=buttons,
+                    message_id=str(message_id),
+                    title=title,
+                    text=text,
+                    buttons=buttons,
             ):
                 return True
         return False
@@ -128,19 +158,15 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
-            targets = message.targets
-            userid = message.userid
-            chat_id = None
-            if not userid and targets is not None:
-                userid = targets.get("feishu_userid") or targets.get("feishu_openid")
-                chat_id = targets.get("feishu_chat_id")
+            userid, chat_id, receive_id_type = self._resolve_message_target(message)
             client: Feishu = self.get_instance(conf.name)
             if not client:
                 continue
             result = client.send_notification(
                 message=message,
-                userid=str(userid).strip() if userid else None,
-                chat_id=str(chat_id).strip() if chat_id else None,
+                userid=userid,
+                chat_id=chat_id,
+                receive_id_type=receive_id_type,
             )
             if result and result.get("success"):
                 return MessageResponse(
@@ -151,28 +177,3 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
                     success=True,
                 )
         return None
-
-
-def run_async(coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    result: Dict[str, Any] = {}
-    error: Dict[str, BaseException] = {}
-    done = threading.Event()
-
-    def runner():
-        try:
-            result["value"] = asyncio.run(coro)
-        except BaseException as err:
-            error["value"] = err
-        finally:
-            done.set()
-
-    threading.Thread(target=runner, daemon=True).start()
-    done.wait()
-    if error.get("value"):
-        raise error["value"]
-    return result.get("value")
