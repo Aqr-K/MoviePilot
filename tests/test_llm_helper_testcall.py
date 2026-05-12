@@ -244,6 +244,70 @@ class LlmHelperTestCallTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("reasoning_effort"), "none")
 
+    def test_get_llm_reads_latest_settings_when_runtime_args_omitted(self):
+        resolve_calls = []
+        llm_calls = []
+
+        class _FakeProviderManager:
+            async def resolve_runtime(self, **kwargs):
+                resolve_calls.append(kwargs)
+                return {
+                    "provider_id": kwargs["provider_id"],
+                    "runtime": "openai_compatible",
+                    "model_id": kwargs["model"],
+                    "api_key": kwargs["api_key"],
+                    "base_url": kwargs["base_url"],
+                    "default_headers": None,
+                    "use_responses_api": None,
+                    "model_record": None,
+                    "model_metadata": None,
+                }
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                llm_calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        provider_module = ModuleType("app.agent.llm.provider")
+        provider_module.LLMProviderManager = _FakeProviderManager
+        openai_module = ModuleType("langchain_openai")
+        openai_module.ChatOpenAI = _FakeChatOpenAI
+
+        with patch.object(llm_module.settings, "LLM_PROVIDER", "deepseek"), patch.object(
+            llm_module.settings, "LLM_MODEL", "deepseek-chat"
+        ), patch.object(llm_module.settings, "LLM_API_KEY", "updated-key"), patch.object(
+            llm_module.settings, "LLM_BASE_URL", "https://updated.example.com/v1"
+        ), patch.object(
+            llm_module.settings, "LLM_BASE_URL_PRESET", "updated-preset"
+        ), patch.dict(
+            sys.modules,
+            {
+                "app.agent.llm.provider": provider_module,
+                "langchain_openai": openai_module,
+            },
+        ):
+            asyncio.run(llm_module.LLMHelper.get_llm())
+
+        self.assertEqual(len(resolve_calls), 1)
+        self.assertEqual(
+            resolve_calls[0],
+            {
+                "provider_id": "deepseek",
+                "model": "deepseek-chat",
+                "api_key": "updated-key",
+                "base_url": "https://updated.example.com/v1",
+                "base_url_preset_id": "updated-preset",
+            },
+        )
+        self.assertEqual(len(llm_calls), 1)
+        self.assertEqual(llm_calls[0].get("model"), "deepseek-chat")
+        self.assertEqual(llm_calls[0].get("api_key"), "updated-key")
+        self.assertEqual(
+            llm_calls[0].get("base_url"),
+            "https://updated.example.com/v1",
+        )
+
     def test_get_llm_maps_unified_max_to_openai_xhigh(self):
         calls = []
 

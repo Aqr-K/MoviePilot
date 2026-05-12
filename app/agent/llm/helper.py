@@ -512,9 +512,9 @@ class LLMHelper:
             provider: str | None = None,
             model: str | None = None,
             thinking_level: str | None = None,
-            api_key: str | None = settings.LLM_API_KEY,
-            base_url: str | None = settings.LLM_BASE_URL,
-            base_url_preset: str | None = settings.LLM_BASE_URL_PRESET,
+            api_key: str | None = None,
+            base_url: str | None = None,
+            base_url_preset: str | None = None,
     ):
         """
         获取LLM实例
@@ -525,12 +525,18 @@ class LLMHelper:
             是否启用思考模式）。支持的级别包括 "off"（关闭）、"auto"（自动）、"minimal"、"low"、"medium"、"high"、"max"/"xhigh"（最大）。
             不同模型对思考模式的支持和表现不同，具体映射关系请
             参考代码实现。对于不支持思考模式的模型，该参数将被忽略。
-        :param api_key: API Key，默认为配置项LLM_API_KEY。对于某些提供商（如 DeepSeek），可能需要同时提供 base_url。
-        :param base_url: API Base URL，默认为配置项LLM_BASE_URL。
+        :param api_key: API Key。未显式传入时使用当前配置项 LLM_API_KEY。对于某些提供商（如 DeepSeek），可能需要同时提供 base_url。
+        :param base_url: API Base URL。未显式传入时使用当前配置项 LLM_BASE_URL。
+        :param base_url_preset: Base URL 预设。未显式传入时使用当前配置项 LLM_BASE_URL_PRESET。
         :return: LLM实例
         """
         provider_name = str(provider if provider is not None else settings.LLM_PROVIDER).lower()
         model_name = model if model is not None else settings.LLM_MODEL
+        api_key_value = api_key if api_key is not None else settings.LLM_API_KEY
+        base_url_value = base_url if base_url is not None else settings.LLM_BASE_URL
+        base_url_preset_value = (
+            base_url_preset if base_url_preset is not None else settings.LLM_BASE_URL_PRESET
+        )
         normalized_thinking_level = cls._resolve_thinking_level(
             thinking_level=thinking_level,
         )
@@ -542,17 +548,17 @@ class LLMHelper:
             runtime = await LLMProviderManager().resolve_runtime(
                 provider_id=provider_name,
                 model=model_name,
-                api_key=api_key,
-                base_url=base_url,
-                base_url_preset_id=base_url_preset,
+                api_key=api_key_value,
+                base_url=base_url_value,
+                base_url_preset_id=base_url_preset_value,
             )
         except Exception as err:
             logger.debug(f"LLM provider 目录不可用，回退到旧运行时逻辑: {err}")
             runtime = cls._build_legacy_runtime(
                 provider_name=provider_name,
                 model_name=model_name,
-                api_key=api_key,
-                base_url=base_url,
+                api_key=api_key_value,
+                base_url=base_url_value,
             )
         model_name = runtime.get("model_id") or model_name
         thinking_kwargs = cls._build_thinking_kwargs(
