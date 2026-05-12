@@ -455,6 +455,22 @@ class ConfigModel(BaseModel):
     # 指定的仓库Github token，多个仓库使用,分隔，格式：{user1}/{repo1}:ghp_****,{user2}/{repo2}:github_pat_****
     REPO_GITHUB_TOKEN: Optional[str] = None
 
+    # ==================== 飞书通知配置 ====================
+    # 飞书应用 App ID
+    FEISHU_APP_ID: Optional[str] = None
+    # 飞书应用 App Secret
+    FEISHU_APP_SECRET: Optional[str] = None
+    # 飞书默认接收用户 Open ID
+    FEISHU_OPEN_ID: Optional[str] = None
+    # 飞书默认接收群聊 Chat ID
+    FEISHU_CHAT_ID: Optional[str] = None
+    # 飞书管理员 Open ID 列表，多个使用 , 分隔
+    FEISHU_ADMINS: Optional[str] = None
+    # 飞书事件校验 Token
+    FEISHU_VERIFICATION_TOKEN: Optional[str] = None
+    # 飞书事件加密 Key
+    FEISHU_ENCRYPT_KEY: Optional[str] = None
+
     # ==================== 性能配置 ====================
     # 大内存模式
     BIG_MEMORY_MODE: bool = False

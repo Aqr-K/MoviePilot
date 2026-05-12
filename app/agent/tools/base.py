@@ -303,6 +303,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             MessageChannel.Telegram: "telegram",
             MessageChannel.Discord: "discord",
             MessageChannel.Wechat: "wechat",
+            MessageChannel.Feishu: "feishu",
             MessageChannel.WechatClawBot: "wechatclawbot",
             MessageChannel.Slack: "slack",
             MessageChannel.VoceChat: "vocechat",
@@ -323,6 +324,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             "telegram": "TELEGRAM_ADMINS",
             "discord": "DISCORD_ADMINS",
             "wechat": "WECHAT_ADMINS",
+            "feishu": "FEISHU_ADMINS",
             "wechatclawbot": "WECHATCLAWBOT_ADMINS",
             "slack": "SLACK_ADMINS",
             "vocechat": "VOCECHAT_ADMINS",
@@ -334,6 +336,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             "telegram": "TELEGRAM_CHAT_ID",
             "vocechat": "VOCECHAT_CHANNEL_ID",
             "wechat": "WECHAT_BOT_CHAT_ID",
+            "feishu": "FEISHU_OPEN_ID",
             "wechatclawbot": "WECHATCLAWBOT_DEFAULT_TARGET",
         }
 

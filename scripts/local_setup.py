@@ -1747,6 +1747,7 @@ def _collect_notification_config() -> Optional[dict[str, Any]]:
             "skip": "跳过",
             "telegram": "Telegram",
             "wechat": "企业微信机器人",
+            "feishu": "飞书",
             "slack": "Slack",
         },
         default="skip",
@@ -1779,6 +1780,28 @@ def _collect_notification_config() -> Optional[dict[str, Any]]:
             config["WECHAT_BOT_CHAT_ID"] = chat_id
         if admins:
             config["WECHAT_ADMINS"] = admins
+    elif notification_type == "feishu":
+        config = {
+            "FEISHU_APP_ID": _prompt_text("飞书应用 App ID"),
+            "FEISHU_APP_SECRET": _prompt_text("飞书应用 App Secret", secret=True),
+        }
+        open_id = _prompt_text("默认接收用户 Open ID（可选）", default="", allow_empty=True)
+        chat_id = _prompt_text("默认接收群聊 Chat ID（可选）", default="", allow_empty=True)
+        admins = _prompt_text(
+            "管理员 Open ID 列表，多个逗号分隔（可选）", default="", allow_empty=True
+        )
+        verification_token = _prompt_text("飞书事件 Verification Token（可选）", default="", allow_empty=True)
+        encrypt_key = _prompt_text("飞书事件 Encrypt Key（可选）", default="", allow_empty=True)
+        if open_id:
+            config["FEISHU_OPEN_ID"] = open_id
+        if chat_id:
+            config["FEISHU_CHAT_ID"] = chat_id
+        if admins:
+            config["FEISHU_ADMINS"] = admins
+        if verification_token:
+            config["FEISHU_VERIFICATION_TOKEN"] = verification_token
+        if encrypt_key:
+            config["FEISHU_ENCRYPT_KEY"] = encrypt_key
     else:
         config = {
             "SLACK_OAUTH_TOKEN": _prompt_text("Slack OAuth Token", secret=True),
