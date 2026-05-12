@@ -33,6 +33,8 @@ QUERY_SUBSCRIBE_OUTPUT_FIELDS = [
     "sites",
     "downloader",
     "best_version",
+    "current_priority",
+    "episode_priority",
     "save_path",
     "custom_words",
     "media_category",

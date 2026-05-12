@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 from app import schemas
 from app.chain import ChainBase
@@ -55,6 +55,242 @@ class SubscribeChain(ChainBase):
     _LOCK_TIMOUT = 3600 * 2
     _button_page_size = 6
     _text_page_size = 10
+
+    @staticmethod
+    def __normalize_episode_priority(episode_priority: Optional[dict]) -> Dict[str, int]:
+        """
+        归一化按集洗版优先级状态。
+        """
+        if not isinstance(episode_priority, dict):
+            return {}
+
+        normalized = {}
+        for episode, priority in episode_priority.items():
+            if episode is None or priority is None:
+                continue
+            try:
+                normalized[str(int(episode))] = int(priority)
+            except (TypeError, ValueError):
+                continue
+        return normalized
+
+    @classmethod
+    def __get_episode_priority(cls, subscribe: Subscribe) -> Dict[str, int]:
+        """
+        获取订阅按集洗版优先级状态。
+        """
+        episode_priority = cls.__normalize_episode_priority(getattr(subscribe, "episode_priority", None))
+        if episode_priority:
+            return episode_priority
+
+        if subscribe.best_version and subscribe.type == MediaType.TV.value and subscribe.current_priority is not None:
+            target_episodes = cls.__get_best_version_target_episodes(subscribe)
+            return {
+                str(episode): int(subscribe.current_priority)
+                for episode in target_episodes
+            }
+        return {}
+
+    @classmethod
+    def get_episode_priority(cls, subscribe: Subscribe) -> Dict[str, int]:
+        """
+        对外暴露按集洗版优先级状态。
+        """
+        return cls.__get_episode_priority(subscribe)
+
+    @classmethod
+    def __get_best_version_target_episodes(cls, subscribe: Subscribe) -> List[int]:
+        """
+        获取洗版订阅目标剧集范围。
+        """
+        if subscribe.type != MediaType.TV.value:
+            return []
+
+        start_episode = subscribe.start_episode or 1
+        total_episode = subscribe.total_episode or 0
+        if total_episode < start_episode:
+            return []
+        return list(range(start_episode, total_episode + 1))
+
+    @classmethod
+    def __get_pending_best_version_episodes_with_priority(
+            cls,
+            subscribe: Subscribe,
+            episode_priority: Optional[dict] = None,
+    ) -> List[int]:
+        """
+        使用指定按集优先级状态获取当前仍需继续洗版的剧集。
+        """
+        target_episodes = cls.__get_best_version_target_episodes(subscribe)
+        if not target_episodes:
+            return []
+
+        if episode_priority is None:
+            normalized = cls.__get_episode_priority(subscribe)
+        else:
+            normalized = cls.__normalize_episode_priority(episode_priority)
+        return [episode for episode in target_episodes if normalized.get(str(episode)) != 100]
+
+    @classmethod
+    def _get_pending_best_version_episodes(cls, subscribe: Subscribe) -> List[int]:
+        """
+        获取当前仍需继续洗版的剧集。
+        """
+        return cls.__get_pending_best_version_episodes_with_priority(subscribe)
+
+    @classmethod
+    def get_best_version_lack_episode(
+            cls,
+            subscribe: Subscribe,
+            episode_priority: Optional[dict] = None,
+    ) -> int:
+        """
+        获取洗版订阅当前剩余待洗剧集数。
+        """
+        if not subscribe.best_version or subscribe.type != MediaType.TV.value:
+            return subscribe.lack_episode or 0
+        return len(cls.__get_pending_best_version_episodes_with_priority(subscribe, episode_priority))
+
+    @classmethod
+    def get_best_version_current_priority(
+            cls,
+            subscribe: Subscribe,
+            episode_priority: Optional[dict] = None,
+    ) -> int:
+        """
+        获取洗版订阅当前优先级状态。
+        """
+        if not subscribe.best_version or subscribe.type != MediaType.TV.value:
+            return subscribe.current_priority or 0
+
+        pending_episodes = cls.__get_pending_best_version_episodes_with_priority(subscribe, episode_priority)
+        if not pending_episodes:
+            return 100
+
+        if episode_priority is None:
+            normalized = cls.__get_episode_priority(subscribe)
+        else:
+            normalized = cls.__normalize_episode_priority(episode_priority)
+        return max(
+            (normalized.get(str(episode), 0) for episode in pending_episodes),
+            default=0,
+        )
+
+    @classmethod
+    def __is_best_version_complete(cls, subscribe: Subscribe) -> bool:
+        """
+        判断洗版订阅是否已完成。
+        """
+        if not subscribe.best_version:
+            return False
+        if subscribe.type != MediaType.TV.value:
+            return subscribe.current_priority == 100
+
+        target_episodes = cls.__get_best_version_target_episodes(subscribe)
+        if not target_episodes:
+            return subscribe.current_priority == 100
+
+        episode_priority = cls.__get_episode_priority(subscribe)
+        return all(episode_priority.get(str(episode)) == 100 for episode in target_episodes)
+
+    @classmethod
+    def is_best_version_complete(cls, subscribe: Subscribe) -> bool:
+        """
+        对外暴露洗版完成判断。
+        """
+        return cls.__is_best_version_complete(subscribe)
+
+    @classmethod
+    def __is_best_version_complete_with_priority(
+            cls,
+            subscribe: Subscribe,
+            episode_priority: Optional[dict] = None,
+    ) -> bool:
+        """
+        使用指定按集优先级状态判断洗版是否已完成。
+        """
+        if not subscribe.best_version:
+            return False
+        if subscribe.type != MediaType.TV.value:
+            return subscribe.current_priority == 100
+
+        target_episodes = cls.__get_best_version_target_episodes(subscribe)
+        if not target_episodes:
+            return subscribe.current_priority == 100
+
+        return not cls.__get_pending_best_version_episodes_with_priority(subscribe, episode_priority)
+
+    @staticmethod
+    def __get_downloaded_episodes(downloads: Optional[List[Context]]) -> List[int]:
+        """
+        获取本次下载实际涉及的剧集。
+        """
+        if not downloads:
+            return []
+
+        downloaded_episodes = set()
+        for context in downloads:
+            selected_episodes = getattr(context, "selected_episodes", None)
+            if selected_episodes is None:
+                selected_episodes = context.meta_info.episode_list if context.meta_info else []
+            for episode in selected_episodes or []:
+                try:
+                    downloaded_episodes.add(int(episode))
+                except (TypeError, ValueError):
+                    continue
+        return sorted(downloaded_episodes)
+
+    @classmethod
+    def __get_best_version_completed_episodes(cls, subscribe: Subscribe) -> List[int]:
+        """
+        获取已完成洗版的剧集。
+        """
+        episode_priority = cls.__get_episode_priority(subscribe)
+        return sorted(
+            int(episode) for episode, priority in episode_priority.items()
+            if str(episode).isdigit() and priority == 100
+        )
+
+    @classmethod
+    def __get_best_version_interested_episodes(
+            cls,
+            subscribe: Subscribe,
+            context: Context,
+            priority: int,
+    ) -> List[int]:
+        """
+        获取当前资源中仍值得继续洗版的剧集。
+        """
+        if subscribe.type != MediaType.TV.value:
+            return []
+
+        target_episodes = set(cls.__get_best_version_target_episodes(subscribe))
+        if not target_episodes:
+            return []
+
+        selected_episodes = getattr(context, "selected_episodes", None)
+        if selected_episodes is None:
+            selected_episodes = context.meta_info.episode_list if context.meta_info else []
+        if not selected_episodes:
+            episode_priority = cls.__get_episode_priority(subscribe)
+            return sorted([
+                episode for episode in target_episodes
+                if episode_priority.get(str(episode)) is None or priority > episode_priority.get(str(episode))
+            ])
+
+        episode_priority = cls.__get_episode_priority(subscribe)
+        interested = []
+        for episode in selected_episodes:
+            try:
+                episode_num = int(episode)
+            except (TypeError, ValueError):
+                continue
+            if episode_num not in target_episodes:
+                continue
+            current_priority = episode_priority.get(str(episode_num))
+            if current_priority is None or priority > current_priority:
+                interested.append(episode_num)
+        return sorted(set(interested))
 
     @staticmethod
     def __get_event_media(_mediaid: str, _meta: MetaBase) -> Optional[MediaInfo]:
@@ -627,9 +863,23 @@ class SubscribeChain(ChainBase):
                                             f"{subscribe.name} 正在洗版，{torrent_info.title} 不符合订阅集数范围"
                                         )
                                         continue
-                                    # 洗版时，优先级小于等于已下载优先级的不要
-                                    if subscribe.current_priority \
-                                            and torrent_info.pri_order <= subscribe.current_priority:
+                                    # 洗版时，只保留至少能提升一集优先级的资源
+                                    if (
+                                        torrent_mediainfo.type == MediaType.TV
+                                        and not self.__get_best_version_interested_episodes(
+                                            subscribe=subscribe,
+                                            context=context,
+                                            priority=torrent_info.pri_order,
+                                        )
+                                    ):
+                                        logger.info(
+                                            f'{subscribe.name} 正在洗版，{torrent_info.title} 不包含可提升优先级的剧集')
+                                        continue
+                                    if (
+                                        torrent_mediainfo.type != MediaType.TV
+                                        and subscribe.current_priority
+                                        and torrent_info.pri_order <= subscribe.current_priority
+                                    ):
                                         logger.info(
                                             f'{subscribe.name} 正在洗版，{torrent_info.title} 优先级低于或等于已下载优先级')
                                         continue
@@ -700,11 +950,58 @@ class SubscribeChain(ChainBase):
             return
         # 当前下载资源的优先级
         priority = max([item.torrent_info.pri_order for item in downloads])
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if subscribe.type == MediaType.TV.value:
+            episode_priority = self.__get_episode_priority(subscribe)
+            updated = False
+            for download in downloads:
+                download_priority = download.torrent_info.pri_order
+                downloaded_episodes = self.__get_downloaded_episodes([download])
+                if not downloaded_episodes:
+                    continue
+                for episode in downloaded_episodes:
+                    episode_key = str(episode)
+                    old_priority = episode_priority.get(episode_key)
+                    if old_priority is None or download_priority > old_priority:
+                        episode_priority[episode_key] = download_priority
+                        updated = True
+
+            if not updated and not episode_priority:
+                return
+
+            current_priority = self.get_best_version_current_priority(subscribe, episode_priority)
+            lack_episode = self.get_best_version_lack_episode(subscribe, episode_priority)
+            update_data: Dict[str, Any] = {
+                "episode_priority": episode_priority,
+                "last_update": now,
+                "current_priority": current_priority,
+                "lack_episode": lack_episode,
+            }
+
+            SubscribeOper().update(subscribe.id, update_data)
+            subscribe.episode_priority = episode_priority
+            subscribe.current_priority = current_priority
+            subscribe.lack_episode = lack_episode
+            subscribe.last_update = now
+
+            completed_episodes = self.__get_best_version_completed_episodes(subscribe)
+            if self.__is_best_version_complete(subscribe):
+                logger.info(f'{mediainfo.title_year} 洗版完成，已完成剧集：{completed_episodes}')
+                self.__finish_subscribe(subscribe=subscribe, meta=meta, mediainfo=mediainfo)
+            else:
+                logger.info(
+                    f'{mediainfo.title_year} 正在洗版，更新剧集优先级为 {priority}，已完成剧集：{completed_episodes}'
+                )
+            return
+
         # 订阅存在待定策略，不管是否已完成，均需更新订阅信息
         SubscribeOper().update(subscribe.id, {
             "current_priority": priority,
-            "last_update": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "last_update": now
         })
+        subscribe.current_priority = priority
+        subscribe.last_update = now
         if priority == 100:
             # 洗版完成
             self.__finish_subscribe(subscribe=subscribe, meta=meta, mediainfo=mediainfo)
@@ -742,7 +1039,7 @@ class SubscribeChain(ChainBase):
             # 洗版下载到了内容，更新资源优先级
             self.update_subscribe_priority(subscribe=subscribe, meta=meta,
                                            mediainfo=mediainfo, downloads=downloads)
-        elif subscribe.current_priority == 100:
+        elif self.__is_best_version_complete(subscribe):
             # 洗版完成
             self.__finish_subscribe(subscribe=subscribe, meta=meta, mediainfo=mediainfo)
         else:
@@ -1081,8 +1378,22 @@ class SubscribeChain(ChainBase):
 
                             # 洗版时，优先级小于已下载优先级的不要
                             if subscribe.best_version:
-                                if subscribe.current_priority \
-                                        and torrent_info.pri_order <= subscribe.current_priority:
+                                if (
+                                    meta.type == MediaType.TV
+                                    and not self.__get_best_version_interested_episodes(
+                                        subscribe=subscribe,
+                                        context=_context,
+                                        priority=torrent_info.pri_order,
+                                    )
+                                ):
+                                    logger.info(
+                                        f'{subscribe.name} 正在洗版，{torrent_info.title} 不包含可提升优先级的剧集')
+                                    continue
+                                if (
+                                    meta.type != MediaType.TV
+                                    and subscribe.current_priority
+                                    and torrent_info.pri_order <= subscribe.current_priority
+                                ):
                                     logger.info(
                                         f'{subscribe.name} 正在洗版，{torrent_info.title} 优先级低于或等于已下载优先级')
                                     continue
@@ -1163,16 +1474,31 @@ class SubscribeChain(ChainBase):
                 continue
             # 对于电视剧，获取当前季的总集数
             episodes = mediainfo.seasons.get(subscribe.season) or []
+            current_priority = None
             if not subscribe.manual_total_episode and len(episodes):
                 total_episode = len(episodes)
-                lack_episode = subscribe.lack_episode + (total_episode - subscribe.total_episode)
+                if subscribe.best_version and subscribe.type == MediaType.TV.value:
+                    old_total_episode = subscribe.total_episode or 0
+                    episode_priority = self.__get_episode_priority(subscribe)
+                    for episode in range(old_total_episode + 1, total_episode + 1):
+                        episode_priority.setdefault(str(episode), 0)
+                    subscribe.total_episode = total_episode
+                    subscribe.episode_priority = episode_priority
+                    lack_episode = self.get_best_version_lack_episode(subscribe, episode_priority)
+                    current_priority = self.get_best_version_current_priority(subscribe, episode_priority)
+                else:
+                    lack_episode = subscribe.lack_episode + (total_episode - subscribe.total_episode)
                 logger.info(
                     f'订阅 {subscribe.name} 总集数变化，更新总集数为{total_episode}，缺失集数为{lack_episode} ...')
             else:
                 total_episode = subscribe.total_episode
-                lack_episode = subscribe.lack_episode
+                if subscribe.best_version and subscribe.type == MediaType.TV.value:
+                    lack_episode = self.get_best_version_lack_episode(subscribe)
+                    current_priority = self.get_best_version_current_priority(subscribe)
+                else:
+                    lack_episode = subscribe.lack_episode
             # 更新TMDB信息
-            subscribeoper.update(subscribe.id, {
+            update_data = {
                 "name": mediainfo.title,
                 "year": mediainfo.year,
                 "vote": mediainfo.vote_average,
@@ -1183,7 +1509,15 @@ class SubscribeChain(ChainBase):
                 "tvdbid": mediainfo.tvdb_id,
                 "total_episode": total_episode,
                 "lack_episode": lack_episode
-            })
+            }
+            if subscribe.best_version and subscribe.type == MediaType.TV.value:
+                update_data["current_priority"] = current_priority
+                if not subscribe.manual_total_episode and len(episodes):
+                    update_data["episode_priority"] = subscribe.episode_priority
+                subscribe.current_priority = current_priority
+            subscribe.total_episode = total_episode
+            subscribe.lack_episode = lack_episode
+            subscribeoper.update(subscribe.id, update_data)
             logger.info(f'{subscribe.name} 订阅元数据更新完成')
 
     def get_subscribe_by_source(self, source: str) -> Optional[Subscribe]:
@@ -1343,6 +1677,11 @@ class SubscribeChain(ChainBase):
         获取已下载过的集数或电影
         """
         if subscribe.best_version:
+            if subscribe.type == MediaType.TV.value:
+                completed = SubscribeChain.__get_best_version_completed_episodes(subscribe)
+                if completed:
+                    logger.info(f'订阅 {subscribe.name} 第{subscribe.season}季 已完成洗版剧集：{completed}')
+                return completed
             return []
         note = subscribe.note or []
         if not note:
@@ -1368,6 +1707,13 @@ class SubscribeChain(ChainBase):
         update_data = {}
         if update_date:
             update_data["last_update"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        if subscribe.best_version and subscribe.type == MediaType.TV.value:
+            lack_episode = len(SubscribeChain._get_pending_best_version_episodes(subscribe))
+            logger.info(f"{mediainfo.title_year} 季 {subscribe.season} 剩余待洗剧集数为{lack_episode} ...")
+            update_data["lack_episode"] = lack_episode
+            if update_data:
+                SubscribeOper().update(subscribe.id, update_data)
+            return
         if subscribe.type == MediaType.TV.value:
             if not lefts:
                 # 如果 lefts 为空，表示没有缺失集数，直接设置 lack_episode 为 0
@@ -2475,18 +2821,19 @@ class SubscribeChain(ChainBase):
             )
         else:
             # 洗版，如果已经满足了优先级，则认为已经洗版完成
-            if subscribe.current_priority == 100:
+            if self.__is_best_version_complete(subscribe):
                 exist_flag = True
                 no_exists = {}
             else:
                 exist_flag = False
                 if meta.type == MediaType.TV:
+                    pending_episodes = self._get_pending_best_version_episodes(subscribe)
                     # 对于电视剧，构造缺失的媒体信息
                     no_exists = {
                         mediakey: {
                             subscribe.season: schemas.NotExistMediaInfo(
                                 season=subscribe.season,
-                                episodes=[],
+                                episodes=pending_episodes,
                                 total_episode=subscribe.total_episode,
                                 start_episode=subscribe.start_episode or 1)
                         }
@@ -2559,22 +2906,21 @@ class SubscribeChain(ChainBase):
             f"订阅 {subscribe.name} 第{subscribe.season}季 总集数更新为 {new_total_episode}，缺失集数更新为 {new_lack_episode}"
         )
 
-    @staticmethod
-    def _is_episode_range_covered(meta: MetaBase, subscribe: Subscribe) -> bool:
+    @classmethod
+    def _is_episode_range_covered(cls, meta: MetaBase, subscribe: Subscribe) -> bool:
         """
-        判断种子是否包含指定订阅的剧集范围
+        判断种子是否覆盖当前仍需洗版的剧集范围。
         """
         episodes = meta.episode_list
         if not episodes:
             # 没有剧集信息，表示该种子为合集
             return True
 
-        min_ep = min(episodes)
-        max_ep = max(episodes)
-        start_ep = subscribe.start_episode or 1
-        end_ep = subscribe.total_episode
+        pending_episodes = cls._get_pending_best_version_episodes(subscribe)
+        if not pending_episodes:
+            return True
 
-        return min_ep <= start_ep and max_ep >= end_ep
+        return bool(set(episodes).intersection(set(pending_episodes)))
 
     @staticmethod
     def __get_media_id_match_source(mediainfo: Optional[MediaInfo]) -> str:

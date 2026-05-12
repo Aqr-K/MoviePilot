@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import AsyncIterator, Any, Dict, Tuple
 from typing import List, Optional
 
-from app.helper.sites import SitesHelper  # noqa
 from fastapi.concurrency import run_in_threadpool
 
 from app.chain import ChainBase
@@ -20,6 +19,7 @@ from app.core.event import eventmanager, Event
 from app.core.metainfo import MetaInfo
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.progress import ProgressHelper
+from app.helper.sites import SitesHelper  # noqa
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import NotExistMediaInfo
@@ -50,7 +50,7 @@ class SearchChain(ChainBase):
 
     @staticmethod
     def _calculate_recommend_request_hash(
-        filtered_indices: Optional[List[int]], search_results_count: int
+            filtered_indices: Optional[List[int]], search_results_count: int
     ) -> str:
         """
         计算当前推荐请求哈希，用于识别筛选条件是否变化。
@@ -94,7 +94,7 @@ class SearchChain(ChainBase):
         return self._build_ai_recommend_status()
 
     def get_recommend_status(
-        self, filtered_indices: Optional[List[int]], search_results_count: int
+            self, filtered_indices: Optional[List[int]], search_results_count: int
     ) -> Dict[str, Any]:
         """
         获取AI推荐状态，并在筛选条件变化时返回 idle。
@@ -141,7 +141,7 @@ class SearchChain(ChainBase):
 
     @staticmethod
     def _extract_recommend_items(
-        filtered_indices: Optional[List[int]], results: List[Any]
+            filtered_indices: Optional[List[int]], results: List[Any]
     ) -> tuple[List[str], List[int]]:
         """
         构建发送给模型的候选列表和索引映射。
@@ -180,10 +180,10 @@ class SearchChain(ChainBase):
 
     @staticmethod
     def _restore_original_indices(
-        ai_indices: List[int],
-        filtered_indices: Optional[List[int]],
-        valid_indices: List[int],
-        results_count: int,
+            ai_indices: List[int],
+            filtered_indices: Optional[List[int]],
+            valid_indices: List[int],
+            results_count: int,
     ) -> List[int]:
         """
         将模型输出的局部索引映射回原始搜索结果索引。
@@ -206,7 +206,8 @@ class SearchChain(ChainBase):
 
         return original_indices
 
-    async def _invoke_recommend_llm(self, search_results_text: str) -> str:
+    @staticmethod
+    async def _invoke_recommend_llm(search_results_text: str) -> str:
         """
         通过统一后台提示词机制执行资源推荐。
         """
@@ -233,10 +234,10 @@ class SearchChain(ChainBase):
         return full_output[0].strip()
 
     def start_recommend_task(
-        self,
-        filtered_indices: Optional[List[int]],
-        search_results_count: int,
-        results: List[Any],
+            self,
+            filtered_indices: Optional[List[int]],
+            search_results_count: int,
+            results: List[Any],
     ) -> None:
         """
         启动AI推荐任务。
@@ -274,8 +275,8 @@ class SearchChain(ChainBase):
                     return
 
                 user_preference = (
-                    settings.AI_RECOMMEND_USER_PREFERENCE
-                    or "Prefer high-quality resources with more seeders"
+                        settings.AI_RECOMMEND_USER_PREFERENCE
+                        or "Prefer high-quality resources with more seeders"
                 )
                 search_results_text = (
                     f"User Preference: {user_preference}\n\n"
@@ -614,10 +615,10 @@ class SearchChain(ChainBase):
 
             filtered_torrents = torrent_list
             if filter_params:
-                torrenthelper = TorrentHelper()
+                handler = TorrentHelper()
                 filtered_torrents = [
-                    torrent for torrent in filtered_torrents
-                    if torrenthelper.filter_torrent(torrent, filter_params)
+                    t for t in filtered_torrents
+                    if handler.filter_torrent(t, filter_params)
                 ]
 
             if rule_groups and filtered_torrents:
@@ -633,11 +634,11 @@ class SearchChain(ChainBase):
                 return torrent_list
 
             site_torrents: Dict[Tuple[Optional[int], Optional[str]], List[TorrentInfo]] = {}
-            for torrent in torrent_list:
-                site_key = (torrent.site, torrent.site_name)
+            for t in torrent_list:
+                site_key = (t.site, t.site_name)
                 if site_key not in site_torrents:
                     site_torrents[site_key] = []
-                site_torrents[site_key].append(torrent)
+                site_torrents[site_key].append(t)
 
             if len(site_torrents) <= 1:
                 return __do_site_filter(torrent_list)
@@ -659,11 +660,11 @@ class SearchChain(ChainBase):
                     )
 
             filtered_ids = {
-                id(torrent)
+                id(t)
                 for filtered_torrents in filtered_by_site.values()
-                for torrent in filtered_torrents
+                for t in filtered_torrents
             }
-            return [torrent for torrent in torrent_list if id(torrent) in filtered_ids]
+            return [t for t in torrent_list if id(t) in filtered_ids]
 
         if not torrents:
             logger.warn(f'{keyword or mediainfo.title} 未搜索到资源')
@@ -1286,16 +1287,16 @@ class SearchChain(ChainBase):
 
         async def search_site(site: dict) -> Tuple[dict, List[TorrentInfo]]:
             if area == "imdbid":
-                result = await self.async_search_torrents(site=site,
-                                                          keyword=mediainfo.imdb_id if mediainfo else None,
-                                                          mtype=mediainfo.type if mediainfo else None,
-                                                          page=page)
+                site_result = await self.async_search_torrents(site=site,
+                                                               keyword=mediainfo.imdb_id if mediainfo else None,
+                                                               mtype=mediainfo.type if mediainfo else None,
+                                                               page=page)
             else:
-                result = await self.async_search_torrents(site=site,
-                                                          keyword=keyword,
-                                                          mtype=mediainfo.type if mediainfo else None,
-                                                          page=page)
-            return site, result or []
+                site_result = await self.async_search_torrents(site=site,
+                                                               keyword=keyword,
+                                                               mtype=mediainfo.type if mediainfo else None,
+                                                               page=page)
+            return site, site_result or []
 
         tasks = [asyncio.create_task(search_site(site)) for site in indexer_sites]
         results_count = 0

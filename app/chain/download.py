@@ -213,6 +213,12 @@ class DownloadChain(ChainBase):
 
         # 实际下载的集数
         download_episodes = StringUtils.format_ep(list(episodes)) if episodes else None
+        if episodes is not None:
+            context.selected_episodes = sorted(set(episodes))
+        elif _meta and _meta.episode_list:
+            context.selected_episodes = sorted(set(_meta.episode_list))
+        else:
+            context.selected_episodes = []
         _folder_name = ""
         if not torrent_file and not torrent_content:
             # 下载种子文件，得到的可能是文件也可能是磁力链

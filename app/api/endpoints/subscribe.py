@@ -107,6 +107,8 @@ async def update_subscribe(
     # 避免更新缺失集数
     old_subscribe_dict = subscribe.to_dict()
     subscribe_dict = subscribe_in.model_dump()
+    if subscribe_in.episode_priority is None:
+        subscribe_dict.pop("episode_priority", None)
     if not subscribe_in.lack_episode:
         # 没有缺失集数时，缺失集数清空，避免更新为0
         subscribe_dict.pop("lack_episode")
@@ -232,6 +234,8 @@ async def reset_subscribes(
         await subscribe.async_update(db, {
             "note": [],
             "lack_episode": subscribe.total_episode,
+            "current_priority": None,
+            "episode_priority": {},
             "state": "R"
         })
         # 重新获取更新后的订阅数据

@@ -60,6 +60,8 @@ class SubscribeHistory(Base):
     sites = Column(JSON)
     # 是否洗版
     best_version = Column(Integer, default=0)
+    # 洗版时已下载剧集的优先级状态，格式：{"1": 90, "2": 100}
+    episode_priority = Column(JSON)
     # 保存路径
     save_path = Column(String)
     # 是否使用 imdbid 搜索

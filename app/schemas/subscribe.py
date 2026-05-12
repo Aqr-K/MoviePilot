@@ -61,6 +61,8 @@ class Subscribe(BaseModel):
     best_version: Optional[int] = 0
     # 当前优先级
     current_priority: Optional[int] = None
+    # 洗版时已下载剧集的优先级状态
+    episode_priority: Optional[Dict[str, int]] = None
     # 保存路径
     save_path: Optional[str] = None
     # 是否使用 imdbid 搜索
