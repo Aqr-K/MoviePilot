@@ -7,6 +7,7 @@ from types import ModuleType
 from unittest import TestCase
 from unittest.mock import patch
 
+from packaging.requirements import Requirement
 from packaging.version import Version
 
 
@@ -120,6 +121,43 @@ class PluginHelperTest(TestCase):
         self.assertEqual([], errors)
         self.assertEqual(1, max_active_installs)
 
+    def test_get_protected_runtime_packages_only_keeps_main_dependency_graph(self):
+        """
+        验证仅主程序依赖链上的包会被纳入保护集合。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        installed_packages = {
+            "passlib": Version("1.7.4"),
+            "bcrypt": Version("4.0.1"),
+            "demo_package": Version("1.0"),
+        }
+        requirement_graph = {
+            "passlib": (Version("1.7.4"), [Requirement("bcrypt>=4")]),
+            "bcrypt": (Version("4.0.1"), []),
+            "demo_package": (Version("1.0"), []),
+        }
+
+        with patch.object(
+                PluginHelper,
+                "_PluginHelper__parse_project_requirement_roots",
+                return_value={"passlib": set()}
+        ):
+            with patch.object(
+                    PluginHelper,
+                    "_PluginHelper__get_installed_distribution_requirements",
+                    return_value=requirement_graph
+            ):
+                protected_packages = PluginHelper._PluginHelper__get_protected_runtime_packages(installed_packages)
+
+        self.assertEqual({
+            "passlib": Version("1.7.4"),
+            "bcrypt": Version("4.0.1"),
+        }, protected_packages)
+
     def test_pip_install_rejects_conflicting_runtime_dependency(self):
         """
         验证插件如果试图覆盖主程序核心依赖，会在真正执行 pip 前被直接拒绝。
@@ -134,7 +172,7 @@ class PluginHelperTest(TestCase):
             requirements_file.write_text("fastapi<0.1\n", encoding="utf-8")
             with patch.object(
                     PluginHelper,
-                    "_PluginHelper__get_installed_packages",
+                    "_PluginHelper__get_protected_runtime_packages",
                     return_value={"fastapi": Version("0.115.14")}
             ):
                 success, message = PluginHelper.pip_install_with_fallback(requirements_file)
@@ -143,9 +181,47 @@ class PluginHelperTest(TestCase):
         self.assertIn("主程序核心依赖", message)
         self.assertIn("fastapi", message)
 
+    def test_pip_install_allows_changing_non_runtime_dependency(self):
+        """
+        验证非主程序依赖即便已安装，插件后续仍可调整其版本约束。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        seen_install_commands = []
+
+        def fake_execute(cmd):
+            if cmd[:4] == [sys.executable, "-m", "pip", "install"]:
+                seen_install_commands.append(cmd)
+                self.assertNotIn("-c", cmd)
+                return True, "ok"
+            return True, "ok"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            requirements_file = Path(temp_dir) / "requirements.txt"
+            requirements_file.write_text("demo-package>=2\n", encoding="utf-8")
+            with patch.object(
+                    PluginHelper,
+                    "_PluginHelper__get_installed_packages",
+                    return_value={"demo_package": Version("1.0")}
+            ):
+                with patch.object(
+                        PluginHelper,
+                        "_PluginHelper__get_protected_runtime_packages",
+                        return_value={}
+                ):
+                    with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
+                        success, message = PluginHelper.pip_install_with_fallback(requirements_file)
+
+        self.assertTrue(success)
+        self.assertEqual("ok", message)
+        self.assertEqual(1, len(seen_install_commands))
+
     def test_pip_install_uses_runtime_constraints_file(self):
         """
-        验证插件依赖安装会固定当前运行环境已安装版本，防止共享 venv 被升级或降级。
+        验证插件依赖安装会固定主程序依赖的当前版本，防止共享 venv 被改写。
         """
         try:
             from app.helper.plugin import PluginHelper
@@ -169,7 +245,7 @@ class PluginHelperTest(TestCase):
             requirements_file.write_text("demo-package\n", encoding="utf-8")
             with patch.object(
                     PluginHelper,
-                    "_PluginHelper__get_installed_packages",
+                    "_PluginHelper__get_protected_runtime_packages",
                     return_value={"fastapi": Version("0.115.14")}
             ):
                 with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
@@ -213,7 +289,7 @@ class PluginHelperTest(TestCase):
             requirements_file.write_text("demo-package\n", encoding="utf-8")
             with patch.object(
                     PluginHelper,
-                    "_PluginHelper__get_installed_packages",
+                    "_PluginHelper__get_protected_runtime_packages",
                     return_value={"fastapi": Version("0.115.14")}
             ):
                 with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
