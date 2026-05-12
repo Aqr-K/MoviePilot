@@ -318,5 +318,5 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         client = self.get_instance(client_config.name)
         if not client:
             return False
-        sequence = int(stream_meta.get("sequence") or 1) + 1
+        sequence = int(stream_meta.get("sequence") or 0) + 1
         return client.close_streaming_card(card_id=card_id, sequence=sequence)

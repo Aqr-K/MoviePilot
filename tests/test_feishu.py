@@ -144,6 +144,36 @@ class TestFeishu(unittest.TestCase):
         self.assertTrue(result.is_callback)
         self.assertEqual(result.chat_id, "oc_123")
 
+    def test_build_event_handler_registers_common_im_events(self):
+        registered = []
+
+        class _Builder:
+            def __getattr__(self, name):
+                if name.startswith("register_"):
+                    def _register(handler):
+                        registered.append(name)
+                        return self
+                    return _register
+                raise AttributeError(name)
+
+            def build(self):
+                return "handler"
+
+        client = self._build_client()
+        fake_builder = _Builder()
+
+        with patch("app.modules.feishu.feishu.lark.EventDispatcherHandler.builder", return_value=fake_builder):
+            handler = client._build_event_handler()
+
+        self.assertEqual(handler, "handler")
+        self.assertIn("register_p2_im_message_receive_v1", registered)
+        self.assertIn("register_p2_im_message_message_read_v1", registered)
+        self.assertIn("register_p2_im_message_reaction_created_v1", registered)
+        self.assertIn("register_p2_im_message_reaction_deleted_v1", registered)
+        self.assertIn("register_p2_im_message_recalled_v1", registered)
+        self.assertIn("register_p2_im_chat_access_event_bot_p2p_chat_entered_v1", registered)
+        self.assertIn("register_p2_card_action_trigger", registered)
+
     def test_parse_message_blocks_non_admin_command(self):
         client = self._build_client(FEISHU_ADMINS="ou_admin")
 
@@ -292,6 +322,7 @@ class TestFeishu(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["metadata"]["feishu_streaming"]["card_id"], "card_stream")
+        self.assertEqual(result["metadata"]["feishu_streaming"]["sequence"], 0)
         card_request = client._api_client.cardkit.v1.card.create.call_args.args[0]
         self.assertEqual(card_request.request_body.type, "card_json")
         card_payload = json.loads(card_request.request_body.data)
@@ -324,6 +355,31 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(reply_request.message_id, "om_origin")
         self.assertEqual(reply_request.request_body.msg_type, "interactive")
         self.assertEqual(json.loads(reply_request.request_body.content)["data"]["card_id"], "card_stream")
+        self.assertEqual(result["metadata"]["feishu_streaming"]["sequence"], 0)
+
+    def test_edit_replied_streaming_card_uses_first_increment_sequence(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+
+        success = client.edit_message(
+            message_id="om_reply",
+            text="补充内容",
+            metadata={
+                "feishu_streaming": {
+                    "card_id": "card_stream",
+                    "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                    "sequence": 0,
+                }
+            },
+        )
+
+        self.assertTrue(success)
+        message_api.patch.assert_not_called()
+        content_request = client._api_client.cardkit.v1.card_element.content.call_args.args[0]
+        self.assertEqual(content_request.request_body.sequence, 1)
 
     def test_edit_message_uses_cardkit_content_for_streaming_card(self):
         client = self._build_client()
@@ -339,7 +395,7 @@ class TestFeishu(unittest.TestCase):
                 "feishu_streaming": {
                     "card_id": "card_stream",
                     "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
-                    "sequence": 1,
+                    "sequence": 0,
                 }
             },
         )
@@ -350,7 +406,7 @@ class TestFeishu(unittest.TestCase):
         content_request = client._api_client.cardkit.v1.card_element.content.call_args.args[0]
         self.assertEqual(content_request.card_id, "card_stream")
         self.assertEqual(content_request.element_id, Feishu.STREAM_CARD_BODY_ELEMENT_ID)
-        self.assertEqual(content_request.request_body.sequence, 2)
+        self.assertEqual(content_request.request_body.sequence, 1)
 
     def test_close_streaming_card_updates_card_settings(self):
         client = self._build_client()
@@ -628,7 +684,7 @@ class TestFeishu(unittest.TestCase):
                     metadata={
                         "feishu_streaming": {
                             "card_id": "card_stream",
-                            "sequence": 3,
+                            "sequence": 2,
                         }
                     },
                     success=True,
@@ -636,7 +692,7 @@ class TestFeishu(unittest.TestCase):
             )
 
         self.assertTrue(success)
-        client.close_streaming_card.assert_called_once_with(card_id="card_stream", sequence=4)
+        client.close_streaming_card.assert_called_once_with(card_id="card_stream", sequence=3)
 
     def test_module_post_message_prefers_file_and_voice_paths(self):
         module = FeishuModule()

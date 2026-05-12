@@ -32,7 +32,11 @@ from lark_oapi.api.im.v1 import (
     GetMessageResourceRequest,
     PatchMessageRequest,
     PatchMessageRequestBody,
+    P2ImChatAccessEventBotP2pChatEnteredV1,
     P2ImMessageMessageReadV1,
+    P2ImMessageReactionCreatedV1,
+    P2ImMessageReactionDeletedV1,
+    P2ImMessageRecalledV1,
     P2ImMessageReceiveV1,
     ReplyMessageRequest,
     ReplyMessageRequestBody,
@@ -119,6 +123,10 @@ class Feishu:
         )
         builder.register_p2_im_message_receive_v1(self._on_message)
         builder.register_p2_im_message_message_read_v1(self._on_message_read)
+        builder.register_p2_im_message_reaction_created_v1(self._on_message_reaction_created)
+        builder.register_p2_im_message_reaction_deleted_v1(self._on_message_reaction_deleted)
+        builder.register_p2_im_message_recalled_v1(self._on_message_recalled)
+        builder.register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(self._on_bot_p2p_chat_entered)
         builder.register_p2_card_action_trigger(self._on_card_action)
         return builder.build()
 
@@ -357,6 +365,54 @@ class Feishu:
             "收到飞书消息已读事件：reader=%s, message_count=%s",
             getattr(reader, "open_id", None) or getattr(reader, "user_id", None),
             len(getattr(event, "message_id_list", None) or []),
+        )
+
+    @staticmethod
+    def _on_message_reaction_created(data: P2ImMessageReactionCreatedV1) -> None:
+        """忽略消息表情新增事件，避免长连接打印未注册处理器错误。"""
+        event = getattr(data, "event", None)
+        operator = getattr(event, "operator", None)
+        reaction = getattr(event, "reaction", None)
+        logger.debug(
+            "收到飞书消息表情新增事件：message_id=%s, user=%s, emoji=%s",
+            getattr(event, "message_id", None),
+            getattr(operator, "open_id", None) or getattr(operator, "user_id", None),
+            getattr(reaction, "emoji_type", None),
+        )
+
+    @staticmethod
+    def _on_message_reaction_deleted(data: P2ImMessageReactionDeletedV1) -> None:
+        """忽略消息表情删除事件，避免长连接打印未注册处理器错误。"""
+        event = getattr(data, "event", None)
+        operator = getattr(event, "operator", None)
+        reaction = getattr(event, "reaction", None)
+        logger.debug(
+            "收到飞书消息表情删除事件：message_id=%s, user=%s, emoji=%s",
+            getattr(event, "message_id", None),
+            getattr(operator, "open_id", None) or getattr(operator, "user_id", None),
+            getattr(reaction, "emoji_type", None),
+        )
+
+    @staticmethod
+    def _on_message_recalled(data: P2ImMessageRecalledV1) -> None:
+        """忽略消息撤回事件，避免长连接打印未注册处理器错误。"""
+        event = getattr(data, "event", None)
+        operator = getattr(event, "operator", None)
+        logger.debug(
+            "收到飞书消息撤回事件：message_id=%s, user=%s",
+            getattr(event, "message_id", None),
+            getattr(operator, "open_id", None) or getattr(operator, "user_id", None),
+        )
+
+    @staticmethod
+    def _on_bot_p2p_chat_entered(data: P2ImChatAccessEventBotP2pChatEnteredV1) -> None:
+        """忽略机器人进入单聊事件，避免长连接打印未注册处理器错误。"""
+        event = getattr(data, "event", None)
+        operator = getattr(event, "operator_id", None)
+        logger.debug(
+            "收到飞书机器人进入单聊事件：chat_id=%s, user=%s",
+            getattr(event, "chat_id", None),
+            getattr(operator, "open_id", None) or getattr(operator, "user_id", None),
         )
 
     def get_state(self) -> bool:
@@ -681,7 +737,9 @@ class Feishu:
             "feishu_streaming": {
                 "card_id": card_id,
                 "element_id": self.STREAM_CARD_BODY_ELEMENT_ID,
-                "sequence": 1,
+                # CardKit 的后续 PATCH/设置调用都依赖单调递增 sequence，
+                # 首次建卡后尚未发生内容更新，因此从 0 开始记录。
+                "sequence": 0,
             }
         }
         return result
@@ -1181,7 +1239,7 @@ class Feishu:
         if isinstance(stream_meta, dict) and not buttons:
             card_id = str(stream_meta.get("card_id") or "").strip()
             element_id = str(stream_meta.get("element_id") or self.STREAM_CARD_BODY_ELEMENT_ID).strip()
-            sequence = int(stream_meta.get("sequence") or 1) + 1
+            sequence = int(stream_meta.get("sequence") or 0) + 1
             if card_id and element_id and self._update_streaming_card_content(
                 card_id=card_id,
                 element_id=element_id,
