@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class TMDb(object):
+    _RESPONSE_SNAPSHOT_MARKER = "__mp_tmdb_response_snapshot__"
 
     def __init__(self, session=None, language=None):
         self._api_key = settings.TMDB_API_KEY
@@ -114,7 +115,7 @@ class TMDb(object):
             req = self._req.post_res(url, data=data, json=json)
         if req is None:
             raise TMDbException("无法连接TheMovieDb，请检查网络连接！")
-        return req
+        return self._snapshot_response(req)
 
     @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True)
     async def async_request(self, method, url, data, json, **kwargs):
@@ -124,7 +125,28 @@ class TMDb(object):
             req = await self._async_req.post_res(url, data=data, json=json)
         if req is None:
             raise TMDbException("无法连接TheMovieDb，请检查网络连接！")
-        return req
+        return self._snapshot_response(req)
+
+    @classmethod
+    def _snapshot_response(cls, response):
+        # Redis 不能稳定序列化 requests/httpx 响应对象，缓存里只保留当前流程会用到的数据。
+        return {
+            cls._RESPONSE_SNAPSHOT_MARKER: True,
+            "headers": dict(response.headers.items()),
+            "json": response.json(),
+        }
+
+    @classmethod
+    def _get_response_headers(cls, response):
+        if isinstance(response, dict) and response.get(cls._RESPONSE_SNAPSHOT_MARKER):
+            return response.get("headers") or {}
+        return response.headers
+
+    @classmethod
+    def _get_response_json(cls, response):
+        if isinstance(response, dict) and response.get(cls._RESPONSE_SNAPSHOT_MARKER):
+            return response.get("json")
+        return response.json()
 
     def cache_clear(self):
         return self.request.cache_clear()
@@ -143,11 +165,15 @@ class TMDb(object):
         )
 
     def _handle_headers(self, headers):
-        if "X-RateLimit-Remaining" in headers:
-            self._remaining = int(headers["X-RateLimit-Remaining"])
+        normalized_headers = {
+            str(key).lower(): value for key, value in dict(headers or {}).items()
+        }
 
-        if "X-RateLimit-Reset" in headers:
-            self._reset = int(headers["X-RateLimit-Reset"])
+        if "x-ratelimit-remaining" in normalized_headers:
+            self._remaining = int(normalized_headers["x-ratelimit-remaining"])
+
+        if "x-ratelimit-reset" in normalized_headers:
+            self._reset = int(normalized_headers["x-ratelimit-reset"])
 
     def _handle_rate_limit(self):
         if self._remaining < 1:
@@ -191,7 +217,7 @@ class TMDb(object):
         if req is None:
             return None
 
-        self._handle_headers(req.headers)
+        self._handle_headers(self._get_response_headers(req))
 
         rate_limit_result = self._handle_rate_limit()
         if rate_limit_result:
@@ -199,7 +225,7 @@ class TMDb(object):
             time.sleep(rate_limit_result)
             return self._request_obj(action, params, False, method, data, json, key)
 
-        json_data = req.json()
+        json_data = self._get_response_json(req)
         self._process_json_response(json_data, is_async=False)
         self._handle_errors(json_data)
 
@@ -219,7 +245,7 @@ class TMDb(object):
         if req is None:
             return None
 
-        self._handle_headers(req.headers)
+        self._handle_headers(self._get_response_headers(req))
 
         rate_limit_result = self._handle_rate_limit()
         if rate_limit_result:
@@ -227,7 +253,7 @@ class TMDb(object):
             await asyncio.sleep(rate_limit_result)
             return await self._async_request_obj(action, params, False, method, data, json, key)
 
-        json_data = req.json()
+        json_data = self._get_response_json(req)
         self._process_json_response(json_data, is_async=True)
         self._handle_errors(json_data)
 
