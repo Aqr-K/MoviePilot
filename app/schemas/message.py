@@ -20,6 +20,8 @@ class MessageResponse(BaseModel):
     channel: Optional[MessageChannel] = None
     # 消息来源
     source: Optional[str] = None
+    # 渠道自定义上下文（如飞书流式卡片 card_id/element_id/sequence）
+    metadata: Optional[Dict[str, Any]] = None
     # 是否发送成功
     success: bool = False
 

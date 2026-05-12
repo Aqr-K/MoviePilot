@@ -159,29 +159,25 @@ class MessageChain(ChainBase):
                 text=text,
             )
 
-        processing_marker = self._mark_message_processing_started(
+        self._mark_message_processing_started(
             channel=channel,
             source=source,
             original_message_id=original_message_id,
             text=text,
         )
-
-        try:
-            self._handle_message_core(
-                channel=channel,
-                source=source,
-                userid=userid,
-                username=username,
-                text=text,
-                original_message_id=original_message_id,
-                original_chat_id=original_chat_id,
-                images=images,
-                audio_refs=audio_refs,
-                files=files,
-                has_audio_input=has_audio_input,
-            )
-        finally:
-            self._mark_message_processing_finished(processing_marker)
+        self._handle_message_core(
+            channel=channel,
+            source=source,
+            userid=userid,
+            username=username,
+            text=text,
+            original_message_id=original_message_id,
+            original_chat_id=original_chat_id,
+            images=images,
+            audio_refs=audio_refs,
+            files=files,
+            has_audio_input=has_audio_input,
+        )
 
     def _handle_message_core(
             self,
@@ -339,20 +335,6 @@ class MessageChain(ChainBase):
             source=source,
             message_id=str(original_message_id),
             reaction_id=str(reaction_id),
-        )
-
-    def _mark_message_processing_finished(
-            self,
-            marker: Optional[_ProcessingMarker],
-    ) -> None:
-        """清理渠道“消息正在处理”标记。"""
-        if not marker:
-            return
-        self.run_module(
-            "delete_feishu_message_reaction",
-            message_id=marker.message_id,
-            reaction_id=marker.reaction_id,
-            source=marker.source,
         )
 
     def _handle_callback(

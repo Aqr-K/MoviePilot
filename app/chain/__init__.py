@@ -1548,6 +1548,7 @@ class ChainBase(metaclass=ABCMeta):
             text: str,
             title: Optional[str] = None,
             buttons: Optional[List[List[dict]]] = None,
+            metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         编辑已发送的消息
@@ -1569,6 +1570,7 @@ class ChainBase(metaclass=ABCMeta):
             text=text,
             title=title,
             buttons=buttons,
+            metadata=metadata,
         )
 
     def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:

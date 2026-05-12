@@ -160,6 +160,7 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             text: str,
             title: Optional[str] = None,
             buttons: Optional[List[List[dict]]] = None,
+            metadata: Optional[dict] = None,
     ) -> bool:
         if channel != self._channel:
             return False
@@ -172,6 +173,7 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
                     title=title,
                     text=text,
                     buttons=buttons,
+                    metadata=metadata,
             ):
                 return True
         return False
@@ -218,6 +220,7 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
                     chat_id=result.get("chat_id"),
                     channel=MessageChannel.Feishu,
                     source=conf.name,
+                    metadata=result.get("metadata"),
                     success=True,
                 )
         return None
@@ -231,8 +234,22 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         client = self.get_instance(client_config.name)
         if not client:
             return None
-        image_key = image_ref.replace("feishu://image/", "", 1)
-        downloaded = client._download_image_bytes(image_key)
+        resource_path = image_ref.replace("feishu://image/", "", 1)
+        message_id = None
+        image_key = resource_path
+        if "/" in resource_path:
+            message_id, image_key = resource_path.split("/", 1)
+            message_id = message_id.strip() or None
+            image_key = image_key.strip()
+        downloaded = None
+        if message_id:
+            downloaded = client._download_message_resource_bytes(
+                message_id=message_id,
+                file_key=image_key,
+                resource_type="image",
+            )
+        if not downloaded:
+            downloaded = client._download_image_bytes(image_key)
         if not downloaded:
             return None
         content, _, content_type = downloaded
@@ -287,3 +304,17 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         if not client:
             return False
         return client.delete_message_reaction(message_id=message_id, reaction_id=reaction_id)
+
+    def close_feishu_streaming_card(
+            self,
+            card_id: str,
+            sequence: int,
+            source: str,
+    ) -> bool:
+        client_config = self.get_config(source)
+        if not client_config:
+            return False
+        client = self.get_instance(client_config.name)
+        if not client:
+            return False
+        return client.close_streaming_card(card_id=card_id, sequence=sequence)

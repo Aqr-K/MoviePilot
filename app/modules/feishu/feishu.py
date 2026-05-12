@@ -9,6 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import lark_oapi as lark
 import lark_oapi.ws.client as lark_ws_client_module
+from lark_oapi.api.cardkit.v1 import (
+    ContentCardElementRequest,
+    ContentCardElementRequestBody,
+    CreateCardRequest,
+    CreateCardRequestBody,
+    SettingsCardRequest,
+    SettingsCardRequestBody,
+)
 from lark_oapi.api.im.v1 import (
     CreateFileRequest,
     CreateFileRequestBody,
@@ -24,6 +32,7 @@ from lark_oapi.api.im.v1 import (
     GetMessageResourceRequest,
     PatchMessageRequest,
     PatchMessageRequestBody,
+    P2ImMessageMessageReadV1,
     P2ImMessageReceiveV1,
     ReplyMessageRequest,
     ReplyMessageRequestBody,
@@ -40,7 +49,7 @@ from app.core.config import settings
 from app.core.context import Context, MediaInfo
 from app.log import logger
 from app.schemas import CommingMessage, Notification
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, NotificationType
 from app.utils.http import RequestUtils
 
 
@@ -48,6 +57,8 @@ class Feishu:
     """飞书通知客户端，负责长连接收消息与主动发送通知。"""
 
     PROCESSING_REACTION_EMOJI = "GLANCE"
+    STREAM_CARD_TITLE_ELEMENT_ID = "mp_stream_title"
+    STREAM_CARD_BODY_ELEMENT_ID = "mp_stream_body"
 
     def __init__(
         self,
@@ -107,6 +118,7 @@ class Feishu:
             level=LogLevel.INFO,
         )
         builder.register_p2_im_message_receive_v1(self._on_message)
+        builder.register_p2_im_message_message_read_v1(self._on_message_read)
         builder.register_p2_card_action_trigger(self._on_card_action)
         return builder.build()
 
@@ -202,8 +214,12 @@ class Feishu:
 
         if message_type == "image":
             image_key = str(content.get("image_key") or "").strip()
+            message_id = str(getattr(message, "message_id", None) or "").strip()
             if image_key:
-                images = [CommingMessage.MessageImage(ref=f"feishu://image/{image_key}")]
+                if message_id:
+                    images = [CommingMessage.MessageImage(ref=f"feishu://image/{message_id}/{image_key}")]
+                else:
+                    images = [CommingMessage.MessageImage(ref=f"feishu://image/{image_key}")]
         elif message_type in {"audio", "media", "file"}:
             file_key = str(content.get("file_key") or "").strip()
             file_name = str(content.get("file_name") or "").strip() or None
@@ -330,6 +346,17 @@ class Feishu:
                     "content": "操作已提交",
                 }
             }
+        )
+
+    @staticmethod
+    def _on_message_read(data: P2ImMessageMessageReadV1) -> None:
+        """忽略消息已读事件，避免长连接打印未注册处理器错误。"""
+        event = getattr(data, "event", None)
+        reader = getattr(event, "reader", None)
+        logger.debug(
+            "收到飞书消息已读事件：reader=%s, message_count=%s",
+            getattr(reader, "open_id", None) or getattr(reader, "user_id", None),
+            len(getattr(event, "message_id_list", None) or []),
         )
 
     def get_state(self) -> bool:
@@ -547,6 +574,171 @@ class Feishu:
             },
             "elements": elements,
         }
+
+    def _build_streaming_card_payload(
+        self,
+        title: Optional[str],
+        text: Optional[str],
+    ) -> Dict[str, Any]:
+        """构建支持 CardKit 流式更新的飞书卡片 JSON 2.0。"""
+        elements: List[dict] = []
+        title_content = self._escape_card_text(title).strip() if title else ""
+        if title_content:
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "element_id": self.STREAM_CARD_TITLE_ELEMENT_ID,
+                    "content": f"**{title_content}**",
+                }
+            )
+        elements.append(
+            {
+                "tag": "markdown",
+                "element_id": self.STREAM_CARD_BODY_ELEMENT_ID,
+                "content": self._escape_card_text(text).strip() or " ",
+            }
+        )
+        return {
+            "schema": "2.0",
+            "config": {
+                "wide_screen_mode": True,
+                "enable_forward": True,
+                "update_multi": True,
+                "streaming_mode": True,
+                "summary": {
+                    "content": title or "MoviePilot助手",
+                },
+                "streaming_config": {
+                    "print_frequency_ms": {"default": 70},
+                    "print_step": {"default": 1},
+                    "print_strategy": "fast",
+                },
+            },
+            "body": {
+                "direction": "vertical",
+                "padding": "12px 12px 12px 12px",
+                "elements": elements,
+            },
+        }
+
+    def _create_streaming_card(self, title: Optional[str], text: Optional[str]) -> Optional[str]:
+        if not self._api_client:
+            return None
+        response = self._api_client.cardkit.v1.card.create(
+            CreateCardRequest.builder()
+            .request_body(
+                CreateCardRequestBody.builder()
+                .type("card_json")
+                .data(json.dumps(self._build_streaming_card_payload(title=title, text=text), ensure_ascii=False))
+                .build()
+            )
+            .build()
+        )
+        if response.success():
+            data = getattr(response, "data", None)
+            return getattr(data, "card_id", None)
+        logger.error(
+            "飞书流式卡片创建失败：code=%s, msg=%s, log_id=%s",
+            response.code,
+            response.msg,
+            response.get_log_id(),
+        )
+        return None
+
+    def _send_streaming_card_message(
+        self,
+        title: Optional[str],
+        text: Optional[str],
+        userid: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        receive_id_type: Optional[str] = None,
+    ) -> Optional[dict]:
+        card_id = self._create_streaming_card(title=title, text=text)
+        if not card_id:
+            return None
+        receive_id, resolved_receive_id_type = self._resolve_target(
+            userid=userid,
+            chat_id=chat_id,
+            receive_id_type=receive_id_type,
+        )
+        result = self._send_message(
+            receive_id,
+            resolved_receive_id_type,
+            "interactive",
+            {"type": "card", "data": {"card_id": card_id}},
+        )
+        if not result:
+            return None
+        result["metadata"] = {
+            "feishu_streaming": {
+                "card_id": card_id,
+                "element_id": self.STREAM_CARD_BODY_ELEMENT_ID,
+                "sequence": 1,
+            }
+        }
+        return result
+
+    def _update_streaming_card_content(
+        self,
+        card_id: str,
+        element_id: str,
+        content: str,
+        sequence: int,
+    ) -> bool:
+        if not self._api_client:
+            return False
+        response = self._api_client.cardkit.v1.card_element.content(
+            ContentCardElementRequest.builder()
+            .card_id(card_id)
+            .element_id(element_id)
+            .request_body(
+                ContentCardElementRequestBody.builder()
+                .uuid(str(uuid.uuid4()))
+                .content(content or " ")
+                .sequence(sequence)
+                .build()
+            )
+            .build()
+        )
+        if response.success():
+            return True
+        logger.error(
+            "飞书流式卡片内容更新失败：card_id=%s, element_id=%s, sequence=%s, code=%s, msg=%s, log_id=%s",
+            card_id,
+            element_id,
+            sequence,
+            response.code,
+            response.msg,
+            response.get_log_id(),
+        )
+        return False
+
+    def close_streaming_card(self, card_id: str, sequence: int) -> bool:
+        if not self._api_client or not card_id:
+            return False
+        response = self._api_client.cardkit.v1.card.settings(
+            SettingsCardRequest.builder()
+            .card_id(card_id)
+            .request_body(
+                SettingsCardRequestBody.builder()
+                .settings(json.dumps({"config": {"streaming_mode": False}}, ensure_ascii=False))
+                .uuid(str(uuid.uuid4()))
+                .sequence(sequence)
+                .build()
+            )
+            .build()
+        )
+        if response.success():
+            return True
+        logger.error(
+            "飞书关闭流式卡片失败：card_id=%s, sequence=%s, code=%s, msg=%s, log_id=%s",
+            card_id,
+            sequence,
+            response.code,
+            response.msg,
+            response.get_log_id(),
+        )
+        return False
 
     def _send_message(self, receive_id: str, receive_id_type: str, msg_type: str, content: dict) -> Optional[dict]:
         """调用飞书 IM API 发送消息，并返回统一结果结构。"""
@@ -915,6 +1107,29 @@ class Feishu:
         original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         """发送通知消息，优先使用交互卡片承载按钮。"""
+        is_streaming_agent_text = (
+            message.mtype == NotificationType.Agent
+            and not message.buttons
+            and not message.link
+            and not original_message_id
+        )
+        if is_streaming_agent_text:
+            try:
+                result = self._send_streaming_card_message(
+                    title=message.title,
+                    text=message.text,
+                    userid=userid,
+                    chat_id=chat_id,
+                    receive_id_type=receive_id_type,
+                )
+            except Exception as err:
+                logger.error(f"飞书流式卡片发送失败：{err}")
+                return {"success": False}
+            if not result:
+                return {"success": False}
+            result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
+            return result
+
         payload = self._build_card(
             title=message.title,
             text=message.text,
@@ -949,10 +1164,24 @@ class Feishu:
         result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
         return result
 
-    def edit_message(self, message_id: str, title: Optional[str] = None, text: Optional[str] = None, buttons: Optional[List[List[dict]]] = None) -> bool:
+    def edit_message(self, message_id: str, title: Optional[str] = None, text: Optional[str] = None, buttons: Optional[List[List[dict]]] = None, metadata: Optional[dict] = None) -> bool:
         """编辑已发送的飞书交互卡片消息。"""
         if not self._api_client:
             return False
+
+        stream_meta = (metadata or {}).get("feishu_streaming") if isinstance(metadata, dict) else None
+        if isinstance(stream_meta, dict) and not buttons:
+            card_id = str(stream_meta.get("card_id") or "").strip()
+            element_id = str(stream_meta.get("element_id") or self.STREAM_CARD_BODY_ELEMENT_ID).strip()
+            sequence = int(stream_meta.get("sequence") or 1) + 1
+            if card_id and element_id and self._update_streaming_card_content(
+                card_id=card_id,
+                element_id=element_id,
+                content=self._escape_card_text(text).strip() or " ",
+                sequence=sequence,
+            ):
+                stream_meta["sequence"] = sequence
+                return True
 
         card = self._build_card(title=title, text=text, link=None, buttons=buttons)
         try:

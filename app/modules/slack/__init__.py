@@ -558,6 +558,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         text: str,
         title: Optional[str] = None,
         buttons: Optional[List[List[dict]]] = None,
+        metadata: Optional[dict] = None,
     ) -> bool:
         """
         编辑消息

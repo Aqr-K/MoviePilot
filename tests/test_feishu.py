@@ -22,7 +22,7 @@ from app.modules.feishu import FeishuModule
 from app.modules.feishu.feishu import Feishu
 from app.schemas import Notification
 from app.schemas.message import ChannelCapability, ChannelCapabilityManager
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, NotificationType
 
 
 class TestFeishu(unittest.TestCase):
@@ -57,7 +57,14 @@ class TestFeishu(unittest.TestCase):
         return response
 
     @staticmethod
-    def _build_message_api(create_response=None, patch_response=None, reply_response=None, reaction_create_response=None, reaction_delete_response=None, image_create_response=None, file_create_response=None, image_get_response=None, file_get_response=None, message_resource_response=None):
+    def _card_create_success_response(card_id="card_test"):
+        response = MagicMock()
+        response.success.return_value = True
+        response.data = SimpleNamespace(card_id=card_id)
+        return response
+
+    @staticmethod
+    def _build_message_api(create_response=None, patch_response=None, reply_response=None, reaction_create_response=None, reaction_delete_response=None, card_create_response=None, card_settings_response=None, card_content_response=None, image_create_response=None, file_create_response=None, image_get_response=None, file_get_response=None, message_resource_response=None):
         message_api = SimpleNamespace(
             create=MagicMock(return_value=create_response),
             patch=MagicMock(return_value=patch_response),
@@ -88,7 +95,18 @@ class TestFeishu(unittest.TestCase):
                     file=file_api,
                     message_resource=message_resource_api,
                 )
-            )
+            ),
+            cardkit=SimpleNamespace(
+                v1=SimpleNamespace(
+                    card=SimpleNamespace(
+                        create=MagicMock(return_value=card_create_response),
+                        settings=MagicMock(return_value=card_settings_response),
+                    ),
+                    card_element=SimpleNamespace(
+                        content=MagicMock(return_value=card_content_response),
+                    ),
+                )
+            ),
         )
         return api_client, message_api
 
@@ -256,6 +274,74 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(delete_request.message_id, "om_origin")
         self.assertEqual(delete_request.reaction_id, "reaction_1")
 
+    def test_send_notification_uses_streaming_card_for_agent_text(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            create_response=self._success_response(message_id="om_stream", chat_id="oc_stream"),
+            card_create_response=self._card_create_success_response("card_stream"),
+        )
+
+        result = client.send_notification(
+            Notification(
+                mtype=NotificationType.Agent,
+                title="MoviePilot助手",
+                text="第一帧内容",
+            ),
+            userid="ou_user_stream",
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["metadata"]["feishu_streaming"]["card_id"], "card_stream")
+        card_request = client._api_client.cardkit.v1.card.create.call_args.args[0]
+        self.assertEqual(card_request.request_body.type, "card_json")
+        card_payload = json.loads(card_request.request_body.data)
+        self.assertTrue(card_payload["config"]["streaming_mode"])
+        self.assertEqual(card_payload["body"]["elements"][-1]["element_id"], Feishu.STREAM_CARD_BODY_ELEMENT_ID)
+        message_request = message_api.create.call_args.args[0]
+        self.assertEqual(message_request.request_body.msg_type, "interactive")
+        self.assertEqual(json.loads(message_request.request_body.content)["data"]["card_id"], "card_stream")
+
+    def test_edit_message_uses_cardkit_content_for_streaming_card(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+
+        success = client.edit_message(
+            message_id="om_stream",
+            text="第二帧内容",
+            metadata={
+                "feishu_streaming": {
+                    "card_id": "card_stream",
+                    "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                    "sequence": 1,
+                }
+            },
+        )
+
+        self.assertTrue(success)
+        client._api_client.cardkit.v1.card_element.content.assert_called_once()
+        message_api.patch.assert_not_called()
+        content_request = client._api_client.cardkit.v1.card_element.content.call_args.args[0]
+        self.assertEqual(content_request.card_id, "card_stream")
+        self.assertEqual(content_request.element_id, Feishu.STREAM_CARD_BODY_ELEMENT_ID)
+        self.assertEqual(content_request.request_body.sequence, 2)
+
+    def test_close_streaming_card_updates_card_settings(self):
+        client = self._build_client()
+        client._api_client, _ = self._build_message_api(
+            card_settings_response=self._success_response(),
+        )
+
+        success = client.close_streaming_card(card_id="card_stream", sequence=3)
+
+        self.assertTrue(success)
+        settings_request = client._api_client.cardkit.v1.card.settings.call_args.args[0]
+        self.assertEqual(settings_request.card_id, "card_stream")
+        settings_payload = json.loads(settings_request.request_body.settings)
+        self.assertFalse(settings_payload["config"]["streaming_mode"])
+
     def test_parse_message_supports_image_and_file_payloads(self):
         client = self._build_client()
 
@@ -289,6 +375,24 @@ class TestFeishu(unittest.TestCase):
 
         self.assertEqual(image_message.images[0].ref, "feishu://image/img_v2_test")
         self.assertEqual(file_message.files[0].ref, "feishu://file/file_key/report.pdf")
+
+    def test_on_message_wraps_feishu_image_ref_with_message_id(self):
+        client = self._build_client()
+        message = SimpleNamespace(
+            message_id="om_img_evt",
+            chat_id="oc_chat_evt",
+            chat_type="p2p",
+            message_type="image",
+            content=json.dumps({"image_key": "img_v2_evt"}),
+        )
+        sender = SimpleNamespace(sender_id=SimpleNamespace(open_id="ou_user_evt", user_id=None))
+        event = SimpleNamespace(sender=sender, message=message)
+
+        with patch.object(client, "_forward_to_message_chain") as forward:
+            client._on_message(SimpleNamespace(event=event))
+
+        payload = forward.call_args.args[0]
+        self.assertEqual(payload["images"][0]["ref"], "feishu://image/om_img_evt/img_v2_evt")
 
     def test_feishu_channel_capabilities_enable_images_and_files(self):
         self.assertTrue(
@@ -451,15 +555,21 @@ class TestFeishu(unittest.TestCase):
         client = MagicMock()
         client._download_image_bytes.return_value = (b"image", "poster.png", "image/png")
         client._download_file_bytes.return_value = (b"file", "note.txt", "text/plain")
+        client._download_message_resource_bytes.return_value = (b"image", "poster.png", "image/png")
 
         with patch.object(module, "get_config", return_value=SimpleNamespace(name="feishu-main")), patch.object(
             module, "get_instance", return_value=client
         ):
-            data_url = module.download_feishu_image_to_data_url("feishu://image/img_v2_xxx", "feishu-main")
+            data_url = module.download_feishu_image_to_data_url("feishu://image/om_msg/img_v2_xxx", "feishu-main")
             file_bytes = module.download_feishu_file_bytes("feishu://file/file_xxx/note.txt", "feishu-main")
 
         self.assertTrue(data_url.startswith("data:image/png;base64,"))
         self.assertEqual(file_bytes, b"file")
+        client._download_message_resource_bytes.assert_called_once_with(
+            message_id="om_msg",
+            file_key="img_v2_xxx",
+            resource_type="image",
+        )
 
     def test_module_message_reaction_helpers_delegate_to_client(self):
         module = FeishuModule()
@@ -475,6 +585,19 @@ class TestFeishu(unittest.TestCase):
 
         self.assertEqual(reaction_id, "reaction_2")
         self.assertTrue(deleted)
+
+    def test_module_close_streaming_card_delegates_to_client(self):
+        module = FeishuModule()
+        client = MagicMock()
+        client.close_streaming_card.return_value = True
+
+        with patch.object(module, "get_config", return_value=SimpleNamespace(name="feishu-main")), patch.object(
+            module, "get_instance", return_value=client
+        ):
+            success = module.close_feishu_streaming_card("card_stream", 4, "feishu-main")
+
+        self.assertTrue(success)
+        client.close_streaming_card.assert_called_once_with(card_id="card_stream", sequence=4)
 
     def test_module_post_message_prefers_file_and_voice_paths(self):
         module = FeishuModule()

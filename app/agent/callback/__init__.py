@@ -211,6 +211,24 @@ class StreamingHandler:
         # 执行最后一次刷新
         await self._flush()
 
+        message_response = self._message_response
+        if (
+            message_response
+            and message_response.channel == MessageChannel.Feishu
+            and isinstance(message_response.metadata, dict)
+        ):
+            stream_meta = message_response.metadata.get("feishu_streaming") or {}
+            card_id = str(stream_meta.get("card_id") or "").strip()
+            sequence = int(stream_meta.get("sequence") or 1) + 1
+            if card_id:
+                await run_in_threadpool(
+                    _StreamChain().run_module,
+                    "close_feishu_streaming_card",
+                    card_id=card_id,
+                    sequence=sequence,
+                    source=message_response.source,
+                )
+
         # 检查是否所有缓冲内容都已发送
         with self._lock:
             # 当前消息的文本 = buffer 中从 _msg_start_offset 开始的部分
@@ -535,6 +553,7 @@ class StreamingHandler:
                         chat_id=self._message_response.chat_id,
                         text=current_text,
                         title=self._title,
+                        metadata=self._message_response.metadata,
                     )
                     if success:
                         with self._lock:
