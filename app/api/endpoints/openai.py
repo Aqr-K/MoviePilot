@@ -85,12 +85,16 @@ class _OpenAIStreamingHandler(StreamingHandler):
         source: Optional[str] = None,
         user_id: Optional[str] = None,
         username: Optional[str] = None,
+        original_message_id: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
         title: str = "",
     ):
         self._channel = channel
         self._source = source
         self._user_id = user_id
         self._username = username
+        self._original_message_id = original_message_id
+        self._original_chat_id = original_chat_id
         self._title = title
         self._streaming_enabled = True
         self._sent_text = ""

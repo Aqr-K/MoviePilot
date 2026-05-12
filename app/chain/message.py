@@ -269,6 +269,8 @@ class MessageChain(ChainBase):
                 source=source,
                 userid=userid,
                 username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
                 images=images,
                 files=files,
             )
@@ -284,6 +286,8 @@ class MessageChain(ChainBase):
                 source=source,
                 userid=userid,
                 username=username,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
                 images=images,
                 files=files,
             )
@@ -1055,6 +1059,8 @@ class MessageChain(ChainBase):
             source: str,
             userid: Union[str, int],
             username: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
             images: Optional[List[CommingMessage.MessageImage]] = None,
             files: Optional[List[CommingMessage.MessageAttachment]] = None,
             session_id: Optional[str] = None,
@@ -1168,6 +1174,8 @@ class MessageChain(ChainBase):
                     channel=channel.value if channel else None,
                     source=source,
                     username=username,
+                    original_message_id=str(original_message_id) if original_message_id else None,
+                    original_chat_id=original_chat_id,
                 ),
                 global_vars.loop,
             )

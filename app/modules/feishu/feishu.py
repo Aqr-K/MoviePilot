@@ -652,21 +652,29 @@ class Feishu:
         userid: Optional[str] = None,
         chat_id: Optional[str] = None,
         receive_id_type: Optional[str] = None,
+        original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         card_id = self._create_streaming_card(title=title, text=text)
         if not card_id:
             return None
-        receive_id, resolved_receive_id_type = self._resolve_target(
-            userid=userid,
-            chat_id=chat_id,
-            receive_id_type=receive_id_type,
-        )
-        result = self._send_message(
-            receive_id,
-            resolved_receive_id_type,
-            "interactive",
-            {"type": "card", "data": {"card_id": card_id}},
-        )
+        if original_message_id:
+            result = self._reply_message(
+                message_id=original_message_id,
+                msg_type="interactive",
+                content={"type": "card", "data": {"card_id": card_id}},
+            )
+        else:
+            receive_id, resolved_receive_id_type = self._resolve_target(
+                userid=userid,
+                chat_id=chat_id,
+                receive_id_type=receive_id_type,
+            )
+            result = self._send_message(
+                receive_id,
+                resolved_receive_id_type,
+                "interactive",
+                {"type": "card", "data": {"card_id": card_id}},
+            )
         if not result:
             return None
         result["metadata"] = {
@@ -1111,7 +1119,6 @@ class Feishu:
             message.mtype == NotificationType.Agent
             and not message.buttons
             and not message.link
-            and not original_message_id
         )
         if is_streaming_agent_text:
             try:
@@ -1121,6 +1128,7 @@ class Feishu:
                     userid=userid,
                     chat_id=chat_id,
                     receive_id_type=receive_id_type,
+                    original_message_id=original_message_id,
                 )
             except Exception as err:
                 logger.error(f"飞书流式卡片发送失败：{err}")

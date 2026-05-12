@@ -61,6 +61,8 @@ class StreamingHandler:
         self._source: Optional[str] = None
         self._user_id: Optional[str] = None
         self._username: Optional[str] = None
+        self._original_message_id: Optional[str] = None
+        self._original_chat_id: Optional[str] = None
         self._title: str = ""
         self._allow_dispatch_without_context = False
         # 非啰嗦模式下的待输出工具统计，等下一段文本到来时再统一补一句摘要
@@ -147,6 +149,8 @@ class StreamingHandler:
         source: Optional[str] = None,
         user_id: Optional[str] = None,
         username: Optional[str] = None,
+        original_message_id: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
         title: str = "",
     ):
         """
@@ -163,6 +167,8 @@ class StreamingHandler:
         self._source = source
         self._user_id = user_id
         self._username = username
+        self._original_message_id = original_message_id
+        self._original_chat_id = original_chat_id
         self._title = title
 
         self._streaming_enabled = True
@@ -472,6 +478,8 @@ class StreamingHandler:
                         mtype=NotificationType.Agent,
                         userid=self._user_id,
                         username=self._username,
+                        original_message_id=self._original_message_id,
+                        original_chat_id=self._original_chat_id,
                         title=self._title,
                         text=current_text,
                     ),
@@ -515,6 +523,8 @@ class StreamingHandler:
                                 mtype=NotificationType.Agent,
                                 userid=self._user_id,
                                 username=self._username,
+                                original_message_id=self._original_message_id,
+                                original_chat_id=self._original_chat_id,
                                 title=self._title,
                                 text=current_text,
                             ),

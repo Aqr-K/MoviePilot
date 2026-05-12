@@ -179,6 +179,8 @@ class MoviePilotAgent:
             channel: str = None,
             source: str = None,
             username: str = None,
+            original_message_id: Optional[str] = None,
+            original_chat_id: Optional[str] = None,
             replay_mode: ReplyMode = ReplyMode.DISPATCH,
             persist_output_message: bool = True,
             allow_message_tools: bool = True,
@@ -189,6 +191,8 @@ class MoviePilotAgent:
         self.channel = channel
         self.source = source
         self.username = username
+        self.original_message_id = original_message_id
+        self.original_chat_id = original_chat_id
         self.reply_mode = replay_mode
         self.persist_output_message = persist_output_message
         self.allow_message_tools = allow_message_tools
@@ -619,6 +623,8 @@ class MoviePilotAgent:
                     source=self.source,
                     user_id=self.user_id,
                     username=self.username,
+                    original_message_id=self.original_message_id,
+                    original_chat_id=self.original_chat_id,
                 )
 
                 # 流式运行智能体，token 直接推送到 stream_handler
@@ -794,6 +800,8 @@ class _MessageTask:
     channel: Optional[str] = None
     source: Optional[str] = None
     username: Optional[str] = None
+    original_message_id: Optional[str] = None
+    original_chat_id: Optional[str] = None
     reply_mode: ReplyMode = ReplyMode.DISPATCH
 
 
@@ -878,6 +886,8 @@ class AgentManager:
             channel: str = None,
             source: str = None,
             username: str = None,
+            original_message_id: Optional[str] = None,
+            original_chat_id: Optional[str] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
     ) -> str:
         """
@@ -893,6 +903,8 @@ class AgentManager:
             channel=channel,
             source=source,
             username=username,
+            original_message_id=original_message_id,
+            original_chat_id=original_chat_id,
             reply_mode=reply_mode,
         )
 
@@ -980,6 +992,8 @@ class AgentManager:
                 channel=task.channel,
                 source=task.source,
                 username=task.username,
+                original_message_id=task.original_message_id,
+                original_chat_id=task.original_chat_id,
                 replay_mode=task.reply_mode,
             )
             self.active_agents[session_id] = agent
@@ -992,6 +1006,8 @@ class AgentManager:
                 agent.source = task.source
             if task.username:
                 agent.username = task.username
+            agent.original_message_id = task.original_message_id
+            agent.original_chat_id = task.original_chat_id
             agent.reply_mode = task.reply_mode
 
         return await agent.process(task.message, images=task.images, files=task.files)

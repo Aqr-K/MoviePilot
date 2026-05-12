@@ -301,6 +301,30 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(message_request.request_body.msg_type, "interactive")
         self.assertEqual(json.loads(message_request.request_body.content)["data"]["card_id"], "card_stream")
 
+    def test_send_notification_replies_with_streaming_card_for_agent_text(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            reply_response=self._success_response(message_id="om_reply", chat_id="oc_stream"),
+            card_create_response=self._card_create_success_response("card_stream"),
+        )
+
+        result = client.send_notification(
+            Notification(
+                mtype=NotificationType.Agent,
+                title="MoviePilot助手",
+                text="第一帧内容",
+            ),
+            userid="ou_user_stream",
+            original_message_id="om_origin",
+        )
+
+        self.assertTrue(result["success"])
+        message_api.create.assert_not_called()
+        reply_request = message_api.reply.call_args.args[0]
+        self.assertEqual(reply_request.message_id, "om_origin")
+        self.assertEqual(reply_request.request_body.msg_type, "interactive")
+        self.assertEqual(json.loads(reply_request.request_body.content)["data"]["card_id"], "card_stream")
+
     def test_edit_message_uses_cardkit_content_for_streaming_card(self):
         client = self._build_client()
         client._api_client, message_api = self._build_message_api(

@@ -263,6 +263,33 @@ class TestAgentToolStreaming(unittest.TestCase):
         )
         self.assertTrue(handler.has_sent_message)
 
+    def test_flush_passes_original_message_context_to_send_direct_message(self):
+        handler = StreamingHandler()
+        handler._channel = MessageChannel.Feishu.value
+        handler._source = "feishu-main"
+        handler._user_id = "ou_user"
+        handler._username = "tester"
+        handler._original_message_id = "om_origin"
+        handler._original_chat_id = "oc_origin"
+        handler._streaming_enabled = True
+        handler.emit("hello")
+
+        with patch(
+            "app.agent.callback.run_in_threadpool", new_callable=AsyncMock
+        ) as run_in_threadpool_mock:
+            run_in_threadpool_mock.return_value = MessageResponse(
+                message_id="om_stream",
+                chat_id="oc_origin",
+                source="feishu-main",
+                success=True,
+            )
+
+            asyncio.run(handler._flush())
+
+        notification = run_in_threadpool_mock.await_args.args[1]
+        self.assertEqual(notification.original_message_id, "om_origin")
+        self.assertEqual(notification.original_chat_id, "oc_origin")
+
     def test_verbose_background_tool_call_does_not_post_message(self):
         async def _run():
             tool = DummyTool(session_id="session-1", user_id="10001")
