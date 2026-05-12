@@ -1,9 +1,11 @@
+import asyncio
 import json
 import threading
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import lark_oapi as lark
+import lark_oapi.ws.client as lark_ws_client_module
 from lark_oapi.api.im.v1 import (
     CreateMessageRequest,
     CreateMessageRequestBody,
@@ -56,6 +58,7 @@ class Feishu:
         self._ready = threading.Event()
         self._stop_event = threading.Event()
         self._ws_thread: Optional[threading.Thread] = None
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
         self._user_chat_mapping: Dict[str, str] = {}
         self._user_receive_id_type_mapping: Dict[str, str] = {}
         self._chat_open_mapping: Dict[str, str] = {}
@@ -100,6 +103,18 @@ class Feishu:
 
     def _run_ws_client(self) -> None:
         """在后台线程中运行飞书长连接客户端。"""
+        original_select = lark_ws_client_module._select
+        original_loop = lark_ws_client_module.loop
+        loop = asyncio.new_event_loop()
+        self._ws_loop = loop
+        asyncio.set_event_loop(loop)
+        lark_ws_client_module.loop = loop
+
+        async def _wait_for_stop() -> None:
+            while not self._stop_event.is_set():
+                await asyncio.sleep(1)
+
+        lark_ws_client_module._select = _wait_for_stop
         try:
             self._ws_client = lark.ws.Client(
                 self._app_id,
@@ -116,6 +131,23 @@ class Feishu:
             self._ready.clear()
             if not self._stop_event.is_set():
                 logger.error(f"飞书长连接服务启动失败：{err}")
+        finally:
+            lark_ws_client_module._select = original_select
+            lark_ws_client_module.loop = original_loop
+            pending_tasks = [
+                task
+                for task in asyncio.all_tasks(loop)
+                if not task.done()
+            ]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                loop.run_until_complete(
+                    asyncio.gather(*pending_tasks, return_exceptions=True)
+                )
+            loop.close()
+            asyncio.set_event_loop(None)
+            self._ws_loop = None
 
     def _forward_to_message_chain(self, payload: dict) -> None:
         """将飞书入站消息转发到统一消息入口，复用现有交互主链。"""
@@ -262,14 +294,16 @@ class Feishu:
         self._stop_event.set()
         self._ready.clear()
         ws_client = self._ws_client
+        ws_loop = self._ws_loop
         if ws_client:
             try:
                 ws_client._auto_reconnect = False
-                if ws_client._conn is not None:
-                    try:
-                        ws_client._conn.close()
-                    except Exception as err:
-                        logger.debug(f"关闭飞书连接失败：{err}")
+                if ws_loop and ws_loop.is_running():
+                    disconnect_future = asyncio.run_coroutine_threadsafe(
+                        ws_client._disconnect(),
+                        ws_loop,
+                    )
+                    disconnect_future.result(timeout=5)
             except Exception as err:
                 logger.debug(f"停止飞书客户端失败：{err}")
         if self._ws_thread and self._ws_thread.is_alive():

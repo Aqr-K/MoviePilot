@@ -427,7 +427,7 @@ ensure_prereqs() {
     exit 1
   fi
 
-  if ! ensure_base_tools || ! ensure_python; then
+  if ! ensure_base_tools || ! ensure_python || ! ensure_uv; then
     python_install_hint
     exit 1
   fi

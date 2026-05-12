@@ -229,7 +229,7 @@ function ensure_backend_runtime_dependencies() {
     fi
 
     WARN "→ 检测到后端核心依赖异常，开始尝试恢复主程序依赖..."
-    local -a pip_cmd=("${VENV_PATH}/bin/python3" "-m" "pip" "install" "-r" "/app/requirements.txt")
+    local -a pip_cmd=("${VENV_PATH}/bin/pip" "install" "-r" "/app/requirements.txt")
     if [ -n "${PIP_PROXY}" ]; then
         pip_cmd+=("-i" "${PIP_PROXY}")
     elif [ -n "${PROXY_HOST}" ]; then

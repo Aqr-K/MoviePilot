@@ -1,4 +1,5 @@
 import sys
+import asyncio
 import json
 import unittest
 from types import ModuleType, SimpleNamespace
@@ -194,6 +195,51 @@ class TestFeishu(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(response.message_id, "om_789")
         self.assertEqual(response.chat_id, "oc_789")
+
+    def test_run_ws_client_binds_thread_local_event_loop(self):
+        client = self._build_client()
+        original_loop = object()
+        fake_ws_client = MagicMock()
+        created_loops = []
+        real_new_event_loop = asyncio.new_event_loop
+
+        def _new_loop():
+            loop = real_new_event_loop()
+            created_loops.append(loop)
+            return loop
+
+        with patch("app.modules.feishu.feishu.lark_ws_client_module.loop", original_loop), patch(
+            "app.modules.feishu.feishu.lark_ws_client_module._select",
+            new=MagicMock(return_value=None),
+        ), patch("app.modules.feishu.feishu.asyncio.new_event_loop", side_effect=_new_loop), patch(
+            "app.modules.feishu.feishu.lark.ws.Client", return_value=fake_ws_client
+        ), patch.object(
+            fake_ws_client, "start", side_effect=lambda: None
+        ) as mock_start:
+            client._run_ws_client()
+
+        self.assertIsNone(client._ws_loop)
+        mock_start.assert_called_once()
+        self.assertEqual(len(created_loops), 1)
+        self.assertTrue(created_loops[0].is_closed())
+
+    def test_stop_disconnects_ws_client_via_threadsafe_loop(self):
+        client = self._build_client()
+        stop_loop = MagicMock()
+        stop_loop.is_running.return_value = True
+        client._ws_loop = stop_loop
+        client._ws_client = MagicMock()
+        client._ws_thread = MagicMock()
+        client._ws_thread.is_alive.return_value = False
+
+        future = MagicMock()
+        future.result.return_value = None
+
+        with patch("app.modules.feishu.feishu.asyncio.run_coroutine_threadsafe", return_value=future) as runner:
+            client.stop()
+
+        runner.assert_called_once()
+        future.result.assert_called_once_with(timeout=5)
 
 
 if __name__ == "__main__":

@@ -69,13 +69,13 @@ function install_backend_and_download_resources() {
             # 复制新的requirements.in
             cp "${TMP_PATH}/App/requirements.in" /app/requirements.in
             # 重新编译依赖
-            if ! ${VENV_PATH}/bin/pip-compile /app/requirements.in; then
+            if ! ${VENV_PATH}/bin/pip-compile /app/requirements.in -o /app/requirements.txt; then
                 ERROR "依赖编译失败，恢复原依赖"
                 cp /tmp/requirements.txt.backup /app/requirements.txt
                 return 1
             fi
             # 安装新依赖
-            if ! ${VENV_PATH}/bin/pip install ${PIP_OPTIONS} --root-user-action=ignore -r /app/requirements.txt; then
+            if ! ${VENV_PATH}/bin/pip install ${PIP_OPTIONS} -r /app/requirements.txt; then
                 ERROR "依赖安装失败，恢复原依赖"
                 cp /tmp/requirements.txt.backup /app/requirements.txt
                 return 1

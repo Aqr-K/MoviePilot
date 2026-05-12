@@ -541,6 +541,71 @@ def get_venv_python(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+def get_venv_bin_dir(venv_dir: Path) -> Path:
+    if os.name == "nt":
+        return venv_dir / "Scripts"
+    return venv_dir / "bin"
+
+
+def get_venv_pip(venv_dir: Path) -> Path:
+    if os.name == "nt":
+        return get_venv_bin_dir(venv_dir) / "pip.exe"
+    return get_venv_bin_dir(venv_dir) / "pip"
+
+
+def _ensure_uv_available_for_venv(venv_dir: Path, venv_python: Path) -> Optional[Path]:
+    if os.name == "nt":
+        return None
+
+    venv_bin = get_venv_bin_dir(venv_dir)
+    uv_bin = venv_bin / "uv"
+    if uv_bin.exists():
+        return uv_bin
+
+    system_uv = shutil.which("uv")
+    if system_uv:
+        uv_target = Path(system_uv).expanduser().resolve()
+        print_step(f"复用系统 uv：{uv_target}")
+        if uv_bin.exists() or uv_bin.is_symlink():
+            uv_bin.unlink()
+        uv_bin.symlink_to(uv_target)
+        return uv_bin
+
+    print_step("当前未检测到 uv，先在虚拟环境内安装 uv")
+    run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "uv"])
+    if uv_bin.exists():
+        return uv_bin
+    raise RuntimeError("uv 安装完成，但虚拟环境中未找到 uv 可执行文件")
+
+
+def configure_venv_pip_compat(venv_dir: Path, venv_python: Path) -> Path:
+    if os.name == "nt":
+        return get_venv_pip(venv_dir)
+
+    _ensure_uv_available_for_venv(venv_dir, venv_python)
+    venv_bin = get_venv_bin_dir(venv_dir)
+    wrapper_src = ROOT / "scripts" / "uv-pip-compat.sh"
+    wrapper_dst = venv_bin / "uv-pip-compat"
+    shutil.copy2(wrapper_src, wrapper_dst)
+    wrapper_dst.chmod(0o755)
+
+    python_version = get_python_version(str(venv_python))
+    compat_links = {
+        "pip",
+        "pip3",
+        f"pip{python_version[0]}",
+        f"pip{python_version[0]}.{python_version[1]}",
+        "pip-compile",
+        "pip-sync",
+    }
+    for link_name in compat_links:
+        link_path = venv_bin / link_name
+        if link_path.exists() or link_path.is_symlink():
+            link_path.unlink()
+        link_path.symlink_to(wrapper_dst.name)
+    return get_venv_pip(venv_dir)
+
+
 def ensure_supported_python(python_bin: str) -> None:
     version = get_python_version(python_bin)
     if version < MIN_PYTHON_VERSION:
@@ -2566,6 +2631,7 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
     ensure_supported_python(python_bin)
     venv_dir = venv_dir.expanduser().resolve()
     venv_python = get_venv_python(venv_dir)
+    venv_pip = get_venv_pip(venv_dir)
     print_step(f"使用 Python 解释器：{python_bin}")
 
     if recreate and venv_dir.exists():
@@ -2578,13 +2644,15 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
     else:
         print_step(f"复用已有虚拟环境：{venv_dir}")
 
-    print_step("升级 pip")
-    run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
+    if os.name == "nt":
+        print_step("升级 pip")
+        run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
+    else:
+        print_step("为虚拟环境配置 uv 兼容 pip 命令")
+        venv_pip = configure_venv_pip_compat(venv_dir, venv_python)
 
     print_step("安装项目依赖")
-    run(
-        [str(venv_python), "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")]
-    )
+    run([str(venv_pip), "install", "-r", str(ROOT / "requirements.txt")])
     return venv_python
 
 
