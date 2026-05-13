@@ -162,6 +162,8 @@ class StreamingHandler:
         :param user_id: 用户ID
         :param username: 用户名
         :param title: 消息标题
+        :param original_message_id: 原始消息ID（如果是回复消息）
+        :param original_chat_id: 原始聊天ID（如果是回复消息）
         """
         self._channel = channel
         self._source = source

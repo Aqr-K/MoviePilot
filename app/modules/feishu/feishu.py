@@ -1251,13 +1251,15 @@ class Feishu:
             sequence = int(stream_meta.get("sequence") or 0) + 1
             # 无论远端是否响应成功都自增 sequence，防止某次超时导致后续 sequence 一直因为没有递增而被拒绝
             stream_meta["sequence"] = sequence
-            if card_id and element_id and self._update_streaming_card_content(
-                    card_id=card_id,
-                    element_id=element_id,
-                    content=self._escape_card_text(text).strip() or " ",
-                    sequence=sequence,
-            ):
-                return True
+            if card_id and element_id:
+                if self._update_streaming_card_content(
+                        card_id=card_id,
+                        element_id=element_id,
+                        content=self._escape_card_text(text).strip() or " ",
+                        sequence=sequence,
+                ):
+                    return True
+                return False
 
         card = self._build_card(title=title, text=text, link=None, buttons=buttons)
         try:

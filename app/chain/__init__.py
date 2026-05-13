@@ -1559,6 +1559,7 @@ class ChainBase(metaclass=ABCMeta):
         :param text: 新的消息内容
         :param title: 消息标题
         :param buttons: 更新后的按钮列表
+        :param metadata: 其他消息元数据
         :return: 编辑是否成功
         """
         return self.run_module(

@@ -312,7 +312,7 @@ class PromptManager:
         根据渠道能力动态生成格式指令
         """
         instructions = []
-        if ChannelCapability.RICH_TEXT not in caps.capabilities:
+        if ChannelCapability.MARKDOWN not in caps.capabilities:
             instructions.append(
                 "- Formatting: Use **Plain Text ONLY**. The channel does NOT support Markdown."
             )
