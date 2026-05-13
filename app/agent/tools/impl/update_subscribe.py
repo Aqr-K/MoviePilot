@@ -74,6 +74,10 @@ class UpdateSubscribeInput(BaseModel):
         None,
         description="Whether to upgrade to best version: 0 for no, 1 for yes (optional)",
     )
+    best_version_full: Optional[int] = Field(
+        None,
+        description="For TV best-version subscriptions, only download full-season packs: 0 for no, 1 for yes (optional)",
+    )
     custom_words: Optional[str] = Field(
         None, description="Custom recognition words (optional)"
     )
@@ -140,6 +144,7 @@ class UpdateSubscribeTool(MoviePilotTool):
         downloader: Optional[str] = None,
         save_path: Optional[str] = None,
         best_version: Optional[int] = None,
+        best_version_full: Optional[int] = None,
         custom_words: Optional[str] = None,
         media_category: Optional[str] = None,
         episode_group: Optional[str] = None,
@@ -230,6 +235,8 @@ class UpdateSubscribeTool(MoviePilotTool):
                     subscribe_dict["save_path"] = save_path
                 if best_version is not None:
                     subscribe_dict["best_version"] = best_version
+                if best_version_full is not None:
+                    subscribe_dict["best_version_full"] = best_version_full
 
                 # 其他配置
                 if custom_words is not None:

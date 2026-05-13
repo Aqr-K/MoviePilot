@@ -279,6 +279,7 @@ class SubscribeChainTest(TestCase):
             "name": "Test Show",
             "season": 1,
             "best_version": 1,
+            "best_version_full": 0,
             "type": MediaType.TV.value,
             "start_episode": 1,
             "total_episode": 3,
@@ -381,6 +382,32 @@ class SubscribeChainTest(TestCase):
             )
         )
 
+    def test_full_best_version_rejects_episode_resource(self):
+        subscribe = self._build_subscribe(best_version_full=1, total_episode=3)
+
+        self.assertFalse(
+            SubscribeChain._SubscribeChain__is_full_season_best_version_resource(
+                meta=SimpleNamespace(season_list=[1], episode_list=[1]),
+                subscribe=subscribe,
+            )
+        )
+
+    def test_full_best_version_accepts_full_pack_resource(self):
+        subscribe = self._build_subscribe(best_version_full=1, total_episode=3)
+
+        self.assertTrue(
+            SubscribeChain._SubscribeChain__is_full_season_best_version_resource(
+                meta=SimpleNamespace(season_list=[1], episode_list=[]),
+                subscribe=subscribe,
+            )
+        )
+        self.assertTrue(
+            SubscribeChain._SubscribeChain__is_full_season_best_version_resource(
+                meta=SimpleNamespace(season_list=[1], episode_list=[1, 2, 3]),
+                subscribe=subscribe,
+            )
+        )
+
     def test_update_subscribe_priority_uses_selected_episodes(self):
         subscribe = self._build_subscribe(
             total_episode=4,
@@ -447,6 +474,39 @@ class SubscribeChainTest(TestCase):
                 meta=meta,
                 mediainfo=mediainfo,
                 downloads=downloads,
+            )
+
+        payload = subscribe_oper.update.call_args.args[1]
+        self.assertEqual(payload["episode_priority"], {"1": 100, "2": 100, "3": 100})
+        self.assertEqual(payload["current_priority"], 100)
+        self.assertEqual(payload["lack_episode"], 0)
+        finish_mock.assert_called_once_with(subscribe=subscribe, meta=meta, mediainfo=mediainfo)
+
+    def test_full_best_version_updates_all_episodes_when_pack_has_no_episode_metadata(self):
+        subscribe = self._build_subscribe(
+            best_version_full=1,
+            total_episode=3,
+            episode_priority={"1": 80, "2": 80, "3": 80},
+            current_priority=80,
+            lack_episode=3,
+        )
+        download = self._build_download(priority=100, selected_episodes=[], meta_episodes=[])
+        chain = SubscribeChain()
+        meta = SimpleNamespace()
+        mediainfo = SimpleNamespace(title_year="Test Show (2026)")
+
+        with patch.object(SUBSCRIBE_CHAIN_MODULE, "SubscribeOper") as subscribe_oper_cls, patch.object(
+            SubscribeChain,
+            "_SubscribeChain__finish_subscribe",
+        ) as finish_mock:
+            subscribe_oper = subscribe_oper_cls.return_value
+            subscribe_oper.update.return_value = None
+
+            chain.update_subscribe_priority(
+                subscribe=subscribe,
+                meta=meta,
+                mediainfo=mediainfo,
+                downloads=[download],
             )
 
         payload = subscribe_oper.update.call_args.args[1]

@@ -292,6 +292,41 @@ class SubscribeChain(ChainBase):
                 interested.append(episode_num)
         return sorted(set(interested))
 
+    @classmethod
+    def __is_full_best_version_enabled(cls, subscribe: Subscribe) -> bool:
+        """
+        判断当前订阅是否启用了电视剧全集洗版。
+        """
+        return (
+            bool(getattr(subscribe, "best_version_full", 0))
+            and bool(subscribe.best_version)
+            and subscribe.type == MediaType.TV.value
+        )
+
+    @classmethod
+    def __is_full_season_best_version_resource(cls, meta: MetaBase, subscribe: Subscribe) -> bool:
+        """
+        判断候选资源是否覆盖订阅目标的全集范围。
+        """
+        if not cls.__is_full_best_version_enabled(subscribe):
+            return True
+
+        season_list = meta.season_list or [1]
+        if len(season_list) != 1:
+            return False
+        if subscribe.season is not None and season_list[0] != subscribe.season:
+            return False
+
+        episodes = meta.episode_list
+        if not episodes:
+            # 资源未标出单集时按整季包处理，后续下载前仍会解析种子文件确认完整性。
+            return True
+
+        target_episodes = set(cls.__get_best_version_target_episodes(subscribe))
+        if not target_episodes:
+            return False
+        return target_episodes.issubset(set(episodes))
+
     @staticmethod
     def __get_event_media(_mediaid: str, _meta: MetaBase) -> Optional[MediaInfo]:
         """
@@ -356,6 +391,8 @@ class SubscribeChain(ChainBase):
                 "exclude") else kwargs.get("exclude"),
             'best_version': self.__get_default_subscribe_config(mtype, "best_version") if not kwargs.get(
                 "best_version") else kwargs.get("best_version"),
+            'best_version_full': self.__get_default_subscribe_config(mtype, "best_version_full")
+            if kwargs.get("best_version_full") is None else kwargs.get("best_version_full"),
             'search_imdbid': self.__get_default_subscribe_config(mtype, "search_imdbid") if not kwargs.get(
                 "search_imdbid") else kwargs.get("search_imdbid"),
             'sites': self.__get_default_subscribe_config(mtype, "sites") or None if not kwargs.get(
@@ -852,6 +889,16 @@ class SubscribeChain(ChainBase):
 
                                 # 洗版
                                 if subscribe.best_version:
+                                    if (
+                                        torrent_mediainfo.type == MediaType.TV
+                                        and not self.__is_full_season_best_version_resource(
+                                            meta=torrent_meta, subscribe=subscribe
+                                        )
+                                    ):
+                                        logger.info(
+                                            f"{subscribe.name} 正在全集洗版，{torrent_info.title} 不是全集资源"
+                                        )
+                                        continue
                                     # 洗版时，不符合订阅集数的不要
                                     if (
                                         torrent_mediainfo.type == MediaType.TV
@@ -958,6 +1005,9 @@ class SubscribeChain(ChainBase):
             for download in downloads:
                 download_priority = download.torrent_info.pri_order
                 downloaded_episodes = self.__get_downloaded_episodes([download])
+                if self.__is_full_best_version_enabled(subscribe) and not downloaded_episodes:
+                    # 全集整包下载时资源标题常不携带集数，视为覆盖当前订阅的全部目标集。
+                    downloaded_episodes = self.__get_best_version_target_episodes(subscribe)
                 if not downloaded_episodes:
                     continue
                 for episode in downloaded_episodes:
@@ -1342,6 +1392,14 @@ class SubscribeChain(ChainBase):
                                                 )
                                                 continue
                                 else:
+                                    if not self.__is_full_season_best_version_resource(
+                                        meta=torrent_meta,
+                                        subscribe=subscribe,
+                                    ):
+                                        logger.debug(
+                                            f"{subscribe.name} 正在全集洗版，{torrent_info.title} 不是全集资源"
+                                        )
+                                        continue
                                     # 洗版时，不符合订阅集数的不要
                                     if (
                                         meta.type == MediaType.TV
@@ -2827,7 +2885,9 @@ class SubscribeChain(ChainBase):
             else:
                 exist_flag = False
                 if meta.type == MediaType.TV:
-                    pending_episodes = self._get_pending_best_version_episodes(subscribe)
+                    pending_episodes = [] if self.__is_full_best_version_enabled(
+                        subscribe
+                    ) else self._get_pending_best_version_episodes(subscribe)
                     # 对于电视剧，构造缺失的媒体信息
                     no_exists = {
                         mediakey: {
@@ -2850,6 +2910,9 @@ class SubscribeChain(ChainBase):
 
         # 获取已下载的集数或电影
         downloaded = self.__get_downloaded(subscribe)
+        if self.__is_full_best_version_enabled(subscribe):
+            # 全集洗版必须保留整季缺失范围，避免下载链路从整包中拆选单集。
+            downloaded = []
         if meta.type == MediaType.TV:
             # 对于电视剧类型，整合缺失集数并剔除已下载的集数
             exist_flag, no_exists = self.__get_subscribe_no_exits(

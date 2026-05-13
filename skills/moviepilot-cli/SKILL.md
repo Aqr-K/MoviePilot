@@ -140,6 +140,9 @@ List active subscriptions:
 Update subscription filters:
 `node scripts/mp-cli.js update_subscribe subscribe_id=123 resolution="1080p"`
 
+Only download full-season packs for a TV best-version subscription:
+`node scripts/mp-cli.js update_subscribe subscribe_id=123 best_version=1 best_version_full=1`
+
 Trigger a search for missing episodes (confirm with user first):
 `node scripts/mp-cli.js search_subscribe subscribe_id=123`
 

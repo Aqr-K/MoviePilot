@@ -102,7 +102,7 @@ Key columns: `id`, `downloader`, `download_hash`, `fullpath`, `savepath`, `filep
 Key columns: `id`, `src`, `dest`, `mode`, `type`, `category`, `title`, `year`, `tmdbid`, `seasons`, `episodes`, `download_hash`, `status` (boolean: true=success, false=failed), `errmsg`, `date`
 
 ### subscribe (订阅)
-Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `lack_episode`, `state` ('N'=new, 'R'=running, 'S'=paused), `filter`, `include`, `exclude`, `quality`, `resolution`, `sites`, `best_version`, `date`, `username`
+Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `lack_episode`, `state` ('N'=new, 'R'=running, 'S'=paused), `filter`, `include`, `exclude`, `quality`, `resolution`, `sites`, `best_version`, `best_version_full`, `date`, `username`
 
 ### subscribehistory (订阅历史)
 Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `date`, `username`

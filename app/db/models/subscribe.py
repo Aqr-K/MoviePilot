@@ -71,6 +71,8 @@ class Subscribe(Base):
     downloader = Column(String)
     # 是否洗版
     best_version = Column(Integer, default=0)
+    # 是否只洗全集整包，开启后电视剧洗版不按单集下载
+    best_version_full = Column(Integer, default=0)
     # 当前优先级
     current_priority = Column(Integer)
     # 洗版时已下载剧集的优先级状态，格式：{"1": 90, "2": 100}
