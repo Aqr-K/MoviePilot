@@ -18,6 +18,7 @@ from app.agent.llm import LLMHelper
 from app.helper.voice import VoiceHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
+from app.modules.qqbot.qqbot import QQBot
 from app.modules.slack import SlackModule
 from app.modules.telegram.telegram import Telegram
 from app.modules.telegram import TelegramModule
@@ -1027,6 +1028,25 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertIsNotNone(message)
         self.assertEqual([image.ref for image in message.images], ["https://example.com/qq-image.png"])
         self.assertEqual(message.images[0].mime_type, "image/png")
+
+    def test_qq_markdown_image_size_preserves_poster_ratio(self):
+        with patch.object(QQBot, "_get_image_size", return_value=(1000, 1500)):
+            content, use_markdown = QQBot._format_message_markdown(
+                title="poster",
+                image="https://example.com/poster.jpg",
+            )
+
+        self.assertTrue(use_markdown)
+        self.assertIn("![image #341px #512px](https://example.com/poster.jpg)", content)
+
+    def test_qq_markdown_image_uses_poster_ratio_fallback(self):
+        with patch.object(QQBot, "_get_image_size", return_value=None):
+            content, use_markdown = QQBot._format_message_markdown(
+                image="https://example.com/poster.jpg",
+            )
+
+        self.assertTrue(use_markdown)
+        self.assertEqual(content, "![image #208px #320px](https://example.com/poster.jpg)")
 
     def test_qq_message_parser_accepts_audio_only_attachment(self):
         module = QQBotModule()
