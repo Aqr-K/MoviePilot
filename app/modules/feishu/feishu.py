@@ -837,6 +837,7 @@ class Feishu:
             return None
 
         data = getattr(response, "data", None)
+        logger.info(f"_send_message 飞书回复消息成功：data={data}")
         return {
             "success": True,
             "message_id": getattr(data, "message_id", None),
@@ -879,6 +880,7 @@ class Feishu:
             return None
 
         data = getattr(response, "data", None)
+        logger.info(f"_reply_message 飞书回复消息成功：data={data}")
         return {
             "success": True,
             "message_id": getattr(data, "message_id", None),
