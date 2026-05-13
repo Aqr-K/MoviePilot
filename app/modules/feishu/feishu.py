@@ -51,6 +51,7 @@ from lark_oapi.event.callback.model.p2_card_action_trigger import (
 
 from app.core.config import settings
 from app.core.context import Context, MediaInfo
+from app.db.user_oper import UserOper
 from app.log import logger
 from app.schemas import CommingMessage, Notification
 from app.schemas.types import MessageChannel, NotificationType
@@ -269,6 +270,27 @@ class Feishu:
         if normalized_user_id:
             self._user_receive_id_type_mapping[normalized_user_id] = "user_id"
 
+    @staticmethod
+    def _resolve_username(
+            open_id: Optional[str],
+            user_id: Optional[str],
+            fallback: Optional[str],
+    ) -> Optional[str]:
+        """根据飞书绑定 ID 映射 MoviePilot 用户名，未绑定时保留渠道名称。"""
+        binding_ids = {}
+        if open_id:
+            binding_ids["feishu_openid"] = open_id
+        if user_id:
+            binding_ids["feishu_userid"] = user_id
+        if binding_ids:
+            try:
+                mapped_username = UserOper().get_name(**binding_ids)
+                if mapped_username:
+                    return mapped_username
+            except Exception as err:
+                logger.debug(f"解析飞书用户绑定失败：{err}")
+        return fallback
+
     def _on_message(self, data: P2ImMessageReceiveV1) -> None:
         """处理飞书长连接收到的普通消息事件。"""
         event = getattr(data, "event", None)
@@ -454,7 +476,11 @@ class Feishu:
         sender = message.get("sender") or {}
         open_id = sender.get("open_id")
         user_id = sender.get("user_id")
-        username = sender.get("name") or open_id or user_id
+        username = self._resolve_username(
+            open_id=open_id,
+            user_id=user_id,
+            fallback=sender.get("name") or open_id or user_id,
+        )
         userid = open_id or user_id
         if not userid:
             return None

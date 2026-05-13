@@ -123,19 +123,20 @@ class TestFeishu(unittest.TestCase):
     def test_parse_message_returns_callback_message(self):
         client = self._build_client()
 
-        result = client.parse_message(
-            {
-                "type": "cardAction",
-                "callback_data": "approve",
-                "message_id": "om_123",
-                "chat_id": "oc_123",
-                "sender": {
-                    "open_id": "ou_user_1",
-                    "user_id": "u_user_1",
-                    "name": "tester",
-                },
-            }
-        )
+        with patch("app.modules.feishu.feishu.UserOper.get_name", return_value=None):
+            result = client.parse_message(
+                {
+                    "type": "cardAction",
+                    "callback_data": "approve",
+                    "message_id": "om_123",
+                    "chat_id": "oc_123",
+                    "sender": {
+                        "open_id": "ou_user_1",
+                        "user_id": "u_user_1",
+                        "name": "tester",
+                    },
+                }
+            )
 
         self.assertIsNotNone(result)
         self.assertEqual(result.channel, MessageChannel.Feishu)
@@ -195,7 +196,9 @@ class TestFeishu(unittest.TestCase):
     def test_parse_message_blocks_non_admin_command(self):
         client = self._build_client(FEISHU_ADMINS="ou_admin")
 
-        with patch.object(client, "send_text", return_value={"success": True}) as send_text:
+        with patch("app.modules.feishu.feishu.UserOper.get_name", return_value=None), patch.object(
+            client, "send_text", return_value={"success": True}
+        ) as send_text:
             result = client.parse_message(
                 {
                     "type": "message",
@@ -215,6 +218,30 @@ class TestFeishu(unittest.TestCase):
             userid="ou_user_2",
             chat_id="oc_chat_1",
             receive_id_type="open_id",
+        )
+
+    def test_parse_message_maps_feishu_ids_to_moviepilot_username(self):
+        client = self._build_client()
+
+        with patch("app.modules.feishu.feishu.UserOper.get_name", return_value="moviepilot-user") as get_name:
+            result = client.parse_message(
+                {
+                    "type": "message",
+                    "text": "/ai 添加黑客帝国订阅",
+                    "sender": {
+                        "open_id": "ou_bound_user",
+                        "user_id": "u_bound_user",
+                        "name": "ou_bound_user",
+                    },
+                }
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.userid, "ou_bound_user")
+        self.assertEqual(result.username, "moviepilot-user")
+        get_name.assert_called_once_with(
+            feishu_openid="ou_bound_user",
+            feishu_userid="u_bound_user",
         )
 
     def test_send_notification_uses_direct_card_content(self):
@@ -499,33 +526,34 @@ class TestFeishu(unittest.TestCase):
     def test_parse_message_supports_image_and_file_payloads(self):
         client = self._build_client()
 
-        image_message = client.parse_message(
-            {
-                "type": "message",
-                "text": "",
-                "images": [{"ref": "feishu://image/img_v2_test"}],
-                "message_id": "om_img",
-                "chat_id": "oc_chat",
-                "sender": {
-                    "open_id": "ou_user_5",
-                    "name": "tester",
-                },
-            }
-        )
+        with patch("app.modules.feishu.feishu.UserOper.get_name", return_value=None):
+            image_message = client.parse_message(
+                {
+                    "type": "message",
+                    "text": "",
+                    "images": [{"ref": "feishu://image/img_v2_test"}],
+                    "message_id": "om_img",
+                    "chat_id": "oc_chat",
+                    "sender": {
+                        "open_id": "ou_user_5",
+                        "name": "tester",
+                    },
+                }
+            )
 
-        file_message = client.parse_message(
-            {
-                "type": "message",
-                "text": "",
-                "files": [{"ref": "feishu://file/file_key/report.pdf", "name": "report.pdf"}],
-                "message_id": "om_file",
-                "chat_id": "oc_chat",
-                "sender": {
-                    "open_id": "ou_user_6",
-                    "name": "tester",
-                },
-            }
-        )
+            file_message = client.parse_message(
+                {
+                    "type": "message",
+                    "text": "",
+                    "files": [{"ref": "feishu://file/file_key/report.pdf", "name": "report.pdf"}],
+                    "message_id": "om_file",
+                    "chat_id": "oc_chat",
+                    "sender": {
+                        "open_id": "ou_user_6",
+                        "name": "tester",
+                    },
+                }
+            )
 
         self.assertEqual(image_message.images[0].ref, "feishu://image/img_v2_test")
         self.assertEqual(file_message.files[0].ref, "feishu://file/file_key/report.pdf")

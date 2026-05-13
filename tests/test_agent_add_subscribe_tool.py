@@ -60,6 +60,32 @@ class TestAgentAddSubscribeTool(unittest.TestCase):
         self.assertEqual(async_add.await_args.kwargs["username"], "tg_display_name")
         self.assertIn("成功添加订阅：The Matrix (1999)", result)
 
+    def test_feishu_subscription_uses_pre_resolved_username_when_openid_lookup_misses(self):
+        tool = AddSubscribeTool(session_id="session-1", user_id="ou_feishu_user")
+        tool.set_message_attr(
+            channel=MessageChannel.Feishu.value,
+            source="feishu-main",
+            username="moviepilot-user",
+        )
+
+        with patch(
+            "app.agent.tools.impl.add_subscribe.SubscribeChain.async_add",
+            new=AsyncMock(return_value=(1, "")),
+        ) as async_add, patch(
+            "app.agent.tools.impl.add_subscribe.UserOper.get_name",
+            return_value=None,
+        ):
+            result = asyncio.run(
+                tool.run(
+                    title="The Matrix",
+                    year="1999",
+                    media_type="movie",
+                )
+            )
+
+        self.assertEqual(async_add.await_args.kwargs["username"], "moviepilot-user")
+        self.assertIn("成功添加订阅：The Matrix (1999)", result)
+
 
 if __name__ == "__main__":
     unittest.main()
