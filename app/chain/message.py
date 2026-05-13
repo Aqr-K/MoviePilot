@@ -1272,6 +1272,13 @@ class MessageChain(ChainBase):
                     )
                 elif audio_ref.startswith("wxbot://voice"):
                     continue
+                elif audio_ref.startswith("feishu://file/"):
+                    content = self.run_module(
+                        "download_feishu_file_bytes", file_ref=audio_ref, source=source
+                    )
+                    filename = self._guess_audio_filename(
+                        audio_ref, default="input.opus"
+                    )
                 elif audio_ref.startswith("http"):
                     resp = RequestUtils(timeout=30).get_res(audio_ref)
                     content = resp.content if resp and resp.content else None
@@ -1339,11 +1346,11 @@ class MessageChain(ChainBase):
         """
         下载可直接提供给 LLM 的附件内容，并统一转换为 data URL。
         """
-        attachments = CommingMessage.MessageImage.normalize_list(attachments)
-        if not attachments:
+        normalized_attachments = CommingMessage.MessageImage.normalize_list(attachments) or []
+        if not normalized_attachments:
             return None
         data_urls = []
-        for attachment in attachments:
+        for attachment in normalized_attachments:
             attachment_ref = attachment.ref
             try:
                 before_count = len(data_urls)

@@ -576,6 +576,24 @@ class TestFeishu(unittest.TestCase):
         payload = forward.call_args.args[0]
         self.assertEqual(payload["images"][0]["ref"], "feishu://image/om_img_evt/img_v2_evt")
 
+    def test_on_message_wraps_feishu_audio_ref_with_message_id(self):
+        client = self._build_client()
+        message = SimpleNamespace(
+            message_id="om_audio_evt",
+            chat_id="oc_chat_evt",
+            chat_type="p2p",
+            message_type="audio",
+            content=json.dumps({"file_key": "file_audio_evt", "file_name": "voice.opus"}),
+        )
+        sender = SimpleNamespace(sender_id=SimpleNamespace(open_id="ou_user_evt", user_id=None))
+        event = SimpleNamespace(sender=sender, message=message)
+
+        with patch.object(client, "_forward_to_message_chain") as forward:
+            client._on_message(SimpleNamespace(event=event))
+
+        payload = forward.call_args.args[0]
+        self.assertEqual(payload["audio_refs"], ["feishu://file/om_audio_evt/file_audio_evt/voice.opus"])
+
     def test_feishu_channel_capabilities_enable_images_and_files(self):
         self.assertTrue(
             ChannelCapabilityManager.supports_capability(
@@ -784,13 +802,23 @@ class TestFeishu(unittest.TestCase):
         ):
             data_url = module.download_feishu_image_to_data_url("feishu://image/om_msg/img_v2_xxx", "feishu-main")
             file_bytes = module.download_feishu_file_bytes("feishu://file/file_xxx/note.txt", "feishu-main")
+            audio_bytes = module.download_feishu_file_bytes(
+                "feishu://file/om_audio/file_audio/voice.opus",
+                "feishu-main",
+            )
 
         self.assertTrue(data_url.startswith("data:image/png;base64,"))
         self.assertEqual(file_bytes, b"file")
-        client.download_message_resource_bytes.assert_called_once_with(
+        self.assertEqual(audio_bytes, b"image")
+        client.download_message_resource_bytes.assert_any_call(
             message_id="om_msg",
             file_key="img_v2_xxx",
             resource_type="image",
+        )
+        client.download_message_resource_bytes.assert_any_call(
+            message_id="om_audio",
+            file_key="file_audio",
+            resource_type="audio",
         )
 
     def test_module_message_reaction_helpers_delegate_to_client(self):

@@ -235,13 +235,16 @@ class Feishu:
         elif message_type in {"audio", "media", "file"}:
             file_key = str(content.get("file_key") or "").strip()
             file_name = str(content.get("file_name") or "").strip() or None
+            message_id = str(getattr(message, "message_id", None) or "").strip()
             if file_key:
                 if message_type == "audio":
-                    audio_refs = [f"feishu://file/{file_key}/{file_name or 'audio.opus'}"]
+                    resource_path = f"{message_id}/{file_key}" if message_id else file_key
+                    audio_refs = [f"feishu://file/{resource_path}/{file_name or 'audio.opus'}"]
                 else:
+                    resource_path = f"{message_id}/{file_key}" if message_id else file_key
                     files = [
                         CommingMessage.MessageAttachment(
-                            ref=f"feishu://file/{file_key}/{file_name or 'attachment'}",
+                            ref=f"feishu://file/{resource_path}/{file_name or 'attachment'}",
                             name=file_name,
                         )
                     ]

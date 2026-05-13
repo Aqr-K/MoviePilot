@@ -301,11 +301,32 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         client = self.get_instance(client_config.name)
         if not client:
             return None
-        parts = file_ref.replace("feishu://file/", "", 1).split("/", 1)
-        file_key = parts[0].strip() if parts else ""
+        parts = [
+            part.strip()
+            for part in file_ref.replace("feishu://file/", "", 1).split("/")
+            if part.strip()
+        ]
+        file_key = ""
+        downloaded = None
+        if len(parts) >= 2 and parts[0].startswith("om_"):
+            message_id, file_key = parts[0], parts[1]
+            downloaded = client.download_message_resource_bytes(
+                message_id=message_id,
+                file_key=file_key,
+                resource_type="audio",
+            )
+            if not downloaded:
+                downloaded = client.download_message_resource_bytes(
+                    message_id=message_id,
+                    file_key=file_key,
+                    resource_type="file",
+                )
+        else:
+            file_key = parts[0] if parts else ""
         if not file_key:
             return None
-        downloaded = client.download_file_bytes(file_key)
+        if not downloaded:
+            downloaded = client.download_file_bytes(file_key)
         if not downloaded:
             return None
         content, _, _ = downloaded

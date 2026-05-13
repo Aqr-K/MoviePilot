@@ -2,6 +2,7 @@ import base64
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
@@ -14,6 +15,7 @@ from app.agent import MoviePilotAgent, AgentChain
 from app.chain.message import MessageChain
 from app.core.config import settings
 from app.agent.llm import LLMHelper
+from app.helper.voice import VoiceHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule
@@ -278,16 +280,24 @@ class AgentImageSupportTest(unittest.TestCase):
             "qq://file/" + quote("https://example.com/qq-voice.ogg", safe=""),
             "vocechat://file/%2Fuploads%2Fvoice.ogg",
             "synology://file/" + quote("https://example.com/synology-voice.wav", safe=""),
+            "feishu://file/om_audio/file_audio/voice.opus",
         ]
 
         with patch.object(VoiceHelper, "is_available", return_value=True), patch.object(
             chain,
             "run_module",
-            side_effect=[b"slack", b"discord", b"qq", b"vocechat", b"synology"],
+            side_effect=[b"slack", b"discord", b"qq", b"vocechat", b"synology", b"feishu"],
         ) as run_module, patch.object(
             VoiceHelper,
             "transcribe_bytes",
-            side_effect=["slack text", "discord text", "qq text", "vocechat text", "synology text"],
+            side_effect=[
+                "slack text",
+                "discord text",
+                "qq text",
+                "vocechat text",
+                "synology text",
+                "feishu text",
+            ],
         ) as transcribe_bytes:
             result = chain._transcribe_audio_refs(
                 audio_refs=audio_refs,
@@ -297,7 +307,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertEqual(
             result,
-            "slack text\ndiscord text\nqq text\nvocechat text\nsynology text",
+            "slack text\ndiscord text\nqq text\nvocechat text\nsynology text\nfeishu text",
         )
         self.assertEqual(
             [call.args[0] for call in run_module.call_args_list],
@@ -307,6 +317,7 @@ class AgentImageSupportTest(unittest.TestCase):
                 "download_qq_file_bytes",
                 "download_vocechat_file_bytes",
                 "download_synologychat_file_bytes",
+                "download_feishu_file_bytes",
             ],
         )
         self.assertEqual(
@@ -317,6 +328,7 @@ class AgentImageSupportTest(unittest.TestCase):
                 "qq-voice.ogg",
                 "voice.ogg",
                 "synology-voice.wav",
+                "voice.opus",
             ],
         )
 
@@ -393,7 +405,7 @@ class AgentImageSupportTest(unittest.TestCase):
         with patch.object(settings, "AI_AGENT_ENABLE", True), patch.object(
             settings, "LLM_SUPPORT_IMAGE_INPUT", False
         ), patch.object(chain, "_get_or_create_session_id", return_value="session-1"), patch.object(
-            chain, "_download_images_to_base64"
+            chain, "_download_attachments_to_data_urls"
         ) as download_images, patch.object(
             chain,
             "_prepare_agent_files",
@@ -439,8 +451,8 @@ class AgentImageSupportTest(unittest.TestCase):
             "run_module",
             return_value="data:image/png;base64,abc123",
         ) as run_module:
-            images = chain._download_images_to_base64(
-                images=["https://files.slack.com/files-pri/T1-F1/test.png"],
+            images = chain._download_attachments_to_data_urls(
+                attachments=["https://files.slack.com/files-pri/T1-F1/test.png"],
                 channel=MessageChannel.Slack,
                 source="slack-test",
             )
@@ -598,8 +610,8 @@ class AgentImageSupportTest(unittest.TestCase):
             "run_module",
             return_value="data:image/png;base64,wechat123",
         ) as run_module:
-            images = chain._download_images_to_base64(
-                images=["wxwork://media_id/media-1"],
+            images = chain._download_attachments_to_data_urls(
+                attachments=["wxwork://media_id/media-1"],
                 channel=MessageChannel.Wechat,
                 source="wechat-test",
             )
@@ -964,7 +976,13 @@ class AgentImageSupportTest(unittest.TestCase):
             with patch.object(
                 module,
                 "get_configs",
-                return_value={"discord-test": SimpleNamespace(name="discord-test")},
+                return_value={
+                    "discord-test": SimpleNamespace(
+                        name="discord-test",
+                        type="discord",
+                        enabled=True,
+                    )
+                },
             ), patch.object(
                 module, "check_message", return_value=True
             ), patch.object(
@@ -1145,8 +1163,9 @@ class AgentImageSupportTest(unittest.TestCase):
 
     def test_prepare_agent_files_saves_local_file(self):
         chain = MessageChain()
-        with tempfile.TemporaryDirectory() as tempdir, patch.object(
-            settings, "TEMP_PATH", Path(tempdir)
+        with tempfile.TemporaryDirectory() as tempdir, patch(
+            "app.chain.message.settings",
+            SimpleNamespace(TEMP_PATH=Path(tempdir)),
         ), patch.object(
             chain,
             "_download_message_file_bytes",
