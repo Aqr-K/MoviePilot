@@ -283,7 +283,8 @@ class TestFeishu(unittest.TestCase):
         request = message_api.create.call_args.args[0]
         self.assertEqual(request.request_body.msg_type, "interactive")
         content = json.loads(request.request_body.content)
-        image_element = content["body"]["elements"][2]
+        self.assertEqual(content["body"]["padding"], "0px 0px 0px 0px")
+        image_element = content["body"]["elements"][0]
         self.assertEqual(image_element["tag"], "img")
         self.assertEqual(image_element["img_key"], "img_v2_remote")
         self.assertEqual(content["body"]["elements"][-1]["tag"], "column_set")
@@ -582,9 +583,10 @@ class TestFeishu(unittest.TestCase):
         request = message_api.create.call_args.args[0]
         self.assertEqual(request.request_body.msg_type, "interactive")
         content = json.loads(request.request_body.content)
-        self.assertEqual(content["body"]["elements"][0]["content"], "图片标题")
-        self.assertEqual(content["body"]["elements"][1]["content"], "图片说明")
-        self.assertEqual(content["body"]["elements"][2]["img_key"], "img_v2_uploaded")
+        self.assertEqual(content["body"]["padding"], "0px 0px 0px 0px")
+        self.assertEqual(content["body"]["elements"][0]["img_key"], "img_v2_uploaded")
+        self.assertEqual(content["body"]["elements"][1]["content"], "图片标题")
+        self.assertEqual(content["body"]["elements"][2]["content"], "图片说明")
 
     def test_send_file_keeps_non_image_file_message_and_caption(self):
         client = self._build_client()

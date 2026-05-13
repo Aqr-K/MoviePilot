@@ -717,16 +717,8 @@ class Feishu:
     ) -> Dict[str, Any]:
         """构建飞书交互卡片结构。"""
         elements: List[dict] = []
-        title_section = self._build_markdown_section(title, text_size="heading")
-        body_section = self._build_markdown_section(
-            self._build_message_text(title=None, text=text, link=link),
-            text_size="normal",
-        )
-        if title_section:
-            elements.append(title_section)
-        if body_section:
-            elements.append(body_section)
         if image_key:
+            # 图文混合消息需要让图片贴近卡片顶部，避免先展示文字再露出海报。
             elements.append(
                 {
                     "tag": "img",
@@ -738,6 +730,15 @@ class Feishu:
                     "mode": "fit_horizontal",
                 }
             )
+        title_section = self._build_markdown_section(title, text_size="heading")
+        body_section = self._build_markdown_section(
+            self._build_message_text(title=None, text=text, link=link),
+            text_size="normal",
+        )
+        if title_section:
+            elements.append(title_section)
+        if body_section:
+            elements.append(body_section)
         elements.extend(self._card_actions(buttons))
         return {
             # 飞书卡片消息要支持后续 PATCH 更新，发送和更新时都必须显式声明 update_multi。
@@ -752,7 +753,7 @@ class Feishu:
             },
             "body": {
                 "direction": "vertical",
-                "padding": "12px 12px 12px 12px",
+                "padding": "0px 0px 0px 0px",
                 "elements": elements,
             },
         }
