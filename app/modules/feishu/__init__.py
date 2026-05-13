@@ -92,7 +92,24 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             userid, chat_id, receive_id_type = self._resolve_message_target(message)
             client: Feishu = self.get_instance(conf.name)
             if client:
-                if message.file_path:
+                if message.image and message.file_path:
+                    # 普通文件无法嵌入卡片，先发送图文卡片，再单独发送附件，避免图片被 file_path 分支吞掉。
+                    client.send_notification(
+                        message=message.model_copy(update={"file_path": None, "file_name": None}),
+                        userid=userid,
+                        chat_id=chat_id,
+                        receive_id_type=receive_id_type,
+                        original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                    )
+                    client.send_file(
+                        file_path=message.file_path,
+                        userid=userid,
+                        chat_id=chat_id,
+                        file_name=message.file_name,
+                        receive_id_type=receive_id_type,
+                        original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                    )
+                elif message.file_path:
                     client.send_file(
                         file_path=message.file_path,
                         userid=userid,
@@ -186,7 +203,24 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             client: Feishu = self.get_instance(conf.name)
             if not client:
                 continue
-            if message.file_path:
+            if message.image and message.file_path:
+                result = client.send_notification(
+                    message=message.model_copy(update={"file_path": None, "file_name": None}),
+                    userid=userid,
+                    chat_id=chat_id,
+                    receive_id_type=receive_id_type,
+                    original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                )
+                if result and result.get("success"):
+                    client.send_file(
+                        file_path=message.file_path,
+                        userid=userid,
+                        chat_id=chat_id,
+                        file_name=message.file_name,
+                        receive_id_type=receive_id_type,
+                        original_message_id=str(message.original_message_id) if message.original_message_id else None,
+                    )
+            elif message.file_path:
                 result = client.send_file(
                     file_path=message.file_path,
                     userid=userid,

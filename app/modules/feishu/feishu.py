@@ -1,9 +1,11 @@
 import asyncio
 import json
+import tempfile
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import lark_oapi as lark
 import lark_oapi.ws.client as lark_ws_client_module
@@ -61,6 +63,7 @@ class Feishu:
     PROCESSING_REACTION_EMOJI = "GLANCE"
     STREAM_CARD_TITLE_ELEMENT_ID = "mp_stream_title"
     STREAM_CARD_BODY_ELEMENT_ID = "mp_stream_body"
+    IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".heic"}
 
     def __init__(
             self,
@@ -314,12 +317,10 @@ class Feishu:
         operator = getattr(event, "operator", None)
         action = getattr(event, "action", None)
         context = getattr(event, "context", None)
-        value = getattr(action, "value", None) or {}
-        callback_data = None
-        if isinstance(value, dict):
-            callback_data = value.get("callback_data") or value.get("value")
-        if not callback_data:
-            callback_data = getattr(action, "name", None)
+        callback_data = self._extract_card_callback_data(
+            value=getattr(action, "value", None),
+            name=getattr(action, "name", None),
+        )
 
         payload = {
             "type": "cardAction",
@@ -576,40 +577,144 @@ class Feishu:
         return "\n\n".join(part for part in parts if part)
 
     @staticmethod
+    def _guess_image_suffix(image_url: str, content_type: Optional[str] = None) -> str:
+        """根据 URL 或响应 Content-Type 推断临时图片后缀。"""
+        content_type = (content_type or "").split(";", 1)[0].strip().lower()
+        suffix_map = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+            "image/bmp": ".bmp",
+            "image/tiff": ".tiff",
+            "image/heic": ".heic",
+        }
+        if content_type in suffix_map:
+            return suffix_map[content_type]
+        path_suffix = Path(urlparse(image_url).path).suffix.lower()
+        if path_suffix in Feishu.IMAGE_SUFFIXES:
+            return path_suffix
+        return ".jpg"
+
+    def _upload_remote_image(self, image_url: Optional[str]) -> Optional[str]:
+        """下载远程图片并上传到飞书，返回可用于卡片的 image_key。"""
+        image_url = (image_url or "").strip()
+        if not image_url:
+            return None
+        if image_url.startswith("feishu://image/"):
+            resource_path = image_url.replace("feishu://image/", "", 1)
+            return resource_path.rsplit("/", 1)[-1].strip() or None
+
+        response = None
+        temp_path = None
+        try:
+            response = RequestUtils(timeout=30, ua=settings.USER_AGENT).get_res(image_url)
+            if not response or not getattr(response, "content", None):
+                logger.warning(f"飞书图片下载失败：{image_url}")
+                return None
+            content_type = response.headers.get("Content-Type") if response.headers else None
+            suffix = self._guess_image_suffix(image_url=image_url, content_type=content_type)
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as fp:
+                fp.write(response.content)
+                temp_path = Path(fp.name)
+            return self._upload_image(temp_path)
+        except Exception as err:
+            logger.error(f"飞书远程图片上传失败：{err}")
+            return None
+        finally:
+            if response is not None:
+                response.close()
+            if temp_path:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception as err:
+                    logger.debug(f"删除飞书临时图片失败：{err}")
+
+    @staticmethod
+    def _extract_card_callback_data(value: Any, name: Optional[str] = None) -> Optional[str]:
+        """从新版/旧版飞书卡片回调中提取统一的 callback_data。"""
+        callback_data = None
+        if isinstance(value, dict):
+            callback_data = value.get("callback_data") or value.get("value")
+        elif isinstance(value, str):
+            callback_data = value
+        if not callback_data:
+            callback_data = name
+        return str(callback_data).strip() if callback_data else None
+
+    @staticmethod
     def _card_actions(buttons: Optional[List[List[dict]]]) -> List[dict]:
         """将统一按钮结构转换为飞书卡片按钮配置。"""
         if not buttons:
             return []
         card_rows = []
         for row in buttons[:8]:
-            elements = []
+            columns = []
             for button in row[:3]:
                 text = (button or {}).get("text")
                 if not text:
                     continue
                 url = (button or {}).get("url")
                 callback_data = (button or {}).get("callback_data")
-                value = {"callback_data": callback_data} if callback_data else {"value": text}
+                behaviors = []
+                # 长连接模式不支持旧版消息卡片回传，必须使用新版 behaviors callback。
+                if callback_data:
+                    behaviors.append(
+                        {
+                            "type": "callback",
+                            "value": {"callback_data": str(callback_data)},
+                        }
+                    )
+                if url:
+                    behaviors.append(
+                        {
+                            "type": "open_url",
+                            "default_url": str(url),
+                            "pc_url": str(url),
+                            "android_url": str(url),
+                            "ios_url": str(url),
+                        }
+                    )
+                if not behaviors:
+                    behaviors.append(
+                        {
+                            "type": "callback",
+                            "value": {"callback_data": str(text)},
+                        }
+                    )
                 element = {
                     "tag": "button",
                     "text": {"tag": "plain_text", "content": text[:20]},
                     "type": "default",
-                    "value": value,
+                    "behaviors": behaviors,
                 }
-                if url:
-                    element["multi_url"] = {
-                        "url": url,
-                        "pc_url": url,
-                        "android_url": url,
-                        "ios_url": url,
+                columns.append(
+                    {
+                        "tag": "column",
+                        "width": "weighted",
+                        "weight": 1,
+                        "elements": [element],
                     }
-                elements.append(element)
-            if elements:
-                card_rows.append({"tag": "action", "actions": elements})
+                )
+            if columns:
+                card_rows.append(
+                    {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "columns": columns,
+                    }
+                )
         return card_rows
 
-    def _build_card(self, title: Optional[str], text: Optional[str], link: Optional[str],
-                    buttons: Optional[List[List[dict]]]) -> Dict[str, Any]:
+    def _build_card(
+            self,
+            title: Optional[str],
+            text: Optional[str],
+            link: Optional[str],
+            buttons: Optional[List[List[dict]]],
+            image_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """构建飞书交互卡片结构。"""
         elements: List[dict] = []
         title_section = self._build_markdown_section(title, text_size="heading")
@@ -621,15 +726,35 @@ class Feishu:
             elements.append(title_section)
         if body_section:
             elements.append(body_section)
+        if image_key:
+            elements.append(
+                {
+                    "tag": "img",
+                    "img_key": image_key,
+                    "alt": {
+                        "tag": "plain_text",
+                        "content": title or "图片",
+                    },
+                    "mode": "fit_horizontal",
+                }
+            )
         elements.extend(self._card_actions(buttons))
         return {
             # 飞书卡片消息要支持后续 PATCH 更新，发送和更新时都必须显式声明 update_multi。
+            "schema": "2.0",
             "config": {
                 "wide_screen_mode": True,
                 "enable_forward": True,
                 "update_multi": True,
+                "summary": {
+                    "content": title or "MoviePilot",
+                },
             },
-            "elements": elements,
+            "body": {
+                "direction": "vertical",
+                "padding": "12px 12px 12px 12px",
+                "elements": elements,
+            },
         }
 
     def _build_streaming_card_payload(
@@ -1060,17 +1185,24 @@ class Feishu:
             return {"success": False}
 
         suffix = local_file.suffix.lower()
-        is_image = suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".heic"}
+        is_image = suffix in self.IMAGE_SUFFIXES
         try:
             if is_image:
                 image_key = self._upload_image(local_file)
                 if not image_key:
                     return {"success": False}
+                payload = self._build_card(
+                    title=title,
+                    text=text,
+                    link=None,
+                    buttons=None,
+                    image_key=image_key,
+                )
                 if original_message_id:
                     result = self._reply_message(
                         message_id=original_message_id,
-                        msg_type="image",
-                        content={"image_key": image_key},
+                        msg_type="interactive",
+                        content=payload,
                     )
                 else:
                     receive_id, resolved_receive_id_type = self._resolve_target(
@@ -1081,8 +1213,8 @@ class Feishu:
                     result = self._send_message(
                         receive_id,
                         resolved_receive_id_type,
-                        "image",
-                        {"image_key": image_key},
+                        "interactive",
+                        payload,
                     )
             else:
                 file_key = self._upload_file(local_file, file_name=file_name)
@@ -1106,7 +1238,7 @@ class Feishu:
                         "file",
                         {"file_key": file_key},
                     )
-            if result and (title or text):
+            if result and (title or text) and not is_image:
                 self.send_text(
                     self._build_message_text(title=title, text=text),
                     userid=userid,
@@ -1212,11 +1344,13 @@ class Feishu:
                 userid or "") or self._default_chat_id
             return result
 
+        image_key = self._upload_remote_image(message.image)
         payload = self._build_card(
             title=message.title,
             text=message.text,
             link=message.link,
             buttons=message.buttons,
+            image_key=image_key,
         )
         try:
             if original_message_id:
