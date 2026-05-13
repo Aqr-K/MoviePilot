@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
+from app.core.config import settings
 from app.chain.transfer import JobManager, TransferChain
 from app.schemas import FileItem, TransferInfo, TransferTask
 from app.schemas.types import EventType, MediaType
@@ -84,6 +85,20 @@ def make_task(episode: int, season: int = 1) -> TransferTask:
         ),
         meta=FakeMeta(episode),
     )
+
+
+def make_transfer_chain() -> TransferChain:
+    chain = object.__new__(TransferChain)
+    chain.jobview = JobManager()
+    chain._media_exts = settings.RMT_MEDIAEXT
+    chain._subtitle_exts = settings.RMT_SUBEXT
+    chain._audio_exts = settings.RMT_AUDIOEXT
+    chain._allowed_exts = (
+        chain._media_exts + chain._audio_exts + chain._subtitle_exts
+    )
+    chain._success_target_files = {}
+    chain._scrape_batches = {}
+    return chain
 
 
 def migrate_to_media_job(jobview: JobManager, task: TransferTask):
@@ -192,8 +207,7 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual(task2.fileitem, jobs[0].tasks[0].fileitem)
 
     def test_exception_failure_does_not_mark_downloader_without_history(self):
-        chain = object.__new__(TransferChain)
-        chain.jobview = JobManager()
+        chain = make_transfer_chain()
         completed = []
 
         def fake_transfer_completed(hashs, downloader):
@@ -212,8 +226,7 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual([], chain.jobview.list_jobs())
 
     def test_successful_history_skip_marks_downloader_hash_completed(self):
-        chain = object.__new__(TransferChain)
-        chain.jobview = JobManager()
+        chain = make_transfer_chain()
         completed = []
 
         def fake_transfer_completed(hashs, downloader):
@@ -255,8 +268,7 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual([("abc123", "qbittorrent")], completed)
 
     def test_failed_history_skip_still_marks_downloader_hash_completed(self):
-        chain = object.__new__(TransferChain)
-        chain.jobview = JobManager()
+        chain = make_transfer_chain()
         completed = []
 
         def fake_transfer_completed(hashs, downloader):
@@ -298,10 +310,8 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual([("abc123", "qbittorrent")], completed)
 
     def test_unrecognized_task_marks_downloader_hash_completed(self):
-        chain = object.__new__(TransferChain)
-        chain.jobview = JobManager()
+        chain = make_transfer_chain()
         chain.post_message = lambda *_args, **_kwargs: None
-        chain._scrape_batches = {}
         completed = []
 
         def fake_transfer_completed(hashs, downloader):
@@ -336,10 +346,7 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual([], chain.jobview.list_jobs())
 
     def test_scrape_event_is_aggregated_by_transfer_batch_across_seasons(self):
-        chain = object.__new__(TransferChain)
-        chain.jobview = JobManager()
-        chain._success_target_files = {}
-        chain._scrape_batches = {}
+        chain = make_transfer_chain()
         chain.eventmanager = MagicMock()
         chain.transfer_completed = lambda *args, **kwargs: None
 
@@ -430,10 +437,7 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual({}, chain._scrape_batches)
 
     def test_scrape_event_keeps_immediate_behavior_without_transfer_batch(self):
-        chain = object.__new__(TransferChain)
-        chain.jobview = JobManager()
-        chain._success_target_files = {}
-        chain._scrape_batches = {}
+        chain = make_transfer_chain()
         chain.eventmanager = MagicMock()
         chain.transfer_completed = lambda *args, **kwargs: None
 

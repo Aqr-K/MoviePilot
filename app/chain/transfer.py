@@ -799,10 +799,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             return StorageChain().is_bluray_folder(fileitem)
         if not fileitem.extension:
             return False
-        media_exts = (
-            self._media_exts if hasattr(self, "_media_exts") else settings.RMT_MEDIAEXT
-        )
-        return True if f".{fileitem.extension.lower()}" in media_exts else False
+        return True if f".{fileitem.extension.lower()}" in self._media_exts else False
 
     def __is_allowed_file(self, fileitem: FileItem) -> bool:
         """
@@ -1179,8 +1176,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not task or not task.transfer_batch_id:
             return
-        if not hasattr(self, "_scrape_batches"):
-            self._scrape_batches = {}
         with job_lock:
             batch = self._scrape_batches.setdefault(
                 task.transfer_batch_id,
@@ -1198,8 +1193,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not batch_id:
             return
-        if not hasattr(self, "_scrape_batches"):
-            self._scrape_batches = {}
         with job_lock:
             batch = self._scrape_batches.setdefault(
                 batch_id,
@@ -1226,8 +1219,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         ):
             return
 
-        if not hasattr(self, "_scrape_batches"):
-            self._scrape_batches = {}
         target_diritem = transferinfo.target_diritem
         target_files = transferinfo.file_list_new or []
         target_key = (target_diritem.storage, target_diritem.path)
@@ -1264,8 +1255,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not task or not task.transfer_batch_id:
             return
-        if not hasattr(self, "_scrape_batches"):
-            self._scrape_batches = {}
         with job_lock:
             batch = self._scrape_batches.get(task.transfer_batch_id)
             if not batch:
@@ -1279,8 +1268,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not batch_id:
             return
-        if not hasattr(self, "_scrape_batches"):
-            self._scrape_batches = {}
 
         with job_lock:
             batch = self._scrape_batches.get(batch_id)
