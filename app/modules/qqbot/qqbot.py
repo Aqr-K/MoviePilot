@@ -26,8 +26,9 @@ from app.modules.qqbot.gateway import run_gateway
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
-# QQ Markdown 图片默认尺寸（获取失败时使用，与 OpenClaw 对齐）
-_DEFAULT_IMAGE_SIZE: Tuple[int, int] = (512, 512)
+# QQ Markdown 图片展示尺寸限制，避免竖版海报被客户端拉伸变形
+_DEFAULT_IMAGE_SIZE: Tuple[int, int] = (208, 320)
+_MAX_IMAGE_SIZE: Tuple[int, int] = (512, 512)
 
 
 class QQBot:
@@ -237,6 +238,23 @@ class QQBot:
             return None
 
     @staticmethod
+    def _fit_image_size(size: Optional[Tuple[int, int]]) -> Tuple[int, int]:
+        """
+        计算 QQ Markdown 图片展示尺寸，保持原始比例并限制最大边长。
+        """
+        if not size:
+            return _DEFAULT_IMAGE_SIZE
+        width, height = size
+        if width <= 0 or height <= 0:
+            return _DEFAULT_IMAGE_SIZE
+
+        max_width, max_height = _MAX_IMAGE_SIZE
+        scale = min(max_width / width, max_height / height, 1)
+        display_width = max(1, round(width * scale))
+        display_height = max(1, round(height * scale))
+        return display_width, display_height
+
+    @staticmethod
     def _escape_markdown(text: str) -> str:
         """转义 Markdown 特殊字符，避免破坏格式。不转义 ()，QQ 会误解析 \\( \\) 导致括号丢失或乱码"""
         if not text:
@@ -266,15 +284,15 @@ class QQBot:
         if text:
             parts.append(QQBot._escape_markdown((text or "").strip()))
         if image:
-            # QQ Markdown 图片需带尺寸才能正确渲染，格式: ![#宽px #高px](url)，否则会显示为 [图片] 文本
-            # 参考 OpenClaw，先获取图片真实尺寸，失败则用默认 512x512
+            # QQ Markdown 图片需带尺寸才能正确渲染，格式: ![alt #宽px #高px](url)，否则会显示为 [图片] 文本。
+            # 这里使用展示尺寸而非原图尺寸，避免竖版海报被 QQ 客户端塞进固定区域时变形。
             img_url = (image or "").strip()
             if img_url and (img_url.startswith("http://") or img_url.startswith("https://")):
                 size = QQBot._get_image_size(img_url)
-                w, h = size if size else _DEFAULT_IMAGE_SIZE
+                w, h = QQBot._fit_image_size(size)
                 if size:
-                    logger.debug(f"QQ Bot 图片尺寸: {w}x{h} - {img_url[:60]}...")
-                parts.append(f"![#{w}px #{h}px]({img_url})")
+                    logger.debug(f"QQ Bot 图片尺寸: {size[0]}x{size[1]} -> {w}x{h} - {img_url[:60]}...")
+                parts.append(f"![image #{w}px #{h}px]({img_url})")
             elif img_url:
                 parts.append(img_url)
         if link:
