@@ -750,7 +750,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 媒体根目录
         fileitem: FileItem = event_data.get("fileitem")
         # 媒体文件列表
-        file_list: List[str] = event_data.get("file_list", [])
+        file_list: List[str] = list(dict.fromkeys(event_data.get("file_list") or []))
         # 媒体元数据
         meta: MetaBase = event_data.get("meta")
         # 媒体信息
@@ -793,7 +793,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         )
                     else:
                         # 1. 收集fileitem和file_list中每个文件之间所有子目录
-                        all_dirs = set()
+                        all_dirs: set[Path] = set()
                         root_path = Path(fileitem.path)
 
                         logger.debug(f"开始收集目录，根目录：{root_path}")
@@ -815,7 +815,10 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         logger.debug(f"共收集到 {len(all_dirs)} 个目录")
 
                         # 2. 初始化一遍子目录，但不处理文件
-                        for sub_dir in all_dirs:
+                        for sub_dir in sorted(
+                                all_dirs,
+                                key=lambda item: (len(item.parts), item.as_posix()),
+                        ):
                             sub_dir_item = self.storagechain.get_file_item(
                                 storage=fileitem.storage, path=sub_dir
                             )
@@ -834,7 +837,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
                         # 3. 刮削每个文件
                         logger.info(f"开始刮削 {len(file_list)} 个文件")
-                        for sub_file_path in file_list:
+                        for sub_file_path in sorted(file_list):
                             sub_file_item = self.storagechain.get_file_item(
                                 storage=fileitem.storage, path=Path(sub_file_path)
                             )

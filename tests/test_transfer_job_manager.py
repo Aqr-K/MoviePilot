@@ -1,19 +1,19 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from app.chain.transfer import JobManager, TransferChain
-from app.schemas import FileItem, TransferTask
-from app.schemas.types import MediaType
+from app.schemas import FileItem, TransferInfo, TransferTask
+from app.schemas.types import EventType, MediaType
 
 
 class FakeMeta:
-    def __init__(self, episode: int):
+    def __init__(self, episode: int, season: int = 1):
         self.name = "Test Show"
-        self.title = f"Test Show S01E{episode:02d}"
+        self.title = f"Test Show S{season:02d}E{episode:02d}"
         self.year = "2026"
         self.type = MediaType.TV
-        self.begin_season = 1
+        self.begin_season = season
         self.end_season = None
         self.total_season = 1
         self.begin_episode = episode
@@ -25,7 +25,7 @@ class FakeMeta:
 
     @property
     def season(self):
-        return "S01"
+        return f"S{self.begin_season:02d}"
 
     @property
     def episode(self):
@@ -53,6 +53,8 @@ class FakeMedia:
     def __init__(self, tmdb_id: int = 12345):
         self.tmdb_id = tmdb_id
         self.douban_id = None
+        self.type = MediaType.TV
+        self.title_year = "Test Show (2026)"
 
     def clear(self):
         pass
@@ -68,8 +70,8 @@ class FakeMedia:
         }
 
 
-def make_task(episode: int) -> TransferTask:
-    name = f"Test.Show.S01E{episode:02d}.mkv"
+def make_task(episode: int, season: int = 1) -> TransferTask:
+    name = f"Test.Show.S{season:02d}E{episode:02d}.mkv"
     return TransferTask(
         fileitem=FileItem(
             storage="local",
@@ -299,6 +301,7 @@ class TransferJobManagerTest(unittest.TestCase):
         chain = object.__new__(TransferChain)
         chain.jobview = JobManager()
         chain.post_message = lambda *_args, **_kwargs: None
+        chain._scrape_batches = {}
         completed = []
 
         def fake_transfer_completed(hashs, downloader):
@@ -331,6 +334,161 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual("未识别到媒体信息", errmsg)
         self.assertEqual([("abc123", "qbittorrent")], completed)
         self.assertEqual([], chain.jobview.list_jobs())
+
+    def test_scrape_event_is_aggregated_by_transfer_batch_across_seasons(self):
+        chain = object.__new__(TransferChain)
+        chain.jobview = JobManager()
+        chain._success_target_files = {}
+        chain._scrape_batches = {}
+        chain.eventmanager = MagicMock()
+        chain.transfer_completed = lambda *args, **kwargs: None
+
+        tasks = [make_task(1, season=1), make_task(1, season=2)]
+        target_diritem = FileItem(
+            storage="local",
+            path="/library/Test Show (2026)",
+            type="dir",
+            name="Test Show (2026)",
+        )
+        batch_id = "batch-tv-multi-season"
+
+        for task in tasks:
+            task.mediainfo = FakeMedia()
+            task.transfer_batch_id = batch_id
+            task.background = False
+            task.manual = True
+            self.assertTrue(chain._TransferChain__put_to_jobview(task))
+            chain._TransferChain__register_scrape_batch_task(task)
+
+        chain._TransferChain__close_scrape_batch(batch_id)
+
+        transferinfos = [
+            TransferInfo(
+                success=True,
+                fileitem=tasks[0].fileitem,
+                target_diritem=target_diritem,
+                target_item=FileItem(
+                    storage="local",
+                    path="/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
+                    type="file",
+                    name="Test.Show.S01E01.mkv",
+                    extension="mkv",
+                ),
+                file_list_new=[
+                    "/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv"
+                ],
+                transfer_type="copy",
+                need_scrape=True,
+                need_notify=False,
+            ),
+            TransferInfo(
+                success=True,
+                fileitem=tasks[1].fileitem,
+                target_diritem=target_diritem,
+                target_item=FileItem(
+                    storage="local",
+                    path="/library/Test Show (2026)/Season 2/Test.Show.S02E01.mkv",
+                    type="file",
+                    name="Test.Show.S02E01.mkv",
+                    extension="mkv",
+                ),
+                file_list_new=[
+                    "/library/Test Show (2026)/Season 2/Test.Show.S02E01.mkv"
+                ],
+                transfer_type="copy",
+                need_scrape=True,
+                need_notify=False,
+            ),
+        ]
+
+        with patch(
+            "app.chain.transfer.TransferHistoryOper",
+            return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
+        ), patch(
+            "app.chain.transfer.StorageChain"
+        ) as storage_chain_cls:
+            storage_chain_cls.return_value.is_bluray_folder.return_value = False
+            for task, transferinfo in zip(tasks, transferinfos):
+                chain._TransferChain__default_callback(task, transferinfo)
+                chain._TransferChain__finish_scrape_batch_task(task)
+
+        metadata_calls = [
+            call
+            for call in chain.eventmanager.send_event.call_args_list
+            if call.args[0] == EventType.MetadataScrape
+        ]
+        self.assertEqual(1, len(metadata_calls))
+        event_data = metadata_calls[0].args[1]
+        self.assertEqual(target_diritem, event_data["fileitem"])
+        self.assertEqual(
+            [
+                "/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
+                "/library/Test Show (2026)/Season 2/Test.Show.S02E01.mkv",
+            ],
+            event_data["file_list"],
+        )
+        self.assertEqual({}, chain._scrape_batches)
+
+    def test_scrape_event_keeps_immediate_behavior_without_transfer_batch(self):
+        chain = object.__new__(TransferChain)
+        chain.jobview = JobManager()
+        chain._success_target_files = {}
+        chain._scrape_batches = {}
+        chain.eventmanager = MagicMock()
+        chain.transfer_completed = lambda *args, **kwargs: None
+
+        task = make_task(1)
+        task.mediainfo = FakeMedia()
+        task.background = False
+        task.manual = True
+        self.assertTrue(chain._TransferChain__put_to_jobview(task))
+
+        target_diritem = FileItem(
+            storage="local",
+            path="/library/Test Show (2026)",
+            type="dir",
+            name="Test Show (2026)",
+        )
+        transferinfo = TransferInfo(
+            success=True,
+            fileitem=task.fileitem,
+            target_diritem=target_diritem,
+            target_item=FileItem(
+                storage="local",
+                path="/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
+                type="file",
+                name="Test.Show.S01E01.mkv",
+                extension="mkv",
+            ),
+            file_list_new=[
+                "/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv"
+            ],
+            transfer_type="copy",
+            need_scrape=True,
+            need_notify=False,
+        )
+
+        with patch(
+            "app.chain.transfer.TransferHistoryOper",
+            return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
+        ), patch(
+            "app.chain.transfer.StorageChain"
+        ) as storage_chain_cls:
+            storage_chain_cls.return_value.is_bluray_folder.return_value = False
+            chain._TransferChain__default_callback(task, transferinfo)
+
+        metadata_calls = [
+            call
+            for call in chain.eventmanager.send_event.call_args_list
+            if call.args[0] == EventType.MetadataScrape
+        ]
+        self.assertEqual(1, len(metadata_calls))
+        event_data = metadata_calls[0].args[1]
+        self.assertEqual(target_diritem, event_data["fileitem"])
+        self.assertEqual(
+            ["/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv"],
+            event_data["file_list"],
+        )
 
 
 if __name__ == "__main__":

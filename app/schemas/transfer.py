@@ -66,6 +66,7 @@ class TransferTask(BaseModel):
     downloader: Optional[str] = None
     download_hash: Optional[str] = None
     download_history: Optional[DownloadHistory] = None
+    transfer_batch_id: Optional[str] = None
     manual: Optional[bool] = False
     background: Optional[bool] = True
     preview: Optional[bool] = False

@@ -3,9 +3,10 @@ import queue
 import re
 import threading
 import traceback
+import uuid
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Dict, Callable
+from typing import List, Optional, Tuple, Union, Dict, Callable, Any
 
 from app import schemas
 from app.agent import ReplyMode, prompt_manager, agent_manager
@@ -730,6 +731,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.retry_scheduler = FailedRetryScheduler()
         # 转移成功的文件清单
         self._success_target_files: Dict[str, List[str]] = {}
+        # 批次级刮削缓冲，避免同一批多文件入库重复触发目录刮削
+        self._scrape_batches: Dict[str, Dict[str, Any]] = {}
         # 整理进度进度
         self._progress = ProgressHelper(ProgressKey.FileTransfer)
         # 队列相关状态
@@ -796,7 +799,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             return StorageChain().is_bluray_folder(fileitem)
         if not fileitem.extension:
             return False
-        return True if f".{fileitem.extension.lower()}" in self._media_exts else False
+        media_exts = (
+            self._media_exts if hasattr(self, "_media_exts") else settings.RMT_MEDIAEXT
+        )
+        return True if f".{fileitem.extension.lower()}" in media_exts else False
 
     def __is_allowed_file(self, fileitem: FileItem) -> bool:
         """
@@ -831,7 +837,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
         def __notify():
             """
-            完成时发送消息、刮削事件、移除任务等
+            完成时发送消息、移除任务等
             """
             # 更新文件数量
             transferinfo.file_count = (
@@ -842,12 +848,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     self.jobview.size(task.mediainfo, task.meta.begin_season)
                     or task.fileitem.size
             )
-            # 更新文件清单
-            with job_lock:
-                transferinfo.file_list_new = self._success_target_files.pop(
-                    transferinfo.target_diritem.path, []
-                )
-
             # 发送通知，实时手动整理时不发
             if transferinfo.need_notify and (task.background or not task.manual):
                 se_str = None
@@ -866,19 +866,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     transferinfo=transferinfo,
                     season_episode=se_str,
                     username=task.username,
-                )
-
-            # 刮削事件
-            if transferinfo.need_scrape and self.__is_media_file(task.fileitem):
-                self.eventmanager.send_event(
-                    EventType.MetadataScrape,
-                    {
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "fileitem": transferinfo.target_diritem,
-                        "file_list": transferinfo.file_list_new,
-                        "overwrite": False,
-                    },
                 )
 
         transferhis = TransferHistoryOper()
@@ -1070,9 +1057,19 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 设置任务成功
             self.jobview.finish_task(task)
 
+            # 登记批次级刮削目标
+            self.__record_scrape_target(task, transferinfo)
+
         # 全部整理完成且有成功的任务时，发送消息和事件
         if self.jobview.is_finished(task):
+            # 更新文件清单
+            with job_lock:
+                transferinfo.file_list_new = self._success_target_files.pop(
+                    transferinfo.target_diritem.path, []
+                )
             __notify()
+            if not task.transfer_batch_id:
+                self.__send_metadata_scrape_event(task, transferinfo)
 
         # 只要该种子的所有任务都已整理完成，则设置种子状态为已整理
         self.__mark_torrent_completed_if_done(task.download_hash, task.downloader)
@@ -1122,6 +1119,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 维护整理任务视图，如果任务已存在则不添加到队列
         if not self.__put_to_jobview(task):
             return False
+        self.__register_scrape_batch_task(task)
         # 添加到队列
         self._queue.put(TransferQueue(task=task, callback=self.__default_callback))
         return True
@@ -1149,6 +1147,168 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         ):
             self.transfer_completed(hashs=download_hash, downloader=downloader)
 
+    def __send_metadata_scrape_event(
+            self, task: TransferTask, transferinfo: TransferInfo
+    ):
+        """
+        发送元数据刮削事件，保持对外事件载荷兼容。
+        """
+        if (
+                not task
+                or not transferinfo
+                or not transferinfo.need_scrape
+                or not transferinfo.target_diritem
+                or not self.__is_media_file(task.fileitem)
+        ):
+            return
+
+        self.eventmanager.send_event(
+            EventType.MetadataScrape,
+            {
+                "meta": task.meta,
+                "mediainfo": task.mediainfo,
+                "fileitem": transferinfo.target_diritem,
+                "file_list": transferinfo.file_list_new,
+                "overwrite": False,
+            },
+        )
+
+    def __register_scrape_batch_task(self, task: TransferTask):
+        """
+        登记批次任务。刮削事件只在批次关闭且任务全部完成后统一发送。
+        """
+        if not task or not task.transfer_batch_id:
+            return
+        if not hasattr(self, "_scrape_batches"):
+            self._scrape_batches = {}
+        with job_lock:
+            batch = self._scrape_batches.setdefault(
+                task.transfer_batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            batch["pending"].add(task.fileitem.path)
+
+    def __close_scrape_batch(self, batch_id: Optional[str]):
+        """
+        标记批次不再接收新任务，并尝试发送已聚合的刮削事件。
+        """
+        if not batch_id:
+            return
+        if not hasattr(self, "_scrape_batches"):
+            self._scrape_batches = {}
+        with job_lock:
+            batch = self._scrape_batches.setdefault(
+                batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            batch["closed"] = True
+        self.__flush_scrape_batch_if_ready(batch_id)
+
+    def __record_scrape_target(self, task: TransferTask, transferinfo: TransferInfo):
+        """
+        记录批次内需要刮削的目标文件，按目标媒体根目录聚合。
+        """
+        if (
+                not task
+                or not task.transfer_batch_id
+                or not transferinfo
+                or not transferinfo.need_scrape
+                or not transferinfo.target_diritem
+                or not self.__is_media_file(task.fileitem)
+        ):
+            return
+
+        if not hasattr(self, "_scrape_batches"):
+            self._scrape_batches = {}
+        target_diritem = transferinfo.target_diritem
+        target_files = transferinfo.file_list_new or []
+        target_key = (target_diritem.storage, target_diritem.path)
+        with job_lock:
+            batch = self._scrape_batches.setdefault(
+                task.transfer_batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            target = batch["targets"].setdefault(
+                target_key,
+                {
+                    "fileitem": target_diritem,
+                    "meta": task.meta,
+                    "mediainfo": task.mediainfo,
+                    "files": [],
+                    "overwrite": False,
+                },
+            )
+            if not target.get("meta"):
+                target["meta"] = task.meta
+            if not target.get("mediainfo"):
+                target["mediainfo"] = task.mediainfo
+            for target_file in target_files:
+                if target_file and target_file not in target["files"]:
+                    target["files"].append(target_file)
+
+    def __finish_scrape_batch_task(self, task: TransferTask):
+        """
+        标记批次内单个任务已结束。
+        """
+        if not task or not task.transfer_batch_id:
+            return
+        if not hasattr(self, "_scrape_batches"):
+            self._scrape_batches = {}
+        with job_lock:
+            batch = self._scrape_batches.get(task.transfer_batch_id)
+            if not batch:
+                return
+            batch["pending"].discard(task.fileitem.path)
+        self.__flush_scrape_batch_if_ready(task.transfer_batch_id)
+
+    def __flush_scrape_batch_if_ready(self, batch_id: Optional[str]):
+        """
+        批次任务全部结束后发送聚合后的刮削事件。
+        """
+        if not batch_id:
+            return
+        if not hasattr(self, "_scrape_batches"):
+            self._scrape_batches = {}
+
+        with job_lock:
+            batch = self._scrape_batches.get(batch_id)
+            if (
+                    not batch
+                    or not batch.get("closed")
+                    or batch.get("pending")
+            ):
+                return
+            targets = list(batch.get("targets", {}).values())
+            self._scrape_batches.pop(batch_id, None)
+
+        for target in targets:
+            fileitem = target.get("fileitem")
+            if not fileitem:
+                continue
+            file_list = list(dict.fromkeys(target.get("files") or []))
+            self.eventmanager.send_event(
+                EventType.MetadataScrape,
+                {
+                    "meta": target.get("meta"),
+                    "mediainfo": target.get("mediainfo"),
+                    "fileitem": fileitem,
+                    "file_list": file_list,
+                    "overwrite": target.get("overwrite", False),
+                },
+            )
+
     def remove_from_queue(self, fileitem: FileItem):
         """
         从待整理队列移除
@@ -1163,6 +1323,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         self.jobview.fail_unfinished_task(task)
         self.jobview.try_remove_job(task)
+        self.__finish_scrape_batch_task(task)
 
     def __start_transfer(self):
         """
@@ -1487,6 +1648,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         finally:
             # 移除已完成的任务
             self.jobview.try_remove_job(task)
+            self.__finish_scrape_batch_task(task)
 
     def get_queue_tasks(self) -> List[TransferJob]:
         """
@@ -1903,6 +2065,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         # 是否全部成功
         all_success = True
+        transfer_batch_id = str(uuid.uuid4())
         if preview:
             # 预览模式始终同步执行，避免进入异步队列
             background = False
@@ -2086,6 +2249,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     downloader=_downloader,
                     download_hash=_download_hash,
                     download_history=download_history,
+                    transfer_batch_id=transfer_batch_id,
                     manual=manual,
                     background=background,
                     preview=preview,
@@ -2098,6 +2262,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 else:
                     # 加入列表
                     if self.__put_to_jobview(transfer_task):
+                        self.__register_scrape_batch_task(transfer_task)
                         transfer_tasks.append(transfer_task)
                     else:
                         logger.debug(f"{file_path.name} 已在整理列表中，跳过")
@@ -2106,6 +2271,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         finally:
             file_items.clear()
             del file_items
+            self.__close_scrape_batch(transfer_batch_id)
 
         # 实时整理
         preview_items: List[dict] = []
