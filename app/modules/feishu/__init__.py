@@ -161,9 +161,9 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             title: Optional[str] = None,
             buttons: Optional[List[List[dict]]] = None,
             metadata: Optional[dict] = None,
-    ) -> bool:
+    ) -> Optional[bool]:
         if channel != self._channel:
-            return False
+            return None
         for conf in self.get_configs().values():
             if source != conf.name:
                 continue
@@ -296,7 +296,7 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             message_id: str,
             reaction_id: str,
             source: str,
-    ) -> bool:
+    ) -> Optional[bool]:
         client_config = self.get_config(source)
         if not client_config:
             return False

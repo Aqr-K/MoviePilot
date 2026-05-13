@@ -16,6 +16,10 @@ from langchain_core.messages import (  # noqa: F401
     HumanMessage,
     BaseMessage,
 )
+
+import warnings
+warnings.filterwarnings("ignore", message=".*allowed_objects.*")
+
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.callback import StreamingHandler

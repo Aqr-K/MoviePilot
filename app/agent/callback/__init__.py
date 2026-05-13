@@ -437,15 +437,23 @@ class StreamingHandler:
 
     async def _cancel_flush_task(self):
         """
-        取消当前的定时刷新任务
+        停止当前的定时刷新任务。
+
+        停止流式输出时，刷新任务可能已经在线程池里发出了首条消息。
+        这里先等待该轮刷新自然完成，确保 message_id 等返回信息能落回本地状态；
+        否则最终刷新会误以为尚未发送过消息，从而再次发送一条新消息。
         """
-        if self._flush_task and not self._flush_task.done():
-            self._flush_task.cancel()
+        current_task = asyncio.current_task()
+        if (
+            self._flush_task
+            and not self._flush_task.done()
+            and self._flush_task is not current_task
+        ):
             try:
                 await self._flush_task
             except asyncio.CancelledError:
                 pass
-            self._flush_task = None
+        self._flush_task = None
 
     async def _flush(self):
         """

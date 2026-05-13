@@ -18,7 +18,7 @@ jobs=0
 
 # 禁用大部分警告、约定和重构建议，只保留错误和重要警告
 disable=all
-enable=error,
+enable=E,
        syntax-error,
        undefined-variable,
        used-before-assignment,

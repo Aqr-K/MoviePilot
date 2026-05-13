@@ -192,6 +192,63 @@ class TestAgentToolStreaming(unittest.TestCase):
         )
         self.assertEqual(handler._sent_text, "hello world")
 
+    def test_stop_streaming_waits_inflight_initial_flush_before_final_edit(self):
+        async def _run():
+            handler = StreamingHandler()
+            handler._channel = MessageChannel.Feishu.value
+            handler._source = "feishu-main"
+            handler._user_id = "ou_user"
+            handler._streaming_enabled = True
+            handler.emit("hello")
+
+            send_started = asyncio.Event()
+            allow_send_finish = asyncio.Event()
+            calls = []
+
+            async def fake_run_in_threadpool(func, *args, **kwargs):
+                calls.append((func.__name__, args, kwargs))
+                if func.__name__ == "send_direct_message":
+                    send_started.set()
+                    await allow_send_finish.wait()
+                    return MessageResponse(
+                        message_id="om_stream",
+                        chat_id="oc_stream",
+                        channel=MessageChannel.Feishu,
+                        source="feishu-main",
+                        success=True,
+                    )
+                return True
+
+            with patch(
+                "app.agent.callback.run_in_threadpool",
+                new=fake_run_in_threadpool,
+            ):
+                # 模拟定时刷新已经开始发送首条消息，但飞书 API 尚未返回。
+                handler._flush_task = asyncio.create_task(handler._flush())
+                await send_started.wait()
+                handler.emit(" world")
+
+                stop_task = asyncio.create_task(handler.stop_streaming())
+                await asyncio.sleep(0)
+                self.assertFalse(stop_task.done())
+
+                allow_send_finish.set()
+                all_sent, final_text = await stop_task
+
+            return all_sent, final_text, calls
+
+        all_sent, final_text, calls = asyncio.run(_run())
+
+        self.assertTrue(all_sent)
+        self.assertEqual(final_text, "hello world")
+        self.assertEqual(
+            [call[0] for call in calls],
+            ["send_direct_message", "edit_message", "finalize_message"],
+        )
+        edit_kwargs = calls[1][2]
+        self.assertEqual(edit_kwargs["message_id"], "om_stream")
+        self.assertEqual(edit_kwargs["text"], "hello world")
+
     def test_stop_streaming_uses_generic_finalize_message(self):
         handler = StreamingHandler()
         handler._message_response = MessageResponse(

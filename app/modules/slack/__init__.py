@@ -527,7 +527,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         source: str,
         message_id: str,
         chat_id: Optional[str] = None,
-    ) -> bool:
+    ) -> Optional[bool]:
         """
         删除消息
         :param channel: 消息渠道
@@ -536,10 +536,10 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         :param chat_id: 聊天ID（频道ID）
         :return: 删除是否成功
         """
+        if channel != self._channel:
+            return None
         success = False
         for conf in self.get_configs().values():
-            if channel != self._channel:
-                break
             if source != conf.name:
                 continue
             client: Slack = self.get_instance(conf.name)
@@ -559,7 +559,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         title: Optional[str] = None,
         buttons: Optional[List[List[dict]]] = None,
         metadata: Optional[dict] = None,
-    ) -> bool:
+    ) -> Optional[bool]:
         """
         编辑消息
         :param channel: 消息渠道
@@ -572,7 +572,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         :return: 编辑是否成功
         """
         if channel != self._channel:
-            return False
+            return None
         for conf in self.get_configs().values():
             if source != conf.name:
                 continue
