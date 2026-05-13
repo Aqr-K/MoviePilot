@@ -63,6 +63,26 @@ class TransHandler:
                     current_value = value
                 setattr(result, key, current_value)
 
+    @staticmethod
+    def __build_preview_item(
+            storage: str,
+            path: Path,
+            item_type: str,
+            size: Optional[int] = None,
+    ) -> FileItem:
+        """
+        构造预览结果中的文件项，不访问真实存储。
+        """
+        return FileItem(
+            storage=storage,
+            path=path.as_posix(),
+            name=path.name,
+            basename=path.stem,
+            type=item_type,
+            extension=path.suffix.lstrip(".") if item_type == "file" else None,
+            size=size if item_type == "file" else None,
+        )
+
     def transfer_media(
         self,
         fileitem: FileItem,
@@ -161,12 +181,10 @@ class TransHandler:
                 else:
                     new_path = target_path / fileitem.name
                 if preview:
-                    preview_diritem = FileItem(
+                    preview_diritem = self.__build_preview_item(
                         storage=target_storage,
-                        path=new_path.as_posix(),
-                        name=new_path.name,
-                        basename=new_path.stem,
-                        type="dir",
+                        path=new_path,
+                        item_type="dir",
                     )
                     self.__update_result(
                         result=result,
@@ -291,27 +309,47 @@ class TransHandler:
 
                 # 目标目录
                 if preview:
-                    target_diritem = FileItem(
+                    # 预览只做路径推算，不检查目录或同名文件冲突，避免目标存储探测触发真实整理。
+                    target_diritem = self.__build_preview_item(
                         storage=target_storage,
-                        path=folder_path.as_posix(),
-                        name=folder_path.name,
-                        basename=folder_path.stem,
-                        type="dir",
+                        path=folder_path,
+                        item_type="dir",
                     )
-                else:
-                    target_diritem = target_oper.get_folder(folder_path)
-                    if not target_diritem:
-                        logger.error(f"目标目录 {folder_path} 获取失败")
-                        self.__update_result(
-                            result=result,
-                            success=False,
-                            message=f"目标目录 {folder_path} 获取失败",
-                            fileitem=fileitem,
-                            fail_list=[fileitem.path],
-                            transfer_type=transfer_type,
-                            need_notify=need_notify,
-                        )
-                        return result
+                    target_item = self.__build_preview_item(
+                        storage=target_storage,
+                        path=new_file,
+                        item_type="file",
+                        size=fileitem.size,
+                    )
+                    self.__update_result(
+                        result=result,
+                        success=True,
+                        fileitem=fileitem,
+                        target_item=target_item,
+                        target_diritem=target_diritem,
+                        file_list=[fileitem.path],
+                        file_list_new=[new_file.as_posix()],
+                        file_count=1,
+                        total_size=fileitem.size or 0,
+                        need_scrape=need_scrape,
+                        transfer_type=transfer_type,
+                        need_notify=False,
+                    )
+                    return result
+
+                target_diritem = target_oper.get_folder(folder_path)
+                if not target_diritem:
+                    logger.error(f"目标目录 {folder_path} 获取失败")
+                    self.__update_result(
+                        result=result,
+                        success=False,
+                        message=f"目标目录 {folder_path} 获取失败",
+                        fileitem=fileitem,
+                        fail_list=[fileitem.path],
+                        transfer_type=transfer_type,
+                        need_notify=need_notify,
+                    )
+                    return result
 
                 # 判断是否要覆盖，附加文件强制覆盖
                 overflag = False
@@ -439,39 +477,10 @@ class TransHandler:
                             logger.info(
                                 f"当前整理覆盖模式设置为 {overwrite_mode}，仅保留最新版本，正在删除已有版本文件 ..."
                             )
-                            if not preview:
-                                self.__delete_version_files(target_oper, new_file)
+                            self.__delete_version_files(target_oper, new_file)
                 else:
                     # 附加文件 总是需要覆盖
                     overflag = True
-
-                if preview:
-                    target_item = target_oper.get_item(new_file)
-                    if not target_item:
-                        target_item = FileItem(
-                            storage=target_storage,
-                            path=new_file.as_posix(),
-                            name=new_file.name,
-                            basename=new_file.stem,
-                            type="file",
-                            extension=new_file.suffix.lstrip("."),
-                            size=fileitem.size,
-                        )
-                    self.__update_result(
-                        result=result,
-                        success=True,
-                        fileitem=fileitem,
-                        target_item=target_item,
-                        target_diritem=target_diritem,
-                        file_list=[fileitem.path],
-                        file_list_new=[new_file.as_posix()],
-                        file_count=1,
-                        total_size=fileitem.size or 0,
-                        need_scrape=need_scrape,
-                        transfer_type=transfer_type,
-                        need_notify=False,
-                    )
-                    return result
 
                 # 整理文件
                 new_item, err_msg = self.__transfer_file(

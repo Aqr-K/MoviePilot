@@ -24,6 +24,21 @@ else
     exit 127
 fi
 
+has_environment_option() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -p|--python|--python=*|-p*|--system)
+                return 0
+                ;;
+            --)
+                return 1
+                ;;
+        esac
+        shift
+    done
+    return 1
+}
+
 case "${COMMAND_NAME}" in
     pip|pip3|pip3.*)
         if [ "$#" -eq 0 ]; then
@@ -37,6 +52,14 @@ case "${COMMAND_NAME}" in
             help)
                 shift
                 exec "${UV_BIN}" help pip "$@"
+                ;;
+            check)
+                if [ -x "${SCRIPT_DIR}/python" ] && ! has_environment_option "$@"; then
+                    # uv 不会仅凭 pip 软链接位置锁定 venv，显式绑定当前运行态解释器。
+                    shift
+                    exec "${UV_BIN}" pip check --python "${SCRIPT_DIR}/python" "$@"
+                fi
+                exec "${UV_BIN}" pip "$@"
                 ;;
             *)
                 exec "${UV_BIN}" pip "$@"

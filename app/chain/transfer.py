@@ -1974,7 +1974,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             return False, f"{fileitem.name} 没有找到可整理的媒体文件"
 
         planned_file_count = len(file_items)
-        logger.info(f"正在计划整理 {planned_file_count} 个文件...")
+        if preview:
+            logger.info(f"正在预览 {planned_file_count} 个文件的整理路径...")
+        else:
+            logger.info(f"正在计划整理 {planned_file_count} 个文件...")
 
         # 整理所有文件
         transfer_tasks: List[TransferTask] = []

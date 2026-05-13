@@ -267,6 +267,7 @@ class PluginHelperTest(TestCase):
 
         repair_commands = []
         healthcheck_failed = False
+        pip_check_cmd = PluginHelper._PluginHelper__build_runtime_pip_command("check")
 
         def fake_execute(cmd):
             nonlocal healthcheck_failed
@@ -275,7 +276,7 @@ class PluginHelperTest(TestCase):
                     repair_commands.append(cmd)
                     return True, "repaired"
                 return True, "installed"
-            if cmd[:4] == [sys.executable, "-m", "pip", "check"]:
+            if cmd == pip_check_cmd:
                 if not healthcheck_failed:
                     healthcheck_failed = True
                     return False, "broken"

@@ -861,6 +861,17 @@ class PluginHelper(metaclass=WeakSingleton):
         return strategies
 
     @staticmethod
+    def __build_runtime_pip_command(*args: str) -> List[str]:
+        """
+        优先使用当前解释器同目录的 pip 入口，以便 uv-pip-compat 能接管兼容命令。
+        """
+        pip_name = "pip.exe" if sys.platform == "win32" else "pip"
+        pip_bin = Path(sys.executable).with_name(pip_name)
+        if pip_bin.exists():
+            return [str(pip_bin), *args]
+        return [sys.executable, "-m", "pip", *args]
+
+    @staticmethod
     def __format_pkg_name_for_pip(name: str) -> str:
         """
         将内部统一使用的下划线包名转回 pip 更常见的连字符写法，便于日志和约束文件阅读。
@@ -1217,7 +1228,7 @@ class PluginHelper(metaclass=WeakSingleton):
         安装完成后立即执行运行环境自检，尽量在插件加载前发现依赖图已被污染。
         """
         checks = [
-            ("pip check", [sys.executable, "-m", "pip", "check"]),
+            ("pip check", cls.__build_runtime_pip_command("check")),
             ("核心依赖导入检查", [sys.executable, "-c", cls._runtime_import_probe]),
         ]
         for check_name, command in checks:
