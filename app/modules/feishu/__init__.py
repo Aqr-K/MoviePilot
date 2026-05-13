@@ -243,13 +243,13 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             image_key = image_key.strip()
         downloaded = None
         if message_id:
-            downloaded = client._download_message_resource_bytes(
+            downloaded = client.download_message_resource_bytes(
                 message_id=message_id,
                 file_key=image_key,
                 resource_type="image",
             )
         if not downloaded:
-            downloaded = client._download_image_bytes(image_key)
+            downloaded = client.download_image_bytes(image_key)
         if not downloaded:
             return None
         content, _, content_type = downloaded
@@ -271,7 +271,7 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
         file_key = parts[0].strip() if parts else ""
         if not file_key:
             return None
-        downloaded = client._download_file_bytes(file_key)
+        downloaded = client.download_file_bytes(file_key)
         if not downloaded:
             return None
         content, _, _ = downloaded

@@ -543,9 +543,9 @@ class TestFeishu(unittest.TestCase):
             message_resource_response=self._resource_response(b"resource-bytes", file_name="voice.opus", content_type="audio/ogg"),
         )
 
-        image_download = client._download_image_bytes("img_v2_test")
-        file_download = client._download_file_bytes("file_test")
-        resource_download = client._download_message_resource_bytes("om_test", "file_test", "audio")
+        image_download = client.download_image_bytes("img_v2_test")
+        file_download = client.download_file_bytes("file_test")
+        resource_download = client.download_message_resource_bytes("om_test", "file_test", "audio")
 
         self.assertEqual(image_download[0], b"image-bytes")
         self.assertEqual(file_download[0], b"file-bytes")
@@ -633,9 +633,9 @@ class TestFeishu(unittest.TestCase):
     def test_module_download_helpers_delegate_to_client(self):
         module = FeishuModule()
         client = MagicMock()
-        client._download_image_bytes.return_value = (b"image", "poster.png", "image/png")
-        client._download_file_bytes.return_value = (b"file", "note.txt", "text/plain")
-        client._download_message_resource_bytes.return_value = (b"image", "poster.png", "image/png")
+        client.download_image_bytes.return_value = (b"image", "poster.png", "image/png")
+        client.download_file_bytes.return_value = (b"file", "note.txt", "text/plain")
+        client.download_message_resource_bytes.return_value = (b"image", "poster.png", "image/png")
 
         with patch.object(module, "get_config", return_value=SimpleNamespace(name="feishu-main")), patch.object(
             module, "get_instance", return_value=client
@@ -645,7 +645,7 @@ class TestFeishu(unittest.TestCase):
 
         self.assertTrue(data_url.startswith("data:image/png;base64,"))
         self.assertEqual(file_bytes, b"file")
-        client._download_message_resource_bytes.assert_called_once_with(
+        client.download_message_resource_bytes.assert_called_once_with(
             message_id="om_msg",
             file_key="img_v2_xxx",
             resource_type="image",

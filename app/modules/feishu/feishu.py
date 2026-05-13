@@ -1,7 +1,5 @@
 import asyncio
-import base64
 import json
-import mimetypes
 import threading
 import uuid
 from pathlib import Path
@@ -65,16 +63,16 @@ class Feishu:
     STREAM_CARD_BODY_ELEMENT_ID = "mp_stream_body"
 
     def __init__(
-        self,
-        FEISHU_APP_ID: Optional[str] = None,
-        FEISHU_APP_SECRET: Optional[str] = None,
-        FEISHU_OPEN_ID: Optional[str] = None,
-        FEISHU_CHAT_ID: Optional[str] = None,
-        FEISHU_ADMINS: Optional[str] = None,
-        FEISHU_VERIFICATION_TOKEN: Optional[str] = None,
-        FEISHU_ENCRYPT_KEY: Optional[str] = None,
-        name: Optional[str] = None,
-        **kwargs,
+            self,
+            FEISHU_APP_ID: Optional[str] = None,
+            FEISHU_APP_SECRET: Optional[str] = None,
+            FEISHU_OPEN_ID: Optional[str] = None,
+            FEISHU_CHAT_ID: Optional[str] = None,
+            FEISHU_ADMINS: Optional[str] = None,
+            FEISHU_VERIFICATION_TOKEN: Optional[str] = None,
+            FEISHU_ENCRYPT_KEY: Optional[str] = None,
+            name: Optional[str] = None,
+            **kwargs,
     ):
         """初始化飞书客户端与长连接所需配置。"""
         self._name = name or "feishu"
@@ -202,7 +200,9 @@ class Feishu:
         threading.Thread(target=_run, daemon=True).start()
 
     @staticmethod
-    def _parse_message_content(message) -> Tuple[str, Optional[List[CommingMessage.MessageImage]], Optional[List[str]], Optional[List[CommingMessage.MessageAttachment]]]:
+    def _parse_message_content(message) -> Tuple[
+        str, Optional[List[CommingMessage.MessageImage]], Optional[List[str]], Optional[
+            List[CommingMessage.MessageAttachment]]]:
         """从飞书事件消息体中提取文本、图片、音频和文件引用。"""
         raw_content = getattr(message, "content", None)
         if not raw_content:
@@ -254,9 +254,9 @@ class Feishu:
         self._chat_open_mapping[normalized_chat_id] = normalized_userid
 
     def _remember_user_id_type(
-        self,
-        open_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+            self,
+            open_id: Optional[str] = None,
+            user_id: Optional[str] = None,
     ) -> None:
         """记住用户对应的飞书 ID 类型，避免回消息时误用 open_id/user_id。"""
         normalized_open_id = (open_id or "").strip()
@@ -513,10 +513,10 @@ class Feishu:
         )
 
     def _resolve_target(
-        self,
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
+            self,
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
     ) -> Tuple[str, str]:
         """解析飞书发送目标，优先走显式用户，其次回退默认配置。"""
         resolved_userid = (userid or "").strip() or None
@@ -608,7 +608,8 @@ class Feishu:
                 card_rows.append({"tag": "action", "actions": elements})
         return card_rows
 
-    def _build_card(self, title: Optional[str], text: Optional[str], link: Optional[str], buttons: Optional[List[List[dict]]]) -> Dict[str, Any]:
+    def _build_card(self, title: Optional[str], text: Optional[str], link: Optional[str],
+                    buttons: Optional[List[List[dict]]]) -> Dict[str, Any]:
         """构建飞书交互卡片结构。"""
         elements: List[dict] = []
         title_section = self._build_markdown_section(title, text_size="heading")
@@ -632,9 +633,9 @@ class Feishu:
         }
 
     def _build_streaming_card_payload(
-        self,
-        title: Optional[str],
-        text: Optional[str],
+            self,
+            title: Optional[str],
+            text: Optional[str],
     ) -> Dict[str, Any]:
         """构建支持 CardKit 流式更新的飞书卡片 JSON 2.0。"""
         elements: List[dict] = []
@@ -702,13 +703,13 @@ class Feishu:
         return None
 
     def _send_streaming_card_message(
-        self,
-        title: Optional[str],
-        text: Optional[str],
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
-        original_message_id: Optional[str] = None,
+            self,
+            title: Optional[str],
+            text: Optional[str],
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
+            original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         card_id = self._create_streaming_card(title=title, text=text)
         if not card_id:
@@ -745,11 +746,11 @@ class Feishu:
         return result
 
     def _update_streaming_card_content(
-        self,
-        card_id: str,
-        element_id: str,
-        content: str,
-        sequence: int,
+            self,
+            card_id: str,
+            element_id: str,
+            content: str,
+            sequence: int,
     ) -> bool:
         if not self._api_client:
             return False
@@ -843,11 +844,11 @@ class Feishu:
         }
 
     def _reply_message(
-        self,
-        message_id: str,
-        msg_type: str,
-        content: dict,
-        reply_in_thread: bool = False,
+            self,
+            message_id: str,
+            msg_type: str,
+            content: dict,
+            reply_in_thread: bool = False,
     ) -> Optional[dict]:
         """按原消息回复，保持飞书会话中的引用关系。"""
         if not self._api_client:
@@ -923,7 +924,8 @@ class Feishu:
         data = getattr(response, "data", None)
         return getattr(data, "image_key", None)
 
-    def _upload_file(self, file_path: Path, file_name: Optional[str] = None, duration: Optional[int] = None) -> Optional[str]:
+    def _upload_file(self, file_path: Path, file_name: Optional[str] = None, duration: Optional[int] = None) -> \
+    Optional[str]:
         if not self._api_client:
             return None
         with file_path.open("rb") as fp:
@@ -949,7 +951,7 @@ class Feishu:
         data = getattr(response, "data", None)
         return getattr(data, "file_key", None)
 
-    def _download_image_bytes(self, image_key: str) -> Optional[Tuple[bytes, Optional[str], Optional[str]]]:
+    def download_image_bytes(self, image_key: str) -> Optional[Tuple[bytes, Optional[str], Optional[str]]]:
         if not self._api_client or not image_key:
             return None
         response = self._api_client.im.v1.image.get(
@@ -962,7 +964,7 @@ class Feishu:
             content_type = response.raw.headers.get("Content-Type")
         return response.file.read(), response.file_name, content_type
 
-    def _download_file_bytes(self, file_key: str) -> Optional[Tuple[bytes, Optional[str], Optional[str]]]:
+    def download_file_bytes(self, file_key: str) -> Optional[Tuple[bytes, Optional[str], Optional[str]]]:
         if not self._api_client or not file_key:
             return None
         response = self._api_client.im.v1.file.get(
@@ -975,7 +977,8 @@ class Feishu:
             content_type = response.raw.headers.get("Content-Type")
         return response.file.read(), response.file_name, content_type
 
-    def _download_message_resource_bytes(self, message_id: str, file_key: str, resource_type: str) -> Optional[Tuple[bytes, Optional[str], Optional[str]]]:
+    def download_message_resource_bytes(self, message_id: str, file_key: str, resource_type: str) -> Optional[
+        Tuple[bytes, Optional[str], Optional[str]]]:
         if not self._api_client or not message_id or not file_key:
             return None
         response = self._api_client.im.v1.message_resource.get(
@@ -993,12 +996,12 @@ class Feishu:
         return response.file.read(), response.file_name, content_type
 
     def send_text(
-        self,
-        text: str,
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
-        original_message_id: Optional[str] = None,
+            self,
+            text: str,
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
+            original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         """发送纯文本消息。"""
         try:
@@ -1026,19 +1029,20 @@ class Feishu:
 
         if not result:
             return {"success": False}
-        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
+        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(
+            userid or "") or self._default_chat_id
         return result
 
     def send_file(
-        self,
-        file_path: str,
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        title: Optional[str] = None,
-        text: Optional[str] = None,
-        file_name: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
-        original_message_id: Optional[str] = None,
+            self,
+            file_path: str,
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            title: Optional[str] = None,
+            text: Optional[str] = None,
+            file_name: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
+            original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         """发送本地图片或文件。"""
         local_file = Path(file_path)
@@ -1107,17 +1111,18 @@ class Feishu:
 
         if not result:
             return {"success": False}
-        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
+        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(
+            userid or "") or self._default_chat_id
         return result
 
     def send_voice(
-        self,
-        voice_path: str,
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        caption: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
-        original_message_id: Optional[str] = None,
+            self,
+            voice_path: str,
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            caption: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
+            original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         """发送飞书语音消息。"""
         local_file = Path(voice_path)
@@ -1161,22 +1166,23 @@ class Feishu:
 
         if not result:
             return {"success": False}
-        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
+        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(
+            userid or "") or self._default_chat_id
         return result
 
     def send_notification(
-        self,
-        message: Notification,
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
-        original_message_id: Optional[str] = None,
+            self,
+            message: Notification,
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
+            original_message_id: Optional[str] = None,
     ) -> Optional[dict]:
         """发送通知消息，优先使用交互卡片承载按钮。"""
         is_streaming_agent_text = (
-            message.mtype == NotificationType.Agent
-            and not message.buttons
-            and not message.link
+                message.mtype == NotificationType.Agent
+                and not message.buttons
+                and not message.link
         )
         if is_streaming_agent_text:
             try:
@@ -1193,7 +1199,8 @@ class Feishu:
                 return {"success": False}
             if not result:
                 return {"success": False}
-            result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
+            result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(
+                userid or "") or self._default_chat_id
             return result
 
         payload = self._build_card(
@@ -1227,10 +1234,12 @@ class Feishu:
 
         if not result:
             return {"success": False}
-        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(userid or "") or self._default_chat_id
+        result["chat_id"] = result.get("chat_id") or chat_id or self._user_chat_mapping.get(
+            userid or "") or self._default_chat_id
         return result
 
-    def edit_message(self, message_id: str, title: Optional[str] = None, text: Optional[str] = None, buttons: Optional[List[List[dict]]] = None, metadata: Optional[dict] = None) -> bool:
+    def edit_message(self, message_id: str, title: Optional[str] = None, text: Optional[str] = None,
+                     buttons: Optional[List[List[dict]]] = None, metadata: Optional[dict] = None) -> bool:
         """编辑已发送的飞书交互卡片消息。"""
         if not self._api_client:
             return False
@@ -1243,10 +1252,10 @@ class Feishu:
             # 无论远端是否响应成功都自增 sequence，防止某次超时导致后续 sequence 一直因为没有递增而被拒绝
             stream_meta["sequence"] = sequence
             if card_id and element_id and self._update_streaming_card_content(
-                card_id=card_id,
-                element_id=element_id,
-                content=self._escape_card_text(text).strip() or " ",
-                sequence=sequence,
+                    card_id=card_id,
+                    element_id=element_id,
+                    content=self._escape_card_text(text).strip() or " ",
+                    sequence=sequence,
             ):
                 return True
 
@@ -1275,9 +1284,9 @@ class Feishu:
         return False
 
     def add_message_reaction(
-        self,
-        message_id: str,
-        emoji_type: str,
+            self,
+            message_id: str,
+            emoji_type: str,
     ) -> Optional[str]:
         """为指定消息添加表情回应，并返回 reaction_id。"""
         if not self._api_client or not message_id or not emoji_type:
@@ -1339,12 +1348,12 @@ class Feishu:
         return False
 
     def send_medias_message(
-        self,
-        message: Notification,
-        medias: List[MediaInfo],
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
+            self,
+            message: Notification,
+            medias: List[MediaInfo],
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
     ) -> Optional[dict]:
         """发送媒体列表消息，复用通知发送链路。"""
         lines = []
@@ -1367,12 +1376,12 @@ class Feishu:
         )
 
     def send_torrents_message(
-        self,
-        message: Notification,
-        torrents: List[Context],
-        userid: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        receive_id_type: Optional[str] = None,
+            self,
+            message: Notification,
+            torrents: List[Context],
+            userid: Optional[str] = None,
+            chat_id: Optional[str] = None,
+            receive_id_type: Optional[str] = None,
     ) -> Optional[dict]:
         """发送种子列表消息，复用通知发送链路。"""
         lines = []

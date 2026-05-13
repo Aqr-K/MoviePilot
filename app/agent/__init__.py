@@ -663,7 +663,7 @@ class MoviePilotAgent:
                             and self.should_dispatch_reply
                             and not self._tool_context.get("user_reply_sent")
                     ):
-                        await self.send_agent_message(remaining_text, is_streaming_fallback=True)
+                        await self.send_agent_message(remaining_text)
                     elif (
                             remaining_text
                             and self.persist_output_message
@@ -743,16 +743,15 @@ class MoviePilotAgent:
             # 确保停止流式输出
             await self.stream_handler.stop_streaming()
 
-    async def send_agent_message(self, message: str, title: str = "", is_streaming_fallback: bool = False):
+    async def send_agent_message(self, message: str, title: str = ""):
         """
         通过原渠道发送消息给用户
         """
-        mtype = NotificationType.System if is_streaming_fallback else NotificationType.Agent
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
                 source=self.source,
-                mtype=mtype,
+                mtype=NotificationType.Agent,
                 userid=self.user_id,
                 username=self.username,
                 original_message_id=self.original_message_id,
