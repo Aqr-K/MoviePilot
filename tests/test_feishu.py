@@ -241,6 +241,7 @@ class TestFeishu(unittest.TestCase):
         self.assertNotIn("card", content)
         self.assertEqual(content["schema"], "2.0")
         self.assertTrue(content["config"]["update_multi"])
+        self.assertEqual(content["body"]["padding"], "12px 12px 12px 12px")
         self.assertEqual(content["body"]["elements"][0]["text_size"], "heading")
         self.assertEqual(content["body"]["elements"][0]["tag"], "markdown")
         button = content["body"]["elements"][-1]["columns"][0]["elements"][0]
@@ -287,6 +288,9 @@ class TestFeishu(unittest.TestCase):
         image_element = content["body"]["elements"][0]
         self.assertEqual(image_element["tag"], "img")
         self.assertEqual(image_element["img_key"], "img_v2_remote")
+        self.assertEqual(content["body"]["elements"][1]["margin"], "12px 12px 0px 12px")
+        self.assertEqual(content["body"]["elements"][2]["margin"], "4px 12px 12px 12px")
+        self.assertEqual(content["body"]["elements"][-1]["margin"], "0px 12px 12px 12px")
         self.assertEqual(content["body"]["elements"][-1]["tag"], "column_set")
 
     def test_send_notification_supports_user_id_target(self):
@@ -586,7 +590,9 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(content["body"]["padding"], "0px 0px 0px 0px")
         self.assertEqual(content["body"]["elements"][0]["img_key"], "img_v2_uploaded")
         self.assertEqual(content["body"]["elements"][1]["content"], "图片标题")
+        self.assertEqual(content["body"]["elements"][1]["margin"], "12px 12px 0px 12px")
         self.assertEqual(content["body"]["elements"][2]["content"], "图片说明")
+        self.assertEqual(content["body"]["elements"][2]["margin"], "4px 12px 12px 12px")
 
     def test_send_file_keeps_non_image_file_message_and_caption(self):
         client = self._build_client()

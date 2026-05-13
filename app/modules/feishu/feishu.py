@@ -554,15 +554,24 @@ class Feishu:
         return escaped
 
     @classmethod
-    def _build_markdown_section(cls, text: Optional[str], text_size: str = "normal") -> Optional[dict]:
+    def _build_markdown_section(
+            cls,
+            text: Optional[str],
+            text_size: str = "normal",
+            margin: Optional[str] = None,
+    ) -> Optional[dict]:
         content = cls._escape_card_text(text).strip()
         if not content:
             return None
-        return {
+        section = {
             "tag": "markdown",
             "text_size": text_size,
             "content": content,
         }
+        if margin:
+            # 图片卡片需要 body 零边距，文字留白转移到组件外边距上。
+            section["margin"] = margin
+        return section
 
     @staticmethod
     def _build_message_text(title: Optional[str], text: Optional[str], link: Optional[str] = None) -> str:
@@ -644,7 +653,7 @@ class Feishu:
         return str(callback_data).strip() if callback_data else None
 
     @staticmethod
-    def _card_actions(buttons: Optional[List[List[dict]]]) -> List[dict]:
+    def _card_actions(buttons: Optional[List[List[dict]]], margin: Optional[str] = None) -> List[dict]:
         """将统一按钮结构转换为飞书卡片按钮配置。"""
         if not buttons:
             return []
@@ -698,13 +707,14 @@ class Feishu:
                     }
                 )
             if columns:
-                card_rows.append(
-                    {
-                        "tag": "column_set",
-                        "flex_mode": "none",
-                        "columns": columns,
-                    }
-                )
+                row = {
+                    "tag": "column_set",
+                    "flex_mode": "none",
+                    "columns": columns,
+                }
+                if margin:
+                    row["margin"] = margin
+                card_rows.append(row)
         return card_rows
 
     def _build_card(
@@ -730,16 +740,20 @@ class Feishu:
                     "mode": "fit_horizontal",
                 }
             )
-        title_section = self._build_markdown_section(title, text_size="heading")
+        text_margin = "12px 12px 0px 12px" if image_key else None
+        body_margin = "4px 12px 12px 12px" if image_key else None
+        action_margin = "0px 12px 12px 12px" if image_key else None
+        title_section = self._build_markdown_section(title, text_size="heading", margin=text_margin)
         body_section = self._build_markdown_section(
             self._build_message_text(title=None, text=text, link=link),
             text_size="normal",
+            margin=body_margin,
         )
         if title_section:
             elements.append(title_section)
         if body_section:
             elements.append(body_section)
-        elements.extend(self._card_actions(buttons))
+        elements.extend(self._card_actions(buttons, margin=action_margin))
         return {
             # 飞书卡片消息要支持后续 PATCH 更新，发送和更新时都必须显式声明 update_multi。
             "schema": "2.0",
@@ -753,7 +767,7 @@ class Feishu:
             },
             "body": {
                 "direction": "vertical",
-                "padding": "0px 0px 0px 0px",
+                "padding": "0px 0px 0px 0px" if image_key else "12px 12px 12px 12px",
                 "elements": elements,
             },
         }
