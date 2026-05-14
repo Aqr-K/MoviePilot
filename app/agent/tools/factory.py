@@ -77,6 +77,7 @@ from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiers
 from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
 from app.agent.tools.impl.update_system_settings import UpdateSystemSettingsTool
+from app.agent.llm.capability import AgentCapabilityManager
 from app.core.plugin import PluginManager
 from app.log import logger
 from app.schemas.message import ChannelCapabilityManager
@@ -225,12 +226,9 @@ class MoviePilotToolFactory:
         ]
         if MoviePilotToolFactory._should_enable_choice_tool(channel):
             tool_definitions.append(AskUserChoiceTool)
-        tool_definitions.extend(
-            [
-                SendLocalFileTool,
-                SendVoiceMessageTool,
-            ]
-        )
+        tool_definitions.append(SendLocalFileTool)
+        if AgentCapabilityManager.supports_audio_output():
+            tool_definitions.append(SendVoiceMessageTool)
         # 创建内置工具
         for ToolClass in tool_definitions:
             tool = ToolClass(session_id=session_id, user_id=user_id)

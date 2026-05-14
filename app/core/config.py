@@ -541,8 +541,10 @@ class ConfigModel(BaseModel):
     LLM_THINKING_LEVEL: Optional[str] = "off"
     # LLM是否支持图片输入，开启后消息图片会按多模态输入发送给模型
     LLM_SUPPORT_IMAGE_INPUT: bool = True
-    # LLM是否支持音频输入输出，开启后才会启用语音转写与语音回复
-    LLM_SUPPORT_AUDIO_INPUT_OUTPUT: bool = False
+    # 是否启用音频输入，开启后用户语音会先转写为文本再进入 Agent
+    LLM_SUPPORT_AUDIO_INPUT: bool = False
+    # 是否启用音频输出，开启后 Agent 可在支持渠道发送语音回复
+    LLM_SUPPORT_AUDIO_OUTPUT: bool = False
     # LLM API密钥
     LLM_API_KEY: Optional[str] = None
     # LLM基础URL（用于自定义API端点）
@@ -589,22 +591,28 @@ class ConfigModel(BaseModel):
     # AI智能体自动重试整理失败记录开关
     AI_AGENT_RETRY_TRANSFER: bool = False
 
-    # 语音能力提供商（当前仅支持 openai/openai-compatible）
-    AI_VOICE_PROVIDER: str = "openai"
-    # 语音能力共享 API 密钥，未设置且 LLM_PROVIDER=openai 时回退使用 LLM_API_KEY
-    AI_VOICE_API_KEY: Optional[str] = None
-    # 语音能力共享基础URL，未设置且 LLM_PROVIDER=openai 时回退使用 LLM_BASE_URL
-    AI_VOICE_BASE_URL: Optional[str] = None
-    # 语音转文字模型
-    AI_VOICE_STT_MODEL: str = "gpt-4o-mini-transcribe"
-    # 文字转语音模型
-    AI_VOICE_TTS_MODEL: str = "gpt-4o-mini-tts"
-    # TTS 发音人
-    AI_VOICE_TTS_VOICE: str = "alloy"
-    # 语音识别语言
-    AI_VOICE_LANGUAGE: str = "zh"
+    # 音频输入提供商：openai/openai_chat_audio/mimo
+    AUDIO_INPUT_PROVIDER: str = "openai"
+    # 音频输入 API 密钥
+    AUDIO_INPUT_API_KEY: Optional[str] = None
+    # 音频输入基础URL
+    AUDIO_INPUT_BASE_URL: Optional[str] = None
+    # 音频输入模型
+    AUDIO_INPUT_MODEL: str = "gpt-4o-mini-transcribe"
+    # 音频输入识别语言
+    AUDIO_INPUT_LANGUAGE: str = "zh"
+    # 音频输出提供商：openai/openai_chat_audio/mimo
+    AUDIO_OUTPUT_PROVIDER: str = "openai"
+    # 音频输出 API 密钥
+    AUDIO_OUTPUT_API_KEY: Optional[str] = None
+    # 音频输出基础URL
+    AUDIO_OUTPUT_BASE_URL: Optional[str] = None
+    # 音频输出模型
+    AUDIO_OUTPUT_MODEL: str = "gpt-4o-mini-tts"
+    # 音频输出音色/发音人
+    AUDIO_OUTPUT_VOICE: str = "alloy"
     # 回复语音时是否同时附带文字说明
-    AI_VOICE_REPLY_WITH_TEXT: bool = False
+    AUDIO_OUTPUT_INCLUDE_TEXT: bool = False
 
 
 class Settings(BaseSettings, ConfigModel, LogConfigModel):
@@ -824,7 +832,9 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             return False, f"配置项 '{key}' 不存在"
 
         try:
-            field = Settings.model_fields[key]
+            field = Settings.model_fields.get(key)
+            if not field:
+                return False, f"配置项 '{key}' 不存在"
             original_value = getattr(self, key)
             if key == "API_TOKEN":
                 converted_value, needs_update = self.validate_api_token(

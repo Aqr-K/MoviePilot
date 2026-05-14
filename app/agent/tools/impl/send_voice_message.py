@@ -5,9 +5,9 @@ from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
+from app.agent.llm.capability import AgentCapabilityManager
 from app.agent.tools.base import MoviePilotTool, ToolChain
 from app.core.config import settings
-from app.helper.voice import VoiceHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType
 
@@ -50,22 +50,24 @@ class SendVoiceMessageTool(MoviePilotTool):
         voice_path = None
         used_voice = False
         channel = self._channel or ""
-        reply_mode = VoiceHelper.resolve_reply_mode(
+        reply_mode = AgentCapabilityManager.resolve_reply_mode(
             channel=channel,
             source=self._source,
         )
         fallback_reason = "当前渠道不支持语音回复"
-        if not VoiceHelper.is_enabled():
-            fallback_reason = "当前未启用音频输入输出"
+        if not AgentCapabilityManager.supports_audio_output():
+            fallback_reason = "当前未启用音频输出"
         if (
-            reply_mode == VoiceHelper.REPLY_MODE_NATIVE
-            and VoiceHelper.is_available("tts")
+            reply_mode == AgentCapabilityManager.REPLY_MODE_NATIVE
+            and AgentCapabilityManager.is_audio_output_available()
         ):
-            voice_file = await asyncio.to_thread(VoiceHelper.synthesize_speech, message)
+            voice_file = await asyncio.to_thread(
+                AgentCapabilityManager.synthesize_speech, message
+            )
             if voice_file:
                 voice_path = str(voice_file)
                 used_voice = True
-        elif reply_mode == VoiceHelper.REPLY_MODE_NATIVE:
+        elif reply_mode == AgentCapabilityManager.REPLY_MODE_NATIVE:
             fallback_reason = "当前未配置可用的语音合成能力"
 
         logger.info(
@@ -87,7 +89,7 @@ class SendVoiceMessageTool(MoviePilotTool):
                 voice_path=voice_path,
                 voice_caption=(
                     message
-                    if voice_path and settings.AI_VOICE_REPLY_WITH_TEXT
+                    if voice_path and settings.AUDIO_OUTPUT_INCLUDE_TEXT
                     else None
                 ),
             )

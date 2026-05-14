@@ -1,4 +1,5 @@
 import asyncio
+import importlib.machinery
 import sys
 import unittest
 from types import SimpleNamespace
@@ -18,6 +19,10 @@ def _stub_module(name: str, **attrs):
 
 _stub_module("qbittorrentapi", TorrentFilesList=list)
 _stub_module("transmission_rpc", File=object)
+_stub_module(
+    "psutil",
+    __spec__=importlib.machinery.ModuleSpec("psutil", loader=None),
+)
 
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.agent import ReplyMode

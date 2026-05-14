@@ -476,7 +476,8 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
     info = settings.model_dump(
         include={
             "AI_AGENT_ENABLE",
-            "LLM_SUPPORT_AUDIO_INPUT_OUTPUT",
+            "LLM_SUPPORT_AUDIO_INPUT",
+            "LLM_SUPPORT_AUDIO_OUTPUT",
             "RECOGNIZE_SOURCE",
             "SEARCH_SOURCE",
             "AI_RECOMMEND_ENABLED",
@@ -486,7 +487,8 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
     # 智能助手总开关未开启，智能推荐状态强制返回False
     if not settings.AI_AGENT_ENABLE:
         info["AI_RECOMMEND_ENABLED"] = False
-        info["LLM_SUPPORT_AUDIO_INPUT_OUTPUT"] = False
+        info["LLM_SUPPORT_AUDIO_INPUT"] = False
+        info["LLM_SUPPORT_AUDIO_OUTPUT"] = False
 
     # 追加用户唯一ID和订阅分享管理权限
     share_admin = SubscribeHelper().is_admin_user()

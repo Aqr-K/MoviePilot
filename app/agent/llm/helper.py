@@ -886,7 +886,6 @@ class LLMHelper:
                     {"id": model_id, "name": model_id}
                     for model_id in await self._get_google_models(api_key or "")
                 ]
-            model_list_base_url = base_url
             try:
                 from app.agent.llm.provider import LLMProviderManager
 

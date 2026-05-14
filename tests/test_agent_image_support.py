@@ -12,10 +12,10 @@ from telebot import apihelper
 from app.agent.tools.impl.send_message import SendMessageInput
 from app.agent.tools.impl.send_local_file import SendLocalFileInput
 from app.agent import MoviePilotAgent, AgentChain
+from app.agent.llm import AgentCapabilityManager
 from app.chain.message import MessageChain
 from app.core.config import settings
 from app.agent.llm import LLMHelper
-from app.helper.voice import VoiceHelper
 from app.modules.discord import DiscordModule
 from app.modules.qqbot import QQBotModule
 from app.modules.qqbot.qqbot import QQBot
@@ -284,13 +284,15 @@ class AgentImageSupportTest(unittest.TestCase):
             "feishu://file/om_audio/file_audio/voice.opus",
         ]
 
-        with patch.object(VoiceHelper, "is_available", return_value=True), patch.object(
+        with patch.object(
+            AgentCapabilityManager, "is_audio_input_available", return_value=True
+        ), patch.object(
             chain,
             "run_module",
             side_effect=[b"slack", b"discord", b"qq", b"vocechat", b"synology", b"feishu"],
         ) as run_module, patch.object(
-            VoiceHelper,
-            "transcribe_bytes",
+            AgentCapabilityManager,
+            "transcribe_audio",
             side_effect=[
                 "slack text",
                 "discord text",

@@ -12,7 +12,7 @@ from typing import Any, Optional, Dict, Union, List, Tuple
 from urllib.parse import unquote, urlparse
 
 from app.agent import ReplyMode, agent_manager, prompt_manager
-from app.agent.llm import LLMHelper
+from app.agent.llm import AgentCapabilityManager, LLMHelper
 from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
@@ -29,7 +29,6 @@ from app.db.transferhistory_oper import TransferHistoryOper
 from app.db.user_oper import UserOper
 from app.helper.interaction import agent_interaction_manager, media_interaction_manager, PendingMediaInteraction
 from app.helper.torrent import TorrentHelper
-from app.helper.voice import VoiceHelper
 from app.log import logger
 from app.schemas import Notification, CommingMessage, NotExistMediaInfo
 from app.schemas.message import ChannelCapabilityManager
@@ -1196,8 +1195,8 @@ class MessageChain(ChainBase):
         """
         if not audio_refs:
             return None
-        if not VoiceHelper.is_available("stt"):
-            logger.warning("语音能力未配置，跳过语音识别")
+        if not AgentCapabilityManager.is_audio_input_available():
+            logger.warning("音频输入能力未配置或未启用，跳过语音识别")
             return None
 
         transcripts = []
@@ -1303,7 +1302,7 @@ class MessageChain(ChainBase):
                     )
                     continue
 
-                transcript = VoiceHelper.transcribe_bytes(
+                transcript = AgentCapabilityManager.transcribe_audio(
                     content=content, filename=filename
                 )
                 if transcript:

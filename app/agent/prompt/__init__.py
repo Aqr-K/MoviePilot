@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from app.agent.llm.capability import AgentCapabilityManager
 from app.core.config import settings
 from app.log import logger
 from app.schemas import (
@@ -327,10 +328,12 @@ class PromptManager:
 
     @staticmethod
     def _generate_voice_reply_instructions() -> str:
+        if not AgentCapabilityManager.supports_audio_output():
+            return "Audio output is disabled; do not call `send_voice_message`."
         return (
-            "- Voice replies: Use normal text replies by default. "
-            "Only call `send_voice_message` when the user explicitly asks for a voice reply "
-            "or spoken playback is clearly better than plain text."
+            "Use normal text replies by default. Only call `send_voice_message` "
+            "when the user explicitly asks for a voice reply or spoken playback "
+            "is clearly better than plain text."
         )
 
     @staticmethod
