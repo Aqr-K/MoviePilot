@@ -6,6 +6,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
 
 def _stub_module(name: str, **attrs):
     module = sys.modules.get(name)
@@ -28,6 +30,92 @@ class _FakeModel:
 
     async def ainvoke(self, _prompt):
         return SimpleNamespace(content=self._content)
+
+
+def _build_tool_call(name: str = "search"):
+    return [
+        {
+            "id": "call_1",
+            "type": "tool_call",
+            "name": name,
+            "args": {},
+        }
+    ]
+
+
+class _FakeOpenAIInput:
+    def __init__(self, messages):
+        self._messages = messages
+
+    def to_messages(self):
+        return self._messages
+
+
+class _FakeChatOpenAIForPatch:
+    def __init__(self, **kwargs):
+        self.model = kwargs["model"]
+        self.model_name = kwargs["model"]
+        self.openai_api_base = kwargs.get("base_url")
+        self.profile = None
+
+    def _convert_input(self, input_):
+        return _FakeOpenAIInput(input_)
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        messages = []
+        for message in input_:
+            payload_message = {
+                "role": message.type,
+                "content": message.content,
+            }
+            if message.type == "human":
+                payload_message["role"] = "user"
+            elif message.type == "ai":
+                payload_message["role"] = "assistant"
+                tool_calls = getattr(message, "tool_calls", None)
+                if tool_calls:
+                    payload_message["tool_calls"] = tool_calls
+            elif message.type == "tool":
+                payload_message["role"] = "tool"
+                payload_message["tool_call_id"] = message.tool_call_id
+            messages.append(payload_message)
+        return {"messages": messages}
+
+
+def _build_fake_openai_modules(chat_openai_cls=_FakeChatOpenAIForPatch):
+    """构造最小 langchain_openai stub，避免单测触发真实依赖链。"""
+    from langchain_core.messages import AIMessageChunk
+
+    for attr in (
+            "_moviepilot_interleaved_reasoning_patched",
+            "_moviepilot_responses_instructions_patched",
+    ):
+        if hasattr(chat_openai_cls, attr):
+            delattr(chat_openai_cls, attr)
+
+    openai_module = ModuleType("langchain_openai")
+    openai_module.__path__ = []
+    openai_module.ChatOpenAI = chat_openai_cls
+
+    chat_models_module = ModuleType("langchain_openai.chat_models")
+    chat_models_module.__path__ = []
+
+    base_module = ModuleType("langchain_openai.chat_models.base")
+
+    def _convert_dict_to_message(message_dict):
+        return AIMessage(content=message_dict.get("content") or "")
+
+    def _convert_delta_to_message_chunk(delta, default_class):
+        return AIMessageChunk(content=delta.get("content") or "")
+
+    base_module._convert_dict_to_message = _convert_dict_to_message
+    base_module._convert_delta_to_message_chunk = _convert_delta_to_message_chunk
+
+    return {
+        "langchain_openai": openai_module,
+        "langchain_openai.chat_models": chat_models_module,
+        "langchain_openai.chat_models.base": base_module,
+    }, base_module
 
 
 sys.modules.pop("app.agent.llm.helper", None)
@@ -143,6 +231,97 @@ class LlmHelperTestCallTest(unittest.TestCase):
             calls[0].get("extra_body"),
             {"thinking": {"type": "disabled"}},
         )
+
+    def test_openai_compatible_patch_preserves_stream_reasoning_content(self):
+        from langchain_core.messages import AIMessageChunk
+
+        fake_modules, openai_base = _build_fake_openai_modules()
+        with patch.dict(sys.modules, fake_modules):
+            llm_module._patch_openai_interleaved_reasoning_content_support()
+
+            chunk = openai_base._convert_delta_to_message_chunk(
+                {"role": "assistant", "content": "", "reasoning_content": "先调用工具"},
+                AIMessageChunk,
+            )
+
+        self.assertEqual(
+            chunk.additional_kwargs.get("reasoning_content"),
+            "先调用工具",
+        )
+
+    def test_openai_compatible_patch_injects_xiaomi_reasoning_content(self):
+        fake_modules, _ = _build_fake_openai_modules()
+        with patch.dict(sys.modules, fake_modules):
+            llm_module._patch_openai_interleaved_reasoning_content_support()
+            llm = _FakeChatOpenAIForPatch(
+                model="mimo-v2.5-pro",
+                api_key="sk-test",
+                base_url="https://api.xiaomimimo.com/v1",
+            )
+            messages = [
+                HumanMessage(content="天气如何？"),
+                AIMessage(
+                    content="",
+                    tool_calls=_build_tool_call(),
+                    additional_kwargs={"reasoning_content": "先调用天气工具"},
+                ),
+                ToolMessage(content="晴天", tool_call_id="call_1"),
+            ]
+
+            payload = llm._get_request_payload(messages)
+
+        self.assertEqual(
+            payload["messages"][1]["reasoning_content"],
+            "先调用天气工具",
+        )
+
+    def test_openai_compatible_patch_injects_any_model_with_reasoning_content(self):
+        fake_modules, _ = _build_fake_openai_modules()
+        with patch.dict(sys.modules, fake_modules):
+            llm_module._patch_openai_interleaved_reasoning_content_support()
+            llm = _FakeChatOpenAIForPatch(
+                model="glm-5",
+                api_key="sk-test",
+                base_url="https://open.bigmodel.cn/api/paas/v4",
+            )
+            messages = [
+                HumanMessage(content="天气如何？"),
+                AIMessage(
+                    content="",
+                    tool_calls=_build_tool_call(),
+                    additional_kwargs={"reasoning_content": "先规划工具调用"},
+                ),
+                ToolMessage(content="晴天", tool_call_id="call_1"),
+            ]
+
+            payload = llm._get_request_payload(messages)
+
+        self.assertEqual(
+            payload["messages"][1]["reasoning_content"],
+            "先规划工具调用",
+        )
+
+    def test_openai_compatible_patch_skips_when_reasoning_content_missing(self):
+        fake_modules, _ = _build_fake_openai_modules()
+        with patch.dict(sys.modules, fake_modules):
+            llm_module._patch_openai_interleaved_reasoning_content_support()
+            llm = _FakeChatOpenAIForPatch(
+                model="gpt-4o-mini",
+                api_key="sk-test",
+                base_url="https://api.openai.com/v1",
+            )
+            messages = [
+                HumanMessage(content="天气如何？"),
+                AIMessage(
+                    content="",
+                    tool_calls=_build_tool_call(),
+                ),
+                ToolMessage(content="晴天", tool_call_id="call_1"),
+            ]
+
+            payload = llm._get_request_payload(messages)
+
+        self.assertNotIn("reasoning_content", payload["messages"][1])
 
     def test_get_llm_uses_deepseek_thinking_level_controls(self):
         calls = []
@@ -307,6 +486,50 @@ class LlmHelperTestCallTest(unittest.TestCase):
             llm_calls[0].get("base_url"),
             "https://updated.example.com/v1",
         )
+
+    def test_get_llm_keeps_openai_patch_global_without_model_marker(self):
+        class _FakeProviderManager:
+            async def resolve_runtime(self, **kwargs):
+                return {
+                    "provider_id": kwargs["provider_id"],
+                    "runtime": "openai_compatible",
+                    "model_id": kwargs["model"],
+                    "api_key": kwargs["api_key"],
+                    "base_url": kwargs["base_url"],
+                    "default_headers": None,
+                    "use_responses_api": None,
+                    "model_record": None,
+                    "model_metadata": {},
+                }
+
+        provider_module = ModuleType("app.agent.llm.provider")
+        provider_module.LLMProviderManager = _FakeProviderManager
+        fake_openai_modules, _ = _build_fake_openai_modules()
+
+        with patch.dict(
+            sys.modules,
+            {
+                "app.agent.llm.provider": provider_module,
+                **fake_openai_modules,
+            },
+        ):
+            created = asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="mimo-v2.5-pro",
+                    api_key="sk-test",
+                    base_url="https://api.xiaomimimo.com/v1",
+                )
+            )
+            self.assertTrue(
+                getattr(
+                    sys.modules["langchain_openai"].ChatOpenAI,
+                    "_moviepilot_interleaved_reasoning_patched",
+                    False,
+                )
+            )
+
+        self.assertFalse(hasattr(created, "_moviepilot_interleaved_reasoning_field"))
 
     def test_get_llm_maps_unified_max_to_openai_xhigh(self):
         calls = []

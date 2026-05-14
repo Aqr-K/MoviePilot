@@ -7,7 +7,7 @@ import time
 from functools import wraps
 from typing import Any, List
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from app.core.config import settings
 from app.log import logger
@@ -142,9 +142,15 @@ def _patch_deepseek_reasoning_content_support():
     def _patched_get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = original_get_request_payload(self, input_, stop=stop, **kwargs)
 
-        # Resolve original messages so we can extract reasoning_content from
-        # additional_kwargs.  The parent's payload builder does not propagate
-        # this DeepSeek-specific field.
+        extra_body = (getattr(self, "model_kwargs", None) or {}).get("extra_body")
+        if not _is_deepseek_thinking_enabled(
+                getattr(self, "model_name", None) or getattr(self, "model", None),
+                extra_body,
+        ):
+            return payload
+
+        # 从原始 LangChain 消息中取回 reasoning_content。上游 payload 构造器
+        # 不会自动透传这个 DeepSeek 扩展字段。
         messages = self._convert_input(input_).to_messages()
 
         for i, message in enumerate(payload["messages"]):
@@ -152,9 +158,8 @@ def _patch_deepseek_reasoning_content_support():
                 message["content"] = json.dumps(message["content"])
             elif message["role"] == "assistant":
                 if isinstance(message["content"], list):
-                    # DeepSeek API expects assistant content to be a string,
-                    # not a list. Extract text blocks and join them, or use
-                    # empty string if none exist.
+                    # DeepSeek API 要求 assistant content 为字符串；工具场景下
+                    # LangChain 可能保留为内容块列表，这里只拼回可见文本块。
                     text_parts = [
                         block.get("text", "")
                         for block in message["content"]
@@ -162,10 +167,8 @@ def _patch_deepseek_reasoning_content_support():
                     ]
                     message["content"] = "".join(text_parts) if text_parts else ""
 
-                # DeepSeek reasoning models require every assistant message to
-                # carry a reasoning_content field (even when empty).  The value
-                # is stored in AIMessage.additional_kwargs by
-                # _create_chat_result(); re-inject it into the API payload.
+                # DeepSeek thinking mode 要求历史 assistant 消息携带
+                # reasoning_content，即便本地只保存到了 additional_kwargs。
                 if (
                         "reasoning_content" not in message
                         and i < len(messages)
@@ -182,6 +185,103 @@ def _patch_deepseek_reasoning_content_support():
     logger.debug("已修补 langchain-deepseek thinking tool-call 的 reasoning_content 回传兼容性")
 
 
+def _patch_openai_interleaved_reasoning_content_support():
+    """
+    修补 OpenAI-compatible 模型的 interleaved reasoning 内容回传。
+
+    小米 MiMo、部分 Kimi/GLM 等兼容端点会把思考内容放在响应顶层
+    `reasoning_content` 字段；如果下一轮请求没有把它随历史 assistant
+    消息带回，工具调用后续请求会被服务端以 400 拒绝。
+
+    这里不按 provider 白名单判断，而是只在历史 AIMessage 真实保存过
+    `reasoning_content` 时回传，避免以后每接入一个同类模型都要单独适配。
+    """
+    try:
+        import langchain_openai.chat_models.base as _openai_base
+        from langchain_openai import ChatOpenAI
+    except Exception as err:
+        logger.debug(f"跳过 langchain-openai reasoning_content 修补：{err}")
+        return
+
+    if not getattr(_openai_base, "_moviepilot_reasoning_response_patched", False):
+        original_convert_dict = getattr(_openai_base, "_convert_dict_to_message", None)
+        original_convert_delta = getattr(
+            _openai_base, "_convert_delta_to_message_chunk", None
+        )
+
+        if callable(original_convert_dict):
+            @wraps(original_convert_dict)
+            def _patched_convert_dict_to_message(message_dict):
+                message = original_convert_dict(message_dict)
+                if (
+                        isinstance(message, AIMessage)
+                        and "reasoning_content" in message_dict
+                ):
+                    message.additional_kwargs["reasoning_content"] = (
+                        message_dict.get("reasoning_content") or ""
+                    )
+                return message
+
+            _openai_base._convert_dict_to_message = _patched_convert_dict_to_message
+
+        if callable(original_convert_delta):
+            @wraps(original_convert_delta)
+            def _patched_convert_delta_to_message_chunk(delta, default_class):
+                chunk = original_convert_delta(delta, default_class)
+                if (
+                        isinstance(chunk, AIMessageChunk)
+                        and "reasoning_content" in delta
+                ):
+                    chunk.additional_kwargs["reasoning_content"] = (
+                        delta.get("reasoning_content") or ""
+                    )
+                return chunk
+
+            _openai_base._convert_delta_to_message_chunk = (
+                _patched_convert_delta_to_message_chunk
+            )
+
+        _openai_base._moviepilot_reasoning_response_patched = True
+
+    if getattr(ChatOpenAI, "_moviepilot_interleaved_reasoning_patched", False):
+        return
+
+    original_get_request_payload = getattr(ChatOpenAI, "_get_request_payload", None)
+    if not callable(original_get_request_payload):
+        logger.warning("langchain-openai 缺少 _get_request_payload，无法修补 reasoning_content")
+        return
+
+    @wraps(original_get_request_payload)
+    def _patched_get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = original_get_request_payload(self, input_, stop=stop, **kwargs)
+        if "messages" not in payload:
+            return payload
+
+        messages = self._convert_input(input_).to_messages()
+        for index, payload_message in enumerate(payload["messages"]):
+            if (
+                    payload_message.get("role") != "assistant"
+                    or index >= len(messages)
+                    or not isinstance(messages[index], AIMessage)
+                    or "reasoning_content" in payload_message
+            ):
+                continue
+
+            reasoning_content = messages[index].additional_kwargs.get(
+                "reasoning_content"
+            )
+            if reasoning_content is not None:
+                # 只回传模型真实返回过的思考字段。普通模型没有该字段时，
+                # payload 保持原样，不额外塞未知参数。
+                payload_message["reasoning_content"] = reasoning_content
+
+        return payload
+
+    ChatOpenAI._get_request_payload = _patched_get_request_payload
+    ChatOpenAI._moviepilot_interleaved_reasoning_patched = True
+    logger.debug("已修补 langchain-openai interleaved reasoning_content 回传兼容性")
+
+
 def _patch_openai_responses_instructions_support():
     """
     修补 langchain-openai 在使用 use_responses_api=True 时，
@@ -194,6 +294,8 @@ def _patch_openai_responses_instructions_support():
     except Exception as err:
         logger.debug(f"跳过 langchain-openai instructions 修补：{err}")
         return
+
+    _patch_openai_interleaved_reasoning_content_support()
 
     if getattr(ChatOpenAI, "_moviepilot_responses_instructions_patched", False):
         return

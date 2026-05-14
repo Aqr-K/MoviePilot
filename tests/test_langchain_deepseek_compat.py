@@ -38,6 +38,9 @@ class _FakeChatDeepSeek:
         self.model_name = model_name
         self.model_kwargs = model_kwargs or {}
 
+    def _convert_input(self, input_):
+        return type("_FakeInput", (), {"to_messages": lambda _self: input_})()
+
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         messages = []
         for message in input_:
@@ -62,7 +65,7 @@ class _FakeChatDeepSeek:
 _ORIGINAL_GET_REQUEST_PAYLOAD = _FakeChatDeepSeek._get_request_payload
 
 
-sys.modules.pop("app.helper.llm", None)
+sys.modules.pop("app.agent.llm.helper", None)
 _stub_module(
     "app.core.config",
     settings=ModuleType("settings"),
@@ -78,7 +81,7 @@ sys.modules["app.core.config"].settings.PROXY_HOST = None
 _stub_module("app.log", logger=_DummyLogger())
 _stub_module("langchain_deepseek", ChatDeepSeek=_FakeChatDeepSeek)
 
-module_path = Path(__file__).resolve().parents[1] / "app" / "helper" / "llm.py"
+module_path = Path(__file__).resolve().parents[1] / "app" / "agent" / "llm" / "helper.py"
 spec = importlib.util.spec_from_file_location("test_llm_module_for_deepseek_compat", module_path)
 llm_module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
