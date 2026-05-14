@@ -2,13 +2,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent import (
     HEARTBEAT_SESSION_PREFIX,
     MoviePilotAgent,
     AgentManager,
     ReplyMode,
+    UNSUPPORTED_IMAGE_INPUT_MESSAGE,
 )
 from app.agent.memory import memory_manager
 from app.core.config import settings
@@ -29,6 +30,24 @@ class _FakeAgent:
 
     def get_state(self, _config):
         return _FakeGraphState(self._messages)
+
+
+class _FakeFailingAgent:
+    def __init__(self, error):
+        self._error = error
+
+    async def ainvoke(self, _payload, config=None):
+        raise self._error
+
+    def get_state(self, _config):
+        return _FakeGraphState([])
+
+
+class _FakeStreamingFailingAgent(_FakeFailingAgent):
+    async def astream(self, _messages, **_kwargs):
+        raise self._error
+        # 保持 async generator 形态，避免测试替身变成普通 coroutine。
+        yield None
 
 
 class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
@@ -59,6 +78,80 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         )
         save_messages.assert_called_once()
         self.assertEqual("后台结果", agent._streamed_output)
+
+    async def test_non_streaming_image_unsupported_error_sends_friendly_notice(self):
+        agent = MoviePilotAgent(session_id="image-test", user_id="user-1")
+        agent.channel = "Telegram"
+        agent.source = "telegram-test"
+        agent._tool_context = {"user_reply_sent": False}
+        agent._streamed_output = ""
+        agent.stream_handler = SimpleNamespace(
+            stop_streaming=AsyncMock(return_value=(False, ""))
+        )
+        agent._should_stream = lambda: False
+        agent._create_agent = AsyncMock(
+            return_value=_FakeFailingAgent(
+                RuntimeError("No endpoints found that support image input")
+            )
+        )
+        agent.send_agent_message = AsyncMock()
+        agent._save_agent_message_to_db = AsyncMock()
+
+        result, _ = await agent._execute_agent(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": "看看这张图"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,xxx"}},
+                    ]
+                )
+            ]
+        )
+
+        self.assertEqual(UNSUPPORTED_IMAGE_INPUT_MESSAGE, result)
+        agent.send_agent_message.assert_awaited_once_with(
+            UNSUPPORTED_IMAGE_INPUT_MESSAGE, title=""
+        )
+        agent._save_agent_message_to_db.assert_not_awaited()
+        self.assertEqual(UNSUPPORTED_IMAGE_INPUT_MESSAGE, agent._streamed_output)
+
+    async def test_streaming_image_unsupported_error_sends_friendly_notice(self):
+        agent = MoviePilotAgent(session_id="image-test", user_id="user-1")
+        agent.channel = "Telegram"
+        agent.source = "telegram-test"
+        agent._tool_context = {"user_reply_sent": False}
+        agent._streamed_output = ""
+        agent.stream_handler = SimpleNamespace(
+            set_dispatch_policy=lambda allow_dispatch_without_context=False: None,
+            start_streaming=AsyncMock(),
+            flush_pending_tool_summary=lambda: "",
+            stop_streaming=AsyncMock(return_value=(False, "")),
+        )
+        agent._should_stream = lambda: True
+        agent._create_agent = AsyncMock(
+            return_value=_FakeStreamingFailingAgent(
+                RuntimeError("Error code: 404 - No endpoints found that support image input")
+            )
+        )
+        agent.send_agent_message = AsyncMock()
+        agent._save_agent_message_to_db = AsyncMock()
+
+        result, _ = await agent._execute_agent(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": "看看这张图"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,xxx"}},
+                    ]
+                )
+            ]
+        )
+
+        self.assertEqual(UNSUPPORTED_IMAGE_INPUT_MESSAGE, result)
+        agent.send_agent_message.assert_awaited_once_with(
+            UNSUPPORTED_IMAGE_INPUT_MESSAGE, title=""
+        )
+        agent._save_agent_message_to_db.assert_not_awaited()
 
     async def test_background_non_streaming_sends_when_reply_mode_dispatch(self):
         agent = MoviePilotAgent(session_id="bg-test", user_id="system")

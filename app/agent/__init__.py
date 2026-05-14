@@ -169,6 +169,7 @@ class ReplyMode(str, Enum):
 
 
 HEARTBEAT_SESSION_PREFIX = "__agent_heartbeat_"
+UNSUPPORTED_IMAGE_INPUT_MESSAGE = "当前模型不支持图片输入，请更换支持图片输入的模型，或在系统设置中关闭图片输入支持后重试。"
 
 
 class MoviePilotAgent:
@@ -375,6 +376,92 @@ class MoviePilotAgent:
                         text_parts.append(str(block))
             return "".join(text_parts)
         return str(content)
+
+    @classmethod
+    def _has_image_input_content(cls, content: Any) -> bool:
+        """
+        检查消息内容里是否包含真正会发给模型的图片块。
+        结构化 JSON 文本里的 images 字段只是给 Agent 阅读的说明，不能作为图片输入判断。
+        """
+        if isinstance(content, list):
+            return any(cls._has_image_input_content(item) for item in content)
+        if not isinstance(content, dict):
+            return False
+
+        block_type = str(content.get("type") or "").lower()
+        if block_type in {"image", "image_url", "input_image"}:
+            return True
+        if content.get("image_url") or content.get("image"):
+            return True
+        return any(cls._has_image_input_content(value) for value in content.values())
+
+    @classmethod
+    def _messages_have_image_input(cls, messages: List[BaseMessage]) -> bool:
+        """检查本轮提交给模型的消息列表中是否包含图片输入。"""
+        return any(
+            cls._has_image_input_content(getattr(message, "content", None))
+            for message in messages or []
+        )
+
+    @staticmethod
+    def _exception_detail_text(error: Exception) -> str:
+        """
+        提取异常对象里可用于匹配的文本。
+        OpenAI 兼容端点的错误详情可能藏在 body/code/status_code 等属性中。
+        """
+        parts = [str(error)]
+        for attr in ("message", "code", "status_code"):
+            value = getattr(error, attr, None)
+            if value is not None:
+                parts.append(str(value))
+        body = getattr(error, "body", None)
+        if body is not None:
+            try:
+                parts.append(json.dumps(body, ensure_ascii=False))
+            except (TypeError, ValueError):
+                parts.append(str(body))
+        return " ".join(part for part in parts if part)
+
+    @classmethod
+    def _is_unsupported_image_input_error(cls, error: Exception) -> bool:
+        """
+        判断模型服务是否在拒绝图片输入。
+        兼容 OpenAI 及 OpenAI-compatible 服务常见的错误文案，避免把普通 404 当作图片能力问题。
+        """
+        detail = cls._exception_detail_text(error).lower()
+        if "no endpoints found that support image input" in detail:
+            return True
+        if "image input" not in detail and "images" not in detail:
+            return False
+        return any(
+            marker in detail
+            for marker in (
+                "does not support",
+                "do not support",
+                "not support",
+                "not supported",
+                "unsupported",
+                "no endpoint",
+                "no endpoints",
+            )
+        )
+
+    async def _dispatch_execution_notice(self, message: str) -> None:
+        """
+        将执行层可预期的失败转成用户可读提示。
+        按当前回复模式处理，避免后台捕获任务绕过 CAPTURE_ONLY 约束。
+        """
+        if not message:
+            return
+        self._emit_output(message)
+        if self._tool_context.get("user_reply_sent"):
+            return
+
+        title = "MoviePilot助手" if self.is_background else ""
+        if self.should_dispatch_reply:
+            await self.send_agent_message(message, title=title)
+        elif self.persist_output_message:
+            await self._save_agent_message_to_db(message, title=title)
 
     def _emit_output(self, text: str):
         """
@@ -741,6 +828,12 @@ class MoviePilotAgent:
             logger.info(f"Agent执行被取消: session_id={self.session_id}")
             return "任务已取消", {}
         except Exception as e:
+            if self._messages_have_image_input(messages) and self._is_unsupported_image_input_error(e):
+                logger.warning(
+                    f"当前模型不支持图片输入，已向用户发送友好提示: {e}"
+                )
+                await self._dispatch_execution_notice(UNSUPPORTED_IMAGE_INPUT_MESSAGE)
+                return UNSUPPORTED_IMAGE_INPUT_MESSAGE, {}
             logger.error(f"Agent执行失败: {e} - {traceback.format_exc()}")
             return str(e), {}
         finally:
