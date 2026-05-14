@@ -50,7 +50,11 @@ class ListUtils:
         if not any(isinstance(sublist, list) for sublist in nested_list):
             return nested_list
 
-        return [item for sublist in nested_list if isinstance(sublist, list) for item in sublist]
+        return [
+            item
+            for sublist in nested_list
+            for item in (sublist if isinstance(sublist, list) else [sublist])
+        ]
 
 
 class SetUtils:
