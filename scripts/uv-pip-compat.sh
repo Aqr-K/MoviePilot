@@ -27,7 +27,8 @@ fi
 has_environment_option() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            -p|--python|--python=*|-p*|--system)
+            -p|--python|--python=*|-p*|--system|--user|\
+            -t|--target|--target=*|-t*|--prefix|--prefix=*)
                 return 0
                 ;;
             --)
@@ -37,6 +38,18 @@ has_environment_option() {
         shift
     done
     return 1
+}
+
+uv_pip_with_venv_python() {
+    command_name="$1"
+    shift
+
+    if [ -x "${SCRIPT_DIR}/python" ] && ! has_environment_option "$@"; then
+        # uv 不会仅凭 pip 软链接位置锁定 venv，本地安装也不会激活 venv。
+        # 因此需要在会读取或改写环境的 pip 子命令上显式绑定当前 venv 解释器。
+        exec "${UV_BIN}" pip "${command_name}" --python "${SCRIPT_DIR}/python" "$@"
+    fi
+    exec "${UV_BIN}" pip "${command_name}" "$@"
 }
 
 case "${COMMAND_NAME}" in
@@ -53,13 +66,10 @@ case "${COMMAND_NAME}" in
                 shift
                 exec "${UV_BIN}" help pip "$@"
                 ;;
-            check)
-                if [ -x "${SCRIPT_DIR}/python" ] && ! has_environment_option "$@"; then
-                    # uv 不会仅凭 pip 软链接位置锁定 venv，显式绑定当前运行态解释器。
-                    shift
-                    exec "${UV_BIN}" pip check --python "${SCRIPT_DIR}/python" "$@"
-                fi
-                exec "${UV_BIN}" pip "$@"
+            check|freeze|install|list|show|sync|tree|uninstall)
+                pip_command="$1"
+                shift
+                uv_pip_with_venv_python "${pip_command}" "$@"
                 ;;
             *)
                 exec "${UV_BIN}" pip "$@"
@@ -70,7 +80,7 @@ case "${COMMAND_NAME}" in
         exec "${UV_BIN}" pip compile "$@"
         ;;
     pip-sync)
-        exec "${UV_BIN}" pip sync "$@"
+        uv_pip_with_venv_python sync "$@"
         ;;
     *)
         echo "不支持的 pip 兼容命令入口：${COMMAND_NAME}" >&2
