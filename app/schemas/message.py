@@ -275,6 +275,8 @@ class ChannelCapability(Enum):
     LINKS = "links"
     # 支持文件发送
     FILE_SENDING = "file_sending"
+    # 支持可收口的消息处理状态提示，如 reaction 或 typing
+    PROCESSING_STATUS = "processing_status"
 
 
 @dataclass
@@ -312,6 +314,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
                 ChannelCapability.FILE_SENDING,
+                ChannelCapability.PROCESSING_STATUS,
             },
             max_buttons_per_row=4,
             max_button_rows=10,
@@ -339,6 +342,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
                 ChannelCapability.FILE_SENDING,
+                ChannelCapability.PROCESSING_STATUS,
             },
             max_buttons_per_row=3,
             max_button_rows=8,
@@ -370,6 +374,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.LINKS,
                 ChannelCapability.MENU_COMMANDS,
                 ChannelCapability.FILE_SENDING,
+                ChannelCapability.PROCESSING_STATUS,
             },
             max_buttons_per_row=3,
             max_button_rows=8,
@@ -390,6 +395,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
                 ChannelCapability.FILE_SENDING,
+                ChannelCapability.PROCESSING_STATUS,
             },
             max_buttons_per_row=5,
             max_button_rows=5,

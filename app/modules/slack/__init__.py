@@ -12,6 +12,7 @@ from app.schemas.types import ModuleType
 
 
 class SlackModule(_ModuleBase, _MessageBase[Slack]):
+    PROCESSING_REACTION = "eyes"
     _AUDIO_SUFFIXES = (
         ".mp3",
         ".m4a",
@@ -222,10 +223,14 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
             images = None
             audio_refs = None
             files = None
+            message_id = None
+            chat_id = None
             if msg_json.get("type") == "message":
                 userid = msg_json.get("user")
                 text = msg_json.get("text")
                 username = msg_json.get("user")
+                message_id = msg_json.get("ts")
+                chat_id = msg_json.get("channel")
                 images = self._extract_images(msg_json)
                 audio_refs = self._extract_audio_refs(msg_json)
                 files = self._extract_files(msg_json)
@@ -270,6 +275,8 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     flags=re.IGNORECASE,
                 ).strip()
                 username = ""
+                message_id = msg_json.get("event", {}).get("ts")
+                chat_id = msg_json.get("event", {}).get("channel")
                 images = self._extract_images(msg_json.get("event", {}))
                 audio_refs = self._extract_audio_refs(msg_json.get("event", {}))
                 files = self._extract_files(msg_json.get("event", {}))
@@ -281,6 +288,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 userid = msg_json.get("user_id")
                 text = msg_json.get("command")
                 username = msg_json.get("user_name")
+                chat_id = msg_json.get("channel_id")
             else:
                 return None
             logger.info(
@@ -294,6 +302,8 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 userid=userid,
                 username=username,
                 text=text,
+                message_id=message_id,
+                chat_id=chat_id,
                 images=images,
                 audio_refs=audio_refs,
                 files=files,
@@ -588,6 +598,78 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 if result and result[0]:
                     return True
         return False
+
+    def mark_message_processing_started(
+        self,
+        channel: MessageChannel,
+        source: str,
+        userid: Optional[Union[str, int]] = None,
+        message_id: Optional[Union[str, int]] = None,
+        chat_id: Optional[Union[str, int]] = None,
+        text: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        使用 Slack reaction 标记“正在处理”。
+        """
+        if channel != self._channel:
+            return None
+        if not message_id or not chat_id or not text or str(text).startswith("CALLBACK:"):
+            return None
+        config = self.get_config(source)
+        if not config:
+            return None
+        client: Slack = self.get_instance(config.name)
+        if not client:
+            return None
+        if not client.add_reaction(
+                channel=str(chat_id),
+                timestamp=str(message_id),
+                emoji=self.PROCESSING_REACTION,
+        ):
+            return None
+        return {
+            "channel": channel.value,
+            "source": source,
+            "userid": userid,
+            "message_id": str(message_id),
+            "chat_id": str(chat_id),
+            "metadata": {
+                "kind": "reaction",
+                "emoji": self.PROCESSING_REACTION,
+            },
+        }
+
+    def mark_message_processing_finished(
+        self,
+        channel: MessageChannel,
+        source: str,
+        userid: Optional[Union[str, int]] = None,
+        message_id: Optional[Union[str, int]] = None,
+        chat_id: Optional[Union[str, int]] = None,
+        status: Optional[dict] = None,
+    ) -> Optional[bool]:
+        """
+        移除 Slack “正在处理” reaction。
+        """
+        if channel != self._channel:
+            return None
+        metadata = (status or {}).get("metadata") or {}
+        target_message_id = (status or {}).get("message_id") or message_id
+        target_chat_id = (status or {}).get("chat_id") or chat_id
+        emoji = metadata.get("emoji") or self.PROCESSING_REACTION
+        if not target_message_id or not target_chat_id:
+            return False
+        config = self.get_config(source)
+        if not config:
+            return False
+        client: Slack = self.get_instance(config.name)
+        if not client:
+            return False
+        return client.remove_reaction(
+            channel=str(target_chat_id),
+            timestamp=str(target_message_id),
+            emoji=str(emoji),
+        )
 
     def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:
         """

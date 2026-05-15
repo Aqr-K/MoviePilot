@@ -360,6 +360,67 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             return False
         return client.delete_message_reaction(message_id=message_id, reaction_id=reaction_id)
 
+    def mark_message_processing_started(
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+            text: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        使用飞书消息表情标记“正在处理”。
+        """
+        if channel != self._channel:
+            return None
+        if not message_id or not text or str(text).startswith("CALLBACK:"):
+            return None
+        reaction_id = self.add_feishu_message_reaction(
+            message_id=str(message_id),
+            emoji_type=Feishu.PROCESSING_REACTION_EMOJI,
+            source=source,
+        )
+        if not reaction_id:
+            return None
+        return {
+            "channel": channel.value,
+            "source": source,
+            "userid": userid,
+            "message_id": str(message_id),
+            "chat_id": str(chat_id) if chat_id else None,
+            "metadata": {
+                "kind": "reaction",
+                "reaction_id": str(reaction_id),
+                "emoji_type": Feishu.PROCESSING_REACTION_EMOJI,
+            },
+        }
+
+    def mark_message_processing_finished(
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+            status: Optional[dict] = None,
+    ) -> Optional[bool]:
+        """
+        删除飞书“正在处理”表情。
+        """
+        if channel != self._channel:
+            return None
+        metadata = (status or {}).get("metadata") or {}
+        target_message_id = (status or {}).get("message_id") or message_id
+        reaction_id = metadata.get("reaction_id")
+        if not target_message_id or not reaction_id:
+            return False
+        return self.delete_feishu_message_reaction(
+            message_id=str(target_message_id),
+            reaction_id=str(reaction_id),
+            source=source,
+        )
+
     def finalize_message(self, response: MessageResponse) -> bool:
         if response.channel != self._channel or not isinstance(response.metadata, dict):
             return False

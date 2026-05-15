@@ -289,6 +289,40 @@ class Slack:
             logger.error(f"Slack文件发送失败: {err}")
             return False, str(err)
 
+    def add_reaction(self, channel: str, timestamp: str, emoji: str) -> bool:
+        """
+        为 Slack 消息添加 reaction，用作正在处理状态。
+        """
+        if not self._client or not channel or not timestamp or not emoji:
+            return False
+        try:
+            result = self._client.reactions_add(
+                channel=channel,
+                timestamp=timestamp,
+                name=emoji,
+            )
+            return bool(result and result.get("ok", True))
+        except Exception as err:
+            logger.error(f"Slack添加reaction失败: {err}")
+            return False
+
+    def remove_reaction(self, channel: str, timestamp: str, emoji: str) -> bool:
+        """
+        移除 Slack 消息 reaction。
+        """
+        if not self._client or not channel or not timestamp or not emoji:
+            return False
+        try:
+            result = self._client.reactions_remove(
+                channel=channel,
+                timestamp=timestamp,
+                name=emoji,
+            )
+            return bool(result and result.get("ok", True))
+        except Exception as err:
+            logger.error(f"Slack移除reaction失败: {err}")
+            return False
+
     def send_medias_msg(self, medias: List[MediaInfo], userid: Optional[str] = None, title: Optional[str] = None,
                         buttons: Optional[List[List[dict]]] = None,
                         original_message_id: Optional[str] = None,

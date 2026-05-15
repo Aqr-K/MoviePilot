@@ -596,6 +596,57 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     return True
         return False
 
+    def mark_message_processing_started(
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+            text: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        标记 Telegram 消息正在处理。
+        入站侧已经启动 typing 任务，这里只返回可用于统一收口的上下文。
+        """
+        if channel != self._channel:
+            return None
+        if not text:
+            return None
+        return {
+            "channel": channel.value,
+            "source": source,
+            "userid": userid,
+            "message_id": message_id,
+            "chat_id": chat_id,
+            "metadata": {"kind": "typing"},
+        }
+
+    def mark_message_processing_finished(
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+            status: Optional[dict] = None,
+    ) -> Optional[bool]:
+        """
+        结束 Telegram typing 状态。
+        """
+        if channel != self._channel:
+            return None
+        if status:
+            chat_id = status.get("chat_id") or chat_id
+            userid = status.get("userid") or userid
+        client_config = self.get_config(source)
+        if not client_config:
+            return False
+        client: Telegram = self.get_instance(client_config.name)
+        if not client:
+            return False
+        return client.stop_typing(chat_id=chat_id, userid=userid)
+
     def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:
         """
         直接发送消息并返回消息ID等信息

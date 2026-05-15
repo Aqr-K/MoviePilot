@@ -31,7 +31,7 @@ from app.helper.interaction import agent_interaction_manager, media_interaction_
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import Notification, CommingMessage, NotExistMediaInfo
-from app.schemas.message import ChannelCapabilityManager
+from app.schemas.message import ChannelCapabilityManager, ChannelCapability
 from app.schemas.types import EventType, MessageChannel, MediaType
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
@@ -48,11 +48,24 @@ class MessageChain(ChainBase):
     _session_timeout_minutes: int = 24 * 60
 
     @dataclass
-    class _ProcessingMarker:
+    class _ProcessingStatus:
         channel: MessageChannel
         source: str
-        message_id: str
-        reaction_id: str
+        userid: Optional[Union[str, int]] = None
+        message_id: Optional[Union[str, int]] = None
+        chat_id: Optional[Union[str, int]] = None
+        metadata: Optional[Dict[str, Any]] = None
+
+        def to_dict(self) -> Dict[str, Any]:
+            """转换为模块接口可安全传递的普通字典。"""
+            return {
+                "channel": self.channel.value,
+                "source": self.source,
+                "userid": self.userid,
+                "message_id": self.message_id,
+                "chat_id": self.chat_id,
+                "metadata": self.metadata or {},
+            }
 
     def process(self, body: Any, form: Any, args: Any) -> None:
         """
@@ -158,25 +171,40 @@ class MessageChain(ChainBase):
                 text=text,
             )
 
-        self._mark_message_processing_started(
-            channel=channel,
-            source=source,
-            original_message_id=original_message_id,
-            text=text,
-        )
-        self._handle_message_core(
+        processing_status = self._mark_message_processing_started(
             channel=channel,
             source=source,
             userid=userid,
-            username=username,
-            text=text,
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
-            images=images,
-            audio_refs=audio_refs,
-            files=files,
-            has_audio_input=has_audio_input,
+            text=text,
         )
+        continues_async = False
+        try:
+            continues_async = self._handle_message_core(
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                text=text,
+                original_message_id=original_message_id,
+                original_chat_id=original_chat_id,
+                images=images,
+                audio_refs=audio_refs,
+                files=files,
+                has_audio_input=has_audio_input,
+                processing_status=processing_status,
+            )
+        finally:
+            if continues_async is not True:
+                self._mark_message_processing_finished(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    status=processing_status,
+                    original_message_id=original_message_id,
+                    original_chat_id=original_chat_id,
+                )
 
     def _handle_message_core(
             self,
@@ -191,7 +219,8 @@ class MessageChain(ChainBase):
             audio_refs: Optional[List[str]] = None,
             files: Optional[List[CommingMessage.MessageAttachment]] = None,
             has_audio_input: bool = False,
-    ) -> None:
+            processing_status: Optional[_ProcessingStatus] = None,
+    ) -> bool:
         """执行实际消息路由，便于统一包裹处理中状态。"""
 
         if text.startswith("CALLBACK:"):
@@ -211,14 +240,14 @@ class MessageChain(ChainBase):
                     channel.value,
                     text,
                 )
-            return
+            return False
 
         if text.startswith("/") and not text.lower().startswith("/ai"):
             self.eventmanager.send_event(
                 EventType.CommandExcute,
                 {"cmd": text, "user": userid, "channel": channel, "source": source},
             )
-            return
+            return False
 
         latest_slash_interaction = self._get_latest_slash_interaction(userid)
         if latest_slash_interaction == "sites":
@@ -229,7 +258,7 @@ class MessageChain(ChainBase):
                     username=username,
                     text=text,
             ):
-                return
+                return False
 
         if latest_slash_interaction == "subscribes":
             if SubscribeChain().handle_text_interaction(
@@ -239,7 +268,7 @@ class MessageChain(ChainBase):
                     username=username,
                     text=text,
             ):
-                return
+                return False
 
         if latest_slash_interaction == "skills":
             if SkillsChain().handle_text_interaction(
@@ -249,7 +278,7 @@ class MessageChain(ChainBase):
                     username=username,
                     text=text,
             ):
-                return
+                return False
 
         if media_interaction_manager.get_by_user(userid):
             if MediaInteractionChain().handle_text_interaction(
@@ -259,10 +288,10 @@ class MessageChain(ChainBase):
                     username=username,
                     text=text,
             ):
-                return
+                return False
 
         if text.lower().startswith("/ai"):
-            self._handle_ai_message(
+            return self._handle_ai_message(
                 text=text,
                 channel=channel,
                 source=source,
@@ -272,14 +301,14 @@ class MessageChain(ChainBase):
                 original_chat_id=original_chat_id,
                 images=images,
                 files=files,
+                processing_status=processing_status,
             )
-            return
 
         if (
                 settings.AI_AGENT_ENABLE
                 and (settings.AI_AGENT_GLOBAL or images or files or has_audio_input)
         ):
-            self._handle_ai_message(
+            return self._handle_ai_message(
                 text=text,
                 channel=channel,
                 source=source,
@@ -289,8 +318,8 @@ class MessageChain(ChainBase):
                 original_chat_id=original_chat_id,
                 images=images,
                 files=files,
+                processing_status=processing_status,
             )
-            return
 
         if MediaInteractionChain().handle_text_interaction(
                 channel=channel,
@@ -299,7 +328,7 @@ class MessageChain(ChainBase):
                 username=username,
                 text=text,
         ):
-            return
+            return False
 
         self.eventmanager.send_event(
             EventType.UserMessage,
@@ -310,35 +339,80 @@ class MessageChain(ChainBase):
                 "source": source,
             },
         )
+        return False
 
     def _mark_message_processing_started(
             self,
             channel: MessageChannel,
             source: str,
+            userid: Union[str, int],
             original_message_id: Optional[Union[str, int]],
+            original_chat_id: Optional[Union[str, int]],
             text: str,
-    ) -> Optional[_ProcessingMarker]:
+    ) -> Optional[_ProcessingStatus]:
         """为支持的渠道标记“消息正在处理”。"""
-        if channel != MessageChannel.Feishu:
+        if not ChannelCapabilityManager.supports_capability(
+                channel, ChannelCapability.PROCESSING_STATUS
+        ):
             return None
-        if not original_message_id or not text or text.startswith("CALLBACK:"):
-            return None
-
-        reaction_id = self.run_module(
-            "add_feishu_message_reaction",
-            message_id=str(original_message_id),
-            emoji_type="GLANCE",
-            source=source,
-        )
-        if not reaction_id:
+        if not text:
             return None
 
-        return self._ProcessingMarker(
+        try:
+            status = self.run_module(
+                "mark_message_processing_started",
+                channel=channel,
+                source=source,
+                userid=userid,
+                message_id=original_message_id,
+                chat_id=original_chat_id,
+                text=text,
+            )
+        except Exception as err:
+            logger.debug(f"标记消息处理状态失败: {err}")
+            return None
+
+        if not isinstance(status, dict):
+            return None
+        metadata = status.get("metadata")
+        return self._ProcessingStatus(
             channel=channel,
             source=source,
-            message_id=str(original_message_id),
-            reaction_id=str(reaction_id),
+            userid=status.get("userid", userid),
+            message_id=status.get("message_id", original_message_id),
+            chat_id=status.get("chat_id", original_chat_id),
+            metadata=metadata if isinstance(metadata, dict) else {},
         )
+
+    def _mark_message_processing_finished(
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            status: Optional[_ProcessingStatus] = None,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[Union[str, int]] = None,
+    ) -> None:
+        """
+        结束渠道侧“消息正在处理”状态。
+        不同渠道的表现可能是 reaction、typing 等，消息链只负责调用通用模块接口。
+        """
+        if not status and not ChannelCapabilityManager.supports_capability(
+                channel, ChannelCapability.PROCESSING_STATUS
+        ):
+            return
+        try:
+            self.run_module(
+                "mark_message_processing_finished",
+                channel=channel,
+                source=source,
+                userid=userid,
+                message_id=status.message_id if status else original_message_id,
+                chat_id=status.chat_id if status else original_chat_id,
+                status=status.to_dict() if status else None,
+            )
+        except Exception as err:
+            logger.debug(f"结束消息处理状态失败: {err}")
 
     def _handle_callback(
             self,
@@ -1063,7 +1137,8 @@ class MessageChain(ChainBase):
             images: Optional[List[CommingMessage.MessageImage]] = None,
             files: Optional[List[CommingMessage.MessageAttachment]] = None,
             session_id: Optional[str] = None,
-    ) -> None:
+            processing_status: Optional[_ProcessingStatus] = None,
+    ) -> bool:
         """
         处理AI智能体消息
         """
@@ -1079,7 +1154,7 @@ class MessageChain(ChainBase):
                         title="MoviePilot智能助手未启用，请在系统设置中启用",
                     )
                 )
-                return
+                return False
 
             images = CommingMessage.MessageImage.normalize_list(images)
 
@@ -1099,7 +1174,7 @@ class MessageChain(ChainBase):
                         title="请输入您的问题或需求",
                     )
                 )
-                return
+                return False
 
             # 生成或复用会话ID
             session_id = session_id or self._get_or_create_session_id(userid)
@@ -1122,7 +1197,7 @@ class MessageChain(ChainBase):
                             title="附件读取失败，请稍后重试",
                         )
                     )
-                    return
+                    return False
             elif images:
                 image_attachments = self._build_image_attachments(images)
                 if (
@@ -1140,7 +1215,7 @@ class MessageChain(ChainBase):
                             title="附件读取失败，请稍后重试",
                         )
                     )
-                    return
+                    return False
                 all_files.extend(image_attachments)
                 images = None
 
@@ -1160,7 +1235,7 @@ class MessageChain(ChainBase):
                         title="文件读取失败，请稍后重试",
                     )
                 )
-                return
+                return False
 
             # 在事件循环中处理
             asyncio.run_coroutine_threadsafe(
@@ -1175,17 +1250,20 @@ class MessageChain(ChainBase):
                     username=username,
                     original_message_id=str(original_message_id) if original_message_id else None,
                     original_chat_id=original_chat_id,
+                    processing_status=processing_status.to_dict()
+                    if processing_status
+                    else None,
                 ),
                 global_vars.loop,
             )
-            return
+            return True
 
         except Exception as e:
             logger.error(f"处理AI智能体消息失败: {e}")
             self.messagehelper.put(
                 f"AI智能体处理失败: {str(e)}", role="system", title="MoviePilot助手"
             )
-            return
+            return False
 
     def _transcribe_audio_refs(
             self, audio_refs: List[str], channel: MessageChannel, source: str

@@ -965,6 +965,50 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(reaction_id, "reaction_2")
         self.assertTrue(deleted)
 
+    def test_module_processing_status_uses_reaction_helpers(self):
+        module = FeishuModule()
+        module._channel = MessageChannel.Feishu
+
+        with (
+            patch.object(
+                module,
+                "add_feishu_message_reaction",
+                return_value="reaction_processing",
+            ) as add_reaction,
+            patch.object(
+                module,
+                "delete_feishu_message_reaction",
+                return_value=True,
+            ) as delete_reaction,
+        ):
+            status = module.mark_message_processing_started(
+                channel=MessageChannel.Feishu,
+                source="feishu-main",
+                userid="ou_x",
+                message_id="om_x",
+                chat_id="oc_x",
+                text="hello",
+            )
+            deleted = module.mark_message_processing_finished(
+                channel=MessageChannel.Feishu,
+                source="feishu-main",
+                userid="ou_x",
+                status=status,
+            )
+
+        add_reaction.assert_called_once_with(
+            message_id="om_x",
+            emoji_type="GLANCE",
+            source="feishu-main",
+        )
+        delete_reaction.assert_called_once_with(
+            message_id="om_x",
+            reaction_id="reaction_processing",
+            source="feishu-main",
+        )
+        self.assertEqual(status["metadata"]["reaction_id"], "reaction_processing")
+        self.assertTrue(deleted)
+
     def test_module_finalize_message_closes_streaming_card(self):
         module = FeishuModule()
         module._channel = MessageChannel.Feishu

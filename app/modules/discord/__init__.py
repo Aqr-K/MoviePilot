@@ -473,6 +473,69 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                     return True
         return False
 
+    def mark_message_processing_started(
+        self,
+        channel: MessageChannel,
+        source: str,
+        userid: Optional[Union[str, int]] = None,
+        message_id: Optional[Union[str, int]] = None,
+        chat_id: Optional[Union[str, int]] = None,
+        text: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        使用 Discord typing 指示标记“正在处理”。
+        """
+        if channel != self._channel:
+            return None
+        if not text:
+            return None
+        config = self.get_config(source)
+        if not config:
+            return None
+        client: Discord = self.get_instance(config.name)
+        if not client:
+            return None
+        if not client.start_typing(
+                userid=str(userid) if userid else None,
+                chat_id=str(chat_id) if chat_id else None,
+        ):
+            return None
+        return {
+            "channel": channel.value,
+            "source": source,
+            "userid": userid,
+            "message_id": str(message_id) if message_id else None,
+            "chat_id": str(chat_id) if chat_id else None,
+            "metadata": {"kind": "typing"},
+        }
+
+    def mark_message_processing_finished(
+        self,
+        channel: MessageChannel,
+        source: str,
+        userid: Optional[Union[str, int]] = None,
+        message_id: Optional[Union[str, int]] = None,
+        chat_id: Optional[Union[str, int]] = None,
+        status: Optional[dict] = None,
+    ) -> Optional[bool]:
+        """
+        停止 Discord typing 续发任务。
+        """
+        if channel != self._channel:
+            return None
+        target_chat_id = (status or {}).get("chat_id") or chat_id
+        target_userid = (status or {}).get("userid") or userid
+        config = self.get_config(source)
+        if not config:
+            return False
+        client: Discord = self.get_instance(config.name)
+        if not client:
+            return False
+        return client.stop_typing(
+            userid=str(target_userid) if target_userid else None,
+            chat_id=str(target_chat_id) if target_chat_id else None,
+        )
+
     def send_direct_message(self, message: Notification) -> Optional[MessageResponse]:
         """
         直接发送消息并返回消息ID等信息

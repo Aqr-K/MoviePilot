@@ -8,6 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from fastapi.concurrency import run_in_threadpool
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     SummarizationMiddleware,
@@ -51,6 +52,40 @@ from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 class AgentChain(ChainBase):
     pass
+
+
+def _finish_processing_status(status: Optional[dict], user_id: Optional[str] = None) -> None:
+    """结束入站消息的渠道处理状态。"""
+    if not status:
+        return
+    try:
+        channel = MessageChannel(status.get("channel"))
+    except Exception:
+        return
+    try:
+        AgentChain().run_module(
+            "mark_message_processing_finished",
+            channel=channel,
+            source=status.get("source"),
+            userid=status.get("userid") or user_id,
+            message_id=status.get("message_id"),
+            chat_id=status.get("chat_id"),
+            status=status,
+        )
+    except Exception as err:
+        logger.debug(f"结束Agent消息处理状态失败: {err}")
+
+
+async def _async_finish_processing_status(
+        status: Optional[dict], user_id: Optional[str] = None
+) -> None:
+    """
+    在 Agent worker 中结束渠道处理状态。
+    渠道收口可能触发外部 API，同步实现需切到线程池避免阻塞事件循环。
+    """
+    if not status:
+        return
+    await run_in_threadpool(_finish_processing_status, status, user_id)
 
 
 @dataclass
@@ -901,6 +936,7 @@ class _MessageTask:
     username: Optional[str] = None
     original_message_id: Optional[str] = None
     original_chat_id: Optional[str] = None
+    processing_status: Optional[dict] = None
     reply_mode: ReplyMode = ReplyMode.DISPATCH
 
 
@@ -987,6 +1023,7 @@ class AgentManager:
             username: str = None,
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
+            processing_status: Optional[dict] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
     ) -> str:
         """
@@ -1004,6 +1041,7 @@ class AgentManager:
             username=username,
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
+            processing_status=processing_status,
             reply_mode=reply_mode,
         )
 
@@ -1062,6 +1100,9 @@ class AgentManager:
                 except Exception as e:
                     logger.error(f"处理会话 {session_id} 的消息失败: {e}")
                 finally:
+                    await _async_finish_processing_status(
+                        task.processing_status, task.user_id
+                    )
                     queue.task_done()
 
         except asyncio.CancelledError:
