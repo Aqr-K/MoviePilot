@@ -249,10 +249,11 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                 torrents, _ = server.get_torrents(ids=hashs, tags=settings.TORRENT_TAG) or []
                 try:
                     for torrent in torrents:
+                        torrent_path = Path(torrent.download_dir) / torrent.name
                         ret_torrents.append(TransferTorrent(
                             downloader=name,
                             title=torrent.name,
-                            path=Path(torrent.download_dir) / torrent.name,
+                            path=Path(self.normalize_return_path(torrent_path, name)),
                             hash=torrent.hashString,
                             size=torrent.total_size,
                             tags=",".join(torrent.labels or []),
@@ -276,10 +277,11 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
                         if not path:
                             logger.debug(f"未获取到 {torrent.name} 下载保存路径")
                             continue
+                        torrent_path = Path(torrent.download_dir) / torrent.name
                         ret_torrents.append(TransferTorrent(
                             downloader=name,
                             title=torrent.name,
-                            path=Path(torrent.download_dir) / torrent.name,
+                            path=Path(self.normalize_return_path(torrent_path, name)),
                             hash=torrent.hashString,
                             tags=",".join(torrent.labels or []),
                             progress=torrent.progress,

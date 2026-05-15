@@ -319,7 +319,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
                             TransferTorrent(
                                 downloader=name,
                                 title=torrent.get("name"),
-                                path=torrent_path,
+                                path=Path(self.normalize_return_path(torrent_path, name)),
                                 hash=torrent.get("hash"),
                                 size=torrent.get("total_size"),
                                 tags=torrent.get("tags"),
@@ -355,7 +355,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
                             TransferTorrent(
                                 downloader=name,
                                 title=torrent.get("name"),
-                                path=torrent_path,
+                                path=Path(self.normalize_return_path(torrent_path, name)),
                                 hash=torrent.get("hash"),
                                 tags=torrent.get("tags"),
                             )
