@@ -1,16 +1,62 @@
+import re
 from copy import deepcopy
+from functools import lru_cache
 from typing import List, Tuple, Union, Dict, Optional
 
 from app.core.context import TorrentInfo, MediaInfo
+from app.core.metainfo import MetaInfo
 from app.helper.rule import RuleHelper
 from app.log import logger
-import re
-from app.core.metainfo import MetaInfo
 from app.modules import _ModuleBase
 from app.modules.filter.RuleParser import RuleParser
 from app.modules.filter.builtin_rules import BUILTIN_RULE_SET
 from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
 from app.utils.string import StringUtils
+
+
+_SIZE_UNIT = 1024 * 1024
+
+
+@lru_cache(maxsize=1024)
+def _compile_ignorecase(pattern: str) -> re.Pattern:
+    """
+    编译过滤规则正则。
+    过滤规则在搜索/订阅中会被大量种子重复匹配，缓存编译结果能减少热路径开销；
+    这里仍保留原有的 IGNORECASE 语义，非法正则也会像原来一样在匹配时抛出异常。
+    """
+    return re.compile(r"%s" % pattern, re.IGNORECASE)
+
+
+def _regex_search(pattern: Union[str, int, float], content: str) -> bool:
+    """
+    按原有字符串插值语义执行正则匹配，同时复用已编译表达式。
+    """
+    return bool(_compile_ignorecase(str(pattern)).search(content))
+
+
+@lru_cache(maxsize=256)
+def _parse_size_range(size_range: str) -> Tuple[str, float, Optional[float]]:
+    """
+    解析大小范围，单位为 MB。
+    返回值中的操作符只供本模块内部使用，避免每个种子重复拆分同一个规则。
+    """
+    size_range = size_range.strip()
+    if size_range.find("-") != -1:
+        size_min, size_max = size_range.split("-")
+        return "between", float(size_min.strip()) * _SIZE_UNIT, float(size_max.strip()) * _SIZE_UNIT
+    if size_range.startswith(">"):
+        return "gte", float(size_range[1:].strip()) * _SIZE_UNIT, None
+    if size_range.startswith("<"):
+        return "lte", 0, float(size_range[1:].strip()) * _SIZE_UNIT
+    return "unknown", 0, None
+
+
+@lru_cache(maxsize=256)
+def _parse_publish_time(publish_time: str) -> Tuple[float, ...]:
+    """
+    解析发布时间规则，避免同一规则对大量种子反复转换 float。
+    """
+    return tuple(float(t) for t in publish_time.split("-"))
 
 
 class FilterModule(_ModuleBase):
@@ -86,6 +132,9 @@ class FilterModule(_ModuleBase):
         if not rule_groups:
             return torrent_list
         parser = RuleParser()
+        # 同一轮过滤里，相同的优先级层级会被多个种子反复使用；按需解析并缓存，
+        # 既减少 pyparsing 开销，也保留原来“命中高优先级后不解析低层级”的容错行为。
+        parsed_rule_cache: Dict[str, Union[list, str]] = {}
         # 查询规则表详情
         groups = self.rulehelper.get_rule_group_by_media(media=mediainfo, group_names=rule_groups)
         if groups:
@@ -97,21 +146,27 @@ class FilterModule(_ModuleBase):
                     torrent_list=torrent_list,
                     mediainfo=mediainfo,
                     parser=parser,
+                    parsed_rule_cache=parsed_rule_cache,
                 )
         return torrent_list
 
     def __filter_torrents(self, rule_string: str, rule_name: str,
                           torrent_list: List[TorrentInfo],
                           mediainfo: MediaInfo,
-                          parser: RuleParser) -> List[TorrentInfo]:
+                          parser: RuleParser,
+                          parsed_rule_cache: Dict[str, Union[list, str]]) -> List[TorrentInfo]:
         """
         过滤种子
         """
+        if not torrent_list:
+            return []
+        # 只拆分一次规则层级；具体层级仍延迟到真正需要匹配时解析。
+        rule_groups = [rule_group.strip() for rule_group in rule_string.split('>')]
         # 返回种子列表
         ret_torrents = []
         for torrent in torrent_list:
             # 能命中优先级的才返回
-            if not self.__get_order(torrent, rule_string, mediainfo, parser):
+            if not self.__get_order(torrent, rule_groups, mediainfo, parser, parsed_rule_cache):
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} {torrent.description or ''} "
                              f"不匹配 {rule_name} 过滤规则")
                 continue
@@ -119,13 +174,12 @@ class FilterModule(_ModuleBase):
 
         return ret_torrents
 
-    def __get_order(self, torrent: TorrentInfo, rule_str: str,
-                    mediainfo: MediaInfo, parser: RuleParser) -> Optional[TorrentInfo]:
+    def __get_order(self, torrent: TorrentInfo, rule_groups: List[str],
+                    mediainfo: MediaInfo, parser: RuleParser,
+                    parsed_rule_cache: Dict[str, Union[list, str]]) -> Optional[TorrentInfo]:
         """
         获取种子匹配的规则优先级，值越大越优先，未匹配时返回None
         """
-        # 多级规则
-        rule_groups = rule_str.split('>')
         # 优先级
         res_order = 100
         # 是否匹配
@@ -133,8 +187,8 @@ class FilterModule(_ModuleBase):
 
         for rule_group in rule_groups:
             # 解析规则组
-            parsed_group = parser.parse(rule_group.strip())
-            if self.__match_group(torrent, parsed_group.as_list()[0], mediainfo):
+            parsed_group = self.__parse_rule_group(rule_group, parser, parsed_rule_cache)
+            if self.__match_group(torrent, parsed_group, mediainfo):
                 # 出现匹配时中断
                 matched = True
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} 优先级为 {100 - res_order + 1}")
@@ -144,6 +198,17 @@ class FilterModule(_ModuleBase):
             res_order -= 1
 
         return None if not matched else torrent
+
+    @staticmethod
+    def __parse_rule_group(rule_group: str, parser: RuleParser,
+                           parsed_rule_cache: Dict[str, Union[list, str]]) -> Union[list, str]:
+        """
+        解析单个优先级层级。
+        缓存粒度放在层级表达式上，兼容多个规则组复用相同表达式的情况。
+        """
+        if rule_group not in parsed_rule_cache:
+            parsed_rule_cache[rule_group] = parser.parse(rule_group).as_list()[0]
+        return parsed_rule_cache[rule_group]
 
     def __match_group(self, torrent: TorrentInfo, rule_group: Union[list, str],
                       mediainfo: MediaInfo) -> Optional[bool]:
@@ -173,12 +238,13 @@ class FilterModule(_ModuleBase):
         """
         判断种子是否匹配规则项
         """
-        if not self.rule_set.get(rule_name):
+        rule = self.rule_set.get(rule_name)
+        if not rule:
             # 规则不存在
             logger.debug(f"规则 {rule_name} 不存在")
             return False
         # TMDB规则
-        tmdb = self.rule_set[rule_name].get("tmdb")
+        tmdb = rule.get("tmdb")
         # 符合TMDB规则的直接返回True，即不过滤
         if tmdb and self.__match_tmdb(tmdb, mediainfo):
             logger.debug(f"种子 {torrent.site_name} - {torrent.title} 符合 {rule_name} 的TMDB规则，匹配成功")
@@ -187,7 +253,7 @@ class FilterModule(_ModuleBase):
         content = f"{torrent.title} {torrent.description} {' '.join(torrent.labels or [])}"
         # 只匹配指定关键字
         match_content = []
-        matchs = self.rule_set[rule_name].get("match") or []
+        matchs = rule.get("match") or []
         if matchs:
             for match in matchs:
                 if not hasattr(torrent, match):
@@ -202,27 +268,27 @@ class FilterModule(_ModuleBase):
         if match_content:
             content = " ".join(match_content)
         # 包含规则项
-        includes = self.rule_set[rule_name].get("include") or []
+        includes = rule.get("include") or []
         if not isinstance(includes, list):
             includes = [includes]
         # 排除规则项
-        excludes = self.rule_set[rule_name].get("exclude") or []
+        excludes = rule.get("exclude") or []
         if not isinstance(excludes, list):
             excludes = [excludes]
         # 大小范围规则项
-        size_range = self.rule_set[rule_name].get("size_range")
+        size_range = rule.get("size_range")
         # 做种人数规则项
-        seeders = self.rule_set[rule_name].get("seeders")
+        seeders = rule.get("seeders")
         # FREE规则
-        downloadvolumefactor = self.rule_set[rule_name].get("downloadvolumefactor")
+        downloadvolumefactor = rule.get("downloadvolumefactor")
         # 发布时间规则
-        pubdate: str = self.rule_set[rule_name].get("publish_time")
-        if includes and not any(re.search(r"%s" % include, content, re.IGNORECASE) for include in includes):
+        pubdate: str = rule.get("publish_time")
+        if includes and not any(_regex_search(include, content) for include in includes):
             # 未发现任何包含项
             logger.debug(f"种子 {torrent.site_name} - {torrent.title} 不包含任何项 {includes}")
             return False
         for exclude in excludes:
-            if re.search(r"%s" % exclude, content, re.IGNORECASE):
+            if _regex_search(exclude, content):
                 # 发现排除项
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} 包含 {exclude}")
                 return False
@@ -247,7 +313,7 @@ class FilterModule(_ModuleBase):
             # 种子发布时间
             pub_minutes = torrent.pub_minutes()
             # 发布时间规则
-            pub_times = [float(t) for t in pubdate.split("-")]
+            pub_times = _parse_publish_time(pubdate)
             if len(pub_times) == 1:
                 # 发布时间小于规则
                 if pub_minutes < pub_times[0]:
@@ -319,22 +385,17 @@ class FilterModule(_ModuleBase):
         # 每集大小
         torrent_size = torrent.size / episode_count
         # 大小范围
-        size_range = size_range.strip()
-        if size_range.find("-") != -1:
+        size_rule, size_min, size_max = _parse_size_range(size_range)
+        if size_rule == "between":
             # 区间
-            size_min, size_max = size_range.split("-")
-            size_min = float(size_min.strip()) * 1024 * 1024
-            size_max = float(size_max.strip()) * 1024 * 1024
             if size_min <= torrent_size <= size_max:
                 return True
-        elif size_range.startswith(">"):
+        elif size_rule == "gte":
             # 大于
-            size_min = float(size_range[1:].strip()) * 1024 * 1024
             if torrent_size >= size_min:
                 return True
-        elif size_range.startswith("<"):
+        elif size_rule == "lte":
             # 小于
-            size_max = float(size_range[1:].strip()) * 1024 * 1024
             if torrent_size <= size_max:
                 return True
         return False
