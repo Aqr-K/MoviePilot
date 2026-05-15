@@ -486,6 +486,7 @@ class ConfigModel(BaseModel):
     SECURITY_IMAGE_DOMAINS: list = Field(
         default=[
             "image.tmdb.org",
+            "images.tmdb.org",
             "static-mdb.v.geilijiasu.com",
             "bing.com",
             "doubanio.com",

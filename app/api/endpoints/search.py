@@ -144,6 +144,23 @@ async def search_latest(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     return [torrent.to_dict() for torrent in torrents]
 
 
+@router.get("/last/context", summary="查询上次搜索上下文", response_model=schemas.Response)
+async def search_latest_context(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    查询上次搜索结果及其对应的搜索参数。
+    """
+    search_chain = SearchChain()
+    torrents = await search_chain.async_last_search_results() or []
+    params = await search_chain.async_last_search_params() or {}
+    return schemas.Response(
+        success=True,
+        data={
+            "params": params,
+            "results": [torrent.to_dict() for torrent in torrents],
+        },
+    )
+
+
 @router.get("/media/{mediaid}/stream", summary="渐进式精确搜索资源")
 async def search_by_id_stream(
     request: Request,

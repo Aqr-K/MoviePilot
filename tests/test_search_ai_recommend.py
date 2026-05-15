@@ -28,6 +28,7 @@ from app.agent.tools.factory import MoviePilotToolFactory
 from app.agent import ReplyMode
 from app.chain.search import SearchChain
 from app.core.config import settings
+from app.schemas.types import MediaType
 
 
 def _make_result(title: str, size: int, seeders: int):
@@ -153,10 +154,44 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(1, len(results))
         self.assertEqual(["__ai_recommend_indices__"], removed)
-        self.assertEqual("__search_result__", cached[0][0])
+        self.assertTrue(any(filename == "__search_result__" for filename, _ in cached))
+        self.assertTrue(any(filename == "__search_params__" for filename, _ in cached))
         self.assertIsNone(SearchChain._current_recommend_request_hash)
         self.assertIsNone(SearchChain._ai_recommend_result)
         self.assertIsNone(SearchChain._ai_recommend_error)
+
+    def test_search_by_id_caches_replayable_search_params_when_caching(self):
+        chain = self._make_chain()
+        cached = []
+        chain.save_cache = lambda cache, filename: cached.append((filename, cache))
+        chain.recognize_media = lambda **_kwargs: SimpleNamespace(title="Test")
+        chain.process = lambda **_kwargs: [SimpleNamespace(title="Result")]
+
+        chain.search_by_id(
+            tmdbid=123,
+            mtype=MediaType.MOVIE,
+            area="title",
+            season=2,
+            sites=[1, 3],
+            cache_local=True,
+        )
+
+        self.assertIn(
+            (
+                "__search_params__",
+                {
+                    "keyword": "tmdb:123",
+                    "type": "电影",
+                    "area": "title",
+                    "title": "",
+                    "year": "",
+                    "season": "2",
+                    "sites": "1,3",
+                },
+            ),
+            cached,
+        )
+        self.assertTrue(any(filename == "__search_result__" for filename, _ in cached))
 
     def test_tool_factory_excludes_message_tools_when_disabled(self):
         with patch(
