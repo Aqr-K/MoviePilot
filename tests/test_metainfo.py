@@ -2,7 +2,7 @@
 from pathlib import Path
 from unittest import TestCase
 
-from app.core.metainfo import MetaInfo, MetaInfoPath
+from app.core.metainfo import MetaInfo, MetaInfoPath, find_metainfo
 from tests.cases.meta import meta_cases
 
 
@@ -123,6 +123,22 @@ class MetaInfoTest(TestCase):
         meta = MetaInfo(title="电影测试替换名称 (2024)", custom_words=custom_words)
         self.assertEqual(meta.name, "电影名称")
         self.assertEqual(meta.original_name, "电影测试替换名称")
+
+    def test_custom_words_replace_then_episode_offset(self):
+        """测试复杂识别词仍按先替换、后集数偏移的顺序处理"""
+        custom_words = ["旧名 => 新名 && 第 <> 集 >> EP+1"]
+        meta = MetaInfo(title="旧名 第03集", custom_words=custom_words)
+        self.assertEqual(meta.name, "新名")
+        self.assertEqual(meta.episode, "E04")
+        self.assertEqual(meta.apply_words, custom_words)
+
+    def test_emby_tmdbid_overrides_braced_metainfo_tmdbid(self):
+        """
+        同时存在内嵌元信息和 Emby [tmdbid] 标签时，保持历史上的 [tmdbid] 优先级。
+        """
+        title, metainfo = find_metainfo("Movie {[tmdbid=111;type=movies]} [tmdbid=222]")
+        self.assertEqual(metainfo["tmdbid"], "222")
+        self.assertNotIn("[tmdbid=222]", title)
 
     def test_metainfopath_auxiliary_chinese_stem_uses_parent_title(self):
         """

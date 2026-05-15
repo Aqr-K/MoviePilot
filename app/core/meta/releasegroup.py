@@ -86,6 +86,18 @@ class ReleaseGroupsMatcher(metaclass=Singleton):
             for release_group in site_groups:
                 release_groups.append(release_group)
         self.__release_groups = '|'.join(release_groups)
+        self.systemconfig = SystemConfigOper()
+        self.__groups_re_cache = {}
+
+    def __get_groups_re(self, groups: str):
+        """
+        发布组规则通常很长，按规则文本缓存编译结果，避免每个标题都重复编译。
+        """
+        groups_re = self.__groups_re_cache.get(groups)
+        if not groups_re:
+            groups_re = re.compile(r"(?<=[-@\[￡【&])(?:(?:%s))(?=$|[@.\s\]\[】&])" % groups, re.I)
+            self.__groups_re_cache[groups] = groups_re
+        return groups_re
 
     def match(self, title: str = None, groups: str = None):
         """
@@ -97,7 +109,7 @@ class ReleaseGroupsMatcher(metaclass=Singleton):
             return ""
         if not groups:
             # 自定义组
-            custom_release_groups = SystemConfigOper().get(SystemConfigKey.CustomReleaseGroups)
+            custom_release_groups = self.systemconfig.get(SystemConfigKey.CustomReleaseGroups)
             if isinstance(custom_release_groups, list):
                 custom_release_groups = list(filter(None, custom_release_groups))
             if custom_release_groups:
@@ -106,9 +118,9 @@ class ReleaseGroupsMatcher(metaclass=Singleton):
             else:
                 groups = self.__release_groups
         title = f"{title} "
-        groups_re = re.compile(r"(?<=[-@\[￡【&])(?:(?:%s))(?=$|[@.\s\]\[】&])" % groups, re.I)
+        groups_re = self.__get_groups_re(groups)
         unique_groups = []
-        for item in re.findall(groups_re, title):
+        for item in groups_re.findall(title):
             item_str = item[0] if isinstance(item, tuple) else item
             if item_str not in unique_groups:
                 unique_groups.append(item_str)

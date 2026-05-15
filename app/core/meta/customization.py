@@ -14,6 +14,7 @@ class CustomizationMatcher(metaclass=Singleton):
         self.systemconfig = SystemConfigOper()
         self.customization = None
         self.custom_separator = None
+        self._customization_re_cache = {}
 
     @staticmethod
     def _normalize_customization(customization):
@@ -42,10 +43,14 @@ class CustomizationMatcher(metaclass=Singleton):
             return ""
         self.customization = "|".join([f"({item})" for item in customization])
 
-        customization_re = re.compile(r"%s" % self.customization)
+        customization_re = self._customization_re_cache.get(self.customization)
+        if not customization_re:
+            # 配置每次读取、编译结果按规则缓存，兼顾实时生效和高频识别性能。
+            customization_re = re.compile(r"%s" % self.customization)
+            self._customization_re_cache[self.customization] = customization_re
         # 处理重复多次的情况，保留先后顺序（按添加自定义占位符的顺序）
         unique_customization = {}
-        for item in re.findall(customization_re, title):
+        for item in customization_re.findall(title):
             if not isinstance(item, tuple):
                 item = (item,)
             for i in range(len(item)):

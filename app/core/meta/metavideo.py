@@ -105,6 +105,7 @@ class MetaVideo(MetaBase):
         tokens = Tokens(title)
         # 实例化StreamingPlatforms对象
         streaming_platforms = StreamingPlatforms()
+        media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
         # 解析名称、年份、季、集、资源类型、分辨率等
         token = tokens.get_next()
         while token:
@@ -113,7 +114,7 @@ class MetaVideo(MetaBase):
             self.__init_part(token, tokens)
             # 标题
             if self._continue_flag:
-                self.__init_name(token)
+                self.__init_name(token, media_exts)
             # 年份
             if self._continue_flag:
                 self.__init_year(token)
@@ -226,7 +227,7 @@ class MetaVideo(MetaBase):
                 name = None
         return name
 
-    def __init_name(self, token: Optional[str]):
+    def __init_name(self, token: Optional[str], media_exts: list):
         """
         识别名称
         """
@@ -313,7 +314,6 @@ class MetaVideo(MetaBase):
                 return
             else:
                 # 后缀名不要
-                media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
                 if ".%s".lower() % token in media_exts:
                     return
                 # 英文或者英文+数字，拼装起来

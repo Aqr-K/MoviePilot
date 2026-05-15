@@ -19,6 +19,8 @@ from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecogn
 from app.utils.http import RequestUtils
 
 
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 class TheMovieDbModule(_ModuleBase):
     """
@@ -117,6 +119,59 @@ class TheMovieDbModule(_ModuleBase):
         zh_name = zhconv.convert(meta.cn_name, "zh-hans") if meta.cn_name else None
         # 使用中英文名分别识别，去重去空，但要保持顺序
         return list(dict.fromkeys([k for k in [meta.cn_name, zh_name, meta.en_name] if k]))
+
+    @staticmethod
+    def _fill_group_season_info(mediainfo: MediaInfo, episode_group: Optional[str],
+                                group_seasons: List[dict]) -> None:
+        """
+        将指定剧集组的季、集、年份信息写入 MediaInfo。
+        """
+        seasons = {}
+        season_info = []
+        season_years = {}
+        for group_season in group_seasons:
+            # 季
+            season = group_season.get("order")
+            # 集列表
+            episodes = group_season.get("episodes")
+            if not episodes:
+                continue
+            seasons[season] = [ep.get("episode_number") for ep in episodes]
+            season_info.append(group_season)
+            # 当前季第一集时间
+            first_date = episodes[0].get("air_date")
+            if first_date and _DATE_RE.match(first_date):
+                season_years[season] = str(first_date).split("-")[0]
+        # 每季集清单
+        if seasons:
+            mediainfo.seasons = seasons
+            mediainfo.number_of_seasons = len(seasons)
+        # 每季集详情
+        if season_info:
+            mediainfo.season_info = season_info
+        # 每季年份
+        if season_years:
+            mediainfo.season_years = season_years
+        # 所有剧集组
+        mediainfo.episode_group = episode_group
+        mediainfo.episode_groups = group_seasons
+
+    @staticmethod
+    def _build_search_medias_result(meta: MetaBase, results: Optional[List[dict]]) -> List[MediaInfo]:
+        """
+        构建搜索结果，并沿用原有逻辑把搜索词中的季写入电视剧标题中。
+        """
+        if not results:
+            return []
+        medias = [MediaInfo(tmdb_info=info) for info in results]
+        if meta.begin_season:
+            # 小写数据转大写
+            season_str = cn2an.an2cn(meta.begin_season, "low")
+            for media in medias:
+                if media.type == MediaType.TV:
+                    media.title = f"{media.title} 第{season_str}季"
+                    media.season = meta.begin_season
+        return medias
 
     def _get_info_by_tmdbid(self, tmdbid: int, mtype: Optional[MediaType],
                              meta: Optional[MetaBase]) -> Optional[dict]:
@@ -289,36 +344,7 @@ class TheMovieDbModule(_ModuleBase):
         """
         if mediainfo.type == MediaType.TV and mediainfo.episode_groups:
             if group_seasons:
-                # 指定剧集组时
-                seasons = {}
-                season_info = []
-                season_years = {}
-                for group_season in group_seasons:
-                    # 季
-                    season = group_season.get("order")
-                    # 集列表
-                    episodes = group_season.get("episodes")
-                    if not episodes:
-                        continue
-                    seasons[season] = [ep.get("episode_number") for ep in episodes]
-                    season_info.append(group_season)
-                    # 当前季第一季时间
-                    first_date = episodes[0].get("air_date")
-                    if re.match(r"^\d{4}-\d{2}-\d{2}$", first_date):
-                        season_years[season] = str(first_date).split("-")[0]
-                # 每季集清单
-                if seasons:
-                    mediainfo.seasons = seasons
-                    mediainfo.number_of_seasons = len(seasons)
-                # 每季集详情
-                if season_info:
-                    mediainfo.season_info = season_info
-                # 每季年份
-                if season_years:
-                    mediainfo.season_years = season_years
-                # 所有剧集组
-                mediainfo.episode_group = episode_group
-                mediainfo.episode_groups = group_seasons
+                self._fill_group_season_info(mediainfo, episode_group, group_seasons)
             else:
                 # 每季年份
                 season_years = {}
@@ -337,7 +363,7 @@ class TheMovieDbModule(_ModuleBase):
                         # 当前季第一季时间
                         first_date = episodes[0].get("air_date")
                         # 判断是不是日期格式
-                        if first_date and re.match(r"^\d{4}-\d{2}-\d{2}$", first_date):
+                        if first_date and _DATE_RE.match(first_date):
                             season_years[season] = str(first_date).split("-")[0]
                 if season_years:
                     mediainfo.season_years = season_years
@@ -350,36 +376,7 @@ class TheMovieDbModule(_ModuleBase):
         """
         if mediainfo.type == MediaType.TV and mediainfo.episode_groups:
             if group_seasons:
-                # 指定剧集组时
-                seasons = {}
-                season_info = []
-                season_years = {}
-                for group_season in group_seasons:
-                    # 季
-                    season = group_season.get("order")
-                    # 集列表
-                    episodes = group_season.get("episodes")
-                    if not episodes:
-                        continue
-                    seasons[season] = [ep.get("episode_number") for ep in episodes]
-                    season_info.append(group_season)
-                    # 当前季第一季时间
-                    first_date = episodes[0].get("air_date")
-                    if re.match(r"^\d{4}-\d{2}-\d{2}$", first_date):
-                        season_years[season] = str(first_date).split("-")[0]
-                # 每季集清单
-                if seasons:
-                    mediainfo.seasons = seasons
-                    mediainfo.number_of_seasons = len(seasons)
-                # 每季集详情
-                if season_info:
-                    mediainfo.season_info = season_info
-                # 每季年份
-                if season_years:
-                    mediainfo.season_years = season_years
-                # 所有剧集组
-                mediainfo.episode_group = episode_group
-                mediainfo.episode_groups = group_seasons
+                self._fill_group_season_info(mediainfo, episode_group, group_seasons)
             else:
                 # 每季年份
                 season_years = {}
@@ -398,7 +395,7 @@ class TheMovieDbModule(_ModuleBase):
                         # 当前季第一季时间
                         first_date = episodes[0].get("air_date")
                         # 判断是不是日期格式
-                        if first_date and re.match(r"^\d{4}-\d{2}-\d{2}$", first_date):
+                        if first_date and _DATE_RE.match(first_date):
                             season_years[season] = str(first_date).split("-")[0]
                 if season_years:
                     mediainfo.season_years = season_years
@@ -484,7 +481,7 @@ class TheMovieDbModule(_ModuleBase):
                 meta.type = mtype
             if tmdbid:
                 meta.tmdbid = tmdbid
-            cache_info = self.cache.get(meta)
+            cache_info = self.cache.get(meta) if cache else {}
 
         # 查询剧集组
         group_seasons = []
@@ -573,7 +570,7 @@ class TheMovieDbModule(_ModuleBase):
                 meta.type = mtype
             if tmdbid:
                 meta.tmdbid = tmdbid
-            cache_info = self.cache.get(meta)
+            cache_info = self.cache.get(meta) if cache else {}
 
         # 查询剧集组
         group_seasons = []
@@ -764,17 +761,7 @@ class TheMovieDbModule(_ModuleBase):
             else:
                 results = self.tmdb.search_tvs(meta.name, meta.year)
         # 将搜索词中的季写入标题中
-        if results:
-            medias = [MediaInfo(tmdb_info=info) for info in results]
-            if meta.begin_season:
-                # 小写数据转大写
-                season_str = cn2an.an2cn(meta.begin_season, "low")
-                for media in medias:
-                    if media.type == MediaType.TV:
-                        media.title = f"{media.title} 第{season_str}季"
-                        media.season = meta.begin_season
-            return medias
-        return []
+        return self._build_search_medias_result(meta, results)
 
     def search_persons(self, name: str) -> Optional[List[schemas.MediaPerson]]:
         """
@@ -1206,17 +1193,7 @@ class TheMovieDbModule(_ModuleBase):
             else:
                 results = await self.tmdb.async_search_tvs(meta.name, meta.year)
         # 将搜索词中的季写入标题中
-        if results:
-            medias = [MediaInfo(tmdb_info=info) for info in results]
-            if meta.begin_season:
-                # 小写数据转大写
-                season_str = cn2an.an2cn(meta.begin_season, "low")
-                for media in medias:
-                    if media.type == MediaType.TV:
-                        media.title = f"{media.title} 第{season_str}季"
-                        media.season = meta.begin_season
-            return medias
-        return []
+        return self._build_search_medias_result(meta, results)
 
     async def async_tmdb_discover(self, mtype: MediaType, sort_by: str,
                                   with_genres: str,

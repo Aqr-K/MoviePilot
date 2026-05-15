@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import cn2an
 import regex as re
@@ -7,6 +7,10 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.singleton import Singleton
+
+
+_COMBINED_WORD_RE = re.compile(r'^\s*(.*?)\s*=>\s*(.*?)\s*&&\s*(.*?)\s*<>\s*(.*?)\s*>>\s*(.*?)\s*$')
+_LEADING_ZERO_RE = re.compile(r"^0+")
 
 
 class WordsMatcher(metaclass=Singleton):
@@ -28,37 +32,23 @@ class WordsMatcher(metaclass=Singleton):
             if not word or word.startswith("#"):
                 continue
             try:
-                if word.count(" => ") and word.count(" && ") and word.count(" >> ") and word.count(" <> "):
-                    # 替换词
-                    thc = str(re.findall(r'(.*?)\s*=>', word)[0]).strip()
-                    # 被替换词
-                    bthc = str(re.findall(r'=>\s*(.*?)\s*&&', word)[0]).strip()
-                    # 集偏移前字段
-                    pyq = str(re.findall(r'&&\s*(.*?)\s*<>', word)[0]).strip()
-                    # 集偏移后字段
-                    pyh = str(re.findall(r'<>(.*?)\s*>>', word)[0]).strip()
-                    # 集偏移
-                    offsets = str(re.findall(r'>>\s*(.*?)$', word)[0]).strip()
+                word_info = self.__parse_word(word)
+                if not word_info:
+                    continue
+                word_type, params = word_info
+                if word_type == "replace_and_offset":
+                    thc, bthc, pyq, pyh, offsets = params
                     # 替换词
                     title, message, state = self.__replace_regex(title, thc, bthc)
                     if state:
                         # 替换词成功再进行集偏移
                         title, message, state = self.__episode_offset(title, pyq, pyh, offsets)
-                elif word.count(" => "):
-                    # 替换词
-                    strings = word.split(" => ")
-                    title, message, state = self.__replace_regex(title, strings[0], strings[1])
-                elif word.count(" >> ") and word.count(" <> "):
-                    # 集偏移
-                    strings = word.split(" <> ")
-                    offsets = strings[1].split(" >> ")
-                    strings[1] = offsets[0]
-                    title, message, state = self.__episode_offset(title, strings[0], strings[1], offsets[1])
-                else:
-                    # 屏蔽词
-                    if not word.strip():
-                        continue
-                    title, message, state = self.__replace_regex(title, word, "")
+                elif word_type == "replace":
+                    title, message, state = self.__replace_regex(title, params[0], params[1])
+                elif word_type == "offset":
+                    title, message, state = self.__episode_offset(title, params[0], params[1], params[2])
+                else:  # block
+                    title, message, state = self.__replace_regex(title, params[0], "")
 
                 if state:
                     appley_words.append(word)
@@ -69,15 +59,36 @@ class WordsMatcher(metaclass=Singleton):
         return title, appley_words
 
     @staticmethod
+    def __parse_word(word: str) -> Optional[Tuple[str, Tuple[str, ...]]]:
+        """
+        解析识别词格式。复杂识别词保留原来的字段含义，只把多次正则提取合并为一次。
+        """
+        if word.count(" => ") and word.count(" && ") and word.count(" >> ") and word.count(" <> "):
+            word_match = _COMBINED_WORD_RE.match(word)
+            if not word_match:
+                raise ValueError("复杂识别词格式不正确")
+            return "replace_and_offset", tuple(item.strip() for item in word_match.groups())
+        if word.count(" => "):
+            strings = word.split(" => ")
+            return "replace", (strings[0], strings[1])
+        if word.count(" >> ") and word.count(" <> "):
+            strings = word.split(" <> ")
+            offsets = strings[1].split(" >> ")
+            strings[1] = offsets[0]
+            return "offset", (strings[0], strings[1], offsets[1])
+        if not word.strip():
+            return None
+        return "block", (word,)
+
+    @staticmethod
     def __replace_regex(title: str, replaced: str, replace: str) -> Tuple[str, str, bool]:
         """
         正则替换
         """
         try:
-            if not re.findall(r'%s' % replaced, title):
-                return title, "", False
-            else:
-                return re.sub(r'%s' % replaced, r'%s' % replace, title), "", True
+            replaced_re = re.compile(r'%s' % replaced)
+            title, count = replaced_re.subn(r'%s' % replace, title)
+            return title, "", count > 0
         except Exception as err:
             logger.warn(f"自定义识别词正则替换失败：{str(err)} - 标题：{title}，被替换词：{replaced}，替换词：{replace}")
             return title, str(err), False
@@ -112,9 +123,9 @@ class WordsMatcher(metaclass=Singleton):
                 if not episode_num_str.isdigit():
                     episode_num_offset_str = cn2an.an2cn(episode_num_offset_int, "low")
                 else:
-                    count_0 = re.findall(r"^0+", episode_num_str)
+                    count_0 = _LEADING_ZERO_RE.search(episode_num_str)
                     if count_0:
-                        episode_num_offset_str = f"{count_0[0]}{episode_num_offset_int}"
+                        episode_num_offset_str = f"{count_0.group(0)}{episode_num_offset_int}"
                     else:
                         episode_num_offset_str = str(episode_num_offset_int)
                 episode_nums_offset_str.append(episode_num_offset_str)

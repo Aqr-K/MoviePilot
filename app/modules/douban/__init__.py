@@ -71,6 +71,42 @@ class DoubanModule(_ModuleBase):
         """
         return 2
 
+    @staticmethod
+    def _prepare_search_names(meta: MetaBase) -> List[str]:
+        """
+        准备搜索名称列表，保留中英文名称分别识别且按顺序去重的历史行为。
+        """
+        # 简体名称
+        zh_name = zhconv.convert(meta.cn_name, "zh-hans") if meta.cn_name else None
+        # 使用中英文名分别识别，去重去空，但要保持顺序
+        return list(dict.fromkeys([k for k in [meta.cn_name, zh_name, meta.en_name] if k]))
+
+    @staticmethod
+    def _build_search_medias_result(meta: MetaBase, items: Optional[List[dict]]) -> List[MediaInfo]:
+        """
+        构建豆瓣搜索结果，并沿用原有的类型、标题包含和季信息处理规则。
+        """
+        if not items:
+            return []
+        ret_medias = []
+        for item_obj in items:
+            if meta.type and meta.type != MediaType.UNKNOWN and meta.type.value != item_obj.get("type_name"):
+                continue
+            if item_obj.get("type_name") not in (MediaType.TV.value, MediaType.MOVIE.value):
+                continue
+            if meta.name not in item_obj.get("target", {}).get("title"):
+                continue
+            ret_medias.append(MediaInfo(douban_info=item_obj.get("target")))
+        # 将搜索词中的季写入标题中
+        if ret_medias and meta.begin_season:
+            # 小写数据转大写
+            season_str = cn2an.an2cn(meta.begin_season, "low")
+            for media in ret_medias:
+                if media.type == MediaType.TV:
+                    media.title = f"{media.title} 第{season_str}季"
+                    media.season = meta.begin_season
+        return ret_medias
+
     def _recognize_media_core(self, meta: MetaBase = None,
                               mtype: MediaType = None,
                               doubanid: Optional[str] = None,
@@ -107,7 +143,7 @@ class DoubanModule(_ModuleBase):
                 meta.type = mtype
             if doubanid:
                 meta.doubanid = doubanid
-            cache_info = self.cache.get(meta)
+            cache_info = self.cache.get(meta) if cache else {}
         cache_hit = False
 
         # 识别豆瓣信息
@@ -118,11 +154,7 @@ class DoubanModule(_ModuleBase):
                 info = douban_info_func(doubanid=doubanid, mtype=mtype or meta.type)
             elif meta:
                 info = {}
-                # 简体名称
-                zh_name = zhconv.convert(meta.cn_name, "zh-hans") if meta.cn_name else None
-                # 使用中英文名分别识别，去重去空，但要保持顺序
-                names = list(dict.fromkeys([k for k in [meta.cn_name, zh_name, meta.en_name] if k]))
-                for name in names:
+                for name in self._prepare_search_names(meta):
                     if meta.begin_season:
                         logger.info(f"正在识别 {name} 第{meta.begin_season}季 ...")
                     else:
@@ -211,7 +243,7 @@ class DoubanModule(_ModuleBase):
                 meta.type = mtype
             if doubanid:
                 meta.doubanid = doubanid
-            cache_info = self.cache.get(meta)
+            cache_info = self.cache.get(meta) if cache else {}
         cache_hit = False
 
         # 识别豆瓣信息
@@ -222,11 +254,7 @@ class DoubanModule(_ModuleBase):
                 info = await async_douban_info_func(doubanid=doubanid, mtype=mtype or meta.type)
             elif meta:
                 info = {}
-                # 简体名称
-                zh_name = zhconv.convert(meta.cn_name, "zh-hans") if meta.cn_name else None
-                # 使用中英文名分别识别，去重去空，但要保持顺序
-                names = list(dict.fromkeys([k for k in [meta.cn_name, zh_name, meta.en_name] if k]))
-                for name in names:
+                for name in self._prepare_search_names(meta):
                     if meta.begin_season:
                         logger.info(f"正在识别 {name} 第{meta.begin_season}季 ...")
                     else:
@@ -913,24 +941,7 @@ class DoubanModule(_ModuleBase):
         if not result or not result.get("items"):
             return []
         # 返回数据
-        ret_medias = []
-        for item_obj in result.get("items"):
-            if meta.type and meta.type != MediaType.UNKNOWN and meta.type.value != item_obj.get("type_name"):
-                continue
-            if item_obj.get("type_name") not in (MediaType.TV.value, MediaType.MOVIE.value):
-                continue
-            if meta.name not in item_obj.get("target", {}).get("title"):
-                continue
-            ret_medias.append(MediaInfo(douban_info=item_obj.get("target")))
-        # 将搜索词中的季写入标题中
-        if ret_medias and meta.begin_season:
-            # 小写数据转大写
-            season_str = cn2an.an2cn(meta.begin_season, "low")
-            for media in ret_medias:
-                if media.type == MediaType.TV:
-                    media.title = f"{media.title} 第{season_str}季"
-                    media.season = meta.begin_season
-        return ret_medias
+        return self._build_search_medias_result(meta, result.get("items"))
 
     async def async_search_medias(self, meta: MetaBase) -> Optional[List[MediaInfo]]:
         """
@@ -946,24 +957,7 @@ class DoubanModule(_ModuleBase):
         if not result or not result.get("items"):
             return []
         # 返回数据
-        ret_medias = []
-        for item_obj in result.get("items"):
-            if meta.type and meta.type != MediaType.UNKNOWN and meta.type.value != item_obj.get("type_name"):
-                continue
-            if item_obj.get("type_name") not in (MediaType.TV.value, MediaType.MOVIE.value):
-                continue
-            if meta.name not in item_obj.get("target", {}).get("title"):
-                continue
-            ret_medias.append(MediaInfo(douban_info=item_obj.get("target")))
-        # 将搜索词中的季写入标题中
-        if ret_medias and meta.begin_season:
-            # 小写数据转大写
-            season_str = cn2an.an2cn(meta.begin_season, "low")
-            for media in ret_medias:
-                if media.type == MediaType.TV:
-                    media.title = f"{media.title} 第{season_str}季"
-                    media.season = meta.begin_season
-        return ret_medias
+        return self._build_search_medias_result(meta, result.get("items"))
 
     def search_persons(self, name: str) -> Optional[List[MediaPerson]]:
         """
