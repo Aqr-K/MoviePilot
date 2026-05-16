@@ -2653,7 +2653,16 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
 
     print_step("安装项目依赖")
     run([str(venv_pip), "install", "-r", str(ROOT / "requirements.txt")])
+    install_browser_runtime(venv_python)
     return venv_python
+
+
+def install_browser_runtime(venv_python: Path) -> None:
+    """
+    预下载 CloakBrowser 浏览器内核，避免首次仿真登录时才拉取大文件。
+    """
+    print_step("安装 CloakBrowser 浏览器内核")
+    run([str(venv_python), "-m", "cloakbrowser", "install"])
 
 
 def _startup_platform_name() -> str:

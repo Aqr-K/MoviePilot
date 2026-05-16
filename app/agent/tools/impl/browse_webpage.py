@@ -198,68 +198,62 @@ class BrowseWebpageTool(MoviePilotTool):
         cookies: Optional[str],
         user_agent: Optional[str],
     ) -> str:
-        """在同步上下文中执行 Playwright 浏览器操作"""
-        from playwright.sync_api import sync_playwright
+        """在同步上下文中执行 CloakBrowser 浏览器操作"""
+        from cloakbrowser import launch_context
 
         try:
-            with sync_playwright() as playwright:
-                browser = None
-                context = None
-                page = None
-                try:
-                    # 启动浏览器
-                    browser_type = settings.PLAYWRIGHT_BROWSER_TYPE or "chromium"
-                    browser = playwright[browser_type].launch(headless=True)
-
-                    # 创建上下文
-                    context_kwargs = {}
-                    if user_agent:
-                        context_kwargs["user_agent"] = user_agent
-                    # 设置视口大小
-                    context_kwargs["viewport"] = {
+            context = None
+            page = None
+            try:
+                context_kwargs = {
+                    "viewport": {
                         "width": SCREENSHOT_MAX_WIDTH,
                         "height": SCREENSHOT_MAX_HEIGHT,
                     }
+                }
+                if user_agent:
+                    context_kwargs["user_agent"] = user_agent
 
-                    context = browser.new_context(**context_kwargs)
-                    page = context.new_page()
-                    page.set_default_timeout(timeout * 1000)
+                context = launch_context(
+                    headless=True,
+                    humanize=settings.CLOAKBROWSER_HUMANIZE,
+                    human_preset=settings.CLOAKBROWSER_HUMAN_PRESET,
+                    **context_kwargs,
+                )
+                page = context.new_page()
+                page.set_default_timeout(timeout * 1000)
 
-                    # 设置 cookies
-                    if cookies:
-                        page.set_extra_http_headers({"cookie": cookies})
+                # 设置 cookies
+                if cookies:
+                    page.set_extra_http_headers({"cookie": cookies})
 
-                    # 对于非 goto 操作，如果提供了 url 先导航
-                    if url and browser_action != BrowserAction.GOTO:
-                        page.goto(
-                            url, wait_until="domcontentloaded", timeout=timeout * 1000
-                        )
-                        page.wait_for_load_state("networkidle", timeout=timeout * 1000)
+                # 对于非 goto 操作，如果提供了 url 先导航
+                if url and browser_action != BrowserAction.GOTO:
+                    page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                    page.wait_for_load_state("networkidle", timeout=timeout * 1000)
 
-                    # 执行具体操作
-                    result = self._do_action(
-                        page,
-                        browser_action,
-                        url,
-                        selector,
-                        value,
-                        script,
-                        content_type,
-                        timeout,
-                    )
-                    return result
+                # 执行具体操作
+                result = self._do_action(
+                    page,
+                    browser_action,
+                    url,
+                    selector,
+                    value,
+                    script,
+                    content_type,
+                    timeout,
+                )
+                return result
 
-                finally:
-                    if page:
-                        page.close()
-                    if context:
-                        context.close()
-                    if browser:
-                        browser.close()
+            finally:
+                if page:
+                    page.close()
+                if context:
+                    context.close()
 
         except Exception as e:
-            logger.error(f"Playwright 执行失败: {e}", exc_info=True)
-            return f"Playwright 执行失败: {str(e)}"
+            logger.error(f"CloakBrowser 执行失败: {e}", exc_info=True)
+            return f"CloakBrowser 执行失败: {str(e)}"
 
     def _do_action(
         self,

@@ -109,9 +109,8 @@ COPY --from=prepare_venv --chmod=777 ${VENV_PATH} ${VENV_PATH}
 COPY --from=prepare_venv /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=prepare_venv /usr/local/bin/uv-pip-compat /usr/local/bin/uv-pip-compat
 
-# playwright 环境
+# 浏览器运行依赖
 RUN playwright install-deps chromium \
-    && playwright install-deps firefox \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf \

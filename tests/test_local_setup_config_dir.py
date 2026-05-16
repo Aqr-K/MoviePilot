@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -57,6 +58,35 @@ class LocalSetupConfigDirTests(unittest.TestCase):
 
         self.assertIsNone(result)
         prompt_mock.assert_not_called()
+
+    def test_install_deps_installs_browser_runtime(self):
+        module = load_local_setup_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            venv_dir = (Path(temp_dir) / "venv").resolve()
+            venv_python = venv_dir / "bin" / "python"
+            venv_pip = venv_dir / "bin" / "pip"
+
+            with patch.object(module, "ensure_supported_python"), \
+                    patch.object(
+                        module,
+                        "configure_venv_pip_compat",
+                        return_value=venv_pip,
+                    ), \
+                    patch.object(module, "run") as run_mock, \
+                    patch.object(module, "install_browser_runtime") as install_browser:
+                result = module.install_deps(
+                    python_bin="python3",
+                    venv_dir=venv_dir,
+                    recreate=False,
+                )
+
+        self.assertEqual(result, venv_python)
+        run_mock.assert_any_call(["python3", "-m", "venv", str(venv_dir)])
+        run_mock.assert_any_call(
+            [str(venv_pip), "install", "-r", str(module.ROOT / "requirements.txt")]
+        )
+        install_browser.assert_called_once_with(venv_python)
 
 
 if __name__ == "__main__":

@@ -331,8 +331,12 @@ class ConfigModel(BaseModel):
     NO_CACHE_SITE_KEY: str = "m-team"
     # OCR服务器地址，用于识别站点验证码
     OCR_HOST: str = "https://movie-pilot.org"
-    # 仿真类型：playwright 或 flaresolverr
-    BROWSER_EMULATION: str = "playwright"
+    # 仿真类型：cloakbrowser 或 flaresolverr，其他值按 cloakbrowser 处理
+    BROWSER_EMULATION: str = "cloakbrowser"
+    # CloakBrowser 是否启用拟人化输入
+    CLOAKBROWSER_HUMANIZE: bool = True
+    # CloakBrowser 拟人化输入预设：default 或 careful
+    CLOAKBROWSER_HUMAN_PRESET: str = "default"
     # FlareSolverr 服务地址，例如 http://127.0.0.1:8191
     FLARESOLVERR_URL: Optional[str] = None
 
@@ -526,7 +530,7 @@ class ConfigModel(BaseModel):
     # ==================== Docker配置 ====================
     # Docker Client API地址
     DOCKER_CLIENT_API: Optional[str] = "tcp://127.0.0.1:38379"
-    # Playwright浏览器类型，chromium/firefox
+    # Playwright浏览器类型，供智能体浏览器工具和插件直接使用 Playwright 时读取
     PLAYWRIGHT_BROWSER_TYPE: str = "chromium"
 
     # ==================== AI智能体配置 ====================

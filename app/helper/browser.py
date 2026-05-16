@@ -1,8 +1,7 @@
 import uuid
 from typing import Callable, Any, Optional
 
-from cf_clearance import sync_cf_retry, sync_stealth
-from playwright.sync_api import sync_playwright, Page
+from playwright.sync_api import BrowserContext, Page
 
 from app.core.config import settings
 from app.log import logger
@@ -10,17 +9,33 @@ from app.utils.http import RequestUtils, cookie_parse
 
 
 class PlaywrightHelper:
-    def __init__(self, browser_type=settings.PLAYWRIGHT_BROWSER_TYPE):
-        self.browser_type = browser_type
+    def __init__(self, browser_type: Optional[str] = None, *args, **kwargs):
+        """
+        兼容旧的 PlaywrightHelper(browser_type=...) 构造方式。
+        """
+        self.browser_type = browser_type or settings.PLAYWRIGHT_BROWSER_TYPE
 
     @staticmethod
-    def __pass_cloudflare(url: str, page: Page) -> bool:
+    def __browser_emulation() -> str:
         """
-        尝试跳过cloudfare验证
+        当前浏览器仿真类型。
         """
-        sync_stealth(page, pure=True)
-        page.goto(url)
-        return sync_cf_retry(page)[0]
+        return (settings.BROWSER_EMULATION or "cloakbrowser").lower()
+
+    @staticmethod
+    def __launch_cloakbrowser_context(headless: bool,
+                                      user_agent: Optional[str] = None,
+                                      proxies: Optional[dict] = None) -> BrowserContext:
+        """
+        启动 CloakBrowser 上下文。
+        """
+        from cloakbrowser import launch_context
+
+        return launch_context(headless=headless,
+                              proxy=proxies,
+                              user_agent=user_agent,
+                              humanize=settings.CLOAKBROWSER_HUMANIZE,
+                              human_preset=settings.CLOAKBROWSER_HUMAN_PRESET)
 
     @staticmethod
     def __fs_cookie_str(cookies: list) -> str:
@@ -148,51 +163,44 @@ class PlaywrightHelper:
         """
         result = None
         try:
-            with sync_playwright() as playwright:
-                browser = None
-                context = None
-                page = None
-                try:
-                    # 如果配置使用 FlareSolverr，先通过其获取清除后的 cookies 与 UA
-                    fs_cookie_header = None
-                    fs_ua = None
-                    if settings.BROWSER_EMULATION == "flaresolverr":
-                        solution = self.__flaresolverr_request(url=url, cookies=cookies,
-                                                               proxy_config=proxies, timeout=timeout)
-                        if solution:
-                            fs_cookie_header = self.__fs_cookie_str(solution.get("cookies", []))
-                            fs_ua = solution.get("userAgent")
+            context = None
+            page = None
+            try:
+                # 如果配置使用 FlareSolverr，先通过其获取清除后的 cookies 与 UA
+                fs_cookie_header = None
+                fs_ua = None
+                if self.__browser_emulation() == "flaresolverr":
+                    solution = self.__flaresolverr_request(url=url, cookies=cookies,
+                                                           proxy_config=proxies, timeout=timeout)
+                    if solution:
+                        fs_cookie_header = self.__fs_cookie_str(solution.get("cookies", []))
+                        fs_ua = solution.get("userAgent")
 
-                    browser = playwright[self.browser_type].launch(headless=headless)
-                    context = browser.new_context(user_agent=fs_ua or ua, proxy=proxies)
-                    page = context.new_page()
+                context = self.__launch_cloakbrowser_context(headless=headless,
+                                                             user_agent=fs_ua or ua,
+                                                             proxies=proxies)
+                page = context.new_page()
 
-                    # 优先使用 FlareSolverr 返回，其次使用入参
-                    merged_cookie = fs_cookie_header or cookies
-                    if merged_cookie:
-                        page.set_extra_http_headers({"cookie": merged_cookie})
+                # 优先使用 FlareSolverr 返回，其次使用入参
+                merged_cookie = fs_cookie_header or cookies
+                if merged_cookie:
+                    page.set_extra_http_headers({"cookie": merged_cookie})
 
-                    if settings.BROWSER_EMULATION == "playwright":
-                        if not self.__pass_cloudflare(url, page):
-                            logger.warn("cloudflare challenge fail！")
-                    else:
-                        page.goto(url)
-                    page.wait_for_load_state("networkidle", timeout=timeout * 1000)
+                page.goto(url)
+                page.wait_for_load_state("networkidle", timeout=timeout * 1000)
 
-                    # 回调函数
-                    result = callback(page)
+                # 回调函数
+                result = callback(page)
 
-                except Exception as e:
-                    logger.error(f"网页操作失败: {str(e)}")
-                finally:
-                    if page:
-                        page.close()
-                    if context:
-                        context.close()
-                    if browser:
-                        browser.close()
+            except Exception as e:
+                logger.error(f"网页操作失败: {str(e)}")
+            finally:
+                if page:
+                    page.close()
+                if context:
+                    context.close()
         except Exception as e:
-            logger.error(f"Playwright初始化失败: {str(e)}")
+            logger.error(f"CloakBrowser初始化失败: {str(e)}")
 
         return result
 
@@ -213,7 +221,7 @@ class PlaywrightHelper:
         """
         source = None
         # 如果配置为 FlareSolverr，则直接调用获取页面源码
-        if settings.BROWSER_EMULATION == "flaresolverr":
+        if self.__browser_emulation() == "flaresolverr":
             try:
                 solution = self.__flaresolverr_request(url=url, cookies=cookies,
                                                        proxy_config=proxies, timeout=timeout)
@@ -222,36 +230,32 @@ class PlaywrightHelper:
             except Exception as e:
                 logger.error(f"FlareSolverr 获取源码失败: {str(e)}")
         try:
-            with sync_playwright() as playwright:
-                browser = None
-                context = None
-                page = None
-                try:
-                    browser = playwright[self.browser_type].launch(headless=headless)
-                    context = browser.new_context(user_agent=ua, proxy=proxies)
-                    page = context.new_page()
+            context = None
+            page = None
+            try:
+                context = self.__launch_cloakbrowser_context(headless=headless,
+                                                             user_agent=ua,
+                                                             proxies=proxies)
+                page = context.new_page()
 
-                    if cookies:
-                        page.set_extra_http_headers({"cookie": cookies})
+                if cookies:
+                    page.set_extra_http_headers({"cookie": cookies})
 
-                    if not self.__pass_cloudflare(url, page):
-                        logger.warn("cloudflare challenge fail！")
-                    page.wait_for_load_state("networkidle", timeout=timeout * 1000)
+                page.goto(url)
+                page.wait_for_load_state("networkidle", timeout=timeout * 1000)
 
-                    source = page.content()
+                source = page.content()
 
-                except Exception as e:
-                    logger.error(f"获取网页源码失败: {str(e)}")
-                    source = None
-                finally:
-                    # 确保资源被正确清理
-                    if page:
-                        page.close()
-                    if context:
-                        context.close()
-                    if browser:
-                        browser.close()
+            except Exception as e:
+                logger.error(f"获取网页源码失败: {str(e)}")
+                source = None
+            finally:
+                # 确保资源被正确清理
+                if page:
+                    page.close()
+                if context:
+                    context.close()
         except Exception as e:
-            logger.error(f"Playwright初始化失败: {str(e)}")
+            logger.error(f"CloakBrowser初始化失败: {str(e)}")
 
         return source

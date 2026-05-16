@@ -46,6 +46,7 @@ function load_config_from_app_env() {
         ["PROXY_HOST"]=""
         ["GITHUB_TOKEN"]=""
         ["MOVIEPILOT_AUTO_UPDATE"]="release"
+        ["BROWSER_EMULATION"]="cloakbrowser"
 
         # database
         ["DB_TYPE"]="sqlite"
@@ -220,7 +221,7 @@ function graceful_exit() {
 # 插件依赖和主程序共用同一套 venv 时，历史安装记录可能已经污染环境，
 # 这里优先在真正拉起后端前做一次自愈，避免容器反复起不来。
 function ensure_backend_runtime_dependencies() {
-    local probe_code="import alembic, fastapi, pydantic, pydantic_core, pydantic_settings, sqlalchemy, starlette, uvicorn; from pydantic import BaseModel, Field"
+    local probe_code="import alembic, cloakbrowser, fastapi, pydantic, pydantic_core, pydantic_settings, sqlalchemy, starlette, uvicorn; from pydantic import BaseModel, Field"
 
     INFO "→ 启动前检查后端核心依赖..."
     if "${VENV_PATH}/bin/python3" -c "${probe_code}" >/dev/null 2>&1; then
@@ -327,12 +328,28 @@ chown -R moviepilot:moviepilot \
     /var/log/nginx
 chown moviepilot:moviepilot /etc/hosts /tmp
 
+# 启动前优先确认主运行环境仍然健康，避免插件依赖污染导致服务直接起不来。
+ensure_backend_runtime_dependencies
+
 # 下载浏览器内核
-if [[ "$HTTPS_PROXY" =~ ^https?:// ]] || [[ "$HTTPS_PROXY" =~ ^https?:// ]] || [[ "$PROXY_HOST" =~ ^https?:// ]]; then
-  HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$PROXY_HOST}}" gosu moviepilot:moviepilot playwright install ${PLAYWRIGHT_BROWSER_TYPE:-chromium}
-else
-  gosu moviepilot:moviepilot playwright install ${PLAYWRIGHT_BROWSER_TYPE:-chromium}
-fi
+function install_browser_kernel() {
+  local emulation="${BROWSER_EMULATION:-cloakbrowser}"
+  emulation="${emulation,,}"
+  local proxy="${HTTPS_PROXY:-${https_proxy:-$PROXY_HOST}}"
+
+  if [ "${emulation}" != "cloakbrowser" ] && [ "${emulation}" != "flaresolverr" ] && [ -n "${emulation}" ]; then
+    WARN "浏览器仿真类型 ${emulation} 已按 CloakBrowser 处理。"
+  fi
+
+  INFO "下载 CloakBrowser 浏览器内核"
+  if [[ "$proxy" =~ ^https?:// ]]; then
+    HTTPS_PROXY="$proxy" gosu moviepilot:moviepilot python -m cloakbrowser install
+  else
+    gosu moviepilot:moviepilot python -m cloakbrowser install
+  fi
+}
+
+install_browser_kernel
 
 # 证书管理
 source /app/docker/cert.sh
@@ -357,9 +374,6 @@ fi
 
 # 设置后端服务权限掩码
 umask "${UMASK}"
-
-# 启动前优先确认主运行环境仍然健康，避免插件依赖污染导致服务直接起不来。
-ensure_backend_runtime_dependencies
 
 # 清除非系统环境导入的变量，保证转移到 dumb-init 的时候，不会带入不必要的环境变量
 INFO "准备为 Python 应用清理的非系统环境导入的变量..."
