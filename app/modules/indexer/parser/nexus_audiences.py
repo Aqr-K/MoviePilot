@@ -13,6 +13,35 @@ from app.utils.string import StringUtils
 class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
     schema = SiteSchema.NexusAudiences
 
+    def _parse_message_unread(self, html_text):
+        """
+        解析 Audiences 新版顶部用户栏中的未读消息数。
+        """
+        super()._parse_message_unread(html_text)
+        if self.message_unread:
+            return
+
+        html = etree.HTML(html_text)
+        try:
+            if not StringUtils.is_valid_html_element(html):
+                return
+
+            message_tools = html.xpath(
+                '//a[contains(@class, "site-userbar__compact-tool") and contains(@href, "messages.php") '
+                'and (contains(@class, "site-userbar__compact-tool--has-unread") '
+                'or .//*[contains(@class, "site-userbar__compact-tool-badge--unread")])]'
+                '|//a[contains(@href, "messages.php") '
+                'and (contains(@title, "收件箱") or contains(@aria-label, "收件箱"))]'
+            )
+            for message_link in message_tools:
+                unread = self.__parse_inbox_unread(message_link)
+                if unread is not None:
+                    self.message_unread = unread
+                    return
+        finally:
+            if html is not None:
+                del html
+
     def _parse_user_traffic_info(self, html_text):
         """
         解析用户流量信息
@@ -127,6 +156,47 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
             if active_match:
                 self.seeding = StringUtils.str_int(active_match.group(1))
                 self.leeching = StringUtils.str_int(active_match.group(2))
+
+    def __parse_inbox_unread(self, message_link):
+        """
+        从 Audiences 收件箱入口提取未读数。
+        """
+        inbox_texts = [
+            message_link.get("title"),
+            message_link.get("aria-label"),
+            *message_link.xpath(
+                './/*[contains(@class, "site-userbar__compact-tool-badge--unread") '
+                'or contains(@class, "site-userbar__compact-tool-badge")]/text()'
+            )
+        ]
+
+        for inbox_text in inbox_texts:
+            unread = self.__extract_inbox_unread(inbox_text)
+            if unread is not None:
+                return unread
+
+        return None
+
+    @staticmethod
+    def __extract_inbox_unread(text: str):
+        """
+        Audiences 收件箱角标格式为 总数/未读数，例如 1749/172。
+        """
+        if not text:
+            return None
+
+        text = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+        if not text:
+            return None
+
+        inbox_count = re.search(r"(?:收件箱\s*)?(\d[\d,]*)\s*/\s*(\d[\d,]*)", text)
+        if inbox_count:
+            return StringUtils.str_int(inbox_count.group(2))
+
+        single_count = re.search(r"收件箱\s*(\d[\d,]*)", text)
+        if single_count:
+            return StringUtils.str_int(single_count.group(1))
+        return None
 
     def _parse_seeding_pages(self):
         if not self._torrent_seeding_page:
