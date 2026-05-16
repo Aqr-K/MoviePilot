@@ -180,3 +180,52 @@ class TmdbResponseCacheTest(TestCase):
 
         self.assertEqual(tmdb._remaining, 7)
         self.assertEqual(tmdb._reset, 99)
+
+    def test_get_response_json_returns_snapshot_copy(self):
+        snapshot = {
+            TMDb._RESPONSE_SNAPSHOT_MARKER: True,
+            "headers": {},
+            "json": {
+                "results": [
+                    {"id": 1, "media_type": "movie"},
+                    {"id": 2, "media_type": "tv"},
+                ]
+            },
+        }
+
+        first_json = TMDb._get_response_json(snapshot)
+        first_json["results"][0]["media_type"] = "电影"
+
+        second_json = TMDb._get_response_json(snapshot)
+
+        self.assertEqual(second_json["results"][0]["media_type"], "movie")
+        self.assertIsNot(first_json, second_json)
+        self.assertIsNot(first_json["results"][0], second_json["results"][0])
+
+    def test_async_request_obj_returns_copied_key_from_snapshot(self):
+        tmdb = TMDb()
+        snapshot = {
+            TMDb._RESPONSE_SNAPSHOT_MARKER: True,
+            "headers": {"x-ratelimit-remaining": "39", "x-ratelimit-reset": "1234567890"},
+            "json": {
+                "page": 1,
+                "results": [
+                    {"id": 1, "media_type": "movie"},
+                    {"id": 2, "media_type": "tv"},
+                ],
+            },
+        }
+
+        async def _fake_async_request(*args, **kwargs):
+            return snapshot
+
+        tmdb.async_request = _fake_async_request
+
+        first_results = asyncio.run(tmdb._async_request_obj("/search/multi", key="results"))
+        first_results[0]["media_type"] = "电影"
+
+        second_results = asyncio.run(tmdb._async_request_obj("/search/multi", key="results"))
+
+        self.assertEqual(second_results[0]["media_type"], "movie")
+        self.assertIsNot(first_results, second_results)
+        self.assertIsNot(first_results[0], second_results[0])

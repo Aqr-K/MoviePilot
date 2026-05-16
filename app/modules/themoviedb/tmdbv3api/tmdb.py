@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from copy import deepcopy
 from datetime import datetime
 
 import requests
@@ -145,7 +146,8 @@ class TMDb(object):
     @classmethod
     def _get_response_json(cls, response):
         if isinstance(response, dict) and response.get(cls._RESPONSE_SNAPSHOT_MARKER):
-            return response.get("json")
+            # 调用方会补充 media_type 等字段，缓存快照必须隔离这些原地修改。
+            return deepcopy(response.get("json"))
         return response.json()
 
     def cache_clear(self):
