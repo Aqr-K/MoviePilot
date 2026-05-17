@@ -47,7 +47,20 @@ class SystemUtils:
             output = result.stdout + result.stderr
             return True, output
         except subprocess.CalledProcessError as e:
-            error_message = f"命令：{' '.join(pip_command)}，执行失败，错误信息：{e.stderr.strip()}"
+            stdout = (e.stdout or "").strip()
+            stderr = (e.stderr or "").strip()
+            # 不同命令/兼容层可能把失败原因写入 stdout，失败时需要同时保留两路输出。
+            output_parts = []
+            if stdout:
+                output_parts.append(f"标准输出：{stdout}")
+            if stderr:
+                output_parts.append(f"错误输出：{stderr}")
+            if not output_parts:
+                output_parts.append("无标准输出或错误输出")
+            error_message = (
+                f"命令：{' '.join(pip_command)}，执行失败，"
+                f"返回码：{e.returncode}，{'; '.join(output_parts)}"
+            )
             return False, error_message
         except Exception as e:
             error_message = f"未知错误，命令：{' '.join(pip_command)}，错误：{str(e)}"
