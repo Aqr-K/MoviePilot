@@ -788,7 +788,7 @@ class SkillsChain(ChainBase):
                 if skill.source_type == "registry":
                     text_lines.append("社区源，安装前请自行甄别安全性")
 
-        if any(skill.source_type == "registry" for skill in page_items):
+        if any(skill.source_type == "registry" for skill in items):
             text_lines.extend(
                 [
                     "",

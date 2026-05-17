@@ -583,6 +583,7 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         """
         轮询监控（改进版）
         """
+        monitor_scope = ",".join(str(mon_path) for mon_path in mon_paths) or "未配置路径"
         with snapshot_lock:
             try:
                 # 加载上次快照数据
@@ -650,10 +651,10 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                         trigger='interval',
                         minutes=new_interval
                     )
-                    logger.info(f"{storage}:{mon_path} 监控间隔已调整为 {new_interval} 分钟")
+                    logger.info(f"{storage}:{monitor_scope} 监控间隔已调整为 {new_interval} 分钟")
 
             except Exception as e:
-                logger.error(f"轮询监控 {storage}:{mon_path} 出现错误：{e}")
+                logger.error(f"轮询监控 {storage}:{monitor_scope} 出现错误：{e}")
                 logger.debug(traceback.format_exc())
 
     def event_handler(self, event, text: str, event_path: str, file_size: float = None):

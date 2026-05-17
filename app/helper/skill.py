@@ -94,7 +94,8 @@ class SkillHelper(metaclass=WeakSingleton):
         """
         返回系统默认的技能市场列表，用于区分内置源和用户追加源。
         """
-        default_value = type(settings).model_fields["SKILL_MARKET"].default
+        skill_market_field = type(settings).model_fields.get("SKILL_MARKET")
+        default_value = skill_market_field.default if skill_market_field else None
         if not default_value:
             return []
         return [item.strip() for item in str(default_value).split(",") if item.strip()]

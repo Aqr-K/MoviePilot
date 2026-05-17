@@ -159,7 +159,7 @@ class ChainBase(metaclass=ABCMeta):
         处理插件模块执行错误
         """
         if kwargs.get("raise_exception"):
-            raise
+            raise err
         logger.error(
             f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}"
         )
@@ -185,7 +185,7 @@ class ChainBase(metaclass=ABCMeta):
         处理系统模块执行错误
         """
         if kwargs.get("raise_exception"):
-            raise
+            raise err
         logger.error(
             f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}"
         )

@@ -157,7 +157,7 @@ def _parse_skill_metadata(  # noqa: C901
             MAX_SKILL_COMPATIBILITY_LENGTH,
             skill_path,
         )
-        compatibility_str = compatibility_str[:MAX_SKILL_COMPATIBILITY_LENGTH]
+        compatibility_str = str(compatibility_str)[:MAX_SKILL_COMPATIBILITY_LENGTH]
 
     # 版本号，默认为 0（表示未设置版本）
     raw_version = frontmatter_data.get("version")

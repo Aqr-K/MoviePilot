@@ -998,7 +998,8 @@ def config_list(show_secrets: bool) -> None:
 @click.argument("key")
 def config_get(key: str) -> None:
     """读取单个配置项"""
-    if key not in Settings.model_fields and not hasattr(settings, key):
+    setting_fields = Settings.model_fields.keys()
+    if key not in setting_fields and not hasattr(settings, key):
         raise click.ClickException(f"配置项不存在：{key}")
     click.echo(_format_value(getattr(settings, key)))
 

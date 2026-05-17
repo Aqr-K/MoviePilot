@@ -6,7 +6,7 @@ import signal
 import subprocess
 from dataclasses import dataclass, field
 from tempfile import NamedTemporaryFile
-from typing import Optional, TextIO, Type
+from typing import Any, Optional, TextIO, Type
 
 from pydantic import BaseModel, Field
 
@@ -188,7 +188,7 @@ class ExecuteCommandTool(MoviePilotTool):
             output.append(stream_name, chunk.decode("utf-8", errors="replace"))
 
     @staticmethod
-    def _terminate_process(process: asyncio.subprocess.Process, sig: int):
+    def _terminate_process(process: Any, sig: int):
         """向进程组发送终止信号；不支持进程组的平台回退为单进程终止。"""
         try:
             if os.name == "posix":
@@ -203,7 +203,7 @@ class ExecuteCommandTool(MoviePilotTool):
     @classmethod
     async def _cleanup_process(
         cls,
-        process: asyncio.subprocess.Process,
+        process: Any,
         wait_task: asyncio.Task,
     ) -> None:
         """先温和终止，失败后强杀，避免超时 shell 遗留子进程。"""

@@ -236,7 +236,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         Returns:
             str: 友好的提示消息，如果返回 None 或空字符串则使用 explanation
         """
-        return None
+        explanation = kwargs.get("explanation")
+        return str(explanation) if explanation else None
 
     @abstractmethod
     async def run(self, **kwargs) -> str:

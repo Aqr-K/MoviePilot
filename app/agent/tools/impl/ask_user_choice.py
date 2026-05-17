@@ -26,9 +26,11 @@ class UserChoiceOptionInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_option(self):
-        if not self.label.strip():
+        label = str(self.label)
+        value = str(self.value)
+        if not label.strip():
             raise ValueError("label 不能为空")
-        if not self.value.strip():
+        if not value.strip():
             raise ValueError("value 不能为空")
         return self
 
@@ -55,7 +57,8 @@ class AskUserChoiceInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self):
-        if not self.message.strip():
+        message = str(self.message)
+        if not message.strip():
             raise ValueError("message 不能为空")
         if not self.options:
             raise ValueError("options 至少需要提供一个")

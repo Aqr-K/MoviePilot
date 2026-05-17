@@ -1,4 +1,5 @@
 from datetime import datetime
+from builtins import list as builtin_list
 from typing import Optional
 
 from sqlalchemy import Column, Integer, JSON, String, Index, and_, or_, select
@@ -34,9 +35,9 @@ class Workflow(Base):
     # 已执行次数
     run_count = Column(Integer, default=0)
     # 任务列表
-    actions = Column(JSON, default=list)
+    actions = Column(JSON, default=builtin_list)
     # 任务流
-    flows = Column(JSON, default=list)
+    flows = Column(JSON, default=builtin_list)
     # 执行上下文
     context = Column(JSON, default=dict)
     # 创建时间
