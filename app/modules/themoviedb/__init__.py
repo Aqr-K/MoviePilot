@@ -501,9 +501,6 @@ class TheMovieDbModule(_ModuleBase):
                 names = self._prepare_search_names(meta)
                 for name in names:
                     info = self._search_by_name(name, meta, group_seasons)
-                    if not info:
-                        # 从网站查询
-                        info = self.tmdb.match_web(name=name, mtype=meta.type)
                     if info:
                         # 查到就退出
                         break
@@ -590,9 +587,6 @@ class TheMovieDbModule(_ModuleBase):
                 names = self._prepare_search_names(meta)
                 for name in names:
                     info = await self._async_search_by_name(name, meta, group_seasons)
-                    if not info:
-                        # 从网站查询
-                        info = await self.tmdb.async_match_web(name=name, mtype=meta.type)
                     if info:
                         # 查到就退出
                         break

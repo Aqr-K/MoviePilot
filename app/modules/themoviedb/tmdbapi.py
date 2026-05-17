@@ -1,18 +1,11 @@
 import re
 import traceback
 from typing import Optional, List
-from urllib.parse import quote
 
 import zhconv
-from lxml import etree
 
-from app.core.cache import cached
-from app.core.config import settings
 from app.log import logger
-from app.schemas import APIRateLimitException
 from app.schemas.types import MediaType
-from app.utils.http import RequestUtils, AsyncRequestUtils
-from app.utils.limit import rate_limit_exponential
 from app.utils.string import StringUtils
 from .tmdbv3api import TMDb, Search, Movie, TV, Season, Episode, Discover, Trending, Person, Collection
 from .tmdbv3api.exceptions import TMDbException
@@ -259,152 +252,6 @@ class TmdbApi:
                 multi = await self.async_get_info(mtype=MediaType.TV, tmdbid=multi.get("id"))
             if multi and self.__compare_names(name, multi.get("names")):
                 return multi
-        return None
-
-    # match_web 公共方法
-    @staticmethod
-    def _validate_web_params(name: str) -> Optional[dict]:
-        """
-        验证网站搜索参数
-        :return: None表示继续，dict表示直接返回结果
-        """
-        if not name:
-            return None
-        if StringUtils.is_chinese(name):
-            return {}
-        return None  # 继续执行
-
-    @staticmethod
-    def _build_tmdb_search_url(name: str) -> str:
-        """
-        构建TMDB搜索URL
-        """
-        return "https://www.themoviedb.org/search?query=%s" % quote(name)
-
-    @staticmethod
-    def _validate_response(res) -> Optional[dict]:
-        """
-        验证HTTP响应
-        :return: None表示继续，dict表示直接返回结果，Exception表示抛出异常
-        """
-        if res is None:
-            return None
-        if res.status_code == 429:
-            raise APIRateLimitException("触发TheDbMovie网站限流，获取媒体信息失败")
-        if res.status_code != 200:
-            return {}
-        return None  # 继续执行
-
-    @staticmethod
-    def _extract_tmdb_links(html_text: str, mtype: MediaType) -> List[str]:
-        """
-        从HTML文本中提取TMDB链接
-        """
-        if not html_text:
-            return []
-
-        html = None
-        try:
-            tmdb_links = []
-            html = etree.HTML(html_text)
-            if mtype == MediaType.TV:
-                links = html.xpath("//a[@data-id and @data-media-type='tv']/@href")
-            else:
-                links = html.xpath("//a[@data-id]/@href")
-            for link in links:
-                if not link or (not link.startswith("/tv") and not link.startswith("/movie")):
-                    continue
-                if link not in tmdb_links:
-                    tmdb_links.append(link)
-            return tmdb_links
-        except Exception as err:
-            logger.error(f"解析TMDB网站HTML出错：{str(err)}")
-            return []
-        finally:
-            if html is not None:
-                del html
-
-    @staticmethod
-    def _log_web_search_result(name: str, tmdbinfo: dict):
-        """
-        记录网站搜索结果日志
-        """
-        if tmdbinfo.get('media_type') == MediaType.MOVIE:
-            logger.info("%s 从WEB识别到 电影：TMDBID=%s, 名称=%s, 上映日期=%s" % (
-                name,
-                tmdbinfo.get('id'),
-                tmdbinfo.get('title'),
-                tmdbinfo.get('release_date')))
-        else:
-            logger.info("%s 从WEB识别到 电视剧：TMDBID=%s, 名称=%s, 首播日期=%s" % (
-                name,
-                tmdbinfo.get('id'),
-                tmdbinfo.get('name'),
-                tmdbinfo.get('first_air_date')))
-
-    def _process_web_search_links(self, name: str, mtype: MediaType,
-                                  tmdb_links: List[str], get_info_func) -> Optional[dict]:
-        """
-        处理网站搜索得到的链接
-        """
-        if len(tmdb_links) == 1:
-            tmdbid = self._parse_tmdb_id_from_link(tmdb_links[0])
-            if not tmdbid:
-                logger.warn(f"无法从链接解析TMDBID：{tmdb_links[0]}")
-                return {}
-            tmdbinfo = get_info_func(
-                mtype=MediaType.TV if tmdb_links[0].startswith("/tv") else MediaType.MOVIE,
-                tmdbid=tmdbid)
-            if tmdbinfo:
-                if mtype == MediaType.TV and tmdbinfo.get('media_type') != MediaType.TV:
-                    return {}
-                self._log_web_search_result(name, tmdbinfo)
-            return tmdbinfo
-        elif len(tmdb_links) > 1:
-            logger.info("%s TMDB网站返回数据过多：%s" % (name, len(tmdb_links)))
-        else:
-            logger.info("%s TMDB网站未查询到媒体信息！" % name)
-        return {}
-
-    async def _async_process_web_search_links(self, name: str,
-                                              mtype: MediaType, tmdb_links: List[str]) -> Optional[dict]:
-        """
-        处理网站搜索得到的链接（异步版本）
-        """
-        if len(tmdb_links) == 1:
-            tmdbid = self._parse_tmdb_id_from_link(tmdb_links[0])
-            if not tmdbid:
-                logger.warn(f"无法从链接解析TMDBID：{tmdb_links[0]}")
-                return {}
-            tmdbinfo = await self.async_get_info(
-                mtype=MediaType.TV if tmdb_links[0].startswith("/tv") else MediaType.MOVIE,
-                tmdbid=tmdbid)
-            if tmdbinfo:
-                if mtype == MediaType.TV and tmdbinfo.get('media_type') != MediaType.TV:
-                    return {}
-                self._log_web_search_result(name, tmdbinfo)
-            return tmdbinfo
-        elif len(tmdb_links) > 1:
-            logger.info("%s TMDB网站返回数据过多：%s" % (name, len(tmdb_links)))
-        else:
-            logger.info("%s TMDB网站未查询到媒体信息！" % name)
-        return {}
-
-    @staticmethod
-    def _parse_tmdb_id_from_link(link: str) -> Optional[int]:
-        """
-        从 TMDB 相对链接中解析数值 ID。
-        兼容格式：/movie/1195631-william-tell、/tv/65942-re、/tv/79744-the-rookie
-        """
-        if not link:
-            return None
-        match = re.match(r"^/[^/]+/(\d+)", link)
-        if match:
-            try:
-                return int(match.group(1))
-            except Exception as err:
-                logger.debug(f"解析TMDBID失败：{str(err)} - {traceback.format_exc()}")
-                return None
         return None
 
     @staticmethod
@@ -736,40 +583,6 @@ class TmdbApi:
 
         # 类型变更
         return self._convert_media_type(ret_info)
-
-    @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta)
-    @rate_limit_exponential(source="match_tmdb_web", base_wait=5, max_wait=1800, enable_logging=True)
-    def match_web(self, name: str, mtype: MediaType) -> Optional[dict]:
-        """
-        搜索TMDB网站，直接抓取结果，结果只有一条时才返回
-        :param name: 名称
-        :param mtype: 媒体类型
-        """
-        # 参数验证
-        validation_result = self._validate_web_params(name)
-        if validation_result is not None:
-            return validation_result
-
-        logger.info("正在从TheMovieDb网站查询：%s ..." % name)
-        tmdb_url = self._build_tmdb_search_url(name)
-        res = RequestUtils(timeout=5, ua=settings.NORMAL_USER_AGENT, proxies=settings.PROXY).get_res(url=tmdb_url)
-        if res is None:
-            logger.error("无法连接TheMovieDb")
-            return None
-
-        # 响应验证
-        response_result = self._validate_response(res)
-        if response_result is not None:
-            return response_result
-
-        try:
-            # 提取链接
-            tmdb_links = self._extract_tmdb_links(res.text, mtype)
-            # 处理结果
-            return self._process_web_search_links(name, mtype, tmdb_links, self.get_info)
-        except Exception as err:
-            logger.error(f"从TheDbMovie网站查询出错：{str(err)}")
-            return {}
 
     def get_info(self,
                  mtype: MediaType,
@@ -1625,7 +1438,6 @@ class TmdbApi:
         """
         清除缓存
         """
-        self.match_web.cache_clear()
         self.discover.discover_movies.cache_clear()
         self.discover.discover_tv_shows.cache_clear()
         self.tmdb.cache_clear()
@@ -1850,42 +1662,6 @@ class TmdbApi:
         except Exception as e:
             logger.error(str(e))
             return None
-
-    # 公共异步方法
-    @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta)
-    @rate_limit_exponential(source="match_tmdb_web", base_wait=5, max_wait=1800, enable_logging=True)
-    async def async_match_web(self, name: str, mtype: MediaType) -> Optional[dict]:
-        """
-        搜索TMDB网站，直接抓取结果，结果只有一条时才返回（异步版本）
-        :param name: 名称
-        :param mtype: 媒体类型
-        """
-        # 参数验证
-        validation_result = self._validate_web_params(name)
-        if validation_result is not None:
-            return validation_result
-
-        logger.info("正在从TheDbMovie网站查询：%s ..." % name)
-        tmdb_url = self._build_tmdb_search_url(name)
-        res = await AsyncRequestUtils(timeout=5, ua=settings.NORMAL_USER_AGENT, proxies=settings.PROXY).get_res(
-            url=tmdb_url)
-        if res is None:
-            logger.error("无法连接TheDbMovie")
-            return None
-
-        # 响应验证
-        response_result = self._validate_response(res)
-        if response_result is not None:
-            return response_result
-
-        try:
-            # 提取链接
-            tmdb_links = self._extract_tmdb_links(res.text, mtype)
-            # 处理结果
-            return await self._async_process_web_search_links(name, mtype, tmdb_links)
-        except Exception as err:
-            logger.error(f"从TheDbMovie网站查询出错：{str(err)}")
-            return {}
 
     async def async_search_multiis(self, title: str) -> List[dict]:
         """

@@ -1,6 +1,6 @@
 import asyncio
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from app.core.context import MediaInfo
 from app.core.meta import MetaBase
@@ -61,6 +61,40 @@ class MediaRecognizeModulesTest(TestCase):
         self.assertEqual(result.tmdb_id, 101)
         module.cache.get.assert_not_called()
         module.cache.update.assert_called_once()
+
+    def test_tmdb_recognize_does_not_fallback_to_match_web(self):
+        """TMDB API 搜索无结果时，不应再回退抓取 TMDB 网站搜索页。"""
+        module = TheMovieDbModule()
+        meta = MetaBase("No Match Movie")
+        meta.name = "No Match Movie"
+        meta.type = MediaType.MOVIE
+        module.cache = Mock()
+        module.tmdb = Mock()
+        module.tmdb.match_web.side_effect = AssertionError("不应调用 TMDB 网站搜索")
+        module._search_by_name = Mock(return_value=None)
+
+        result = module.recognize_media(meta=meta, cache=False)
+
+        self.assertIsNone(result)
+        module._search_by_name.assert_called()
+        module.tmdb.match_web.assert_not_called()
+
+    def test_async_tmdb_recognize_does_not_fallback_to_match_web(self):
+        """异步 TMDB API 搜索无结果时，不应再回退抓取 TMDB 网站搜索页。"""
+        module = TheMovieDbModule()
+        meta = MetaBase("No Match Movie")
+        meta.name = "No Match Movie"
+        meta.type = MediaType.MOVIE
+        module.cache = Mock()
+        module.tmdb = Mock()
+        module.tmdb.async_match_web = AsyncMock(side_effect=AssertionError("不应调用 TMDB 网站搜索"))
+        module._async_search_by_name = AsyncMock(return_value=None)
+
+        result = asyncio.run(module.async_recognize_media(meta=meta, cache=False))
+
+        self.assertIsNone(result)
+        module._async_search_by_name.assert_called()
+        module.tmdb.async_match_web.assert_not_called()
 
     def test_douban_prepare_search_names_deduplicates_simplified_name(self):
         """豆瓣候选名称应保留顺序，并去掉繁简转换后的重复项。"""
