@@ -3,7 +3,7 @@ import re
 import traceback
 from typing import Any, Optional
 from typing import List
-from urllib.parse import quote, urlencode, urlparse, parse_qs
+from urllib.parse import quote, urlparse, parse_qs
 
 from fastapi.concurrency import run_in_threadpool
 from jinja2 import Template
@@ -14,6 +14,7 @@ from app.log import logger
 from app.schemas.types import MediaType
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.string import StringUtils
+from app.utils.url import UrlUtils
 
 
 class SiteSpider:
@@ -120,14 +121,15 @@ class SiteSpider:
                 search_word = self.keyword
                 # 查询模式与
                 search_mode = "0"
+            is_imdbid_search = isinstance(self.keyword, str) and re.fullmatch(r"tt\d+", self.keyword)
+            search_word = self.__format_search_word(search_word)
 
             # 搜索URL
             indexer_params = self.search.get("params", {}).copy()
             if indexer_params:
                 search_area = indexer_params.get('search_area')
                 # search_area非0表示支持imdbid搜索
-                if (search_area and
-                        (not self.keyword or not self.keyword.startswith('tt'))):
+                if search_area and not is_imdbid_search:
                     # 支持imdbid搜索，但关键字不是imdbid时，不启用imdbid搜索
                     indexer_params.pop('search_area')
                 # 变量字典
@@ -168,7 +170,7 @@ class SiteSpider:
                             params.update({
                                 "cat%s" % cat.get("id"): 1
                             })
-                searchurl = self.domain + torrentspath + "?" + urlencode(params)
+                searchurl = UrlUtils.combine_url(self.domain, torrentspath, params)
             else:
                 # 变量字典
                 inputs_dict = {
@@ -199,6 +201,22 @@ class SiteSpider:
             searchurl = self.domain + str(torrentspath).format(**inputs_dict)
 
         return searchurl
+
+    def __format_search_word(self, search_word: str) -> str:
+        """
+        按站点配置转换搜索关键字，用于兼容站点特殊的 IMDb ID 查询格式。
+        """
+        if not search_word or not isinstance(search_word, str):
+            return search_word
+        if re.fullmatch(r"tt\d+", search_word):
+            imdbid_format = self.search.get("imdbid_format")
+            if imdbid_format:
+                return str(imdbid_format).format(
+                    keyword=search_word,
+                    imdbid=search_word,
+                    imdbid_num=search_word[2:]
+                )
+        return search_word
 
     def get_torrents(self) -> List[dict]:
         """
