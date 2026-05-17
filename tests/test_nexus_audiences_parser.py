@@ -120,6 +120,26 @@ def test_audiences_table_unread_links_ignore_content_rows():
             <td class="rowfollow" nowrap=""><span title="2026-05-07 23:01:58">8天17时前</span></td>
             <td class="rowfollow"><input class="checkbox" type="checkbox" name="messages[]" value="4318000"></td>
           </tr>
+          <tr>
+            <td class="rowfollow" align="center">
+              <img class="readpm" src="pic/trans.gif" title="已读">
+            </td>
+            <td class="rowfollow" align="left">
+              <a href="messages.php?action=viewmessage&amp;id=4317999">无英文 alt 的已读消息</a>
+            </td>
+            <td class="rowfollow" align="left">系统</td>
+            <td class="rowfollow" nowrap=""><span title="2026-05-07 23:01:58">8天17时前</span></td>
+            <td class="rowfollow"><input class="checkbox" type="checkbox" name="messages[]" value="4317999"></td>
+          </tr>
+          <tr>
+            <td class="rowfollow" align="center"></td>
+            <td class="rowfollow" align="left">
+              <a href="messages.php?action=viewmessage&amp;id=4317998">无状态图标消息</a>
+            </td>
+            <td class="rowfollow" align="left">系统</td>
+            <td class="rowfollow" nowrap=""><span title="2026-05-07 23:01:58">8天17时前</span></td>
+            <td class="rowfollow"><input class="checkbox" type="checkbox" name="messages[]" value="4317998"></td>
+          </tr>
         </table>
       </body>
     </html>
@@ -130,3 +150,34 @@ def test_audiences_table_unread_links_ignore_content_rows():
 
     assert msg_links == ["messages.php?action=viewmessage&id=4318225"]
     assert next_page is None
+
+
+def test_audiences_readpm_row_is_not_unread_message():
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    html_text = """
+    <html>
+      <body>
+        <table>
+          <tr>
+            <td class="rowfollow" align="center">
+              <img class="readpm" src="pic/trans.gif" alt="Read" title="已读">
+            </td>
+            <td class="rowfollow" align="left">
+              <a href="messages.php?action=viewmessage&amp;id=4318000">已读消息</a>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    msg_links = []
+
+    parser._parse_message_unread_links(html_text, msg_links)
+
+    assert msg_links == []

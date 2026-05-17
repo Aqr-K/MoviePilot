@@ -42,6 +42,30 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
             if html is not None:
                 del html
 
+    def _parse_message_unread_links(self, html_text: str, msg_links: list):
+        """
+        解析 Audiences 未读消息链接。
+        """
+        html = etree.HTML(html_text)
+        try:
+            if not StringUtils.is_valid_html_element(html):
+                return None
+
+            message_links = html.xpath(
+                '//tr[.//img[contains(concat(" ", normalize-space(@class), " "), " unreadpm ") '
+                'or @alt="Unread" or @title="未读"]]/td/a[contains(@href, "viewmessage")]/@href'
+            )
+            msg_links.extend(message_links)
+            next_page = None
+            next_page_text = html.xpath('//a[contains(.//text(), "下一页") or contains(.//text(), "下一頁")]/@href')
+            if next_page_text:
+                next_page = next_page_text[-1].strip()
+        finally:
+            if html is not None:
+                del html
+
+        return next_page
+
     def _parse_user_traffic_info(self, html_text):
         """
         解析用户流量信息
