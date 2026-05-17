@@ -1,10 +1,11 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from app.core.config import settings
 from app.chain.transfer import JobManager, TransferChain
-from app.schemas import FileItem, TransferInfo, TransferTask
+from app.schemas import EpisodeFormat, FileItem, TransferInfo, TransferTask
 from app.schemas.types import EventType, MediaType
 
 
@@ -126,6 +127,49 @@ def migrate_to_media_job(jobview: JobManager, task: TransferTask):
 
 
 class TransferJobManagerTest(unittest.TestCase):
+    def test_manual_episode_offset_applies_once(self):
+        chain = make_transfer_chain()
+        source_fileitem = make_fileitem("/downloads/Test.Show.2026.S01E14.mkv")
+        planned_episodes = []
+
+        chain._TransferChain__get_trans_fileitems = lambda fileitem, predicate: [
+            (source_fileitem, False)
+        ]
+        chain._TransferChain__put_to_jobview = lambda task: True
+        chain._TransferChain__register_scrape_batch_task = lambda task: None
+        chain._TransferChain__close_scrape_batch = lambda batch_id: None
+
+        def fake_handle_transfer(task, callback=None):
+            planned_episodes.append(task.meta.begin_episode)
+            return True, ""
+
+        chain._TransferChain__handle_transfer = fake_handle_transfer
+
+        transfer_history_oper = SimpleNamespace(get_by_src=lambda src, storage=None: None)
+        download_history_oper = SimpleNamespace(
+            get_by_hash=lambda download_hash: None,
+            get_file_by_fullpath=lambda fullpath: None,
+            get_files_by_savepath=lambda savepath: [],
+            get_by_path=lambda path: None,
+        )
+        system_config_oper = SimpleNamespace(get=lambda key: None)
+
+        with patch("app.chain.transfer.TransferHistoryOper", return_value=transfer_history_oper), \
+                patch("app.chain.transfer.DownloadHistoryOper", return_value=download_history_oper), \
+                patch("app.chain.transfer.SystemConfigOper", return_value=system_config_oper), \
+                patch("app.chain.transfer.MetaInfoPath", lambda *args, **kwargs: FakeMeta(14)):
+            state, errmsg = chain.do_transfer(
+                fileitem=source_fileitem,
+                mediainfo=FakeMedia(),
+                target_path=Path("/library"),
+                epformat=EpisodeFormat(offset="-1"),
+                background=False,
+            )
+
+        self.assertTrue(state, errmsg)
+        # 手动集数偏移只能应用一次，避免 E14 + (-1) 被二次处理成 E12。
+        self.assertEqual([13], planned_episodes)
+
     def test_completed_media_job_is_removed_after_last_meta_task_fails(self):
         jobview = JobManager()
         tasks = [make_task(episode) for episode in range(1, 4)]

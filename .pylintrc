@@ -5,38 +5,30 @@ init-hook='import sys; sys.path.append(".")'
 # 忽略的文件和目录
 ignore=.git,__pycache__,.venv,build,dist,tests,docs
 
+# 通过 `pylint app/` 检查主程序时不扫描内置插件目录，
+# 插件依赖和动态模型较多，容易产生与主程序无关的误报。
+ignore-paths=^app/plugins(/|$)
+
 # 并行作业数量
 jobs=0
 
 [MESSAGES CONTROL]
-# 只关注错误级别的问题，禁用警告、约定和重构建议
-# E = Error (错误) - 会导致构建失败
-# W = Warning (警告) - 仅显示，不会失败
-# R = Refactor (重构建议) - 仅显示，不会失败
-# C = Convention (约定) - 仅显示，不会失败
-# I = Information (信息) - 仅显示，不会失败
-
-# 禁用大部分警告、约定和重构建议，只保留错误和重要警告
+# 只启用确定性较强的严重问题检查，避免 SQLAlchemy、FastAPI 依赖注入、
+# 第三方 SDK 等动态对象被 Pylint 推断成误报。
 disable=all
-enable=E,
-       syntax-error,
+enable=syntax-error,
        undefined-variable,
        used-before-assignment,
+       possibly-used-before-assignment,
        unreachable,
        return-outside-function,
        yield-outside-function,
        continue-in-finally,
        nonlocal-without-binding,
        undefined-loop-variable,
-       redefined-builtin,
-       not-callable,
-       assignment-from-no-return,
-       no-value-for-parameter,
-       too-many-function-args,
-       unexpected-keyword-arg,
-       redundant-keyword-arg,
        import-error,
-       relative-beyond-top-level
+       relative-beyond-top-level,
+       no-name-in-module
 
 [REPORTS]
 # 设置报告格式

@@ -2245,6 +2245,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
             if not built_meta:
                 return None
+            if not meta:
+                # _build_path_meta 已经应用过手动季集/自定义格式覆盖；
+                # 这里避免再次偏移集数，导致手动整理的集数偏移翻倍。
+                return built_meta
             return _apply_meta_overrides(built_meta, source_path)
 
         def _build_path_meta(
