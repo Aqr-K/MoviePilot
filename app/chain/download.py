@@ -17,6 +17,7 @@ from app.core.metainfo import MetaInfo
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.mediaserver_oper import MediaServerOper
 from app.helper.directory import DirectoryHelper
+from app.helper.thread import ThreadHelper
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import ExistMediaInfo, FileURI, NotExistMediaInfo, DownloadingTorrent, Notification, ResourceSelectionEventData, \
@@ -31,6 +32,31 @@ class DownloadChain(ChainBase):
     """
     下载处理链
     """
+
+    def _submit_download_added_task(
+            self,
+            context: Context,
+            download_dir: Path,
+            torrent_content: Union[str, bytes],
+    ) -> None:
+        """
+        后台执行下载成功后的附加处理，避免站点字幕下载阻塞添加下载响应。
+        """
+
+        def _run_download_added() -> None:
+            try:
+                self.download_added(
+                    context=context,
+                    download_dir=download_dir,
+                    torrent_content=torrent_content,
+                )
+            except Exception as err:
+                logger.error(f"执行下载成功后处理失败：{str(err)}")
+
+        try:
+            ThreadHelper().submit(_run_download_added)
+        except Exception as err:
+            logger.error(f"提交下载成功后处理后台任务失败：{str(err)}")
 
     def download_torrent(self, torrent: TorrentInfo,
                          channel: MessageChannel = None,
@@ -371,7 +397,11 @@ class DownloadChain(ChainBase):
                 username=username,
             )
             # 下载成功后处理
-            self.download_added(context=context, download_dir=download_dir, torrent_content=torrent_content)
+            self._submit_download_added_task(
+                context=context,
+                download_dir=download_dir,
+                torrent_content=torrent_content,
+            )
             # 广播事件
             self.eventmanager.send_event(EventType.DownloadAdded, {
                 "hash": _hash,
