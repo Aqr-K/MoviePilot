@@ -1189,11 +1189,14 @@ class SubscribeChain(ChainBase):
         mediakey = subscribe.tmdbid or subscribe.doubanid
         # 是否有剩余集
         no_lefts = not lefts or not lefts.get(mediakey)
+        # 不论是否洗版，只要本轮有下载产生就要把集数追加进 subscribe.note，
+        # 保证"已下载过哪些集"这条事实在所有订阅模式下都有可靠落点；洗版分支
+        # 之前只写 episode_priority，导致用户切回普通订阅时丢失下载历史，并让
+        # __get_downloaded 在洗版下无法从 note 拿到 priority 未达 100 但实际下过的集。
+        if downloads:
+            self.__update_subscribe_note(subscribe=subscribe, downloads=downloads)
         # 是否完成订阅
         if not subscribe.best_version:
-            # 订阅存在待定策略，不管是否已完成，均需更新订阅信息
-            # 更新订阅已下载信息
-            self.__update_subscribe_note(subscribe=subscribe, downloads=downloads)
             # 更新订阅剩余集数和时间
             self.__update_lack_episodes(lefts=lefts, subscribe=subscribe, mediainfo=mediainfo,
                                         update_date=bool(downloads))
@@ -1856,7 +1859,11 @@ class SubscribeChain(ChainBase):
     @staticmethod
     def __get_downloaded(subscribe: Subscribe) -> List[int]:
         """
-        获取已下载过的集数或电影
+        获取已下载过的集数或电影。
+
+        洗版分支只返回 priority==100 的完成集；priority<100 的集仍要继续搜索更高
+        优先级版本，不能并入返回值（会让下游把 pending 减空、订阅卡死）。
+        note 由非洗版分支消费，用于洗版关闭后的迁移读取。
         """
         if subscribe.best_version:
             if subscribe.type == MediaType.TV.value:
