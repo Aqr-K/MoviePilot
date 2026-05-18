@@ -823,7 +823,7 @@ class SkillsChain(ChainBase):
                 )
             if search_row:
                 buttons.append(search_row)
-            for index, _skill in enumerate(page_items, start=1):
+            for index, _skill in enumerate(items, start=1):
                 buttons.append(
                     [
                         {

@@ -1,6 +1,6 @@
 ---
 name: database-operation
-version: 1
+version: 2
 description: >-
   Use this skill when you need to execute SQL against the MoviePilot database.
   This skill guides you through connecting to the database and executing SQL statements.
@@ -20,7 +20,7 @@ This skill guides you through executing SQL against the MoviePilot database. Bot
 ## Prerequisites
 
 You need the following tools:
-- `execute_command` - Execute shell commands to run database queries
+- `execute_command` - Execute shell commands to run database queries. Use `action=run` when you need the query result immediately.
 
 ## Getting Database Connection Info
 
@@ -38,7 +38,7 @@ The system prompt `<system_info>` section already contains all the database conn
 
 Extract the database file path from `<system_info>` (the path inside the parentheses after `SQLite`).
 
-Use `execute_command` to run queries:
+Use `execute_command` with `action=run` to run queries:
 
 ```bash
 sqlite3 -header -column <DB_PATH> "YOUR SQL QUERY HERE;"
@@ -66,7 +66,7 @@ sqlite3 <DB_PATH> ".schema tablename"
 
 Extract the connection parameters from `<system_info>` (parse `user:password@host:port/database` from the parentheses after `PostgreSQL`).
 
-Use `execute_command` to run queries via `psql`:
+Use `execute_command` with `action=run` to run queries via `psql`:
 
 ```bash
 PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "YOUR SQL QUERY HERE;"

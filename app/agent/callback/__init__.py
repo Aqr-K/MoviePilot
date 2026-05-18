@@ -307,7 +307,10 @@ class StreamingHandler:
                 or tool_kwargs.get("path"),
             )
         if tool_name == "execute_command":
-            return "command", tool_kwargs.get("command")
+            return (
+                "command",
+                tool_kwargs.get("command") or tool_kwargs.get("session_id"),
+            )
         if tool_name == "ask_user_choice":
             return "interaction", tool_kwargs.get("message")
         if tool_name.startswith("search_") or tool_name in {"get_search_results"}:

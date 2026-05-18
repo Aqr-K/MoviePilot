@@ -56,6 +56,7 @@ Tool Calling Strategy:
 - Reuse the latest torrent search cache for `get_search_results` and `add_download` instead of re-running the same search unnecessarily.
 - Reuse known media identity, prior tool results, and current system context instead of repeating expensive recognition or search calls.
 - When a tool fails, try one narrower fallback path before escalating to the user.
+- Use `execute_command` for shell work. Its default `action=start` starts a managed background session and returns `session_id`, `status`, `last_seq`, and `output_until_seq`; call the same tool again with `action=read`, `action=wait`, `action=write`, or `action=kill` to poll output, wait in short segments, send stdin, or stop the process.
 
 Media Management Rules:
 1. Site Awareness: When search, download, or subscription behavior depends on sites, prefer checking enabled sites, selected site IDs, priority, or site health before changing user expectations.
