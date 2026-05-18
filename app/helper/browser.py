@@ -1,11 +1,75 @@
 import uuid
-from typing import Callable, Any, Optional
-
-from playwright.sync_api import BrowserContext, Page
+from typing import Callable, Any, Optional, Protocol
 
 from app.core.config import settings
 from app.log import logger
 from app.utils.http import RequestUtils, cookie_parse
+
+
+class BrowserElement(Protocol):
+    """
+    页面元素的最小接口，避免为了类型标注直接导入 Playwright。
+    """
+
+    def is_visible(self) -> bool:
+        ...
+
+    def fill(self, value: str) -> None:
+        ...
+
+
+class BrowserContext(Protocol):
+    """
+    CloakBrowser 返回的上下文只需要满足这些能力即可。
+    """
+
+    def new_page(self) -> "BrowserPage":
+        ...
+
+    def cookies(self) -> list[dict[str, Any]]:
+        ...
+
+    def close(self) -> None:
+        ...
+
+
+class BrowserPage(Protocol):
+    """
+    CloakBrowser 页面对象的最小接口，覆盖 helper 和登录流程当前用到的方法。
+    """
+
+    context: BrowserContext
+    url: str
+
+    def set_extra_http_headers(self, headers: dict[str, str]) -> None:
+        ...
+
+    def goto(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def wait_for_load_state(self, state: str, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def wait_for_selector(self, selector: str, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def fill(self, selector: str, value: str, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def click(self, selector: str, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def query_selector(self, selector: str) -> Optional[BrowserElement]:
+        ...
+
+    def content(self) -> str:
+        ...
+
+    def evaluate(self, expression: str, *args: Any, **kwargs: Any) -> Any:
+        ...
+
+    def close(self) -> None:
+        ...
 
 
 class PlaywrightHelper:
@@ -145,7 +209,7 @@ class PlaywrightHelper:
                     logger.warning(f"清理 FlareSolverr 会话失败: {str(e)}")
 
     def action(self, url: str,
-               callback: Callable,
+               callback: Callable[[BrowserPage], Any],
                cookies: Optional[str] = None,
                ua: Optional[str] = None,
                proxies: Optional[dict] = None,

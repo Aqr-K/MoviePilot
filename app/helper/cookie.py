@@ -2,9 +2,8 @@ import base64
 from typing import Tuple, Optional
 
 from lxml import etree
-from playwright.sync_api import Page
 
-from app.helper.browser import PlaywrightHelper
+from app.helper.browser import BrowserPage, PlaywrightHelper
 from app.helper.ocr import OcrHelper
 from app.helper.twofa import TwoFactorAuth
 from app.log import logger
@@ -88,7 +87,7 @@ class CookieHelper:
         :return: cookie、ua、message
         """
 
-        def __page_handler(page: Page) -> Tuple[Optional[str], Optional[str], str]:
+        def __page_handler(page: BrowserPage) -> Tuple[Optional[str], Optional[str], str]:
             """
             页面处理
             :return: Cookie和UA
