@@ -42,6 +42,32 @@ class SearchChain(ChainBase):
     _ai_recommend_result: Optional[List[int]] = None
     _ai_recommend_error: Optional[str] = None
 
+    @staticmethod
+    def _get_search_resource_pages() -> int:
+        """
+        获取搜索资源需要抓取的页数。
+
+        settings 可能被环境变量写成字符串，这里统一兜底为 1，避免异常配置导致搜索中断。
+        """
+        pages = settings.SEARCH_RESOURCE_PAGES
+        try:
+            pages = int(pages)
+        except (TypeError, ValueError):
+            return 1
+        return max(pages, 1)
+
+    @classmethod
+    def _build_search_pages(cls, page: Optional[int] = 0) -> List[int]:
+        """
+        根据起始页和配置页数生成需要请求的页码列表。
+        """
+        try:
+            start_page = int(page or 0)
+        except (TypeError, ValueError):
+            start_page = 0
+        start_page = max(start_page, 0)
+        return list(range(start_page, start_page + cls._get_search_resource_pages()))
+
     @property
     def is_ai_recommend_enabled(self) -> bool:
         """
@@ -1247,32 +1273,35 @@ class SearchChain(ChainBase):
         progress.start()
         # 开始计时
         start_time = datetime.now()
+        search_pages = self._build_search_pages(page)
         # 总数
-        total_num = len(indexer_sites)
+        total_num = len(indexer_sites) * len(search_pages)
         # 完成数
         finish_count = 0
         # 更新进度
         progress.update(value=0,
-                        text=f"开始搜索，共 {total_num} 个站点 ...")
+                        text=f"开始搜索，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...")
         # 结果集
         results = []
-        # 多线程
-        with ThreadPoolExecutor(max_workers=len(indexer_sites)) as executor:
+        # 多页搜索会放大请求数，线程池仍按系统线程池配置做上限，避免瞬时打满站点。
+        max_workers = min(total_num, settings.CONF.threadpool or total_num)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             all_task = []
             for site in indexer_sites:
-                if area == "imdbid":
-                    # 搜索IMDBID
-                    task = executor.submit(self.search_torrents, site=site,
-                                           keyword=mediainfo.imdb_id if mediainfo else None,
-                                           mtype=mediainfo.type if mediainfo else None,
-                                           page=page)
-                else:
-                    # 搜索标题
-                    task = executor.submit(self.search_torrents, site=site,
-                                           keyword=keyword,
-                                           mtype=mediainfo.type if mediainfo else None,
-                                           page=page)
-                all_task.append(task)
+                for search_page in search_pages:
+                    if area == "imdbid":
+                        # 搜索IMDBID
+                        task = executor.submit(self.search_torrents, site=site,
+                                               keyword=mediainfo.imdb_id if mediainfo else None,
+                                               mtype=mediainfo.type if mediainfo else None,
+                                               page=search_page)
+                    else:
+                        # 搜索标题
+                        task = executor.submit(self.search_torrents, site=site,
+                                               keyword=keyword,
+                                               mtype=mediainfo.type if mediainfo else None,
+                                               page=search_page)
+                    all_task.append(task)
             for future in as_completed(all_task):
                 if global_vars.is_system_stopped:
                     break
@@ -1282,7 +1311,7 @@ class SearchChain(ChainBase):
                     results.extend(result)
                 logger.info(f"站点搜索进度：{finish_count} / {total_num}")
                 progress.update(value=finish_count / total_num * 100,
-                                text=f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个站点 ...")
+                                text=f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个请求 ...")
         # 计算耗时
         end_time = datetime.now()
         # 更新进度
@@ -1329,32 +1358,40 @@ class SearchChain(ChainBase):
         progress.start()
         # 开始计时
         start_time = datetime.now()
+        search_pages = self._build_search_pages(page)
         # 总数
-        total_num = len(indexer_sites)
+        total_num = len(indexer_sites) * len(search_pages)
         # 完成数
         finish_count = 0
         # 更新进度
         progress.update(value=0,
-                        text=f"开始搜索，共 {total_num} 个站点 ...")
+                        text=f"开始搜索，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...")
         # 结果集
         results = []
+        semaphore = asyncio.Semaphore(settings.CONF.threadpool or total_num)
+
+        async def search_site_page(site: dict, search_page: int) -> List[TorrentInfo]:
+            """
+            控制单次站点页请求的并发量，避免多页搜索把所有请求一次性打出去。
+            """
+            async with semaphore:
+                if area == "imdbid":
+                    # 搜索IMDBID
+                    return await self.async_search_torrents(site=site,
+                                                            keyword=mediainfo.imdb_id if mediainfo else None,
+                                                            mtype=mediainfo.type if mediainfo else None,
+                                                            page=search_page)
+                # 搜索标题
+                return await self.async_search_torrents(site=site,
+                                                        keyword=keyword,
+                                                        mtype=mediainfo.type if mediainfo else None,
+                                                        page=search_page)
 
         # 创建异步任务列表
         tasks = []
         for site in indexer_sites:
-            if area == "imdbid":
-                # 搜索IMDBID
-                task = self.async_search_torrents(site=site,
-                                                  keyword=mediainfo.imdb_id if mediainfo else None,
-                                                  mtype=mediainfo.type if mediainfo else None,
-                                                  page=page)
-            else:
-                # 搜索标题
-                task = self.async_search_torrents(site=site,
-                                                  keyword=keyword,
-                                                  mtype=mediainfo.type if mediainfo else None,
-                                                  page=page)
-            tasks.append(task)
+            for search_page in search_pages:
+                tasks.append(search_site_page(site, search_page))
 
         # 使用asyncio.as_completed来处理并发任务
         for future in asyncio.as_completed(tasks):
@@ -1366,7 +1403,7 @@ class SearchChain(ChainBase):
                 results.extend(result)
             logger.info(f"站点搜索进度：{finish_count} / {total_num}")
             progress.update(value=finish_count / total_num * 100,
-                            text=f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个站点 ...")
+                            text=f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个请求 ...")
 
         # 计算耗时
         end_time = datetime.now()
@@ -1417,45 +1454,53 @@ class SearchChain(ChainBase):
         progress = ProgressHelper(ProgressKey.Search)
         progress.start()
         start_time = datetime.now()
-        total_num = len(indexer_sites)
+        search_pages = self._build_search_pages(page)
+        total_num = len(indexer_sites) * len(search_pages)
         finish_count = 0
         progress.update(value=0,
-                        text=f"开始搜索，共 {total_num} 个站点 ...")
+                        text=f"开始搜索，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...")
         yield {
             "type": "progress",
             "stage": "searching",
             "value": 0,
-            "text": f"开始搜索，共 {total_num} 个站点 ...",
+            "text": f"开始搜索，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...",
             "items": [],
             "finished": 0,
             "total": total_num
         }
 
-        async def search_site(site: dict) -> Tuple[dict, List[TorrentInfo]]:
-            if area == "imdbid":
-                site_result = await self.async_search_torrents(site=site,
-                                                               keyword=mediainfo.imdb_id if mediainfo else None,
-                                                               mtype=mediainfo.type if mediainfo else None,
-                                                               page=page)
-            else:
-                site_result = await self.async_search_torrents(site=site,
-                                                               keyword=keyword,
-                                                               mtype=mediainfo.type if mediainfo else None,
-                                                               page=page)
-            return site, site_result or []
+        semaphore = asyncio.Semaphore(settings.CONF.threadpool or total_num)
 
-        tasks = [asyncio.create_task(search_site(site)) for site in indexer_sites]
+        async def search_site(site: dict, search_page: int) -> Tuple[dict, int, List[TorrentInfo]]:
+            async with semaphore:
+                if area == "imdbid":
+                    site_result = await self.async_search_torrents(site=site,
+                                                                   keyword=mediainfo.imdb_id if mediainfo else None,
+                                                                   mtype=mediainfo.type if mediainfo else None,
+                                                                   page=search_page)
+                else:
+                    site_result = await self.async_search_torrents(site=site,
+                                                                   keyword=keyword,
+                                                                   mtype=mediainfo.type if mediainfo else None,
+                                                                   page=search_page)
+                return site, search_page, site_result or []
+
+        tasks = [
+            asyncio.create_task(search_site(site, search_page))
+            for site in indexer_sites
+            for search_page in search_pages
+        ]
         results_count = 0
         try:
             for future in asyncio.as_completed(tasks):
                 if global_vars.is_system_stopped:
                     break
                 finish_count += 1
-                site, result = await future
+                site, search_page, result = await future
                 results_count += len(result)
                 logger.info(f"站点搜索进度：{finish_count} / {total_num}")
                 progress_value = finish_count / total_num * 100
-                progress_text = f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个站点 ..."
+                progress_text = f"正在搜索{keyword or ''}，已完成 {finish_count} / {total_num} 个请求 ..."
                 progress.update(value=progress_value, text=progress_text)
                 yield {
                     "type": "append",
@@ -1465,6 +1510,7 @@ class SearchChain(ChainBase):
                     "items": result,
                     "site": site.get("name"),
                     "site_id": site.get("id"),
+                    "page": search_page,
                     "finished": finish_count,
                     "total": total_num,
                     "total_items": results_count

@@ -160,6 +160,48 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(SearchChain._ai_recommend_result)
         self.assertIsNone(SearchChain._ai_recommend_error)
 
+    def test_build_search_pages_uses_search_resource_pages_setting(self):
+        with patch.object(settings, "SEARCH_RESOURCE_PAGES", 3, create=True):
+            self.assertEqual([2, 3, 4], SearchChain._build_search_pages(page=2))
+
+    def test_build_search_pages_falls_back_to_one_page_for_invalid_setting(self):
+        with patch.object(settings, "SEARCH_RESOURCE_PAGES", 0, create=True):
+            self.assertEqual([0], SearchChain._build_search_pages(page=0))
+        with patch.object(settings, "SEARCH_RESOURCE_PAGES", "bad", create=True):
+            self.assertEqual([0], SearchChain._build_search_pages(page="bad"))
+
+    def test_search_all_sites_requests_configured_pages(self):
+        chain = self._make_chain()
+        requested_pages = []
+        chain.search_torrents = lambda **kwargs: requested_pages.append(kwargs["page"]) or [
+            SimpleNamespace(title=f"Result Page {kwargs['page']}", description="")
+        ]
+
+        with (
+            patch.object(settings, "SEARCH_RESOURCE_PAGES", 3, create=True),
+            patch("app.chain.search.SystemConfigOper") as system_config_oper,
+            patch("app.chain.search.SitesHelper") as sites_helper,
+            patch("app.chain.search.ProgressHelper") as progress_helper,
+        ):
+            system_config_oper.return_value.get.return_value = [1]
+            sites_helper.return_value.get_indexers.return_value = [
+                {"id": 1, "name": "测试站点"}
+            ]
+            progress_helper.return_value = SimpleNamespace(
+                start=lambda: None,
+                update=lambda **_kwargs: None,
+                end=lambda: None,
+            )
+
+            results = chain._SearchChain__search_all_sites(
+                keyword="keyword",
+                sites=None,
+                page=0,
+            )
+
+        self.assertEqual([0, 1, 2], sorted(requested_pages))
+        self.assertEqual(3, len(results))
+
     def test_search_by_id_caches_replayable_search_params_when_caching(self):
         chain = self._make_chain()
         cached = []
