@@ -24,14 +24,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     gosu \
     bash \
+    ca-certificates \
     curl \
     wget \
+    git \
     busybox \
     tini \
     jq \
+    ripgrep \
+    less \
+    unzip \
     fuse3 \
     rsync \
     openssh-client \
+    iproute2 \
+    netcat-openbsd \
+    lsof \
     ffmpeg \
     nano \
     libjemalloc2 \
