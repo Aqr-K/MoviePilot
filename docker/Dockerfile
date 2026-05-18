@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     fuse3 \
     rsync \
+    openssh-client \
     ffmpeg \
     nano \
     libjemalloc2 \
