@@ -142,6 +142,7 @@ class PromptManager:
         self.prompts_cache: Dict[str, str] = {}
         self._system_tasks_cache: Optional[SystemTasksDefinition] = None
         self._system_tasks_signature: Optional[tuple[int, int]] = None
+        self._available_shell_commands_cache: Optional[list[tuple[str, str]]] = None
 
     def load_prompt(self, prompt_name: str) -> str:
         """
@@ -329,8 +330,7 @@ class PromptManager:
             sections.append(self._format_numbered_rules("IMPORTANT", rules))
         return "\n\n".join(section for section in sections if section).strip()
 
-    @staticmethod
-    def _get_moviepilot_info() -> str:
+    def _get_moviepilot_info(self) -> str:
         """
         获取MoviePilot系统信息，用于注入到系统提示词中
         """
@@ -382,7 +382,7 @@ class PromptManager:
             f"- 系统安装目录: {settings.ROOT_PATH}",
         ]
 
-        available_commands = PromptManager._get_available_shell_commands()
+        available_commands = self._get_available_shell_commands()
         if available_commands:
             info_lines.append("- 可用系统命令（可通过 `execute_command` 调用）:")
             info_lines.extend(
@@ -391,20 +391,28 @@ class PromptManager:
 
         return "\n".join(info_lines)
 
-    @staticmethod
-    def _get_available_shell_commands() -> list[tuple[str, str]]:
+    def _get_available_shell_commands(self) -> list[tuple[str, str]]:
         """
         探测 PATH 中已经安装的常用命令。
 
         这里只使用 shutil.which 做无副作用查找，不实际执行命令；执行权限、
-        高风险操作确认和输出限制仍由 execute_command 工具负责。
+        高风险操作确认和输出限制仍由 execute_command 工具负责。探测结果
+        在进程内缓存，避免每次组装提示词都重复扫描 PATH。
         """
+        if self._available_shell_commands_cache is not None:
+            return self._available_shell_commands_cache
+
         available_commands: list[tuple[str, str]] = []
         for command in COMMON_SHELL_COMMANDS:
             command_path = shutil.which(command)
             if command_path:
                 available_commands.append((command, command_path))
+        self._available_shell_commands_cache = available_commands
         return available_commands
+
+    def clear_available_shell_commands_cache(self) -> None:
+        """清理可用系统命令缓存，供测试或运行时手动刷新使用。"""
+        self._available_shell_commands_cache = None
 
     @staticmethod
     def _generate_formatting_instructions(caps: ChannelCapabilities) -> str:

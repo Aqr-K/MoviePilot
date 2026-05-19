@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from app.agent.middleware.memory import MEMORY_ONBOARDING_PROMPT
 from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
-from app.agent.prompt import PromptConfigError, prompt_manager
+from app.agent.prompt import COMMON_SHELL_COMMANDS, PromptConfigError, prompt_manager
 from app.core.config import settings
 
 
@@ -16,6 +16,14 @@ class _FakeRequest:
 
 
 class TestAgentPromptStyle(unittest.TestCase):
+    def setUp(self):
+        """每个用例前清理系统命令缓存，避免本机 PATH 或测试顺序影响断言。"""
+        prompt_manager.clear_available_shell_commands_cache()
+
+    def tearDown(self):
+        """每个用例后清理系统命令缓存，避免 mock 探测结果泄漏到后续用例。"""
+        prompt_manager.clear_available_shell_commands_cache()
+
     def test_base_prompt_mentions_persona_management_tools(self):
         prompt = prompt_manager.get_agent_prompt()
 
@@ -61,6 +69,20 @@ class TestAgentPromptStyle(unittest.TestCase):
             prompt = prompt_manager.get_agent_prompt()
 
         self.assertNotIn("可用系统命令", prompt)
+
+    def test_available_shell_commands_are_cached_after_first_scan(self):
+        """常用命令探测应只在首次加载时扫描 PATH，后续提示词复用缓存。"""
+        command_paths = {"ssh": "/usr/bin/ssh"}
+        with patch(
+            "app.agent.prompt.shutil.which",
+            side_effect=lambda command: command_paths.get(command),
+        ) as which_mock:
+            first_prompt = prompt_manager.get_agent_prompt()
+            second_prompt = prompt_manager.get_agent_prompt()
+
+        self.assertIn("  - ssh: /usr/bin/ssh", first_prompt)
+        self.assertIn("  - ssh: /usr/bin/ssh", second_prompt)
+        self.assertEqual(which_mock.call_count, len(COMMON_SHELL_COMMANDS))
 
     def test_runtime_config_middleware_injects_persona_only(self):
         middleware = RuntimeConfigMiddleware()
