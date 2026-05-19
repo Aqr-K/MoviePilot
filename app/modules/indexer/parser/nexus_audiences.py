@@ -17,13 +17,10 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         """
         解析 Audiences 新版顶部用户栏中的未读消息数。
         """
-        super()._parse_message_unread(html_text)
-        if self.message_unread:
-            return
-
         html = etree.HTML(html_text)
         try:
             if not StringUtils.is_valid_html_element(html):
+                super()._parse_message_unread(html_text)
                 return
 
             message_tools = html.xpath(
@@ -41,6 +38,8 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         finally:
             if html is not None:
                 del html
+
+        super()._parse_message_unread(html_text)
 
     def _parse_message_unread_links(self, html_text: str, msg_links: list):
         """
