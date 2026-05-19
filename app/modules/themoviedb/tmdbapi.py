@@ -1240,7 +1240,7 @@ class TmdbApi:
         """
         languages = []
         for language in (
-                getattr(settings, "TMDB_LOCALE", None),
+                settings.TMDB_LOCALE,
                 "en",
                 None,
                 original_language,
