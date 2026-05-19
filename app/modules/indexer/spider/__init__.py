@@ -22,6 +22,8 @@ class SiteSpider:
     站点爬虫
     """
 
+    _default_result_num = 100
+
     @property
     def __class__(self):
         return object
@@ -67,7 +69,7 @@ class SiteSpider:
             self.list = self.browse.get('list') or self.list
             self.fields = self.browse.get('fields') or self.fields
         self.domain = indexer.get('domain')
-        self.result_num = int(indexer.get('result_num') or 100)
+        self.result_num = int(indexer.get('result_num') or self.default_result_num())
         self._timeout = int(indexer.get('timeout') or 15)
         self.page = page
         if self.domain and not str(self.domain).endswith("/"):
@@ -81,6 +83,13 @@ class SiteSpider:
         self.is_error = False
         self.torrents_info = {}
         self.torrents_info_array = []
+
+    @classmethod
+    def default_result_num(cls) -> int:
+        """
+        获取普通配置站点的默认单页数量。
+        """
+        return cls._default_result_num
 
     def __get_search_url(self):
         """

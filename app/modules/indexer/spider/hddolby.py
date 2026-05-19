@@ -20,7 +20,7 @@ class HddolbySpider:
     _cookie = None
     _ua = None
     _apikey = None
-    _size = 40
+    _size = 100
     _pageurl = None
     _timeout = 15
     _searchurl = None
@@ -57,6 +57,13 @@ class HddolbySpider:
         "hfr": "高帧率",
     }
 
+    @classmethod
+    def get_search_page_size(cls, keyword: Optional[str] = None) -> Optional[int]:
+        """
+        获取搜索接口单页容量。
+        """
+        return cls._size
+
     def __init__(self, indexer: dict):
         self.systemconfig = SystemConfigOper()
         if indexer:
@@ -88,7 +95,7 @@ class HddolbySpider:
         return {
             "keyword": keyword,
             "page_number": page,
-            "page_size": 100,
+            "page_size": self._size,
             "categories": categories,
             "visible": 1,
         }

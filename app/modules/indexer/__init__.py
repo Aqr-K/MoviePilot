@@ -149,6 +149,30 @@ class IndexerModule(_ModuleBase):
                             site_downloader=site.get("downloader"),
                             **result) for result in result_array]
 
+    @staticmethod
+    def get_search_page_size(site: dict, keyword: Optional[str] = None) -> Optional[int]:
+        """
+        获取站点搜索单页容量；None 表示当前搜索入口不支持可靠翻页。
+        """
+        site = site or {}
+        parser = site.get("parser")
+        parser_classes = {
+            "TNodeSpider": TNodeSpider,
+            "TorrentLeech": TorrentLeech,
+            "mTorrent": MTorrentSpider,
+            "Yema": YemaSpider,
+            "Haidan": HaiDanSpider,
+            "HDDolby": HddolbySpider,
+            "RousiPro": RousiSpider,
+        }
+        if parser in parser_classes:
+            return parser_classes[parser].get_search_page_size(keyword=keyword)
+        try:
+            page_size = int(site.get("result_num") or SiteSpider.default_result_num())
+        except (TypeError, ValueError):
+            page_size = SiteSpider.default_result_num()
+        return page_size if page_size > 0 else SiteSpider.default_result_num()
+
     def search_torrents(self, site: dict,
                         keyword: str = None,
                         mtype: MediaType = None,

@@ -17,6 +17,13 @@ class TorrentLeech:
     _pageurl = "%storrent/%s"
     _timeout = 15
 
+    @classmethod
+    def get_search_page_size(cls, keyword: Optional[str] = None) -> Optional[int]:
+        """
+        获取搜索接口单页容量；关键词搜索 URL 当前没有可靠页码入口。
+        """
+        return None if keyword else cls._size
+
     def __init__(self, indexer: dict):
         self._indexer = indexer
         if indexer.get('proxy'):

@@ -53,6 +53,13 @@ class MTorrentSpider:
         "7": "DIY 国配 中字"
     }
 
+    @classmethod
+    def get_search_page_size(cls, keyword: Optional[str] = None) -> Optional[int]:
+        """
+        获取搜索接口单页容量。
+        """
+        return cls._size
+
     def __init__(self, indexer: dict):
         self.systemconfig = SystemConfigOper()
         if indexer:

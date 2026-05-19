@@ -17,6 +17,13 @@ class TNodeSpider(metaclass=SingletonClass):
     _downloadurl = "%sapi/torrent/download/%s"
     _pageurl = "%storrent/info/%s"
 
+    @classmethod
+    def get_search_page_size(cls, keyword: Optional[str] = None) -> Optional[int]:
+        """
+        获取搜索接口单页容量。
+        """
+        return cls._size
+
     def __init__(self, indexer: dict):
         if indexer:
             self._indexerid = indexer.get('id')

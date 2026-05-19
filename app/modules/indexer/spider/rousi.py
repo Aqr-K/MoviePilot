@@ -39,6 +39,13 @@ class RousiSpider:
     # API KEY
     _apikey = None
 
+    @classmethod
+    def get_search_page_size(cls, keyword: Optional[str] = None) -> Optional[int]:
+        """
+        获取搜索接口单页容量。
+        """
+        return cls._size
+
     def __init__(self, indexer: dict):
         self.systemconfig = SystemConfigOper()
         if indexer:

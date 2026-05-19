@@ -922,6 +922,18 @@ class ChainBase(metaclass=ABCMeta):
         """
         return await self.async_run_module("async_search_collections", name=name)
 
+    def get_search_page_size(
+            self,
+            site: dict,
+            keyword: Optional[str] = None,
+    ) -> Optional[int]:
+        """
+        获取站点搜索单页容量；返回 None 表示当前搜索入口不支持可靠翻页。
+        """
+        return self.run_module(
+            "get_search_page_size", site=site, keyword=keyword
+        )
+
     def search_torrents(
             self,
             site: dict,

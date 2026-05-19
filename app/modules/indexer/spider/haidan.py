@@ -49,6 +49,13 @@ class HaiDanSpider:
         "7": 1
     }
 
+    @classmethod
+    def get_search_page_size(cls, keyword: str = None) -> None:
+        """
+        海胆搜索入口当前没有接入页码参数，不参与自动翻页。
+        """
+        return None
+
     def __init__(self, indexer: dict):
         self.systemconfig = SystemConfigOper()
         if indexer:
