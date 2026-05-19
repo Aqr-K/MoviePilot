@@ -363,6 +363,15 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             if season_image_name := season_image_name_map.get(metadata_type):
                 hint_ext = Path(filename_hint).suffix if filename_hint else ".jpg"
                 final_filename = f"{season_image_name}{hint_ext}"
+        elif item_type == ScrapingTarget.MOVIE and current_fileitem.type == "file":
+            # 电影文件的图片应与视频文件同级保存，避免把图片路径拼到文件名下面。
+            target_dir_item = parent_fileitem or self.storagechain.get_parent_item(
+                current_fileitem
+            )
+            if not target_dir_item:
+                logger.error(f"无法获取文件 {current_fileitem.path} 的父目录项。")
+                return current_fileitem, None
+            target_dir_path = Path(target_dir_item.path)
         # 如果是 EPISODE 类型的图片（如thumb），通常也是放在文件同级目录，文件名与视频文件一致
         elif (
                 metadata_type in [ScrapingMetadata.THUMB]
@@ -389,6 +398,52 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
         target_full_path = target_dir_path / final_filename
         return target_dir_item, target_full_path
+
+    def _get_target_fileitems_and_paths(
+            self,
+            current_fileitem: schemas.FileItem,
+            item_type: ScrapingTarget,
+            metadata_type: ScrapingMetadata,
+            filename_hint: Optional[str] = None,
+            parent_fileitem: Optional[schemas.FileItem] = None,
+    ) -> List[Tuple[schemas.FileItem, Path]]:
+        """
+        根据刮削上下文生成一个或多个保存目标。
+        季图片需要同时兼容根目录 seasonxx-poster 和季目录 poster 两种命名。
+        """
+        target_item, target_path = self._get_target_fileitem_and_path(
+            current_fileitem=current_fileitem,
+            item_type=item_type,
+            metadata_type=metadata_type,
+            filename_hint=filename_hint,
+            parent_fileitem=parent_fileitem,
+        )
+        targets = [(target_item, target_path)] if target_path else []
+
+        if (
+                item_type != ScrapingTarget.SEASON
+                or not filename_hint
+                or not filename_hint.lower().startswith("season")
+                or metadata_type not in {
+                    ScrapingMetadata.POSTER,
+                    ScrapingMetadata.BANNER,
+                    ScrapingMetadata.THUMB,
+                }
+        ):
+            return targets
+
+        season_parent_item = parent_fileitem or self.storagechain.get_parent_item(
+            current_fileitem
+        )
+        if not season_parent_item:
+            logger.warn(f"无法获取季目录 {current_fileitem.path} 的父目录项，跳过根目录季图片")
+            return targets
+
+        season_root_path = Path(current_fileitem.path).with_name(filename_hint)
+        root_target = (season_parent_item, season_root_path)
+        if root_target not in targets:
+            targets.insert(0, root_target)
+        return targets
 
     def metadata_nfo(
             self,
@@ -773,7 +828,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 self.scrape_metadata(
                     fileitem=fileitem,
                     mediainfo=mediainfo,
-                    init_folder=False,
+                    init_folder=True,
                     parent=self.storagechain.get_parent_item(fileitem),
                     overwrite=overwrite,
                 )
@@ -985,8 +1040,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         )
                         continue
 
-                # 获取目标 FileItem (`base_item`) 和 Path (`image_path`)
-                base_item, image_path = self._get_target_fileitem_and_path(
+                # 获取目标 FileItem 和 Path，季图片会同时写根目录和季目录。
+                image_targets = self._get_target_fileitems_and_paths(
                     current_fileitem=current_fileitem,
                     item_type=item_type,
                     metadata_type=metadata_type,
@@ -994,19 +1049,20 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     parent_fileitem=parent_fileitem,
                 )
 
-                if not image_path:
-                    continue
+                for base_item, image_path in image_targets:
+                    if not image_path:
+                        continue
 
-                # 文件存在检查
-                file_exists = self.storagechain.get_file_item(
-                    storage=base_item.storage, path=image_path
-                )
-
-                # 刮削决策
-                if self._should_scrape(option, bool(file_exists), overwrite):
-                    self._download_and_save_image(
-                        fileitem=base_item, path=image_path, url=image_url
+                    # 文件存在检查
+                    file_exists = self.storagechain.get_file_item(
+                        storage=base_item.storage, path=image_path
                     )
+
+                    # 刮削决策
+                    if self._should_scrape(option, bool(file_exists), overwrite):
+                        self._download_and_save_image(
+                            fileitem=base_item, path=image_path, url=image_url
+                        )
             else:
                 logger.debug(
                     f"未找到图片类型 {image_name} 对应的 ScrapingMetadata，跳过。"
@@ -1092,7 +1148,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         处理电影刮削
         """
         if fileitem.type == "file":
-            # 电影文件：仅处理 NFO
+            # 电影文件始终处理 NFO，直接初始化文件时再补同级目录图片。
             self._scrape_nfo_generic(
                 current_fileitem=fileitem,
                 meta=meta,
@@ -1101,6 +1157,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 parent_fileitem=parent,
                 overwrite=overwrite,
             )
+            if init_folder:
+                self._scrape_images_generic(
+                    current_fileitem=fileitem,
+                    mediainfo=mediainfo,
+                    item_type=ScrapingTarget.MOVIE,
+                    parent_fileitem=parent,
+                    overwrite=overwrite,
+                )
         else:
             # 电影目录：递归处理文件并初始化目录
             self._handle_movie_directory(

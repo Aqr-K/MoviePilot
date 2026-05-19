@@ -1,11 +1,13 @@
 import asyncio
 from unittest import TestCase
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.core.context import MediaInfo
 from app.core.meta import MetaBase
 from app.modules.douban import DoubanModule
 from app.modules.themoviedb import TheMovieDbModule
+from app.modules.themoviedb.scraper import TmdbScraper
+from app.modules.themoviedb.tmdbapi import TmdbApi
 from app.schemas.types import MediaType
 
 
@@ -95,6 +97,68 @@ class MediaRecognizeModulesTest(TestCase):
         self.assertIsNone(result)
         module._async_search_by_name.assert_called()
         module.tmdb.async_match_web.assert_not_called()
+
+    def test_tmdb_image_language_fallback_includes_current_en_null_and_original(self):
+        """TMDB 图片查询应带上语言回退，避免当前语言没有图片时直接返回空。"""
+        with patch("app.modules.themoviedb.tmdbapi.settings") as mock_settings:
+            mock_settings.TMDB_LOCALE = "zh"
+
+            result = TmdbApi._build_include_image_language("ja")
+
+        self.assertEqual(result, "zh,en,null,ja")
+
+    def test_tmdb_obtain_images_uses_language_fallback_and_picks_best(self):
+        """obtain_images 应从图片接口回填缺失的海报和背景图。"""
+        module = TheMovieDbModule()
+        module.tmdb = Mock()
+        module.tmdb.get_movie_images.return_value = {
+            "posters": [
+                {"file_path": "/low-poster.jpg", "vote_average": 2, "vote_count": 10},
+                {"file_path": "/best-poster.jpg", "vote_average": 8, "vote_count": 1},
+            ],
+            "backdrops": [
+                {"file_path": "/best-backdrop.jpg", "vote_average": 7, "vote_count": 2},
+            ],
+        }
+        mediainfo = MediaInfo(
+            tmdb_id=100,
+            type=MediaType.MOVIE,
+            original_language="ja",
+        )
+
+        result = module.obtain_images(mediainfo)
+
+        self.assertIs(result, mediainfo)
+        module.tmdb.get_movie_images.assert_called_once_with(100, original_language="ja")
+        self.assertTrue(mediainfo.poster_path.endswith("/best-poster.jpg"))
+        self.assertTrue(mediainfo.backdrop_path.endswith("/best-backdrop.jpg"))
+
+    def test_tmdb_scraper_metadata_img_fetches_missing_main_images(self):
+        """主媒体图片缺失时，刮削图片列表应先从 TMDB images 接口补齐。"""
+        scraper = TmdbScraper()
+        scraper._meta_tmdb = Mock()
+        scraper._meta_tmdb.get_movie_images.return_value = {
+            "posters": [
+                {"file_path": "/fallback-poster.jpg", "vote_average": 5},
+            ],
+            "backdrops": [
+                {"file_path": "/fallback-backdrop.jpg", "vote_average": 4},
+            ],
+        }
+        mediainfo = MediaInfo(
+            tmdb_id=200,
+            type=MediaType.MOVIE,
+            original_language="en",
+        )
+
+        images = scraper.get_metadata_img(mediainfo)
+
+        scraper._meta_tmdb.get_movie_images.assert_called_once_with(
+            200,
+            original_language="en",
+        )
+        self.assertIn("poster.jpg", images)
+        self.assertIn("backdrop.jpg", images)
 
     def test_douban_prepare_search_names_deduplicates_simplified_name(self):
         """豆瓣候选名称应保留顺序，并去掉繁简转换后的重复项。"""

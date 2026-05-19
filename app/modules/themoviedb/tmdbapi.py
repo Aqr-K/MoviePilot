@@ -4,6 +4,7 @@ from typing import Optional, List
 
 import zhconv
 
+from app.core.config import settings
 from app.log import logger
 from app.schemas.types import MediaType
 from app.utils.string import StringUtils
@@ -1232,7 +1233,24 @@ class TmdbApi:
             logger.error(str(e))
             return []
 
-    def get_movie_images(self, tmdbid: int) -> dict:
+    @staticmethod
+    def _build_include_image_language(original_language: Optional[str] = None) -> str:
+        """
+        构造图片接口语言回退列表，避免当前语言没有图片时返回空列表。
+        """
+        languages = []
+        for language in (
+                getattr(settings, "TMDB_LOCALE", None),
+                "en",
+                None,
+                original_language,
+        ):
+            language = "null" if language is None else str(language).strip()
+            if language and language not in languages:
+                languages.append(language)
+        return ",".join(languages)
+
+    def get_movie_images(self, tmdbid: int, original_language: Optional[str] = None) -> dict:
         """
         获取电影的图片
         """
@@ -1240,12 +1258,17 @@ class TmdbApi:
             return {}
         try:
             logger.debug(f"正在获取电影图片：{tmdbid}...")
-            return self.movie.images(movie_id=tmdbid) or {}
+            return self.movie.images(
+                movie_id=tmdbid,
+                include_image_language=self._build_include_image_language(
+                    original_language
+                ),
+            ) or {}
         except Exception as e:
             logger.error(str(e))
             return {}
 
-    def get_tv_images(self, tmdbid: int) -> dict:
+    def get_tv_images(self, tmdbid: int, original_language: Optional[str] = None) -> dict:
         """
         获取电视剧的图片
         """
@@ -1253,7 +1276,12 @@ class TmdbApi:
             return {}
         try:
             logger.debug(f"正在获取电视剧图片：{tmdbid}...")
-            return self.tv.images(tv_id=tmdbid) or {}
+            return self.tv.images(
+                tv_id=tmdbid,
+                include_image_language=self._build_include_image_language(
+                    original_language
+                ),
+            ) or {}
         except Exception as e:
             logger.error(str(e))
             return {}
@@ -1965,7 +1993,9 @@ class TmdbApi:
             logger.error(str(e))
             return []
 
-    async def async_get_movie_images(self, tmdbid: int) -> dict:
+    async def async_get_movie_images(
+            self, tmdbid: int, original_language: Optional[str] = None
+    ) -> dict:
         """
         获取电影的图片（异步版本）
         """
@@ -1973,12 +2003,19 @@ class TmdbApi:
             return {}
         try:
             logger.debug(f"正在获取电影图片：{tmdbid}...")
-            return await self.movie.async_images(movie_id=tmdbid) or {}
+            return await self.movie.async_images(
+                movie_id=tmdbid,
+                include_image_language=self._build_include_image_language(
+                    original_language
+                ),
+            ) or {}
         except Exception as e:
             logger.error(str(e))
             return {}
 
-    async def async_get_tv_images(self, tmdbid: int) -> dict:
+    async def async_get_tv_images(
+            self, tmdbid: int, original_language: Optional[str] = None
+    ) -> dict:
         """
         获取电视剧的图片（异步版本）
         """
@@ -1986,7 +2023,12 @@ class TmdbApi:
             return {}
         try:
             logger.debug(f"正在获取电视剧图片：{tmdbid}...")
-            return await self.tv.async_images(tv_id=tmdbid) or {}
+            return await self.tv.async_images(
+                tv_id=tmdbid,
+                include_image_language=self._build_include_image_language(
+                    original_language
+                ),
+            ) or {}
         except Exception as e:
             logger.error(str(e))
             return {}

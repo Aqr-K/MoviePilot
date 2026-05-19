@@ -127,6 +127,7 @@ class TmdbScraper:
                     if poster_name and poster_url:
                         images[poster_name] = poster_url
         else:
+            self.__ensure_main_images(mediainfo)
             # 获取媒体信息中原有图片
             for attr_name, attr_value in vars(mediainfo).items():
                 if (
@@ -154,6 +155,52 @@ class TmdbScraper:
                             )
                             images[image_name] = image_url
         return images
+
+    def __ensure_main_images(self, mediainfo: MediaInfo) -> None:
+        """
+        主媒体图片缺失时从 TMDB images 接口回填，避免当前语言没有图时只生成 NFO。
+        """
+        if not mediainfo or not mediainfo.tmdb_id:
+            return
+        if mediainfo.poster_path and mediainfo.backdrop_path:
+            return
+        if mediainfo.type == MediaType.MOVIE:
+            image_info = self.default_tmdb.get_movie_images(
+                mediainfo.tmdb_id,
+                original_language=mediainfo.original_language,
+            )
+        else:
+            image_info = self.default_tmdb.get_tv_images(
+                mediainfo.tmdb_id,
+                original_language=mediainfo.original_language,
+            )
+        if not image_info:
+            return
+        if not mediainfo.poster_path:
+            poster_path = self.__pick_best_image_path(image_info.get("posters"))
+            if poster_path:
+                mediainfo.poster_path = settings.TMDB_IMAGE_URL(poster_path)
+        if not mediainfo.backdrop_path:
+            backdrop_path = self.__pick_best_image_path(image_info.get("backdrops"))
+            if backdrop_path:
+                mediainfo.backdrop_path = settings.TMDB_IMAGE_URL(backdrop_path)
+
+    @staticmethod
+    def __pick_best_image_path(images: list) -> Optional[str]:
+        """
+        从 TMDB 图片列表中选择评分和投票数最高的一张。
+        """
+        if not images:
+            return None
+        images = sorted(
+            images,
+            key=lambda item: (
+                item.get("vote_average") or 0,
+                item.get("vote_count") or 0,
+            ),
+            reverse=True,
+        )
+        return images[0].get("file_path")
 
     @staticmethod
     def get_season_poster(seasoninfo: dict, season: int) -> Tuple[str, str]:
