@@ -38,6 +38,30 @@ class TestAgentPromptStyle(unittest.TestCase):
         self.assertIn("当前日期", prompt)
         self.assertNotIn("当前时间", prompt)
 
+    def test_base_prompt_injects_available_shell_commands(self):
+        """系统信息应注入 PATH 中已安装的常用命令，帮助 Agent 选择 execute_command。"""
+        command_paths = {
+            "ssh": "/usr/bin/ssh",
+            "rg": "/opt/homebrew/bin/rg",
+        }
+        with patch(
+            "app.agent.prompt.shutil.which",
+            side_effect=lambda command: command_paths.get(command),
+        ):
+            prompt = prompt_manager.get_agent_prompt()
+
+        self.assertIn("- 可用系统命令（可通过 `execute_command` 调用）:", prompt)
+        self.assertIn("  - ssh: /usr/bin/ssh", prompt)
+        self.assertIn("  - rg: /opt/homebrew/bin/rg", prompt)
+        self.assertNotIn("  - git:", prompt)
+
+    def test_base_prompt_omits_shell_command_section_when_none_available(self):
+        """PATH 中没有命中白名单命令时，不注入空的系统命令段落。"""
+        with patch("app.agent.prompt.shutil.which", return_value=None):
+            prompt = prompt_manager.get_agent_prompt()
+
+        self.assertNotIn("可用系统命令", prompt)
+
     def test_runtime_config_middleware_injects_persona_only(self):
         middleware = RuntimeConfigMiddleware()
         updated_request = middleware.modify_request(_FakeRequest())

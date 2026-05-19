@@ -1,5 +1,6 @@
 """提示词管理器"""
 
+import shutil
 import socket
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,82 @@ from app.utils.system import SystemUtils
 
 SYSTEM_TASKS_FILE = "System Tasks.yaml"
 SYSTEM_TASKS_SCHEMA_VERSION = 2
+COMMON_SHELL_COMMANDS = (
+    "ssh",
+    "scp",
+    "sftp",
+    "rsync",
+    "git",
+    "gh",
+    "rg",
+    "fd",
+    "find",
+    "grep",
+    "sed",
+    "awk",
+    "jq",
+    "yq",
+    "curl",
+    "wget",
+    "tar",
+    "gzip",
+    "gunzip",
+    "zip",
+    "unzip",
+    "xz",
+    "7z",
+    "docker",
+    "docker-compose",
+    "kubectl",
+    "helm",
+    "sqlite3",
+    "psql",
+    "mysql",
+    "redis-cli",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "uv",
+    "node",
+    "npm",
+    "yarn",
+    "pnpm",
+    "bun",
+    "ffmpeg",
+    "ffprobe",
+    "mediainfo",
+    "rclone",
+    "aria2c",
+    "yt-dlp",
+    "openssl",
+    "base64",
+    "sha256sum",
+    "shasum",
+    "du",
+    "df",
+    "ps",
+    "top",
+    "lsof",
+    "netstat",
+    "ss",
+    "ping",
+    "traceroute",
+    "dig",
+    "nslookup",
+    "nc",
+    "telnet",
+    "crontab",
+    "systemctl",
+    "service",
+    "journalctl",
+    "launchctl",
+    "brew",
+    "apt",
+    "apk",
+    "yum",
+    "dnf",
+)
 
 
 class PromptConfigError(ValueError):
@@ -305,7 +382,29 @@ class PromptManager:
             f"- 系统安装目录: {settings.ROOT_PATH}",
         ]
 
+        available_commands = PromptManager._get_available_shell_commands()
+        if available_commands:
+            info_lines.append("- 可用系统命令（可通过 `execute_command` 调用）:")
+            info_lines.extend(
+                f"  - {command}: {path}" for command, path in available_commands
+            )
+
         return "\n".join(info_lines)
+
+    @staticmethod
+    def _get_available_shell_commands() -> list[tuple[str, str]]:
+        """
+        探测 PATH 中已经安装的常用命令。
+
+        这里只使用 shutil.which 做无副作用查找，不实际执行命令；执行权限、
+        高风险操作确认和输出限制仍由 execute_command 工具负责。
+        """
+        available_commands: list[tuple[str, str]] = []
+        for command in COMMON_SHELL_COMMANDS:
+            command_path = shutil.which(command)
+            if command_path:
+                available_commands.append((command, command_path))
+        return available_commands
 
     @staticmethod
     def _generate_formatting_instructions(caps: ChannelCapabilities) -> str:
