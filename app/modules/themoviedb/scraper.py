@@ -301,6 +301,17 @@ class TmdbScraper:
         # 内容分级
         if content_rating := mediainfo.content_rating:
             DomUtils.add_node(doc, root, "mpaa", content_rating)
+        # 制作公司
+        for company in mediainfo.production_companies or []:
+            if company.get("name"):
+                DomUtils.add_node(doc, root, "studio", company.get("name"))
+        # 制作国家
+        for country in mediainfo.production_countries or []:
+            if country.get("name"):
+                DomUtils.add_node(doc, root, "country", country.get("name"))
+        # 时长
+        if mediainfo.runtime:
+            DomUtils.add_node(doc, root, "runtime", str(mediainfo.runtime))
 
         return doc
 

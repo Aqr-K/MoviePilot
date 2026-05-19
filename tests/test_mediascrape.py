@@ -218,13 +218,16 @@ class TestMediaScrapingImages(unittest.TestCase):
 
         self.media_chain._scrape_images_generic(fileitem, mediainfo, ScrapingTarget.MOVIE)
 
-        # Check download called for mapped metadata
+        # Check download called for mapped metadata + aliases (fanart→backdrop)
         calls = self.media_chain._download_and_save_image.call_args_list
-        self.assertEqual(len(calls), 3)
         urls = [call.kwargs["url"] for call in calls]
+        paths = [call.kwargs["path"] for call in calls]
         self.assertIn("http://poster", urls)
         self.assertIn("http://fanart", urls)
         self.assertIn("http://logo", urls)
+        # fanart.jpg should also generate backdrop.jpg alias
+        self.assertIn(Path("/movies/Avatar/fanart.jpg"), paths)
+        self.assertIn(Path("/movies/Avatar/backdrop.jpg"), paths)
 
     def test_scrape_images_season_filter(self):
         fileitem = schemas.FileItem(path="/tv/Show/Season 1", name="Season 1", type="dir", storage="local")
@@ -250,7 +253,7 @@ class TestMediaScrapingImages(unittest.TestCase):
         )
 
     def test_scrape_movie_file_images_when_initialized_directly(self):
-        """直接初始化刮削电影文件时，应生成同级 poster/backdrop。"""
+        """直接初始化刮削电影文件时，应生成同级 poster/backdrop 及别名。"""
         fileitem = schemas.FileItem(path="/movies/Avatar/Avatar.mkv", name="Avatar.mkv", type="file", storage="local")
         parent_item = schemas.FileItem(path="/movies/Avatar", name="Avatar", type="dir", storage="local")
         mediainfo = MediaInfo()
@@ -269,13 +272,10 @@ class TestMediaScrapingImages(unittest.TestCase):
         )
 
         paths = [call.kwargs["path"] for call in self.media_chain._download_and_save_image.call_args_list]
-        self.assertEqual(
-            paths,
-            [
-                Path("/movies/Avatar/poster.jpg"),
-                Path("/movies/Avatar/backdrop.jpg"),
-            ],
-        )
+        # poster has no alias, backdrop generates fanart alias
+        self.assertIn(Path("/movies/Avatar/poster.jpg"), paths)
+        self.assertIn(Path("/movies/Avatar/backdrop.jpg"), paths)
+        self.assertIn(Path("/movies/Avatar/fanart.jpg"), paths)
 
     def test_scrape_episode_thumb_image_path(self):
         fileitem = schemas.FileItem(path="/tv/Show/Season 1/S01E01.mp4", name="S01E01.mp4", type="file", storage="local")
@@ -332,6 +332,64 @@ class TestMediaScrapingImages(unittest.TestCase):
             path=Path("/tv/Show/Season 1/S01E01.jpg"),
             url="http://episode-thumb"
         )
+
+    def test_expand_with_aliases_backdrop(self):
+        """backdrop should also generate fanart alias."""
+        parent_item = schemas.FileItem(path="/movies/Avatar", name="Avatar", type="dir", storage="local")
+        targets = [(parent_item, Path("/movies/Avatar/backdrop.jpg"))]
+        self.media_chain.scraping_policies.option.return_value = ScrapingOption("movie", "backdrop", ScrapingPolicy.OVERWRITE)
+
+        expanded = self.media_chain._expand_with_aliases(targets, ScrapingTarget.MOVIE)
+        paths = [t[1] for t in expanded]
+        self.assertIn(Path("/movies/Avatar/backdrop.jpg"), paths)
+        self.assertIn(Path("/movies/Avatar/fanart.jpg"), paths)
+
+    def test_expand_with_aliases_thumb(self):
+        """thumb should also generate landscape alias."""
+        parent_item = schemas.FileItem(path="/tv/Show", name="Show", type="dir", storage="local")
+        targets = [(parent_item, Path("/tv/Show/thumb.jpg"))]
+        self.media_chain.scraping_policies.option.return_value = ScrapingOption("tv", "thumb", ScrapingPolicy.OVERWRITE)
+
+        expanded = self.media_chain._expand_with_aliases(targets, ScrapingTarget.TV)
+        paths = [t[1] for t in expanded]
+        self.assertIn(Path("/tv/Show/thumb.jpg"), paths)
+        self.assertIn(Path("/tv/Show/landscape.jpg"), paths)
+
+    def test_expand_with_aliases_skips_season_prefix(self):
+        """season-prefixed files should not get aliases."""
+        parent_item = schemas.FileItem(path="/tv/Show", name="Show", type="dir", storage="local")
+        targets = [(parent_item, Path("/tv/Show/season01-thumb.jpg"))]
+        self.media_chain.scraping_policies.option.return_value = ScrapingOption("season", "thumb", ScrapingPolicy.OVERWRITE)
+
+        expanded = self.media_chain._expand_with_aliases(targets, ScrapingTarget.SEASON)
+        self.assertEqual(len(expanded), 1)
+
+    def test_expand_with_aliases_respects_skip_policy(self):
+        """Alias should not be generated if its metadata type is set to SKIP."""
+        parent_item = schemas.FileItem(path="/movies/Avatar", name="Avatar", type="dir", storage="local")
+        targets = [(parent_item, Path("/movies/Avatar/backdrop.jpg"))]
+        # backdrop is OVERWRITE but fanart (also BACKDROP type) is SKIP
+        def option_side_effect(item_type, metadata_type):
+            if metadata_type == ScrapingMetadata.BACKDROP:
+                return ScrapingOption("movie", "backdrop", ScrapingPolicy.SKIP)
+            return ScrapingOption("movie", "backdrop", ScrapingPolicy.OVERWRITE)
+        self.media_chain.scraping_policies.option.side_effect = option_side_effect
+
+        expanded = self.media_chain._expand_with_aliases(targets, ScrapingTarget.MOVIE)
+        # fanart maps to BACKDROP which is SKIP, so no alias
+        self.assertEqual(len(expanded), 1)
+
+    def test_season_backdrop_path(self):
+        """Season backdrop should be saved in season directory."""
+        fileitem = schemas.FileItem(path="/tv/Show/Season 1", name="Season 1", type="dir", storage="local")
+        target_item, target_path = self.media_chain._get_target_fileitem_and_path(
+            current_fileitem=fileitem,
+            item_type=ScrapingTarget.SEASON,
+            metadata_type=ScrapingMetadata.BACKDROP,
+            filename_hint="season01-backdrop.jpg"
+        )
+        self.assertEqual(target_item, fileitem)
+        self.assertEqual(target_path, Path("/tv/Show/Season 1/backdrop.jpg"))
 
     @patch("app.chain.media.RequestUtils")
     @patch("app.chain.media.NamedTemporaryFile")

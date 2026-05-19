@@ -136,10 +136,10 @@ class ScrapingConfig:
             for mt, mds in [
                 (
                     "movie",
-                    ["nfo", "poster", "backdrop", "logo", "disc", "banner", "thumb"],
+                    ["nfo", "poster", "backdrop", "logo", "disc", "banner", "thumb", "clearart", "landscape"],
                 ),
-                ("tv", ["nfo", "poster", "backdrop", "logo", "banner", "thumb"]),
-                ("season", ["nfo", "poster", "banner", "thumb"]),
+                ("tv", ["nfo", "poster", "backdrop", "logo", "banner", "thumb", "clearart", "landscape"]),
+                ("season", ["nfo", "poster", "backdrop", "banner", "thumb", "landscape"]),
                 ("episode", ["nfo", "thumb"]),
             ]
             for md in mds
@@ -164,6 +164,15 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         "cdart": ScrapingMetadata.DISC,
         "banner": ScrapingMetadata.BANNER,
         "thumb": ScrapingMetadata.THUMB,
+        "landscape": ScrapingMetadata.LANDSCAPE,
+        "clearart": ScrapingMetadata.CLEARART,
+    }
+
+    IMAGE_ALIASES = {
+        "backdrop": ["fanart"],
+        "fanart": ["backdrop"],
+        "thumb": ["landscape"],
+        "landscape": ["thumb"],
     }
 
     def __init__(self):
@@ -359,6 +368,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 ScrapingMetadata.POSTER: "poster",
                 ScrapingMetadata.BANNER: "banner",
                 ScrapingMetadata.THUMB: "thumb",
+                ScrapingMetadata.BACKDROP: "backdrop",
+                ScrapingMetadata.LANDSCAPE: "landscape",
             }
             if season_image_name := season_image_name_map.get(metadata_type):
                 hint_ext = Path(filename_hint).suffix if filename_hint else ".jpg"
@@ -428,6 +439,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     ScrapingMetadata.POSTER,
                     ScrapingMetadata.BANNER,
                     ScrapingMetadata.THUMB,
+                    ScrapingMetadata.BACKDROP,
+                    ScrapingMetadata.LANDSCAPE,
                 }
         ):
             return targets
@@ -444,6 +457,39 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if root_target not in targets:
             targets.insert(0, root_target)
         return targets
+
+    def _expand_with_aliases(
+            self,
+            targets: List[Tuple[schemas.FileItem, Path]],
+            item_type: ScrapingTarget,
+    ) -> List[Tuple[schemas.FileItem, Path]]:
+        """
+        为兼容多媒体服务器，扩展图片保存目标列表，添加别名文件。
+        例如 backdrop.jpg 同时保存为 fanart.jpg，thumb.jpg 同时保存为 landscape.jpg。
+        """
+        expanded = list(targets)
+        for base_item, image_path in list(targets):
+            if not image_path:
+                continue
+            stem = image_path.stem.lower()
+            ext = image_path.suffix
+            # 跳过 season 前缀文件（如 season01-poster.jpg）
+            if stem.startswith("season"):
+                continue
+            aliases = self.IMAGE_ALIASES.get(stem)
+            if not aliases:
+                continue
+            for alias in aliases:
+                alias_meta_type = self.IMAGE_METADATA_MAP.get(alias)
+                if alias_meta_type:
+                    alias_option = self.scraping_policies.option(item_type, alias_meta_type)
+                    if alias_option.is_skip:
+                        continue
+                alias_path = image_path.with_name(f"{alias}{ext}")
+                alias_target = (base_item, alias_path)
+                if alias_target not in expanded:
+                    expanded.append(alias_target)
+        return expanded
 
     def metadata_nfo(
             self,
@@ -467,6 +513,32 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             season=season,
             episode=episode,
         )
+
+    def metadata_img(
+            self,
+            mediainfo: MediaInfo,
+            season: Optional[int] = None,
+            episode: Optional[int] = None,
+    ) -> Optional[dict]:
+        """
+        获取图片名称和url，合并所有模块的结果。
+        优先使用高优先级模块的图片，低优先级模块补充缺失的图片类型。
+        """
+        merged = {}
+        for module in sorted(
+            self.modulemanager.get_running_modules("metadata_img"),
+            key=lambda x: x.get_priority(),
+        ):
+            try:
+                result = module.metadata_img(
+                    mediainfo=mediainfo, season=season, episode=episode
+                )
+                if result and isinstance(result, dict):
+                    for name, url in result.items():
+                        merged.setdefault(name, url)
+            except Exception as err:
+                logger.error(f"获取 {module.get_name()} 图片失败：{str(err)}")
+        return merged or None
 
     @staticmethod
     def select_recognize_source(
@@ -1048,6 +1120,9 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     filename_hint=image_name,
                     parent_fileitem=parent_fileitem,
                 )
+
+                # 扩展别名目标（如 backdrop→fanart, thumb→landscape）
+                image_targets = self._expand_with_aliases(image_targets, item_type)
 
                 for base_item, image_path in image_targets:
                     if not image_path:

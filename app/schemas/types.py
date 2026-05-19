@@ -446,3 +446,5 @@ class ScrapingMetadata(NameValueEnum):
     BANNER = "横幅图"
     THUMB = "缩略图"
     DISC = "光盘图"
+    CLEARART = "透明艺术图"
+    LANDSCAPE = "横版缩略图"

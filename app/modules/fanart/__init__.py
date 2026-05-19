@@ -1,5 +1,4 @@
 import asyncio
-import re
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -549,15 +548,34 @@ class FanartModule(_ModuleBase):
         _images.sort(key=lambda x: int(x.get("likes", 0)), reverse=True)
         return _images[0]
 
-    @staticmethod
-    def __name(fanart_name: str) -> str:
+    _FANART_NAME_MAP = {
+        "showbackground": "fanart",
+        "moviebackground": "fanart",
+        "hdtvlogo": "logo",
+        "hdmovielogo": "logo",
+        "movielogo": "logo",
+        "tvposter": "poster",
+        "movieposter": "poster",
+        "tvthumb": "thumb",
+        "moviethumb": "thumb",
+        "tvbanner": "banner",
+        "moviebanner": "banner",
+        "hdclearart": "clearart",
+        "movieart": "clearart",
+        "hdmovieclearart": "clearart",
+        "cdart": "cdart",
+        "moviedisc": "disc",
+        "seasonposter": "seasonposter",
+        "seasonthumb": "seasonthumb",
+        "seasonbanner": "seasonbanner",
+    }
+
+    @classmethod
+    def __name(cls, fanart_name: str) -> str:
         """
-        转换Fanart图片的名字
+        转换Fanart图片的名字为媒体服务器兼容名称
         """
-        words_to_remove = r"tv|movie|hdmovie|hdtv|show|hd"
-        pattern = re.compile(words_to_remove, re.IGNORECASE)
-        result = re.sub(pattern, "", fanart_name)
-        return result
+        return cls._FANART_NAME_MAP.get(fanart_name.lower(), fanart_name)
 
     @classmethod
     @cached(maxsize=settings.CONF.fanart, ttl=settings.CONF.meta, shared_key="get")
