@@ -134,6 +134,87 @@ class TransferInfo(BaseModel):
     # 是否需要通知
     need_notify: Optional[bool] = False
 
+    def ensure_target_items(self):
+        """
+        补齐整理目标文件项和目录项，兼容 OpenList 等成功后元数据延迟可见的存储。
+        """
+        if not self.target_item or not self.target_item.path:
+            self.target_item = self.__build_target_item()
+        if not self.target_diritem or not self.target_diritem.path:
+            self.target_diritem = self.__build_target_diritem()
+        return self
+
+    def __build_target_item(self) -> Optional[FileItem]:
+        """
+        根据目标文件清单构造整理目标文件项。
+        """
+        if self.target_item and self.target_item.path:
+            return self.target_item
+        if not self.file_list_new:
+            return self.target_item
+
+        target_path = self.file_list_new[0]
+        if not target_path:
+            return self.target_item
+
+        path = Path(str(target_path))
+        source_item = self.fileitem
+        return FileItem(
+            storage=self.__get_target_storage(),
+            path=path.as_posix(),
+            type=source_item.type if source_item and source_item.type else "file",
+            name=path.name,
+            basename=path.stem,
+            extension=path.suffix.lstrip("."),
+            size=source_item.size if source_item else None,
+            modify_time=source_item.modify_time if source_item else None,
+            thumbnail=source_item.thumbnail if source_item else None,
+        )
+
+    def __build_target_diritem(self) -> Optional[FileItem]:
+        """
+        根据目标文件项或目标文件清单构造整理目标目录项。
+        """
+        if self.target_diritem and self.target_diritem.path:
+            return self.target_diritem
+
+        target_dir_path = self.__get_target_dir_path()
+        if not target_dir_path:
+            return self.target_diritem
+
+        path = Path(str(target_dir_path))
+        return FileItem(
+            storage=self.__get_target_storage(),
+            path=path.as_posix(),
+            type="dir",
+            name=path.name,
+            basename=path.stem,
+        )
+
+    def __get_target_dir_path(self) -> Optional[str]:
+        """
+        从已知整理结果中推导媒体目标目录路径。
+        """
+        if self.target_item and self.target_item.path:
+            if self.target_item.type == "dir":
+                return self.target_item.path
+            return Path(str(self.target_item.path)).parent.as_posix()
+        if self.file_list_new:
+            return Path(str(self.file_list_new[0])).parent.as_posix()
+        return None
+
+    def __get_target_storage(self) -> str:
+        """
+        从目标项、目标目录项或源文件项中推导目标存储标识。
+        """
+        if self.target_item and self.target_item.storage:
+            return self.target_item.storage
+        if self.target_diritem and self.target_diritem.storage:
+            return self.target_diritem.storage
+        if self.fileitem and self.fileitem.storage:
+            return self.fileitem.storage
+        return "local"
+
     def to_dict(self):
         """
         返回字典

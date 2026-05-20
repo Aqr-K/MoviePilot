@@ -6,7 +6,6 @@ import threading
 import time
 import traceback
 import uuid
-from pathlib import Path
 from queue import Empty, PriorityQueue
 from typing import Callable, Dict, List, Optional, Tuple, Union, Any
 
@@ -146,7 +145,6 @@ class EventManager(metaclass=Singleton):
         :param priority: 广播事件的优先级，默认为 10
         :return: 如果是链式事件，返回处理后的事件数据；否则返回 None
         """
-        self.__normalize_transfer_event_data(etype, data)
         event = Event(etype, data, priority)
         if isinstance(etype, EventType):
             return self.__trigger_broadcast_event(event)
@@ -166,7 +164,6 @@ class EventManager(metaclass=Singleton):
         :param priority: 广播事件的优先级，默认为 10
         :return: 如果是链式事件，返回处理后的事件数据；否则返回 None
         """
-        self.__normalize_transfer_event_data(etype, data)
         event = Event(etype, data, priority)
         if isinstance(etype, EventType):
             return self.__trigger_broadcast_event(event)
@@ -175,107 +172,6 @@ class EventManager(metaclass=Singleton):
         else:
             logger.error(f"Unknown event type: {etype}")
         return None
-
-    @staticmethod
-    def __build_transfer_target_item(transferinfo) -> Optional["FileItem"]:
-        """
-        根据目标路径构造整理目标文件项，保证事件消费者能读取 target_item.path。
-        """
-        if transferinfo.target_item and transferinfo.target_item.path:
-            return transferinfo.target_item
-        target_path = None
-        if transferinfo.file_list_new:
-            target_path = transferinfo.file_list_new[0]
-        if not target_path:
-            return transferinfo.target_item
-
-        from app.schemas import FileItem
-
-        path = Path(str(target_path))
-        source_item = transferinfo.fileitem
-        storage = (
-            transferinfo.target_item.storage
-            if transferinfo.target_item and transferinfo.target_item.storage
-            else transferinfo.target_diritem.storage
-            if transferinfo.target_diritem and transferinfo.target_diritem.storage
-            else source_item.storage
-            if source_item and source_item.storage
-            else "local"
-        )
-        return FileItem(
-            storage=storage,
-            path=path.as_posix(),
-            type=source_item.type if source_item and source_item.type else "file",
-            name=path.name,
-            basename=path.stem,
-            extension=path.suffix.lstrip("."),
-            size=source_item.size if source_item else None,
-            modify_time=source_item.modify_time if source_item else None,
-            thumbnail=source_item.thumbnail if source_item else None,
-        )
-
-    @staticmethod
-    def __build_transfer_target_diritem(transferinfo) -> Optional["FileItem"]:
-        """
-        根据整理结果构造目标目录项，避免事件消费者读取 target_diritem.path 时报错。
-        """
-        if transferinfo.target_diritem and transferinfo.target_diritem.path:
-            return transferinfo.target_diritem
-
-        target_dir_path = None
-        if transferinfo.target_item and transferinfo.target_item.path:
-            target_dir_path = Path(str(transferinfo.target_item.path)).parent.as_posix()
-        elif transferinfo.file_list_new:
-            target_dir_path = Path(str(transferinfo.file_list_new[0])).parent.as_posix()
-        if not target_dir_path:
-            return transferinfo.target_diritem
-
-        from app.schemas import FileItem
-
-        path = Path(target_dir_path)
-        storage = (
-            transferinfo.target_diritem.storage
-            if transferinfo.target_diritem and transferinfo.target_diritem.storage
-            else transferinfo.target_item.storage
-            if transferinfo.target_item and transferinfo.target_item.storage
-            else transferinfo.fileitem.storage
-            if transferinfo.fileitem and transferinfo.fileitem.storage
-            else "local"
-        )
-        return FileItem(
-            storage=storage,
-            path=path.as_posix(),
-            type="dir",
-            name=path.name,
-            basename=path.stem,
-        )
-
-    @classmethod
-    def __normalize_transfer_event_data(
-            cls, etype: Union[EventType, ChainEventType], data: Optional[Union[Dict, ChainEventData]]
-    ) -> None:
-        """
-        整理事件发出前补齐目标文件和目录信息，维持插件侧可直接读取 path 的事件契约。
-        """
-        if not isinstance(etype, EventType) or not isinstance(data, dict):
-            return
-        if etype not in {
-            EventType.TransferComplete,
-            EventType.TransferFailed,
-            EventType.SubtitleTransferComplete,
-            EventType.SubtitleTransferFailed,
-            EventType.AudioTransferComplete,
-            EventType.AudioTransferFailed,
-            EventType.MetadataScrape,
-        }:
-            return
-
-        transferinfo = data.get("transferinfo")
-        if not transferinfo or not hasattr(transferinfo, "file_list_new"):
-            return
-
-        transferinfo.target_item = cls.__build_transfer_target_item(transferinfo)
-        transferinfo.target_diritem = cls.__build_transfer_target_diritem(transferinfo)
 
     def add_event_listener(self, event_type: Union[EventType, ChainEventType], handler: Callable,
                            priority: Optional[int] = DEFAULT_EVENT_PRIORITY):

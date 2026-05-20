@@ -871,6 +871,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         整理完成后处理
         """
+        if transferinfo:
+            transferinfo.ensure_target_items()
 
         # 状态
         ret_status = True
@@ -1160,6 +1162,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not transferinfo:
             return None
+        transferinfo.ensure_target_items()
         if transferinfo.target_diritem and transferinfo.target_diritem.path:
             return transferinfo.target_diritem.path
         if transferinfo.target_item and transferinfo.target_item.path:
@@ -1176,6 +1179,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not transferinfo:
             return None
+        transferinfo.ensure_target_items()
         if transferinfo.target_diritem:
             return transferinfo.target_diritem
         target_dir_path = self.__get_transfer_target_dir_path(transferinfo)

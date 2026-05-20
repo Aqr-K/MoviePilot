@@ -1,17 +1,13 @@
 import unittest
-from unittest.mock import patch
 
-from app.core.event import EventManager
 from app.schemas import FileItem, TransferInfo
-from app.schemas.types import EventType
 
 
-class EventTransferNormalizationTest(unittest.TestCase):
-    def test_transfer_event_fills_missing_target_items_before_dispatch(self):
+class TransferInfoTest(unittest.TestCase):
+    def test_ensure_target_items_fills_missing_target_items_from_target_path(self):
         """
-        整理事件投递给插件前，应补齐可读取 path 的目标文件和目标目录项。
+        整理结果只有目标路径清单时，应补齐目标文件项和目录项。
         """
-        event_manager = EventManager()
         transferinfo = TransferInfo(
             success=True,
             fileitem=FileItem(
@@ -26,12 +22,8 @@ class EventTransferNormalizationTest(unittest.TestCase):
             ],
             transfer_type="move",
         )
-        event_data = {"transferinfo": transferinfo}
 
-        with patch.object(
-                event_manager, "_EventManager__trigger_broadcast_event"
-        ):
-            event_manager.send_event(EventType.TransferComplete, event_data)
+        transferinfo.ensure_target_items()
 
         self.assertIsNotNone(transferinfo.target_item)
         self.assertIsNotNone(transferinfo.target_diritem)
@@ -46,11 +38,31 @@ class EventTransferNormalizationTest(unittest.TestCase):
         self.assertEqual("alist", transferinfo.target_item.storage)
         self.assertEqual("alist", transferinfo.target_diritem.storage)
 
-    def test_transfer_event_fills_missing_target_diritem_from_target_item(self):
+    def test_ensure_target_items_keeps_new_model_initial_state(self):
         """
-        目标文件项已存在但目录项缺失时，事件数据应补齐 target_diritem。
+        新建整理结果模型不应立即改写目标项，避免影响失败记录等非事件流程。
         """
-        event_manager = EventManager()
+        transferinfo = TransferInfo(
+            success=True,
+            fileitem=FileItem(
+                storage="alist",
+                path="/downloads/Test.Show.S01E01.mkv",
+                type="file",
+                name="Test.Show.S01E01.mkv",
+            ),
+            file_list_new=[
+                "/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv"
+            ],
+            transfer_type="move",
+        )
+
+        self.assertIsNone(transferinfo.target_item)
+        self.assertIsNone(transferinfo.target_diritem)
+
+    def test_ensure_target_items_fills_missing_target_diritem_from_target_item(self):
+        """
+        目标文件项已存在但目录项缺失时，应从目标文件路径推导目录项。
+        """
         transferinfo = TransferInfo(
             success=True,
             fileitem=FileItem(
@@ -70,12 +82,8 @@ class EventTransferNormalizationTest(unittest.TestCase):
             ],
             transfer_type="move",
         )
-        event_data = {"transferinfo": transferinfo}
 
-        with patch.object(
-                event_manager, "_EventManager__trigger_broadcast_event"
-        ):
-            event_manager.send_event(EventType.TransferComplete, event_data)
+        transferinfo.ensure_target_items()
 
         self.assertIsNotNone(transferinfo.target_diritem)
         self.assertEqual(
