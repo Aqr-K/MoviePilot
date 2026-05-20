@@ -612,7 +612,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 确定需要安装的插件
         plugins_to_install = [
             plugin for plugin in candidate_plugins
-            if plugin.id in install_plugins and not self.is_plugin_exists(plugin.id, plugin.plugin_version)
+            if plugin.id in install_plugins
+            and plugin.system_version_compatible is not False
+            and not self.is_plugin_exists(plugin.id, plugin.plugin_version)
         ]
 
         if not plugins_to_install:
@@ -1417,6 +1419,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if not isinstance(plugin_info, dict):
             return None
 
+        plugin_info = PluginHelper.annotate_plugin_system_version(plugin_info.copy())
         # 如 package_version 为空，则需要判断插件是否兼容当前版本
         if not package_version:
             if plugin_info.get(settings.VERSION_FLAG) is not True:
@@ -1443,6 +1446,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if StringUtils.compare_version(installed_version, "<", plugin_info.get("version")):
                 # 需要更新
                 plugin.has_update = True
+        # 主系统版本兼容性
+        if plugin_info.get("system_version"):
+            plugin.system_version = plugin_info.get("system_version")
+        if plugin_info.get("system_version_compatible") is False:
+            plugin.system_version_compatible = False
+            plugin.system_version_message = plugin_info.get("system_version_message")
         # 运行状态
         if plugin_obj and hasattr(plugin_obj, "get_state"):
             try:

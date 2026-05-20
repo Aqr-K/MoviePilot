@@ -35,9 +35,11 @@ from app.utils.singleton import WeakSingleton
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 from app.utils.url import UrlUtils
+from version import APP_VERSION
 
 PLUGIN_DIR = Path(settings.ROOT_PATH) / "app" / "plugins"
 LOCAL_REPO_PREFIX = "local://"
+PLUGIN_SYSTEM_VERSION_FIELD = "system_version"
 
 
 class PluginHelper(metaclass=WeakSingleton):
@@ -164,6 +166,66 @@ class PluginHelper(metaclass=WeakSingleton):
         )
 
     @staticmethod
+    def get_current_system_version() -> Optional[Version]:
+        """
+        解析当前主程序版本，供插件 package 中的系统版本范围匹配使用。
+        """
+        try:
+            return Version(str(APP_VERSION))
+        except InvalidVersion:
+            logger.error(f"当前主程序版本号无法解析：{APP_VERSION}")
+            return None
+
+    @classmethod
+    def check_plugin_system_version(cls, plugin_info: Optional[dict]) -> Tuple[bool, str]:
+        """
+        检查插件 package 元数据中的主系统版本范围是否满足当前 MoviePilot 版本。
+        """
+        if not isinstance(plugin_info, dict):
+            return True, ""
+
+        raw_specifier = plugin_info.get(PLUGIN_SYSTEM_VERSION_FIELD)
+        if raw_specifier is None or raw_specifier == "":
+            return True, ""
+        if not isinstance(raw_specifier, str):
+            return False, (
+                f"插件限定的系统版本范围 {PLUGIN_SYSTEM_VERSION_FIELD} 必须是字符串，"
+                f"请使用 pip 依赖版本格式，例如 >=2.12.0,<3"
+            )
+
+        system_version = cls.get_current_system_version()
+        if system_version is None:
+            return False, f"当前 MoviePilot 版本 {APP_VERSION} 无法解析，已拒绝安装带版本限制的插件"
+
+        try:
+            specifier_set = SpecifierSet(raw_specifier)
+        except InvalidSpecifier:
+            return False, (
+                f"插件限定的系统版本范围格式不正确：{raw_specifier}，"
+                f"请使用 pip 依赖版本格式，例如 >=2.12.0,<3"
+            )
+
+        if specifier_set.contains(system_version, prereleases=True):
+            return True, ""
+
+        return False, (
+            f"插件要求 MoviePilot 版本 {raw_specifier}，当前版本 {APP_VERSION} 不满足，已拒绝安装"
+        )
+
+    @classmethod
+    def annotate_plugin_system_version(cls, plugin_info: dict) -> dict:
+        """
+        为插件 package 元数据补充系统版本兼容状态，便于市场展示和安装流程复用。
+        """
+        if not isinstance(plugin_info, dict):
+            return plugin_info
+
+        compatible, message = cls.check_plugin_system_version(plugin_info)
+        plugin_info["system_version_compatible"] = compatible
+        plugin_info["system_version_message"] = message
+        return plugin_info
+
+    @staticmethod
     def get_local_repo_paths() -> List[Path]:
         """
         获取本地插件仓库目录列表
@@ -248,6 +310,7 @@ class PluginHelper(metaclass=WeakSingleton):
                     candidate["repo_order"] = repo_order
                     candidate["repo_path"] = repo_path
                     candidate["path"] = plugin_dir
+                    self.annotate_plugin_system_version(candidate)
                     candidate_version = str(candidate.get("version") or "0")
 
                     existing = candidates.get(pid)
@@ -313,6 +376,10 @@ class PluginHelper(metaclass=WeakSingleton):
                         if not is_compatible:
                             candidate["compatible"] = False
                             candidate["skip_reason"] = f"package.json 未声明 {settings.VERSION_FLAG} 兼容"
+                        self.annotate_plugin_system_version(candidate)
+                        if candidate.get("system_version_compatible") is False:
+                            candidate["compatible"] = False
+                            candidate["skip_reason"] = candidate.get("system_version_message")
                         if package_version is not None:
                             return candidate
                         if not selected_candidate:
@@ -537,6 +604,10 @@ class PluginHelper(metaclass=WeakSingleton):
         is_release = meta.get("release")
         # 插件版本号
         plugin_version = meta.get("version")
+        compatible, message = self.check_plugin_system_version(meta)
+        if not compatible:
+            logger.debug(f"{pid} 插件系统版本兼容性检查失败：{message}")
+            return False, message
         if is_release:
             # 使用 插件ID_插件版本号 作为 Release tag
             if not plugin_version:
@@ -575,6 +646,10 @@ class PluginHelper(metaclass=WeakSingleton):
         )
         if not candidate:
             return False, f"未找到本地插件：{pid}"
+        compatible, message = self.check_plugin_system_version(candidate)
+        if not compatible:
+            logger.debug(f"{pid} 本地插件系统版本兼容性检查失败：{message}")
+            return False, message
 
         source_dir = Path(candidate.get("path"))
         dest_dir = PLUGIN_DIR / pid.lower()
@@ -1426,6 +1501,49 @@ class PluginHelper(metaclass=WeakSingleton):
         except Exception as e:
             logger.error(f"获取插件 {pid} 元数据失败：{e}")
             return {}
+
+    def get_plugin_system_version_check_message(self, pid: str, repo_url: str) -> Optional[str]:
+        """
+        获取指定插件来源的主系统版本兼容错误；兼容或无法定位元数据时返回 None。
+        """
+        if not pid or not repo_url:
+            return None
+
+        if self.is_local_repo_url(repo_url):
+            candidate = self.get_local_plugin_candidate(
+                pid=pid,
+                package_version=self.parse_local_repo_package_version(repo_url),
+                repo_path=self.parse_local_repo_path(repo_url),
+                strict_compat=False
+            )
+            if not candidate:
+                return None
+            compatible, message = self.check_plugin_system_version(candidate)
+            return None if compatible else message
+
+        package_version = self.get_plugin_package_version(pid, repo_url, settings.VERSION_FLAG)
+        if package_version is None:
+            return None
+        meta = self.__get_plugin_meta(pid, repo_url, package_version)
+        compatible, message = self.check_plugin_system_version(meta)
+        return None if compatible else message
+
+    async def async_get_plugin_system_version_check_message(self, pid: str, repo_url: str) -> Optional[str]:
+        """
+        异步获取指定插件来源的主系统版本兼容错误；兼容或无法定位元数据时返回 None。
+        """
+        if not pid or not repo_url:
+            return None
+
+        if self.is_local_repo_url(repo_url):
+            return await asyncio.to_thread(self.get_plugin_system_version_check_message, pid, repo_url)
+
+        package_version = await self.async_get_plugin_package_version(pid, repo_url, settings.VERSION_FLAG)
+        if package_version is None:
+            return None
+        meta = await self.__async_get_plugin_meta(pid, repo_url, package_version)
+        compatible, message = self.check_plugin_system_version(meta)
+        return None if compatible else message
 
     def __install_flow_sync(self, pid: str, force_install: bool,
                             prepare_content: Callable[[], Tuple[bool, str]],
@@ -2284,6 +2402,10 @@ class PluginHelper(metaclass=WeakSingleton):
         is_release = meta.get("release")
         # 插件版本号
         plugin_version = meta.get("version")
+        compatible, message = self.check_plugin_system_version(meta)
+        if not compatible:
+            logger.debug(f"{pid} 插件系统版本兼容性检查失败：{message}")
+            return False, message
         if is_release:
             # 使用 插件ID_插件版本号 作为 Release tag
             if not plugin_version:

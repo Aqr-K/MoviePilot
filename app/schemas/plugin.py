@@ -36,6 +36,12 @@ class Plugin(BaseModel):
     has_page: Optional[bool] = False
     # 是否有新版本
     has_update: Optional[bool] = False
+    # 主系统版本是否兼容
+    system_version_compatible: Optional[bool] = True
+    # 主系统版本兼容提示
+    system_version_message: Optional[str] = None
+    # 主系统版本限定范围
+    system_version: Optional[str] = None
     # 是否本地
     is_local: Optional[bool] = False
     # 仓库地址

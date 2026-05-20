@@ -251,6 +251,12 @@ async def install(
     # 首先检查插件是否已经存在，并且是否强制安装，否则只进行安装统计
     plugin_helper = PluginHelper()
     if not force and plugin_id in PluginManager().get_plugin_ids():
+        if repo_url:
+            compatible_message = await plugin_helper.async_get_plugin_system_version_check_message(
+                plugin_id, repo_url
+            )
+            if compatible_message:
+                return schemas.Response(success=False, message=compatible_message)
         await plugin_helper.async_install_reg(pid=plugin_id, repo_url=repo_url)
     else:
         # 插件不存在或需要强制安装，下载安装并注册插件

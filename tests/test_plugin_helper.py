@@ -32,6 +32,66 @@ class PluginHelperTest(TestCase):
             PluginHelper.sanitize_repo_url_for_statistic(repo_url)
         )
 
+    def test_check_plugin_system_version_allows_missing_field(self):
+        """
+        未声明主系统版本范围时保持旧插件兼容，不做额外限制。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        success, message = PluginHelper.check_plugin_system_version({"version": "1.0.0"})
+
+        self.assertTrue(success)
+        self.assertEqual("", message)
+
+    def test_check_plugin_system_version_rejects_out_of_range(self):
+        """
+        插件声明的主系统版本范围不满足当前版本时拒绝安装。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        with patch.object(PluginHelper, "get_current_system_version", return_value=Version("2.12.2")):
+            success, message = PluginHelper.check_plugin_system_version({"system_version": ">=2.13.0"})
+
+        self.assertFalse(success)
+        self.assertIn("MoviePilot 版本 >=2.13.0", message)
+
+    def test_check_plugin_system_version_accepts_v_prefix_specifier(self):
+        """
+        兼容带 v 前缀的版本范围，降低插件索引维护成本。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        with patch.object(PluginHelper, "get_current_system_version", return_value=Version("2.12.2")):
+            success, message = PluginHelper.check_plugin_system_version({"system_version": ">=v2.12.0"})
+
+        self.assertTrue(success)
+        self.assertEqual("", message)
+
+    def test_annotate_plugin_system_version_marks_incompatible(self):
+        """
+        插件市场列表会带出系统版本兼容状态，供前端禁用安装入口。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        plugin_info = {"system_version": ">=2.13.0"}
+        with patch.object(PluginHelper, "get_current_system_version", return_value=Version("2.12.2")):
+            annotated = PluginHelper.annotate_plugin_system_version(plugin_info)
+
+        self.assertFalse(annotated["system_version_compatible"])
+        self.assertIn("当前版本", annotated["system_version_message"])
+
     def test_pip_install_keeps_modules_imported_during_install(self):
         """
         验证依赖安装窗口内被其他任务导入的运行态模块不会被误删。
