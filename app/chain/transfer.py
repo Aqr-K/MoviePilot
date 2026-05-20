@@ -26,8 +26,7 @@ from app.db.models.transferhistory import TransferHistory
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.directory import DirectoryHelper
-from app.helper.episode_format import EpisodeFormatRuleHelper
-from app.helper.format import FormatParser
+from app.helper.format import EpisodeFormatRuleHelper, FormatParser
 from app.helper.progress import ProgressHelper
 from app.log import logger
 from app.schemas import StorageOperSelectionEventData

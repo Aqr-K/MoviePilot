@@ -3,8 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.chain.transfer import TransferChain
-from app.helper.format import FormatParser
-from app.helper.episode_format import EpisodeFormatRuleHelper, _AutoRecommendSample
+from app.helper.format import EpisodeFormatRuleHelper, FormatParser, _AutoRecommendSample
 from app.schemas import EpisodeFormatRule, FileItem
 
 
@@ -23,7 +22,7 @@ def _make_file(name: str, size: int = 150 * 1024 * 1024) -> FileItem:
 @pytest.fixture(autouse=True)
 def _patch_media_exts(monkeypatch):
     monkeypatch.setattr(
-        "app.helper.episode_format.settings.RMT_MEDIAEXT",
+        "app.helper.format.settings.RMT_MEDIAEXT",
         [".mkv", ".mp4"],
     )
 
@@ -201,7 +200,7 @@ def test_auto_recommend_returns_false_when_parse_raises(monkeypatch):
     def _raise_parse(*args, **kwargs):
         raise ValueError("broken parse")
 
-    monkeypatch.setattr("app.helper.episode_format.parse.parse", _raise_parse)
+    monkeypatch.setattr("app.helper.format.parse.parse", _raise_parse)
 
     state, errmsg, data = helper.recommend([], samples)
 
@@ -359,7 +358,7 @@ def test_auto_recommend_uses_native_episode_as_fallback(monkeypatch):
     ]
 
     monkeypatch.setattr(
-        "app.helper.episode_format.anitopy.parse",
+        "app.helper.format.anitopy.parse",
         lambda _: {},
     )
     monkeypatch.setattr(
