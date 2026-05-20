@@ -61,6 +61,10 @@ class TestAgentPromptStyle(unittest.TestCase):
         self.assertIn("- 可用系统命令（可通过 `execute_command` 调用）:", prompt)
         self.assertIn("  - ssh: /usr/bin/ssh", prompt)
         self.assertIn("  - rg: /opt/homebrew/bin/rg", prompt)
+        self.assertIn(
+            "When searching files or text, prefer `rg` / `rg --files`",
+            prompt,
+        )
         self.assertNotIn("  - git:", prompt)
 
     def test_base_prompt_omits_shell_command_section_when_none_available(self):

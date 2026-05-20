@@ -388,6 +388,12 @@ class PromptManager:
             info_lines.extend(
                 f"  - {command}: {path}" for command, path in available_commands
             )
+            # `rg` 同时覆盖文件枚举和文本检索，且比通用 shell 查找更适合
+            # Agent 的代码阅读与定位场景；只有在它不可用或不适合时才退回其他工具。
+            if any(command == "rg" for command, _ in available_commands):
+                info_lines.append(
+                    "- When searching files or text, prefer `rg` / `rg --files`. Only fall back to other search tools when `rg` is unavailable or unsuitable."
+                )
 
         return "\n".join(info_lines)
 
