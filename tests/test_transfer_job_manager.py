@@ -295,6 +295,23 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual(1, len(jobs))
         self.assertEqual(task2.fileitem, jobs[0].tasks[0].fileitem)
 
+    def test_same_source_file_is_deduped_across_media_jobs(self):
+        """
+        同一个源文件即使识别到不同媒体作业，也不能重复加入整理视图。
+        """
+        jobview = JobManager()
+        task1 = make_task(1)
+        task2 = make_task(1)
+        task1.mediainfo = FakeMedia(100)
+        task2.mediainfo = FakeMedia(200)
+
+        self.assertTrue(jobview.add_task(task1))
+        self.assertFalse(jobview.add_task(task2))
+
+        jobs = jobview.list_jobs()
+        self.assertEqual(1, len(jobs))
+        self.assertEqual(task1.fileitem, jobs[0].tasks[0].fileitem)
+
     def test_pre_recognized_migrations_with_same_meta_do_not_link_jobs(self):
         jobview = JobManager()
         task1 = make_task(1)
