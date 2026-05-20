@@ -163,9 +163,10 @@ class TransferJobManagerTest(unittest.TestCase):
         )
         target_folder = FileItem(
             storage="alist",
-            path=target_path.parent.as_posix(),
+            path=f"{target_path.parent.as_posix()}/",
             type="dir",
             name=target_path.parent.name,
+            basename=target_path.parent.stem,
         )
         source_oper = SimpleNamespace(
             is_support_transtype=lambda transfer_type: True,
@@ -192,9 +193,9 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual("file", new_item.type)
         self.assertEqual(1024, new_item.size)
 
-    def test_transfer_media_passes_complete_result_when_target_metadata_is_delayed(self):
+    def test_transfer_media_uses_target_folder_returned_by_storage(self):
         """
-        整理成功时应在结果源头带上完整目标项，回调和事件不再二次拼装。
+        整理成功时直接使用存储层返回的目标目录项，回调和事件不再二次拼装。
         """
         handler = TransHandler()
         source_item = FileItem(
@@ -214,6 +215,9 @@ class TransferJobManagerTest(unittest.TestCase):
         target_folder = FileItem(
             storage="alist",
             type="dir",
+            path="/library/",
+            name="library",
+            basename="library",
         )
         target_item = FileItem(
             storage="alist",
@@ -259,10 +263,7 @@ class TransferJobManagerTest(unittest.TestCase):
 
         self.assertTrue(transferinfo.success)
         self.assertEqual(target_item, transferinfo.target_item)
-        self.assertIsNotNone(transferinfo.target_diritem)
-        self.assertEqual("/library/", transferinfo.target_diritem.path)
-        self.assertEqual("alist", transferinfo.target_diritem.storage)
-        self.assertEqual("dir", transferinfo.target_diritem.type)
+        self.assertEqual(target_folder, transferinfo.target_diritem)
 
     def test_success_callback_uses_transfer_result_target_diritem(self):
         """

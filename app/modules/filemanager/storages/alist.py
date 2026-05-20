@@ -66,11 +66,16 @@ class Alist(StorageBase, metaclass=WeakSingleton):
     ) -> schemas.FileItem:
         """
         根据目标路径构造文件项，用于 OpenList 操作成功但元数据短时间不可见的场景。
+        目录项路径需要遵循 FileItem 以斜杠结尾的约定。
         """
+        target_path_str = target_path.as_posix()
+        if source_item.type == "dir" and not target_path_str.endswith("/"):
+            target_path_str = f"{target_path_str}/"
+
         return schemas.FileItem(
             storage=self.schema.value,
             type=source_item.type,
-            path=target_path.as_posix(),
+            path=target_path_str,
             name=target_path.name,
             basename=target_path.stem,
             extension=target_path.suffix[1:] if source_item.type != "dir" else None,

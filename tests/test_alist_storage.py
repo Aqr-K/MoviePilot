@@ -219,7 +219,7 @@ class AlistStorageTest(unittest.TestCase):
                         )
 
         self.assertIsNotNone(folder)
-        self.assertEqual("/library/Test Show (2026)/Season 1", folder.path)
+        self.assertEqual("/library/Test Show (2026)/Season 1/", folder.path)
         self.assertEqual("alist", folder.storage)
         self.assertEqual("dir", folder.type)
 
