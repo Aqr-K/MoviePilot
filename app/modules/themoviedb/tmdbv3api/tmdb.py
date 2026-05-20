@@ -130,11 +130,16 @@ class TMDb(object):
 
     @classmethod
     def _snapshot_response(cls, response):
+        """
+        生成可缓存的响应快照，并在入缓存前拦截明显异常的TMDB响应结构。
+        """
+        json_data = cls._decode_response_json(response)
+        cls._validate_json_response(json_data)
         # Redis 不能稳定序列化 requests/httpx 响应对象，缓存里只保留当前流程会用到的数据。
         return {
             cls._RESPONSE_SNAPSHOT_MARKER: True,
             "headers": dict(response.headers.items()),
-            "json": response.json(),
+            "json": json_data,
         }
 
     @classmethod
@@ -148,7 +153,78 @@ class TMDb(object):
         if isinstance(response, dict) and response.get(cls._RESPONSE_SNAPSHOT_MARKER):
             # 调用方会补充 media_type 等字段，缓存快照必须隔离这些原地修改。
             return deepcopy(response.get("json"))
-        return response.json()
+        return cls._decode_response_json(response)
+
+    @classmethod
+    def _decode_response_json(cls, response):
+        """
+        解析TMDB响应JSON，并把空响应或代理错误页统一转换为TMDB异常。
+        """
+        try:
+            return response.json()
+        except ValueError as err:
+            raise TMDbException(cls._build_invalid_json_message(response)) from err
+
+    @staticmethod
+    def _build_invalid_json_message(response):
+        """
+        生成非JSON响应的诊断信息，避免日志只保留JSONDecodeError文本。
+        """
+        status_code = getattr(response, "status_code", None)
+        headers = getattr(response, "headers", {}) or {}
+        try:
+            content_type = headers.get("content-type") or headers.get("Content-Type")
+        except AttributeError:
+            content_type = None
+
+        try:
+            response_text = getattr(response, "text", "") or ""
+        except Exception as err:  # pragma: no cover - 防御异常响应对象
+            response_text = f"<读取响应内容失败：{err!r}>"
+        if not isinstance(response_text, str):
+            response_text = repr(response_text)
+        response_text = response_text.strip()
+        if len(response_text) > 200:
+            response_text = f"{response_text[:200]}..."
+
+        message_parts = ["TheMovieDb 返回数据不是有效JSON"]
+        if status_code is not None:
+            message_parts.append(f"HTTP状态码：{status_code}")
+        if content_type:
+            message_parts.append(f"Content-Type：{content_type}")
+        if response_text:
+            message_parts.append(f"响应内容：{response_text!r}")
+        else:
+            message_parts.append("响应内容为空")
+        return "，".join(message_parts)
+
+    @staticmethod
+    def _validate_json_response(json_data):
+        """
+        校验TMDB响应JSON顶层结构，避免代理错误页等标量值继续按字典解析。
+        """
+        if isinstance(json_data, (dict, list)):
+            return
+
+        payload_preview = repr(json_data)
+        if len(payload_preview) > 200:
+            payload_preview = f"{payload_preview[:200]}..."
+        raise TMDbException(
+            "TheMovieDb 返回数据格式异常：期望JSON对象或数组，"
+            f"实际为{type(json_data).__name__}，内容：{payload_preview}"
+        )
+
+    @staticmethod
+    def _get_json_key(json_data, key):
+        """
+        从TMDB对象响应中读取指定字段，避免异常顶层结构触发AttributeError。
+        """
+        if not isinstance(json_data, dict):
+            raise TMDbException(
+                "TheMovieDb 返回数据格式异常："
+                f"期望JSON对象包含字段 {key!r}，实际为{type(json_data).__name__}"
+            )
+        return json_data.get(key)
 
     def cache_clear(self):
         return self.request.cache_clear()
@@ -190,6 +266,12 @@ class TMDb(object):
         return 0
 
     def _process_json_response(self, json_data, is_async=False):
+        """
+        从TMDB对象响应中记录分页信息；数组响应没有分页字段，直接跳过。
+        """
+        if not isinstance(json_data, dict):
+            return
+
         if "page" in json_data:
             self._page = json_data["page"]
 
@@ -201,6 +283,12 @@ class TMDb(object):
 
     @staticmethod
     def _handle_errors(json_data):
+        """
+        将TMDB标准错误字段转换为统一异常，非对象响应由结构校验提前处理。
+        """
+        if not isinstance(json_data, dict):
+            return
+
         if "errors" in json_data:
             raise TMDbException(json_data["errors"])
 
@@ -228,11 +316,12 @@ class TMDb(object):
             return self._request_obj(action, params, False, method, data, json, key)
 
         json_data = self._get_response_json(req)
+        self._validate_json_response(json_data)
         self._process_json_response(json_data, is_async=False)
         self._handle_errors(json_data)
 
         if key:
-            return json_data.get(key)
+            return self._get_json_key(json_data, key)
         return json_data
 
     async def _async_request_obj(self, action, params="", call_cached=True,
@@ -256,11 +345,12 @@ class TMDb(object):
             return await self._async_request_obj(action, params, False, method, data, json, key)
 
         json_data = self._get_response_json(req)
+        self._validate_json_response(json_data)
         self._process_json_response(json_data, is_async=True)
         self._handle_errors(json_data)
 
         if key:
-            return json_data.get(key)
+            return self._get_json_key(json_data, key)
         return json_data
 
     def close(self):
