@@ -1,5 +1,7 @@
 import asyncio
+import gzip
 import importlib.util
+import json
 import pickle
 import sys
 from contextlib import asynccontextmanager, contextmanager
@@ -144,19 +146,32 @@ class _UnicodeDecodeErrorResponse:
     模拟 httpx.Response.json() 直接抛 UnicodeDecodeError 的异常响应。
     """
 
-    def __init__(self):
+    def __init__(self, content: bytes = b"\x8b"):
         """
         初始化一个带有压缩响应特征的伪响应对象。
         """
         self.headers = {"Content-Type": "application/json", "Content-Encoding": "gzip"}
         self.status_code = 200
         self.text = ""
+        self.content = content
 
     def json(self):
         """
         模拟 httpx.Response.json() 在遇到错误编码响应时直接抛出 UnicodeDecodeError。
         """
         raise UnicodeDecodeError("utf-8", b"\x8b", 1, 2, "invalid start byte")
+
+
+class _GzipJsonResponse(_UnicodeDecodeErrorResponse):
+    """
+    模拟响应对象带着尚未解压的 gzip JSON 字节。
+    """
+
+    def __init__(self, payload):
+        """
+        将JSON载荷压缩成 gzip 字节，复现代理返回原始压缩体的情况。
+        """
+        super().__init__(gzip.compress(json.dumps(payload).encode("utf-8")))
 
 
 class TmdbResponseCacheTest(TestCase):
@@ -216,6 +231,20 @@ class TmdbResponseCacheTest(TestCase):
 
         with self.assertRaisesRegex(TMDbException, "不是有效JSON.*Content-Encoding：gzip"):
             TMDb.request.__wrapped__(tmdb, "GET", "https://example.com", None, None)
+
+    def test_request_decodes_raw_gzip_json_response(self):
+        """
+        客户端未自动解压 gzip JSON 时，应手动解压后正常进入响应快照。
+        """
+        tmdb = TMDb()
+        tmdb._req.get_res = lambda *args, **kwargs: _GzipJsonResponse(
+            {"page": 1, "results": [{"id": 100}]}
+        )
+
+        result = TMDb.request.__wrapped__(tmdb, "GET", "https://example.com", None, None)
+
+        self.assertTrue(result[TMDb._RESPONSE_SNAPSHOT_MARKER])
+        self.assertEqual(result["json"]["results"], [{"id": 100}])
 
     def test_get_response_json_rejects_invalid_live_response(self):
         """
