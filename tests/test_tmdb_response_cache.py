@@ -139,6 +139,26 @@ class _FakeResponse:
         return self._payload
 
 
+class _UnicodeDecodeErrorResponse:
+    """
+    模拟 httpx.Response.json() 直接抛 UnicodeDecodeError 的异常响应。
+    """
+
+    def __init__(self):
+        """
+        初始化一个带有压缩响应特征的伪响应对象。
+        """
+        self.headers = {"Content-Type": "application/json", "Content-Encoding": "gzip"}
+        self.status_code = 200
+        self.text = ""
+
+    def json(self):
+        """
+        模拟 httpx.Response.json() 在遇到错误编码响应时直接抛出 UnicodeDecodeError。
+        """
+        raise UnicodeDecodeError("utf-8", b"\x8b", 1, 2, "invalid start byte")
+
+
 class TmdbResponseCacheTest(TestCase):
     def test_request_returns_pickleable_snapshot(self):
         tmdb = TMDb()
@@ -185,6 +205,16 @@ class TmdbResponseCacheTest(TestCase):
         tmdb._req.get_res = lambda *args, **kwargs: _InvalidJsonResponse()
 
         with self.assertRaisesRegex(TMDbException, "不是有效JSON.*HTTP状态码：502.*bad gateway"):
+            TMDb.request.__wrapped__(tmdb, "GET", "https://example.com", None, None)
+
+    def test_request_rejects_unicode_decode_error_response(self):
+        """
+        错误编码的响应体也应转换为TMDbException，避免UnicodeDecodeError直接冒泡。
+        """
+        tmdb = TMDb()
+        tmdb._req.get_res = lambda *args, **kwargs: _UnicodeDecodeErrorResponse()
+
+        with self.assertRaisesRegex(TMDbException, "不是有效JSON.*Content-Encoding：gzip"):
             TMDb.request.__wrapped__(tmdb, "GET", "https://example.com", None, None)
 
     def test_get_response_json_rejects_invalid_live_response(self):

@@ -158,11 +158,13 @@ class TMDb(object):
     @classmethod
     def _decode_response_json(cls, response):
         """
-        解析TMDB响应JSON，并把空响应或代理错误页统一转换为TMDB异常。
+        解析TMDB响应JSON，并把空响应、代理错误页或错误编码的响应统一转换为TMDB异常。
         """
         try:
             return response.json()
-        except ValueError as err:
+        except (ValueError, UnicodeDecodeError) as err:
+            # httpx.Response.json() 在响应体是压缩字节或错误编码时会直接抛 UnicodeDecodeError，
+            # 这里统一收敛成 TMDbException，避免上层把脏响应当作未捕获异常。
             raise TMDbException(cls._build_invalid_json_message(response)) from err
 
     @staticmethod
@@ -192,6 +194,9 @@ class TMDb(object):
             message_parts.append(f"HTTP状态码：{status_code}")
         if content_type:
             message_parts.append(f"Content-Type：{content_type}")
+        content_encoding = headers.get("content-encoding") or headers.get("Content-Encoding")
+        if content_encoding:
+            message_parts.append(f"Content-Encoding：{content_encoding}")
         if response_text:
             message_parts.append(f"响应内容：{response_text!r}")
         else:
