@@ -1,6 +1,7 @@
 from urllib.parse import parse_qs, urlparse
 
 from app.modules.indexer.spider import SiteSpider
+from app.modules.indexer.spider.haidan import HaiDanSpider
 from app.schemas.types import MediaType
 
 
@@ -28,6 +29,15 @@ def _get_search_url(indexer: dict, keyword: str | list[str], mtype: MediaType = 
     """
     spider = SiteSpider(indexer=indexer, keyword=keyword, mtype=mtype)
     return spider._SiteSpider__get_search_url()
+
+
+def _get_haidan_params(keyword: str | None, mtype: MediaType = None) -> dict:
+    """
+    调用 HaiDanSpider 私有参数构造逻辑，避免真实请求站点。
+    """
+    spider = HaiDanSpider(indexer={"domain": "https://www.haidan.video/", "name": "海胆"})
+    params = parse_qs(spider._HaiDanSpider__get_params(keyword, mtype), keep_blank_values=True)
+    return {key: values[0] for key, values in params.items()}
 
 
 def test_eastgame_imdb_search_uses_imdb_area():
@@ -154,3 +164,13 @@ def test_ttg_title_search_does_not_format_keyword():
     query = parse_qs(urlparse(_get_search_url(indexer, "The Movie", MediaType.MOVIE)).query)
 
     assert query["search_field"] == ["The Movie 分类:电影DVDRip"]
+
+
+def test_haidan_empty_keyword_uses_blank_search_value():
+    """
+    海胆空关键词浏览不能把 Python None 编码进 search 参数。
+    """
+    params = _get_haidan_params(None)
+
+    assert params["search"] == ""
+    assert params["search_area"] == "0"
