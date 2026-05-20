@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 class TMDb(object):
     _RESPONSE_SNAPSHOT_MARKER = "__mp_tmdb_response_snapshot__"
     _JSON_DECODE_FAILED = object()
-    _MAX_GZIP_DECODE_DEPTH = 3
 
     def __init__(self, session=None, language=None):
         self._api_key = settings.TMDB_API_KEY
@@ -38,26 +37,13 @@ class TMDb(object):
 
         if not self._session:
             self._session = requests.Session()
-        request_headers = self._build_request_headers()
-        self._req = RequestUtils(headers=request_headers, session=self._session, proxies=self.proxies)
+        self._req = RequestUtils(ua=settings.NORMAL_USER_AGENT, session=self._session, proxies=self.proxies)
 
-        self._async_req = AsyncRequestUtils(headers=request_headers, proxies=self.proxies)
+        self._async_req = AsyncRequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=self.proxies)
 
         self._remaining = 40
         self._reset = None
         self._timeout = 15
-
-    @staticmethod
-    def _build_request_headers():
-        """
-        构造TMDB JSON请求头，避免小体积JSON被代理重复压缩。
-        """
-        return {
-            "User-Agent": settings.NORMAL_USER_AGENT,
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Accept": "application/json",
-            "Accept-Encoding": "identity",
-        }
 
     @property
     def page(self):
@@ -211,27 +197,10 @@ class TMDb(object):
         if "gzip" not in encodings and not content_bytes.startswith(b"\x1f\x8b"):
             return cls._JSON_DECODE_FAILED
 
-        for json_payload in cls._iter_gzip_decoded_payloads(content_bytes):
-            try:
-                return jsonlib.loads(json_payload)
-            except (ValueError, UnicodeDecodeError):
-                continue
-        return cls._JSON_DECODE_FAILED
-
-    @classmethod
-    def _iter_gzip_decoded_payloads(cls, content_bytes: bytes):
-        """
-        逐层解开gzip响应体，兼容客户端或代理只解压了部分层级的情况。
-        """
-        current_payload = content_bytes
-        for _ in range(cls._MAX_GZIP_DECODE_DEPTH):
-            if not current_payload.startswith(b"\x1f\x8b"):
-                return
-            try:
-                current_payload = gzip.decompress(current_payload)
-            except (OSError, EOFError):
-                return
-            yield current_payload
+        try:
+            return jsonlib.loads(gzip.decompress(content_bytes))
+        except (OSError, EOFError, ValueError, UnicodeDecodeError):
+            return cls._JSON_DECODE_FAILED
 
     @staticmethod
     def _get_header_value(headers, name):
