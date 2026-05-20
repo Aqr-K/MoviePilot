@@ -26,6 +26,7 @@ from app.helper.message import MessageHelper, MessageQueueManager, MessageTempla
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import (
+    RateLimitExceededException,
     TransferInfo,
     TransferTorrent,
     ExistMediaInfo,
@@ -204,6 +205,18 @@ class ChainBase(metaclass=ABCMeta):
             },
         )
 
+    @staticmethod
+    def __handle_rate_limit_error(
+            err: RateLimitExceededException, source_type: str, source_id: str,
+            method: str, **kwargs
+    ) -> None:
+        """
+        处理本地限流跳过，避免预期的限流状态进入系统错误告警。
+        """
+        if kwargs.get("raise_exception"):
+            raise err
+        logger.info(f"{source_type} {source_id}.{method} 已限流，跳过执行：{str(err)}")
+
     def __execute_plugin_modules(
             self, method: str, result: Any, *args, **kwargs
     ) -> Any:
@@ -227,6 +240,10 @@ class ChainBase(metaclass=ABCMeta):
                                 result.extend(temp)
                         else:
                             break
+                    except RateLimitExceededException as err:
+                        self.__handle_rate_limit_error(
+                            err, "插件", plugin_id, method, **kwargs
+                        )
                     except Exception as err:
                         self.__handle_plugin_error(
                             err, plugin_id, plugin_name, method, **kwargs
@@ -264,6 +281,10 @@ class ChainBase(metaclass=ABCMeta):
                                 result.extend(temp)
                         else:
                             break
+                    except RateLimitExceededException as err:
+                        self.__handle_rate_limit_error(
+                            err, "插件", plugin_id, method, **kwargs
+                        )
                     except Exception as err:
                         self.__handle_plugin_error(
                             err, plugin_id, plugin_name, method, **kwargs
@@ -303,6 +324,10 @@ class ChainBase(metaclass=ABCMeta):
                 else:
                     # 中止继续执行
                     break
+            except RateLimitExceededException as err:
+                self.__handle_rate_limit_error(
+                    err, "模块", module_id, method, **kwargs
+                )
             except Exception as err:
                 logger.error(traceback.format_exc())
                 self.__handle_system_error(
@@ -353,6 +378,10 @@ class ChainBase(metaclass=ABCMeta):
                 else:
                     # 中止继续执行
                     break
+            except RateLimitExceededException as err:
+                self.__handle_rate_limit_error(
+                    err, "模块", module_id, method, **kwargs
+                )
             except Exception as err:
                 logger.error(traceback.format_exc())
                 self.__handle_system_error(
