@@ -61,6 +61,24 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                 return fileitem
         return None
 
+    def __build_transfer_item(
+            self, source_item: schemas.FileItem, target_path: Path
+    ) -> schemas.FileItem:
+        """
+        根据目标路径构造文件项，用于 OpenList 操作成功但元数据短时间不可见的场景。
+        """
+        return schemas.FileItem(
+            storage=self.schema.value,
+            type=source_item.type,
+            path=target_path.as_posix(),
+            name=target_path.name,
+            basename=target_path.stem,
+            extension=target_path.suffix[1:] if source_item.type != "dir" else None,
+            size=getattr(source_item, "size", None),
+            modify_time=getattr(source_item, "modify_time", None),
+            thumbnail=getattr(source_item, "thumbnail", None),
+        )
+
     @property
     def __get_base_url(self) -> str:
         """
@@ -799,6 +817,28 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                 self.rename(new_item, new_name)
         return True
 
+    def copy_item(
+            self, fileitem: schemas.FileItem, path: Path, new_name: str
+    ) -> Optional[schemas.FileItem]:
+        """
+        复制文件并返回目标文件项，兼容 OpenList 成功响应不携带目标对象的格式。
+        """
+        if not self.copy(fileitem=fileitem, path=path, new_name=new_name):
+            return None
+        target_path = path / new_name
+        target_item = self._delay_get_item(target_path, refresh=True)
+        if target_item:
+            return target_item
+        if fileitem.name == new_name:
+            return self.__build_transfer_item(fileitem, target_path)
+
+        copied_item = self._delay_get_item(path / fileitem.name, refresh=True)
+        if copied_item and self.rename(copied_item, new_name):
+            return self._delay_get_item(
+                target_path, refresh=True
+            ) or self.__build_transfer_item(fileitem, target_path)
+        return None
+
     def move(self, fileitem: schemas.FileItem, path: Path, new_name: str) -> bool:
         """
         移动文件
@@ -851,6 +891,19 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             )
             return False
         return True
+
+    def move_item(
+            self, fileitem: schemas.FileItem, path: Path, new_name: str
+    ) -> Optional[schemas.FileItem]:
+        """
+        移动文件并返回目标文件项，兼容 OpenList 成功响应不携带目标对象的格式。
+        """
+        if not self.move(fileitem=fileitem, path=path, new_name=new_name):
+            return None
+        target_path = path / new_name
+        return self._delay_get_item(target_path, refresh=True) or self.__build_transfer_item(
+            fileitem, target_path
+        )
 
     def link(self, fileitem: schemas.FileItem, target_file: Path) -> bool:
         """

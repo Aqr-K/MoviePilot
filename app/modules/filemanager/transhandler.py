@@ -709,12 +709,20 @@ class TransHandler:
                 # 复制文件到新目录
                 target_fileitem = target_oper.get_folder(target_file.parent)
                 if target_fileitem:
-                    if source_oper.copy(
-                        fileitem, Path(target_fileitem.path), target_file.name
+                    copy_item = getattr(source_oper, "copy_item", None)
+                    if callable(copy_item):
+                        new_item = copy_item(
+                            fileitem, Path(target_fileitem.path), target_file.name
+                        )
+                        if new_item:
+                            return new_item, ""
+                    elif source_oper.copy(
+                            fileitem, Path(target_fileitem.path), target_file.name
                     ):
-                        return target_oper.get_item(target_file), ""
-                    else:
-                        return None, f"【{target_storage}】{fileitem.path} 复制文件失败"
+                        new_item = target_oper.get_item(target_file)
+                        if new_item:
+                            return new_item, ""
+                    return None, f"【{target_storage}】{fileitem.path} 复制文件失败"
                 else:
                     return (
                         None,
@@ -724,12 +732,20 @@ class TransHandler:
                 # 移动文件到新目录
                 target_fileitem = target_oper.get_folder(target_file.parent)
                 if target_fileitem:
-                    if source_oper.move(
-                        fileitem, Path(target_fileitem.path), target_file.name
+                    move_item = getattr(source_oper, "move_item", None)
+                    if callable(move_item):
+                        new_item = move_item(
+                            fileitem, Path(target_fileitem.path), target_file.name
+                        )
+                        if new_item:
+                            return new_item, ""
+                    elif source_oper.move(
+                            fileitem, Path(target_fileitem.path), target_file.name
                     ):
-                        return target_oper.get_item(target_file), ""
-                    else:
-                        return None, f"【{target_storage}】{fileitem.path} 移动文件失败"
+                        new_item = target_oper.get_item(target_file)
+                        if new_item:
+                            return new_item, ""
+                    return None, f"【{target_storage}】{fileitem.path} 移动文件失败"
                 else:
                     return (
                         None,

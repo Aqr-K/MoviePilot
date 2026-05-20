@@ -200,6 +200,44 @@ class AlistStorageTest(unittest.TestCase):
         self.assertEqual(50, len(items))
         self.assertEqual(1, request_utils.post_res.call_count)
 
+    def test_move_item_returns_target_when_openlist_metadata_is_delayed(self):
+        """
+        OpenList 操作成功但目标元数据延迟可见时，应返回可用的目标文件项。
+        """
+        source = FileItem(
+            storage="alist",
+            type="file",
+            path="/downloads/Test.Show.S01E01.mkv",
+            name="Test.Show.S01E01.mkv",
+            basename="Test.Show.S01E01",
+            extension="mkv",
+            size=1024,
+            modify_time=1715939275.0,
+        )
+        request_utils = MagicMock()
+        request_utils.post_res.return_value = _FakeResponse(
+            {"code": 200, "message": "success", "data": None}
+        )
+
+        with patch.object(Alist, "get_conf", return_value={"url": "http://openlist.test", "token": "token"}):
+            with patch.object(self.storage, "_Alist__get_header_with_token", return_value={}):
+                with patch.object(alist_module, "RequestUtils", return_value=request_utils):
+                    with patch.object(self.storage, "_delay_get_item", return_value=None):
+                        target = self.storage.move_item(
+                            source,
+                            Path("/library/Test Show (2026)/Season 1"),
+                            "Test.Show.S01E01.mkv",
+                        )
+
+        self.assertIsNotNone(target)
+        self.assertEqual(
+            "/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
+            target.path,
+        )
+        self.assertEqual("alist", target.storage)
+        self.assertEqual("file", target.type)
+        self.assertEqual(1024, target.size)
+
 
 if __name__ == "__main__":
     unittest.main()

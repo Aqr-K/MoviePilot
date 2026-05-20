@@ -725,6 +725,56 @@ class TransferJobManagerTest(unittest.TestCase):
             event_data["file_list"],
         )
 
+    def test_success_callback_handles_missing_target_diritem(self):
+        """
+        成功结果缺少目标目录项时，回调不应把已入库任务误判为失败。
+        """
+        chain = make_transfer_chain()
+        chain.eventmanager = MagicMock()
+        chain.transfer_completed = lambda *args, **kwargs: None
+
+        task = make_task(1)
+        task.mediainfo = FakeMedia()
+        task.background = False
+        task.manual = True
+        self.assertTrue(chain._TransferChain__put_to_jobview(task))
+
+        target_item = FileItem(
+            storage="alist",
+            path="/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
+            type="file",
+            name="Test.Show.S01E01.mkv",
+            extension="mkv",
+        )
+        transferinfo = TransferInfo(
+            success=True,
+            fileitem=task.fileitem,
+            target_item=target_item,
+            file_list_new=[target_item.path],
+            transfer_type="copy",
+            need_scrape=True,
+            need_notify=False,
+        )
+
+        with patch(
+            "app.chain.transfer.TransferHistoryOper",
+            return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
+        ):
+            state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
+
+        self.assertTrue(state)
+        self.assertEqual("", errmsg)
+        metadata_calls = [
+            call
+            for call in chain.eventmanager.send_event.call_args_list
+            if call.args[0] == EventType.MetadataScrape
+        ]
+        self.assertEqual(1, len(metadata_calls))
+        event_data = metadata_calls[0].args[1]
+        self.assertEqual("alist", event_data["fileitem"].storage)
+        self.assertEqual("/library/Test Show (2026)/Season 1", event_data["fileitem"].path)
+        self.assertEqual([target_item.path], event_data["file_list"])
+
 
 if __name__ == "__main__":
     unittest.main()

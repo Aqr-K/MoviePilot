@@ -882,6 +882,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 )
 
         transferhis = TransferHistoryOper()
+        target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
 
         # 转移失败
         if not transferinfo.success:
@@ -999,9 +1000,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
         else:
             # 转移成功
-            logger.info(
-                f"{task.fileitem.name} 入库成功：{transferinfo.target_diritem.path}"
-            )
+            logger.info(f"{task.fileitem.name} 入库成功：{target_dir_path or ''}")
 
             # 新增task转移成功历史记录
             history = transferhis.add_success(
@@ -1059,13 +1058,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 )
 
             # task登记转移成功文件清单
-            target_dir_path = transferinfo.target_diritem.path
             target_files = transferinfo.file_list_new
-            with job_lock:
-                if self._success_target_files.get(target_dir_path):
-                    self._success_target_files[target_dir_path].extend(target_files)
-                else:
-                    self._success_target_files[target_dir_path] = target_files
+            if target_dir_path:
+                with job_lock:
+                    if self._success_target_files.get(target_dir_path):
+                        self._success_target_files[target_dir_path].extend(target_files)
+                    else:
+                        self._success_target_files[target_dir_path] = target_files
 
             # 设置任务成功
             self.jobview.finish_task(task)
@@ -1077,9 +1076,12 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if self.jobview.is_finished(task):
             # 更新文件清单
             with job_lock:
-                transferinfo.file_list_new = self._success_target_files.pop(
-                    transferinfo.target_diritem.path, []
-                )
+                if target_dir_path:
+                    transferinfo.file_list_new = self._success_target_files.pop(
+                        target_dir_path, []
+                    )
+                else:
+                    transferinfo.file_list_new = transferinfo.file_list_new or []
             __notify()
             if not task.transfer_batch_id:
                 self.__send_metadata_scrape_event(task, transferinfo)
@@ -1120,6 +1122,45 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         StorageChain().delete_media_file(t.fileitem, delete_self=False)
 
         return ret_status, ret_message
+
+    def __get_transfer_target_dir_path(
+            self, transferinfo: Optional[TransferInfo]
+    ) -> Optional[str]:
+        """
+        获取整理目标目录路径，兼容 OpenList 等成功后目录项短时间不可见的存储。
+        """
+        if not transferinfo:
+            return None
+        if transferinfo.target_diritem and transferinfo.target_diritem.path:
+            return transferinfo.target_diritem.path
+        if transferinfo.target_item and transferinfo.target_item.path:
+            return Path(transferinfo.target_item.path).parent.as_posix()
+        if transferinfo.file_list_new:
+            return Path(transferinfo.file_list_new[0]).parent.as_posix()
+        return None
+
+    def __build_transfer_target_diritem(
+            self, transferinfo: Optional[TransferInfo]
+    ) -> Optional[FileItem]:
+        """
+        构建整理目标目录项，避免成功结果缺少 target_diritem 时阻断后续流程。
+        """
+        if not transferinfo:
+            return None
+        if transferinfo.target_diritem:
+            return transferinfo.target_diritem
+        target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
+        if not target_dir_path:
+            return None
+        target_path = Path(target_dir_path)
+        storage = transferinfo.target_item.storage if transferinfo.target_item else "local"
+        return FileItem(
+            storage=storage,
+            path=target_dir_path,
+            type="dir",
+            name=target_path.name,
+            basename=target_path.stem,
+        )
 
     def put_to_queue(self, task: TransferTask) -> bool:
         """
@@ -1170,9 +1211,12 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 not task
                 or not transferinfo
                 or not transferinfo.need_scrape
-                or not transferinfo.target_diritem
                 or not self.__is_media_file(task.fileitem)
         ):
+            return
+
+        target_diritem = self.__build_transfer_target_diritem(transferinfo)
+        if not target_diritem:
             return
 
         self.eventmanager.send_event(
@@ -1180,7 +1224,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             {
                 "meta": task.meta,
                 "mediainfo": task.mediainfo,
-                "fileitem": transferinfo.target_diritem,
+                "fileitem": target_diritem,
                 "file_list": transferinfo.file_list_new,
                 "overwrite": False,
             },
@@ -1230,12 +1274,14 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 or not task.transfer_batch_id
                 or not transferinfo
                 or not transferinfo.need_scrape
-                or not transferinfo.target_diritem
                 or not self.__is_media_file(task.fileitem)
         ):
             return
 
-        target_diritem = transferinfo.target_diritem
+        target_diritem = self.__build_transfer_target_diritem(transferinfo)
+        if not target_diritem:
+            return
+
         target_files = transferinfo.file_list_new or []
         target_key = (target_diritem.storage, target_diritem.path)
         with job_lock:
