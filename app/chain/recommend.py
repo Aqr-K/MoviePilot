@@ -157,7 +157,7 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         return [tv.to_dict() for tv in tvs] if tvs else []
 
     @log_execution_time(logger=logger)
-    @cached(ttl=recommend_ttl, region=recommend_cache_region)
+    @cached(ttl=recommend_ttl, region=recommend_cache_region, skip_empty=True)
     def tmdb_trending(self, page: Optional[int] = 1) -> List[dict]:
         """
         TMDB流行趋势
@@ -312,7 +312,7 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         return [tv.to_dict() for tv in tvs] if tvs else []
 
     @log_execution_time(logger=logger)
-    @cached(ttl=recommend_ttl, region=recommend_cache_region)
+    @cached(ttl=recommend_ttl, region=recommend_cache_region, skip_empty=True)
     async def async_tmdb_trending(self, page: Optional[int] = 1) -> List[dict]:
         """
         异步TMDB流行趋势

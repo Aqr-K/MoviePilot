@@ -146,13 +146,13 @@ class _UnicodeDecodeErrorResponse:
     模拟 httpx.Response.json() 直接抛 UnicodeDecodeError 的异常响应。
     """
 
-    def __init__(self, content: bytes = b"\x8b"):
+    def __init__(self, content: bytes = b"\x8b", text: str = ""):
         """
         初始化一个带有压缩响应特征的伪响应对象。
         """
         self.headers = {"Content-Type": "application/json", "Content-Encoding": "gzip"}
         self.status_code = 200
-        self.text = ""
+        self.text = text
         self.content = content
 
     def json(self):
@@ -227,10 +227,16 @@ class TmdbResponseCacheTest(TestCase):
         错误编码的响应体也应转换为TMDbException，避免UnicodeDecodeError直接冒泡。
         """
         tmdb = TMDb()
-        tmdb._req.get_res = lambda *args, **kwargs: _UnicodeDecodeErrorResponse()
+        tmdb._req.get_res = lambda *args, **kwargs: _UnicodeDecodeErrorResponse(
+            text="乱码内容不应进入日志"
+        )
 
-        with self.assertRaisesRegex(TMDbException, "不是有效JSON.*Content-Encoding：gzip"):
+        with self.assertRaisesRegex(
+                TMDbException,
+                "不是有效JSON.*Content-Encoding：gzip.*响应内容因编码错误已省略",
+        ) as cm:
             TMDb.request.__wrapped__(tmdb, "GET", "https://example.com", None, None)
+        self.assertNotIn("乱码内容", str(cm.exception))
 
     def test_request_decodes_raw_gzip_json_response(self):
         """

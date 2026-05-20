@@ -107,6 +107,22 @@ class MediaRecognizeModulesTest(TestCase):
 
         self.assertEqual(result, "zh,en,null,ja")
 
+    def test_tmdb_trending_filters_non_media_and_normalizes_media_type(self):
+        """TMDB流行趋势应过滤人物项，并把字符串媒体类型转为内部枚举。"""
+        infos = [
+            {"id": 100, "media_type": "movie", "title": "测试电影"},
+            {"id": 101, "media_type": "tv", "name": "测试剧集"},
+            {"id": 102, "media_type": "person", "name": "测试人物"},
+            {"id": 103, "media_type": MediaType.MOVIE, "title": "枚举电影"},
+        ]
+
+        result = TmdbApi._normalize_trending_infos(infos)
+
+        self.assertEqual([info["id"] for info in result], [100, 101, 103])
+        self.assertEqual(result[0]["media_type"], MediaType.MOVIE)
+        self.assertEqual(result[1]["media_type"], MediaType.TV)
+        self.assertEqual(result[2]["media_type"], MediaType.MOVIE)
+
     def test_tmdb_obtain_images_uses_language_fallback_and_picks_best(self):
         """obtain_images 应从图片接口回填缺失的海报和背景图。"""
         module = TheMovieDbModule()

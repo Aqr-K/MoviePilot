@@ -171,7 +171,7 @@ class TMDb(object):
             json_data = cls._decode_compressed_response_json(response)
             if json_data is not cls._JSON_DECODE_FAILED:
                 return json_data
-            raise TMDbException(cls._build_invalid_json_message(response)) from err
+            raise TMDbException(cls._build_invalid_json_message(response, err)) from err
 
     @classmethod
     def _decode_compressed_response_json(cls, response):
@@ -224,23 +224,27 @@ class TMDb(object):
         return None
 
     @staticmethod
-    def _build_invalid_json_message(response):
+    def _build_invalid_json_message(response, parse_error: Exception = None):
         """
         生成非JSON响应的诊断信息，避免日志只保留JSONDecodeError文本。
         """
         status_code = getattr(response, "status_code", None)
         headers = getattr(response, "headers", {}) or {}
         content_type = TMDb._get_header_value(headers, "Content-Type")
+        is_encoding_error = isinstance(parse_error, UnicodeDecodeError)
 
-        try:
-            response_text = getattr(response, "text", "") or ""
-        except Exception as err:  # pragma: no cover - 防御异常响应对象
-            response_text = f"<读取响应内容失败：{err!r}>"
-        if not isinstance(response_text, str):
-            response_text = repr(response_text)
-        response_text = response_text.strip()
-        if len(response_text) > 200:
-            response_text = f"{response_text[:200]}..."
+        # 编码错误时响应体通常是压缩字节或乱码，打印内容只会污染日志。
+        response_text = ""
+        if not is_encoding_error:
+            try:
+                response_text = getattr(response, "text", "") or ""
+            except Exception as err:  # pragma: no cover - 防御异常响应对象
+                response_text = f"<读取响应内容失败：{err!r}>"
+            if not isinstance(response_text, str):
+                response_text = repr(response_text)
+            response_text = response_text.strip()
+            if len(response_text) > 200:
+                response_text = f"{response_text[:200]}..."
 
         message_parts = ["TheMovieDb 返回数据不是有效JSON"]
         if status_code is not None:
@@ -250,7 +254,9 @@ class TMDb(object):
         content_encoding = TMDb._get_header_value(headers, "Content-Encoding")
         if content_encoding:
             message_parts.append(f"Content-Encoding：{content_encoding}")
-        if response_text:
+        if is_encoding_error:
+            message_parts.append("响应内容因编码错误已省略")
+        elif response_text:
             message_parts.append(f"响应内容：{response_text!r}")
         else:
             message_parts.append("响应内容为空")

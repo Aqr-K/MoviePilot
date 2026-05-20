@@ -1220,6 +1220,26 @@ class TmdbApi:
             logger.error(str(e))
             return []
 
+    @staticmethod
+    def _normalize_trending_infos(infos: Optional[List[dict]]) -> List[dict]:
+        """
+        过滤流行趋势中的人物等非媒体项，并统一电影、电视剧的媒体类型。
+        """
+        if not infos:
+            return []
+
+        ret_infos = []
+        for info in infos:
+            media_type = info.get("media_type")
+            if media_type == "movie":
+                info["media_type"] = MediaType.MOVIE
+            elif media_type == "tv":
+                info["media_type"] = MediaType.TV
+            elif media_type not in [MediaType.MOVIE, MediaType.TV]:
+                continue
+            ret_infos.append(info)
+        return ret_infos
+
     def discover_trending(self, page: Optional[int] = 1) -> List[dict]:
         """
         流行趋势
@@ -1228,7 +1248,8 @@ class TmdbApi:
             return []
         try:
             logger.debug(f"正在获取流行趋势：page={page} ...")
-            return self.trending.all_week(page=page)
+            tmdbinfo = self.trending.all_week(page=page)
+            return self._normalize_trending_infos(tmdbinfo)
         except Exception as e:
             logger.error(str(e))
             return []
@@ -1988,7 +2009,8 @@ class TmdbApi:
             return []
         try:
             logger.debug(f"正在获取流行趋势：page={page} ...")
-            return await self.trending.async_all_week(page=page)
+            tmdbinfo = await self.trending.async_all_week(page=page)
+            return self._normalize_trending_infos(tmdbinfo)
         except Exception as e:
             logger.error(str(e))
             return []
