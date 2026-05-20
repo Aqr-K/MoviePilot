@@ -49,7 +49,7 @@ class TestAgentPromptStyle(unittest.TestCase):
     def test_base_prompt_injects_available_shell_commands(self):
         """系统信息应注入 PATH 中已安装的常用命令，帮助 Agent 选择 execute_command。"""
         command_paths = {
-            "ssh": "/usr/bin/ssh",
+            "git": "/usr/bin/git",
             "rg": "/opt/homebrew/bin/rg",
         }
         with patch(
@@ -59,13 +59,13 @@ class TestAgentPromptStyle(unittest.TestCase):
             prompt = prompt_manager.get_agent_prompt()
 
         self.assertIn("- 可用系统命令（可通过 `execute_command` 调用）:", prompt)
-        self.assertIn("  - ssh: /usr/bin/ssh", prompt)
+        self.assertIn("  - git: /usr/bin/git", prompt)
         self.assertIn("  - rg: /opt/homebrew/bin/rg", prompt)
         self.assertIn(
             "When searching files or text, prefer `rg` / `rg --files`",
             prompt,
         )
-        self.assertNotIn("  - git:", prompt)
+        self.assertNotIn("  - ssh:", prompt)
 
     def test_base_prompt_omits_shell_command_section_when_none_available(self):
         """PATH 中没有命中白名单命令时，不注入空的系统命令段落。"""
@@ -76,7 +76,7 @@ class TestAgentPromptStyle(unittest.TestCase):
 
     def test_available_shell_commands_are_cached_after_first_scan(self):
         """常用命令探测应只在首次加载时扫描 PATH，后续提示词复用缓存。"""
-        command_paths = {"ssh": "/usr/bin/ssh"}
+        command_paths = {"git": "/usr/bin/git"}
         with patch(
             "app.agent.prompt.shutil.which",
             side_effect=lambda command: command_paths.get(command),
@@ -84,9 +84,68 @@ class TestAgentPromptStyle(unittest.TestCase):
             first_prompt = prompt_manager.get_agent_prompt()
             second_prompt = prompt_manager.get_agent_prompt()
 
-        self.assertIn("  - ssh: /usr/bin/ssh", first_prompt)
-        self.assertIn("  - ssh: /usr/bin/ssh", second_prompt)
+        self.assertIn("  - git: /usr/bin/git", first_prompt)
+        self.assertIn("  - git: /usr/bin/git", second_prompt)
         self.assertEqual(which_mock.call_count, len(COMMON_SHELL_COMMANDS))
+
+    def test_common_shell_commands_skip_linux_basics(self):
+        """不影响任务策略的通用命令不进入启动探测列表，避免重复 which。"""
+        low_value_commands = {
+            "rsync",
+            "find",
+            "grep",
+            "sed",
+            "awk",
+            "tar",
+            "gzip",
+            "gunzip",
+            "base64",
+            "du",
+            "df",
+            "ps",
+            "top",
+            "ping",
+            "pip",
+            "pip3",
+            "uv",
+            "node",
+            "npm",
+            "yarn",
+            "pnpm",
+            "bun",
+            "sqlite3",
+            "psql",
+            "mysql",
+            "redis-cli",
+            "kubectl",
+            "helm",
+            "lsof",
+            "netstat",
+            "ss",
+            "traceroute",
+            "dig",
+            "nslookup",
+            "nc",
+            "telnet",
+            "crontab",
+            "systemctl",
+            "service",
+            "journalctl",
+            "launchctl",
+            "brew",
+            "apt",
+            "apk",
+            "yum",
+            "dnf",
+        }
+
+        self.assertFalse(low_value_commands & set(COMMON_SHELL_COMMANDS))
+
+    def test_common_shell_commands_keep_extra_install_runtime_tools(self):
+        """需要额外安装且会影响执行方式的运行时工具应保留探测。"""
+        expected_commands = {"ssh", "scp", "sftp", "python", "python3"}
+
+        self.assertTrue(expected_commands <= set(COMMON_SHELL_COMMANDS))
 
     def test_runtime_config_middleware_injects_persona_only(self):
         middleware = RuntimeConfigMiddleware()
