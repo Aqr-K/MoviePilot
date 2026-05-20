@@ -67,6 +67,39 @@ class TemplateContextBuilderConcurrencyTest(unittest.TestCase):
         # 第二次调用不应反向污染第一次的结果
         self.assertEqual(first.get("marker"), 1)
 
+    def test_build_exposes_video_bit_from_meta(self):
+        """
+        模板上下文应提供独立 videoBit 字段，避免用户只能从 videoCodec 中手工拆位深。
+        """
+        meta = type("FakeMeta", (), {})()
+        meta.begin_episode = None
+        meta.title = "Movie.2024.1080p.x265.10bit.mkv"
+        meta.name = "Movie"
+        meta.en_name = "Movie"
+        meta.year = "2024"
+        meta.season_seq = ""
+        meta.season = ""
+        meta.episode_seqs = ""
+        meta.episode = ""
+        meta.part = None
+        meta.customization = None
+        meta.fps = None
+        meta.resource_type = None
+        meta.resource_effect = None
+        meta.edition = ""
+        meta.resource_pix = "1080p"
+        meta.resource_term = "1080p"
+        meta.resource_team = None
+        meta.video_encode = "x265 10bit"
+        meta.video_bit = "10bit"
+        meta.audio_encode = "AAC"
+        meta.web_source = None
+
+        context = TemplateContextBuilder().build(meta=meta)
+
+        self.assertEqual(context.get("videoCodec"), "x265 10bit")
+        self.assertEqual(context.get("videoBit"), "10bit")
+
 
 if __name__ == "__main__":
     unittest.main()

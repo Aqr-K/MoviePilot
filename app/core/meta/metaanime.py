@@ -170,6 +170,8 @@ class MetaAnime(MetaBase):
                 self.video_encode = anitopy_info.get("video_term")
                 if isinstance(self.video_encode, list):
                     self.video_encode = self.video_encode[0]
+                # 视频位深
+                self.video_bit = self.extract_video_bit(original_title) or self.extract_video_bit(self.video_encode)
                 # 音频编码
                 self.audio_encode = anitopy_info.get("audio_term")
                 if isinstance(self.audio_encode, list):

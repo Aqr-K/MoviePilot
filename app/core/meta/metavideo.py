@@ -54,6 +54,7 @@ class MetaVideo(MetaBase):
     _video_encode_re = r"^(H26[45])$|^(x26[45])$|^AVC$|^HEVC$|^VC\d?$|^MPEG\d?$|^Xvid$|^DivX$|^AV1$|^HDR\d*$|^AVS(\+|[23])$"
     _audio_encode_re = r"^DTS\d?$|^DTSHD$|^DTSHDMA$|^Atmos$|^TrueHD\d?$|^AC3$|^\dAudios?$|^DDP\d?$|^DD\+\d?$|^DD\d?$|^LPCM\d?$|^AAC\d?$|^FLAC\d?$|^HD\d?$|^MA\d?$|^HR\d?$|^Opus\d?$|^Vorbis\d?$|^AV[3S]A$"
     _fps_re = r"(\d{2,3})(?=FPS)"
+
     def __init__(self, title: str, subtitle: str = None, isfile: bool = False):
         """
         初始化
@@ -136,6 +137,9 @@ class MetaVideo(MetaBase):
             # 视频编码
             if self._continue_flag:
                 self.__init_video_encode(token)
+            # 视频位深
+            if self._continue_flag:
+                self.__init_video_bit(token)
             # 音频编码
             if self._continue_flag:
                 self.__init_audio_encode(token)
@@ -178,6 +182,8 @@ class MetaVideo(MetaBase):
         self.resource_team = ReleaseGroupsMatcher().match(title=original_title) or None
         # 自定义占位符
         self.customization = CustomizationMatcher().match(title=original_title) or None
+        if not self.video_bit:
+            self.video_bit = self.extract_video_bit(self.video_encode)
 
     @staticmethod
     def __get_title_from_description(description: str) -> Optional[str]:
@@ -692,6 +698,27 @@ class MetaVideo(MetaBase):
                 self.video_encode = "10bit"
             else:
                 self.video_encode = f"{self.video_encode} 10bit"
+
+    def __init_video_bit(self, token: str):
+        """
+        识别视频位深。
+        """
+        if not self.name:
+            return
+        if not self.year \
+                and not self.resource_pix \
+                and not self.resource_type \
+                and not self.begin_season \
+                and not self.begin_episode:
+            return
+        video_bit = self.extract_video_bit(token)
+        if not video_bit:
+            return
+        self._continue_flag = False
+        self._stop_name_flag = True
+        self._last_token_type = "videobit"
+        if not self.video_bit:
+            self.video_bit = video_bit
 
     def __init_audio_encode(self, token: str):
         """

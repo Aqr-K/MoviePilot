@@ -204,6 +204,8 @@ class TemplateContextBuilder:
             "releaseGroup": meta.resource_team,
             # 视频编码
             "videoCodec": meta.video_encode,
+            # 视频位深
+            "videoBit": meta.video_bit,
             # 音频编码
             "audioCodec": meta.audio_encode,
             # 流媒体平台

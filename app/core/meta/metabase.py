@@ -61,6 +61,8 @@ class MetaBase(object):
     web_source: Optional[str] = None
     # 视频编码
     video_encode: Optional[str] = None
+    # 视频位深
+    video_bit: Optional[str] = None
     # 音频编码
     audio_encode: Optional[str] = None
     # 应用的识别词信息
@@ -460,6 +462,22 @@ class MetaBase(object):
         """
         return self.fps or None
 
+    @staticmethod
+    def extract_video_bit(value: Optional[str]) -> Optional[str]:
+        """
+        从标题或编码文本中提取视频位深标签。
+        """
+        if not value:
+            return None
+        bit_match = re.search(
+            r"(?<![A-Za-z0-9])(?P<bit>8|10|12|16)[\s._-]*bits?(?![A-Za-z0-9])",
+            value,
+            re.IGNORECASE,
+        )
+        if not bit_match:
+            return None
+        return f"{bit_match.group('bit')}bit"
+
     def is_in_season(self, season: Union[list, int, str]) -> bool:
         """
         是否包含季
@@ -593,6 +611,9 @@ class MetaBase(object):
         # 视频编码
         if not self.video_encode:
             self.video_encode = meta.video_encode
+        # 视频位深
+        if not self.video_bit:
+            self.video_bit = meta.video_bit
         # 音频编码
         if not self.audio_encode:
             self.audio_encode = meta.audio_encode

@@ -132,6 +132,21 @@ class MetaInfoTest(TestCase):
         self.assertEqual(meta.episode, "E04")
         self.assertEqual(meta.apply_words, custom_words)
 
+    def test_video_bit_extracted_for_video_title(self):
+        """测试普通影视标题中的视频位深可单独识别"""
+        meta = MetaInfo(title="The 355 2022 BluRay 1080p DTS-HD MA5.1 X265.10bit-BeiTai")
+        self.assertEqual(meta.video_encode, "x265 10bit")
+        self.assertEqual(meta.video_bit, "10bit")
+
+    def test_video_bit_extracted_for_anime_title(self):
+        """测试动漫标题中的视频位深可单独识别"""
+        meta = MetaInfo(
+            title="[云歌字幕组][7月新番][欢迎来到实力至上主义的教室 第二季][01]"
+                  "[X264 10bit][1080p][简体中文].mp4"
+        )
+        self.assertEqual(meta.video_encode, "X264")
+        self.assertEqual(meta.video_bit, "10bit")
+
     def test_emby_tmdbid_overrides_braced_metainfo_tmdbid(self):
         """
         同时存在内嵌元信息和 Emby [tmdbid] 标签时，保持历史上的 [tmdbid] 优先级。
