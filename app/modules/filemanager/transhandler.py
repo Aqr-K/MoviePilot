@@ -546,6 +546,7 @@ class TransHandler:
                     result=result,
                 )
                 if not new_item:
+                    err_msg = err_msg or f"{fileitem.path} 整理后未获取到目标文件信息"
                     logger.error(f"文件 {fileitem.path} 整理失败：{err_msg}")
                     self.__update_result(
                         result=result,
@@ -607,6 +608,34 @@ class TransHandler:
                 extension=_path.suffix.lstrip("."),
                 modify_time=_path.stat().st_mtime,
             )
+
+        def __build_remote_targetitem(_source_item: FileItem, _path: Path) -> FileItem:
+            """
+            根据已确认的目标路径构造网盘文件信息，用于兼容元数据延迟可见的存储。
+            """
+            return FileItem(
+                storage=target_storage,
+                path=_path.as_posix(),
+                name=_path.name,
+                basename=_path.stem,
+                type=_source_item.type or "file",
+                size=_source_item.size,
+                extension=_path.suffix.lstrip("."),
+                modify_time=_source_item.modify_time,
+                thumbnail=_source_item.thumbnail,
+            )
+
+        def __get_remote_targetitem(_source_item: FileItem, _path: Path) -> FileItem:
+            """
+            获取网盘目标文件信息，目标存储索引未刷新时使用目标路径兜底。
+            """
+            target_item = target_oper.get_item(_path)
+            if target_item:
+                return target_item
+            logger.warn(
+                f"目标文件【{target_storage}】{_path} 元数据暂不可见，使用目标路径构造整理结果"
+            )
+            return __build_remote_targetitem(_source_item, _path)
 
         if (
             fileitem.storage != target_storage
@@ -719,9 +748,7 @@ class TransHandler:
                     elif source_oper.copy(
                             fileitem, Path(target_fileitem.path), target_file.name
                     ):
-                        new_item = target_oper.get_item(target_file)
-                        if new_item:
-                            return new_item, ""
+                        return __get_remote_targetitem(fileitem, target_file), ""
                     return None, f"【{target_storage}】{fileitem.path} 复制文件失败"
                 else:
                     return (
@@ -742,9 +769,7 @@ class TransHandler:
                     elif source_oper.move(
                             fileitem, Path(target_fileitem.path), target_file.name
                     ):
-                        new_item = target_oper.get_item(target_file)
-                        if new_item:
-                            return new_item, ""
+                        return __get_remote_targetitem(fileitem, target_file), ""
                     return None, f"【{target_storage}】{fileitem.path} 移动文件失败"
                 else:
                     return (
@@ -753,7 +778,7 @@ class TransHandler:
                     )
             elif transfer_type == "link":
                 if source_oper.link(fileitem, target_file):
-                    return target_oper.get_item(target_file), ""
+                    return __get_remote_targetitem(fileitem, target_file), ""
                 else:
                     return None, f"【{target_storage}】{fileitem.path} 创建硬链接失败"
             else:

@@ -331,7 +331,18 @@ class Alist(StorageBase, metaclass=WeakSingleton):
             )
             return None
 
-        return self._delay_get_item(path, refresh=True)
+        return self._delay_get_item(
+            path, refresh=True
+        ) or self.__build_transfer_item(
+            schemas.FileItem(
+                storage=self.schema.value,
+                type="dir",
+                path=fileitem.path,
+                name=name,
+                basename=Path(name).stem,
+            ),
+            path,
+        )
 
     def get_folder(self, path: Path) -> Optional[schemas.FileItem]:
         """

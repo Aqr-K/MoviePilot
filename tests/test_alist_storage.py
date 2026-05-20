@@ -200,6 +200,29 @@ class AlistStorageTest(unittest.TestCase):
         self.assertEqual(50, len(items))
         self.assertEqual(1, request_utils.post_res.call_count)
 
+    def test_create_folder_returns_target_when_openlist_metadata_is_delayed(self):
+        """
+        OpenList 创建目录成功但元数据延迟可见时，应返回可用的目标目录项。
+        """
+        request_utils = MagicMock()
+        request_utils.post_res.return_value = _FakeResponse(
+            {"code": 200, "message": "success", "data": None}
+        )
+
+        with patch.object(Alist, "get_conf", return_value={"url": "http://openlist.test", "token": "token"}):
+            with patch.object(self.storage, "_Alist__get_header_with_token", return_value={}):
+                with patch.object(alist_module, "RequestUtils", return_value=request_utils):
+                    with patch.object(self.storage, "_delay_get_item", return_value=None):
+                        folder = self.storage.create_folder(
+                            self._dir_item("/library/Test Show (2026)"),
+                            "Season 1",
+                        )
+
+        self.assertIsNotNone(folder)
+        self.assertEqual("/library/Test Show (2026)/Season 1", folder.path)
+        self.assertEqual("alist", folder.storage)
+        self.assertEqual("dir", folder.type)
+
     def test_move_item_returns_target_when_openlist_metadata_is_delayed(self):
         """
         OpenList 操作成功但目标元数据延迟可见时，应返回可用的目标文件项。
