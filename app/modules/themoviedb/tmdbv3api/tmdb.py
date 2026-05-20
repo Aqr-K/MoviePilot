@@ -186,19 +186,20 @@ class TMDb(object):
             return None
         return None
 
-    @staticmethod
-    def _build_invalid_json_message(response, parse_error: Exception = None):
+    @classmethod
+    def _build_invalid_json_message(cls, response, parse_error: Exception = None):
         """
         生成非JSON响应的诊断信息，避免日志只保留JSONDecodeError文本。
         """
         status_code = getattr(response, "status_code", None)
         headers = getattr(response, "headers", {}) or {}
-        content_type = TMDb._get_header_value(headers, "Content-Type")
+        content_type = cls._get_header_value(headers, "Content-Type")
         is_encoding_error = isinstance(parse_error, UnicodeDecodeError)
 
-        # 编码错误时响应体通常是压缩字节或乱码，打印内容只会污染日志。
+        # 编码错误或压缩字节时响应体是乱码，打印内容只会污染日志。
+        content_encoding = cls._get_header_value(headers, "Content-Encoding")
         response_text = ""
-        if not is_encoding_error:
+        if not is_encoding_error and not content_encoding:
             try:
                 response_text = getattr(response, "text", "") or ""
             except Exception as err:  # pragma: no cover - 防御异常响应对象
@@ -214,10 +215,9 @@ class TMDb(object):
             message_parts.append(f"HTTP状态码：{status_code}")
         if content_type:
             message_parts.append(f"Content-Type：{content_type}")
-        content_encoding = TMDb._get_header_value(headers, "Content-Encoding")
         if content_encoding:
             message_parts.append(f"Content-Encoding：{content_encoding}")
-        if is_encoding_error:
+        if is_encoding_error or content_encoding:
             message_parts.append("响应内容编码异常，已省略原始内容")
         elif response_text:
             message_parts.append(f"响应内容：{response_text!r}")
