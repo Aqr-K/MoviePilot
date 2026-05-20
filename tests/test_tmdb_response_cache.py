@@ -174,7 +174,29 @@ class _GzipJsonResponse(_UnicodeDecodeErrorResponse):
         super().__init__(gzip.compress(json.dumps(payload).encode("utf-8")))
 
 
+class _DoubleGzipJsonResponse(_UnicodeDecodeErrorResponse):
+    """
+    模拟代理或上游重复gzip压缩后的JSON响应。
+    """
+
+    def __init__(self, payload):
+        """
+        将JSON载荷压缩两次，复现客户端只自动解开外层gzip的情况。
+        """
+        inner_payload = gzip.compress(json.dumps(payload).encode("utf-8"))
+        super().__init__(gzip.compress(inner_payload))
+
+
 class TmdbResponseCacheTest(TestCase):
+    def test_build_request_headers_disables_response_compression(self):
+        """
+        TMDB请求应避免主动接受压缩JSON，减少代理保留gzip响应头的兼容问题。
+        """
+        headers = TMDb._build_request_headers()
+
+        self.assertEqual(headers["Accept"], "application/json")
+        self.assertEqual(headers["Accept-Encoding"], "identity")
+
     def test_request_returns_pickleable_snapshot(self):
         tmdb = TMDb()
         response = _FakeResponse(
@@ -251,6 +273,20 @@ class TmdbResponseCacheTest(TestCase):
 
         self.assertTrue(result[TMDb._RESPONSE_SNAPSHOT_MARKER])
         self.assertEqual(result["json"]["results"], [{"id": 100}])
+
+    def test_request_decodes_nested_gzip_json_response(self):
+        """
+        响应体仍是gzip字节时，应逐层解压直到得到可解析的JSON。
+        """
+        tmdb = TMDb()
+        tmdb._req.get_res = lambda *args, **kwargs: _DoubleGzipJsonResponse(
+            {"page": 1, "results": [{"id": 101}]}
+        )
+
+        result = TMDb.request.__wrapped__(tmdb, "GET", "https://example.com", None, None)
+
+        self.assertTrue(result[TMDb._RESPONSE_SNAPSHOT_MARKER])
+        self.assertEqual(result["json"]["results"], [{"id": 101}])
 
     def test_get_response_json_rejects_invalid_live_response(self):
         """
