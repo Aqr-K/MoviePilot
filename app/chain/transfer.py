@@ -871,9 +871,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         整理完成后处理
         """
-        if transferinfo:
-            transferinfo.ensure_target_items()
-
         # 状态
         ret_status = True
         # 错误信息
@@ -1162,7 +1159,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         """
         if not transferinfo:
             return None
-        transferinfo.ensure_target_items()
         if transferinfo.target_diritem and transferinfo.target_diritem.path:
             return transferinfo.target_diritem.path
         if transferinfo.target_item and transferinfo.target_item.path:
@@ -1170,30 +1166,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if transferinfo.file_list_new:
             return Path(transferinfo.file_list_new[0]).parent.as_posix()
         return None
-
-    def __build_transfer_target_diritem(
-            self, transferinfo: Optional[TransferInfo]
-    ) -> Optional[FileItem]:
-        """
-        构建整理目标目录项，避免成功结果缺少 target_diritem 时阻断后续流程。
-        """
-        if not transferinfo:
-            return None
-        transferinfo.ensure_target_items()
-        if transferinfo.target_diritem:
-            return transferinfo.target_diritem
-        target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
-        if not target_dir_path:
-            return None
-        target_path = Path(target_dir_path)
-        storage = transferinfo.target_item.storage if transferinfo.target_item else "local"
-        return FileItem(
-            storage=storage,
-            path=target_dir_path,
-            type="dir",
-            name=target_path.name,
-            basename=target_path.stem,
-        )
 
     def put_to_queue(self, task: TransferTask) -> bool:
         """
@@ -1248,7 +1220,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         ):
             return
 
-        target_diritem = self.__build_transfer_target_diritem(transferinfo)
+        target_diritem = transferinfo.target_diritem
         if not target_diritem:
             return
 
@@ -1311,7 +1283,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         ):
             return
 
-        target_diritem = self.__build_transfer_target_diritem(transferinfo)
+        target_diritem = transferinfo.target_diritem
         if not target_diritem:
             return
 

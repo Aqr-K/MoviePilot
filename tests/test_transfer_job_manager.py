@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from app.core.config import settings
+from app.core.context import MediaInfo
+from app.core.meta import MetaVideo
 from app.chain.transfer import JobManager, TransferChain
 from app.modules.filemanager.transhandler import TransHandler
 from app.schemas import EpisodeFormat, FileItem, TransferInfo, TransferTask
@@ -71,6 +73,20 @@ class FakeMedia:
             "tmdb_id": self.tmdb_id,
             "douban_id": self.douban_id,
         }
+
+
+def make_media_info() -> MediaInfo:
+    media = MediaInfo()
+    media.type = MediaType.TV
+    media.title = "Test Show"
+    media.title_year = "Test Show (2026)"
+    media.year = "2026"
+    media.tmdb_id = 12345
+    media.category = ""
+    media.actors = []
+    media.season_years = {}
+    media.vote_average = 0
+    return media
 
 
 def make_task(episode: int, season: int = 1) -> TransferTask:
@@ -175,6 +191,134 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual("alist", new_item.storage)
         self.assertEqual("file", new_item.type)
         self.assertEqual(1024, new_item.size)
+
+    def test_transfer_media_passes_complete_result_when_target_metadata_is_delayed(self):
+        """
+        整理成功时应在结果源头带上完整目标项，回调和事件不再二次拼装。
+        """
+        handler = TransHandler()
+        source_item = FileItem(
+            storage="alist",
+            path="/downloads/Test.Show.S01E01.mkv",
+            type="file",
+            name="Test.Show.S01E01.mkv",
+            basename="Test.Show.S01E01",
+            extension="mkv",
+            size=1024,
+            modify_time=1715939275.0,
+        )
+        target_path = Path("/library")
+        target_file = Path(
+            "/library/Test.Show.S01E01.mkv"
+        )
+        target_folder = FileItem(
+            storage="alist",
+            type="dir",
+        )
+        target_item = FileItem(
+            storage="alist",
+            path=target_file.as_posix(),
+            type="file",
+            name=target_file.name,
+            basename=target_file.stem,
+            extension="mkv",
+            size=1024,
+        )
+        source_oper = SimpleNamespace(
+            is_support_transtype=lambda transfer_type: True,
+            move=lambda fileitem, path, name: True,
+        )
+        target_oper = SimpleNamespace(
+            get_folder=lambda path: target_folder,
+            get_item=lambda path: None,
+        )
+
+        with patch.object(
+                TransHandler, "get_rename_path", return_value=target_file
+        ), patch(
+                "app.modules.filemanager.transhandler.DirectoryHelper.get_media_root_path",
+                return_value=Path("/library"),
+        ), patch.object(
+                TransHandler,
+                "_TransHandler__transfer_command",
+                return_value=(target_item, ""),
+        ), patch("app.modules.filemanager.transhandler.eventmanager") as eventmanager_mock:
+            eventmanager_mock.send_event.return_value = None
+            transferinfo = handler.transfer_media(
+                fileitem=source_item,
+                in_meta=MetaVideo("Test.Show.S01E01"),
+                mediainfo=make_media_info(),
+                target_storage="alist",
+                target_path=target_path,
+                transfer_type="move",
+                source_oper=source_oper,
+                target_oper=target_oper,
+                need_scrape=True,
+                need_notify=True,
+            )
+
+        self.assertTrue(transferinfo.success)
+        self.assertEqual(target_item, transferinfo.target_item)
+        self.assertIsNotNone(transferinfo.target_diritem)
+        self.assertEqual("/library/", transferinfo.target_diritem.path)
+        self.assertEqual("alist", transferinfo.target_diritem.storage)
+        self.assertEqual("dir", transferinfo.target_diritem.type)
+
+    def test_success_callback_uses_transfer_result_target_diritem(self):
+        """
+        回调发送刮削事件时应直接使用整理结果里的目标目录项。
+        """
+        chain = make_transfer_chain()
+        chain.eventmanager = MagicMock()
+        chain.transfer_completed = lambda *args, **kwargs: None
+
+        task = make_task(1)
+        task.mediainfo = FakeMedia()
+        task.background = False
+        task.manual = True
+        self.assertTrue(chain._TransferChain__put_to_jobview(task))
+
+        target_diritem = FileItem(
+            storage="alist",
+            path="/library/Test Show (2026)/Season 1/",
+            type="dir",
+            name="Season 1",
+        )
+        target_item = FileItem(
+            storage="alist",
+            path="/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
+            type="file",
+            name="Test.Show.S01E01.mkv",
+            extension="mkv",
+        )
+        transferinfo = TransferInfo(
+            success=True,
+            fileitem=task.fileitem,
+            target_item=target_item,
+            target_diritem=target_diritem,
+            file_list_new=[target_item.path],
+            transfer_type="copy",
+            need_scrape=True,
+            need_notify=False,
+        )
+
+        with patch(
+            "app.chain.transfer.TransferHistoryOper",
+            return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
+        ):
+            state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
+
+        self.assertTrue(state)
+        self.assertEqual("", errmsg)
+        metadata_calls = [
+            call
+            for call in chain.eventmanager.send_event.call_args_list
+            if call.args[0] == EventType.MetadataScrape
+        ]
+        self.assertEqual(1, len(metadata_calls))
+        event_data = metadata_calls[0].args[1]
+        self.assertEqual(target_diritem, event_data["fileitem"])
+        self.assertEqual([target_item.path], event_data["file_list"])
 
     def test_manual_episode_offset_applies_once(self):
         chain = make_transfer_chain()
@@ -790,57 +934,6 @@ class TransferJobManagerTest(unittest.TestCase):
             ["/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv"],
             event_data["file_list"],
         )
-
-    def test_success_callback_handles_missing_target_diritem(self):
-        """
-        成功结果缺少目标目录项时，回调不应把已入库任务误判为失败。
-        """
-        chain = make_transfer_chain()
-        chain.eventmanager = MagicMock()
-        chain.transfer_completed = lambda *args, **kwargs: None
-
-        task = make_task(1)
-        task.mediainfo = FakeMedia()
-        task.background = False
-        task.manual = True
-        self.assertTrue(chain._TransferChain__put_to_jobview(task))
-
-        target_item = FileItem(
-            storage="alist",
-            path="/library/Test Show (2026)/Season 1/Test.Show.S01E01.mkv",
-            type="file",
-            name="Test.Show.S01E01.mkv",
-            extension="mkv",
-        )
-        transferinfo = TransferInfo(
-            success=True,
-            fileitem=task.fileitem,
-            target_item=target_item,
-            file_list_new=[target_item.path],
-            transfer_type="copy",
-            need_scrape=True,
-            need_notify=False,
-        )
-
-        with patch(
-            "app.chain.transfer.TransferHistoryOper",
-            return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
-        ):
-            state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
-
-        self.assertTrue(state)
-        self.assertEqual("", errmsg)
-        metadata_calls = [
-            call
-            for call in chain.eventmanager.send_event.call_args_list
-            if call.args[0] == EventType.MetadataScrape
-        ]
-        self.assertEqual(1, len(metadata_calls))
-        event_data = metadata_calls[0].args[1]
-        self.assertEqual("alist", event_data["fileitem"].storage)
-        self.assertEqual("/library/Test Show (2026)/Season 1", event_data["fileitem"].path)
-        self.assertEqual([target_item.path], event_data["file_list"])
-
 
 if __name__ == "__main__":
     unittest.main()

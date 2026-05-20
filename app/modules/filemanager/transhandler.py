@@ -127,6 +127,41 @@ class TransHandler:
             size=size if item_type == "file" else None,
         )
 
+    @staticmethod
+    def __build_transfer_target_diritem(
+            target_storage: str, target_path: Path
+    ) -> FileItem:
+        """
+        按已确认的目标目录路径构造整理结果目录项。
+        """
+        return FileItem(
+            storage=target_storage,
+            path=TransHandler.__format_dir_path(target_path),
+            name=target_path.name,
+            basename=target_path.stem,
+            type="dir",
+        )
+
+    @staticmethod
+    def __format_dir_path(path: Path) -> str:
+        """
+        按 FileItem 目录路径约定返回以斜杠结尾的路径。
+        """
+        path_str = path.as_posix()
+        if path_str != "/" and not path_str.endswith("/"):
+            return f"{path_str}/"
+        return path_str
+
+    @staticmethod
+    def __normalize_dir_path(path: Optional[str]) -> str:
+        """
+        比较目录路径时忽略尾部斜杠，兼容不同存储返回的目录项格式。
+        """
+        if not path:
+            return ""
+        path_str = Path(str(path)).as_posix().rstrip("/")
+        return path_str or "/"
+
     def transfer_media(
         self,
         fileitem: FileItem,
@@ -281,6 +316,10 @@ class TransHandler:
                     return result
 
                 logger.info(f"文件夹 {fileitem.path} 整理成功")
+                if self.__normalize_dir_path(new_diritem.path) != self.__normalize_dir_path(new_path.as_posix()):
+                    new_diritem = self.__build_transfer_target_diritem(
+                        target_storage=target_storage, target_path=new_path
+                    )
                 # 返回整理后的路径
                 self.__update_result(
                     result=result,
@@ -401,6 +440,11 @@ class TransHandler:
                         need_notify=need_notify,
                     )
                     return result
+                # 目标目录已创建成功但元数据可能短暂缺字段，整理结果直接按目标路径补全。
+                if self.__normalize_dir_path(target_diritem.path) != self.__normalize_dir_path(folder_path.as_posix()):
+                    target_diritem = self.__build_transfer_target_diritem(
+                        target_storage=target_storage, target_path=folder_path
+                    )
 
                 # 判断是否要覆盖，附加文件强制覆盖
                 overflag = False
