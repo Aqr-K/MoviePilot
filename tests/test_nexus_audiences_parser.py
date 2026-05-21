@@ -83,6 +83,92 @@ def test_audiences_inbox_total_unread_badge_uses_unread_part():
     assert parser.message_unread == 172
 
 
+def test_audiences_inbox_total_only_is_not_unread_count():
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    html_text = """
+    <html>
+      <body>
+        <div class="site-userbar__compact-actions">
+          <a class="site-userbar__compact-tool"
+             href="messages.php"
+             title="收件箱 1749"
+             aria-label="收件箱 1749">
+            <strong>收件箱</strong>
+            <span class="site-userbar__compact-tool-badge">1749</span>
+          </a>
+        </div>
+      </body>
+    </html>
+    """
+
+    parser._parse_message_unread(html_text)
+
+    assert parser.message_unread == 0
+
+
+def test_audiences_unread_badge_plain_count_is_unread_count():
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    html_text = """
+    <html>
+      <body>
+        <div class="site-userbar__compact-actions">
+          <a class="site-userbar__compact-tool site-userbar__compact-tool--has-unread"
+             href="messages.php"
+             title="收件箱 1749"
+             aria-label="收件箱 1749">
+            <strong>收件箱</strong>
+            <span class="site-userbar__compact-tool-badge site-userbar__compact-tool-badge--unread">172</span>
+          </a>
+        </div>
+      </body>
+    </html>
+    """
+
+    parser._parse_message_unread(html_text)
+
+    assert parser.message_unread == 172
+
+
+def test_audiences_unread_marker_without_count_uses_unknown_count():
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    html_text = """
+    <html>
+      <body>
+        <div class="site-userbar__compact-actions">
+          <a class="site-userbar__compact-tool site-userbar__compact-tool--has-unread"
+             href="messages.php"
+             title="收件箱"
+             aria-label="收件箱">
+            <strong>收件箱</strong>
+          </a>
+        </div>
+      </body>
+    </html>
+    """
+
+    parser._parse_message_unread(html_text)
+
+    assert parser.message_unread == 99999
+
+
 def test_audiences_table_unread_links_ignore_content_rows():
     parser = NexusAudiencesSiteUserInfo(
         site_name="Audiences",
@@ -226,16 +312,212 @@ def test_audiences_unread_links_increment_page_until_empty():
       </body>
     </html>
     """
+    next_html_text = html_text.replace("4318225", "4318226").replace("种子被删除", "系统通知")
     msg_links = []
 
     next_page = parser._parse_message_unread_links(html_text, msg_links)
-    next_next_page = parser._parse_message_unread_links(html_text, msg_links)
+    next_next_page = parser._parse_message_unread_links(next_html_text, msg_links)
     stop_page = parser._parse_message_unread_links("<html><body><table></table></body></html>", msg_links)
 
     assert msg_links == [
         "messages.php?action=viewmessage&id=4318225",
-        "messages.php?action=viewmessage&id=4318225",
+        "messages.php?action=viewmessage&id=4318226",
     ]
     assert next_page == "messages.php?action=viewmailbox&box=1&unread=yes&page=1"
     assert next_next_page == "messages.php?action=viewmailbox&box=1&unread=yes&page=2"
     assert stop_page is None
+
+
+def test_audiences_unread_messages_stop_when_pages_repeat():
+    """
+    Audiences 异常分页重复返回同一批消息时，应停止翻页并只通知一次。
+    """
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    parser.message_unread = 172
+    list_html = """
+    <html>
+      <body>
+        <table>
+          <tr>
+            <td class="rowfollow" align="center">
+              <img class="unreadpm" src="pic/trans.gif" alt="Unread" title="未读">
+            </td>
+            <td class="rowfollow" align="left">
+              <a href="messages.php?action=viewmessage&amp;id=4318225">种子被删除</a>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    requested_urls = []
+
+    def fake_get_page_content(url, params=None, headers=None):
+        """
+        模拟观众分页异常：每个未读列表页都返回同一个消息链接。
+        """
+        requested_urls.append(url)
+        return "<html></html>" if "viewmessage" in url else list_html
+
+    def fake_parse_message_content(_):
+        """
+        返回可识别的消息详情，便于验证重复链接没有被重复通知。
+        """
+        return "种子被删除", "2026-05-07 23:01:58", "消息摘要内容"
+
+    parser._get_page_content = fake_get_page_content
+    parser._parse_message_content = fake_parse_message_content
+
+    parser._pase_unread_msgs()
+
+    mailbox_requests = [url for url in requested_urls if "viewmailbox" in url]
+    detail_requests = [url for url in requested_urls if "viewmessage" in url]
+    assert mailbox_requests == [
+        "https://audiences.me/messages.php?action=viewmailbox&box=1&unread=yes",
+        "https://audiences.me/messages.php?action=viewmailbox&box=1&unread=yes&page=1",
+    ]
+    assert detail_requests == [
+        "https://audiences.me/messages.php?action=viewmessage&id=4318225"
+    ]
+    assert parser.message_unread_contents == [
+        ("种子被删除", "2026-05-07 23:01:58", "消息摘要内容")
+    ]
+
+
+def test_audiences_unread_messages_skip_empty_detail():
+    """
+    详情页解析失败时，不应把全 None 的消息写入通知列表。
+    """
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    parser.message_unread = 1
+    list_html = """
+    <html>
+      <body>
+        <table>
+          <tr>
+            <td class="rowfollow" align="center">
+              <img class="unreadpm" src="pic/trans.gif" alt="Unread" title="未读">
+            </td>
+            <td class="rowfollow" align="left">
+              <a href="messages.php?action=viewmessage&amp;id=4318225">种子被删除</a>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    def fake_get_page_content(url, params=None, headers=None):
+        """
+        未读列表正常返回链接，消息详情页返回无法解析的空页面。
+        """
+        return "<html></html>" if "viewmessage" in url else list_html
+
+    def fake_parse_message_content(_):
+        """
+        模拟详情页解析不到标题、时间和内容。
+        """
+        return None, None, None
+
+    parser._get_page_content = fake_get_page_content
+    parser._parse_message_content = fake_parse_message_content
+
+    parser._pase_unread_msgs()
+
+    assert parser.message_unread_contents == []
+
+
+def test_audiences_unknown_unread_count_updates_from_collected_links():
+    """
+    只有未读状态没有可靠数量时，最终用实际抓到的未读链接数回填。
+    """
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    parser.message_unread = 99999
+    first_list_html = """
+    <html>
+      <body>
+        <table>
+          <tr>
+            <td class="rowfollow" align="center">
+              <img class="unreadpm" src="pic/trans.gif" alt="Unread" title="未读">
+            </td>
+            <td class="rowfollow" align="left">
+              <a href="messages.php?action=viewmessage&amp;id=4318225">种子被删除</a>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    second_list_html = first_list_html.replace("4318225", "4318226").replace("种子被删除", "系统通知")
+
+    def fake_get_page_content(url, params=None, headers=None):
+        """
+        模拟未读数量未知时正常翻到空页为止。
+        """
+        if "viewmessage" in url:
+            return "<html></html>"
+        if "page=1" in url:
+            return second_list_html
+        if "page=2" in url:
+            return "<html><body><table></table></body></html>"
+        return first_list_html
+
+    def fake_parse_message_content(html_text):
+        """
+        返回固定消息详情，测试重点是未知数量回填。
+        """
+        return "标题", "2026-05-07 23:01:58", "内容"
+
+    parser._get_page_content = fake_get_page_content
+    parser._parse_message_content = fake_parse_message_content
+
+    parser._pase_unread_msgs()
+
+    assert parser.message_unread == 2
+    assert len(parser.message_unread_contents) == 2
+
+
+def test_audiences_unknown_unread_count_resets_when_no_links():
+    """
+    未知未读数量但列表为空时，不保留 99999 作为通知数量。
+    """
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    parser.message_unread = 99999
+
+    def fake_get_page_content(url, params=None, headers=None):
+        """
+        模拟站点标记有未读但未读列表为空。
+        """
+        return "<html><body><table></table></body></html>"
+
+    parser._get_page_content = fake_get_page_content
+
+    parser._pase_unread_msgs()
+
+    assert parser.message_unread == 0
+    assert parser.message_unread_contents == []

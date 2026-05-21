@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 
 from lxml import etree
 
+from app.log import logger
 from app.modules.indexer.parser import SiteSchema
 from app.modules.indexer.parser.nexus_php import NexusPhpSiteUserInfo
 from app.utils.string import StringUtils
@@ -12,6 +13,7 @@ from app.utils.string import StringUtils
 
 class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
     schema = SiteSchema.NexusAudiences
+    __UNKNOWN_UNREAD_COUNT = 99999
 
     def __init__(self, *args, **kwargs):
         """
@@ -21,6 +23,7 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         self._user_mail_unread_page = self.__build_unread_mailbox_page(box=1)
         self._sys_mail_unread_page = None
         self.__next_mail_page = 1
+        self.__seen_unread_message_links = set()
 
     def _parse_message_unread(self, html_text):
         """
@@ -44,6 +47,8 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
                 if unread is not None:
                     self.message_unread = unread
                     return
+            if message_tools:
+                return
         finally:
             if html is not None:
                 del html
@@ -63,13 +68,112 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
                 '//tr[.//img[contains(concat(" ", normalize-space(@class), " "), " unreadpm ") '
                 'or @alt="Unread" or @title="未读"]]/td/a[contains(@href, "viewmessage")]/@href'
             )
-            msg_links.extend(message_links)
-            next_page = self.__build_next_unread_mailbox_page(bool(message_links))
+            new_message_links = self.__filter_new_message_links(message_links)
+            if message_links and not new_message_links:
+                logger.warn(f"{self._site_name} 未读消息页只发现重复消息链接，停止后续翻页")
+            msg_links.extend(new_message_links)
+            next_page = self.__build_next_unread_mailbox_page(
+                self.__should_fetch_next_unread_page(new_message_links)
+            )
         finally:
             if html is not None:
                 del html
 
         return next_page
+
+    def _pase_unread_msgs(self):
+        """
+        解析 Audiences 未读消息，避免异常分页重复通知和空详情通知。
+        """
+        self.__reset_unread_message_parse_state()
+        unread_msg_links = []
+        if self.message_unread > 0 or self.message_read_force:
+            next_page = self.__parse_unread_message_list_page(
+                link=self._user_mail_unread_page,
+                unread_msg_links=unread_msg_links
+            )
+            while next_page:
+                next_page = self.__parse_unread_message_list_page(
+                    link=next_page,
+                    unread_msg_links=unread_msg_links
+                )
+        if self.message_unread == self.__UNKNOWN_UNREAD_COUNT:
+            self.message_unread = len(unread_msg_links)
+        elif unread_msg_links and not self.message_unread:
+            self.message_unread = len(unread_msg_links)
+        for msg_link in unread_msg_links:
+            logger.debug(f"{self._site_name} 信息链接 {msg_link}")
+            head, date, content = self._parse_message_content(
+                self._get_page_content(
+                    urljoin(self._base_url, msg_link),
+                    params=self._mail_content_params,
+                    headers=self._mail_content_headers
+                )
+            )
+            logger.debug(f"{self._site_name} 标题 {head} 时间 {date} 内容 {content}")
+            if self.__is_empty_message_content(head, date, content):
+                logger.warn(f"{self._site_name} 信息链接 {msg_link} 解析结果为空，跳过消息通知")
+                continue
+            self.message_unread_contents.append((head, date, content))
+
+    def __parse_unread_message_list_page(self, link: str, unread_msg_links: list):
+        """
+        读取并解析一页 Audiences 未读消息列表。
+        """
+        if not link:
+            return None
+        return self._parse_message_unread_links(
+            self._get_page_content(
+                url=urljoin(self._base_url, link),
+                params=self._mail_unread_params,
+                headers=self._mail_unread_headers
+            ),
+            unread_msg_links
+        )
+
+    def __reset_unread_message_parse_state(self):
+        """
+        重置 Audiences 未读消息分页状态，避免复用解析器时沿用上次页码和去重集合。
+        """
+        self.__next_mail_page = 1
+        self.__seen_unread_message_links.clear()
+
+    def __filter_new_message_links(self, message_links: list) -> list:
+        """
+        过滤 Audiences 异常分页重复返回的消息详情链接。
+        """
+        new_message_links = []
+        for message_link in message_links:
+            message_link_key = urljoin(self._base_url, message_link)
+            if message_link_key in self.__seen_unread_message_links:
+                continue
+            self.__seen_unread_message_links.add(message_link_key)
+            new_message_links.append(message_link)
+        return new_message_links
+
+    def __should_fetch_next_unread_page(self, new_message_links: list) -> bool:
+        """
+        判断是否还需要继续请求 Audiences 下一页未读消息列表。
+        """
+        if not new_message_links:
+            return False
+        return not self.__has_reached_expected_unread_count()
+
+    def __has_reached_expected_unread_count(self) -> bool:
+        """
+        已达到 Audiences 顶部栏给出的未读数时停止翻页。
+        """
+        return not self.message_read_force \
+            and self.message_unread > 0 \
+            and self.message_unread != self.__UNKNOWN_UNREAD_COUNT \
+            and len(self.__seen_unread_message_links) >= self.message_unread
+
+    @staticmethod
+    def __is_empty_message_content(head, date, content) -> bool:
+        """
+        判断消息详情是否完全为空，避免把解析失败页包装成 None 通知。
+        """
+        return not any(str(item).strip() for item in (head, date, content) if item is not None)
 
     @classmethod
     def __build_unread_mailbox_page(cls, box: int) -> str:
@@ -208,26 +312,29 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         """
         从 Audiences 收件箱入口提取未读数。
         """
-        inbox_texts = [
+        for inbox_text in [
             message_link.get("title"),
             message_link.get("aria-label"),
-            *message_link.xpath(
-                './/*[contains(@class, "site-userbar__compact-tool-badge--unread") '
-                'or contains(@class, "site-userbar__compact-tool-badge")]/text()'
-            )
-        ]
-
-        for inbox_text in inbox_texts:
-            unread = self.__extract_inbox_unread(inbox_text)
+        ]:
+            unread = self.__extract_inbox_unread_pair(inbox_text)
             if unread is not None:
                 return unread
+
+        for inbox_text in message_link.xpath(
+                './/*[contains(@class, "site-userbar__compact-tool-badge--unread")]/text()'):
+            unread = self.__extract_inbox_unread_badge(inbox_text)
+            if unread is not None:
+                return unread
+
+        if self.__has_inbox_unread_marker(message_link):
+            return self.__UNKNOWN_UNREAD_COUNT
 
         return None
 
     @staticmethod
-    def __extract_inbox_unread(text: str):
+    def __extract_inbox_unread_pair(text: str):
         """
-        Audiences 收件箱角标格式为 总数/未读数，例如 1749/172。
+        从 Audiences 总数/未读数格式中提取未读数，例如 1749/172。
         """
         if not text:
             return None
@@ -240,10 +347,34 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         if inbox_count:
             return StringUtils.str_int(inbox_count.group(2))
 
-        single_count = re.search(r"收件箱\s*(\d[\d,]*)", text)
+        return None
+
+    @staticmethod
+    def __extract_inbox_unread_badge(text: str):
+        """
+        从明确的未读角标中提取未读数，避免把普通收件箱总数误作未读。
+        """
+        unread = NexusAudiencesSiteUserInfo.__extract_inbox_unread_pair(text)
+        if unread is not None:
+            return unread
+
+        if not text:
+            return None
+        text = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+        single_count = re.fullmatch(r"(\d[\d,]*)", text)
         if single_count:
             return StringUtils.str_int(single_count.group(1))
         return None
+
+    @staticmethod
+    def __has_inbox_unread_marker(message_link) -> bool:
+        """
+        判断收件箱入口是否只有未读状态但没有可靠数量。
+        """
+        link_class = message_link.get("class") or ""
+        if "site-userbar__compact-tool--has-unread" in link_class:
+            return True
+        return bool(message_link.xpath('.//*[contains(@class, "site-userbar__compact-tool-badge--unread")]'))
 
     def _parse_seeding_pages(self):
         if not self._torrent_seeding_page:
