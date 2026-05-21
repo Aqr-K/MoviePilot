@@ -705,9 +705,7 @@ class MessageQueueManager(metaclass=SingletonClass):
 
         历史实现把 ``immediately`` 标志直接 pop 后丢弃，所有异步消息一律
         进队列；如果调用时落在用户配置的"免打扰时段"之外，消息会一直挂
-        着不发——Issue #5807 后续实战中观察到 prepare_feedback_issue
-        发出的「确认提交问题反馈」按钮卡片就被这样吞掉，用户在 TG 里
-        永远等不到确认按钮。这里与同步 ``send_message`` 行为对齐：
+        着不发。这里与同步 ``send_message`` 行为对齐：
         指定 ``immediately=True`` 必须当场发出，与时段无关。
         """
         immediately = kwargs.pop("immediately", False)

@@ -92,24 +92,11 @@ class AskUserChoiceTool(MoviePilotTool):
     def _blocked_by_feedback_quality_gate(self) -> bool:
         """反馈 Issue 质量门槛拒绝后，禁止继续发按钮引导改写。
 
-        这是对 ``feedback-issue`` skill 的工具层兜底：模型可能在
-        ``submit_feedback_issue`` 返回 ``rejected_quality`` 后仍调用本工具，
-        试图让用户选择“提供真实问题描述重新提交”。这会把测试 / 占位内容
-        的拒绝结果变成绕过指导，因此同一轮 tool context 中直接拦截。
+        这是对 ``feedback-issue`` skill 的历史兜底：如果同一轮上下文已经
+        标记反馈内容被质量门槛拒绝，就不能再用按钮诱导用户把测试 / 占位
+        内容改写成“真实问题”。
         """
         return bool(self._agent_context.get("feedback_issue_rejected_quality"))
-
-    def _blocked_by_pending_feedback_confirmation(self) -> bool:
-        """已经发出 ``prepare_feedback_issue`` 的预览按钮后，禁止再叠一层选择。
-
-        Why: Issue #5807 实测中 deepseek 在 prepare 之后又自作主张调
-        ``ask_user_choice``，给用户发了第二个「确认提交 ISSUE」按钮。
-        两条按钮 → 两次 callback → agent 走两轮 → 同一条成功文案被发 3 次。
-        从工具层硬拦：发现 ``reply_mode=feedback_issue_confirmation`` 直接拒绝。
-        """
-        return (
-            self._agent_context.get("reply_mode") == "feedback_issue_confirmation"
-        )
 
     async def run(
         self,
@@ -127,18 +114,6 @@ class AskUserChoiceTool(MoviePilotTool):
             return (
                 "反馈 Issue 已被质量门槛拒绝，不能继续发送按钮引导用户改写或重新提交。"
                 "请直接结束本次反馈流程。"
-            )
-
-        if self._blocked_by_pending_feedback_confirmation():
-            logger.warning(
-                "ask_user_choice blocked while feedback issue preview pending: "
-                "session_id=%s",
-                self._session_id,
-            )
-            return (
-                "prepare_feedback_issue 已经发出确认按钮并在等待用户点击，"
-                "不允许再叠加 ask_user_choice。请直接结束本轮，等待用户在"
-                "现有按钮上点选。"
             )
 
         if not self._channel or not self._source:
