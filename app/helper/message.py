@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import queue
 import re
@@ -700,9 +701,22 @@ class MessageQueueManager(metaclass=SingletonClass):
 
     async def async_send_message(self, *args, **kwargs) -> None:
         """
-        异步发送消息（直接加入队列）
+        异步发送消息：``immediately=True`` 立即发送，否则按调度时段入队。
+
+        历史实现把 ``immediately`` 标志直接 pop 后丢弃，所有异步消息一律
+        进队列；如果调用时落在用户配置的"免打扰时段"之外，消息会一直挂
+        着不发——Issue #5807 后续实战中观察到 prepare_feedback_issue
+        发出的「确认提交问题反馈」按钮卡片就被这样吞掉，用户在 TG 里
+        永远等不到确认按钮。这里与同步 ``send_message`` 行为对齐：
+        指定 ``immediately=True`` 必须当场发出，与时段无关。
         """
-        kwargs.pop("immediately", False)
+        immediately = kwargs.pop("immediately", False)
+        if immediately or self._is_in_scheduled_time(datetime.now()):
+            # _send 会执行具体渠道回调，可能包含网络 IO；放到 executor
+            # 避免 async 调用方所在事件循环被同步发送阻塞。
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: self._send(*args, **kwargs))
+            return
         self.queue.put({
             "args": args,
             "kwargs": kwargs
