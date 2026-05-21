@@ -1,5 +1,6 @@
 """插件 Agent 工具共享辅助方法"""
 
+import asyncio
 import json
 import shutil
 from typing import Any, Optional
@@ -248,7 +249,7 @@ async def install_plugin_runtime(
             SystemConfigKey.UserInstalledPlugins, install_plugins
         )
 
-    reload_plugin_runtime(plugin_id)
+    await asyncio.to_thread(reload_plugin_runtime, plugin_id)
     return True, message or "插件安装成功", refreshed_only
 
 

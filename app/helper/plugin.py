@@ -2117,9 +2117,22 @@ class PluginHelper(metaclass=WeakSingleton):
             async with aiofiles.open(requirements_file_path, "w", encoding="utf-8") as f:
                 await f.write(requirements_txt)
 
-            return self.pip_install_with_fallback(Path(requirements_file_path))
+            return await self.__async_pip_install_with_fallback(Path(requirements_file_path))
 
         return True, ""  # 如果 requirements.txt 为空，视作成功
+
+    async def __async_pip_install_with_fallback(
+            self,
+            requirements_file: Path,
+            find_links_dirs: Optional[List[Path]] = None) -> Tuple[bool, str]:
+        """
+        在线程池中执行插件依赖安装，避免同步 pip 子进程阻塞事件循环。
+        """
+        return await asyncio.to_thread(
+            self.pip_install_with_fallback,
+            requirements_file,
+            find_links_dirs
+        )
 
     async def __async_backup_plugin(self, pid: str) -> str:
         """
@@ -2204,7 +2217,7 @@ class PluginHelper(metaclass=WeakSingleton):
         # 检查是否存在 requirements.txt 文件
         if await requirements_file.exists():
             logger.info(f"{pid} 存在依赖，开始尝试安装依赖")
-            success, error_message = self.pip_install_with_fallback(Path(requirements_file))
+            success, error_message = await self.__async_pip_install_with_fallback(Path(requirements_file))
             if success:
                 return True, True, ""
             else:
@@ -2234,7 +2247,7 @@ class PluginHelper(metaclass=WeakSingleton):
             try:
                 # 使用自动降级策略安装依赖
                 wheels_dirs = self.__collect_plugin_wheels_dirs()
-                return self.pip_install_with_fallback(Path(requirements_temp_file), wheels_dirs)
+                return await self.__async_pip_install_with_fallback(Path(requirements_temp_file), wheels_dirs)
             finally:
                 # 删除临时文件
                 await requirements_temp_file.unlink()

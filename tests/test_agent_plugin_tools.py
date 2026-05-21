@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.agent.tools.impl.install_plugin import InstallPluginTool
+from app.agent.tools.impl._plugin_tool_utils import install_plugin_runtime
 from app.agent.tools.impl.query_installed_plugins import QueryInstalledPluginsTool
 from app.agent.tools.impl.query_market_plugins import QueryMarketPluginsTool
 from app.agent.tools.impl.query_plugin_config import QueryPluginConfigTool
@@ -169,6 +170,54 @@ class TestAgentPluginTools(unittest.TestCase):
         install_runtime.assert_awaited_once_with(
             "DemoPlugin", "https://example.com/market", force=False
         )
+
+    def test_install_plugin_runtime_reloads_in_threadpool(self):
+        plugin_manager = MagicMock()
+        plugin_manager.get_plugin_ids.return_value = ["DemoPlugin"]
+        plugin_helper = MagicMock()
+        plugin_helper.async_install_reg = AsyncMock(return_value=True)
+        config_oper = MagicMock()
+        config_oper.get.return_value = ["DemoPlugin"]
+        calls = []
+
+        async def fake_to_thread(func, *args, **kwargs):
+            calls.append((func, args, kwargs))
+            return None
+
+        with patch(
+            "app.agent.tools.impl._plugin_tool_utils.SystemConfigOper",
+            return_value=config_oper,
+        ), patch(
+            "app.agent.tools.impl._plugin_tool_utils.PluginManager",
+            return_value=plugin_manager,
+        ), patch(
+            "app.agent.tools.impl._plugin_tool_utils.PluginHelper",
+            return_value=plugin_helper,
+        ), patch(
+            "app.agent.tools.impl._plugin_tool_utils.reload_plugin_runtime",
+        ) as reload_runtime, patch(
+            "app.agent.tools.impl._plugin_tool_utils.asyncio.to_thread",
+            side_effect=fake_to_thread,
+        ):
+            success, message, refreshed_only = asyncio.run(
+                install_plugin_runtime(
+                    "DemoPlugin",
+                    "https://example.com/market",
+                    force=False,
+                )
+            )
+
+        self.assertTrue(success)
+        self.assertEqual("插件已存在，已刷新加载", message)
+        self.assertTrue(refreshed_only)
+        plugin_helper.async_install_reg.assert_awaited_once_with(
+            pid="DemoPlugin",
+            repo_url="https://example.com/market",
+        )
+        self.assertEqual(1, len(calls))
+        self.assertEqual(reload_runtime, calls[0][0])
+        self.assertEqual(("DemoPlugin",), calls[0][1])
+        self.assertEqual({}, calls[0][2])
 
     def test_uninstall_plugin_uninstalls_installed_candidate(self):
         tool = UninstallPluginTool(session_id="session-1", user_id="10001")

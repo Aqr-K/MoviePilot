@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import tempfile
 import threading
@@ -360,3 +361,37 @@ class PluginHelperTest(TestCase):
         self.assertIn("已自动恢复主程序依赖", message)
         self.assertEqual(1, len(repair_commands))
         self.assertIn("runtime-constraints-", repair_commands[0][-1])
+
+    def test_async_pip_install_runs_in_threadpool(self):
+        """
+        验证异步安装路径会把同步 pip 安装派发到线程池，避免阻塞事件循环。
+        """
+        try:
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        helper = PluginHelper()
+        requirements_file = Path("/tmp/demo-requirements.txt")
+        find_links_dirs = [Path("/tmp/demo-wheels")]
+        calls = []
+
+        async def run_install():
+            return await helper._PluginHelper__async_pip_install_with_fallback(
+                requirements_file,
+                find_links_dirs
+            )
+
+        async def fake_to_thread(func, *args, **kwargs):
+            calls.append((func, args, kwargs))
+            return True, "ok"
+
+        with patch("app.helper.plugin.asyncio.to_thread", side_effect=fake_to_thread):
+            success, message = asyncio.run(run_install())
+
+        self.assertTrue(success)
+        self.assertEqual("ok", message)
+        self.assertEqual(1, len(calls))
+        self.assertEqual(helper.pip_install_with_fallback, calls[0][0])
+        self.assertEqual((requirements_file, find_links_dirs), calls[0][1])
+        self.assertEqual({}, calls[0][2])
