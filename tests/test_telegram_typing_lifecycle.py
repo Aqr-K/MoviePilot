@@ -46,7 +46,11 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
     def test_start_typing_can_stop_by_chat_id(self):
         telegram = self._telegram_client()
 
-        telegram._start_typing_task("chat-1", max_duration_seconds=1)
+        telegram._start_typing_task(
+            "chat-1",
+            max_duration_seconds=1,
+            initial_delay_seconds=0,
+        )
         time.sleep(0.03)
 
         self.assertIn("chat-1", Telegram._typing_tasks)
@@ -58,7 +62,11 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
         telegram = self._telegram_client()
         Telegram._user_chat_mapping["10001"] = "chat-2"
 
-        telegram._start_typing_task("chat-2", max_duration_seconds=1)
+        telegram._start_typing_task(
+            "chat-2",
+            max_duration_seconds=1,
+            initial_delay_seconds=0,
+        )
         time.sleep(0.03)
 
         self.assertTrue(telegram.stop_typing(userid="10001"))
@@ -67,10 +75,31 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
     def test_typing_task_has_max_duration_guard(self):
         telegram = self._telegram_client()
 
-        telegram._start_typing_task("chat-3", max_duration_seconds=0.02)
+        telegram._start_typing_task(
+            "chat-3",
+            max_duration_seconds=0.02,
+            initial_delay_seconds=0,
+        )
         time.sleep(0.08)
 
         self.assertNotIn("chat-3", Telegram._typing_tasks)
+
+    def test_short_typing_task_can_stop_before_first_chat_action(self):
+        """
+        短响应在首次 typing 发出前结束时，不应留下客户端自然过期的残留状态。
+        """
+        telegram = self._telegram_client()
+
+        telegram._start_typing_task(
+            "chat-4",
+            max_duration_seconds=1,
+            initial_delay_seconds=0.05,
+        )
+        telegram.stop_typing(chat_id="chat-4")
+        time.sleep(0.08)
+
+        telegram._bot.send_chat_action.assert_not_called()
+        self.assertNotIn("chat-4", Telegram._typing_tasks)
 
     def test_agent_managed_send_msg_keeps_typing_for_worker_cleanup(self):
         telegram = self._telegram_client()

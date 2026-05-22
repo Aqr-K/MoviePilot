@@ -46,6 +46,7 @@ class Telegram:
     _typing_stop_flags: Dict[str, threading.Event] = {}  # chat_id -> 停止信号
     _typing_lock = threading.RLock()
     _typing_interval_seconds = 5
+    _typing_initial_delay_seconds = 1
     _typing_max_duration_seconds = 5 * 60
     _typing_command_max_duration_seconds = 30
     _typing_callback_max_duration_seconds = 60
@@ -340,6 +341,7 @@ class Telegram:
             self,
             chat_id: Union[str, int],
             max_duration_seconds: Optional[float] = None,
+            initial_delay_seconds: Optional[float] = None,
     ) -> None:
         """
         启动持续发送正在输入状态的任务
@@ -351,11 +353,20 @@ class Telegram:
         # 使用独立 Event 避免同一 chat 新旧 typing 线程互相误改停止标记。
         stop_event = threading.Event()
         max_duration = max_duration_seconds or self._typing_max_duration_seconds
+        initial_delay = (
+            self._typing_initial_delay_seconds
+            if initial_delay_seconds is None
+            else max(initial_delay_seconds, 0)
+        )
 
         def typing_worker():
-            """定期发送typing状态的后台线程"""
+            """延迟首发并定期发送 typing 状态的后台线程。"""
             started_at = time.monotonic()
             try:
+                # Telegram 没有撤销 typing 的接口，短响应先等待一小段时间，
+                # 避免回复已经发出后客户端仍残留几秒“正在输入”。
+                if initial_delay and stop_event.wait(initial_delay):
+                    return
                 while not stop_event.is_set():
                     if time.monotonic() - started_at >= max_duration:
                         logger.warning(

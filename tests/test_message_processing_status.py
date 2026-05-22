@@ -1,10 +1,13 @@
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.agent import _finish_processing_status
 from app.modules.discord import DiscordModule
+from app.modules.discord.discord import Discord
 from app.modules.slack import SlackModule
 from app.schemas.message import ChannelCapability, ChannelCapabilityManager
 from app.schemas.types import MessageChannel
@@ -142,6 +145,36 @@ class TestMessageProcessingStatus(unittest.TestCase):
             status=status,
             userid="fallback",
         )
+
+
+class TestDiscordTypingLifecycle(IsolatedAsyncioTestCase):
+    async def test_short_typing_task_can_stop_before_first_trigger(self):
+        """
+        短响应在首次 Discord typing 触发前结束时，不应留下客户端自然保留的输入状态。
+        """
+        discord_client = Discord.__new__(Discord)
+        discord_client._loop = asyncio.get_running_loop()
+        discord_client._typing_tasks = {}
+        discord_client._typing_stop_events = {}
+        discord_client._typing_interval_seconds = 0.01
+        discord_client._typing_max_duration_seconds = 1
+        channel = MagicMock()
+        channel.trigger_typing = AsyncMock()
+
+        with patch.object(discord_client, "_resolve_channel", return_value=channel):
+            started = await discord_client._start_typing_task(
+                typing_key="chat:30003",
+                chat_id="30003",
+                max_duration_seconds=1,
+                initial_delay_seconds=0.05,
+            )
+            stopped = await discord_client._stop_typing_task("chat:30003")
+            await asyncio.sleep(0.08)
+
+        self.assertTrue(started)
+        self.assertTrue(stopped)
+        channel.trigger_typing.assert_not_called()
+        self.assertNotIn("chat:30003", discord_client._typing_tasks)
 
 
 if __name__ == "__main__":

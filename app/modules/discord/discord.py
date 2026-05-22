@@ -82,6 +82,7 @@ class Discord:
         self._typing_tasks: Dict[str, asyncio.Task] = {}
         self._typing_stop_events: Dict[str, asyncio.Event] = {}
         self._typing_interval_seconds = 5
+        self._typing_initial_delay_seconds = 1
         self._typing_max_duration_seconds = 5 * 60
 
         self._register_events()
@@ -379,6 +380,7 @@ class Discord:
         userid: Optional[str] = None,
         chat_id: Optional[str] = None,
         max_duration_seconds: Optional[float] = None,
+        initial_delay_seconds: Optional[float] = None,
     ) -> bool:
         """
         持续发送 Discord typing 指示，直到显式停止或达到最大续期。
@@ -395,6 +397,7 @@ class Discord:
                     userid=userid,
                     chat_id=chat_id,
                     max_duration_seconds=max_duration_seconds,
+                    initial_delay_seconds=initial_delay_seconds,
                 ),
                 self._loop,
             )
@@ -438,6 +441,7 @@ class Discord:
         userid: Optional[str] = None,
         chat_id: Optional[str] = None,
         max_duration_seconds: Optional[float] = None,
+        initial_delay_seconds: Optional[float] = None,
     ) -> bool:
         await self._stop_typing_task(typing_key)
         channel = await self._resolve_channel(userid=userid, chat_id=chat_id)
@@ -445,10 +449,26 @@ class Discord:
             return False
         stop_event = asyncio.Event()
         max_duration = max_duration_seconds or self._typing_max_duration_seconds
+        initial_delay = (
+            self._typing_initial_delay_seconds
+            if initial_delay_seconds is None
+            else max(initial_delay_seconds, 0)
+        )
 
         async def _typing_worker() -> None:
             started_at = self._loop.time()
             try:
+                # Discord typing 触发后也会在客户端自然保留一段时间，
+                # 先给短响应一个取消窗口，避免回复后残留输入状态。
+                if initial_delay:
+                    try:
+                        await asyncio.wait_for(
+                            stop_event.wait(),
+                            timeout=initial_delay,
+                        )
+                        return
+                    except asyncio.TimeoutError:
+                        pass
                 while not stop_event.is_set():
                     if self._loop.time() - started_at >= max_duration:
                         logger.warning(
