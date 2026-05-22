@@ -54,6 +54,12 @@ class TestAgentInteraction(unittest.TestCase):
         self.assertIn("ask_user_choice", [tool.name for tool in telegram_tools])
         self.assertNotIn("ask_user_choice", [tool.name for tool in wechat_tools])
 
+    def test_choice_tool_returns_direct_after_sending_interaction(self):
+        """发送按钮后应结束当前 Agent 轮次，等待用户选择作为新消息进入。"""
+        tool = AskUserChoiceTool(session_id="session-1", user_id="10001")
+
+        self.assertTrue(tool.return_direct)
+
     def test_choice_tool_sends_buttons_and_registers_pending_request(self):
         tool = AskUserChoiceTool(session_id="session-1", user_id="10001")
         tool.set_message_attr(

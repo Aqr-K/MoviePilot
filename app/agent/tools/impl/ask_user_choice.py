@@ -66,8 +66,11 @@ class AskUserChoiceInput(BaseModel):
 
 
 class AskUserChoiceTool(MoviePilotTool):
+    """发送按钮选择并让当前 Agent 轮次等待用户回调消息。"""
+
     name: str = "ask_user_choice"
     sends_message: bool = True
+    return_direct: bool = True
     description: str = (
         "Ask the user to choose from button options on channels that support interactive buttons. "
         "After the user clicks a button, the selected value will come back as the user's next message."
