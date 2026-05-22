@@ -656,27 +656,28 @@ def _find_native_linker() -> Optional[str]:
     return None
 
 
-def ensure_rust_accel_ready() -> None:
+def ensure_rust_accel_ready() -> bool:
     """
     确认 Rust 加速扩展源码存在且本机具备 cargo 与链接器。
     """
     if not RUST_ACCEL_MANIFEST.exists():
-        return
+        return False
     if _rust_accel_should_skip():
         print_step(f"已跳过 Rust 加速扩展构建：{RUST_ACCEL_SKIP_ENV}=1")
-        return
+        return False
     if not _find_cargo():
-        raise RuntimeError(
-            "未找到 Rust cargo，无法构建 MoviePilot Rust 加速扩展。"
-            "请先安装 Rust toolchain 后重试，或临时设置 "
-            f"{RUST_ACCEL_SKIP_ENV}=1 跳过加速扩展。"
+        print_step(
+            "未找到 Rust cargo，已跳过 Rust 加速扩展构建；"
+            "应用将继续使用 Python 实现。"
         )
+        return False
     if not _find_native_linker():
-        raise RuntimeError(
-            "未找到本机 C 编译器/链接器，无法构建 MoviePilot Rust 加速扩展。"
-            "请先安装系统构建工具后重试，或临时设置 "
-            f"{RUST_ACCEL_SKIP_ENV}=1 跳过加速扩展。"
+        print_step(
+            "未找到本机 C 编译器/链接器，已跳过 Rust 加速扩展构建；"
+            "应用将继续使用 Python 实现。"
         )
+        return False
+    return True
 
 
 def install_rust_accel(venv_python: Path) -> None:
@@ -688,22 +689,26 @@ def install_rust_accel(venv_python: Path) -> None:
     if _rust_accel_should_skip():
         return
 
-    ensure_rust_accel_ready()
+    if not ensure_rust_accel_ready():
+        return
     print_step("构建并安装 Rust 加速扩展")
     env = os.environ.copy()
     env["PATH"] = _cargo_env_path()
-    run(
-        [
-            str(venv_python),
-            "-m",
-            "maturin",
-            "develop",
-            "--release",
-            "--manifest-path",
-            str(RUST_ACCEL_MANIFEST),
-        ],
-        env=env,
-    )
+    try:
+        run(
+            [
+                str(venv_python),
+                "-m",
+                "maturin",
+                "develop",
+                "--release",
+                "--manifest-path",
+                str(RUST_ACCEL_MANIFEST),
+            ],
+            env=env,
+        )
+    except subprocess.CalledProcessError as exc:
+        print_step(f"Rust 加速扩展构建失败，已跳过；应用将继续使用 Python 实现：{exc}")
 
 
 def ensure_supported_python(python_bin: str) -> None:
@@ -2732,7 +2737,6 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
     创建或复用本地虚拟环境，并安装后端依赖、Rust 扩展和浏览器运行时。
     """
     ensure_supported_python(python_bin)
-    ensure_rust_accel_ready()
     venv_dir = venv_dir.expanduser().resolve()
     venv_python = get_venv_python(venv_dir)
     venv_pip = get_venv_pip(venv_dir)

@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::types::{PyDict, PyList};
 use regex::{Regex, RegexBuilder};
 use scraper::{ElementRef, Html, Selector};
 use url::form_urlencoded;
@@ -39,17 +39,6 @@ enum RowParseResult {
     Unsupported,
     Empty,
     Item(PyObject),
-}
-
-#[pyfunction]
-pub(crate) fn apply_indexer_text_filters_fast(
-    text: &Bound<'_, PyAny>,
-    filters: &Bound<'_, PyAny>,
-) -> PyResult<Option<String>> {
-    if text.is_none() {
-        return Ok(None);
-    }
-    apply_text_filters(text.str()?.to_str()?.to_string(), filters)
 }
 
 /// 批量解析普通配置 indexer 页面，遇到不支持的选择器配置时返回 None 交给 Python 回退。
@@ -171,16 +160,7 @@ fn apply_text_filters(mut current: String, filters: &Bound<'_, PyAny>) -> PyResu
     Ok(Some(current.trim().to_string()))
 }
 
-/// 将站点页面中的文件大小文本转换为字节数。
-#[pyfunction]
-pub(crate) fn parse_filesize_fast(text: &Bound<'_, PyAny>) -> PyResult<i64> {
-    if text.is_none() {
-        return Ok(0);
-    }
-    Ok(parse_filesize_text(text.str()?.to_str()?))
-}
-
-/// 将文件大小文本转换为字节数，供 Python 导出函数和 Rust HTML 解析共用。
+/// 将文件大小文本转换为字节数，供 Rust HTML 解析内部共用。
 fn parse_filesize_text(text: &str) -> i64 {
     let raw = text.trim().to_string();
     if raw.is_empty() {

@@ -544,9 +544,16 @@ ensure_prereqs() {
     exit 1
   fi
 
-  if ! ensure_base_tools || ! ensure_build_tools || ! ensure_python || ! ensure_uv || ! ensure_rust_toolchain; then
+  if ! ensure_base_tools || ! ensure_python || ! ensure_uv; then
     python_install_hint
     exit 1
+  fi
+
+  if ! rust_accel_should_skip; then
+    if ! ensure_build_tools || ! ensure_rust_toolchain; then
+      export MOVIEPILOT_SKIP_RUST_ACCEL=1
+      echo "==> Rust 加速扩展准备失败，已跳过；应用将继续使用 Python 实现"
+    fi
   fi
 }
 

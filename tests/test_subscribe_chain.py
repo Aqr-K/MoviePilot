@@ -16,13 +16,13 @@ def _load_subscribe_chain_class():
         module = sys.modules[module_name]
         return module, module.SubscribeChain
 
-    injected_modules = {}
+    original_modules = {}
 
     def ensure_module(name: str, module: types.ModuleType):
-        if name in sys.modules:
-            return sys.modules[name]
+        """临时替换模块依赖，并记录原模块以便加载完成后恢复。"""
+        if name not in original_modules:
+            original_modules[name] = sys.modules.get(name)
         sys.modules[name] = module
-        injected_modules[name] = module
         return module
 
     chain_module = ensure_module("app.chain", types.ModuleType("app.chain"))
@@ -270,9 +270,15 @@ def _load_subscribe_chain_class():
     sys.modules[module_name] = module
     assert spec and spec.loader
     spec.loader.exec_module(module)
-    module._injected_modules = injected_modules
-    for injected_name in injected_modules:
-        sys.modules.pop(injected_name, None)
+    module._injected_modules = {
+        name: sys.modules.get(name)
+        for name in original_modules
+    }
+    for injected_name, original_module in original_modules.items():
+        if original_module is None:
+            sys.modules.pop(injected_name, None)
+        else:
+            sys.modules[injected_name] = original_module
     return module, module.SubscribeChain
 
 

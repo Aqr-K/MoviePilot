@@ -99,13 +99,37 @@ def test_rust_indexer_search_url_keeps_existing_query_and_category():
     assert "search_field=imdb0049406" in search_url
 
 
-def test_rust_filesize_parser_matches_site_units():
+def test_rust_rss_parser_extracts_common_rss_and_atom_fields():
     """
-    Rust 文件大小解析应覆盖站点解析器常见单位。
+    Rust RSS 解析应同时覆盖 RSS item 和 Atom entry 的核心字段。
     """
-    assert rust_accel.parse_filesize("1.5 GB") == 1610612736
-    assert rust_accel.parse_filesize("2 TiB") == 2199023255552
-    assert rust_accel.parse_filesize("42") == 42
+    xml_text = """
+    <rss><channel>
+      <item>
+        <title>Example Torrent</title>
+        <description><![CDATA[Desc]]></description>
+        <link>https://example.org/details/1</link>
+        <enclosure url="https://example.org/download/1.torrent" length="1024" />
+        <pubDate>Tue, 19 May 2026 08:30:00 GMT</pubDate>
+        <dc:creator>豆瓣用户</dc:creator>
+      </item>
+      <entry>
+        <title>Atom Torrent</title>
+        <summary>Atom Desc</summary>
+        <link href="https://example.org/atom/2" />
+        <updated>2026-05-19T09:30:00Z</updated>
+      </entry>
+    </channel></rss>
+    """
+
+    items = rust_accel.parse_rss_items(xml_text, 100)
+
+    assert items[0]["title"] == "Example Torrent"
+    assert items[0]["enclosure"] == "https://example.org/download/1.torrent"
+    assert items[0]["size"] == 1024
+    assert items[0]["nickname"] == "豆瓣用户"
+    assert items[1]["title"] == "Atom Torrent"
+    assert items[1]["enclosure"] == "https://example.org/atom/2"
 
 
 def test_rust_indexer_page_parser_handles_common_fields():

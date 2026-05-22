@@ -56,7 +56,7 @@ MCP工具API文档：详见 [docs/mcp-api.md](docs/mcp-api.md)
 
 开发环境准备与本地源码运行说明：[`docs/development-setup.md`](docs/development-setup.md)
 
-本地开发启用 Rust 加速扩展，需先安装 Rust toolchain 并确保 `cargo` 可用：
+本地开发启用 Rust 加速扩展，需先安装 Rust toolchain 并确保 `cargo` 可用；未安装时项目会自动使用 Python 实现：
 
 ```shell
 cargo --version
@@ -66,6 +66,12 @@ python -c "from app.utils import rust_accel; print(rust_accel.is_available())"
 ```
 
 如果输出 `True`，说明当前开发环境已经加载 `moviepilot_rust`。重新修改 Rust 代码后再次执行 `python -m maturin develop --release --manifest-path rust/moviepilot_rust/Cargo.toml` 即可更新本地扩展。
+
+需要本地评估 Rust 加速效果时，可运行：
+
+```shell
+python scripts/benchmark_rust_accel.py --loops 20 --repeat 5
+```
 
 插件开发说明：<https://wiki.movie-pilot.org/zh/plugindev>
 

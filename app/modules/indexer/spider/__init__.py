@@ -672,9 +672,6 @@ class SiteSpider:
         """
         if not text or not filters or not isinstance(filters, list):
             return text
-        rust_text = rust_accel.apply_indexer_text_filters(text, filters)
-        if rust_text is not None:
-            return rust_text
         if not isinstance(text, str):
             text = str(text)
         for filter_item in filters:

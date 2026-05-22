@@ -117,34 +117,6 @@ def filter_torrents(
         return None
 
 
-def apply_indexer_text_filters(text: Any, filters: Optional[List[dict]]) -> Optional[str]:
-    """
-    使用 Rust 执行 indexer 文本过滤器，不可用或遇到不支持过滤器时返回 None。
-    """
-    if not _moviepilot_rust or not filters or not isinstance(filters, list):
-        return None
-    try:
-        return _moviepilot_rust.apply_indexer_text_filters_fast(None if text is None else str(text), filters)
-    except BaseException as err:
-        _raise_non_rust_panic(err)
-        logger.debug(f"Rust 站点文本过滤失败，回退 Python：{err}")
-        return None
-
-
-def parse_filesize(text: Any) -> Optional[int]:
-    """
-    使用 Rust 将文件大小文本转换为字节，不可用时返回 None。
-    """
-    if not _moviepilot_rust:
-        return None
-    try:
-        return int(_moviepilot_rust.parse_filesize_fast(text))
-    except BaseException as err:
-        _raise_non_rust_panic(err)
-        logger.debug(f"Rust 文件大小解析失败，回退 Python：{err}")
-        return None
-
-
 def build_indexer_search_url(config: dict) -> Optional[str]:
     """
     使用 Rust 根据普通 indexer 配置生成搜索 URL，不可用时返回 None。
@@ -184,6 +156,20 @@ def parse_indexer_torrents(
     except BaseException as err:
         _raise_non_rust_panic(err)
         logger.debug(f"Rust 站点页面解析失败，回退 Python：{err}")
+        return None
+
+
+def parse_rss_items(xml_text: str, max_items: int) -> Optional[List[dict]]:
+    """
+    使用 Rust 批量解析 RSS/Atom 条目，不可用或解析失败时返回 None。
+    """
+    if not _moviepilot_rust:
+        return None
+    try:
+        return _moviepilot_rust.parse_rss_items_fast(xml_text or "", int(max_items or 0))
+    except BaseException as err:
+        _raise_non_rust_panic(err)
+        logger.debug(f"Rust RSS 条目解析失败，回退 Python：{err}")
         return None
 
 
