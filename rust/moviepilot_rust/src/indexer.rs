@@ -34,6 +34,12 @@ static FILESIZE_UNIT_RE: Lazy<Regex> = Lazy::new(|| {
         .unwrap()
 });
 static NUMERIC_FACTOR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+\.?\d*)").unwrap());
+static FIELD_EXPR_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"^fields(?:\.([A-Za-z0-9_]+)|\[\s*['"]([^'"]+)['"]\s*\])$"#).unwrap()
+});
+static JINJA_EXPR_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"\{\{-?\s*(.*?)\s*-?\}\}"#).unwrap());
+static JINJA_TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\{%-?\s*(.*?)\s*-?%\}"#).unwrap());
 
 enum RowParseResult {
     Unsupported,
@@ -388,13 +394,16 @@ fn parse_title(
             } else {
                 String::new()
             };
-        Some(render_known_template(
+        let Some(rendered) = render_known_template(
             &template,
             &[
                 ("title_default", title_default.as_str()),
                 ("title_optional", title_optional.as_str()),
             ],
-        ))
+        ) else {
+            return Ok(false);
+        };
+        Some(rendered)
     } else {
         None
     };
@@ -434,7 +443,10 @@ fn parse_description(
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
-        Some(render_known_template(&template, &refs))
+        let Some(rendered) = render_known_template(&template, &refs) else {
+            return Ok(false);
+        };
+        Some(rendered)
     } else {
         None
     };
@@ -590,9 +602,6 @@ fn parse_labels_field(
         output.set_item("labels", PyList::empty(py))?;
         return Ok(true);
     }
-    if selector.contains("remove")? {
-        return Ok(false);
-    }
     let Some(values) = query_all_values(row, &selector)? else {
         output.set_item("labels", PyList::empty(py))?;
         return Ok(true);
@@ -673,9 +682,6 @@ fn safe_query(
     row: ElementRef<'_>,
     selector_config: &Bound<'_, PyDict>,
 ) -> PyResult<Option<String>> {
-    if selector_config.contains("remove")? {
-        return Ok(None);
-    }
     let Some(values) = query_all_values(row, selector_config)? else {
         return Ok(None);
     };
@@ -694,15 +700,35 @@ fn query_all_values(
         return Ok(None);
     };
     let attribute = get_optional_string(selector_config, "attribute")?;
+    let remove_selectors = parse_remove_selectors(selector_config)?;
     let mut values = Vec::new();
     for element in row.select(&selector) {
         if let Some(attribute) = attribute.as_deref() {
             values.push(element.value().attr(attribute).unwrap_or("").to_string());
         } else {
-            values.push(normalize_element_text(element));
+            values.push(normalize_element_text(element, &remove_selectors));
         }
     }
     Ok(Some(values))
+}
+
+/// 解析 remove 配置，支持逗号分隔的 CSS 选择器列表。
+fn parse_remove_selectors(selector_config: &Bound<'_, PyDict>) -> PyResult<Vec<Selector>> {
+    let Some(remove_text) = get_optional_string(selector_config, "remove")? else {
+        return Ok(Vec::new());
+    };
+    let mut selectors = Vec::new();
+    for item in remove_text.split(',') {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        let Ok(selector) = Selector::parse(item) else {
+            return Ok(Vec::new());
+        };
+        selectors.push(selector);
+    }
+    Ok(selectors)
 }
 
 /// 读取 selector 或 selectors 配置。
@@ -729,15 +755,25 @@ fn select_indexed_value(
         return None;
     }
     if let Ok(Some(contents)) = get_optional_i64(selector_config, "contents") {
-        let index = contents as usize;
         if let Some(first) = values.first() {
-            return first.split('\n').nth(index).map(|item| item.to_string());
+            let lines: Vec<&str> = first.split('\n').collect();
+            return pick_indexed_item(&lines, contents).map(|item| item.to_string());
         }
     }
     if let Ok(Some(index)) = get_optional_i64(selector_config, "index") {
-        return values.get(index as usize).cloned();
+        return pick_indexed_item(&values, index).cloned();
     }
     values.first().cloned()
+}
+
+/// 按 Python 列表语义读取正负索引。
+fn pick_indexed_item<T>(items: &[T], index: i64) -> Option<&T> {
+    let len = items.len() as i64;
+    let resolved = if index < 0 { len + index } else { index };
+    if resolved < 0 {
+        return None;
+    }
+    items.get(resolved as usize)
 }
 
 /// 应用字段配置中的 filters。
@@ -760,13 +796,48 @@ fn apply_selector_filters(
 }
 
 /// 规范化元素文本，尽量接近 PyQuery.text() 输出。
-fn normalize_element_text(element: ElementRef<'_>) -> String {
-    element
-        .text()
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .collect::<Vec<&str>>()
-        .join(" ")
+fn normalize_element_text(element: ElementRef<'_>, remove_selectors: &[Selector]) -> String {
+    let mut rendered = String::new();
+    for node in element.descendants() {
+        let Some(text_node) = node.value().as_text() else {
+            continue;
+        };
+        if should_skip_text_node(
+            node.parent().and_then(ElementRef::wrap),
+            element,
+            remove_selectors,
+        ) {
+            continue;
+        }
+        rendered.push_str(text_node);
+    }
+    normalize_whitespace(&rendered)
+}
+
+/// 折叠 PyQuery.text() 中的连续空白，保留元素相邻文本节点的直接拼接效果。
+fn normalize_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+/// 判断文本节点是否位于需要 remove 的元素子树中。
+fn should_skip_text_node(
+    mut parent: Option<ElementRef<'_>>,
+    root: ElementRef<'_>,
+    remove_selectors: &[Selector],
+) -> bool {
+    while let Some(element) = parent {
+        if element == root {
+            return false;
+        }
+        if remove_selectors
+            .iter()
+            .any(|selector| selector.matches(&element))
+        {
+            return true;
+        }
+        parent = element.parent().and_then(ElementRef::wrap);
+    }
+    false
 }
 
 /// 判断 row 内是否存在指定 selector。
@@ -806,21 +877,285 @@ fn normalize_site_link(domain: &str, link: &str, protocol_relative: bool) -> Str
 }
 
 /// 渲染常见的 Jinja 字段模板，不支持复杂表达式时由调用方回退 Python。
-fn render_known_template(template: &str, values: &[(&str, &str)]) -> String {
-    let mut rendered = template.to_string();
-    for (key, value) in values {
-        for pattern in [
-            format!("{{{{ fields.{key} }}}}"),
-            format!("{{{{fields.{key}}}}}"),
-            format!("{{{{ fields['{key}'] }}}}"),
-            format!("{{{{fields['{key}']}}}}"),
-            format!("{{{{ fields[\"{key}\"] }}}}"),
-            format!("{{{{fields[\"{key}\"]}}}}"),
-        ] {
-            rendered = rendered.replace(&pattern, value);
+fn render_known_template(template: &str, values: &[(&str, &str)]) -> Option<String> {
+    if template.contains("{#") {
+        return None;
+    }
+    let rendered = render_jinja_blocks(template, values)?;
+    render_field_vars(&rendered, values)
+}
+
+/// 渲染站点解析配置里常见的 if/elif/else/endif 字段模板。
+fn render_jinja_blocks(template: &str, values: &[(&str, &str)]) -> Option<String> {
+    let mut result = String::new();
+    let mut cursor = 0;
+    while let Some(tag_match) = JINJA_TAG_RE.find_at(template, cursor) {
+        result.push_str(&template[cursor..tag_match.start()]);
+        let captures = JINJA_TAG_RE.captures(tag_match.as_str())?;
+        let tag_content = captures.get(1)?.as_str().trim();
+        let Some(condition) = tag_content.strip_prefix("if ") else {
+            return None;
+        };
+        let block_end = find_matching_endif(template, tag_match.end())?;
+        let body = &template[tag_match.end()..block_end.endif_start];
+        let rendered_branch = render_if_body(body, condition, values)?;
+        result.push_str(&rendered_branch);
+        cursor = block_end.endif_end;
+    }
+    result.push_str(&template[cursor..]);
+    Some(result)
+}
+
+/// 查找当前 if 块对应的 endif，允许内部再嵌套一层字段模板。
+fn find_matching_endif(template: &str, from: usize) -> Option<JinjaBlockEnd> {
+    let mut depth = 1;
+    for tag_match in JINJA_TAG_RE.find_iter(&template[from..]) {
+        let absolute_start = from + tag_match.start();
+        let absolute_end = from + tag_match.end();
+        let captures = JINJA_TAG_RE.captures(tag_match.as_str())?;
+        let tag_content = captures.get(1)?.as_str().trim();
+        if tag_content.starts_with("if ") {
+            depth += 1;
+        } else if tag_content == "endif" {
+            depth -= 1;
+            if depth == 0 {
+                return Some(JinjaBlockEnd {
+                    endif_start: absolute_start,
+                    endif_end: absolute_end,
+                });
+            }
         }
     }
-    rendered
+    None
+}
+
+/// 从 if 块中选出第一个满足条件的分支并继续渲染。
+fn render_if_body(body: &str, first_condition: &str, values: &[(&str, &str)]) -> Option<String> {
+    let branches = split_if_branches(body, first_condition)?;
+    for branch in branches {
+        let selected = match branch.condition {
+            Some(condition) => eval_field_condition(&condition, values)?,
+            None => true,
+        };
+        if selected {
+            return render_known_template(&branch.content, values);
+        }
+    }
+    Some(String::new())
+}
+
+/// 按同层级 elif/else 拆分 if 块，嵌套 if 内部的分支不会被误拆。
+fn split_if_branches(body: &str, first_condition: &str) -> Option<Vec<JinjaBranch>> {
+    let mut branches = Vec::new();
+    let mut depth = 0;
+    let mut current_condition = Some(first_condition.trim().to_string());
+    let mut branch_start = 0;
+    for tag_match in JINJA_TAG_RE.find_iter(body) {
+        let captures = JINJA_TAG_RE.captures(tag_match.as_str())?;
+        let tag_content = captures.get(1)?.as_str().trim();
+        if tag_content.starts_with("if ") {
+            depth += 1;
+            continue;
+        }
+        if tag_content == "endif" {
+            if depth == 0 {
+                return None;
+            }
+            depth -= 1;
+            continue;
+        }
+        if depth == 0 {
+            if let Some(condition) = tag_content.strip_prefix("elif ") {
+                branches.push(JinjaBranch {
+                    condition: current_condition.take(),
+                    content: body[branch_start..tag_match.start()].to_string(),
+                });
+                current_condition = Some(condition.trim().to_string());
+                branch_start = tag_match.end();
+            } else if tag_content == "else" {
+                branches.push(JinjaBranch {
+                    condition: current_condition.take(),
+                    content: body[branch_start..tag_match.start()].to_string(),
+                });
+                current_condition = None;
+                branch_start = tag_match.end();
+            }
+        }
+    }
+    branches.push(JinjaBranch {
+        condition: current_condition,
+        content: body[branch_start..].to_string(),
+    });
+    Some(branches)
+}
+
+/// 计算字段真值条件，覆盖站点模板里的 fields.xxx、not、and、or。
+fn eval_field_condition(condition: &str, values: &[(&str, &str)]) -> Option<bool> {
+    let trimmed = condition.trim();
+    if trimmed.contains(" or ") {
+        for part in trimmed.split(" or ") {
+            if eval_field_condition(part, values)? {
+                return Some(true);
+            }
+        }
+        return Some(false);
+    }
+    if trimmed.contains(" and ") {
+        for part in trimmed.split(" and ") {
+            if !eval_field_condition(part, values)? {
+                return Some(false);
+            }
+        }
+        return Some(true);
+    }
+    eval_field_condition_atom(trimmed, values)
+}
+
+/// 计算单个字段条件，缺失字段按 Jinja Undefined 的假值处理。
+fn eval_field_condition_atom(condition: &str, values: &[(&str, &str)]) -> Option<bool> {
+    let (negated, expression) = if let Some(rest) = condition.trim().strip_prefix("not ") {
+        (true, rest.trim())
+    } else {
+        (false, condition.trim())
+    };
+    let key = parse_field_key(expression)?;
+    let value = get_template_value(values, &key).unwrap_or_default();
+    let truthy = !value.is_empty();
+    Some(if negated { !truthy } else { truthy })
+}
+
+/// 替换模板中的 fields 变量，存在未知变量语法时回退 Python。
+fn render_field_vars(template: &str, values: &[(&str, &str)]) -> Option<String> {
+    let mut rendered = String::new();
+    let mut cursor = 0;
+    for captures in JINJA_EXPR_RE.captures_iter(template) {
+        let whole = captures.get(0)?;
+        rendered.push_str(&template[cursor..whole.start()]);
+        let expression = captures.get(1)?.as_str();
+        rendered.push_str(&eval_field_output(expression, values)?);
+        cursor = whole.end();
+    }
+    rendered.push_str(&template[cursor..]);
+    if rendered.contains("{{") || rendered.contains("{%") {
+        return None;
+    }
+    Some(rendered)
+}
+
+/// 渲染输出表达式，覆盖字段变量、字段三元表达式和字符串拼接。
+fn eval_field_output(expression: &str, values: &[(&str, &str)]) -> Option<String> {
+    let expression = expression.trim();
+    if let Some((true_expr, condition, false_expr)) = split_inline_if(expression) {
+        if eval_field_condition(condition, values)? {
+            return eval_field_output(true_expr, values);
+        }
+        return eval_field_output(false_expr, values);
+    }
+    let terms = split_concat_terms(expression)?;
+    if terms.len() > 1 {
+        let mut rendered = String::new();
+        for term in terms {
+            rendered.push_str(&eval_field_atom(term, values)?);
+        }
+        return Some(rendered);
+    }
+    eval_field_atom(expression, values)
+}
+
+/// 拆分 Jinja 的简单三元表达式：a if cond else b。
+fn split_inline_if(expression: &str) -> Option<(&str, &str, &str)> {
+    let (true_expr, right) = expression.split_once(" if ")?;
+    let (condition, false_expr) = right.split_once(" else ")?;
+    Some((true_expr.trim(), condition.trim(), false_expr.trim()))
+}
+
+/// 按字符串字面量边界拆分加号拼接表达式。
+fn split_concat_terms(expression: &str) -> Option<Vec<&str>> {
+    let mut terms = Vec::new();
+    let mut start = 0;
+    let mut quote: Option<char> = None;
+    for (index, ch) in expression.char_indices() {
+        if let Some(current_quote) = quote {
+            if ch == current_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+        if ch == '+' {
+            let term = expression[start..index].trim();
+            if term.is_empty() {
+                return None;
+            }
+            terms.push(term);
+            start = index + ch.len_utf8();
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    let term = expression[start..].trim();
+    if term.is_empty() {
+        return None;
+    }
+    terms.push(term);
+    Some(terms)
+}
+
+/// 渲染字段或字符串字面量，其他表达式交给 Python 回退。
+fn eval_field_atom(expression: &str, values: &[(&str, &str)]) -> Option<String> {
+    let expression = expression.trim();
+    if let Some(value) = parse_string_literal(expression) {
+        return Some(value);
+    }
+    let key = parse_field_key(expression)?;
+    Some(get_template_value(values, &key).unwrap_or_default().to_string())
+}
+
+/// 解析单引号或双引号字符串字面量。
+fn parse_string_literal(expression: &str) -> Option<String> {
+    let mut chars = expression.chars();
+    let quote = chars.next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    if !expression.ends_with(quote) || expression.len() < 2 {
+        return None;
+    }
+    let inner = &expression[quote.len_utf8()..expression.len() - quote.len_utf8()];
+    Some(inner.to_string())
+}
+
+/// 解析 fields 变量名，拒绝函数调用和比较表达式等完整 Jinja 能力。
+fn parse_field_key(expression: &str) -> Option<String> {
+    let captures = FIELD_EXPR_RE.captures(expression.trim())?;
+    captures
+        .get(1)
+        .or_else(|| captures.get(2))
+        .map(|item| item.as_str().to_string())
+}
+
+/// 从模板上下文中获取字段值，缺失字段按 Jinja 的空值处理。
+fn get_template_value<'a>(values: &'a [(&str, &str)], template_key: &str) -> Option<&'a str> {
+    for (field_key, value) in values {
+        if *field_key == template_key {
+            return Some(*value);
+        }
+    }
+    None
+}
+
+struct JinjaBlockEnd {
+    endif_start: usize,
+    endif_end: usize,
+}
+
+struct JinjaBranch {
+    condition: Option<String>,
+    content: String,
 }
 
 /// 读取分类配置中的 ID 列表。

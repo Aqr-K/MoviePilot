@@ -196,3 +196,152 @@ def test_rust_indexer_page_parser_handles_common_fields():
         "hit_and_run": True,
         "category": MediaType.MOVIE.value,
     }]
+
+
+def test_rust_indexer_page_parser_renders_common_title_template():
+    """
+    Rust 普通 indexer 页面解析应兼容站点构建项目里的 title_optional 模板。
+    """
+    spider = SiteSpider(
+        indexer={
+            "id": "demo",
+            "name": "Demo",
+            "domain": "https://example.org/",
+            "search": {"paths": [{"path": "torrents.php"}]},
+            "torrents": {
+                "list": {"selector": "tr.torrent"},
+                "fields": {
+                    "title_default": {"selector": "a.title"},
+                    "title_optional": {
+                        "selector": "a.title",
+                        "attribute": "title",
+                        "optional": True,
+                    },
+                    "title": {
+                        "text": (
+                            "{% if fields['title_optional'] %}"
+                            "{{ fields['title_optional'] }}"
+                            "{% else %}"
+                            "{{ fields['title_default'] }}"
+                            "{% endif %}"
+                        )
+                    },
+                    "download": {"selector": "a.dl", "attribute": "href"},
+                },
+            },
+        },
+    )
+    html = """
+    <table>
+      <tr class="torrent">
+        <td><a class="title" title="Optional Name" href="/details/1">Default Name</a></td>
+        <td><a class="dl" href="/download/1">DL</a></td>
+      </tr>
+      <tr class="torrent">
+        <td><a class="title" title="" href="/details/2">Default Fallback</a></td>
+        <td><a class="dl" href="/download/2">DL</a></td>
+      </tr>
+    </table>
+    """
+
+    torrents = spider.parse(html)
+
+    assert [item["title"] for item in torrents] == ["Optional Name", "Default Fallback"]
+
+
+def test_rust_indexer_page_parser_renders_common_description_templates():
+    """
+    Rust 普通 indexer 页面解析应兼容站点构建项目里的 description 字段模板。
+    """
+    spider = SiteSpider(
+        indexer={
+            "id": "demo",
+            "name": "Demo",
+            "domain": "https://example.org/",
+            "search": {"paths": [{"path": "torrents.php"}]},
+            "torrents": {
+                "list": {"selector": "tr.torrent"},
+                "fields": {
+                    "title": {"selector": "a.title"},
+                    "subject": {"selector": ".subject"},
+                    "tags": {"selector": ".tags"},
+                    "description": {
+                        "text": (
+                            "{% if fields['tags']%}"
+                            "{{ fields['subject']+' '+fields['tags'] }}"
+                            "{% else %}"
+                            "{{ fields['subject'] }}"
+                            "{% endif %}"
+                        )
+                    },
+                    "download": {"selector": "a.dl", "attribute": "href"},
+                },
+            },
+        },
+    )
+    html = """
+    <table>
+      <tr class="torrent">
+        <td><a class="title">Movie 2024</a><span class="subject">BluRay</span><span class="tags">HDR</span></td>
+        <td><a class="dl" href="/download/1">DL</a></td>
+      </tr>
+      <tr class="torrent">
+        <td><a class="title">Show 2025</a><span class="subject">WEB-DL</span><span class="tags"></span></td>
+        <td><a class="dl" href="/download/2">DL</a></td>
+      </tr>
+    </table>
+    """
+
+    torrents = spider.parse(html)
+
+    assert [item["description"] for item in torrents] == ["BluRay HDR", "WEB-DL"]
+
+
+def test_rust_indexer_page_parser_supports_remove_and_negative_index():
+    """
+    Rust 普通 indexer 页面解析应兼容站点配置常用的 remove 和负索引。
+    """
+    spider = SiteSpider(
+        indexer={
+            "id": "demo",
+            "name": "Demo",
+            "domain": "https://example.org/",
+            "search": {"paths": [{"path": "torrents.php"}]},
+            "torrents": {
+                "list": {"selector": "tr.torrent"},
+                "fields": {
+                    "title": {"selector": ".name", "remove": "a,b"},
+                    "description": {
+                        "selector": ".desc",
+                        "remove": "span,a,img,font,b",
+                        "contents": -1,
+                    },
+                    "labels": {
+                        "selector": ".labels > span",
+                        "remove": "span,a,img,font,b",
+                        "contents": -1,
+                    },
+                    "download": {"selector": "a.dl", "attribute": "href"},
+                },
+            },
+        },
+    )
+    html = """
+    <table>
+      <tr class="torrent">
+        <td class="name">Movie<a>删掉</a><b>也删</b>2024</td>
+        <td class="desc">第一行
+          <span>标签</span><a>链接</a>
+          第二行
+        </td>
+        <td class="labels"><span><i>DIY</i></span><span><i>HDR</i></span></td>
+        <td><a class="dl" href="/download/1">DL</a></td>
+      </tr>
+    </table>
+    """
+
+    torrents = spider.parse(html)
+
+    assert torrents[0]["title"] == "Movie2024"
+    assert torrents[0]["description"] == "第一行 第二行"
+    assert torrents[0]["labels"] == ["DIY", "HDR"]
