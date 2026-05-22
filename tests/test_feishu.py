@@ -314,6 +314,28 @@ class TestFeishu(unittest.TestCase):
             [{"type": "callback", "value": {"callback_data": "confirm"}}],
         )
 
+    def test_send_notification_keeps_markdown_images_for_normal_card(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            create_response=self._success_response()
+        )
+
+        result = client.send_notification(
+            Notification(
+                title="普通通知",
+                text="海报：![poster](https://example.com/poster.jpg)",
+            ),
+            userid="ou_user_img_md",
+        )
+
+        self.assertTrue(result["success"])
+        request = message_api.create.call_args.args[0]
+        content = json.loads(request.request_body.content)
+        self.assertEqual(
+            content["body"]["elements"][1]["content"],
+            "海报：![poster](https://example.com/poster.jpg)",
+        )
+
     def test_send_notification_embeds_remote_image_in_card(self):
         client = self._build_client()
         image_upload_response = MagicMock()
@@ -471,6 +493,7 @@ class TestFeishu(unittest.TestCase):
             result["metadata"]["feishu_streaming"]["card_id"], "card_stream"
         )
         self.assertEqual(result["metadata"]["feishu_streaming"]["sequence"], 0)
+        self.assertEqual(result["metadata"]["feishu_streaming"]["sent_image_urls"], [])
         card_request = client._api_client.cardkit.v1.card.create.call_args.args[0]
         self.assertEqual(card_request.request_body.type, "card_json")
         card_payload = json.loads(card_request.request_body.data)
@@ -484,6 +507,98 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(
             json.loads(message_request.request_body.content)["data"]["card_id"],
             "card_stream",
+        )
+
+    def test_streaming_card_sends_markdown_images_separately(self):
+        client = self._build_client()
+        image_upload_response = MagicMock()
+        image_upload_response.success.return_value = True
+        image_upload_response.data = SimpleNamespace(image_key="img_v2_stream")
+        client._api_client, message_api = self._build_message_api(
+            create_response=self._success_response(
+                message_id="om_stream", chat_id="oc_stream"
+            ),
+            card_create_response=self._card_create_success_response("card_stream"),
+            image_create_response=image_upload_response,
+        )
+        response = MagicMock()
+        response.content = b"png-bytes"
+        response.headers = {"Content-Type": "image/jpeg"}
+
+        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+            request_utils.return_value.get_res.return_value = response
+            result = client.send_notification(
+                Notification(
+                    mtype=NotificationType.Agent,
+                    title="MoviePilot助手",
+                    text="找到海报 ![poster](https://example.com/poster.jpg)\n[详情](https://example.com/detail)",
+                ),
+                userid="ou_user_stream",
+            )
+
+        self.assertTrue(result["success"])
+        card_request = client._api_client.cardkit.v1.card.create.call_args.args[0]
+        card_payload = json.loads(card_request.request_body.data)
+        body_content = card_payload["body"]["elements"][-1]["content"]
+        self.assertNotIn("![poster]", body_content)
+        self.assertNotIn("poster.jpg", body_content)
+        self.assertIn("poster", body_content)
+        self.assertIn("[详情](https://example.com/detail)", body_content)
+        self.assertEqual(client._api_client.im.v1.image.create.call_count, 1)
+        self.assertEqual(message_api.create.call_count, 2)
+        self.assertEqual(
+            result["metadata"]["feishu_streaming"]["sent_image_urls"],
+            ["https://example.com/poster.jpg"],
+        )
+        image_request = message_api.create.call_args_list[-1].args[0]
+        image_payload = json.loads(image_request.request_body.content)
+        self.assertEqual(image_payload["body"]["elements"][0]["img_key"], "img_v2_stream")
+
+    def test_streaming_card_sends_notification_image_separately(self):
+        client = self._build_client()
+        image_upload_response = MagicMock()
+        image_upload_response.success.return_value = True
+        image_upload_response.data = SimpleNamespace(image_key="img_v2_agent_image")
+        client._api_client, message_api = self._build_message_api(
+            create_response=self._success_response(
+                message_id="om_stream", chat_id="oc_stream"
+            ),
+            card_create_response=self._card_create_success_response("card_stream"),
+            image_create_response=image_upload_response,
+        )
+        response = MagicMock()
+        response.content = b"png-bytes"
+        response.headers = {"Content-Type": "image/png"}
+
+        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+            request_utils.return_value.get_res.return_value = response
+            result = client.send_notification(
+                Notification(
+                    mtype=NotificationType.Agent,
+                    title="MoviePilot助手",
+                    text="第一帧内容",
+                    image="https://example.com/agent.png",
+                ),
+                userid="ou_user_stream",
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(client._api_client.im.v1.image.create.call_count, 1)
+        self.assertEqual(message_api.create.call_count, 2)
+        self.assertEqual(
+            result["metadata"]["feishu_streaming"]["sent_image_urls"],
+            ["https://example.com/agent.png"],
+        )
+        stream_request = message_api.create.call_args_list[0].args[0]
+        image_request = message_api.create.call_args_list[1].args[0]
+        self.assertEqual(
+            json.loads(stream_request.request_body.content)["data"]["card_id"],
+            "card_stream",
+        )
+        image_payload = json.loads(image_request.request_body.content)
+        self.assertEqual(
+            image_payload["body"]["elements"][0]["img_key"],
+            "img_v2_agent_image",
         )
 
     def test_send_notification_replies_with_streaming_card_for_agent_text(self):
@@ -531,6 +646,7 @@ class TestFeishu(unittest.TestCase):
                     "card_id": "card_stream",
                     "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
                     "sequence": 0,
+                    "sent_image_urls": ["https://example.com/poster.jpg"],
                 }
             },
         )
@@ -557,6 +673,7 @@ class TestFeishu(unittest.TestCase):
                     "card_id": "card_stream",
                     "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
                     "sequence": 0,
+                    "sent_image_urls": ["https://example.com/poster.jpg"],
                 }
             },
         )
@@ -570,6 +687,207 @@ class TestFeishu(unittest.TestCase):
         self.assertEqual(content_request.card_id, "card_stream")
         self.assertEqual(content_request.element_id, Feishu.STREAM_CARD_BODY_ELEMENT_ID)
         self.assertEqual(content_request.request_body.sequence, 1)
+
+    def test_edit_streaming_card_removes_markdown_image_syntax(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+
+        success = client.edit_message(
+            message_id="om_stream",
+            text="第二帧 ![poster](https://example.com/poster.jpg)",
+            metadata={
+                "feishu_streaming": {
+                    "card_id": "card_stream",
+                    "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                    "sequence": 0,
+                    "sent_image_urls": ["https://example.com/poster.jpg"],
+                }
+            },
+        )
+
+        self.assertTrue(success)
+        message_api.patch.assert_not_called()
+        content_request = (
+            client._api_client.cardkit.v1.card_element.content.call_args.args[0]
+        )
+        self.assertEqual(content_request.request_body.content, "第二帧 poster")
+
+    def test_edit_streaming_card_keeps_normal_markdown_links(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+
+        success = client.edit_message(
+            message_id="om_stream",
+            text="第二帧 [详情](https://example.com/detail)",
+            chat_id="oc_stream",
+            metadata={
+                "feishu_streaming": {
+                    "card_id": "card_stream",
+                    "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                    "sequence": 0,
+                    "sent_image_urls": [],
+                }
+            },
+        )
+
+        self.assertTrue(success)
+        message_api.patch.assert_not_called()
+        client._api_client.im.v1.image.create.assert_not_called()
+        content_request = (
+            client._api_client.cardkit.v1.card_element.content.call_args.args[0]
+        )
+        self.assertEqual(
+            content_request.request_body.content,
+            "第二帧 [详情](https://example.com/detail)",
+        )
+
+    def test_edit_streaming_card_hides_incomplete_markdown_image(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+
+        success = client.edit_message(
+            message_id="om_stream",
+            text="第二帧 ![poster](https://example.com/poster",
+            chat_id="oc_stream",
+            metadata={
+                "feishu_streaming": {
+                    "card_id": "card_stream",
+                    "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                    "sequence": 0,
+                    "sent_image_urls": [],
+                }
+            },
+        )
+
+        self.assertTrue(success)
+        message_api.patch.assert_not_called()
+        client._api_client.im.v1.image.create.assert_not_called()
+        content_request = (
+            client._api_client.cardkit.v1.card_element.content.call_args.args[0]
+        )
+        self.assertEqual(content_request.request_body.content, "第二帧")
+
+    def test_edit_streaming_card_hides_incomplete_markdown_image_alt_text(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+
+        success = client.edit_message(
+            message_id="om_stream",
+            text="第二帧 ![poster",
+            chat_id="oc_stream",
+            metadata={
+                "feishu_streaming": {
+                    "card_id": "card_stream",
+                    "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                    "sequence": 0,
+                    "sent_image_urls": [],
+                }
+            },
+        )
+
+        self.assertTrue(success)
+        message_api.patch.assert_not_called()
+        client._api_client.im.v1.image.create.assert_not_called()
+        content_request = (
+            client._api_client.cardkit.v1.card_element.content.call_args.args[0]
+        )
+        self.assertEqual(content_request.request_body.content, "第二帧")
+
+    def test_edit_streaming_card_sends_completed_markdown_image_once(self):
+        client = self._build_client()
+        image_upload_response = MagicMock()
+        image_upload_response.success.return_value = True
+        image_upload_response.data = SimpleNamespace(image_key="img_v2_stream_edit")
+        client._api_client, message_api = self._build_message_api(
+            create_response=self._success_response(message_id="om_img", chat_id="oc_stream"),
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+            image_create_response=image_upload_response,
+        )
+        metadata = {
+            "feishu_streaming": {
+                "card_id": "card_stream",
+                "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                "sequence": 0,
+                "sent_image_urls": [],
+            }
+        }
+        response = MagicMock()
+        response.content = b"jpg-bytes"
+        response.headers = {"Content-Type": "image/jpeg"}
+
+        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+            request_utils.return_value.get_res.return_value = response
+            first_success = client.edit_message(
+                message_id="om_stream",
+                text="第二帧 ![poster](https://example.com/poster.jpg)",
+                chat_id="oc_stream",
+                metadata=metadata,
+            )
+            second_success = client.edit_message(
+                message_id="om_stream",
+                text="第二帧 ![poster](https://example.com/poster.jpg)",
+                chat_id="oc_stream",
+                metadata=metadata,
+            )
+
+        self.assertTrue(first_success)
+        self.assertTrue(second_success)
+        self.assertEqual(client._api_client.im.v1.image.create.call_count, 1)
+        self.assertEqual(
+            metadata["feishu_streaming"]["sent_image_urls"],
+            ["https://example.com/poster.jpg"],
+        )
+        image_request = message_api.create.call_args.args[0]
+        image_payload = json.loads(image_request.request_body.content)
+        self.assertEqual(
+            image_payload["body"]["elements"][0]["img_key"],
+            "img_v2_stream_edit",
+        )
+
+    def test_edit_streaming_card_skips_non_image_markdown_target(self):
+        client = self._build_client()
+        client._api_client, message_api = self._build_message_api(
+            patch_response=self._success_response(),
+            card_content_response=self._success_response(),
+        )
+        metadata = {
+            "feishu_streaming": {
+                "card_id": "card_stream",
+                "element_id": Feishu.STREAM_CARD_BODY_ELEMENT_ID,
+                "sequence": 0,
+                "sent_image_urls": [],
+            }
+        }
+        response = MagicMock()
+        response.content = b"<html></html>"
+        response.headers = {"Content-Type": "text/html"}
+
+        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+            request_utils.return_value.get_res.return_value = response
+            success = client.edit_message(
+                message_id="om_stream",
+                text="第二帧 ![link](https://example.com/detail)",
+                chat_id="oc_stream",
+                metadata=metadata,
+            )
+
+        self.assertTrue(success)
+        client._api_client.im.v1.image.create.assert_not_called()
+        self.assertEqual(metadata["feishu_streaming"]["sent_image_urls"], [])
+        self.assertEqual(message_api.create.call_count, 0)
 
     def test_close_streaming_card_updates_card_settings(self):
         client = self._build_client()

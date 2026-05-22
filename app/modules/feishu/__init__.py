@@ -191,6 +191,7 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
                     text=text,
                     buttons=buttons,
                     metadata=metadata,
+                    chat_id=str(chat_id) if chat_id else None,
             ):
                 return True
         return False
