@@ -1441,7 +1441,7 @@ class SubscribeChain(ChainBase):
                                     not torrent_mediainfo.tmdb_id and not torrent_mediainfo.douban_id):
                                 logger.debug(
                                     f'{torrent_info.site_name} - {torrent_info.title} 重新识别失败，尝试通过标题匹配...')
-                                if torrenthelper.match_torrent(mediainfo=mediainfo,
+                                if TorrentHelper.match_torrent(mediainfo=mediainfo,
                                                                torrent_meta=torrent_meta,
                                                                torrent=torrent_info):
                                     # 匹配成功

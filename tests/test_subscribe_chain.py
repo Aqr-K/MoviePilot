@@ -92,6 +92,11 @@ def _load_subscribe_chain_class():
 
             return decorator
 
+        @staticmethod
+        def add_event_listener(*args, **kwargs):
+            """兼容模块导入时注册配置变更监听。"""
+            return None
+
     event_module.eventmanager = _EventManager()
     event_module.Event = SimpleNamespace
 
@@ -266,6 +271,8 @@ def _load_subscribe_chain_class():
     assert spec and spec.loader
     spec.loader.exec_module(module)
     module._injected_modules = injected_modules
+    for injected_name in injected_modules:
+        sys.modules.pop(injected_name, None)
     return module, module.SubscribeChain
 
 
@@ -312,6 +319,73 @@ class SubscribeChainTest(TestCase):
             selected_episodes=selected_episodes,
             meta_info=SimpleNamespace(season_list=[1], episode_list=meta_episodes or []),
         )
+
+    def test_match_title_fallback_calls_torrent_match_from_class(self):
+        """确保标题兜底匹配不依赖 TorrentHelper 实例绑定。"""
+
+        class _ReachedTitleMatch(Exception):
+            """标记测试已经进入标题匹配函数体。"""
+
+        class _PlainTorrentHelper:
+            """模拟未声明 staticmethod 的历史 TorrentHelper 形态。"""
+
+            def match_torrent(mediainfo, torrent_meta, torrent):
+                """标记类级调用已经正确进入匹配逻辑。"""
+                raise _ReachedTitleMatch
+
+            def filter_torrent(self, *args, **kwargs):
+                """保持订阅匹配后续过滤流程可继续执行。"""
+                return True
+
+        subscribe = self._build_subscribe(
+            best_version=0,
+            custom_words=None,
+            doubanid=None,
+            episode_group=None,
+            sites=[],
+            tmdbid=1,
+        )
+        mediainfo = SimpleNamespace(
+            clear=lambda: None,
+            douban_id=None,
+            title_year="Test Show (2026)",
+            tmdb_id=1,
+            type=MediaType.TV,
+        )
+        context = SimpleNamespace(
+            media_info=None,
+            media_recognize_fail_count=3,
+            meta_info=SimpleNamespace(
+                begin_season=1,
+                episode_list=[],
+                org_string="Test Show",
+                season_list=[1],
+            ),
+            torrent_info=SimpleNamespace(
+                description="",
+                site=1,
+                site_name="TestSite",
+                title="Test Show S01",
+            ),
+        )
+
+        class _SubscribeOper:
+            """提供单条订阅，避免依赖真实数据库。"""
+
+            def list(self, *args, **kwargs):
+                """返回当前测试构造的订阅列表。"""
+                return [subscribe]
+
+        chain = SubscribeChain()
+        chain.recognize_media = lambda **kwargs: mediainfo
+        chain.check_and_handle_existing_media = lambda **kwargs: (False, {})
+
+        with patch.object(SUBSCRIBE_CHAIN_MODULE, "SubscribeOper", _SubscribeOper), patch.object(
+            SUBSCRIBE_CHAIN_MODULE,
+            "TorrentHelper",
+            _PlainTorrentHelper,
+        ), self.assertRaises(_ReachedTitleMatch):
+            chain.match({"test.example": [context]})
 
     def test_get_episode_priority_falls_back_to_current_priority(self):
         subscribe = self._build_subscribe(current_priority=80, episode_priority=None)
