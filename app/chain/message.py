@@ -522,6 +522,7 @@ class MessageChain(ChainBase):
                 username=username,
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
+                processing_status=processing_status,
         ):
             return True
 
@@ -1168,6 +1169,7 @@ class MessageChain(ChainBase):
             images: Optional[List[CommingMessage.MessageImage]] = None,
             files: Optional[List[CommingMessage.MessageAttachment]] = None,
             session_id: Optional[str] = None,
+            processing_status: Optional[_ProcessingStatus] = None,
     ) -> bool:
         """
         处理AI智能体消息
@@ -1267,20 +1269,28 @@ class MessageChain(ChainBase):
                 )
                 return False
 
+            process_kwargs = {
+                "session_id": session_id,
+                "user_id": str(userid),
+                "message": user_message,
+                "images": images,
+                "files": prepared_files,
+                "channel": channel.value if channel else None,
+                "source": source,
+                "username": username,
+                "original_message_id": str(original_message_id)
+                if original_message_id
+                else None,
+                "original_chat_id": original_chat_id,
+            }
+            # 回调消息的处理状态已由入口层创建，需要交给 Agent worker 结束；
+            # 普通 Agent 消息仍不传入，让 worker 在真正开始处理时自行启动状态。
+            if processing_status:
+                process_kwargs["processing_status"] = processing_status.to_dict()
+
             # 在事件循环中处理
             asyncio.run_coroutine_threadsafe(
-                agent_manager.process_message(
-                    session_id=session_id,
-                    user_id=str(userid),
-                    message=user_message,
-                    images=images,
-                    files=prepared_files,
-                    channel=channel.value if channel else None,
-                    source=source,
-                    username=username,
-                    original_message_id=str(original_message_id) if original_message_id else None,
-                    original_chat_id=original_chat_id,
-                ),
+                agent_manager.process_message(**process_kwargs),
                 global_vars.loop,
             )
             return True
