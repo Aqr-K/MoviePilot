@@ -424,6 +424,7 @@ class TestMediaScrapingImages(unittest.TestCase):
 
         mock_request_utils.assert_called_with(proxies=mock_settings.PROXY, ua=mock_settings.NORMAL_USER_AGENT)
         mock_instance.get_stream.assert_called_with(url=url)
+        mock_temp_file.assert_called_once_with(delete=False, suffix=".jpg")
         tmp_mock.write.assert_any_call(b"data1")
         tmp_mock.write.assert_any_call(b"data2")
         mock_chmod.assert_called()
@@ -431,6 +432,30 @@ class TestMediaScrapingImages(unittest.TestCase):
         call_args = self.media_chain.storagechain.upload_file.call_args.kwargs
         self.assertEqual(call_args["fileitem"], fileitem)
         self.assertEqual(call_args["new_name"], "poster.jpg")
+
+    @patch("app.chain.media.NamedTemporaryFile")
+    @patch("app.chain.media.Path.chmod")
+    def test_save_file_uses_python310_compatible_tempfile(self, mock_chmod, mock_temp_file):
+        """保存刮削文件时不应使用 Python 3.12 才支持的 delete_on_close 参数。"""
+        self.media_chain = MediaChain()
+        self.media_chain.storagechain = MagicMock()
+        self.media_chain._cleanup_temp_file = MagicMock()
+
+        fileitem = schemas.FileItem(path="/movies/Avatar", name="Avatar", type="dir", storage="local")
+        target_path = Path("/movies/Avatar/movie.nfo")
+
+        tmp_mock = MagicMock()
+        tmp_mock.name = "/tmp/mockfile"
+        mock_temp_file.return_value.__enter__.return_value = tmp_mock
+        self.media_chain.storagechain.upload_file.return_value = fileitem
+
+        self.media_chain._save_file(fileitem, target_path, "<nfo></nfo>")
+
+        mock_temp_file.assert_called_once_with(delete=False, suffix=".nfo")
+        tmp_mock.write.assert_called_once_with(b"<nfo></nfo>")
+        mock_chmod.assert_called()
+        self.media_chain.storagechain.upload_file.assert_called_once()
+        self.media_chain._cleanup_temp_file.assert_called_once_with(Path("/tmp/mockfile"))
 
 
 class TestMediaScrapingTVDirectory(unittest.TestCase):
