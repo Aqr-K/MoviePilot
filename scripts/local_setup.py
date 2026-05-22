@@ -45,6 +45,9 @@ COOKIE_DIR = CONFIG_DIR / "cookies"
 ENV_FILE = CONFIG_DIR / "app.env"
 
 DEFAULT_NODE_VERSION = "20.12.1"
+RUST_ACCEL_DIR = ROOT / "rust" / "moviepilot_rust"
+RUST_ACCEL_MANIFEST = RUST_ACCEL_DIR / "Cargo.toml"
+RUST_ACCEL_SKIP_ENV = "MOVIEPILOT_SKIP_RUST_ACCEL"
 FRONTEND_LATEST_API = (
     "https://api.github.com/repos/jxxghp/MoviePilot-Frontend/releases/latest"
 )
@@ -475,10 +478,17 @@ def print_step(message: str) -> None:
     print(f"==> {message}")
 
 
-def run(command: list[str], cwd: Optional[Path] = None) -> None:
+def run(
+    command: list[str],
+    cwd: Optional[Path] = None,
+    env: Optional[dict[str, str]] = None,
+) -> None:
+    """
+    执行安装步骤中的外部命令，并在失败时让调用方中断流程。
+    """
     pretty = " ".join(command)
     print(f"+ {pretty}")
-    subprocess.run(command, cwd=str(cwd or ROOT), check=True)
+    subprocess.run(command, cwd=str(cwd or ROOT), check=True, env=env)
 
 
 def capture(command: list[str], cwd: Optional[Path] = None) -> str:
@@ -579,6 +589,9 @@ def _ensure_uv_available_for_venv(venv_dir: Path, venv_python: Path) -> Optional
 
 
 def configure_venv_pip_compat(venv_dir: Path, venv_python: Path) -> Path:
+    """
+    在虚拟环境中安装 uv 并保持 pip 命令兼容，供现有安装流程复用。
+    """
     if os.name == "nt":
         return get_venv_pip(venv_dir)
 
@@ -604,6 +617,93 @@ def configure_venv_pip_compat(venv_dir: Path, venv_python: Path) -> Path:
             link_path.unlink()
         link_path.symlink_to(wrapper_dst.name)
     return get_venv_pip(venv_dir)
+
+
+def _rust_accel_should_skip() -> bool:
+    """
+    判断当前安装是否显式跳过 Rust 加速扩展构建。
+    """
+    raw_value = os.getenv(RUST_ACCEL_SKIP_ENV, "").strip().lower()
+    return raw_value in {"1", "true", "yes", "on"}
+
+
+def _cargo_env_path() -> str:
+    """
+    组合 PATH，兼容 rustup 默认安装到用户目录但当前 shell 未刷新环境的场景。
+    """
+    extra_paths = [str(Path.home() / ".cargo" / "bin")]
+    current_path = os.environ.get("PATH", "")
+    return os.pathsep.join([*extra_paths, current_path])
+
+
+def _find_cargo() -> Optional[str]:
+    """
+    查找 Rust cargo 可执行文件，供本地 CLI 安装构建 PyO3 扩展。
+    """
+    return shutil.which("cargo", path=_cargo_env_path())
+
+
+def _find_native_linker() -> Optional[str]:
+    """
+    查找 Rust 扩展构建所需的本机链接器。
+    """
+    if os.name == "nt":
+        return "windows-msvc"
+    for candidate in ("cc", "gcc", "clang"):
+        linker = shutil.which(candidate)
+        if linker:
+            return linker
+    return None
+
+
+def ensure_rust_accel_ready() -> None:
+    """
+    确认 Rust 加速扩展源码存在且本机具备 cargo 与链接器。
+    """
+    if not RUST_ACCEL_MANIFEST.exists():
+        return
+    if _rust_accel_should_skip():
+        print_step(f"已跳过 Rust 加速扩展构建：{RUST_ACCEL_SKIP_ENV}=1")
+        return
+    if not _find_cargo():
+        raise RuntimeError(
+            "未找到 Rust cargo，无法构建 MoviePilot Rust 加速扩展。"
+            "请先安装 Rust toolchain 后重试，或临时设置 "
+            f"{RUST_ACCEL_SKIP_ENV}=1 跳过加速扩展。"
+        )
+    if not _find_native_linker():
+        raise RuntimeError(
+            "未找到本机 C 编译器/链接器，无法构建 MoviePilot Rust 加速扩展。"
+            "请先安装系统构建工具后重试，或临时设置 "
+            f"{RUST_ACCEL_SKIP_ENV}=1 跳过加速扩展。"
+        )
+
+
+def install_rust_accel(venv_python: Path) -> None:
+    """
+    构建并安装 MoviePilot Rust 加速扩展到当前虚拟环境。
+    """
+    if not RUST_ACCEL_MANIFEST.exists():
+        return
+    if _rust_accel_should_skip():
+        return
+
+    ensure_rust_accel_ready()
+    print_step("构建并安装 Rust 加速扩展")
+    env = os.environ.copy()
+    env["PATH"] = _cargo_env_path()
+    run(
+        [
+            str(venv_python),
+            "-m",
+            "maturin",
+            "develop",
+            "--release",
+            "--manifest-path",
+            str(RUST_ACCEL_MANIFEST),
+        ],
+        env=env,
+    )
 
 
 def ensure_supported_python(python_bin: str) -> None:
@@ -2628,7 +2728,11 @@ def init_local(
 
 
 def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
+    """
+    创建或复用本地虚拟环境，并安装后端依赖、Rust 扩展和浏览器运行时。
+    """
     ensure_supported_python(python_bin)
+    ensure_rust_accel_ready()
     venv_dir = venv_dir.expanduser().resolve()
     venv_python = get_venv_python(venv_dir)
     venv_pip = get_venv_pip(venv_dir)
@@ -2653,6 +2757,7 @@ def install_deps(*, python_bin: str, venv_dir: Path, recreate: bool) -> Path:
 
     print_step("安装项目依赖")
     run([str(venv_pip), "install", "-r", str(ROOT / "requirements.txt")])
+    install_rust_accel(venv_python)
     install_browser_runtime(venv_python)
     return venv_python
 

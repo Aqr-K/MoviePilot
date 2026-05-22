@@ -6,6 +6,7 @@
 build/
 cython_cache/
 dist/
+rust/**/target/
 nginx/
 test.py
 safety_report.txt

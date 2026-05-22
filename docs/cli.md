@@ -159,6 +159,9 @@ moviepilot install deps --config-dir /path/to/moviepilot-config
 说明：
 
 - 默认会自动选择本地已安装的 `Python 3.11+` 解释器
+- 会在安装 Python 依赖后构建并安装 `moviepilot_rust` 加速扩展，因此本机需要可用的 Rust `cargo`
+- 一键安装脚本会自动准备 Rust toolchain 和系统构建工具；手动执行 CLI 安装时，如果未安装 Rust 或本机编译器，请先安装后再执行 `moviepilot install deps`
+- 如需临时跳过加速扩展构建，可设置 `MOVIEPILOT_SKIP_RUST_ACCEL=1`，但相关核心处理会回退到 Python 实现，性能收益不会生效
 
 安装前端 release：
 
@@ -220,7 +223,7 @@ moviepilot setup --config-dir /path/to/moviepilot-config
 
 `moviepilot setup` 会串行执行：
 
-1. 安装后端依赖
+1. 安装后端依赖并构建 Rust 加速扩展
 2. 下载并安装前端 release
 3. 下载并同步资源文件
 4. 初始化本地配置
@@ -323,7 +326,7 @@ moviepilot update all --skip-resources
 
 说明：
 
-- `update backend` 会更新 Git 仓库并重新安装后端依赖
+- `update backend` 会更新 Git 仓库并重新安装后端依赖，同时重新构建 Rust 加速扩展
 - `update frontend` 会按当前仓库 `version.py` 中的 `FRONTEND_VERSION` 下载并替换前端 release
 - `update all` 会先更新后端，再按更新后代码中的 `FRONTEND_VERSION` 更新前端，默认也会同步资源文件
 - 更新前请先执行 `moviepilot stop`

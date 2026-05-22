@@ -93,10 +93,10 @@ class NexusPhpSiteUserInfo(SiteParserBase):
         html_text = self._prepare_html_text(html_text)
         upload_match = re.search(r"[^总]上[传傳]量?[:：_<>/a-zA-Z-=\"'\s#;]+([\d,.\s]+[KMGTPI]*B)", html_text,
                                  re.IGNORECASE)
-        self.upload = StringUtils.num_filesize(upload_match.group(1).strip()) if upload_match else 0
+        self.upload = self.num_filesize(upload_match.group(1).strip()) if upload_match else 0
         download_match = re.search(r"[^总子影力]下[载載]量?[:：_<>/a-zA-Z-=\"'\s#;]+([\d,.\s]+[KMGTPI]*B)", html_text,
                                    re.IGNORECASE)
-        self.download = StringUtils.num_filesize(download_match.group(1).strip()) if download_match else 0
+        self.download = self.num_filesize(download_match.group(1).strip()) if download_match else 0
         ratio_match = re.search(r"分享率[:：_<>/a-zA-Z-=\"'\s#;]+([\d,.\s]+)", html_text)
         # 计算分享率
         calc_ratio = 0.0 if self.download <= 0.0 else round(self.upload / self.download, 3)
@@ -209,7 +209,7 @@ class NexusPhpSiteUserInfo(SiteParserBase):
                 page_seeding = len(seeding_sizes)
 
                 for i in range(0, len(seeding_sizes)):
-                    size = StringUtils.num_filesize(seeding_sizes[i].xpath("string(.)").strip())
+                    size = self.num_filesize(seeding_sizes[i].xpath("string(.)").strip())
                     seeders = StringUtils.str_int(seeding_seeders[i])
 
                     page_seeding_size += size
@@ -273,7 +273,7 @@ class NexusPhpSiteUserInfo(SiteParserBase):
             tmp_seeding_size = 0
             tmp_seeding_info = []
             for i in range(0, len(seeding_sizes)):
-                size = StringUtils.num_filesize(seeding_sizes[i].xpath("string(.)").strip())
+                size = self.num_filesize(seeding_sizes[i].xpath("string(.)").strip())
                 seeders = StringUtils.str_int(seeding_seeders[i])
 
                 tmp_seeding_size += size
@@ -292,7 +292,7 @@ class NexusPhpSiteUserInfo(SiteParserBase):
                 seeding_size_match = re.search(r"总做种体积:\s+([\d,.\s]+[KMGTPI]*B)", seeding_sizes[0], re.IGNORECASE)
                 tmp_seeding = StringUtils.str_int(seeding_match.group(1)) if (
                         seeding_match and seeding_match.group(1)) else 0
-                tmp_seeding_size = StringUtils.num_filesize(
+                tmp_seeding_size = self.num_filesize(
                     seeding_size_match.group(1).strip()) if seeding_size_match else 0
             if not self.seeding_size:
                 self.seeding_size = tmp_seeding_size

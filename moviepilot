@@ -105,6 +105,8 @@ Options:
     --venv PATH       虚拟环境目录，默认 ./venv
     --recreate        删除并重建虚拟环境
     --config-dir PATH 指定配置目录
+    说明            会构建并安装 Rust 加速扩展，需本机可用 cargo 和编译器；
+                    可临时设置 MOVIEPILOT_SKIP_RUST_ACCEL=1 跳过构建
 
   frontend:
     --version TAG         前端版本，默认使用 version.py 中的 FRONTEND_VERSION
@@ -152,6 +154,10 @@ Options:
   --superuser-password PWD  预设超级管理员密码
   --config-dir PATH         指定配置目录
   -h, --help                显示帮助
+
+说明:
+  - 安装后端依赖时会构建并安装 Rust 加速扩展，需本机可用 cargo 和编译器
+  - 可临时设置 MOVIEPILOT_SKIP_RUST_ACCEL=1 跳过加速扩展构建
 EOF
 }
 
@@ -188,6 +194,10 @@ Options:
   --skip-resources          更新 all 时跳过资源同步
   --config-dir PATH         指定配置目录
   -h, --help                显示帮助
+
+说明:
+  - 更新后端依赖时会重新构建并安装 Rust 加速扩展，需本机可用 cargo 和编译器
+  - 可临时设置 MOVIEPILOT_SKIP_RUST_ACCEL=1 跳过加速扩展构建
 EOF
 }
 

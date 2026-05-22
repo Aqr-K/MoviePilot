@@ -73,6 +73,7 @@ test_*
 build/
 dist/
 *.egg-info/
+rust/**/target/
 
 # Docker
 Dockerfile*

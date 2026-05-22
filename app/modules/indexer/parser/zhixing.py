@@ -75,7 +75,7 @@ class ZhixingSiteUserInfo(SiteParserBase):
                 s = s.strip()
                 if re.match(r'^\d+(\.\d+)?$', s):
                     s += ' B'
-            return StringUtils.num_filesize(s) if s else 0
+            return self.num_filesize(s) if s else 0
 
         self.upload = num_filesize_safe(info_dict.get('上传流量')) if '上传流量' in info_dict else 0
         self.download = num_filesize_safe(info_dict.get('下载流量')) if '下载流量' in info_dict else 0
@@ -108,7 +108,7 @@ class ZhixingSiteUserInfo(SiteParserBase):
             if size_td:
                 size_text = size_td.find('a').text if size_td.find('a') else size_td.text.strip()
                 page_seeding += 1
-                page_seeding_size += StringUtils.num_filesize(size_text)
+                page_seeding_size += self.num_filesize(size_text)
         return page_seeding, page_seeding_size
 
     def _parse_message_unread_links(self, html_text: str, msg_links: list) -> Optional[str]:
@@ -164,7 +164,7 @@ class ZhixingSiteUserInfo(SiteParserBase):
                             s = s.strip()
                             if re.match(r'^\d+(\.\d+)?$', s):
                                 s += ' B'
-                        return StringUtils.num_filesize(s) if s else 0
+                        return self.num_filesize(s) if s else 0
                     self.seeding = int(self._basic_info.get('当前保种数量', 0))
                     self.seeding_size = num_filesize_safe(self._basic_info.get('当前保种容量', ''))
 
