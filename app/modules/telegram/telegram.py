@@ -118,30 +118,15 @@ class Telegram:
 
                 # Check if we should process this message
                 if self._should_process_message(message):
-                    # 启动持续发送正在输入状态
-                    message_text = message.text or message.caption or ""
-                    max_duration = (
-                        self._typing_command_max_duration_seconds
-                        if (
-                                message_text.startswith("/")
-                                and not message_text.lower().startswith("/ai")
-                        )
-                        else None
-                    )
-                    self._start_typing_task(
-                        message.chat.id, max_duration_seconds=max_duration
-                    )
                     payload = self._serialize_update_payload(message)
                     if not payload:
                         logger.warn("Telegram消息序列化失败，跳过转发")
-                        self._stop_typing_task(message.chat.id)
                         return
                     response = RequestUtils(timeout=15).post_res(
                         self._ds_url, json=payload
                     )
                     if not response or response.status_code >= 400:
-                        logger.warn("Telegram消息转发失败，停止typing状态")
-                        self._stop_typing_task(message.chat.id)
+                        logger.warn("Telegram消息转发失败")
 
             @_bot.callback_query_handler(func=lambda call: True)
             def callback_query(call):
@@ -149,7 +134,6 @@ class Telegram:
                 处理按钮点击回调
                 """
                 chat_id = None
-                typing_started = False
                 try:
                     # Update user-chat mapping for callbacks too
                     chat_id = call.message.chat.id
@@ -181,25 +165,15 @@ class Telegram:
                     # 先确认回调，避免用户看到loading状态
                     _bot.answer_callback_query(call.id)
 
-                    # 启动持续发送正在输入状态
-                    self._start_typing_task(
-                        chat_id,
-                        max_duration_seconds=self._typing_callback_max_duration_seconds,
-                    )
-                    typing_started = True
-
                     # 发送给主程序处理
                     response = RequestUtils(timeout=15).post_res(
                         self._ds_url, json=callback_json
                     )
                     if not response or response.status_code >= 400:
-                        logger.warn("Telegram按钮回调转发失败，停止typing状态")
-                        self._stop_typing_task(chat_id)
+                        logger.warn("Telegram按钮回调转发失败")
 
                 except Exception as err:
                     logger.error(f"处理按钮回调失败：{str(err)}")
-                    if typing_started and chat_id is not None:
-                        self._stop_typing_task(chat_id)
                     _bot.answer_callback_query(call.id, "处理失败，请重试")
 
             def run_polling():
@@ -427,10 +401,30 @@ class Telegram:
     ) -> None:
         """
         按调用方要求停止 typing。
-        Agent 回复和流式编辑由 worker 统一收口，避免中途发送消息时误关后续排队消息的状态。
+        typing 由消息处理状态统一收口，兼容显式要求立即停止的调用。
         """
         if stop_typing:
             self._stop_typing_task(chat_id)
+
+    def start_typing(
+            self,
+            chat_id: Optional[Union[str, int]] = None,
+            userid: Optional[Union[str, int]] = None,
+    ) -> bool:
+        """
+        外部链路主动启动 typing 状态。
+        """
+        if chat_id:
+            target_chat_id = chat_id
+        elif userid:
+            target_chat_id = self._get_user_chat_id(str(userid)) or str(userid)
+        else:
+            target_chat_id = None
+        target_chat_id = target_chat_id or (str(userid) if userid else None)
+        if not target_chat_id:
+            return False
+        self._start_typing_task(target_chat_id)
+        return True
 
     def stop_typing(
             self,
@@ -463,7 +457,7 @@ class Telegram:
             original_message_id: Optional[int] = None,
             original_chat_id: Optional[str] = None,
             disable_web_page_preview: Optional[bool] = None,
-            stop_typing: bool = True,
+            stop_typing: bool = False,
     ) -> Optional[dict]:
         """
         发送Telegram消息
@@ -559,7 +553,7 @@ class Telegram:
             userid: Optional[str] = None,
             caption: Optional[str] = None,
             original_chat_id: Optional[str] = None,
-            stop_typing: bool = True,
+            stop_typing: bool = False,
     ) -> Optional[dict]:
         """
         发送Telegram语音消息。
@@ -608,7 +602,7 @@ class Telegram:
             text: Optional[str] = None,
             file_name: Optional[str] = None,
             original_chat_id: Optional[str] = None,
-            stop_typing: bool = True,
+            stop_typing: bool = False,
     ) -> Optional[dict]:
         """
         发送本地图片或文件给 Telegram 用户。
@@ -699,7 +693,7 @@ class Telegram:
             buttons: Optional[List[List[Dict]]] = None,
             original_message_id: Optional[int] = None,
             original_chat_id: Optional[str] = None,
-            stop_typing: bool = True,
+            stop_typing: bool = False,
     ) -> Optional[bool]:
         """
         发送媒体列表消息
@@ -779,7 +773,7 @@ class Telegram:
             buttons: Optional[List[List[Dict]]] = None,
             original_message_id: Optional[int] = None,
             original_chat_id: Optional[str] = None,
-            stop_typing: bool = True,
+            stop_typing: bool = False,
     ) -> Optional[bool]:
         """
         发送种子列表消息
@@ -937,7 +931,7 @@ class Telegram:
             text: str,
             title: Optional[str] = None,
             buttons: Optional[List[List[dict]]] = None,
-            stop_typing: bool = True,
+            stop_typing: bool = False,
     ) -> Optional[bool]:
         """
         编辑Telegram消息（公开方法）

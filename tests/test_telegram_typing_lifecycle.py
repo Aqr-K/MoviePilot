@@ -1,11 +1,17 @@
 import asyncio
+import sys
 import time
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+
+sys.modules.setdefault("app.helper.sites", ModuleType("app.helper.sites"))
+setattr(sys.modules["app.helper.sites"], "SitesHelper", object)
 
 from app.agent import AgentManager, _MessageTask
 from app.chain.message import MessageChain
+from app.command import Command, _finish_command_processing_status
+from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
 from app.schemas.types import MessageChannel
 
@@ -82,8 +88,47 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
         self.assertTrue(result["success"])
         stop_typing.assert_not_called()
 
-    def test_slash_command_stops_typing_when_message_handler_returns(self):
+    def test_send_msg_does_not_stop_typing_by_default(self):
+        """
+        响应发送不再默认结束 typing，由处理状态统一收口。
+        """
+        telegram = self._telegram_client()
+        sent = SimpleNamespace(message_id=1, chat=SimpleNamespace(id="chat-1"))
+
+        with patch.object(
+                telegram, "_Telegram__send_request", return_value=sent
+        ), patch.object(telegram, "_stop_typing_task") as stop_typing:
+            result = telegram.send_msg(title="处理中", userid="10001")
+
+        self.assertTrue(result["success"])
+        stop_typing.assert_not_called()
+
+    def test_telegram_module_processing_status_starts_typing(self):
+        """
+        Telegram 通过模块处理状态接口启动 typing 保活。
+        """
+        module = TelegramModule()
+        module._channel = MessageChannel.Telegram
+        client = Mock()
+        client.start_typing.return_value = True
+
+        with patch.object(
+                module, "get_config", return_value=SimpleNamespace(name="telegram-test")
+        ), patch.object(module, "get_instance", return_value=client):
+            status = module.mark_message_processing_started(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                chat_id="-100",
+                text="hello",
+            )
+
+        client.start_typing.assert_called_once_with(chat_id="-100", userid="10001")
+        self.assertEqual(status["metadata"]["kind"], "typing")
+
+    def test_slash_command_defers_processing_status_to_command_handler(self):
         chain = MessageChain.__new__(MessageChain)
+        chain.eventmanager = Mock()
         status = MessageChain._ProcessingStatus(
             channel=MessageChannel.Telegram,
             source="telegram-test",
@@ -94,7 +139,7 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
 
         with patch.object(chain, "_record_user_message"), patch.object(
                 chain, "_mark_message_processing_started", return_value=status
-        ), patch.object(chain, "_handle_message_core"), patch.object(
+        ), patch.object(
                 chain, "_mark_message_processing_finished"
         ) as finish_status:
             chain.handle_message(
@@ -106,13 +151,65 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
                 original_chat_id="-100",
             )
 
+        finish_status.assert_not_called()
+        chain.eventmanager.send_event.assert_called_once()
+        self.assertEqual(
+            chain.eventmanager.send_event.call_args.args[1]["processing_status"],
+            status.to_dict(),
+        )
+
+    def test_command_handler_finishes_processing_status_after_execute(self):
+        """
+        传统命令响应完成后由命令处理器统一结束 processing status。
+        """
+        command = Command.__new__(Command)
+        command.get = Mock(return_value={"func": Mock()})
+        command.execute = Mock()
+        event = SimpleNamespace(
+            event_data={
+                "cmd": "/sites",
+                "user": "10001",
+                "channel": MessageChannel.Telegram,
+                "source": "telegram-test",
+                "processing_status": {
+                    "channel": MessageChannel.Telegram.value,
+                    "source": "telegram-test",
+                    "userid": "10001",
+                    "chat_id": "-100",
+                    "metadata": {"kind": "typing"},
+                },
+            }
+        )
+
+        with patch("app.command._finish_command_processing_status") as finish_status:
+            command.command_event(event)
+
+        command.execute.assert_called_once()
         finish_status.assert_called_once_with(
+            event.event_data["processing_status"],
+            user_id="10001",
+        )
+
+    def test_finish_command_processing_status_uses_module_interface(self):
+        status = {
+            "channel": MessageChannel.Telegram.value,
+            "source": "telegram-test",
+            "userid": "10001",
+            "chat_id": "-100",
+            "metadata": {"kind": "typing"},
+        }
+
+        with patch("app.command.CommandChain") as chain_cls:
+            _finish_command_processing_status(status, user_id="fallback")
+
+        chain_cls.return_value.run_module.assert_called_once_with(
+            "mark_message_processing_finished",
             channel=MessageChannel.Telegram,
             source="telegram-test",
             userid="10001",
+            message_id=None,
+            chat_id="-100",
             status=status,
-            original_message_id=None,
-            original_chat_id="-100",
         )
 
     def test_async_agent_keeps_processing_status_for_worker(self):

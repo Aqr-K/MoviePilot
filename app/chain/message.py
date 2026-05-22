@@ -137,40 +137,6 @@ class MessageChain(ChainBase):
         """
         images = CommingMessage.MessageImage.normalize_list(images)
 
-        # 语音输入只用于转写为文本，不默认改变回复形式。
-        has_audio_input = bool(audio_refs)
-        if audio_refs:
-            transcript = self._transcribe_audio_refs(audio_refs, channel, source)
-            merged_parts = []
-            seen_parts = set()
-            for item in [text.strip() if text else "", transcript or ""]:
-                normalized = item.strip()
-                if not normalized or normalized in seen_parts:
-                    continue
-                seen_parts.add(normalized)
-                merged_parts.append(normalized)
-            text = "\n".join(merged_parts).strip()
-            if not text:
-                self.post_message(
-                    Notification(
-                        channel=channel,
-                        source=source,
-                        userid=userid,
-                        username=username,
-                        title="语音识别失败，请稍后重试",
-                    )
-                )
-                return
-
-        if not text.startswith("CALLBACK:"):
-            self._record_user_message(
-                channel=channel,
-                source=source,
-                userid=userid,
-                username=username,
-                text=text,
-            )
-
         processing_status = self._mark_message_processing_started(
             channel=channel,
             source=source,
@@ -181,6 +147,40 @@ class MessageChain(ChainBase):
         )
         continues_async = False
         try:
+            # 语音输入只用于转写为文本，不默认改变回复形式。
+            has_audio_input = bool(audio_refs)
+            if audio_refs:
+                transcript = self._transcribe_audio_refs(audio_refs, channel, source)
+                merged_parts = []
+                seen_parts = set()
+                for item in [text.strip() if text else "", transcript or ""]:
+                    normalized = item.strip()
+                    if not normalized or normalized in seen_parts:
+                        continue
+                    seen_parts.add(normalized)
+                    merged_parts.append(normalized)
+                text = "\n".join(merged_parts).strip()
+                if not text:
+                    self.post_message(
+                        Notification(
+                            channel=channel,
+                            source=source,
+                            userid=userid,
+                            username=username,
+                            title="语音识别失败，请稍后重试",
+                        )
+                    )
+                    return
+
+            if not text.startswith("CALLBACK:"):
+                self._record_user_message(
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                    username=username,
+                    text=text,
+                )
+
             continues_async = self._handle_message_core(
                 channel=channel,
                 source=source,
@@ -225,7 +225,7 @@ class MessageChain(ChainBase):
 
         if text.startswith("CALLBACK:"):
             if ChannelCapabilityManager.supports_callbacks(channel):
-                self._handle_callback(
+                return self._handle_callback(
                     text=text,
                     channel=channel,
                     source=source,
@@ -233,6 +233,7 @@ class MessageChain(ChainBase):
                     username=username,
                     original_message_id=original_message_id,
                     original_chat_id=original_chat_id,
+                    processing_status=processing_status,
                 )
             else:
                 logger.warning(
@@ -245,9 +246,17 @@ class MessageChain(ChainBase):
         if text.startswith("/") and not text.lower().startswith("/ai"):
             self.eventmanager.send_event(
                 EventType.CommandExcute,
-                {"cmd": text, "user": userid, "channel": channel, "source": source},
+                {
+                    "cmd": text,
+                    "user": userid,
+                    "channel": channel,
+                    "source": source,
+                    "processing_status": processing_status.to_dict()
+                    if processing_status
+                    else None,
+                },
             )
-            return False
+            return bool(processing_status)
 
         latest_slash_interaction = self._get_latest_slash_interaction(userid)
         if latest_slash_interaction == "sites":
@@ -355,8 +364,6 @@ class MessageChain(ChainBase):
                 channel, ChannelCapability.PROCESSING_STATUS
         ):
             return None
-        if not text:
-            return None
 
         try:
             status = self.run_module(
@@ -423,7 +430,8 @@ class MessageChain(ChainBase):
             username: str,
             original_message_id: Optional[Union[str, int]] = None,
             original_chat_id: Optional[str] = None,
-    ) -> None:
+            processing_status: Optional[_ProcessingStatus] = None,
+    ) -> bool:
         """
         处理按钮回调
         """
@@ -439,7 +447,7 @@ class MessageChain(ChainBase):
                 userid=userid,
                 username=username,
         ):
-            return
+            return False
 
         if SkillsChain().handle_callback_interaction(
                 callback_data=callback_data,
@@ -450,7 +458,7 @@ class MessageChain(ChainBase):
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
         ):
-            return
+            return False
 
         if SiteChain().handle_callback_interaction(
                 callback_data=callback_data,
@@ -461,7 +469,7 @@ class MessageChain(ChainBase):
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
         ):
-            return
+            return False
 
         if SubscribeChain().handle_callback_interaction(
                 callback_data=callback_data,
@@ -472,7 +480,7 @@ class MessageChain(ChainBase):
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
         ):
-            return
+            return False
 
         if MediaInteractionChain().handle_callback_interaction(
                 callback_data=callback_data,
@@ -483,7 +491,7 @@ class MessageChain(ChainBase):
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
         ):
-            return
+            return False
 
         if self._handle_agent_choice_callback(
                 callback_data=callback_data,
@@ -493,8 +501,9 @@ class MessageChain(ChainBase):
                 username=username,
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
+                processing_status=processing_status,
         ):
-            return
+            return True
 
         # 插件消息的事件回调 [PLUGIN]插件ID|内容
         if callback_data.startswith("[PLUGIN]"):
@@ -513,7 +522,7 @@ class MessageChain(ChainBase):
                     "original_chat_id": original_chat_id,
                 },
             )
-            return
+            return False
 
         logger.error(f"回调数据格式错误：{callback_data}")
         self.post_message(
@@ -525,6 +534,7 @@ class MessageChain(ChainBase):
                 title="回调数据格式错误，请检查！",
             )
         )
+        return False
 
     @staticmethod
     def _get_latest_slash_interaction(userid: Union[str, int]) -> Optional[str]:
@@ -628,6 +638,7 @@ class MessageChain(ChainBase):
             username: str,
             original_message_id: Optional[Union[str, int]] = None,
             original_chat_id: Optional[str] = None,
+            processing_status: Optional[_ProcessingStatus] = None,
     ) -> bool:
         """
         将 Agent 按钮选择回传为同一会话中的下一条用户消息。
@@ -652,7 +663,7 @@ class MessageChain(ChainBase):
                     title="该选择已失效，请重新发起选择",
                 )
             )
-            return True
+            return False
 
         request, option = resolved
         selected_text = option.value
@@ -673,15 +684,15 @@ class MessageChain(ChainBase):
             username=username,
             text=selected_text,
         )
-        self._handle_ai_message(
+        return self._handle_ai_message(
             text=selected_text,
             channel=channel,
             source=source,
             userid=userid,
             username=username,
             session_id=request.session_id,
+            processing_status=processing_status,
         )
-        return True
 
     def _update_interaction_message_feedback(
             self,
