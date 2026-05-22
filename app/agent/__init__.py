@@ -952,6 +952,8 @@ class AgentManager:
         self._session_queues: Dict[str, asyncio.Queue] = {}
         # 每个会话的worker任务
         self._session_workers: Dict[str, asyncio.Task] = {}
+        # typing 这类状态按会话/聊天共享，前一条任务结束时可能仍需延续到后续排队消息。
+        self._deferred_processing_statuses: Dict[str, dict] = {}
 
     def get_session_status(self, session_id: str) -> dict[str, Any]:
         """获取会话当前模型与 token 使用状态。"""
@@ -1007,6 +1009,7 @@ class AgentManager:
                 pass
         self._session_workers.clear()
         self._session_queues.clear()
+        self._deferred_processing_statuses.clear()
         for agent in self.active_agents.values():
             await agent.cleanup()
         self.active_agents.clear()
@@ -1100,8 +1103,10 @@ class AgentManager:
                 except Exception as e:
                     logger.error(f"处理会话 {session_id} 的消息失败: {e}")
                 finally:
-                    await _async_finish_processing_status(
-                        task.processing_status, task.user_id
+                    await self._finish_task_processing_status(
+                        session_id=session_id,
+                        task=task,
+                        queue=queue,
                     )
                     queue.task_done()
 
@@ -1116,6 +1121,52 @@ class AgentManager:
                     and self._session_queues[session_id].empty()
             ):
                 self._session_queues.pop(session_id, None)
+            self._deferred_processing_statuses.pop(session_id, None)
+
+    @staticmethod
+    def _is_shared_processing_status(status: Optional[dict]) -> bool:
+        """
+        判断状态是否属于同一聊天窗口共享的处理提示。
+        reaction 绑定到具体消息，应按消息收口；typing 绑定到会话/聊天，需要等队列空闲再关闭。
+        """
+        metadata = (status or {}).get("metadata") or {}
+        return isinstance(metadata, dict) and metadata.get("kind") == "typing"
+
+    async def _finish_task_processing_status(
+            self,
+            session_id: str,
+            task: _MessageTask,
+            queue: asyncio.Queue,
+    ) -> None:
+        """
+        根据会话队列状态结束或延后处理提示。
+        当后面还有排队消息时，typing 状态继续保留；队列真正空闲后再统一关闭。
+        """
+        status = task.processing_status
+        if self._is_shared_processing_status(status) and not queue.empty():
+            self._deferred_processing_statuses[session_id] = status
+            return
+
+        if status:
+            await _async_finish_processing_status(status, task.user_id)
+            if self._is_shared_processing_status(status):
+                self._deferred_processing_statuses.pop(session_id, None)
+            elif queue.empty():
+                deferred_status = self._deferred_processing_statuses.pop(
+                    session_id, None
+                )
+                if deferred_status:
+                    await _async_finish_processing_status(
+                        deferred_status, task.user_id
+                    )
+            return
+
+        if not queue.empty():
+            return
+
+        deferred_status = self._deferred_processing_statuses.pop(session_id, None)
+        if deferred_status:
+            await _async_finish_processing_status(deferred_status, task.user_id)
 
     async def _process_message_internal(self, task: _MessageTask):
         """
@@ -1181,6 +1232,7 @@ class AgentManager:
                     break
             self._session_queues.pop(session_id, None)
             stopped = True
+        self._deferred_processing_statuses.pop(session_id, None)
 
         if stopped:
             logger.info(f"会话 {session_id} 的Agent推理已应急停止")
@@ -1204,6 +1256,7 @@ class AgentManager:
 
         # 清理队列
         self._session_queues.pop(session_id, None)
+        self._deferred_processing_statuses.pop(session_id, None)
 
         # 清理agent
         if session_id in self.active_agents:

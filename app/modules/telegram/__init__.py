@@ -15,6 +15,7 @@ from app.schemas import (
     CommandRegisterEventData,
     NotificationConf,
     MessageResponse,
+    NotificationType,
 )
 from app.schemas.types import ModuleType, ChainEventType
 from app.utils.structures import DictUtils
@@ -451,6 +452,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     return
             client: Telegram = self.get_instance(conf.name)
             if client:
+                stop_typing = message.mtype != NotificationType.Agent
                 if message.file_path:
                     client.send_file(
                         file_path=message.file_path,
@@ -459,6 +461,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         text=message.text,
                         userid=userid,
                         original_chat_id=message.original_chat_id,
+                        stop_typing=stop_typing,
                     )
                 elif message.voice_path:
                     client.send_voice(
@@ -466,6 +469,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         userid=userid,
                         caption=message.voice_caption,
                         original_chat_id=message.original_chat_id,
+                        stop_typing=stop_typing,
                     )
                 else:
                     client.send_msg(
@@ -478,6 +482,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         original_message_id=message.original_message_id,
                         original_chat_id=message.original_chat_id,
                         disable_web_page_preview=message.disable_web_page_preview,
+                        stop_typing=stop_typing,
                     )
 
     def post_medias_message(
@@ -502,6 +507,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     buttons=message.buttons,
                     original_message_id=message.original_message_id,
                     original_chat_id=message.original_chat_id,
+                    stop_typing=message.mtype != NotificationType.Agent,
                 )
 
     def post_torrents_message(
@@ -526,6 +532,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     buttons=message.buttons,
                     original_message_id=message.original_message_id,
                     original_chat_id=message.original_chat_id,
+                    stop_typing=message.mtype != NotificationType.Agent,
                 )
 
     def delete_message(
@@ -585,12 +592,14 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 continue
             client: Telegram = self.get_instance(conf.name)
             if client:
+                stop_typing = not (metadata or {}).get("agent_managed_typing")
                 result = client.edit_msg(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=text,
                     title=title,
                     buttons=buttons,
+                    stop_typing=stop_typing,
                 )
                 if result:
                     return True
@@ -665,12 +674,14 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     return None
             client: Telegram = self.get_instance(conf.name)
             if client:
+                agent_managed_typing = message.mtype == NotificationType.Agent
                 if message.voice_path:
                     result = client.send_voice(
                         voice_path=message.voice_path,
                         userid=userid,
                         caption=message.voice_caption,
                         original_chat_id=message.original_chat_id,
+                        stop_typing=not agent_managed_typing,
                     )
                 else:
                     result = client.send_msg(
@@ -680,6 +691,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         userid=userid,
                         link=message.link,
                         disable_web_page_preview=message.disable_web_page_preview,
+                        stop_typing=not agent_managed_typing,
                     )
                 if result and result.get("success"):
                     return MessageResponse(
@@ -687,6 +699,9 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         chat_id=result.get("chat_id"),
                         channel=MessageChannel.Telegram,
                         source=conf.name,
+                        metadata={"agent_managed_typing": True}
+                        if agent_managed_typing
+                        else None,
                         success=True,
                     )
         return None
