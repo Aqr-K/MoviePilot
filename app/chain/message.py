@@ -522,7 +522,6 @@ class MessageChain(ChainBase):
                 username=username,
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
-                processing_status=processing_status,
         ):
             return True
 
@@ -659,7 +658,6 @@ class MessageChain(ChainBase):
             username: str,
             original_message_id: Optional[Union[str, int]] = None,
             original_chat_id: Optional[str] = None,
-            processing_status: Optional[_ProcessingStatus] = None,
     ) -> bool:
         """
         将 Agent 按钮选择回传为同一会话中的下一条用户消息。
@@ -712,7 +710,6 @@ class MessageChain(ChainBase):
             userid=userid,
             username=username,
             session_id=request.session_id,
-            processing_status=processing_status,
         )
 
     def _update_interaction_message_feedback(
@@ -1169,7 +1166,6 @@ class MessageChain(ChainBase):
             images: Optional[List[CommingMessage.MessageImage]] = None,
             files: Optional[List[CommingMessage.MessageAttachment]] = None,
             session_id: Optional[str] = None,
-            processing_status: Optional[_ProcessingStatus] = None,
     ) -> bool:
         """
         处理AI智能体消息
@@ -1283,11 +1279,6 @@ class MessageChain(ChainBase):
                 else None,
                 "original_chat_id": original_chat_id,
             }
-            # 回调消息的处理状态已由入口层创建，需要交给 Agent worker 结束；
-            # 普通 Agent 消息仍不传入，让 worker 在真正开始处理时自行启动状态。
-            if processing_status:
-                process_kwargs["processing_status"] = processing_status.to_dict()
-
             # 在事件循环中处理
             asyncio.run_coroutine_threadsafe(
                 agent_manager.process_message(**process_kwargs),
