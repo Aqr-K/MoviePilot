@@ -34,22 +34,10 @@ def _finish_command_processing_status(status: Optional[dict], user_id: Optional[
     """
     if not status:
         return
-    try:
-        channel = MessageChannel(status.get("channel"))
-    except Exception:
-        return
-    try:
-        CommandChain().run_module(
-            "mark_message_processing_finished",
-            channel=channel,
-            source=status.get("source"),
-            userid=status.get("userid") or user_id,
-            message_id=status.get("message_id"),
-            chat_id=status.get("chat_id"),
-            status=status,
-        )
-    except Exception as err:
-        logger.debug(f"结束命令消息处理状态失败: {err}")
+    CommandChain().finish_message_processing_status(
+        status=status,
+        userid=user_id,
+    )
 
 
 class Command(metaclass=Singleton):

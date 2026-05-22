@@ -58,22 +58,36 @@ def _finish_processing_status(status: Optional[dict], user_id: Optional[str] = N
     """结束入站消息的渠道处理状态。"""
     if not status:
         return
-    try:
-        channel = MessageChannel(status.get("channel"))
-    except Exception:
-        return
-    try:
-        AgentChain().run_module(
-            "mark_message_processing_finished",
-            channel=channel,
-            source=status.get("source"),
-            userid=status.get("userid") or user_id,
-            message_id=status.get("message_id"),
-            chat_id=status.get("chat_id"),
-            status=status,
-        )
-    except Exception as err:
-        logger.debug(f"结束Agent消息处理状态失败: {err}")
+    AgentChain().finish_message_processing_status(
+        status=status,
+        userid=user_id,
+    )
+
+
+async def _async_start_processing_status(task: "_MessageTask") -> Optional[dict]:
+    """
+    在 Agent worker 中启动渠道处理状态。
+    渠道启动可能触发外部 API，同步实现需切到线程池避免阻塞事件循环。
+    """
+    if not task.channel:
+        return None
+
+    def _start() -> Optional[dict]:
+        """在线程池中通过统一 Chain 接口启动处理状态。"""
+        try:
+            return AgentChain().start_message_processing_status(
+                channel=MessageChannel(task.channel),
+                source=task.source,
+                userid=task.user_id,
+                message_id=task.original_message_id,
+                chat_id=task.original_chat_id,
+                text=task.message,
+            )
+        except Exception as err:
+            logger.debug(f"启动Agent消息处理状态失败: {err}")
+            return None
+
+    return await run_in_threadpool(_start)
 
 
 async def _async_finish_processing_status(
@@ -952,8 +966,6 @@ class AgentManager:
         self._session_queues: Dict[str, asyncio.Queue] = {}
         # 每个会话的worker任务
         self._session_workers: Dict[str, asyncio.Task] = {}
-        # typing 这类状态按会话/聊天共享，前一条任务结束时可能仍需延续到后续排队消息。
-        self._deferred_processing_statuses: Dict[str, dict] = {}
 
     def get_session_status(self, session_id: str) -> dict[str, Any]:
         """获取会话当前模型与 token 使用状态。"""
@@ -1009,7 +1021,6 @@ class AgentManager:
                 pass
         self._session_workers.clear()
         self._session_queues.clear()
-        self._deferred_processing_statuses.clear()
         for agent in self.active_agents.values():
             await agent.cleanup()
         self.active_agents.clear()
@@ -1026,7 +1037,6 @@ class AgentManager:
             username: str = None,
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
-            processing_status: Optional[dict] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
     ) -> str:
         """
@@ -1044,7 +1054,6 @@ class AgentManager:
             username=username,
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
-            processing_status=processing_status,
             reply_mode=reply_mode,
         )
 
@@ -1099,15 +1108,12 @@ class AgentManager:
                     break
 
                 try:
+                    await self._start_task_processing_status(task)
                     await self._process_message_internal(task)
                 except Exception as e:
                     logger.error(f"处理会话 {session_id} 的消息失败: {e}")
                 finally:
-                    await self._finish_task_processing_status(
-                        session_id=session_id,
-                        task=task,
-                        queue=queue,
-                    )
+                    await self._finish_task_processing_status(task)
                     queue.task_done()
 
         except asyncio.CancelledError:
@@ -1121,52 +1127,23 @@ class AgentManager:
                     and self._session_queues[session_id].empty()
             ):
                 self._session_queues.pop(session_id, None)
-            self._deferred_processing_statuses.pop(session_id, None)
 
     @staticmethod
-    def _is_shared_processing_status(status: Optional[dict]) -> bool:
+    async def _start_task_processing_status(task: _MessageTask) -> None:
         """
-        判断状态是否属于同一聊天窗口共享的处理提示。
-        reaction 绑定到具体消息，应按消息收口；typing 绑定到会话/聊天，需要等队列空闲再关闭。
+        在 Agent worker 真正开始处理消息时启动渠道处理状态。
         """
-        metadata = (status or {}).get("metadata") or {}
-        return isinstance(metadata, dict) and metadata.get("kind") == "typing"
-
-    async def _finish_task_processing_status(
-            self,
-            session_id: str,
-            task: _MessageTask,
-            queue: asyncio.Queue,
-    ) -> None:
-        """
-        根据会话队列状态结束或延后处理提示。
-        当后面还有排队消息时，typing 状态继续保留；队列真正空闲后再统一关闭。
-        """
-        status = task.processing_status
-        if self._is_shared_processing_status(status) and not queue.empty():
-            self._deferred_processing_statuses[session_id] = status
+        if task.processing_status:
             return
+        task.processing_status = await _async_start_processing_status(task)
 
-        if status:
-            await _async_finish_processing_status(status, task.user_id)
-            if self._is_shared_processing_status(status):
-                self._deferred_processing_statuses.pop(session_id, None)
-            elif queue.empty():
-                deferred_status = self._deferred_processing_statuses.pop(
-                    session_id, None
-                )
-                if deferred_status:
-                    await _async_finish_processing_status(
-                        deferred_status, task.user_id
-                    )
-            return
-
-        if not queue.empty():
-            return
-
-        deferred_status = self._deferred_processing_statuses.pop(session_id, None)
-        if deferred_status:
-            await _async_finish_processing_status(deferred_status, task.user_id)
+    @staticmethod
+    async def _finish_task_processing_status(task: _MessageTask) -> None:
+        """
+        在 Agent worker 完成或异常后结束本条消息的渠道处理状态。
+        """
+        await _async_finish_processing_status(task.processing_status, task.user_id)
+        task.processing_status = None
 
     async def _process_message_internal(self, task: _MessageTask):
         """
@@ -1232,7 +1209,6 @@ class AgentManager:
                     break
             self._session_queues.pop(session_id, None)
             stopped = True
-        self._deferred_processing_statuses.pop(session_id, None)
 
         if stopped:
             logger.info(f"会话 {session_id} 的Agent推理已应急停止")
@@ -1256,7 +1232,6 @@ class AgentManager:
 
         # 清理队列
         self._session_queues.pop(session_id, None)
-        self._deferred_processing_statuses.pop(session_id, None)
 
         # 清理agent
         if session_id in self.active_agents:

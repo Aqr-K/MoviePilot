@@ -138,14 +138,9 @@ class TestMessageProcessingStatus(unittest.TestCase):
         with patch("app.agent.AgentChain") as chain_cls:
             _finish_processing_status(status, user_id="fallback")
 
-        chain_cls.return_value.run_module.assert_called_once_with(
-            "mark_message_processing_finished",
-            channel=MessageChannel.Telegram,
-            source="telegram-main",
-            userid="10001",
-            message_id=None,
-            chat_id="-100",
+        chain_cls.return_value.finish_message_processing_status.assert_called_once_with(
             status=status,
+            userid="fallback",
         )
 
 

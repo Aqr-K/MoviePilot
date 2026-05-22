@@ -585,14 +585,12 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 continue
             client: Telegram = self.get_instance(conf.name)
             if client:
-                stop_typing = not (metadata or {}).get("agent_managed_typing")
                 result = client.edit_msg(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=text,
                     title=title,
                     buttons=buttons,
-                    stop_typing=stop_typing,
                 )
                 if result:
                     return True

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 sys.modules.setdefault("app.helper.sites", ModuleType("app.helper.sites"))
 setattr(sys.modules["app.helper.sites"], "SitesHelper", object)
 
-from app.agent import AgentManager, _MessageTask
+from app.agent import AgentManager, _MessageTask, _async_start_processing_status
 from app.chain.message import MessageChain
 from app.command import Command, _finish_command_processing_status
 from app.modules.telegram import TelegramModule
@@ -202,29 +202,25 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
         with patch("app.command.CommandChain") as chain_cls:
             _finish_command_processing_status(status, user_id="fallback")
 
-        chain_cls.return_value.run_module.assert_called_once_with(
-            "mark_message_processing_finished",
-            channel=MessageChannel.Telegram,
-            source="telegram-test",
-            userid="10001",
-            message_id=None,
-            chat_id="-100",
+        chain_cls.return_value.finish_message_processing_status.assert_called_once_with(
             status=status,
+            userid="fallback",
         )
 
-    def test_async_agent_keeps_processing_status_for_worker(self):
+    def test_async_agent_leaves_processing_status_to_worker(self):
         chain = MessageChain.__new__(MessageChain)
-        status = MessageChain._ProcessingStatus(
-            channel=MessageChannel.Telegram,
-            source="telegram-test",
-            userid="10001",
-            chat_id="-100",
-            metadata={"kind": "typing"},
-        )
 
         with patch.object(chain, "_record_user_message"), patch.object(
-                chain, "_mark_message_processing_started", return_value=status
-        ), patch.object(chain, "_handle_message_core", return_value=True), patch.object(
+                chain, "_mark_message_processing_started"
+        ) as start_status, patch(
+                "app.chain.message.settings.AI_AGENT_ENABLE", True
+        ), patch(
+                "app.chain.message.agent_manager.process_message",
+                new_callable=AsyncMock,
+        ) as process_message, patch(
+                "app.chain.message.asyncio.run_coroutine_threadsafe",
+                side_effect=lambda coro, _loop: (coro.close(), Mock())[1],
+        ), patch.object(
                 chain, "_mark_message_processing_finished"
         ) as finish_status:
             chain.handle_message(
@@ -236,7 +232,83 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
                 original_chat_id="-100",
             )
 
+        start_status.assert_not_called()
         finish_status.assert_not_called()
+        process_message.assert_called_once()
+        self.assertNotIn("processing_status", process_message.call_args.kwargs)
+        self.assertEqual(
+            process_message.call_args.kwargs["channel"],
+            MessageChannel.Telegram.value,
+        )
+        self.assertEqual(process_message.call_args.kwargs["source"], "telegram-test")
+        self.assertEqual(process_message.call_args.kwargs["original_chat_id"], "-100")
+
+    def test_agent_manager_starts_processing_status_when_task_runs(self):
+        async def _run():
+            manager = AgentManager()
+            task = _MessageTask(
+                session_id="session-1",
+                user_id="10001",
+                message="第一条",
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                original_chat_id="-100",
+            )
+            status = {
+                "channel": MessageChannel.Telegram.value,
+                "source": "telegram-test",
+                "userid": "10001",
+                "chat_id": "-100",
+                "metadata": {"kind": "typing"},
+            }
+
+            with patch(
+                    "app.agent._async_start_processing_status",
+                    new_callable=AsyncMock,
+                    return_value=status,
+            ) as start_status:
+                await manager._start_task_processing_status(task)
+
+            start_status.assert_awaited_once_with(task)
+            self.assertEqual(task.processing_status, status)
+
+        asyncio.run(_run())
+
+    def test_agent_start_processing_status_uses_chain_interface(self):
+        async def _run():
+            task = _MessageTask(
+                session_id="session-1",
+                user_id="10001",
+                message="第一条",
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                original_message_id="10",
+                original_chat_id="-100",
+            )
+            status = {
+                "channel": MessageChannel.Telegram.value,
+                "source": "telegram-test",
+                "userid": "10001",
+                "message_id": "10",
+                "chat_id": "-100",
+                "metadata": {"kind": "typing"},
+            }
+
+            with patch("app.agent.AgentChain") as chain_cls:
+                chain_cls.return_value.start_message_processing_status.return_value = status
+                result = await _async_start_processing_status(task)
+
+            chain_cls.return_value.start_message_processing_status.assert_called_once_with(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                message_id="10",
+                chat_id="-100",
+                text="第一条",
+            )
+            self.assertEqual(result, status)
+
+        asyncio.run(_run())
 
     def test_callback_stops_typing_when_message_handler_returns(self):
         chain = MessageChain.__new__(MessageChain)
@@ -281,7 +353,7 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
             metadata={"kind": "typing"},
         )
 
-        with patch.object(chain, "run_module") as run_module:
+        with patch.object(chain, "finish_message_processing_status") as finish_status:
             chain._mark_message_processing_finished(
                 channel=MessageChannel.Telegram,
                 source="telegram-test",
@@ -290,119 +362,106 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
                 original_chat_id="-100",
             )
 
-        run_module.assert_called_once_with(
-            "mark_message_processing_finished",
+        finish_status.assert_called_once_with(
+            status=status.to_dict(),
             channel=MessageChannel.Telegram,
             source="telegram-test",
             userid="10001",
             message_id=None,
             chat_id="-100",
-            status=status.to_dict(),
         )
 
-    def test_agent_manager_defers_shared_typing_until_queued_task_finishes(self):
+    def test_agent_manager_finishes_processing_status_after_each_task(self):
         async def _run():
             manager = AgentManager()
-            queue = asyncio.Queue()
-            first = _MessageTask(
+            status = {
+                "channel": MessageChannel.Telegram.value,
+                "source": "telegram-test",
+                "userid": "10001",
+                "chat_id": "-100",
+                "metadata": {"kind": "typing"},
+            }
+            task = _MessageTask(
                 session_id="session-1",
                 user_id="10001",
                 message="第一条",
-                processing_status={
-                    "channel": MessageChannel.Telegram.value,
-                    "source": "telegram-test",
-                    "userid": "10001",
-                    "chat_id": "-100",
-                    "metadata": {"kind": "typing"},
-                },
+                processing_status=status,
             )
-            second = _MessageTask(
-                session_id="session-1",
-                user_id="10001",
-                message="第二条",
-                processing_status={
-                    "channel": MessageChannel.Telegram.value,
-                    "source": "telegram-test",
-                    "userid": "10001",
-                    "chat_id": "-100",
-                    "metadata": {"kind": "typing"},
-                },
-            )
-            await queue.put(second)
 
             with patch(
                     "app.agent._async_finish_processing_status",
                     new_callable=AsyncMock,
             ) as finish_status:
-                await manager._finish_task_processing_status(
-                    session_id="session-1",
-                    task=first,
-                    queue=queue,
-                )
-                finish_status.assert_not_awaited()
-                self.assertEqual(
-                    manager._deferred_processing_statuses["session-1"],
-                    first.processing_status,
-                )
+                await manager._finish_task_processing_status(task)
 
-                queue.get_nowait()
-                await manager._finish_task_processing_status(
-                    session_id="session-1",
-                    task=second,
-                    queue=queue,
-                )
-
-            finish_status.assert_awaited_once_with(
-                second.processing_status, "10001"
-            )
-            self.assertNotIn("session-1", manager._deferred_processing_statuses)
+            finish_status.assert_awaited_once_with(status, "10001")
+            self.assertIsNone(task.processing_status)
 
         asyncio.run(_run())
 
-    def test_agent_manager_closes_deferred_typing_when_next_task_has_no_status(self):
+    def test_agent_worker_starts_and_finishes_each_queued_task(self):
         async def _run():
             manager = AgentManager()
-            queue = asyncio.Queue()
-            first = _MessageTask(
+            manager._session_queues["session-1"] = asyncio.Queue()
+            first_status = {
+                "channel": MessageChannel.Telegram.value,
+                "source": "telegram-test",
+                "userid": "10001",
+                "chat_id": "-100",
+                "metadata": {"kind": "typing", "seq": 1},
+            }
+            second_status = {
+                "channel": MessageChannel.Telegram.value,
+                "source": "telegram-test",
+                "userid": "10001",
+                "chat_id": "-100",
+                "metadata": {"kind": "typing", "seq": 2},
+            }
+            await manager._session_queues["session-1"].put(_MessageTask(
                 session_id="session-1",
                 user_id="10001",
                 message="第一条",
-                processing_status={
-                    "channel": MessageChannel.Telegram.value,
-                    "source": "telegram-test",
-                    "userid": "10001",
-                    "chat_id": "-100",
-                    "metadata": {"kind": "typing"},
-                },
-            )
-            second = _MessageTask(
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                original_chat_id="-100",
+            ))
+            await manager._session_queues["session-1"].put(_MessageTask(
                 session_id="session-1",
                 user_id="10001",
                 message="第二条",
-                processing_status=None,
-            )
-            await queue.put(second)
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                original_chat_id="-100",
+            ))
 
             with patch(
+                    "app.agent._async_start_processing_status",
+                    new_callable=AsyncMock,
+                    side_effect=[first_status, second_status],
+            ) as start_status, patch.object(
+                    manager,
+                    "_process_message_internal",
+                    new_callable=AsyncMock,
+            ), patch(
                     "app.agent._async_finish_processing_status",
                     new_callable=AsyncMock,
             ) as finish_status:
-                await manager._finish_task_processing_status(
-                    session_id="session-1",
-                    task=first,
-                    queue=queue,
+                manager._session_workers["session-1"] = asyncio.create_task(
+                    manager._session_worker("session-1")
                 )
-                queue.get_nowait()
-                await manager._finish_task_processing_status(
-                    session_id="session-1",
-                    task=second,
-                    queue=queue,
-                )
+                await manager._session_queues["session-1"].join()
+                manager._session_workers["session-1"].cancel()
+                await manager._session_workers["session-1"]
 
-            finish_status.assert_awaited_once_with(
-                first.processing_status, "10001"
+            self.assertEqual(start_status.await_count, 2)
+            self.assertEqual(
+                finish_status.await_args_list[0].args,
+                (first_status, "10001"),
             )
-            self.assertNotIn("session-1", manager._deferred_processing_statuses)
+            self.assertEqual(
+                finish_status.await_args_list[1].args,
+                (second_status, "10001"),
+            )
 
         asyncio.run(_run())
 

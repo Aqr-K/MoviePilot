@@ -41,6 +41,7 @@ from app.schemas import (
     MessageResponse,
 )
 from app.utils.identity import normalize_internal_user_id
+from app.schemas.message import ChannelCapability, ChannelCapabilityManager
 from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     TorrentStatus,
@@ -121,6 +122,74 @@ class ChainBase(metaclass=ABCMeta):
         删除缓存，同时删除Redis和本地缓存
         """
         self.filecache.delete(filename)
+
+    def start_message_processing_status(
+            self,
+            channel: MessageChannel,
+            source: Optional[str],
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+            text: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        启动渠道侧消息输入/处理状态。
+        具体表现由消息模块实现，例如 typing 保活或消息 reaction。
+        """
+        if not channel or not ChannelCapabilityManager.supports_capability(
+                channel, ChannelCapability.PROCESSING_STATUS
+        ):
+            return None
+        try:
+            status = self.run_module(
+                "mark_message_processing_started",
+                channel=channel,
+                source=source,
+                userid=userid,
+                message_id=message_id,
+                chat_id=chat_id,
+                text=text,
+            )
+        except Exception as err:
+            logger.debug(f"启动消息处理状态失败: {err}")
+            return None
+        return status if isinstance(status, dict) else None
+
+    def finish_message_processing_status(
+            self,
+            status: Optional[dict] = None,
+            channel: Optional[MessageChannel] = None,
+            source: Optional[str] = None,
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+    ) -> None:
+        """
+        结束渠道侧消息输入/处理状态。
+        优先使用 start 返回的 status，缺失时使用显式渠道和消息定位参数。
+        """
+        target_channel = channel
+        if status:
+            try:
+                target_channel = MessageChannel(status.get("channel"))
+            except Exception:
+                target_channel = channel
+        if not target_channel or not ChannelCapabilityManager.supports_capability(
+                target_channel, ChannelCapability.PROCESSING_STATUS
+        ):
+            return
+        try:
+            self.run_module(
+                "mark_message_processing_finished",
+                channel=target_channel,
+                source=(status or {}).get("source") or source,
+                userid=(status or {}).get("userid") or userid,
+                message_id=(status or {}).get("message_id") or message_id,
+                chat_id=(status or {}).get("chat_id") or chat_id,
+                status=status,
+            )
+        except Exception as err:
+            logger.debug(f"结束消息处理状态失败: {err}")
 
     @staticmethod
     def _normalize_notification_for_dispatch(
