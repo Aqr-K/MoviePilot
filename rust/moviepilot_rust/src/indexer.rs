@@ -37,8 +37,9 @@ static NUMERIC_FACTOR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+\.?\d*)").
 static FIELD_EXPR_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"^fields(?:\.([A-Za-z0-9_]+)|\[\s*['"]([^'"]+)['"]\s*\])$"#).unwrap()
 });
-static JINJA_EXPR_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"\{\{-?\s*(.*?)\s*-?\}\}"#).unwrap());
+static FIELD_REF_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"fields(?:\.([A-Za-z0-9_]+)|\[\s*['"]([^'"]+)['"]\s*\])"#).unwrap());
+static JINJA_EXPR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\{\{-?\s*(.*?)\s*-?\}\}"#).unwrap());
 static JINJA_TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\{%-?\s*(.*?)\s*-?%\}"#).unwrap());
 
 enum RowParseResult {
@@ -371,7 +372,7 @@ fn parse_indexer_row(
     Ok(RowParseResult::Item(output.into()))
 }
 
-/// 解析标题字段，支持直接 selector 和常见的 title_default/title_optional 模板。
+/// 解析标题字段，支持直接 selector 和按模板引用字段渲染 title.text。
 fn parse_title(
     py: Python<'_>,
     row: ElementRef<'_>,
@@ -384,23 +385,12 @@ fn parse_title(
     let mut title = if selector.contains("selector")? {
         safe_query(row, &selector)?
     } else if let Some(template) = get_optional_string(&selector, "text")? {
-        let Some(default_selector) = get_field_dict(fields, "title_default")? else {
-            return Ok(false);
-        };
-        let title_default = safe_query(row, &default_selector)?.unwrap_or_default();
-        let title_optional =
-            if let Some(optional_selector) = get_field_dict(fields, "title_optional")? {
-                safe_query(row, &optional_selector)?.unwrap_or_default()
-            } else {
-                String::new()
-            };
-        let Some(rendered) = render_known_template(
-            &template,
-            &[
-                ("title_default", title_default.as_str()),
-                ("title_optional", title_optional.as_str()),
-            ],
-        ) else {
+        let values = collect_template_field_values(row, fields, &template)?;
+        let refs: Vec<(&str, &str)> = values
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        let Some(rendered) = render_known_template(&template, &refs) else {
             return Ok(false);
         };
         Some(rendered)
@@ -414,7 +404,7 @@ fn parse_title(
     Ok(true)
 }
 
-/// 解析描述字段，支持直接 selector 和常见 description 模板。
+/// 解析描述字段，支持直接 selector 和按模板引用字段渲染 description.text。
 fn parse_description(
     py: Python<'_>,
     row: ElementRef<'_>,
@@ -427,18 +417,7 @@ fn parse_description(
     let mut description = if selector.contains("selector")? || selector.contains("selectors")? {
         safe_query(row, &selector)?
     } else if let Some(template) = get_optional_string(&selector, "text")? {
-        let mut values = Vec::new();
-        for key in [
-            "tags",
-            "subject",
-            "description_free_forever",
-            "description_normal",
-        ] {
-            if let Some(field_selector) = get_field_dict(fields, key)? {
-                let value = safe_query(row, &field_selector)?.unwrap_or_default();
-                values.push((key.to_string(), value));
-            }
-        }
+        let values = collect_template_field_values(row, fields, &template)?;
         let refs: Vec<(&str, &str)> = values
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -455,6 +434,33 @@ fn parse_description(
         output.set_item("description", value)?;
     }
     Ok(true)
+}
+
+/// 按 Jinja 模板实际引用的 fields 字段提取当前行数据，避免把模板能力绑死在固定字段名上。
+fn collect_template_field_values(
+    row: ElementRef<'_>,
+    fields: &Bound<'_, PyDict>,
+    template: &str,
+) -> PyResult<Vec<(String, String)>> {
+    let mut keys = Vec::new();
+    for captures in FIELD_REF_RE.captures_iter(template) {
+        let Some(key) = captures.get(1).or_else(|| captures.get(2)) else {
+            continue;
+        };
+        let key = key.as_str();
+        if !keys.iter().any(|item: &String| item == key) {
+            keys.push(key.to_string());
+        }
+    }
+
+    let mut values = Vec::new();
+    for key in keys {
+        if let Some(field_selector) = get_field_dict(fields, &key)? {
+            let value = safe_query(row, &field_selector)?.unwrap_or_default();
+            values.push((key, value));
+        }
+    }
+    Ok(values)
 }
 
 /// 解析普通文本字段。
@@ -1112,7 +1118,11 @@ fn eval_field_atom(expression: &str, values: &[(&str, &str)]) -> Option<String> 
         return Some(value);
     }
     let key = parse_field_key(expression)?;
-    Some(get_template_value(values, &key).unwrap_or_default().to_string())
+    Some(
+        get_template_value(values, &key)
+            .unwrap_or_default()
+            .to_string(),
+    )
 }
 
 /// 解析单引号或双引号字符串字面量。

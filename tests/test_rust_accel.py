@@ -249,6 +249,56 @@ def test_rust_indexer_page_parser_renders_common_title_template():
     assert [item["title"] for item in torrents] == ["Optional Name", "Default Fallback"]
 
 
+def test_rust_indexer_page_parser_renders_literal_title_template_without_default_field():
+    """
+    Rust 普通 indexer 页面解析应在没有 title_default 时渲染 title_optional 的纯文本兜底模板。
+    """
+    spider = SiteSpider(
+        indexer={
+            "id": "demo",
+            "name": "Demo",
+            "domain": "https://example.org/",
+            "search": {"paths": [{"path": "torrents.php"}]},
+            "torrents": {
+                "list": {"selector": "tr.torrent"},
+                "fields": {
+                    "title_optional": {
+                        "selector": "a.title",
+                        "attribute": "title",
+                        "optional": True,
+                    },
+                    "title": {
+                        "text": (
+                            "{% if fields['title_optional'] %}"
+                            "{{ fields['title_optional'] }}"
+                            "{% else %}"
+                            "For All Mankind S05 2019 2160p ATVP WEB-DL "
+                            "DDP5.1 Atmos DV H 265-HHWEB [新]"
+                            "{% endif %}"
+                        )
+                    },
+                    "download": {"selector": "a.dl", "attribute": "href"},
+                },
+            },
+        },
+    )
+    html = """
+    <table>
+      <tr class="torrent">
+        <td><a class="title" title="" href="/details/1">Ignored</a></td>
+        <td><a class="dl" href="/download/1">DL</a></td>
+      </tr>
+    </table>
+    """
+
+    torrents = spider.parse(html)
+
+    assert torrents == [{
+        "title": "For All Mankind S05 2019 2160p ATVP WEB-DL DDP5.1 Atmos DV H 265-HHWEB [新]",
+        "enclosure": "https://example.org/download/1",
+    }]
+
+
 def test_rust_indexer_page_parser_renders_common_description_templates():
     """
     Rust 普通 indexer 页面解析应兼容站点构建项目里的 description 字段模板。
