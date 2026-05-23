@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from app.log import logger
 
@@ -36,6 +36,34 @@ def parse_filter_rule(expression: str) -> Optional[list]:
     except BaseException as err:
         _raise_non_rust_panic(err)
         logger.debug(f"Rust 过滤规则解析失败，回退 Python：{err}")
+        return None
+
+
+def parse_indexer_torrents(
+        html_text: str,
+        domain: str,
+        list_config: dict,
+        fields: dict,
+        category: Optional[dict] = None,
+        result_num: int = 100
+) -> Optional[List[dict]]:
+    """
+    使用 Rust 批量解析普通配置站点种子列表，不可用时返回 None。
+    """
+    if not _moviepilot_rust:
+        return None
+    try:
+        return _moviepilot_rust.parse_indexer_torrents_fast(
+            html_text,
+            domain,
+            list_config,
+            fields,
+            category,
+            result_num
+        )
+    except BaseException as err:
+        _raise_non_rust_panic(err)
+        logger.debug(f"Rust 站点列表解析失败，使用 Python 解析兜底：{err}")
         return None
 
 

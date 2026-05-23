@@ -12,6 +12,7 @@ from pyquery import PyQuery
 from app.core.config import settings
 from app.log import logger
 from app.schemas.types import MediaType
+from app.utils import rust_accel
 from app.utils.http import RequestUtils, AsyncRequestUtils
 from app.utils.string import StringUtils
 from app.utils.url import UrlUtils
@@ -736,6 +737,17 @@ class SiteSpider:
         if not html_text:
             self.is_error = True
             return []
+
+        rust_torrents = rust_accel.parse_indexer_torrents(
+            html_text=html_text,
+            domain=self.domain,
+            list_config=self.list,
+            fields=self.fields,
+            category=self.category,
+            result_num=self.result_num
+        )
+        if rust_torrents is not None:
+            return rust_torrents
 
         # 清空旧结果
         self.torrents_info_array = []
