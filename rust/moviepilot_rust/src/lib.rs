@@ -1,5 +1,6 @@
 mod filter;
 mod indexer;
+mod rss;
 mod utils;
 
 use pyo3::prelude::*;
@@ -16,5 +17,6 @@ fn moviepilot_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_available, m)?)?;
     m.add_function(wrap_pyfunction!(filter::parse_filter_rule_fast, m)?)?;
     m.add_function(wrap_pyfunction!(indexer::parse_indexer_torrents_fast, m)?)?;
+    m.add_function(wrap_pyfunction!(rss::parse_rss_items_fast, m)?)?;
     Ok(())
 }

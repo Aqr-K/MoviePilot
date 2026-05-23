@@ -67,6 +67,20 @@ def parse_indexer_torrents(
         return None
 
 
+def parse_rss_items(xml_text: str, max_items: int = 1000) -> Optional[List[dict]]:
+    """
+    使用 Rust 解析 RSS/Atom 条目，不可用或异常时返回 None。
+    """
+    if not _moviepilot_rust:
+        return None
+    try:
+        return _moviepilot_rust.parse_rss_items_fast(xml_text, max_items)
+    except BaseException as err:
+        _raise_non_rust_panic(err)
+        logger.debug(f"Rust RSS解析失败，使用 Python 解析兜底：{err}")
+        return None
+
+
 def _raise_non_rust_panic(err: BaseException) -> None:
     """
     只吞掉 Rust 扩展 panic/异常，保留用户中断和进程退出语义。

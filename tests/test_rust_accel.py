@@ -1,5 +1,10 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 import pytest
 
+from app.helper import rss as rss_module
+from app.helper.rss import RssHelper
 from app.modules.indexer.spider import SiteSpider
 from app.schemas.types import MediaType
 from app.utils import rust_accel
@@ -27,6 +32,127 @@ def test_rust_filter_rule_parser_handles_parentheses_and_or():
     result = rust_accel.parse_filter_rule("CNSUB & (4K | 1080P) & !BLU")
 
     assert result == [[["CNSUB", "and", ["4K", "or", "1080P"]], "and", ["not", "BLU"]]]
+
+
+def test_rust_rss_parser_extracts_rss_and_atom_items():
+    """
+    Rust RSS解析应覆盖 RSS item、Atom entry、命名空间和日期字段。
+    """
+    xml = """
+    <root xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <rss>
+        <channel>
+          <item>
+            <title>Movie &amp; Show</title>
+            <description><![CDATA[Desc <b>bold</b>]]></description>
+            <link>https://example.com/details/1</link>
+            <enclosure url="https://example.com/download/1.torrent" length="123456" />
+            <pubDate>Tue, 19 May 2026 08:30:00 GMT</pubDate>
+            <dc:creator>豆瓣用户</dc:creator>
+          </item>
+        </channel>
+      </rss>
+      <feed>
+        <entry>
+          <title>Atom Title</title>
+          <summary>Atom Summary</summary>
+          <link href="https://example.com/atom/2" />
+          <updated>2026-05-19T09:30:00Z</updated>
+        </entry>
+      </feed>
+    </root>
+    """
+
+    result = rust_accel.parse_rss_items(xml, max_items=100)
+
+    assert len(result) == 2
+    assert result[0]["title"] == "Movie & Show"
+    assert result[0]["description"] == "Desc <b>bold</b>"
+    assert result[0]["link"] == "https://example.com/details/1"
+    assert result[0]["enclosure"] == "https://example.com/download/1.torrent"
+    assert result[0]["size"] == 123456
+    assert result[0]["nickname"] == "豆瓣用户"
+    assert int(result[0]["pubdate"].timestamp()) == int(datetime(2026, 5, 19, 8, 30, tzinfo=timezone.utc).timestamp())
+    assert result[1]["title"] == "Atom Title"
+    assert result[1]["description"] == "Atom Summary"
+    assert result[1]["link"] == "https://example.com/atom/2"
+    assert result[1]["enclosure"] == "https://example.com/atom/2"
+    assert int(result[1]["pubdate"].timestamp()) == int(datetime(2026, 5, 19, 9, 30, tzinfo=timezone.utc).timestamp())
+
+
+def test_rust_rss_parser_skips_incomplete_items():
+    """
+    Rust RSS解析应保持原逻辑，跳过无标题或无链接的条目。
+    """
+    xml = """
+    <rss>
+      <channel>
+        <item><title></title><link>https://example.com/a</link></item>
+        <item><title>No Link</title></item>
+        <item><title>OK</title><link>https://example.com/ok</link></item>
+      </channel>
+    </rss>
+    """
+
+    result = rust_accel.parse_rss_items(xml, max_items=100)
+
+    assert result == [{
+        "title": "OK",
+        "enclosure": "https://example.com/ok",
+        "size": 0,
+        "description": "",
+        "link": "https://example.com/ok",
+        "pubdate": "",
+    }]
+
+
+def test_rss_helper_parse_uses_rust_parser(monkeypatch):
+    """
+    RssHelper.parse 应在请求和编码处理后直接使用 Rust 解析结果。
+    """
+    xml = """
+    <rss>
+      <channel>
+        <item>
+          <title>Helper Title</title>
+          <description>Helper Description</description>
+          <link>https://example.com/details/3</link>
+          <pubDate>2026-05-19T10:30:00Z</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    class FakeRequestUtils:
+        """
+        测试用 RequestUtils，避免真实网络请求。
+        """
+
+        def __init__(self, **_kwargs):
+            """
+            保存构造参数占位，兼容 RssHelper 的调用方式。
+            """
+
+        def get_res(self, _url):
+            """
+            返回带 content/text/status_code 的最小响应对象。
+            """
+            return SimpleNamespace(
+                status_code=200,
+                content=xml.encode("utf-8"),
+                text=xml,
+                apparent_encoding="utf-8",
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(rss_module, "RequestUtils", FakeRequestUtils)
+
+    result = RssHelper().parse("https://example.com/rss")
+
+    assert len(result) == 1
+    assert result[0]["title"] == "Helper Title"
+    assert result[0]["enclosure"] == "https://example.com/details/3"
+    assert int(result[0]["pubdate"].timestamp()) == int(datetime(2026, 5, 19, 10, 30, tzinfo=timezone.utc).timestamp())
 
 
 def test_rust_indexer_parser_handles_jinja_pyquery_filters_and_links():
