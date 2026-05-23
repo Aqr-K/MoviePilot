@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 import cn2an
@@ -11,6 +12,14 @@ from app.utils.singleton import Singleton
 
 _COMBINED_WORD_RE = re.compile(r'^\s*(.*?)\s*=>\s*(.*?)\s*&&\s*(.*?)\s*<>\s*(.*?)\s*>>\s*(.*?)\s*$')
 _LEADING_ZERO_RE = re.compile(r"^0+")
+
+
+@lru_cache(maxsize=1024)
+def _compile_custom_word_regex(pattern: str):
+    """
+    编译自定义识别词正则，缓存重复识别链路中反复使用的同一规则。
+    """
+    return re.compile(pattern)
 
 
 class WordsMatcher(metaclass=Singleton):
@@ -86,7 +95,7 @@ class WordsMatcher(metaclass=Singleton):
         正则替换
         """
         try:
-            replaced_re = re.compile(r'%s' % replaced)
+            replaced_re = _compile_custom_word_regex(r'%s' % replaced)
             title, count = replaced_re.subn(r'%s' % replace, title)
             return title, "", count > 0
         except Exception as err:
@@ -99,12 +108,14 @@ class WordsMatcher(metaclass=Singleton):
         集数偏移
         """
         try:
-            if back and not re.findall(r'%s' % back, title):
+            if back and not _compile_custom_word_regex(r'%s' % back).search(title):
                 return title, "", False
-            if front and not re.findall(r'%s' % front, title):
+            if front and not _compile_custom_word_regex(r'%s' % front).search(title):
                 return title, "", False
-            offset_word_info_re = re.compile(r'(?<=%s.*?)[0-9一二三四五六七八九十]+(?=.*?%s)' % (front, back))
-            episode_nums_str = re.findall(offset_word_info_re, title)
+            offset_word_info_re = _compile_custom_word_regex(
+                r'(?<=%s.*?)[0-9一二三四五六七八九十]+(?=.*?%s)' % (front, back)
+            )
+            episode_nums_str = offset_word_info_re.findall(title)
             if not episode_nums_str:
                 return title, "", False
             episode_nums_offset_str = []
@@ -137,9 +148,10 @@ class WordsMatcher(metaclass=Singleton):
             else:
                 episode_nums_list = sorted(episode_nums_dict.items(), key=lambda x: x[1], reverse=True)
             for episode_num in episode_nums_list:
-                episode_offset_re = re.compile(
-                    r'(?<=%s.*?)%s(?=.*?%s)' % (front, episode_num[0], back))
-                title = re.sub(episode_offset_re, r'%s' % episode_num[1], title)
+                episode_offset_re = _compile_custom_word_regex(
+                    r'(?<=%s.*?)%s(?=.*?%s)' % (front, episode_num[0], back)
+                )
+                title = episode_offset_re.sub(r'%s' % episode_num[1], title)
             return title, "", True
         except Exception as err:
             logger.warn(f"自定义识别词集数偏移失败：{str(err)} - 标题：{title}，前定位词：{front}，后定位词：{back}，偏移量：{offset}")
