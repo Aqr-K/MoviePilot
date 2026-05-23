@@ -73,7 +73,8 @@ function install_rust_accel() {
         return 1
     fi
     INFO "→ 正在更新 Rust 加速扩展..."
-    if ! "${VENV_PATH}/bin/python" -m maturin develop --release --manifest-path "${manifest}"; then
+    # maturin develop 需要显式的虚拟环境标记，容器内直接调用 venv Python 时不会自动识别。
+    if ! VIRTUAL_ENV="${VENV_PATH}" "${VENV_PATH}/bin/python" -m maturin develop --release --manifest-path "${manifest}"; then
         ERROR "Rust 加速扩展更新失败"
         return 1
     fi
