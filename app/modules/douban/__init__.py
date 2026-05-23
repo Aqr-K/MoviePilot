@@ -2,7 +2,6 @@ import re
 from typing import List, Optional, Tuple, Union
 
 import cn2an
-import zhconv
 
 from app import schemas
 from app.core.config import settings
@@ -19,6 +18,7 @@ from app.schemas.types import MediaType, ModuleType, MediaRecognizeType
 from app.utils.common import retry
 from app.utils.http import RequestUtils
 from app.utils.limit import rate_limit_exponential
+from app.utils.zhconv import convert as zhconv_convert
 
 
 class DoubanModule(_ModuleBase):
@@ -77,7 +77,7 @@ class DoubanModule(_ModuleBase):
         准备搜索名称列表，保留中英文名称分别识别且按顺序去重的历史行为。
         """
         # 简体名称
-        zh_name = zhconv.convert(meta.cn_name, "zh-hans") if meta.cn_name else None
+        zh_name = zhconv_convert(meta.cn_name, "zh-hans") if meta.cn_name else None
         # 使用中英文名分别识别，去重去空，但要保持顺序
         return list(dict.fromkeys([k for k in [meta.cn_name, zh_name, meta.en_name] if k]))
 

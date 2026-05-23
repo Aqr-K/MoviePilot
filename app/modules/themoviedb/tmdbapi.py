@@ -2,12 +2,11 @@ import re
 import traceback
 from typing import Optional, List
 
-import zhconv
-
 from app.core.config import settings
 from app.log import logger
 from app.schemas.types import MediaType
 from app.utils.string import StringUtils
+from app.utils.zhconv import convert as zhconv_convert
 from .tmdbv3api import TMDb, Search, Movie, TV, Season, Episode, Discover, Trending, Person, Collection
 from .tmdbv3api.exceptions import TMDbException
 
@@ -726,7 +725,7 @@ class TmdbApi:
                 if iso_3166_1 == "CN":
                     title = alternative_title.get("title")
                     if title and StringUtils.is_chinese(title) \
-                            and zhconv.convert(title, "zh-hans") == title:
+                            and zhconv_convert(title, "zh-hans") == title:
                         return title
             return tmdbinfo.get("title") if tmdbinfo.get("media_type") == MediaType.MOVIE else tmdbinfo.get("name")
 

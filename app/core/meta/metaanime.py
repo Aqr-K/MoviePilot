@@ -1,13 +1,13 @@
 import re
 import traceback
 
-import zhconv
 import anitopy
 from app.core.meta.customization import CustomizationMatcher
 from app.core.meta.metabase import MetaBase
 from app.core.meta.releasegroup import ReleaseGroupsMatcher
 from app.log import logger
 from app.utils.string import StringUtils
+from app.utils.zhconv import convert as zhconv_convert
 from app.schemas.types import MediaType
 
 
@@ -219,7 +219,7 @@ class MetaAnime(MetaBase):
         # 截掉分类
         first_item = title.split(']')[0]
         if first_item and re.search(r"[动漫画纪录片电影视连续剧集日美韩中港台海外亚洲华语大陆综艺原盘高清]{2,}|TV|Animation|Movie|Documentar|Anime",
-                                    zhconv.convert(first_item, "zh-hans"),
+                                    zhconv_convert(first_item, "zh-hans"),
                                     re.IGNORECASE):
             title = re.sub(r"^[^]]*]", "", title).strip()
         # 去掉大小

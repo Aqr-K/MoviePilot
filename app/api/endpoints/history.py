@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 from typing import List, Any, Optional
 
-import jieba
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -24,6 +23,7 @@ from app.db.user_oper import (
 )
 from app.helper.progress import ProgressHelper
 from app.schemas.types import EventType
+from app.utils.jieba import cut as jieba_cut
 
 router = APIRouter()
 
@@ -272,7 +272,7 @@ async def transfer_history(
                 db, title=like_pattern, page=page, count=count, status=status, wildcard=True
             )
         else:
-            words = jieba.cut(title, HMM=False)
+            words = jieba_cut(title, HMM=False)
             like_pattern = "%".join(words)
             total = await TransferHistory.async_count_by_title(
                 db, title=like_pattern, status=status

@@ -2,7 +2,6 @@ import re
 from typing import Optional, List, Tuple, Union, Dict
 
 import cn2an
-import zhconv
 
 from app import schemas
 from app.core.config import settings
@@ -17,6 +16,7 @@ from app.modules.themoviedb.tmdbapi import TmdbApi
 from app.schemas.category import CategoryConfig
 from app.schemas.types import MediaType, MediaImageType, ModuleType, MediaRecognizeType
 from app.utils.http import RequestUtils
+from app.utils.zhconv import convert as zhconv_convert
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -116,7 +116,7 @@ class TheMovieDbModule(_ModuleBase):
         准备搜索名称列表
         """
         # 简体名称
-        zh_name = zhconv.convert(meta.cn_name, "zh-hans") if meta.cn_name else None
+        zh_name = zhconv_convert(meta.cn_name, "zh-hans") if meta.cn_name else None
         # 使用中英文名分别识别，去重去空，但要保持顺序
         return list(dict.fromkeys([k for k in [meta.cn_name, zh_name, meta.en_name] if k]))
 

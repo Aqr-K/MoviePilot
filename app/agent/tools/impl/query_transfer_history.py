@@ -3,7 +3,6 @@
 import json
 from typing import Optional, Type
 
-import jieba
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
@@ -11,6 +10,7 @@ from app.db import AsyncSessionFactory
 from app.db.models.transferhistory import TransferHistory
 from app.log import logger
 from app.schemas.types import media_type_to_agent
+from app.utils.jieba import cut as jieba_cut
 
 
 class QueryTransferHistoryInput(BaseModel):
@@ -69,8 +69,8 @@ class QueryTransferHistoryTool(MoviePilotTool):
             async with AsyncSessionFactory() as db:
                 # 处理标题搜索
                 if title:
-                    # 使用 jieba 分词处理标题
-                    words = jieba.cut(title, HMM=False)
+                    # 使用 fast-jieba 分词处理标题。
+                    words = jieba_cut(title, HMM=False)
                     title_search = "%".join(words)
                     # 查询记录
                     result = await TransferHistory.async_list_by_title(
