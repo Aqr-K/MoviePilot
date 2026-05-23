@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import List, Tuple, Union, Dict, Optional
 
 from app.core.context import TorrentInfo, MediaInfo
-from app.core.metainfo import lear_rust_parse_options_cache, _rust_parse_options
+from app.core.metainfo import clear_rust_parse_options_cache, _rust_parse_options
 from app.helper.rule import RuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
