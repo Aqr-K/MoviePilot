@@ -12,7 +12,6 @@ from app.core.meta.infopath import (
 from app.core.meta.words import WordsMatcher
 from app.log import logger
 from app.schemas.types import MediaType
-from app.utils import rust_accel
 
 
 _ANIME_BRACKET_RE = re.compile(r'【[+0-9XVPI-]+】\s*【', re.IGNORECASE)
@@ -169,9 +168,6 @@ def is_anime(name: str) -> bool:
     :param name: 名称
     :return: 是否动漫
     """
-    rust_result = rust_accel.is_anime(name)
-    if rust_result is not None:
-        return rust_result
     if not name:
         return False
     if _ANIME_BRACKET_RE.search(name):
@@ -189,9 +185,6 @@ def find_metainfo(title: str) -> Tuple[str, dict]:
     """
     从标题中提取媒体信息
     """
-    rust_result = rust_accel.find_metainfo(title)
-    if rust_result is not None:
-        return rust_result
     metainfo = _empty_metainfo()
     if not title:
         return title, metainfo

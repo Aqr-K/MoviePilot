@@ -11,7 +11,6 @@ from app.modules import _ModuleBase
 from app.modules.filter.RuleParser import RuleParser
 from app.modules.filter.builtin_rules import BUILTIN_RULE_SET
 from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
-from app.utils import rust_accel
 from app.utils.string import StringUtils
 
 
@@ -139,9 +138,6 @@ class FilterModule(_ModuleBase):
         # 查询规则表详情
         groups = self.rulehelper.get_rule_group_by_media(media=mediainfo, group_names=rule_groups)
         if groups:
-            rust_filtered = self.__filter_torrents_by_rust(groups, torrent_list, mediainfo)
-            if rust_filtered is not None:
-                return rust_filtered
             for group in groups:
                 # 过滤种子
                 torrent_list = self.__filter_torrents(
@@ -153,46 +149,6 @@ class FilterModule(_ModuleBase):
                     parsed_rule_cache=parsed_rule_cache,
                 )
         return torrent_list
-
-    def __filter_torrents_by_rust(self, groups: list, torrent_list: List[TorrentInfo],
-                                  mediainfo: MediaInfo) -> Optional[List[TorrentInfo]]:
-        """
-        使用 Rust 批量过滤种子；遇到不可支持的规则时返回 None 交由 Python 逻辑处理。
-        """
-        if not torrent_list:
-            return []
-        payloads = [self.__build_rust_torrent_payload(torrent) for torrent in torrent_list]
-        media_payload = mediainfo.to_dict() if mediainfo and hasattr(mediainfo, "to_dict") else (
-            vars(mediainfo).copy() if mediainfo else None
-        )
-        result = rust_accel.filter_torrents(
-            rule_set=self.rule_set,
-            rule_strings=[group.rule_string for group in groups],
-            torrents=payloads,
-            media_info=media_payload,
-        )
-        if result is None:
-            return None
-        filtered_torrents = []
-        for index, pri_order in result:
-            torrent = torrent_list[int(index)]
-            torrent.pri_order = int(pri_order)
-            filtered_torrents.append(torrent)
-        return filtered_torrents
-
-    @staticmethod
-    def __build_rust_torrent_payload(torrent: TorrentInfo) -> dict:
-        """
-        组装 Rust 过滤器需要的纯数据载荷，避免 Rust 直接依赖 Python 业务对象。
-        """
-        payload = torrent.to_dict() if hasattr(torrent, "to_dict") else vars(torrent).copy()
-        payload["pub_minutes"] = torrent.pub_minutes()
-        if payload.get("size"):
-            meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
-            payload["episode_count"] = meta.total_episode or 1
-        else:
-            payload["episode_count"] = 1
-        return payload
 
     def __filter_torrents(self, rule_string: str, rule_name: str,
                           torrent_list: List[TorrentInfo],

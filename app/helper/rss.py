@@ -9,7 +9,6 @@ from lxml import etree
 from app.core.config import settings
 from app.helper.browser import PlaywrightHelper
 from app.log import logger
-from app.utils import rust_accel
 from app.utils.http import RequestUtils
 from app.utils.string import StringUtils
 
@@ -228,32 +227,6 @@ class RssHelper:
         },
     }
 
-    @staticmethod
-    def __format_rust_items(items: List[dict]) -> List[dict]:
-        """
-        将 Rust RSS 解析结果转换为原 Python XPath 解析返回结构。
-        """
-        ret_array = []
-        for item in items:
-            pubdate = ""
-            pubdate_raw = item.get("pubdate_raw")
-            if pubdate_raw:
-                pubdate = StringUtils.get_time(pubdate_raw)
-                if pubdate is not None:
-                    pubdate = pubdate.astimezone(tz=None)
-            tmp_dict = {
-                'title': item.get("title") or "",
-                'enclosure': item.get("enclosure") or "",
-                'size': item.get("size") or 0,
-                'description': item.get("description") or "",
-                'link': item.get("link") or "",
-                'pubdate': pubdate
-            }
-            if item.get("nickname"):
-                tmp_dict['nickname'] = item.get("nickname")
-            ret_array.append(tmp_dict)
-        return ret_array
-
     def parse(self, url, proxy: bool = False,
               timeout: Optional[int] = 15, headers: dict = None, ua: str = None) -> Union[List[dict], None, bool]:
         """
@@ -324,12 +297,6 @@ class RssHelper:
                 if not ret_xml_stripped.startswith('<'):
                     logger.error("RSS内容不是有效的XML格式")
                     return False
-
-                rust_items = rust_accel.parse_rss_items(ret_xml, self.MAX_RSS_ITEMS)
-                if rust_items is not None:
-                    if len(rust_items) >= self.MAX_RSS_ITEMS:
-                        logger.warning(f"RSS条目过多，仅处理前{self.MAX_RSS_ITEMS}个")
-                    return self.__format_rust_items(rust_items)
 
                 # 使用lxml.etree解析XML
                 parser = None

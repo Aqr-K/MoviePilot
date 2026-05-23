@@ -11,7 +11,6 @@ from app.schemas.types import MediaType
 from app.utils.string import StringUtils
 from app.utils.tokens import Tokens
 from app.core.meta.streamingplatform import StreamingPlatforms
-from app.utils import rust_accel
 
 
 class MetaVideo(MetaBase):
@@ -104,60 +103,58 @@ class MetaVideo(MetaBase):
         # 把年月日去掉
         title = re.sub(r'\d{4}[\s._-]\d{1,2}[\s._-]\d{1,2}', "", title)
         media_exts = settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
-        rust_parse = rust_accel.parse_video_title(title, isfile=isfile, media_exts=media_exts)
-        if not self.__apply_rust_parse(rust_parse):
-            # 拆分tokens
-            tokens = Tokens(title)
-            # 实例化StreamingPlatforms对象
-            streaming_platforms = StreamingPlatforms()
-            # 解析名称、年份、季、集、资源类型、分辨率等
+        # 拆分tokens
+        tokens = Tokens(title)
+        # 实例化StreamingPlatforms对象
+        streaming_platforms = StreamingPlatforms()
+        # 解析名称、年份、季、集、资源类型、分辨率等
+        token = tokens.get_next()
+        while token:
+            self._index += 1  # 更新当前处理的token索引
+            # Part
+            self.__init_part(token, tokens)
+            # 标题
+            if self._continue_flag:
+                self.__init_name(token, media_exts)
+            # 年份
+            if self._continue_flag:
+                self.__init_year(token)
+            # 分辨率
+            if self._continue_flag:
+                self.__init_resource_pix(token)
+            # 季
+            if self._continue_flag:
+                self.__init_season(token)
+            # 集
+            if self._continue_flag:
+                self.__init_episode(token)
+            # 资源类型
+            if self._continue_flag:
+                self.__init_resource_type(token)
+            # 流媒体平台
+            if self._continue_flag:
+                self.__init_web_source(token, tokens, streaming_platforms)
+            # 视频编码
+            if self._continue_flag:
+                self.__init_video_encode(token)
+            # 视频位深
+            if self._continue_flag:
+                self.__init_video_bit(token)
+            # 音频编码
+            if self._continue_flag:
+                self.__init_audio_encode(token)
+            # 帧率
+            if self._continue_flag:
+                self.__init_fps(token)
+            # 取下一个，直到没有为卡
             token = tokens.get_next()
-            while token:
-                self._index += 1  # 更新当前处理的token索引
-                # Part
-                self.__init_part(token, tokens)
-                # 标题
-                if self._continue_flag:
-                    self.__init_name(token, media_exts)
-                # 年份
-                if self._continue_flag:
-                    self.__init_year(token)
-                # 分辨率
-                if self._continue_flag:
-                    self.__init_resource_pix(token)
-                # 季
-                if self._continue_flag:
-                    self.__init_season(token)
-                # 集
-                if self._continue_flag:
-                    self.__init_episode(token)
-                # 资源类型
-                if self._continue_flag:
-                    self.__init_resource_type(token)
-                # 流媒体平台
-                if self._continue_flag:
-                    self.__init_web_source(token, tokens, streaming_platforms)
-                # 视频编码
-                if self._continue_flag:
-                    self.__init_video_encode(token)
-                # 视频位深
-                if self._continue_flag:
-                    self.__init_video_bit(token)
-                # 音频编码
-                if self._continue_flag:
-                    self.__init_audio_encode(token)
-                # 帧率
-                if self._continue_flag:
-                    self.__init_fps(token)
-                # 取下一个，直到没有为卡
-                token = tokens.get_next()
-                self._continue_flag = True
-            # 合成质量
-            if self._effect:
-                self._effect.reverse()
-                self.resource_effect = " ".join(self._effect)
-            if self._source:
-                self.resource_type = self._source.strip()
+            self._continue_flag = True
+        # 合成质量
+        if self._effect:
+            self._effect.reverse()
+            self.resource_effect = " ".join(self._effect)
+        if self._source:
+            self.resource_type = self._source.strip()
         # 提取原盘DIY
         if self.resource_type and "BluRay" in self.resource_type:
             if (self.subtitle and re.findall(r'D[Ii]Y', self.subtitle)) \
@@ -187,62 +184,6 @@ class MetaVideo(MetaBase):
         self.customization = CustomizationMatcher().match(title=original_title) or None
         if not self.video_bit:
             self.video_bit = self.extract_video_bit(self.video_encode)
-
-    def __apply_rust_parse(self, rust_parse: Optional[dict]) -> bool:
-        """
-        应用 Rust 主识别结果；成功时跳过 Python token 主循环。
-        """
-        if not rust_parse or not rust_parse.get("complete"):
-            return False
-        self.cn_name = rust_parse.get("cn_name")
-        self.en_name = rust_parse.get("en_name")
-        if rust_parse.get("year"):
-            self.year = str(rust_parse.get("year"))
-        self.part = rust_parse.get("part")
-        self.__merge_rust_parse(rust_parse)
-        media_type = rust_parse.get("type")
-        if media_type == "tv":
-            self.type = MediaType.TV
-        elif media_type == "movie":
-            self.type = MediaType.MOVIE
-        return True
-
-    def __merge_rust_parse(self, rust_parse: Optional[dict]) -> None:
-        """
-        合并 Rust 预解析结果，仅补齐 Python 识别未命中的资源字段。
-        """
-        if not rust_parse:
-            return
-        if not self.year and rust_parse.get("year"):
-            self.year = str(rust_parse.get("year"))
-        if self.begin_season is None and rust_parse.get("begin_season") is not None:
-            self.begin_season = int(rust_parse.get("begin_season"))
-            self.type = MediaType.TV
-        if self.end_season is None and rust_parse.get("end_season") is not None:
-            self.end_season = int(rust_parse.get("end_season"))
-        if not self.total_season and rust_parse.get("total_season"):
-            self.total_season = int(rust_parse.get("total_season"))
-        if self.begin_episode is None and rust_parse.get("begin_episode") is not None:
-            self.begin_episode = int(rust_parse.get("begin_episode"))
-            self.type = MediaType.TV
-        if self.end_episode is None and rust_parse.get("end_episode") is not None:
-            self.end_episode = int(rust_parse.get("end_episode"))
-        if not self.total_episode and rust_parse.get("total_episode"):
-            self.total_episode = int(rust_parse.get("total_episode"))
-        if not self.resource_pix and rust_parse.get("resource_pix"):
-            self.resource_pix = rust_parse.get("resource_pix")
-        if not self.resource_type and rust_parse.get("resource_type"):
-            self.resource_type = rust_parse.get("resource_type")
-        if not self.resource_effect and rust_parse.get("resource_effect"):
-            self.resource_effect = rust_parse.get("resource_effect")
-        if not self.video_encode and rust_parse.get("video_encode"):
-            self.video_encode = rust_parse.get("video_encode")
-        if not self.video_bit and rust_parse.get("video_bit"):
-            self.video_bit = rust_parse.get("video_bit")
-        if not self.audio_encode and rust_parse.get("audio_encode"):
-            self.audio_encode = rust_parse.get("audio_encode")
-        if self.fps is None and rust_parse.get("fps") is not None:
-            self.fps = int(rust_parse.get("fps"))
 
     @staticmethod
     def __get_title_from_description(description: str) -> Optional[str]:
