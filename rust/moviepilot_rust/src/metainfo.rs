@@ -1,13 +1,14 @@
+use crate::utils::{cached_regex, get_config_string_list};
 use anitomy_pure::elements::Category;
 use anitomy_pure::Parser;
 use golia_pinyin::{is_valid_syllable, segment};
 use once_cell::sync::Lazy;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 use regex::{Captures, Regex, RegexBuilder};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 static ANIME_BRACKET_RE: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new(r"【[+0-9XVPI-]+】\s*【")
@@ -311,11 +312,13 @@ static KEYWORD_META_SUFFIX_RE: Lazy<Regex> = Lazy::new(|| {
 static EPISODE_VERSION_SUFFIX_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"v\d+$").unwrap());
 static TOKEN_SPLIT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\s+|\(|\)|\[|]|-|【|】|/|～|;|&|\||#|_|「|」|~").unwrap());
-static STREAMING_PLATFORM_LOOKUP: Lazy<HashMap<String, String>> =
-    Lazy::new(streaming_platform_lookup);
 static RELEASE_GROUP_RE_CACHE: Lazy<Mutex<HashMap<String, Regex>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static CUSTOMIZATION_RE_CACHE: Lazy<Mutex<HashMap<String, Regex>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static STREAMING_PLATFORM_CACHE: Lazy<Mutex<HashMap<usize, Arc<HashMap<String, String>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static PARSE_OPTIONS_CACHE: Lazy<Mutex<HashMap<usize, Arc<ParseOptions>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 const MEDIA_TYPE_MOVIE: &str = "电影";
@@ -370,11 +373,13 @@ struct ExplicitMetaInfo {
     total_episode: Option<i64>,
 }
 
+#[derive(Clone)]
 struct ParseOptions {
     custom_words: Vec<String>,
     media_exts: HashSet<String>,
     release_groups: String,
     customization_patterns: Vec<String>,
+    streaming_platforms: Arc<HashMap<String, String>>,
 }
 
 struct TokenCursor {
@@ -404,9 +409,20 @@ pub(crate) fn parse_metainfo_fast(
     subtitle: Option<&str>,
     options: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<PyObject> {
-    let options = ParseOptions::from_py(options)?;
-    let meta = build_meta_info(title, subtitle, &options, true)?;
+    let options = ParseOptions::from_py_cached(options)?;
+    let meta = build_meta_info(title, subtitle, options.as_ref(), true)?;
     meta_to_py(py, &meta)
+}
+
+/// 给过滤器 size_range 规则复用完整 Rust MetaInfo 解析链路。
+pub(crate) fn parse_total_episode_for_filter(
+    title: &str,
+    subtitle: Option<&str>,
+    options: Option<&Bound<'_, PyDict>>,
+) -> PyResult<i64> {
+    let options = ParseOptions::from_py_cached(options)?;
+    let meta = build_meta_info(title, subtitle, options.as_ref(), true)?;
+    Ok(meta.total_episode)
 }
 
 /// 从路径入口解析 MetaInfoPath，并在 Rust 内完成父目录合并。
@@ -417,8 +433,8 @@ pub(crate) fn parse_metainfo_path_fast(
     path: &str,
     options: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<PyObject> {
-    let options = ParseOptions::from_py(options)?;
-    let meta = build_meta_path(path, &options)?;
+    let options = ParseOptions::from_py_cached(options)?;
+    let meta = build_meta_path(path, options.as_ref())?;
     meta_to_py(py, &meta)
 }
 
@@ -443,19 +459,26 @@ pub(crate) fn find_metainfo_fast(py: Python<'_>, title: &str) -> PyResult<PyObje
 }
 
 impl ParseOptions {
-    /// 从 Python 字典读取 Rust 解析所需配置，避免 Rust 层访问数据库或 settings。
-    fn from_py(options: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+    /// 按 Python 配置字典对象身份缓存解析配置，避免每个标题重复跨语言解包。
+    fn from_py_cached(options: Option<&Bound<'_, PyDict>>) -> PyResult<Arc<Self>> {
         let Some(options) = options else {
-            return Ok(Self {
+            return Ok(Arc::new(Self {
                 custom_words: Vec::new(),
                 media_exts: HashSet::new(),
-                release_groups: default_release_groups(),
+                release_groups: String::new(),
                 customization_patterns: Vec::new(),
-            });
+                streaming_platforms: Arc::new(HashMap::new()),
+            }));
         };
-        Ok(Self {
-            custom_words: get_string_list(options, "custom_words")?,
-            media_exts: get_string_list(options, "media_exts")?
+        let cache_key = options.as_ptr() as usize;
+        if let Ok(guard) = PARSE_OPTIONS_CACHE.lock() {
+            if let Some(cached) = guard.get(&cache_key) {
+                return Ok(cached.clone());
+            }
+        }
+        let parsed = Arc::new(Self {
+            custom_words: get_config_string_list(options, "custom_words")?,
+            media_exts: get_config_string_list(options, "media_exts")?
                 .into_iter()
                 .map(|item| item.to_lowercase())
                 .collect(),
@@ -465,42 +488,45 @@ impl ParseOptions {
                 .map(|value| value.extract::<String>())
                 .transpose()?
                 .filter(|value| !value.is_empty())
-                .unwrap_or_else(default_release_groups),
-            customization_patterns: get_string_list(options, "customization")?,
-        })
+                .unwrap_or_default(),
+            customization_patterns: get_config_string_list(options, "customization")?,
+            streaming_platforms: get_streaming_platforms(options)?,
+        });
+        if let Ok(mut guard) = PARSE_OPTIONS_CACHE.lock() {
+            guard.insert(cache_key, parsed.clone());
+        }
+        Ok(parsed)
     }
 }
 
-/// 读取 Python 字典中的字符串列表。
-fn get_string_list(options: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<String>> {
-    let Some(value) = options.get_item(key)? else {
-        return Ok(Vec::new());
+/// 从 Python 传入的流媒体平台表构建查询映射，避免 Rust 里重复维护默认列表。
+fn get_streaming_platforms(options: &Bound<'_, PyDict>) -> PyResult<Arc<HashMap<String, String>>> {
+    let mut result = HashMap::new();
+    let Some(value) = options.get_item("streaming_platforms")? else {
+        return Ok(Arc::new(result));
     };
     if value.is_none() {
-        return Ok(Vec::new());
+        return Ok(Arc::new(result));
     }
-    if let Ok(list) = value.downcast::<PyList>() {
-        let mut result = Vec::new();
-        for item in list.iter() {
-            let text = item.extract::<String>()?;
-            if !text.is_empty() {
-                result.push(text);
-            }
+    let dict = value.downcast::<PyDict>()?;
+    let cache_key = dict.as_ptr() as usize;
+    if let Ok(guard) = STREAMING_PLATFORM_CACHE.lock() {
+        if let Some(cached) = guard.get(&cache_key) {
+            return Ok(cached.clone());
         }
-        return Ok(result);
     }
-    if let Ok(text) = value.extract::<String>() {
-        return Ok(text
-            .replace('\n', ";")
-            .replace('|', ";")
-            .split(';')
-            .filter_map(|item| {
-                let item = item.trim();
-                (!item.is_empty()).then(|| item.to_string())
-            })
-            .collect());
+    for (key, value) in dict.iter() {
+        let key = key.str()?.to_str()?.to_uppercase();
+        let value = value.str()?.to_str()?.to_string();
+        if !key.is_empty() && !value.is_empty() {
+            result.insert(key, value);
+        }
     }
-    Ok(Vec::new())
+    let result = Arc::new(result);
+    if let Ok(mut guard) = STREAMING_PLATFORM_CACHE.lock() {
+        guard.insert(cache_key, result.clone());
+    }
+    Ok(result)
 }
 
 /// 构建标题入口的完整元信息。
@@ -541,6 +567,7 @@ fn build_meta_info(
                     media_exts: options.media_exts.clone(),
                     release_groups: options.release_groups.clone(),
                     customization_patterns: options.customization_patterns.clone(),
+                    streaming_platforms: options.streaming_platforms.clone(),
                 },
                 false,
             )?;
@@ -1024,7 +1051,13 @@ fn parse_video(
             init_resource_type(&mut meta, &mut state, &current);
         }
         if state.continue_flag {
-            init_web_source(&mut meta, &mut state, &current, &mut tokens);
+            init_web_source(
+                &mut meta,
+                &mut state,
+                &current,
+                &mut tokens,
+                &options.streaming_platforms,
+            );
         }
         if state.continue_flag {
             init_video_encode(&mut meta, &mut state, &current);
@@ -1844,13 +1877,12 @@ fn init_web_source(
     state: &mut VideoState,
     token: &str,
     tokens: &mut TokenCursor,
+    streaming_platforms: &HashMap<String, String>,
 ) {
     if meta_name(meta).is_none() {
         return;
     }
-    let mut platform_name = STREAMING_PLATFORM_LOOKUP
-        .get(&token.to_uppercase())
-        .cloned();
+    let mut platform_name = streaming_platforms.get(&token.to_uppercase()).cloned();
     let mut query_range = 1usize;
     let prev_token = state
         .index
@@ -1869,7 +1901,7 @@ fn init_web_source(
                 } else {
                     format!("{adjacent}{separator}{token}")
                 };
-                if let Some(name) = STREAMING_PLATFORM_LOOKUP.get(&combined.to_uppercase()) {
+                if let Some(name) = streaming_platforms.get(&combined.to_uppercase()) {
                     platform_name = Some(name.clone());
                     query_range = 2;
                     if is_next {
@@ -3059,152 +3091,6 @@ fn match_customization(title: &str, patterns: &[String]) -> Option<String> {
         }
     }
     (!unique.is_empty()).then(|| unique.into_values().collect::<Vec<_>>().join("@"))
-}
-
-/// 按正则文本缓存动态配置正则，避免每个标题重复编译长规则。
-fn cached_regex(cache: &Lazy<Mutex<HashMap<String, Regex>>>, pattern: &str) -> Option<Regex> {
-    if let Ok(guard) = cache.lock() {
-        if let Some(regex) = guard.get(pattern) {
-            return Some(regex.clone());
-        }
-    }
-    let regex = Regex::new(pattern).ok()?;
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(pattern.to_string(), regex.clone());
-    }
-    Some(regex)
-}
-
-/// 默认发布组正则，来自 ReleaseGroupsMatcher.RELEASE_GROUPS。
-fn default_release_groups() -> String {
-    vec![
-        "FF(?:(?:A|WE)B|CD|E(?:DU|B)|TV)",
-        "Audies",
-        "AD(?:Audio|E(?:book|)|Music|Web)",
-        "BeiTai",
-        "Bts(?:CHOOL|HD|PAD|TV)",
-        "Zone",
-        "CHD(?:Bits|PAD|(?:|HK)TV|WEB|)",
-        "StBOX",
-        "OneHD",
-        "Lee",
-        "xiaopie",
-        "(?:(?:iNT|(?:HALFC|Mini(?:S|H|FH)D))-|)TLF",
-        "(?:DG|GBWE)B",
-        "Hares(?:(?:M|T)V|Web|)",
-        "HDA(?:pad|rea|TV)",
-        "EPiC",
-        "HDC(?:hina|TV|)",
-        "k9611",
-        "tudou",
-        "iHD",
-        "D(?:ream|BTV)",
-        "(?:HD|QHstudI)o",
-        "beAst(?:TV|)",
-        "HDH(?:ome|Pad|TV|WEB|)",
-        "HDPT(?:Web|)",
-        "HDS(?:ky|TV|Pad|WEB|)",
-        "AQLJ",
-        "HDZ(?:one|)",
-        "HHWEB",
-        "HTPT",
-        "FRDS",
-        "Yumi",
-        "cXcY",
-        "L(?:eague(?:(?:C|H)D|(?:M|T)V|NF|WEB)|HD)",
-        "i18n",
-        "CiNT",
-        "MTeam(?:TV|)",
-        "MPAD",
-        "MWeb",
-        "Our(?:Bits|TV)",
-        "FLTTH",
-        "Ao",
-        "PbK",
-        "MGs",
-        "iLove(?:HD|TV)",
-        "Panda",
-        "AilMWeb",
-        "PiGo(?:NF|(?:H|WE)B)",
-        "PTer(?:DIY|Game|(?:M|T)V|WEB|)",
-        "PTH(?:Audio|eBook|music|ome|tv|WEB|)",
-        "PTsbao",
-        "OPS",
-        "F(?:Fans(?:AIeNcE|BD|D(?:VD|IY)|TV|WEB)|HDMv)",
-        "SGXT",
-        "PuTao",
-        "CMCT(?:V|)",
-        "Shark(?:WEB|DIY|TV|MV|)",
-        "TJUPT",
-        "TTG",
-        "WiKi",
-        "NGB",
-        "DoA",
-        "(?:ARi|ExRE)N",
-        "B(?:MDru|eyondHD|TN)",
-        "C(?:fandora|trlhd|MRG)",
-        "DON",
-        "EVO",
-        "FLUX",
-        "HONE(?:yG|)",
-        "N(?:oGroup|T(?:b|G))",
-        "PandaMoon",
-        "SMURF",
-        "T(?:EPES|aengoo|rollHD )",
-        "ANi",
-        "HYSUB",
-        "KTXP",
-        "LoliHouse",
-        "MCE",
-        "Nekomoe kissaten",
-        "SweetSub",
-        "MingY",
-        "(?:Lilith|NC)-Raws",
-        "织梦字幕组",
-        "枫叶字幕组",
-        "猎户手抄部",
-        "喵萌奶茶屋",
-        "漫猫字幕社",
-        "霜庭云花Sub",
-        "北宇治字幕组",
-        "氢气烤肉架",
-        "云歌字幕组",
-        "萌樱字幕组",
-        "极影字幕社",
-        "悠哈璃羽字幕社",
-        "❀拨雪寻春❀",
-        "沸羊羊(?:制作|字幕组)",
-        "(?:桜|樱)都字幕组",
-        "FROG(?:E|Web|)",
-        "UB(?:its|WEB|TV)",
-    ]
-    .join("|")
-}
-
-/// 构建常用流媒体平台查询表。
-fn streaming_platform_lookup() -> HashMap<String, String> {
-    let pairs = [
-        ("AMZN", "Amazon"),
-        ("NF", "Netflix"),
-        ("ATVP", "Apple TV+"),
-        ("DSNP", "Disney+"),
-        ("PMTP", "Paramount+"),
-        ("HMAX", "Max"),
-        ("HULU", "Hulu Networks"),
-        ("CR", "Crunchyroll"),
-        ("Baha", "Baha"),
-        ("BG", "B-Global"),
-        ("HBO", "HBO"),
-        ("CRAV", "Crave"),
-        ("PCOK", "Peacock"),
-        ("HMAX", "Max"),
-    ];
-    let mut map = HashMap::new();
-    for (short, full) in pairs {
-        map.insert(short.to_uppercase(), full.to_string());
-        map.insert(full.to_uppercase(), full.to_string());
-    }
-    map
 }
 
 /// 将 Rust 元信息转换为 Python dict。

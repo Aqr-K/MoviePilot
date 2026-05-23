@@ -39,6 +39,31 @@ def parse_filter_rule(expression: str) -> Optional[list]:
         return None
 
 
+def filter_torrents(
+        groups: list,
+        torrent_list: list,
+        rule_set: dict,
+        mediainfo=None,
+        metainfo_options: Optional[dict] = None,
+) -> list:
+    """
+    使用 Rust 执行完整种子过滤入口，返回原列表下标和优先级。
+    """
+    if not _moviepilot_rust:
+        raise RuntimeError(f"Rust 扩展不可用，无法执行种子过滤: {_import_error}")
+    try:
+        return _moviepilot_rust.filter_torrents_fast(
+            groups,
+            torrent_list,
+            rule_set,
+            mediainfo,
+            metainfo_options or {},
+        )
+    except BaseException as err:
+        _raise_non_rust_panic(err)
+        raise
+
+
 def parse_indexer_torrents(
         html_text: str,
         domain: str,

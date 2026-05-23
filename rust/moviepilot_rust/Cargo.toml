@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anitomy-pure = "0.1"
+fancy-regex = "0.14"
 inputx-pinyin = "1.0.2"
 minijinja = "2.20"
 chrono = "0.4"

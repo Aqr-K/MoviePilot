@@ -25,8 +25,9 @@ static HAS_SELECTOR_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#":has\(\s*(?:"([^"]+)"|'([^']+)'|([^)]*))\s*\)"#).unwrap());
 static TABLE_DIRECT_TR_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"\b(table[^>,]*?)\s*>\s*(tr(?:[^\s>,]*)?)"#).unwrap());
-static EN_ELAPSED_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(\d+)\s*(second|minute|hour|day|week|month|year)s?\s*ago").unwrap());
+static EN_ELAPSED_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(\d+)\s*(second|minute|hour|day|week|month|year)s?\s*ago").unwrap()
+});
 const OUTPUT_FIELDS: &[(&str, &str)] = &[
     ("title", "title"),
     ("description", "description"),
@@ -44,12 +45,33 @@ const OUTPUT_FIELDS: &[(&str, &str)] = &[
 
 struct FieldSpec<'py> {
     name: String,
-    config: Bound<'py, PyDict>,
+    text_template: Option<String>,
+    default_value: Option<String>,
+    filters: Option<Bound<'py, PyAny>>,
+    query: Option<QuerySpec>,
+    case_selectors: Vec<(SelectorPlan, f64)>,
 }
 
 enum RowParseResult {
     Empty,
     Item(PyObject),
+}
+
+struct QuerySpec {
+    selector: SelectorPlan,
+    attribute: Option<String>,
+    remove_selectors: Vec<Selector>,
+    contents: Option<i64>,
+    index: Option<i64>,
+}
+
+enum SelectorPlan {
+    Direct(Selector),
+    Has {
+        base: Selector,
+        inner: Selector,
+        suffix: Option<Selector>,
+    },
 }
 
 /// 批量解析普通配置 indexer 页面，优先在 Rust 内覆盖站点配置语义。
@@ -76,8 +98,12 @@ pub(crate) fn parse_indexer_torrents_fast(
     };
     let result = PyList::empty(py);
     let field_specs = build_field_specs(fields)?;
+    let field_map = field_specs
+        .iter()
+        .map(|field| (field.name.as_str(), field))
+        .collect::<HashMap<&str, &FieldSpec<'_>>>();
     for row in rows.into_iter().take(result_num) {
-        match parse_indexer_row(py, row, domain, &field_specs, category)? {
+        match parse_indexer_row(py, row, domain, &field_map, category)? {
             RowParseResult::Empty => {}
             RowParseResult::Item(item) => result.append(item)?,
         }
@@ -95,12 +121,52 @@ fn build_field_specs<'py>(fields: &Bound<'py, PyDict>) -> PyResult<Vec<FieldSpec
         let Ok(config) = value.downcast_into::<PyDict>() else {
             continue;
         };
+        let filters = config.get_item("filters")?.filter(|value| !value.is_none());
         specs.push(FieldSpec {
             name: key.extract::<String>()?,
-            config,
+            text_template: get_optional_string(&config, "text")?,
+            default_value: get_default_value(&config)?,
+            filters,
+            query: build_query_spec(&config)?,
+            case_selectors: build_case_selectors(&config)?,
         });
     }
     Ok(specs)
+}
+
+/// 预编译字段选择器和静态取值参数，避免每行重复读取 Python 配置。
+fn build_query_spec(selector_config: &Bound<'_, PyDict>) -> PyResult<Option<QuerySpec>> {
+    let Some(selector_text) = get_selector_text(selector_config)? else {
+        return Ok(None);
+    };
+    let Some(selector) = parse_selector_plan(&selector_text) else {
+        return Ok(None);
+    };
+    Ok(Some(QuerySpec {
+        selector,
+        attribute: get_optional_string(selector_config, "attribute")?,
+        remove_selectors: parse_remove_selectors(selector_config)?,
+        contents: get_optional_i64(selector_config, "contents")?,
+        index: get_optional_i64(selector_config, "index")?,
+    }))
+}
+
+/// 预编译优惠字段的 case selector，匹配失败时仍按原语义回落到 1.0。
+fn build_case_selectors(selector_config: &Bound<'_, PyDict>) -> PyResult<Vec<(SelectorPlan, f64)>> {
+    let Some(case_obj) = selector_config.get_item("case")? else {
+        return Ok(Vec::new());
+    };
+    let Ok(case_dict) = case_obj.downcast::<PyDict>() else {
+        return Ok(Vec::new());
+    };
+    let mut selectors = Vec::new();
+    for (case_selector_obj, value) in case_dict.iter() {
+        let case_selector = case_selector_obj.extract::<String>()?;
+        if let Some(selector) = parse_selector_plan(&case_selector) {
+            selectors.push((selector, value.extract::<f64>().unwrap_or(1.0)));
+        }
+    }
+    Ok(selectors)
 }
 
 /// 解析单行种子信息，覆盖普通配置站点的主字段抽取流程。
@@ -108,34 +174,44 @@ fn parse_indexer_row(
     py: Python<'_>,
     row: ElementRef<'_>,
     domain: &str,
-    field_specs: &[FieldSpec<'_>],
+    field_map: &HashMap<&str, &FieldSpec<'_>>,
     category: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<RowParseResult> {
     let output = PyDict::new(py);
-    let field_map = field_specs
-        .iter()
-        .map(|field| (field.name.as_str(), field))
-        .collect::<HashMap<&str, &FieldSpec<'_>>>();
     let mut cache = BTreeMap::new();
     let mut resolving = HashSet::new();
 
-    if let Some(value) = eval_field_by_name(row, &field_map, "details", &mut cache, &mut resolving)? {
+    if let Some(value) = eval_field_by_name(row, field_map, "details", &mut cache, &mut resolving)?
+    {
         if !value.is_empty() {
             output.set_item("page_url", normalize_site_link(domain, &value, true))?;
         }
     }
-    if let Some(value) = eval_field_by_name(row, &field_map, "download", &mut cache, &mut resolving)? {
+    if let Some(value) = eval_field_by_name(row, field_map, "download", &mut cache, &mut resolving)?
+    {
         if !value.is_empty() {
             output.set_item("enclosure", normalize_site_link(domain, &value, false))?;
         }
     }
-    if let Some(value) = eval_factor_field(row, &field_map, "downloadvolumefactor", &mut cache, &mut resolving)? {
+    if let Some(value) = eval_factor_field(
+        row,
+        field_map,
+        "downloadvolumefactor",
+        &mut cache,
+        &mut resolving,
+    )? {
         output.set_item("downloadvolumefactor", value)?;
     }
-    if let Some(value) = eval_factor_field(row, &field_map, "uploadvolumefactor", &mut cache, &mut resolving)? {
+    if let Some(value) = eval_factor_field(
+        row,
+        field_map,
+        "uploadvolumefactor",
+        &mut cache,
+        &mut resolving,
+    )? {
         output.set_item("uploadvolumefactor", value)?;
     }
-    if let Some(value) = eval_pubdate_field(row, &field_map, &mut cache, &mut resolving)? {
+    if let Some(value) = eval_pubdate_field(row, field_map, &mut cache, &mut resolving)? {
         if !value.is_empty() {
             output.set_item("pubdate", value)?;
         }
@@ -144,32 +220,44 @@ fn parse_indexer_row(
     for (source_key, target_key) in OUTPUT_FIELDS {
         match *source_key {
             "labels" => {
-                parse_labels_field(py, row, &field_map, &output)?;
+                parse_labels_field(py, row, field_map, &output)?;
             }
             "hr" => {
-                if let Some(value) = eval_hr_field(row, &field_map)? {
+                if let Some(value) = eval_hr_field(row, field_map)? {
                     output.set_item(*target_key, value)?;
                 }
             }
             "category" => {
-                if let Some(value) = eval_field_by_name(row, &field_map, source_key, &mut cache, &mut resolving)? {
+                if let Some(value) =
+                    eval_field_by_name(row, field_map, source_key, &mut cache, &mut resolving)?
+                {
                     output.set_item(*target_key, map_category_value(&value, category)?)?;
                 }
             }
             "size" => {
-                if let Some(value) = eval_field_by_name(row, &field_map, source_key, &mut cache, &mut resolving)? {
-                    output.set_item(*target_key, parse_filesize_text(value.replace('\n', "").trim()))?;
+                if let Some(value) =
+                    eval_field_by_name(row, field_map, source_key, &mut cache, &mut resolving)?
+                {
+                    output.set_item(
+                        *target_key,
+                        parse_filesize_text(value.replace('\n', "").trim()),
+                    )?;
                 }
             }
             "leechers" | "seeders" | "grabs" => {
-                if let Some(value) = eval_field_by_name(row, &field_map, source_key, &mut cache, &mut resolving)? {
+                if let Some(value) =
+                    eval_field_by_name(row, field_map, source_key, &mut cache, &mut resolving)?
+                {
                     output.set_item(*target_key, parse_peer_count(&value))?;
                 }
             }
             _ => {
-                if let Some(value) = eval_field_by_name(row, &field_map, source_key, &mut cache, &mut resolving)? {
+                if let Some(value) =
+                    eval_field_by_name(row, field_map, source_key, &mut cache, &mut resolving)?
+                {
                     if !value.is_empty() {
-                        output.set_item(*target_key, value.replace('\n', " ").trim().to_string())?;
+                        output
+                            .set_item(*target_key, value.replace('\n', " ").trim().to_string())?;
                     }
                 }
             }
@@ -216,32 +304,27 @@ fn eval_field(
     cache: &mut BTreeMap<String, String>,
     resolving: &mut HashSet<String>,
 ) -> PyResult<Option<String>> {
-    let mut value = if let Some(template) = get_optional_string(&spec.config, "text")? {
-        Some(render_field_template(row, field_map, &template, cache, resolving)?)
+    let mut value = if let Some(template) = spec.text_template.as_deref() {
+        Some(render_field_template(
+            row, field_map, &template, cache, resolving,
+        )?)
     } else {
-        safe_query(row, &spec.config)?
+        safe_query(row, spec.query.as_ref())
     };
 
     if let Some(current) = value.as_deref() {
         if contains_jinja_syntax(current) {
             value = Some(render_embedded_value(
-                row,
-                field_map,
-                &spec.name,
-                current,
-                cache,
-                resolving,
+                row, field_map, &spec.name, current, cache, resolving,
             )?);
         }
     }
-    if let Some(filters) = spec.config.get_item("filters")? {
-        if !filters.is_none() {
-            value = apply_text_filters(value.unwrap_or_default(), &filters)?;
-        }
+    if let Some(filters) = spec.filters.as_ref() {
+        value = apply_text_filters(value.unwrap_or_default(), filters)?;
     }
     if value.as_deref().map(str::is_empty).unwrap_or(true) {
-        if let Some(default_value) = get_default_value(&spec.config)? {
-            value = Some(default_value);
+        if let Some(default_value) = spec.default_value.as_ref() {
+            value = Some(default_value.clone());
         }
     }
     Ok(value)
@@ -318,12 +401,10 @@ fn eval_factor_field(
     let Some(spec) = field_map.get(key).copied() else {
         return Ok(None);
     };
-    if let Some(case_obj) = spec.config.get_item("case")? {
-        let case_dict = case_obj.downcast::<PyDict>()?;
-        for (case_selector_obj, value) in case_dict.iter() {
-            let case_selector = case_selector_obj.extract::<String>()?;
-            if selector_exists(row, &case_selector)? {
-                return Ok(Some(value.extract::<f64>().unwrap_or(1.0)));
+    if !spec.case_selectors.is_empty() {
+        for (selector, value) in &spec.case_selectors {
+            if selector_exists_with_plan(row, selector) {
+                return Ok(Some(*value));
             }
         }
         return Ok(Some(1.0));
@@ -350,15 +431,16 @@ fn parse_labels_field(
     let Some(spec) = field_map.get("labels").copied() else {
         return Ok(());
     };
-    if !spec.config.contains("selector")? {
+    let Some(query) = spec.query.as_ref() else {
         output.set_item("labels", PyList::empty(py))?;
         return Ok(());
-    }
+    };
     let labels = PyList::empty(py);
-    if let Some(values) = query_all_values(row, &spec.config)? {
-        for value in values.into_iter().filter(|item| !item.is_empty()) {
-            labels.append(value)?;
-        }
+    for value in query_all_values(row, query)
+        .into_iter()
+        .filter(|item| !item.is_empty())
+    {
+        labels.append(value)?;
     }
     output.set_item("labels", labels)?;
     Ok(())
@@ -372,10 +454,10 @@ fn eval_hr_field(
     let Some(spec) = field_map.get("hr").copied() else {
         return Ok(None);
     };
-    let Some(selector_text) = get_selector_text(&spec.config)? else {
+    let Some(query) = spec.query.as_ref() else {
         return Ok(Some(false));
     };
-    Ok(Some(selector_exists(row, &selector_text)?))
+    Ok(Some(selector_exists_with_plan(row, &query.selector)))
 }
 
 /// 将站点分类 ID 映射为 MoviePilot 的媒体类型中文值。
@@ -418,7 +500,9 @@ fn eval_pubdate_field(
         if is_standard_datetime(&normalized) || !field_map.contains_key("date_added") {
             return Ok(Some(normalized));
         }
-        if let Some(date_added) = eval_field_by_name(row, field_map, "date_added", cache, resolving)? {
+        if let Some(date_added) =
+            eval_field_by_name(row, field_map, "date_added", cache, resolving)?
+        {
             let fallback = normalize_pubdate_text(&date_added);
             if is_standard_datetime(&fallback) {
                 return Ok(Some(fallback));
@@ -426,8 +510,10 @@ fn eval_pubdate_field(
         }
         return Ok(Some(normalized));
     }
-    Ok(eval_field_by_name(row, field_map, "date_added", cache, resolving)?
-        .map(|value| normalize_pubdate_text(&value)))
+    Ok(
+        eval_field_by_name(row, field_map, "date_added", cache, resolving)?
+            .map(|value| normalize_pubdate_text(&value)),
+    )
 }
 
 /// 规范化发布时间文本为 MoviePilot 期望的字符串格式。
@@ -466,9 +552,15 @@ fn select_site_elements<'a>(
     root: ElementRef<'a>,
     selector_text: &str,
 ) -> Option<Vec<ElementRef<'a>>> {
+    let plan = parse_selector_plan(selector_text)?;
+    Some(select_site_elements_with_plan(root, &plan))
+}
+
+/// 将站点选择器预编译为可复用计划，覆盖 PyQuery 的 :has("selector") 写法。
+fn parse_selector_plan(selector_text: &str) -> Option<SelectorPlan> {
     let Some(captures) = HAS_SELECTOR_RE.captures(selector_text) else {
         let selector = parse_css_selector(selector_text)?;
-        return Some(root.select(&selector).collect());
+        return Some(SelectorPlan::Direct(selector));
     };
     let matched = captures.get(0)?;
     let prefix = selector_text[..matched.start()].trim();
@@ -481,19 +573,45 @@ fn select_site_elements<'a>(
         .trim();
     let base_selector = parse_css_selector(prefix)?;
     let has_selector = parse_css_selector(inner)?;
-    let bases = root
-        .select(&base_selector)
-        .filter(|element| element.select(&has_selector).next().is_some());
-    if suffix.is_empty() {
-        return Some(bases.collect());
+    let suffix = if suffix.is_empty() {
+        None
+    } else {
+        let suffix_selector_text = suffix.trim_start_matches('>').trim();
+        Some(parse_css_selector(suffix_selector_text)?)
+    };
+    Some(SelectorPlan::Has {
+        base: base_selector,
+        inner: has_selector,
+        suffix,
+    })
+}
+
+/// 执行预编译 selector 计划，避免每个字段每行重复解析 CSS。
+fn select_site_elements_with_plan<'a>(
+    root: ElementRef<'a>,
+    plan: &SelectorPlan,
+) -> Vec<ElementRef<'a>> {
+    match plan {
+        SelectorPlan::Direct(selector) => root.select(selector).collect(),
+        SelectorPlan::Has {
+            base,
+            inner,
+            suffix,
+        } => {
+            let bases = root
+                .select(base)
+                .filter(|element| element.select(inner).next().is_some());
+            if let Some(suffix) = suffix {
+                let mut values = Vec::new();
+                for base in bases {
+                    values.extend(base.select(suffix));
+                }
+                values
+            } else {
+                bases.collect()
+            }
+        }
     }
-    let suffix_selector_text = suffix.trim_start_matches('>').trim();
-    let suffix_selector = parse_css_selector(suffix_selector_text)?;
-    let mut values = Vec::new();
-    for base in bases {
-        values.extend(base.select(&suffix_selector));
-    }
-    Some(values)
 }
 
 /// 将 PyQuery 扩展选择器转换为 scraper 可识别的 CSS selector 形式。
@@ -520,35 +638,24 @@ fn expand_table_direct_tr_selector(selector_text: &str) -> String {
 }
 
 /// 执行 selector 查询并返回第一个符合 index/contents 规则的文本。
-fn safe_query(row: ElementRef<'_>, selector_config: &Bound<'_, PyDict>) -> PyResult<Option<String>> {
-    let Some(values) = query_all_values(row, selector_config)? else {
-        return Ok(None);
-    };
-    Ok(select_indexed_value(values, selector_config))
+fn safe_query(row: ElementRef<'_>, query: Option<&QuerySpec>) -> Option<String> {
+    let query = query?;
+    let values = query_all_values(row, query);
+    select_indexed_value(values, query)
 }
 
 /// 查询 selector 的全部文本或属性值。
-fn query_all_values(
-    row: ElementRef<'_>,
-    selector_config: &Bound<'_, PyDict>,
-) -> PyResult<Option<Vec<String>>> {
-    let Some(selector_text) = get_selector_text(selector_config)? else {
-        return Ok(None);
-    };
-    let Some(elements) = select_site_elements(row, &selector_text) else {
-        return Ok(None);
-    };
-    let attribute = get_optional_string(selector_config, "attribute")?;
-    let remove_selectors = parse_remove_selectors(selector_config)?;
+fn query_all_values(row: ElementRef<'_>, query: &QuerySpec) -> Vec<String> {
+    let elements = select_site_elements_with_plan(row, &query.selector);
     let mut values = Vec::new();
     for element in elements {
-        if let Some(attribute) = attribute.as_deref() {
+        if let Some(attribute) = query.attribute.as_deref() {
             values.push(element.value().attr(attribute).unwrap_or("").to_string());
         } else {
-            values.push(normalize_element_text(element, &remove_selectors));
+            values.push(normalize_element_text(element, &query.remove_selectors));
         }
     }
-    Ok(Some(values))
+    values
 }
 
 /// 解析 remove 配置，支持逗号分隔的 CSS 选择器列表。
@@ -586,20 +693,17 @@ fn get_selector_text(selector_config: &Bound<'_, PyDict>) -> PyResult<Option<Str
 }
 
 /// 对查询结果应用 contents/index 规则。
-fn select_indexed_value(
-    values: Vec<String>,
-    selector_config: &Bound<'_, PyDict>,
-) -> Option<String> {
+fn select_indexed_value(values: Vec<String>, query: &QuerySpec) -> Option<String> {
     if values.is_empty() {
         return None;
     }
-    if let Ok(Some(contents)) = get_optional_i64(selector_config, "contents") {
+    if let Some(contents) = query.contents {
         if let Some(first) = values.first() {
             let lines: Vec<&str> = first.split('\n').collect();
             return pick_indexed_item(&lines, contents).map(|item| item.to_string());
         }
     }
-    if let Ok(Some(index)) = get_optional_i64(selector_config, "index") {
+    if let Some(index) = query.index {
         return pick_indexed_item(&values, index).cloned();
     }
     values.first().cloned()
@@ -638,7 +742,8 @@ fn apply_text_filters(mut current: String, filters: &Bound<'_, PyAny>) -> PyResu
                     continue;
                 }
                 let pattern = args_list.get_item(0)?.extract::<String>()?;
-                let group_index = extract_i64(&args_list.get_item(args_list.len() - 1)?)?.unwrap_or(0);
+                let group_index =
+                    extract_i64(&args_list.get_item(args_list.len() - 1)?)?.unwrap_or(0);
                 let Ok(regex) = Regex::new(&pattern) else {
                     continue;
                 };
@@ -676,7 +781,9 @@ fn apply_text_filters(mut current: String, filters: &Bound<'_, PyAny>) -> PyResu
                     continue;
                 }
                 let from = args_list.get_item(0)?.extract::<String>()?;
-                let to = args_list.get_item(args_list.len() - 1)?.extract::<String>()?;
+                let to = args_list
+                    .get_item(args_list.len() - 1)?
+                    .extract::<String>()?;
                 current = current.replace(&from, &to);
             }
             Some("dateparse") => {
@@ -804,7 +911,11 @@ fn parse_english_elapsed_date(value: &str) -> Option<String> {
         "year" => Duration::days(amount * 365),
         _ => return None,
     };
-    Some((Local::now() - duration).format("%Y-%m-%d %H:%M:%S").to_string())
+    Some(
+        (Local::now() - duration)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+    )
 }
 
 /// 将文件大小文本转换为字节数，供 Rust HTML 解析内部共用。
@@ -869,7 +980,10 @@ fn should_skip_text_node(
         if element == root {
             return false;
         }
-        if remove_selectors.iter().any(|selector| selector.matches(&element)) {
+        if remove_selectors
+            .iter()
+            .any(|selector| selector.matches(&element))
+        {
             return true;
         }
         parent = element.parent().and_then(ElementRef::wrap);
@@ -877,14 +991,12 @@ fn should_skip_text_node(
     false
 }
 
-/// 判断 row 内是否存在指定 selector。
-fn selector_exists(row: ElementRef<'_>, selector_text: &str) -> PyResult<bool> {
-    if selector_text == "*" {
-        return Ok(true);
-    }
-    Ok(select_site_elements(row, selector_text)
-        .map(|elements| !elements.is_empty())
-        .unwrap_or(false))
+/// 判断 row 内是否存在预编译 selector 计划匹配的元素。
+fn selector_exists_with_plan(row: ElementRef<'_>, selector: &SelectorPlan) -> bool {
+    select_site_elements_with_plan(row, selector)
+        .into_iter()
+        .next()
+        .is_some()
 }
 
 /// 拼接详情和下载链接。

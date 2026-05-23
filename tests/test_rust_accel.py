@@ -180,6 +180,7 @@ def _metainfo_options(custom_words=None):
         "media_exts": settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT,
         "release_groups": release_groups,
         "customization": customization,
+        "streaming_platforms": metainfo_module._rust_parse_options()["streaming_platforms"],
     }
 
 

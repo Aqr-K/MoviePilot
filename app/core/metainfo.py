@@ -1,4 +1,5 @@
 from pathlib import Path
+from functools import lru_cache
 from typing import Tuple, List, Optional
 
 import regex as re
@@ -123,12 +124,14 @@ def _build_meta_info(
     return meta
 
 
-def _rust_parse_options(custom_words: List[str] = None) -> dict:
+@lru_cache(maxsize=1)
+def _rust_default_parse_options() -> dict:
     """
-    收集 Rust Meta 解析所需的运行时配置，避免 Rust 层直接访问数据库和 settings。
+    缓存 Rust Meta 默认解析配置，避免热路径反复读取配置并复制流媒体平台大表。
     """
     from app.core.meta.customization import CustomizationMatcher
     from app.core.meta.releasegroup import ReleaseGroupsMatcher
+    from app.core.meta.streamingplatform import StreamingPlatforms
     from app.db.systemconfig_oper import SystemConfigOper
     from app.schemas.types import SystemConfigKey
 
@@ -144,15 +147,40 @@ def _rust_parse_options(custom_words: List[str] = None) -> dict:
     customization = CustomizationMatcher._normalize_customization(
         systemconfig.get(SystemConfigKey.Customization)
     )
-    words = custom_words
-    if words is None:
-        words = systemconfig.get(SystemConfigKey.CustomIdentifiers) or []
     return {
-        "custom_words": words or [],
+        "custom_words": systemconfig.get(SystemConfigKey.CustomIdentifiers) or [],
         "media_exts": settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT,
         "release_groups": release_groups,
         "customization": customization,
+        "streaming_platforms": StreamingPlatforms()._lookup_cache,
     }
+
+
+@lru_cache(maxsize=256)
+def _rust_custom_parse_options(custom_words: Tuple[str, ...]) -> dict:
+    """
+    缓存带自定义识别词的 Rust Meta 配置，避免同一组识别词重复构造配置对象。
+    """
+    options = dict(_rust_default_parse_options())
+    options["custom_words"] = list(custom_words)
+    return options
+
+
+def _rust_parse_options(custom_words: List[str] = None) -> dict:
+    """
+    收集 Rust Meta 解析所需的运行时配置，避免 Rust 层直接访问数据库和 settings。
+    """
+    if custom_words is None:
+        return _rust_default_parse_options()
+    return _rust_custom_parse_options(tuple(custom_words or []))
+
+
+def clear_rust_parse_options_cache() -> None:
+    """
+    清理 Rust Meta 默认解析配置缓存，供系统配置变更后重载使用。
+    """
+    _rust_default_parse_options.cache_clear()
+    _rust_custom_parse_options.cache_clear()
 
 
 def _meta_from_rust(parsed: dict) -> Optional[MetaBase]:

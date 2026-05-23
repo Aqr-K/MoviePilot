@@ -1,7 +1,8 @@
 import unittest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from app.core.context import TorrentInfo
+from app.core.context import MediaInfo, TorrentInfo
 from app.helper.torrent import TorrentHelper
 from app.modules.filter import FilterModule
 
@@ -63,6 +64,76 @@ class TorrentFilterTest(unittest.TestCase):
 
         self.assertEqual([torrent], filtered)
         self.assertEqual(100, torrent.pri_order)
+
+    def test_filter_torrents_keeps_sequential_rule_group_semantics(self):
+        module = FilterModule()
+        module.rulehelper = _RuleHelper(
+            [
+                SimpleNamespace(name="first", rule_string="HDR"),
+                SimpleNamespace(name="second", rule_string="FREE"),
+            ]
+        )
+        module.rule_set = {
+            "HDR": {"include": "HDR"},
+            "FREE": {"downloadvolumefactor": 0},
+        }
+        keep = TorrentInfo(title="Movie HDR WEB-DL", description="", downloadvolumefactor=0)
+        drop = TorrentInfo(title="Movie HDR WEB-DL", description="", downloadvolumefactor=1)
+
+        filtered = module.filter_torrents(rule_groups=["first", "second"], torrent_list=[keep, drop])
+
+        self.assertEqual([keep], filtered)
+        self.assertEqual(100, keep.pri_order)
+
+    def test_filter_torrents_supports_full_rule_fields_in_rust_entry(self):
+        module = _build_filter_module(
+            rule_string="TMDB & LABEL & SIZE & SEED & PUB & SITE",
+            rule_set={
+                "TMDB": {"tmdb": {"original_language": "zh,cn"}},
+                "LABEL": {"include": "官方", "match": ["labels"]},
+                "SIZE": {"size_range": "100-400"},
+                "SEED": {"seeders": "5"},
+                "PUB": {"publish_time": "0-120"},
+                "SITE": {"include": "Alpha", "match": ["site_name"]},
+            },
+        )
+        torrent = TorrentInfo(
+            site_name="Alpha",
+            title="Show S01E01-E02 1080p",
+            description="",
+            labels=["官方"],
+            size=600 * 1024 * 1024,
+            seeders=8,
+            pubdate=(datetime.now() - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        mediainfo = MediaInfo()
+        mediainfo.original_language = "zh"
+
+        filtered = module.filter_torrents(rule_groups=["test"], torrent_list=[torrent], mediainfo=mediainfo)
+
+        self.assertEqual([torrent], filtered)
+        self.assertEqual(100, torrent.pri_order)
+
+    def test_filter_torrents_uses_rust_entry_without_python_match_fallback(self):
+        module = _build_filter_module(
+            rule_string="KEEP",
+            rule_set={"KEEP": {"include": "Movie"}},
+        )
+
+        def fail_python_fallback(*_args, **_kwargs):
+            """
+            如果入口仍调用旧 Python 私有匹配逻辑，测试应立即失败。
+            """
+            raise AssertionError("Python fallback should not be called")
+
+        module._FilterModule__filter_torrents = fail_python_fallback
+
+        filtered = module.filter_torrents(
+            rule_groups=["test"],
+            torrent_list=[TorrentInfo(title="Movie", description="")],
+        )
+
+        self.assertEqual(1, len(filtered))
 
     def test_filter_torrent_keeps_extra_filter_semantics(self):
         torrent = TorrentInfo(

@@ -1,9 +1,11 @@
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{
+    DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Timelike, Utc,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use quick_xml::events::{BytesRef, BytesStart, Event};
-use quick_xml::name::QName;
 use quick_xml::Reader;
+use std::collections::HashMap;
 
 #[derive(Default)]
 struct RssItem {
@@ -35,8 +37,20 @@ pub(crate) fn parse_rss_items_fast(
 ) -> PyResult<Option<PyObject>> {
     let parsed = parse_rss_items(xml_text, max_items)?;
     let result = PyList::empty(py);
+    let datetime_mod = py.import("datetime")?;
+    let datetime_cls = datetime_mod.getattr("datetime")?;
+    let timezone_cls = datetime_mod.getattr("timezone")?;
+    let timedelta_cls = datetime_mod.getattr("timedelta")?;
+    let mut timezone_cache = HashMap::new();
     for item in parsed {
-        result.append(item_to_py(py, &item)?)?;
+        result.append(item_to_py(
+            py,
+            &item,
+            &datetime_cls,
+            &timezone_cls,
+            &timedelta_cls,
+            &mut timezone_cache,
+        )?)?;
     }
     Ok(Some(result.into()))
 }
@@ -45,7 +59,7 @@ pub(crate) fn parse_rss_items_fast(
 fn parse_rss_items(xml_text: &str, max_items: usize) -> PyResult<Vec<RssItem>> {
     let mut reader = Reader::from_str(xml_text);
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_items.min(1024));
     let mut current_item: Option<RssItem> = None;
     let mut item_depth = 0usize;
     let mut current_field: Option<(TextField, usize)> = None;
@@ -53,8 +67,9 @@ fn parse_rss_items(xml_text: &str, max_items: usize) -> PyResult<Vec<RssItem>> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
-                let local = local_name(event.name());
-                if current_item.is_none() && is_item_node(&local) {
+                let name = event.name();
+                let local = local_name(name.as_ref());
+                if current_item.is_none() && is_item_node(local) {
                     current_item = Some(RssItem::default());
                     item_depth = 1;
                     current_field = None;
@@ -63,25 +78,26 @@ fn parse_rss_items(xml_text: &str, max_items: usize) -> PyResult<Vec<RssItem>> {
 
                 if let Some(item) = current_item.as_mut() {
                     item_depth += 1;
-                    handle_start_field(&event, &local, item, item_depth, &mut current_field)?;
+                    handle_start_field(&event, local, item, item_depth, &mut current_field)?;
                 }
             }
             Ok(Event::Empty(event)) => {
-                let local = local_name(event.name());
+                let name = event.name();
+                let local = local_name(name.as_ref());
                 if let Some(item) = current_item.as_mut() {
-                    handle_empty_field(&event, &local, item)?;
+                    handle_empty_field(&event, local, item)?;
                 }
             }
             Ok(Event::Text(event)) => {
                 if let (Some(item), Some((field, _))) = (current_item.as_mut(), current_field) {
-                    let text = event.decode().map_err(to_py_value_error)?.to_string();
-                    append_text_field(item, field, &text);
+                    let text = event.decode().map_err(to_py_value_error)?;
+                    append_text_field(item, field, text.as_ref());
                 }
             }
             Ok(Event::CData(event)) => {
                 if let (Some(item), Some((field, _))) = (current_item.as_mut(), current_field) {
-                    let text = event.decode().map_err(to_py_value_error)?.to_string();
-                    append_text_field(item, field, &text);
+                    let text = event.decode().map_err(to_py_value_error)?;
+                    append_text_field(item, field, text.as_ref());
                 }
             }
             Ok(Event::GeneralRef(event)) => {
@@ -91,8 +107,9 @@ fn parse_rss_items(xml_text: &str, max_items: usize) -> PyResult<Vec<RssItem>> {
                 }
             }
             Ok(Event::End(event)) => {
-                let local = local_name(event.name());
-                if current_item.is_some() && item_depth == 1 && is_item_node(&local) {
+                let name = event.name();
+                let local = local_name(name.as_ref());
+                if current_item.is_some() && item_depth == 1 && is_item_node(local) {
                     if let Some(item) = current_item.take() {
                         if let Some(item) = finalize_item(item) {
                             results.push(item);
@@ -130,17 +147,17 @@ fn parse_rss_items(xml_text: &str, max_items: usize) -> PyResult<Vec<RssItem>> {
 /// 处理开始标签，记录当前需要采集文本的字段和链接属性。
 fn handle_start_field(
     event: &BytesStart<'_>,
-    local: &str,
+    local: &[u8],
     item: &mut RssItem,
     depth: usize,
     current_field: &mut Option<(TextField, usize)>,
 ) -> PyResult<()> {
-    if local == "enclosure" {
+    if local.eq_ignore_ascii_case(b"enclosure") {
         fill_enclosure(event, item)?;
         return Ok(());
     }
 
-    if local == "link" {
+    if local.eq_ignore_ascii_case(b"link") {
         fill_link_from_href(event, item)?;
     }
 
@@ -153,25 +170,39 @@ fn handle_start_field(
 }
 
 /// 处理空标签，覆盖 Atom 的 link href 和 RSS 的 enclosure。
-fn handle_empty_field(event: &BytesStart<'_>, local: &str, item: &mut RssItem) -> PyResult<()> {
-    match local {
-        "enclosure" => fill_enclosure(event, item)?,
-        "link" => fill_link_from_href(event, item)?,
-        _ => {}
+fn handle_empty_field(event: &BytesStart<'_>, local: &[u8], item: &mut RssItem) -> PyResult<()> {
+    if local.eq_ignore_ascii_case(b"enclosure") {
+        fill_enclosure(event, item)?;
+    } else if local.eq_ignore_ascii_case(b"link") {
+        fill_link_from_href(event, item)?;
     }
     Ok(())
 }
 
 /// 根据标签名和已采集状态选择当前文本字段。
-fn pick_text_field(local: &str, item: &RssItem) -> Option<TextField> {
-    match local {
-        "title" if item.title.is_empty() => Some(TextField::Title),
-        "description" | "summary" if item.description.is_empty() => Some(TextField::Description),
-        "link" if item.link.is_empty() => Some(TextField::Link),
-        "pubDate" | "published" | "updated" if item.pubdate.is_empty() => Some(TextField::Pubdate),
-        "creator" if item.nickname.is_empty() => Some(TextField::Nickname),
-        _ => None,
+fn pick_text_field(local: &[u8], item: &RssItem) -> Option<TextField> {
+    if local.eq_ignore_ascii_case(b"title") && item.title.is_empty() {
+        return Some(TextField::Title);
     }
+    if (local.eq_ignore_ascii_case(b"description") || local.eq_ignore_ascii_case(b"summary"))
+        && item.description.is_empty()
+    {
+        return Some(TextField::Description);
+    }
+    if local.eq_ignore_ascii_case(b"link") && item.link.is_empty() {
+        return Some(TextField::Link);
+    }
+    if (local.eq_ignore_ascii_case(b"pubDate")
+        || local.eq_ignore_ascii_case(b"published")
+        || local.eq_ignore_ascii_case(b"updated"))
+        && item.pubdate.is_empty()
+    {
+        return Some(TextField::Pubdate);
+    }
+    if local.eq_ignore_ascii_case(b"creator") && item.nickname.is_empty() {
+        return Some(TextField::Nickname);
+    }
+    None
 }
 
 /// 追加文本字段内容，兼容 CDATA 和带内联标签的描述。
@@ -266,7 +297,14 @@ fn finalize_item(mut item: RssItem) -> Option<RssItem> {
 }
 
 /// 将 Rust 条目转换为 Python dict，字段名保持与 RssHelper.parse 原返回一致。
-fn item_to_py(py: Python<'_>, item: &RssItem) -> PyResult<PyObject> {
+fn item_to_py(
+    py: Python<'_>,
+    item: &RssItem,
+    datetime_cls: &Bound<'_, PyAny>,
+    timezone_cls: &Bound<'_, PyAny>,
+    timedelta_cls: &Bound<'_, PyAny>,
+    timezone_cache: &mut HashMap<i32, PyObject>,
+) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     dict.set_item("title", &item.title)?;
     dict.set_item("enclosure", &item.enclosure)?;
@@ -274,7 +312,17 @@ fn item_to_py(py: Python<'_>, item: &RssItem) -> PyResult<PyObject> {
     dict.set_item("description", &item.description)?;
     dict.set_item("link", &item.link)?;
     if let Some(timestamp) = parse_pubdate_timestamp(&item.pubdate) {
-        dict.set_item("pubdate", py_datetime_from_timestamp(py, timestamp)?)?;
+        dict.set_item(
+            "pubdate",
+            py_datetime_from_timestamp(
+                py,
+                timestamp,
+                datetime_cls,
+                timezone_cls,
+                timedelta_cls,
+                timezone_cache,
+            )?,
+        )?;
     } else {
         dict.set_item("pubdate", "")?;
     }
@@ -285,13 +333,41 @@ fn item_to_py(py: Python<'_>, item: &RssItem) -> PyResult<PyObject> {
 }
 
 /// 将 Unix 时间戳转换为本地时区 Python datetime，匹配原 astimezone(tz=None) 语义。
-fn py_datetime_from_timestamp<'py>(py: Python<'py>, timestamp: i64) -> PyResult<Bound<'py, PyAny>> {
-    let datetime_mod = py.import("datetime")?;
-    let datetime_cls = datetime_mod.getattr("datetime")?;
-    let timezone_cls = datetime_mod.getattr("timezone")?;
-    let utc = timezone_cls.getattr("utc")?;
-    let utc_dt = datetime_cls.call_method1("fromtimestamp", (timestamp, utc))?;
-    utc_dt.call_method0("astimezone")
+fn py_datetime_from_timestamp<'py>(
+    py: Python<'py>,
+    timestamp: i64,
+    datetime_cls: &Bound<'py, PyAny>,
+    timezone_cls: &Bound<'py, PyAny>,
+    timedelta_cls: &Bound<'py, PyAny>,
+    timezone_cache: &mut HashMap<i32, PyObject>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let Some(local_dt) = Local
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .or_else(|| Local.timestamp_opt(timestamp, 0).earliest())
+    else {
+        return datetime_cls.call_method1("fromtimestamp", (timestamp,));
+    };
+    let offset_seconds = local_dt.offset().fix().local_minus_utc();
+    let tzinfo = match timezone_cache.get(&offset_seconds) {
+        Some(cached) => cached.clone_ref(py),
+        None => {
+            let delta = timedelta_cls.call1((0, offset_seconds))?;
+            let timezone = timezone_cls.call1((delta,))?.unbind();
+            timezone_cache.insert(offset_seconds, timezone.clone_ref(py));
+            timezone
+        }
+    };
+    datetime_cls.call1((
+        local_dt.year(),
+        local_dt.month(),
+        local_dt.day(),
+        local_dt.hour(),
+        local_dt.minute(),
+        local_dt.second(),
+        0,
+        tzinfo.bind(py),
+    ))
 }
 
 /// 解析 RSS/Atom 常见日期格式并返回时间戳。
@@ -365,17 +441,13 @@ fn local_timestamp(naive: NaiveDateTime) -> Option<i64> {
 }
 
 /// 判断当前标签是否为 RSS item 或 Atom entry。
-fn is_item_node(local: &str) -> bool {
-    matches!(local, "item" | "entry")
+fn is_item_node(local: &[u8]) -> bool {
+    local.eq_ignore_ascii_case(b"item") || local.eq_ignore_ascii_case(b"entry")
 }
 
 /// 提取 XML 名称的本地部分，用于兼容 dc:creator 这类命名空间字段。
-fn local_name(name: QName<'_>) -> String {
-    let raw = std::str::from_utf8(name.as_ref()).unwrap_or_default();
-    raw.rsplit_once(':')
-        .map(|(_, local)| local)
-        .unwrap_or(raw)
-        .to_string()
+fn local_name(raw: &[u8]) -> &[u8] {
+    raw.rsplit(|byte| *byte == b':').next().unwrap_or(raw)
 }
 
 /// 将 quick-xml 错误转换为 Python ValueError 交给 Python 包装层判断是否兜底。

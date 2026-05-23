@@ -17,6 +17,7 @@ fn is_available() -> bool {
 fn moviepilot_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_available, m)?)?;
     m.add_function(wrap_pyfunction!(filter::parse_filter_rule_fast, m)?)?;
+    m.add_function(wrap_pyfunction!(filter::filter_torrents_fast, m)?)?;
     m.add_function(wrap_pyfunction!(indexer::parse_indexer_torrents_fast, m)?)?;
     m.add_function(wrap_pyfunction!(metainfo::parse_metainfo_fast, m)?)?;
     m.add_function(wrap_pyfunction!(metainfo::parse_metainfo_path_fast, m)?)?;
