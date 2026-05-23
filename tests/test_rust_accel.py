@@ -299,6 +299,66 @@ def test_rust_indexer_page_parser_renders_literal_title_template_without_default
     }]
 
 
+def test_rust_indexer_page_parser_supports_agsvpt_selector_and_embedded_title_template():
+    """
+    Rust 普通 indexer 页面解析应兼容 AGSVPT 的 PyQuery 选择器和字段内嵌 Jinja 模板。
+    """
+    spider = SiteSpider(
+        indexer={
+            "id": "agsvpt",
+            "name": "AGSVPT",
+            "domain": "https://www.agsvpt.com/",
+            "search": {"paths": [{"path": "torrents.php"}]},
+            "torrents": {
+                "list": {"selector": 'table.torrents > tr:has("table.torrentname")'},
+                "fields": {
+                    "title_default": {"selector": 'a[href*="details.php?id="]'},
+                    "title_optional": {
+                        "selector": 'a[title][href*="details.php?id="]',
+                        "attribute": "title",
+                        "optional": True,
+                    },
+                    "title": {
+                        "text": (
+                            "{% if fields['title_optional'] %}"
+                            "{{ fields['title_optional'] }}"
+                            "{% else %}"
+                            "{{ fields['title_default'] }}"
+                            "{% endif %}"
+                        )
+                    },
+                    "details": {
+                        "selector": 'a[href*="details.php?id="]',
+                        "attribute": "href",
+                    },
+                    "download": {
+                        "selector": 'a[href*="download.php?id="]',
+                        "attribute": "href",
+                    },
+                },
+            },
+        },
+    )
+    html = """
+    <table class="torrents">
+      <tr>
+        <td><table class="torrentname"><tr><td>
+          <a href="details.php?id=1" title="{% if fields['title_optional'] %}{% else %}Release that Witch S01 2026 1080p WEB-DL H264 AAC-HHWEB{% endif %}">Ignored</a>
+        </td></tr></table></td>
+        <td><a href="download.php?id=1">DL</a></td>
+      </tr>
+    </table>
+    """
+
+    torrents = spider.parse(html)
+
+    assert torrents == [{
+        "title": "Release that Witch S01 2026 1080p WEB-DL H264 AAC-HHWEB",
+        "page_url": "https://www.agsvpt.com/details.php?id=1",
+        "enclosure": "https://www.agsvpt.com/download.php?id=1",
+    }]
+
+
 def test_rust_indexer_page_parser_renders_common_description_templates():
     """
     Rust 普通 indexer 页面解析应兼容站点构建项目里的 description 字段模板。
