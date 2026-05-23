@@ -23,7 +23,7 @@ def is_config_enabled() -> bool:
     """
     判断系统配置是否允许使用 Rust 加速。
     """
-    return bool(settings.RUST_ACCEL, True)
+    return bool(settings.RUST_ACCEL)
 
 
 def is_enabled() -> bool:
