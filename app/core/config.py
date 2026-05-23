@@ -480,6 +480,8 @@ class ConfigModel(BaseModel):
     # ==================== 性能配置 ====================
     # 大内存模式
     BIG_MEMORY_MODE: bool = False
+    # Rust 加速总开关，关闭时所有 Rust 快路径回退到 Python 实现
+    RUST_ACCEL: bool = True
     # 是否启用编码探测的性能模式
     ENCODING_DETECTION_PERFORMANCE_MODE: bool = True
     # 编码探测的最低置信度阈值

@@ -162,6 +162,7 @@ moviepilot install deps --config-dir /path/to/moviepilot-config
 - 会在安装 Python 依赖后构建并安装 `moviepilot_rust` 加速扩展，因此本机需要可用的 Rust `cargo`
 - 一键安装脚本会自动准备 Rust toolchain 和系统构建工具；手动执行 CLI 安装时，如果未安装 Rust 或本机编译器，请先安装后再执行 `moviepilot install deps`
 - 如需临时跳过加速扩展构建，可设置 `MOVIEPILOT_SKIP_RUST_ACCEL=1`，但相关核心处理会回退到 Python 实现，性能收益不会生效
+- 安装完成后可在前端“高级设置 - 实验室”中关闭或重新开启 Rust 加速；如果后端未加载扩展，该开关会保持关闭且不可操作
 
 安装前端 release：
 

@@ -1,6 +1,7 @@
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.core.context import MediaInfo, TorrentInfo
 from app.helper.torrent import TorrentHelper
@@ -128,12 +129,39 @@ class TorrentFilterTest(unittest.TestCase):
 
         module._FilterModule__filter_torrents = fail_python_fallback
 
-        filtered = module.filter_torrents(
-            rule_groups=["test"],
-            torrent_list=[TorrentInfo(title="Movie", description="")],
-        )
+        with patch("app.modules.filter.rust_accel.is_enabled", return_value=True), \
+                patch("app.modules.filter.rust_accel.filter_torrents", return_value=[(0, 100)]):
+            filtered = module.filter_torrents(
+                rule_groups=["test"],
+                torrent_list=[TorrentInfo(title="Movie", description="")],
+            )
 
         self.assertEqual(1, len(filtered))
+
+    def test_filter_torrents_uses_python_fallback_when_rust_disabled(self):
+        """
+        Rust 加速关闭时应使用 Python 过滤路径，并保留规则优先级语义。
+        """
+        module = _build_filter_module(
+            rule_string="HDR & !BLU > DV",
+            rule_set={
+                "HDR": {"include": "HDR"},
+                "DV": {"include": "DOVI"},
+                "BLU": {"include": "BluRay"},
+            },
+        )
+        torrents = [
+            TorrentInfo(title="Movie HDR WEB-DL", description=""),
+            TorrentInfo(title="Movie DOVI", description=""),
+            TorrentInfo(title="Movie HDR BluRay", description=""),
+        ]
+
+        with patch("app.modules.filter.rust_accel.is_enabled", return_value=False):
+            filtered = module.filter_torrents(rule_groups=["test"], torrent_list=torrents)
+
+        self.assertEqual(torrents[:2], filtered)
+        self.assertEqual(100, filtered[0].pri_order)
+        self.assertEqual(99, filtered[1].pri_order)
 
     def test_filter_torrent_keeps_extra_filter_semantics(self):
         torrent = TorrentInfo(

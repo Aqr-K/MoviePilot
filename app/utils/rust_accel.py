@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from app.core.config import settings
 from app.log import logger
 
 try:
@@ -18,6 +19,31 @@ def is_available() -> bool:
     return bool(_moviepilot_rust and _moviepilot_rust.is_available())
 
 
+def is_config_enabled() -> bool:
+    """
+    判断系统配置是否允许使用 Rust 加速。
+    """
+    return bool(settings.RUST_ACCEL, True)
+
+
+def is_enabled() -> bool:
+    """
+    判断当前运行时是否实际启用 Rust 加速。
+    """
+    return is_config_enabled() and is_available()
+
+
+def status() -> dict:
+    """
+    返回 Rust 加速能力与开关状态，供系统配置接口展示。
+    """
+    return {
+        "available": is_available(),
+        "enabled": is_enabled(),
+        "import_error": str(_import_error) if _import_error else "",
+    }
+
+
 def import_error() -> Optional[Exception]:
     """
     返回 Rust 扩展导入失败的异常，便于调试构建问题。
@@ -29,7 +55,7 @@ def parse_filter_rule(expression: str) -> Optional[list]:
     """
     使用 Rust 解析过滤规则表达式，不可用时返回 None。
     """
-    if not _moviepilot_rust:
+    if not is_enabled():
         return None
     try:
         return _moviepilot_rust.parse_filter_rule_fast(expression)
@@ -45,12 +71,12 @@ def filter_torrents(
         rule_set: dict,
         mediainfo=None,
         metainfo_options: Optional[dict] = None,
-) -> list:
+) -> Optional[list]:
     """
     使用 Rust 执行完整种子过滤入口，返回原列表下标和优先级。
     """
-    if not _moviepilot_rust:
-        raise RuntimeError(f"Rust 扩展不可用，无法执行种子过滤: {_import_error}")
+    if not is_enabled():
+        return None
     try:
         return _moviepilot_rust.filter_torrents_fast(
             groups,
@@ -61,8 +87,8 @@ def filter_torrents(
         )
     except BaseException as err:
         _raise_non_rust_panic(err)
-        raise
-
+        logger.debug(f"Rust 种子过滤失败，回退 Python：{err}")
+        return None
 
 def parse_indexer_torrents(
         html_text: str,
@@ -75,7 +101,7 @@ def parse_indexer_torrents(
     """
     使用 Rust 批量解析普通配置站点种子列表，不可用时返回 None。
     """
-    if not _moviepilot_rust:
+    if not is_enabled():
         return None
     try:
         return _moviepilot_rust.parse_indexer_torrents_fast(
@@ -96,7 +122,7 @@ def parse_rss_items(xml_text: str, max_items: int = 1000) -> Optional[List[dict]
     """
     使用 Rust 解析 RSS/Atom 条目，不可用或异常时返回 None。
     """
-    if not _moviepilot_rust:
+    if not is_enabled():
         return None
     try:
         return _moviepilot_rust.parse_rss_items_fast(xml_text, max_items)
@@ -110,7 +136,7 @@ def parse_metainfo(title: str, subtitle: Optional[str] = None, options: Optional
     """
     使用 Rust 从标题入口解析 MetaInfo，不可用或异常时返回 None。
     """
-    if not _moviepilot_rust:
+    if not is_enabled():
         return None
     try:
         return _moviepilot_rust.parse_metainfo_fast(title, subtitle, options or {})
@@ -124,7 +150,7 @@ def parse_metainfo_path(path: str, options: Optional[dict] = None) -> Optional[d
     """
     使用 Rust 从路径入口解析 MetaInfoPath，不可用或异常时返回 None。
     """
-    if not _moviepilot_rust:
+    if not is_enabled():
         return None
     try:
         return _moviepilot_rust.parse_metainfo_path_fast(path, options or {})
@@ -138,7 +164,7 @@ def find_metainfo(title: str) -> Optional[dict]:
     """
     使用 Rust 提取标题中的显式媒体标签，不可用或异常时返回 None。
     """
-    if not _moviepilot_rust:
+    if not is_enabled():
         return None
     try:
         return _moviepilot_rust.find_metainfo_fast(title)

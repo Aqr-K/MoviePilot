@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import List, Tuple, Union, Dict, Optional
 
 from app.core.context import TorrentInfo, MediaInfo
-from app.core.metainfo import MetaInfo, clear_rust_parse_options_cache, _rust_parse_options
+from app.core.metainfo import lear_rust_parse_options_cache, _rust_parse_options
 from app.helper.rule import RuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
@@ -12,7 +12,6 @@ from app.modules.filter.RuleParser import RuleParser
 from app.modules.filter.builtin_rules import BUILTIN_RULE_SET
 from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
 from app.utils import rust_accel
-from app.utils.string import StringUtils
 
 
 _SIZE_UNIT = 1024 * 1024
@@ -155,6 +154,12 @@ class FilterModule(_ModuleBase):
                 mediainfo=mediainfo,
                 metainfo_options=_rust_parse_options() if self.__needs_metainfo_options(group_defs) else None,
             )
+            if matched_orders is None:
+                return self.__filter_torrents_with_python(
+                    groups=group_defs,
+                    torrent_list=torrent_list,
+                    mediainfo=mediainfo
+                )
             ret_torrents = []
             for index, pri_order in matched_orders:
                 torrent = torrent_list[index]
@@ -162,6 +167,31 @@ class FilterModule(_ModuleBase):
                 ret_torrents.append(torrent)
             return ret_torrents
         return torrent_list
+
+    def __filter_torrents_with_python(self, groups: List[dict],
+                                      torrent_list: List[TorrentInfo],
+                                      mediainfo: MediaInfo = None) -> List[TorrentInfo]:
+        """
+        使用 Python 旧路径过滤种子，供 Rust 加速关闭或不可用时兜底。
+        """
+        ret_torrents = torrent_list
+        parser = RuleParser()
+        parsed_rule_cache = {}
+        for group in groups:
+            rule_string = group.get("rule_string")
+            if not rule_string:
+                continue
+            ret_torrents = self.__filter_torrents(
+                rule_string=rule_string,
+                rule_name=group.get("name") or rule_string,
+                torrent_list=ret_torrents,
+                mediainfo=mediainfo,
+                parser=parser,
+                parsed_rule_cache=parsed_rule_cache,
+            )
+            if not ret_torrents:
+                break
+        return ret_torrents
 
     def __needs_metainfo_options(self, groups: List[dict]) -> bool:
         """
