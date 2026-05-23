@@ -12,6 +12,7 @@ from app.core.meta.infopath import (
 from app.core.meta.words import WordsMatcher
 from app.log import logger
 from app.schemas.types import MediaType
+from app.utils import rust_accel
 
 
 _ANIME_BRACKET_RE = re.compile(r'【[+0-9XVPI-]+】\s*【', re.IGNORECASE)
@@ -122,6 +123,87 @@ def _build_meta_info(
     return meta
 
 
+def _rust_parse_options(custom_words: List[str] = None) -> dict:
+    """
+    收集 Rust Meta 解析所需的运行时配置，避免 Rust 层直接访问数据库和 settings。
+    """
+    from app.core.meta.customization import CustomizationMatcher
+    from app.core.meta.releasegroup import ReleaseGroupsMatcher
+    from app.db.systemconfig_oper import SystemConfigOper
+    from app.schemas.types import SystemConfigKey
+
+    systemconfig = SystemConfigOper()
+    custom_release_groups = systemconfig.get(SystemConfigKey.CustomReleaseGroups)
+    if isinstance(custom_release_groups, list):
+        custom_release_groups = list(filter(None, custom_release_groups))
+    release_matcher = ReleaseGroupsMatcher()
+    release_groups = release_matcher._ReleaseGroupsMatcher__release_groups
+    if custom_release_groups:
+        release_groups = f"{release_groups}|{'|'.join(custom_release_groups)}"
+
+    customization = CustomizationMatcher._normalize_customization(
+        systemconfig.get(SystemConfigKey.Customization)
+    )
+    words = custom_words
+    if words is None:
+        words = systemconfig.get(SystemConfigKey.CustomIdentifiers) or []
+    return {
+        "custom_words": words or [],
+        "media_exts": settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT,
+        "release_groups": release_groups,
+        "customization": customization,
+    }
+
+
+def _meta_from_rust(parsed: dict) -> Optional[MetaBase]:
+    """
+    将 Rust 解析结果灌回现有 MetaVideo/MetaAnime 对象，保留下游属性和方法兼容性。
+    """
+    if not parsed:
+        return None
+    meta = MetaAnime("") if parsed.get("kind") == "anime" else MetaVideo("")
+    type_map = {
+        MediaType.MOVIE.value: MediaType.MOVIE,
+        MediaType.TV.value: MediaType.TV,
+        MediaType.COLLECTION.value: MediaType.COLLECTION,
+        MediaType.UNKNOWN.value: MediaType.UNKNOWN,
+    }
+    fields = {
+        "isfile": parsed.get("isfile") or False,
+        "title": parsed.get("title") or "",
+        "org_string": parsed.get("org_string"),
+        "subtitle": parsed.get("subtitle"),
+        "type": type_map.get(parsed.get("type"), MediaType.UNKNOWN),
+        "cn_name": parsed.get("cn_name"),
+        "en_name": parsed.get("en_name"),
+        "original_name": parsed.get("original_name"),
+        "year": parsed.get("year"),
+        "total_season": parsed.get("total_season") or 0,
+        "begin_season": parsed.get("begin_season"),
+        "end_season": parsed.get("end_season"),
+        "total_episode": parsed.get("total_episode") or 0,
+        "begin_episode": parsed.get("begin_episode"),
+        "end_episode": parsed.get("end_episode"),
+        "part": parsed.get("part"),
+        "resource_type": parsed.get("resource_type"),
+        "resource_effect": parsed.get("resource_effect"),
+        "resource_pix": parsed.get("resource_pix"),
+        "resource_team": parsed.get("resource_team"),
+        "customization": parsed.get("customization"),
+        "web_source": parsed.get("web_source"),
+        "video_encode": parsed.get("video_encode"),
+        "video_bit": parsed.get("video_bit"),
+        "audio_encode": parsed.get("audio_encode"),
+        "apply_words": parsed.get("apply_words") or [],
+        "tmdbid": parsed.get("tmdbid"),
+        "doubanid": parsed.get("doubanid"),
+        "fps": parsed.get("fps"),
+    }
+    for key, value in fields.items():
+        setattr(meta, key, value)
+    return meta
+
+
 def MetaInfo(title: str, subtitle: Optional[str] = None, custom_words: List[str] = None) -> MetaBase:
     """
     根据标题和副标题识别元数据
@@ -130,6 +212,11 @@ def MetaInfo(title: str, subtitle: Optional[str] = None, custom_words: List[str]
     :param custom_words: 自定义识别词列表
     :return: MetaAnime、MetaVideo
     """
+    rust_meta = _meta_from_rust(
+        rust_accel.parse_metainfo(title, subtitle, _rust_parse_options(custom_words))
+    )
+    if rust_meta:
+        return rust_meta
     meta = _build_meta_info(title=title, subtitle=subtitle, custom_words=custom_words)
     if meta.apply_words:
         original_meta = _build_meta_info(title=title, subtitle=subtitle)
@@ -145,6 +232,11 @@ def MetaInfoPath(path: Path, custom_words: List[str] = None) -> MetaBase:
     :param path: 路径
     :param custom_words: 自定义识别词列表
     """
+    rust_meta = _meta_from_rust(
+        rust_accel.parse_metainfo_path(str(path), _rust_parse_options(custom_words))
+    )
+    if rust_meta:
+        return rust_meta
     # 文件元数据，不包含后缀
     file_meta = MetaInfo(title=path.name, custom_words=custom_words)
     if should_use_parent_title_for_file_stem(path.stem, path.parent.name, file_meta):
@@ -185,6 +277,9 @@ def find_metainfo(title: str) -> Tuple[str, dict]:
     """
     从标题中提取媒体信息
     """
+    rust_result = rust_accel.find_metainfo(title)
+    if rust_result:
+        return rust_result["title"], rust_result["metainfo"]
     metainfo = _empty_metainfo()
     if not title:
         return title, metainfo

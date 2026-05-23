@@ -21,6 +21,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anitomy-pure"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f525032668d2aff5dff115958157db7aecf1dc2fd5f5df93cf1be1452dfd4a"
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -169,6 +175,12 @@ checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
 ]
+
+[[package]]
+name = "fst"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
 
 [[package]]
 name = "futf"
@@ -376,6 +388,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "inputx-pinyin"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fa1bf26d5923bb73e34c63e7ef21fc976c37e016ea13872045bf72335f0a43c"
+dependencies = [
+ "fst",
+ "phf",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -483,7 +505,9 @@ dependencies = [
 name = "moviepilot-rust"
 version = "0.1.0"
 dependencies = [
+ "anitomy-pure",
  "chrono",
+ "inputx-pinyin",
  "minijinja",
  "once_cell",
  "pyo3",
