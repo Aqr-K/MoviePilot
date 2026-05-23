@@ -69,7 +69,7 @@ class QueryTransferHistoryTool(MoviePilotTool):
             async with AsyncSessionFactory() as db:
                 # 处理标题搜索
                 if title:
-                    # 使用 fast-jieba 分词处理标题。
+                    # 使用统一分词封装处理标题，便于替换底层实现。
                     words = jieba_cut(title, HMM=False)
                     title_search = "%".join(words)
                     # 查询记录
