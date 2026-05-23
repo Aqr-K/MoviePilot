@@ -360,7 +360,7 @@ async def fetch_image(
         allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS)
 
     # 验证URL安全性
-    if not SecurityUtils.is_safe_url(url, allowed_domains):
+    if not SecurityUtils.is_safe_url(url, allowed_domains, block_private=True):
         logger.warn(f"Blocked unsafe image URL: {url}")
         return None
 

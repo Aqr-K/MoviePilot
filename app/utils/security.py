@@ -1,3 +1,5 @@
+import ipaddress
+import socket
 from hashlib import sha256
 from pathlib import Path
 from typing import List, Optional, Set, Union
@@ -73,13 +75,52 @@ class SecurityUtils:
             return False
 
     @staticmethod
-    def is_safe_url(url: str, allowed_domains: Union[Set[str], List[str]], strict: bool = False) -> bool:
+    def _is_global_hostname(hostname: str) -> bool:
+        """
+        判断主机名解析结果是否全部为公网地址。
+
+        图片代理会访问用户可控的 URL，这里必须在 allowlist 命中前后都排除
+        私有、回环、链路本地、保留地址等非公网目标，避免通过 DNS 或字面量 IP
+        绕过域名白名单访问内网服务。
+        """
+        if not hostname:
+            return False
+        try:
+            return ipaddress.ip_address(hostname).is_global
+        except ValueError:
+            pass
+
+        try:
+            address_infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+        except socket.gaierror:
+            return False
+
+        if not address_infos:
+            return False
+
+        for address_info in address_infos:
+            try:
+                address = ipaddress.ip_address(address_info[4][0])
+            except ValueError:
+                return False
+            if not address.is_global:
+                return False
+        return True
+
+    @staticmethod
+    def is_safe_url(
+        url: str,
+        allowed_domains: Union[Set[str], List[str]],
+        strict: bool = False,
+        block_private: bool = False,
+    ) -> bool:
         """
         验证URL是否在允许的域名列表中，包括带有端口的域名
 
         :param url: 需要验证的 URL
         :param allowed_domains: 允许的域名集合，域名可以包含端口
         :param strict: 是否严格匹配一级域名（默认为 False，允许多级域名）
+        :param block_private: 是否拦截解析到非公网地址的 URL，防止 SSRF
         :return: 如果URL合法且在允许的域名列表中，返回 True；否则返回 False
         """
         try:
@@ -97,6 +138,9 @@ class SecurityUtils:
             # 获取完整的 netloc（包括 IP 和端口）并转换为小写
             netloc = parsed_url.netloc.lower()
             if not netloc:
+                return False
+
+            if block_private and not SecurityUtils._is_global_hostname(parsed_url.hostname or ""):
                 return False
 
             # 检查每个允许的域名

@@ -33,6 +33,7 @@ for _module_name in ("pillow_avif", "aiofiles", "psutil"):
     _stub_module(_module_name)
 
 _stub_module("app.helper.sites", SitesHelper=_Dummy)
+_stub_module("app.chain.media", MediaChain=_Dummy)
 _stub_module("app.chain.mediaserver", MediaServerChain=_Dummy)
 _stub_module("app.chain.search", SearchChain=_Dummy)
 _stub_module("app.chain.system", SystemChain=_Dummy)
@@ -81,6 +82,24 @@ from app.api.endpoints import system as system_endpoint
 
 
 class NettestSecurityTest(unittest.TestCase):
+    def test_fetch_image_blocks_private_allowed_url_before_request(self):
+        """
+        图片代理即使拿到内网 allowlist 项，也必须在发起请求前拦截。
+        """
+        class FailIfCalled:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("fetch_image should block private URLs before fetching")
+
+        with patch.object(system_endpoint, "ImageHelper", FailIfCalled):
+            resp = asyncio.run(
+                system_endpoint.fetch_image(
+                    url="http://127.0.0.1:8096/secret.png",
+                    allowed_domains={"http://127.0.0.1:8096"},
+                )
+            )
+
+        self.assertIsNone(resp)
+
     def test_nettest_targets_are_served_by_backend(self):
         resp = asyncio.run(system_endpoint.nettest_targets(_="token"))
 
