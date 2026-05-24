@@ -77,6 +77,36 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析 Telegram 管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("TELEGRAM_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls,
+            config: Optional[dict],
+            *user_ids: Optional[Union[str, int]],
+    ) -> bool:
+        """
+        判断 Telegram 命令或命令型按钮回调是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in admins for candidate in candidates)
+
     def message_parser(
         self, source: str, body: Any, form: Any, args: Any
     ) -> Optional[CommingMessage]:
@@ -149,16 +179,15 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         if message:
             # 处理按钮回调
             if "callback_query" in message:
-                return self._handle_callback_query(message, client_config)
+                return self._handle_callback_query(message, client_config, client)
 
             # 处理普通消息
             return self._handle_text_message(message, client_config, client)
 
         return None
 
-    @staticmethod
     def _handle_callback_query(
-        message: dict, client_config: NotificationConf
+        self, message: dict, client_config: NotificationConf, client: Telegram
     ) -> Optional[CommingMessage]:
         """
         处理按钮回调查询
@@ -170,6 +199,17 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         user_name = user_info.get("username")
 
         if callback_data and user_id:
+            if str(callback_data).strip().startswith("/") and self._should_reject_admin_command(
+                    client_config.config, user_id, user_name
+            ):
+                if client:
+                    client.answer_callback_query(
+                        callback_query_id=callback_query.get("id"),
+                        text="只有管理员才有权限执行此命令",
+                        show_alert=True,
+                    )
+                return None
+
             logger.info(
                 f"收到来自 {client_config.name} 的Telegram按钮回调："
                 f"userid={user_id}, username={user_name}, callback_data={callback_data}"
@@ -237,16 +277,10 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                 else None
             )
 
-            admin_users = client_config.config.get("TELEGRAM_ADMINS")
             user_list = client_config.config.get("TELEGRAM_USERS")
-            config_chat_id = client_config.config.get("TELEGRAM_CHAT_ID")
 
             if cleaned_text and cleaned_text.startswith("/"):
-                if (
-                    admin_users
-                    and str(user_id) not in admin_users.split(",")
-                    and str(user_id) != config_chat_id
-                ):
+                if self._should_reject_admin_command(client_config.config, user_id, user_name):
                     client.send_msg(
                         title="只有管理员才有权限执行此命令", userid=user_id
                     )

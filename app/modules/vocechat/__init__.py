@@ -87,6 +87,46 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析 VoceChat 管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("VOCECHAT_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls,
+            config: Optional[dict],
+            *user_ids: Optional[Union[str, int]],
+    ) -> bool:
+        """
+        判断 VoceChat 斜杠命令是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in admins for candidate in candidates)
+
+    @staticmethod
+    def _send_admin_denied(
+            client: Optional[VoceChat], userid: Optional[Union[str, int]]
+    ) -> None:
+        """
+        向 VoceChat 非管理员用户发送命令拒绝提示。
+        """
+        if client and userid:
+            client.send_msg(title="只有管理员才有权限执行此命令", userid=str(userid))
+
     def message_parser(self, source: str, body: Any, form: Any,
                        args: Any) -> Optional[CommingMessage]:
         """
@@ -120,6 +160,7 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
             client_config = self.get_config(source)
             if not client_config:
                 return None
+            client: VoceChat = self.get_instance(client_config.name)
             # 报文体
             msg_body = json.loads(body)
             # 类型
@@ -149,6 +190,11 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
 
             # 处理消息内容
             if (text or images or audio_refs or files) and userid:
+                if text and text.startswith("/") and self._should_reject_admin_command(
+                        client_config.config, msg_body.get("from_uid"), userid
+                ):
+                    self._send_admin_denied(client, userid)
+                    return None
                 logger.info(
                     f"收到来自 {client_config.name} 的VoceChat消息："
                     f"userid={userid}, text={text}, images={len(images) if images else 0}, "

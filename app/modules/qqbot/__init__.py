@@ -82,6 +82,46 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析 QQ 管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("QQBOT_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls,
+            config: Optional[dict],
+            *user_ids: Optional[Union[str, int]],
+    ) -> bool:
+        """
+        判断 QQ 斜杠命令是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in admins for candidate in candidates)
+
+    @staticmethod
+    def _send_admin_denied(
+            client: Optional[QQBot], userid: Optional[Union[str, int]]
+    ) -> None:
+        """
+        向 QQ 非管理员用户发送命令拒绝提示。
+        """
+        if client and userid:
+            client.send_msg(title="只有管理员才有权限执行此命令", userid=str(userid))
+
     def message_parser(
         self, source: str, body: Any, form: Any, args: Any
     ) -> Optional[CommingMessage]:
@@ -92,6 +132,7 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
         client_config = self.get_config(source)
         if not client_config:
             return None
+        client: QQBot = self.get_instance(client_config.name)
         try:
             if isinstance(body, bytes):
                 msg_body = json.loads(body)
@@ -116,6 +157,11 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
             user_openid = author.get("user_openid", "")
             if not user_openid:
                 return None
+            if content.startswith("/") and self._should_reject_admin_command(
+                    client_config.config, user_openid
+            ):
+                self._send_admin_denied(client, user_openid)
+                return None
             logger.info(
                 f"收到 QQ 私聊消息: userid={user_openid}, "
                 f"text={(content or '')[:50]}..., images={len(images) if images else 0}, "
@@ -137,6 +183,11 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
             group_openid = msg_body.get("group_openid", "")
             # 群聊用 group:group_openid 作为 userid，便于回复时识别
             userid = f"group:{group_openid}" if group_openid else member_openid
+            if content.startswith("/") and self._should_reject_admin_command(
+                    client_config.config, member_openid, userid
+            ):
+                self._send_admin_denied(client, userid)
+                return None
             logger.info(
                 f"收到 QQ 群消息: group={group_openid}, userid={member_openid}, "
                 f"text={(content or '')[:50]}..., images={len(images) if images else 0}, "

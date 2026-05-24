@@ -181,7 +181,9 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
             for admin in str(client_config.config.get("WECHATCLAWBOT_ADMINS") or "").split(",")
             if admin.strip()
         ]
-        if text.startswith("/") and admins and user_id not in admins:
+        callback_data = text[9:].strip() if text.startswith("CALLBACK:") else ""
+        is_admin_command = text.startswith("/") or callback_data.startswith("/")
+        if is_admin_command and admins and user_id not in admins:
             client = self.get_instance(client_config.name)
             if client:
                 client.send_msg(title="只有管理员才有权限执行此命令", userid=user_id)

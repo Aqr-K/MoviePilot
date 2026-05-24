@@ -5,7 +5,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import lark_oapi as lark
@@ -106,6 +106,19 @@ class Feishu:
 
         self._api_client = self._build_api_client()
         self._start_ws_client()
+
+    def _should_reject_admin_command(
+            self, *user_ids: Optional[Union[str, int]]
+    ) -> bool:
+        """判断飞书命令或命令型按钮回调是否应因非管理员身份被拒绝。"""
+        if not self._admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in self._admins for candidate in candidates)
 
     def _build_api_client(self) -> lark.Client:
         """构建飞书 OpenAPI client，用于发送和编辑消息。"""
@@ -494,6 +507,16 @@ class Feishu:
             callback_data = message.get("callback_data")
             if not callback_data:
                 return None
+            if str(callback_data).strip().startswith("/") and self._should_reject_admin_command(
+                    open_id, user_id
+            ):
+                self.send_text(
+                    "只有管理员才有权限执行此命令",
+                    userid=str(userid),
+                    chat_id=message.get("chat_id"),
+                    receive_id_type="open_id" if open_id else "user_id",
+                )
+                return None
             return CommingMessage(
                 channel=MessageChannel.Feishu,
                 source=self._name,
@@ -522,7 +545,7 @@ class Feishu:
         if not text and not images and not audio_refs and not files:
             return None
 
-        if text.startswith("/") and self._admins and str(userid) not in self._admins:
+        if text.startswith("/") and self._should_reject_admin_command(open_id, user_id):
             self.send_text(
                 "只有管理员才有权限执行此命令",
                 userid=str(userid),

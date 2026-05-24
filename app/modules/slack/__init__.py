@@ -82,6 +82,44 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析 Slack 管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("SLACK_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls,
+            config: Optional[dict],
+            *user_ids: Optional[Union[str, int]],
+    ) -> bool:
+        """
+        判断 Slack 命令或命令型按钮回调是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in admins for candidate in candidates)
+
+    @staticmethod
+    def _send_admin_denied(client: Optional[Slack], userid: Optional[Union[str, int]]) -> None:
+        """
+        向 Slack 非管理员用户发送命令拒绝提示。
+        """
+        if client and userid:
+            client.send_msg(title="只有管理员才有权限执行此命令", userid=str(userid))
+
     def message_parser(
         self, source: str, body: Any, form: Any, args: Any
     ) -> Optional[CommingMessage]:
@@ -209,6 +247,7 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
         client_config = self.get_config(source)
         if not client_config:
             return None
+        client: Slack = self.get_instance(client_config.name)
         try:
             msg_json = json.loads(body)
             while isinstance(msg_json, str):
@@ -229,6 +268,11 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 userid = msg_json.get("user")
                 text = msg_json.get("text")
                 username = msg_json.get("user")
+                if text and text.startswith("/") and self._should_reject_admin_command(
+                        client_config.config, userid, username
+                ):
+                    self._send_admin_denied(client, userid)
+                    return None
                 message_id = msg_json.get("ts")
                 chat_id = msg_json.get("channel")
                 images = self._extract_images(msg_json)
@@ -240,6 +284,11 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 # 使用CALLBACK前缀标识按钮回调
                 text = f"CALLBACK:{callback_data}"
                 username = msg_json.get("user", {}).get("name")
+                if str(callback_data).strip().startswith("/") and self._should_reject_admin_command(
+                        client_config.config, userid, username
+                ):
+                    self._send_admin_denied(client, userid)
+                    return None
 
                 # 获取原消息信息用于编辑
                 message_info = msg_json.get("message", {})
@@ -275,6 +324,11 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                     flags=re.IGNORECASE,
                 ).strip()
                 username = ""
+                if text and text.startswith("/") and self._should_reject_admin_command(
+                        client_config.config, userid
+                ):
+                    self._send_admin_denied(client, userid)
+                    return None
                 message_id = msg_json.get("event", {}).get("ts")
                 chat_id = msg_json.get("event", {}).get("channel")
                 images = self._extract_images(msg_json.get("event", {}))
@@ -284,11 +338,19 @@ class SlackModule(_ModuleBase, _MessageBase[Slack]):
                 userid = msg_json.get("user", {}).get("id")
                 text = msg_json.get("callback_id")
                 username = msg_json.get("user", {}).get("username")
+                if text and text.startswith("/") and self._should_reject_admin_command(
+                        client_config.config, userid, username
+                ):
+                    self._send_admin_denied(client, userid)
+                    return None
             elif msg_json.get("command"):
                 userid = msg_json.get("user_id")
                 text = msg_json.get("command")
                 username = msg_json.get("user_name")
                 chat_id = msg_json.get("channel_id")
+                if self._should_reject_admin_command(client_config.config, userid, username):
+                    self._send_admin_denied(client, userid)
+                    return None
             else:
                 return None
             logger.info(

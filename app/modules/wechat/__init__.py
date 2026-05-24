@@ -66,6 +66,29 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
     def _is_bot_mode(config: dict) -> bool:
         return (config or {}).get("WECHAT_MODE", "app") == "bot"
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析企业微信管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("WECHAT_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls, config: Optional[dict], user_id: Optional[str]
+    ) -> bool:
+        """
+        判断企业微信菜单或斜杠命令是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        return str(user_id or "").strip() not in admins
+
     @classmethod
     def _create_client(cls, conf):
         if cls._is_bot_mode(conf.config):
@@ -171,13 +194,10 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
             audio_refs = None
             files = None
             if msg_type == "event" and event == "click":
-                # 校验用户有权限执行交互命令
-                if client_config.config.get('WECHAT_ADMINS'):
-                    wechat_admins = client_config.config.get('WECHAT_ADMINS').split(',')
-                    if wechat_admins and not any(
-                            user_id == admin_user for admin_user in wechat_admins):
-                        client.send_msg(title="用户无权限执行菜单命令", userid=user_id)
-                        return None
+                # 企业微信菜单最终会转成命令文本，需与斜杠命令使用一致的管理员校验。
+                if self._should_reject_admin_command(client_config.config, user_id):
+                    client.send_msg(title="只有管理员才有权限执行此命令", userid=user_id)
+                    return None
                 # 根据EventKey执行命令
                 content = DomUtils.tag_value(root_node, "EventKey")
                 logger.info(f"收到来自 {client_config.name} 的微信事件：userid={user_id}, event={content}")
@@ -219,6 +239,12 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
                     f"收到来自 {client_config.name} 的微信文件消息：userid={user_id}, files={len(files) if files else 0}"
                 )
             else:
+                return None
+
+            if content and content.startswith("/") and self._should_reject_admin_command(
+                    client_config.config, user_id
+            ):
+                client.send_msg(title="只有管理员才有权限执行此命令", userid=user_id)
                 return None
 
             if content or images or audio_refs or files:
@@ -274,17 +300,13 @@ class WechatModule(_ModuleBase, _MessageBase[WeChat]):
         if text:
             text = re.sub(r"@\S+", "", text).strip()
 
-        if text and text.startswith("/") and client_config.config.get('WECHAT_ADMINS'):
-            wechat_admins = [
-                admin.strip()
-                for admin in client_config.config.get('WECHAT_ADMINS', '').split(',')
-                if admin.strip()
-            ]
-            if wechat_admins and sender not in wechat_admins:
-                client: WeChatBot = self.get_instance(client_config.name)
-                if client:
-                    client.send_msg(title="只有管理员才有权限执行此命令", userid=sender)
-                return None
+        if text and text.startswith("/") and self._should_reject_admin_command(
+                client_config.config, sender
+        ):
+            client: WeChatBot = self.get_instance(client_config.name)
+            if client:
+                client.send_msg(title="只有管理员才有权限执行此命令", userid=sender)
+            return None
 
         if not text and not images and not audio_refs and not files:
             return None

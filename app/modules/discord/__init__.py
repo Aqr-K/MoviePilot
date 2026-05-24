@@ -102,6 +102,52 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析 Discord 管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("DISCORD_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls,
+            config: Optional[dict],
+            *user_ids: Optional[Union[str, int]],
+    ) -> bool:
+        """
+        判断 Discord 命令或命令型按钮回调是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in admins for candidate in candidates)
+
+    @staticmethod
+    def _send_admin_denied(
+            client: Optional[Discord],
+            userid: Optional[Union[str, int]],
+            chat_id: Optional[Union[str, int]] = None,
+    ) -> None:
+        """
+        向 Discord 非管理员用户发送命令拒绝提示。
+        """
+        if client and userid:
+            client.send_msg(
+                title="只有管理员才有权限执行此命令",
+                userid=str(userid),
+                original_chat_id=str(chat_id) if chat_id else None,
+            )
+
     def message_parser(
         self, source: str, body: Any, form: Any, args: Any
     ) -> Optional[CommingMessage]:
@@ -119,6 +165,7 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
         client_config = self.get_config(source)
         if not client_config:
             return None
+        client: Discord = self.get_instance(client_config.name)
         try:
             msg_json: dict = json.loads(body)
         except Exception as e:
@@ -137,6 +184,11 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             message_id = msg_json.get("message_id")
             chat_id = msg_json.get("chat_id")
             if callback_data and userid:
+                if str(callback_data).strip().startswith("/") and self._should_reject_admin_command(
+                        client_config.config, userid, username
+                ):
+                    self._send_admin_denied(client, userid, chat_id)
+                    return None
                 logger.info(
                     f"收到来自 {client_config.name} 的 Discord 按钮回调："
                     f"userid={userid}, username={username}, callback_data={callback_data}"
@@ -161,6 +213,11 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
             audio_refs = self._extract_audio_refs(msg_json)
             files = self._extract_files(msg_json)
             if (text or images or audio_refs or files) and userid:
+                if text and text.startswith("/") and self._should_reject_admin_command(
+                        client_config.config, userid, username
+                ):
+                    self._send_admin_denied(client, userid, chat_id)
+                    return None
                 logger.info(
                     f"收到来自 {client_config.name} 的 Discord 消息："
                     f"userid={userid}, username={username}, text={text}, "

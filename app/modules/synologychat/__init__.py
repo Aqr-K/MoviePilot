@@ -88,6 +88,46 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
+    @staticmethod
+    def _get_admins(config: Optional[dict]) -> List[str]:
+        """
+        解析 Synology Chat 管理员配置，兼容逗号分隔和首尾空白。
+        """
+        return [
+            admin.strip()
+            for admin in str((config or {}).get("SYNOLOGYCHAT_ADMINS") or "").split(",")
+            if admin.strip()
+        ]
+
+    @classmethod
+    def _should_reject_admin_command(
+            cls,
+            config: Optional[dict],
+            *user_ids: Optional[Union[str, int]],
+    ) -> bool:
+        """
+        判断 Synology Chat 斜杠命令是否应因非管理员身份被拒绝。
+        """
+        admins = cls._get_admins(config)
+        if not admins:
+            return False
+        candidates = [
+            str(user_id).strip()
+            for user_id in user_ids
+            if user_id is not None and str(user_id).strip()
+        ]
+        return not any(candidate in admins for candidate in candidates)
+
+    @staticmethod
+    def _send_admin_denied(
+            client: Optional[SynologyChat], userid: Optional[Union[str, int]]
+    ) -> None:
+        """
+        向 Synology Chat 非管理员用户发送命令拒绝提示。
+        """
+        if client and userid:
+            client.send_msg(title="只有管理员才有权限执行此命令", userid=str(userid))
+
     def message_parser(self, source: str, body: Any, form: Any,
                        args: Any) -> Optional[CommingMessage]:
         """
@@ -127,6 +167,11 @@ class SynologyChatModule(_ModuleBase, _MessageBase[SynologyChat]):
             audio_refs = self._extract_audio_refs(message)
             files = self._extract_files(message)
             if (text or images or audio_refs or files) and user_id:
+                if text and text.startswith("/") and self._should_reject_admin_command(
+                        client_config.config, user_id, user_name
+                ):
+                    self._send_admin_denied(client, user_id)
+                    return None
                 logger.info(
                     f"收到来自 {client_config.name} 的SynologyChat消息："
                     f"userid={user_id}, username={user_name}, text={text}, "
