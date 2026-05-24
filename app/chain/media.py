@@ -571,20 +571,20 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         plugin_available = eventmanager.check(ChainEventType.NameRecognize)
         if settings.RECOGNIZE_PLUGIN_FIRST and plugin_available:
             # 插件优先
-            logger.info(f"插件优先模式已开启。请求辅助识别，标题：{log_name} ...")
+            logger.info(f"插件识别优先模式已开启。请求辅助识别，标题：{log_name} ...")
             mediainfo = plugin_fn()
             if not mediainfo:
                 logger.info(
-                    f"辅助识别未识别到 {log_context} 的媒体信息，尝试使用原生识别"
+                    f"辅助识别未识别到 {log_context} 的媒体信息，尝试使用原生识别 ..."
                 )
                 mediainfo = native_fn()
         else:
             # 原生优先
-            logger.info(f"插件优先模式未开启。尝试原生识别，标题：{log_name} ...")
+            logger.info(f"开始识别标题：{log_name} ...")
             mediainfo = native_fn()
             if not mediainfo and plugin_available:
                 logger.info(
-                    f"原生识别未识别到 {log_context} 的媒体信息，尝试使用辅助识别"
+                    f"未识别到 {log_context} 的媒体信息，尝试使用辅助识别 ..."
                 )
                 mediainfo = plugin_fn()
         return mediainfo
