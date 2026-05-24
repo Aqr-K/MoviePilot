@@ -208,6 +208,32 @@ class TestQbittorrentCompat(unittest.TestCase):
             {"Authorization": "Bearer secret-token"},
         )
 
+    def test_login_enables_incomplete_file_suffix(self):
+        """
+        登录成功后应开启未完成文件后缀，避免下载中的媒体文件被提前整理。
+        """
+        fake_client = MagicMock()
+        fake_client.app_preferences.return_value = {"incomplete_files_ext": False}
+
+        with patch.object(qbittorrent_module.qbittorrentapi, "Client", return_value=fake_client):
+            downloader = Qbittorrent(host="http://127.0.0.1", port=8080, username="admin", password="adminadmin")
+
+        self.assertIs(downloader.qbc, fake_client)
+        fake_client.app_set_preferences.assert_called_once_with({"incomplete_files_ext": True})
+
+    def test_login_skips_incomplete_file_suffix_when_already_enabled(self):
+        """
+        远端已开启未完成文件后缀时不重复写入全局偏好。
+        """
+        fake_client = MagicMock()
+        fake_client.app_preferences.return_value = {"incomplete_files_ext": True}
+
+        with patch.object(qbittorrent_module.qbittorrentapi, "Client", return_value=fake_client):
+            downloader = Qbittorrent(host="http://127.0.0.1", port=8080, username="admin", password="adminadmin")
+
+        self.assertIs(downloader.qbc, fake_client)
+        fake_client.app_set_preferences.assert_not_called()
+
     def test_add_torrent_accepts_structured_success_response(self):
         fake_client = MagicMock()
         fake_client.torrents_add.return_value = {

@@ -153,6 +153,20 @@ class Qbittorrent:
             logger.error(f"同步下载Cookie出错：{str(err)}")
             return False
 
+    @staticmethod
+    def __enable_incomplete_file_suffix(qbt: Client) -> None:
+        """
+        开启未完成文件后缀，避免监控流程提前整理仍在下载的媒体文件。
+        """
+        try:
+            preferences = qbt.app_preferences() or {}
+            if isinstance(preferences, dict) and preferences.get("incomplete_files_ext") is True:
+                return
+            qbt.app_set_preferences({"incomplete_files_ext": True})
+            logger.info("已开启 qbittorrent 未完成文件追加 .!qB 后缀")
+        except Exception as err:
+            logger.warning(f"开启 qbittorrent 未完成文件后缀失败：{str(err)}")
+
     def is_inactive(self) -> bool:
         """
         判断是否需要重连
@@ -198,6 +212,7 @@ class Qbittorrent:
                 stack_trace = "".join(traceback.format_exception(None, e, e.__traceback__))[:2000]
                 logger.error(f"qbittorrent 登录失败：{str(e)}\n{stack_trace}")
                 return None
+            self.__enable_incomplete_file_suffix(qbt)
             return qbt
         except Exception as err:
             logger.error(f"qbittorrent 连接出错：{str(err)}")
