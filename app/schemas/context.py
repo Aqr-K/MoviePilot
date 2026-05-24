@@ -61,6 +61,8 @@ class MetaInfo(BaseModel):
     web_source: Optional[str] = None
     # 应用的识别词信息
     apply_words: Optional[List[str]] = None
+    # 剧集组
+    episode_group: Optional[str] = None
 
 
 class MediaInfo(BaseModel):

@@ -29,6 +29,7 @@ _BRACED_METAINFO_RE = re.compile(r'(?<={\[)[\W\w]+(?=]})')
 _BRACED_TMDBID_RE = re.compile(r'(?<=tmdbid=)\d+')
 _BRACED_DOUBANID_RE = re.compile(r'(?<=doubanid=)\d+')
 _BRACED_TYPE_RE = re.compile(r'(?<=type=)\w+')
+_BRACED_EPISODE_GROUP_RE = re.compile(r'(?:^|;)g=([0-9a-fA-F]+)(?=;|$)')
 _BRACED_BEGIN_SEASON_RE = re.compile(r'(?<=s=)\d+')
 _BRACED_END_SEASON_RE = re.compile(r'(?<=s=\d+-)\d+')
 _BRACED_BEGIN_EPISODE_RE = re.compile(r'(?<=e=)\d+')
@@ -49,6 +50,7 @@ def _empty_metainfo() -> dict:
         'tmdbid': None,
         'doubanid': None,
         'type': None,
+        'episode_group': None,
         'begin_season': None,
         'end_season': None,
         'total_season': None,
@@ -68,6 +70,75 @@ def _apply_range_total(metainfo: dict, begin_key: str, end_key: str, total_key: 
         metainfo[total_key] = metainfo[end_key] - metainfo[begin_key] + 1
     elif metainfo.get(begin_key) and not metainfo.get(end_key):
         metainfo[total_key] = 1
+
+
+def _find_metainfo_python(title: str) -> Tuple[str, dict]:
+    """
+    使用 Python 解析标题中的显式媒体标签，作为 Rust 入口不可用时的兜底。
+    """
+    metainfo = _empty_metainfo()
+    if not title:
+        return title, metainfo
+    # 从标题中提取媒体信息 格式为{[tmdbid=xxx;type=xxx;g=xxx;s=xxx;e=xxx]}
+    results = _BRACED_METAINFO_RE.findall(title)
+    if results:
+        for result in results:
+            # 查找tmdbid信息
+            tmdbid = _BRACED_TMDBID_RE.search(result)
+            if tmdbid and tmdbid.group(0).isdigit():
+                metainfo['tmdbid'] = tmdbid.group(0)
+            # 查找豆瓣id信息
+            doubanid = _BRACED_DOUBANID_RE.search(result)
+            if doubanid and doubanid.group(0).isdigit():
+                metainfo['doubanid'] = doubanid.group(0)
+            # 查找媒体类型
+            mtype = _BRACED_TYPE_RE.search(result)
+            if mtype:
+                media_type = mtype.group(0)
+                if media_type in ["movie", "movies"]:
+                    metainfo['type'] = MediaType.MOVIE
+                elif media_type == "tv":
+                    metainfo['type'] = MediaType.TV
+            # 查找剧集组
+            episode_group = _BRACED_EPISODE_GROUP_RE.search(result)
+            if episode_group:
+                metainfo['episode_group'] = episode_group.group(1)
+            # 查找季信息
+            begin_season = _BRACED_BEGIN_SEASON_RE.search(result)
+            if begin_season and begin_season.group(0).isdigit():
+                metainfo['begin_season'] = int(begin_season.group(0))
+            end_season = _BRACED_END_SEASON_RE.search(result)
+            if end_season and end_season.group(0).isdigit():
+                metainfo['end_season'] = int(end_season.group(0))
+            # 查找集信息
+            begin_episode = _BRACED_BEGIN_EPISODE_RE.search(result)
+            if begin_episode and begin_episode.group(0).isdigit():
+                metainfo['begin_episode'] = int(begin_episode.group(0))
+            end_episode = _BRACED_END_EPISODE_RE.search(result)
+            if end_episode and end_episode.group(0).isdigit():
+                metainfo['end_episode'] = int(end_episode.group(0))
+            # 去除title中该部分
+            if tmdbid or mtype or episode_group or begin_season or end_season or begin_episode or end_episode:
+                title = title.replace(f"{{[{result}]}}", '')
+
+    # 支持Emby格式的ID标签；第一个 [tmdbid] 历史上始终优先处理，用于覆盖前面 {[...]} 中的旧标签。
+    tmdb_match = _EMBY_TMDB_RE_LIST[0].search(title)
+    if tmdb_match:
+        metainfo['tmdbid'] = tmdb_match.group(1)
+        title = _EMBY_TMDB_RE_LIST[0].sub('', title).strip()
+    elif not metainfo['tmdbid']:
+        # 保持原有优先级：[tmdbid] > [tmdb] > {tmdbid} > {tmdb}
+        for tmdb_re in _EMBY_TMDB_RE_LIST[1:]:
+            tmdb_match = tmdb_re.search(title)
+            if tmdb_match:
+                metainfo['tmdbid'] = tmdb_match.group(1)
+                title = tmdb_re.sub('', title).strip()
+                break
+
+    # 计算季集总数
+    _apply_range_total(metainfo, 'begin_season', 'end_season', 'total_season')
+    _apply_range_total(metainfo, 'begin_episode', 'end_episode', 'total_episode')
+    return title, metainfo
 
 
 def _build_meta_info(
@@ -109,6 +180,8 @@ def _build_meta_info(
         meta.doubanid = metainfo['doubanid']
     if metainfo.get('type'):
         meta.type = metainfo['type']
+    if metainfo.get('episode_group'):
+        meta.episode_group = metainfo['episode_group']
     if metainfo.get('begin_season'):
         meta.begin_season = metainfo['begin_season']
     if metainfo.get('end_season'):
@@ -225,6 +298,7 @@ def _meta_from_rust(parsed: dict) -> Optional[MetaBase]:
         "apply_words": parsed.get("apply_words") or [],
         "tmdbid": parsed.get("tmdbid"),
         "doubanid": parsed.get("doubanid"),
+        "episode_group": parsed.get("episode_group"),
         "fps": parsed.get("fps"),
     }
     for key, value in fields.items():
@@ -308,62 +382,4 @@ def find_metainfo(title: str) -> Tuple[str, dict]:
     rust_result = rust_accel.find_metainfo(title)
     if rust_result:
         return rust_result["title"], rust_result["metainfo"]
-    metainfo = _empty_metainfo()
-    if not title:
-        return title, metainfo
-    # 从标题中提取媒体信息 格式为{[tmdbid=xxx;type=xxx;s=xxx;e=xxx]}
-    results = _BRACED_METAINFO_RE.findall(title)
-    if results:
-        for result in results:
-            # 查找tmdbid信息
-            tmdbid = _BRACED_TMDBID_RE.search(result)
-            if tmdbid and tmdbid.group(0).isdigit():
-                metainfo['tmdbid'] = tmdbid.group(0)
-            # 查找豆瓣id信息
-            doubanid = _BRACED_DOUBANID_RE.search(result)
-            if doubanid and doubanid.group(0).isdigit():
-                metainfo['doubanid'] = doubanid.group(0)
-            # 查找媒体类型
-            mtype = _BRACED_TYPE_RE.search(result)
-            if mtype:
-                media_type = mtype.group(0)
-                if media_type == "movies":
-                    metainfo['type'] = MediaType.MOVIE
-                elif media_type == "tv":
-                    metainfo['type'] = MediaType.TV
-            # 查找季信息
-            begin_season = _BRACED_BEGIN_SEASON_RE.search(result)
-            if begin_season and begin_season.group(0).isdigit():
-                metainfo['begin_season'] = int(begin_season.group(0))
-            end_season = _BRACED_END_SEASON_RE.search(result)
-            if end_season and end_season.group(0).isdigit():
-                metainfo['end_season'] = int(end_season.group(0))
-            # 查找集信息
-            begin_episode = _BRACED_BEGIN_EPISODE_RE.search(result)
-            if begin_episode and begin_episode.group(0).isdigit():
-                metainfo['begin_episode'] = int(begin_episode.group(0))
-            end_episode = _BRACED_END_EPISODE_RE.search(result)
-            if end_episode and end_episode.group(0).isdigit():
-                metainfo['end_episode'] = int(end_episode.group(0))
-            # 去除title中该部分
-            if tmdbid or mtype or begin_season or end_season or begin_episode or end_episode:
-                title = title.replace(f"{{[{result}]}}", '')
-
-    # 支持Emby格式的ID标签；第一个 [tmdbid] 历史上始终优先处理，用于覆盖前面 {[...]} 中的旧标签。
-    tmdb_match = _EMBY_TMDB_RE_LIST[0].search(title)
-    if tmdb_match:
-        metainfo['tmdbid'] = tmdb_match.group(1)
-        title = _EMBY_TMDB_RE_LIST[0].sub('', title).strip()
-    elif not metainfo['tmdbid']:
-        # 保持原有优先级：[tmdbid] > [tmdb] > {tmdbid} > {tmdb}
-        for tmdb_re in _EMBY_TMDB_RE_LIST[1:]:
-            tmdb_match = tmdb_re.search(title)
-            if tmdb_match:
-                metainfo['tmdbid'] = tmdb_match.group(1)
-                title = tmdb_re.sub('', title).strip()
-                break
-
-    # 计算季集总数
-    _apply_range_total(metainfo, 'begin_season', 'end_season', 'total_season')
-    _apply_range_total(metainfo, 'begin_episode', 'end_episode', 'total_episode')
-    return title, metainfo
+    return _find_metainfo_python(title)

@@ -582,6 +582,8 @@ class ChainBase(metaclass=ABCMeta):
             tmdbid = meta.tmdbid
         if not doubanid and hasattr(meta, "doubanid"):
             doubanid = meta.doubanid
+        if not episode_group and hasattr(meta, "episode_group"):
+            episode_group = meta.episode_group
         # 有tmdbid时，不使用meta推断的类型（由消歧逻辑决定），也不使用其它ID
         if tmdbid:
             doubanid = None
@@ -665,6 +667,8 @@ class ChainBase(metaclass=ABCMeta):
             tmdbid = meta.tmdbid
         if not doubanid and hasattr(meta, "doubanid"):
             doubanid = meta.doubanid
+        if not episode_group and hasattr(meta, "episode_group"):
+            episode_group = meta.episode_group
         # 有tmdbid时，不使用meta推断的类型（由消歧逻辑决定），也不使用其它ID
         if tmdbid:
             doubanid = None

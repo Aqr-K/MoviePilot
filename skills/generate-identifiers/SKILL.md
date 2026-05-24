@@ -12,7 +12,8 @@ description: >-
   1) A torrent or file name is incorrectly recognized (wrong title, season, episode, etc.);
   2) The user wants to block unwanted keywords from torrent names;
   3) The user needs episode offset rules for series with non-standard numbering;
-  4) The user wants to force recognition of a specific media by TMDB/Douban ID.
+  4) The user wants to force recognition of a specific media by TMDB/Douban ID;
+  5) The user wants TV recognition to use a specific TMDB episode group.
 allowed-tools: query_custom_identifiers update_custom_identifiers recognize_media
 ---
 
@@ -54,7 +55,11 @@ Regex substitution. The left side is a regex pattern, the right side is the repl
 被替换词 => {[tmdbid=xxx;type=movie/tv;s=xxx;e=xxx]}
 被替换词 => {[doubanid=xxx;type=movie/tv;s=xxx;e=xxx]}
 ```
-Where `s` (season) and `e` (episode) are optional.
+Where `s` (season) and `e` (episode) are optional. For TMDB TV recognition, add `g=xxx` to specify an episode group:
+
+```
+被替换词 => {[tmdbid=xxx;type=tv;g=xxx;s=xxx;e=xxx]}
+```
 
 ### 3. Episode Offset (集偏移)
 
@@ -223,6 +228,16 @@ Tell the user:
 ```
 # 仅在 Some.Weird.Name 这一命名模式下强制绑定 TMDB ID 12345
 Some\.Weird\.Name(?:\.S01E\d+)?(?:\.1080p)? => {[tmdbid=12345;type=tv;s=1]}
+```
+
+### Force TMDB Episode Group Recognition
+
+**User**: "种子名 `Some.Weird.Name.S01E01.1080p.mkv`，这是按 TMDB 剧集组 `5ad0ec240e0a26303f00d84d` 排序的电视剧"
+
+**Solution**: Direct TMDB ID specification with `g=...`:
+```
+# 仅在 Some.Weird.Name 命名模式下绑定 TMDB ID 12345 并指定剧集组
+Some\.Weird\.Name(?:\.S01E\d+)?(?:\.1080p)? => {[tmdbid=12345;type=tv;g=5ad0ec240e0a26303f00d84d;s=1]}
 ```
 
 ### Combined Fix

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from app.core.metainfo import MetaInfo, MetaInfoPath, find_metainfo
 from tests.cases.meta import meta_cases
@@ -131,6 +132,33 @@ class MetaInfoTest(TestCase):
         self.assertEqual(meta.name, "新名")
         self.assertEqual(meta.episode, "E04")
         self.assertEqual(meta.apply_words, custom_words)
+
+    def test_custom_words_support_episode_group_parameter(self):
+        """测试自定义识别词替换结果中的 g 参数会写入剧集组"""
+        group_id = "5ad0ec240e0a26303f00d84d"
+        custom_words = [
+            f"Bakemonogatari => 物语系列 {{[tmdbid=46195;type=tv;g={group_id};s=1]}}"
+        ]
+        meta = MetaInfo(title="Bakemonogatari 01", custom_words=custom_words)
+        self.assertEqual(meta.tmdbid, 46195)
+        self.assertEqual(meta.type.value, "电视剧")
+        self.assertEqual(meta.begin_season, 1)
+        self.assertEqual(meta.episode_group, group_id)
+        self.assertEqual(meta.apply_words, custom_words)
+
+    def test_find_metainfo_supports_episode_group_parameter(self):
+        """测试显式媒体标签支持 g 剧集组参数"""
+        group_id = "5ad0ec240e0a26303f00d84d"
+        title, metainfo = find_metainfo(f"物语系列 {{[tmdbid=46195;type=tv;g={group_id};s=1]}}")
+        self.assertEqual(metainfo["episode_group"], group_id)
+        self.assertNotIn("g=", title)
+
+    def test_find_metainfo_does_not_support_episode_group_alias(self):
+        """测试 e_group 不会被当作剧集组参数识别"""
+        group_id = "5ad0ec240e0a26303f00d84d"
+        with patch("app.core.metainfo.rust_accel.find_metainfo", return_value=None):
+            _, metainfo = find_metainfo(f"物语系列 {{[tmdbid=46195;type=tv;e_group={group_id};s=1]}}")
+        self.assertIsNone(metainfo["episode_group"])
 
     def test_video_bit_extracted_for_video_title(self):
         """测试普通影视标题中的视频位深可单独识别"""

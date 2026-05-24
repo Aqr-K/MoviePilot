@@ -223,6 +223,22 @@ def test_rust_metainfo_parser_handles_anime_from_entry():
     assert result["audio_encode"] == "AAC"
 
 
+def test_rust_metainfo_parser_handles_episode_group():
+    """
+    Rust MetaInfo 入口应识别显式媒体标签中的 g 剧集组参数。
+    """
+    group_id = "5ad0ec240e0a26303f00d84d"
+    result = rust_accel.parse_metainfo(
+        f"物语系列 {{[tmdbid=46195;type=tv;g={group_id};s=1]}} 01",
+        options=_metainfo_options(),
+    )
+
+    assert result["tmdbid"] == 46195
+    assert result["type"] == MediaType.TV.value
+    assert result["episode_group"] == group_id
+    assert result["begin_season"] == 1
+
+
 def test_rust_metainfo_path_parser_merges_parent_title():
     """
     Rust MetaInfoPath 入口应在 Rust 内完成父目录标题合并。

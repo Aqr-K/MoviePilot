@@ -50,7 +50,8 @@ class UpdateCustomIdentifiersTool(MoviePilotTool):
         "3) Episode offset: '前定位词 <> 后定位词 >> EP±N'; "
         "4) Combined: '被替换词 => 替换词 && 前定位词 <> 后定位词 >> EP±N'; "
         "Lines starting with '#' are comments. "
-        "The replacement target supports: {[tmdbid=xxx;type=movie/tv;s=xxx;e=xxx]} for direct TMDB ID matching."
+        "The replacement target supports: {[tmdbid=xxx;type=movie/tv;g=xxx;s=xxx;e=xxx]} "
+        "for direct TMDB ID matching; g is an optional TMDB episode group ID for TV recognition."
     )
     require_admin: bool = True
     args_schema: Type[BaseModel] = UpdateCustomIdentifiersInput

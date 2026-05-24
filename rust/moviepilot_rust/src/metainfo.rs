@@ -40,6 +40,8 @@ static BRACED_METAINFO_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\[([^\]]+)]
 static BRACED_TMDBID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"tmdbid=(\d+)").unwrap());
 static BRACED_DOUBANID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"doubanid=(\d+)").unwrap());
 static BRACED_TYPE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"type=(\w+)").unwrap());
+static BRACED_EPISODE_GROUP_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?:^|;)g=([0-9a-fA-F]+)(?:;|$)").unwrap());
 static BRACED_BEGIN_SEASON_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"s=(\d+)").unwrap());
 static BRACED_END_SEASON_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"s=\d+-(\d+)").unwrap());
 static BRACED_BEGIN_EPISODE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"e=(\d+)").unwrap());
@@ -356,6 +358,7 @@ struct MetaResult {
     apply_words: Vec<String>,
     tmdbid: Option<i64>,
     doubanid: Option<String>,
+    episode_group: Option<String>,
     fps: Option<i64>,
     subtitle_flag: bool,
 }
@@ -365,6 +368,7 @@ struct ExplicitMetaInfo {
     tmdbid: Option<String>,
     doubanid: Option<String>,
     media_type: Option<String>,
+    episode_group: Option<String>,
     begin_season: Option<i64>,
     end_season: Option<i64>,
     total_season: Option<i64>,
@@ -448,6 +452,7 @@ pub(crate) fn find_metainfo_fast(py: Python<'_>, title: &str) -> PyResult<PyObje
     meta.set_item("tmdbid", parsed.tmdbid)?;
     meta.set_item("doubanid", parsed.doubanid)?;
     meta.set_item("type", parsed.media_type)?;
+    meta.set_item("episode_group", parsed.episode_group)?;
     meta.set_item("begin_season", parsed.begin_season)?;
     meta.set_item("end_season", parsed.end_season)?;
     meta.set_item("total_season", parsed.total_season)?;
@@ -641,6 +646,7 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
         tmdbid: None,
         doubanid: None,
         media_type: None,
+        episode_group: None,
         begin_season: None,
         end_season: None,
         total_season: None,
@@ -661,6 +667,9 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
             .captures(&result)
             .and_then(|cap| cap.get(1));
         let mtype = BRACED_TYPE_RE.captures(&result).and_then(|cap| cap.get(1));
+        let episode_group = BRACED_EPISODE_GROUP_RE
+            .captures(&result)
+            .and_then(|cap| cap.get(1));
         let begin_season = BRACED_BEGIN_SEASON_RE
             .captures(&result)
             .and_then(|cap| cap.get(1));
@@ -681,10 +690,13 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
         }
         if let Some(value) = mtype {
             match value.as_str() {
-                "movies" => info.media_type = Some(MEDIA_TYPE_MOVIE.to_string()),
+                "movie" | "movies" => info.media_type = Some(MEDIA_TYPE_MOVIE.to_string()),
                 "tv" => info.media_type = Some(MEDIA_TYPE_TV.to_string()),
                 _ => {}
             }
+        }
+        if let Some(value) = episode_group {
+            info.episode_group = Some(value.as_str().to_string());
         }
         if let Some(value) = begin_season {
             info.begin_season = value.as_str().parse::<i64>().ok();
@@ -700,6 +712,7 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
         }
         if tmdbid.is_some()
             || mtype.is_some()
+            || episode_group.is_some()
             || begin_season.is_some()
             || end_season.is_some()
             || begin_episode.is_some()
@@ -768,6 +781,9 @@ fn apply_explicit_metainfo(meta: &mut MetaResult, explicit: &ExplicitMetaInfo) {
     }
     if let Some(value) = explicit.doubanid.as_ref() {
         meta.doubanid = Some(value.clone());
+    }
+    if let Some(value) = explicit.episode_group.as_ref() {
+        meta.episode_group = Some(value.clone());
     }
     if let Some(value) = explicit.media_type.as_ref() {
         meta.media_type = value.clone();
@@ -3125,6 +3141,7 @@ fn meta_to_py(py: Python<'_>, meta: &MetaResult) -> PyResult<PyObject> {
     dict.set_item("apply_words", &meta.apply_words)?;
     dict.set_item("tmdbid", meta.tmdbid)?;
     dict.set_item("doubanid", &meta.doubanid)?;
+    dict.set_item("episode_group", &meta.episode_group)?;
     dict.set_item("fps", meta.fps)?;
     Ok(dict.into())
 }

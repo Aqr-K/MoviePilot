@@ -90,6 +90,7 @@ class MetaBase(object):
     # 附加信息
     tmdbid: int = None
     doubanid: str = None
+    episode_group: Optional[str] = None
     # 帧率信息（纯数值）
     fps: Optional[int] = None
 
@@ -645,6 +646,9 @@ class MetaBase(object):
         # doubanid
         if not self.doubanid and meta.doubanid:
             self.doubanid = meta.doubanid
+        # 剧集组
+        if not self.episode_group and meta.episode_group:
+            self.episode_group = meta.episode_group
 
     def to_dict(self):
         """
