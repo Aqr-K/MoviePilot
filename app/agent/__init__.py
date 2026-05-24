@@ -43,10 +43,11 @@ from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
+from app.core.event import eventmanager
 from app.log import logger
-from app.schemas import Notification, NotificationType
+from app.schemas import AgentLLMProviderEventData, AgentTokensUsageEventData, Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
-from app.schemas.types import MessageChannel
+from app.schemas.types import ChainEventType, EventType, MessageChannel
 from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
@@ -256,6 +257,9 @@ class MoviePilotAgent:
         self._tool_context: Dict[str, object] = {}
         self._streamed_output = ""
         self._session_usage = _SessionUsageSnapshot()
+        self._llm_runtime_config: Optional[Dict[str, Any]] = None
+        self._llm_provider_selection: Dict[str, Any] = {}
+        self._agent_started_at: Optional[datetime] = None
 
         # 流式token管理
         self.stream_handler = StreamingHandler()
@@ -341,6 +345,40 @@ class MoviePilotAgent:
             )
         return self._session_usage.to_dict(self.session_id)
 
+    def _send_agent_tokens_usage_event(
+            self,
+            *,
+            success: bool,
+            error: Optional[str] = None,
+    ) -> None:
+        """
+        广播本次 Agent 执行的 token 聚合用量，供配额类插件异步记录。
+        """
+        try:
+            selection = self._llm_provider_selection or {}
+            event_data = AgentTokensUsageEventData(
+                session_id=self.session_id,
+                selected_provider_id=selection.get("selected_provider_id"),
+                selected_provider_name=selection.get("selected_provider_name"),
+                provider=selection.get("provider") or settings.LLM_PROVIDER,
+                base_url=selection.get("base_url") or settings.LLM_BASE_URL,
+                model=self._session_usage.model or selection.get("model") or settings.LLM_MODEL,
+                input_tokens=self._session_usage.total_input_tokens,
+                output_tokens=self._session_usage.total_output_tokens,
+                total_tokens=self._session_usage.total_tokens,
+                model_call_count=self._session_usage.model_call_count,
+                success=success,
+                error=error,
+                started_at=self._agent_started_at.strftime("%Y-%m-%d %H:%M:%S")
+                if self._agent_started_at
+                else None,
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                source=selection.get("source") or "agent",
+            )
+            eventmanager.send_event(EventType.AgentTokensUsage, event_data)
+        except Exception as err:
+            logger.debug(f"广播 Agent Tokens 用量事件失败: {err}")
+
     @property
     def is_background(self) -> bool:
         """
@@ -388,12 +426,113 @@ class MoviePilotAgent:
             return False
 
     @staticmethod
-    async def _initialize_llm(streaming: bool = False):
+    def _get_event_value(event_data: Any, key: str, default: Any = None) -> Any:
+        """
+        从链式事件数据中兼容读取 Pydantic 模型或普通字典字段。
+        """
+        if isinstance(event_data, dict):
+            return event_data.get(key, default)
+        return getattr(event_data, key, default)
+
+    @staticmethod
+    def _set_event_value(event_data: Any, key: str, value: Any) -> None:
+        """
+        向链式事件数据中兼容写入 Pydantic 模型或普通字典字段。
+        """
+        if isinstance(event_data, dict):
+            event_data[key] = value
+        else:
+            setattr(event_data, key, value)
+
+    @classmethod
+    def _clean_optional_text(cls, value: Any) -> Optional[str]:
+        """
+        标准化事件返回的可选文本字段，空字符串按未返回处理。
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    async def _resolve_llm_runtime_config(self) -> Dict[str, Any]:
+        """
+        通过链式事件解析本次 Agent 可用的 LLM 运行时配置。
+
+        若没有插件返回 selected_provider_id，则沿用系统配置，保持既有行为。
+        """
+        if self._llm_runtime_config is not None:
+            return self._llm_runtime_config
+
+        event_data = AgentLLMProviderEventData(
+            provider=settings.LLM_PROVIDER,
+            model=settings.LLM_MODEL,
+            api_key=settings.LLM_API_KEY,
+            base_url=settings.LLM_BASE_URL,
+            base_url_preset=settings.LLM_BASE_URL_PRESET,
+            thinking_level=None,
+        )
+        selected_event = await eventmanager.async_send_event(
+            ChainEventType.AgentLLMProvider,
+            event_data,
+        )
+        resolved_data = selected_event.event_data if selected_event else event_data
+
+        provider = (
+                self._clean_optional_text(self._get_event_value(resolved_data, "provider"))
+                or settings.LLM_PROVIDER
+        )
+        model = (
+                self._clean_optional_text(self._get_event_value(resolved_data, "model"))
+                or settings.LLM_MODEL
+        )
+        api_key = (
+                self._clean_optional_text(self._get_event_value(resolved_data, "api_key"))
+                or settings.LLM_API_KEY
+        )
+        base_url = (
+                self._clean_optional_text(self._get_event_value(resolved_data, "base_url"))
+                or settings.LLM_BASE_URL
+        )
+        base_url_preset = (
+                self._clean_optional_text(self._get_event_value(resolved_data, "base_url_preset"))
+                or settings.LLM_BASE_URL_PRESET
+        )
+        thinking_level = self._clean_optional_text(
+            self._get_event_value(resolved_data, "thinking_level")
+        )
+        selected_provider_id = self._clean_optional_text(
+            self._get_event_value(resolved_data, "selected_provider_id")
+        )
+        selected_provider_name = self._clean_optional_text(
+            self._get_event_value(resolved_data, "selected_provider_name")
+        )
+        source = self._clean_optional_text(self._get_event_value(resolved_data, "source"))
+
+        self._llm_provider_selection = {
+            "selected_provider_id": selected_provider_id,
+            "selected_provider_name": selected_provider_name,
+            "provider": provider,
+            "base_url": base_url,
+            "model": model,
+            "source": source,
+        }
+        self._llm_runtime_config = {
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "base_url_preset": base_url_preset,
+            "thinking_level": thinking_level,
+        }
+        return self._llm_runtime_config
+
+    async def _initialize_llm(self, streaming: bool = False):
         """
         初始化 LLM
         :param streaming: 是否启用流式输出
         """
-        return await LLMHelper.get_llm(streaming=streaming)
+        runtime_config = await self._resolve_llm_runtime_config()
+        return await LLMHelper.get_llm(streaming=streaming, **runtime_config)
 
     @staticmethod
     def _extract_text_content(content) -> str:
@@ -815,6 +954,11 @@ class MoviePilotAgent:
         - 渠道不支持消息编辑：非流式 LLM + ainvoke，完成后发送最终回复
         - 渠道支持消息编辑：流式 LLM + astream，实时推送 token
         """
+        execution_success = False
+        execution_error: Optional[str] = None
+        self._agent_started_at = datetime.now()
+        self._llm_runtime_config = None
+        self._llm_provider_selection = {}
         try:
             # Agent运行配置
             agent_config = {
@@ -948,11 +1092,14 @@ class MoviePilotAgent:
                 user_id=self.user_id,
                 messages=agent.get_state(agent_config).values.get("messages", []),
             )
+            execution_success = True
 
         except asyncio.CancelledError:
             logger.info(f"Agent执行被取消: session_id={self.session_id}")
+            execution_error = "任务已取消"
             return "任务已取消", {}
         except Exception as e:
+            execution_error = str(e)
             if self._messages_have_image_input(messages) and self._is_unsupported_image_input_error(e):
                 logger.warning(
                     f"当前模型不支持图片输入，已向用户发送友好提示: {e}"
@@ -964,6 +1111,10 @@ class MoviePilotAgent:
             await self._dispatch_execution_notice(friendly_message)
             return friendly_message, {}
         finally:
+            self._send_agent_tokens_usage_event(
+                success=execution_success,
+                error=execution_error,
+            )
             # 确保停止流式输出
             await self.stream_handler.stop_streaming()
 

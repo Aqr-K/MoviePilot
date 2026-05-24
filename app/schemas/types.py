@@ -105,6 +105,8 @@ class EventType(Enum):
     MessageAction = "message.action"
     # 执行工作流
     WorkflowExecute = "workflow.execute"
+    # Agent Tokens 用量
+    AgentTokensUsage = "agent.tokens.usage"
 
 
 # EventType中文名称翻译字典
@@ -139,6 +141,7 @@ EVENT_TYPE_NAMES = {
     EventType.ConfigChanged: "配置项更新",
     EventType.MessageAction: "消息交互动作",
     EventType.WorkflowExecute: "执行工作流",
+    EventType.AgentTokensUsage: "Agent Tokens 用量",
 }
 
 
@@ -174,6 +177,8 @@ class ChainEventType(Enum):
     WorkflowExecution = "workflow.execution"
     # 存储操作选择
     StorageOperSelection = "storage.operation"
+    # Agent LLM 供应商选择
+    AgentLLMProvider = "agent.llm.provider"
 
 
 # 系统配置Key字典

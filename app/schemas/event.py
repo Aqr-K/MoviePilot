@@ -64,6 +64,53 @@ class ChainEventData(BaseEventData):
     pass
 
 
+class AgentLLMProviderEventData(ChainEventData):
+    """
+    Agent LLM 供应商选择事件数据。
+
+    事件发出方会带入当前系统配置作为默认值；插件可覆盖 provider、base_url、
+    api_key、model 等字段，并通过 selected_provider_id 标记本次选择，方便
+    后续用量事件精确回写到同一个配额条目。
+    """
+
+    provider: Optional[str] = Field(default=None, description="LLM provider ID")
+    base_url: Optional[str] = Field(default=None, description="API Base URL")
+    api_key: Optional[str] = Field(default=None, description="API Key")
+    model: Optional[str] = Field(default=None, description="模型名称")
+    base_url_preset: Optional[str] = Field(default=None, description="Base URL 预设ID")
+    thinking_level: Optional[str] = Field(default=None, description="思考模式级别")
+    selected_provider_id: Optional[str] = Field(default=None, description="插件侧供应商ID")
+    selected_provider_name: Optional[str] = Field(default=None, description="插件侧供应商名称")
+    source: Optional[str] = Field(default=None, description="选择来源")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+
+
+class AgentTokensUsageEventData(BaseEventData):
+    """
+    Agent Tokens 用量广播事件数据。
+
+    用量事件不携带 API Key，只携带选择事件返回的 selected_provider_id 以及
+    聚合后的 token 统计，避免把密钥扩散给广播订阅者。
+    """
+
+    session_id: str = Field(..., description="Agent 会话ID")
+    selected_provider_id: Optional[str] = Field(default=None, description="插件侧供应商ID")
+    selected_provider_name: Optional[str] = Field(default=None, description="插件侧供应商名称")
+    provider: Optional[str] = Field(default=None, description="实际 LLM provider ID")
+    base_url: Optional[str] = Field(default=None, description="API Base URL")
+    model: Optional[str] = Field(default=None, description="模型名称")
+    input_tokens: int = Field(default=0, description="输入 tokens")
+    output_tokens: int = Field(default=0, description="输出 tokens")
+    total_tokens: int = Field(default=0, description="总 tokens")
+    model_call_count: int = Field(default=0, description="模型调用次数")
+    success: bool = Field(default=False, description="Agent 执行是否成功")
+    error: Optional[str] = Field(default=None, description="失败原因")
+    started_at: Optional[str] = Field(default=None, description="开始时间")
+    finished_at: Optional[str] = Field(default=None, description="结束时间")
+    source: str = Field(default="agent", description="事件来源")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+
+
 class AuthCredentials(ChainEventData):
     """
     AuthVerification 事件的数据模型
