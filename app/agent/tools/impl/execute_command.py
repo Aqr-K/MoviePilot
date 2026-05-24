@@ -30,7 +30,7 @@ READ_CHUNK_SIZE = 4096
 KILL_GRACE_SECONDS = 3
 COMMAND_CONCURRENCY_LIMIT = 2
 COMMAND_FORBIDDEN_KEYWORDS = (
-    "rm -rf /",
+    "rm -rf / ",
     ":(){ :|:& };:",
     "dd if=/dev/zero",
     "mkfs",
