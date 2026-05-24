@@ -185,7 +185,8 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
 
         self.assertEqual(provider, "my-provider_01")
 
-    def test_fallback_provider_choices_include_baidu_jdcloud_and_wanqing(self):
+    def test_fallback_provider_choices_include_builtin_domestic_token_providers(self):
+        """本地向导兜底列表应覆盖内置国内 Token 套餐 provider。"""
         module = load_local_setup_module()
 
         self.assertEqual(
@@ -197,8 +198,21 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
             module.LLM_PROVIDER_FALLBACK_CHOICES["kuaishou-wanqing"],
             "快手万擎",
         )
+        self.assertEqual(
+            module.LLM_PROVIDER_FALLBACK_CHOICES["china-unicom"],
+            "中国联通",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_FALLBACK_CHOICES["china-mobile"],
+            "中国移动",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_FALLBACK_CHOICES["china-telecom"],
+            "中国电信",
+        )
 
-    def test_local_setup_defaults_include_baidu_jdcloud_and_wanqing_base_urls(self):
+    def test_local_setup_defaults_include_builtin_domestic_token_base_urls(self):
+        """本地向导默认 Base URL 应覆盖内置国内 Token 套餐 provider。"""
         module = load_local_setup_module()
 
         self.assertEqual(
@@ -216,6 +230,30 @@ class LocalSetupLlmProviderPromptTests(unittest.TestCase):
         self.assertEqual(
             module.LLM_PROVIDER_DEFAULTS["kuaishou-wanqing"]["base_url_preset"],
             "kuaishou-wanqing-usage",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["china-unicom"]["base_url"],
+            "https://aigw-gzgy2.cucloud.cn:8443/v1",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["china-unicom"]["base_url_preset"],
+            "china-unicom-coding-openai",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["china-mobile"]["base_url"],
+            "https://ecloud.10086.cn/api",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["china-mobile"]["base_url_preset"],
+            "china-mobile-moma",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["china-telecom"]["base_url"],
+            "https://wishub-x6.ctyun.cn/v1",
+        )
+        self.assertEqual(
+            module.LLM_PROVIDER_DEFAULTS["china-telecom"]["base_url_preset"],
+            "china-telecom-token-service",
         )
 
     def test_collect_agent_config_prompts_for_duplicate_base_url_presets(self):

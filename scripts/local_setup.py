@@ -90,6 +90,21 @@ LLM_PROVIDER_DEFAULTS = {
         "model": "",
         "base_url": "https://modelservice.jdcloud.com/v1",
     },
+    "china-unicom": {
+        "model": "",
+        "base_url": "https://aigw-gzgy2.cucloud.cn:8443/v1",
+        "base_url_preset": "china-unicom-coding-openai",
+    },
+    "china-mobile": {
+        "model": "",
+        "base_url": "https://ecloud.10086.cn/api",
+        "base_url_preset": "china-mobile-moma",
+    },
+    "china-telecom": {
+        "model": "",
+        "base_url": "https://wishub-x6.ctyun.cn/v1",
+        "base_url_preset": "china-telecom-token-service",
+    },
     "kuaishou-wanqing": {
         "model": "",
         "base_url": "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints",
@@ -105,6 +120,9 @@ LLM_PROVIDER_FALLBACK_CHOICES = {
     "openrouter": "OpenRouter",
     "groq": "Groq",
     "jdcloud": "京东云",
+    "china-unicom": "中国联通",
+    "china-mobile": "中国移动",
+    "china-telecom": "中国电信",
     "kuaishou-wanqing": "快手万擎",
 }
 RUNTIME_PACKAGE = {

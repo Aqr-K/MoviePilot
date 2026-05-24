@@ -342,6 +342,127 @@ class LlmProviderRegistryTest(unittest.TestCase):
 
         self.assertEqual(models, [])
 
+    def test_builtin_provider_includes_china_operator_token_services(self):
+        """三大运营商 Token 服务应作为内置 OpenAI-compatible provider 暴露。"""
+        manager = LLMProviderManager()
+
+        unicom = manager.get_provider("china-unicom")
+        mobile = manager.get_provider("china-mobile")
+        telecom = manager.get_provider("china-telecom")
+
+        self.assertEqual(unicom.name, "中国联通")
+        self.assertEqual(unicom.default_base_url, "https://aigw-gzgy2.cucloud.cn:8443/v1")
+        self.assertEqual(
+            tuple((preset.id, preset.value, preset.runtime) for preset in unicom.base_url_presets),
+            (
+                (
+                    "china-unicom-coding-openai",
+                    "https://aigw-gzgy2.cucloud.cn:8443/v1",
+                    None,
+                ),
+                (
+                    "china-unicom-coding-anthropic",
+                    "https://aigw-gzgy2.cucloud.cn:8443",
+                    "anthropic_compatible",
+                ),
+            ),
+        )
+        self.assertTrue(unicom.base_url_editable)
+        self.assertFalse(unicom.supports_model_refresh)
+        self.assertEqual(unicom.model_list_strategy, "manual")
+
+        self.assertEqual(mobile.name, "中国移动")
+        self.assertEqual(mobile.default_base_url, "https://ecloud.10086.cn/api")
+        self.assertEqual(
+            tuple((preset.id, preset.value) for preset in mobile.base_url_presets),
+            (
+                ("china-mobile-moma", "https://ecloud.10086.cn/api"),
+                (
+                    "china-mobile-coding",
+                    "https://zhenze-huhehaote.cmecloud.cn/api/coding/v1",
+                ),
+            ),
+        )
+        self.assertTrue(mobile.base_url_editable)
+        self.assertFalse(mobile.supports_model_refresh)
+        self.assertEqual(mobile.model_list_strategy, "manual")
+
+        self.assertEqual(telecom.name, "中国电信")
+        self.assertEqual(telecom.default_base_url, "https://wishub-x6.ctyun.cn/v1")
+        self.assertEqual(telecom.api_key_label, "App Key")
+        self.assertEqual(
+            tuple(
+                (preset.id, preset.value, preset.runtime, preset.model_list_strategy)
+                for preset in telecom.base_url_presets
+            ),
+            (
+                (
+                    "china-telecom-token-service",
+                    "https://wishub-x6.ctyun.cn/v1",
+                    None,
+                    None,
+                ),
+                (
+                    "china-telecom-coding-openai",
+                    "https://wishub-x6.ctyun.cn/coding/v1",
+                    None,
+                    "manual",
+                ),
+                (
+                    "china-telecom-coding-anthropic",
+                    "https://wishub-x6.ctyun.cn/coding/v1",
+                    "anthropic_compatible",
+                    "manual",
+                ),
+            ),
+        )
+        self.assertTrue(telecom.base_url_editable)
+
+    def test_china_operator_manual_model_presets_return_empty_model_list(self):
+        """未提供稳定全局模型目录的运营商套餐应回退为手动填写模型。"""
+        manager = LLMProviderManager()
+
+        unicom_models = asyncio.run(manager.list_models(provider_id="china-unicom"))
+        mobile_models = asyncio.run(manager.list_models(provider_id="china-mobile"))
+        telecom_coding_models = asyncio.run(
+            manager.list_models(
+                provider_id="china-telecom",
+                base_url_preset_id="china-telecom-coding-openai",
+            )
+        )
+
+        self.assertEqual(unicom_models, [])
+        self.assertEqual(mobile_models, [])
+        self.assertEqual(telecom_coding_models, [])
+
+    def test_china_operator_anthropic_presets_resolve_runtime(self):
+        """运营商提供 Anthropic 协议地址时应切换到 anthropic_compatible runtime。"""
+        manager = LLMProviderManager()
+
+        unicom_runtime = asyncio.run(
+            manager.resolve_runtime(
+                provider_id="china-unicom",
+                model=None,
+                api_key="sk-test",
+                base_url="https://aigw-gzgy2.cucloud.cn:8443",
+                base_url_preset_id="china-unicom-coding-anthropic",
+            )
+        )
+        telecom_runtime = asyncio.run(
+            manager.resolve_runtime(
+                provider_id="china-telecom",
+                model=None,
+                api_key="cp-test",
+                base_url="https://wishub-x6.ctyun.cn/coding/v1",
+                base_url_preset_id="china-telecom-coding-anthropic",
+            )
+        )
+
+        self.assertEqual(unicom_runtime["runtime"], "anthropic_compatible")
+        self.assertEqual(unicom_runtime["base_url"], "https://aigw-gzgy2.cucloud.cn:8443")
+        self.assertEqual(telecom_runtime["runtime"], "anthropic_compatible")
+        self.assertEqual(telecom_runtime["base_url"], "https://wishub-x6.ctyun.cn/coding")
+
     def test_builtin_minimax_provider_merges_general_and_coding_presets(self):
         manager = LLMProviderManager()
 
