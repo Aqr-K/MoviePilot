@@ -30,7 +30,6 @@ READ_CHUNK_SIZE = 4096
 KILL_GRACE_SECONDS = 3
 COMMAND_CONCURRENCY_LIMIT = 2
 COMMAND_FORBIDDEN_KEYWORDS = (
-    "rm -rf / ",
     ":(){ :|:& };:",
     "dd if=/dev/zero",
     "mkfs",
@@ -257,6 +256,29 @@ class ExecuteCommandTool(MoviePilotTool):
         for keyword in COMMAND_FORBIDDEN_KEYWORDS:
             if keyword in command:
                 raise ValueError(f"命令包含禁止使用的关键字 '{keyword}'")
+
+        # 检查是否使用了 rm -r/R 删除根目录或一级目录，防止误杀多级目录
+        import re
+        import os.path
+        tokens = re.split(r'\s+', command.strip())
+        if any(t == "rm" or t.endswith("/rm") for t in tokens):
+            has_r = False
+            for token in tokens:
+                if token.startswith("-") and ("r" in token or "R" in token):
+                    has_r = True
+                    break
+            
+            if has_r:
+                for token in tokens:
+                    # 提取可能包含目标路径的部分（去除重定向、管道、分号等末尾干扰）
+                    m = re.match(r'^([^;\|&><]+)', token)
+                    if m:
+                        clean_token = m.group(1).strip('"\'')
+                        # 仅对绝对路径进行一级目录限制
+                        if clean_token.startswith('/'):
+                            norm_path = os.path.normpath(clean_token)
+                            if re.match(r'^/[^/]*$', norm_path) or re.match(r'^/[^/]*/$', norm_path):
+                                raise ValueError(f"不允许使用 rm 命令删除根目录或一级目录: {clean_token}")
 
     @staticmethod
     def _normalize_timeout(timeout: Optional[int]) -> tuple[int, Optional[str]]:
