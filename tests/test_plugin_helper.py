@@ -33,6 +33,28 @@ class PluginHelperTest(TestCase):
             PluginHelper.sanitize_repo_url_for_statistic(repo_url)
         )
 
+    def test_append_cache_buster_only_during_fresh_context(self):
+        """
+        插件库强制刷新时远端索引 URL 也要变化，避免命中镜像或代理缓存。
+        """
+        try:
+            from app.core.cache import fresh
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            self.skipTest(f"missing dependency: {exc}")
+
+        url = "https://raw.githubusercontent.com/user/repo/main/package.json"
+
+        self.assertEqual(url, PluginHelper._PluginHelper__append_cache_buster(url))
+        with patch("app.helper.plugin.time.time_ns", return_value=1234567890):
+            with fresh(True):
+                refreshed_url = PluginHelper._PluginHelper__append_cache_buster(url)
+
+        self.assertEqual(
+            "https://raw.githubusercontent.com/user/repo/main/package.json?_refresh=1234567890",
+            refreshed_url,
+        )
+
     def test_check_plugin_system_version_allows_missing_field(self):
         """
         未声明主系统版本范围时保持旧插件兼容，不做额外限制。

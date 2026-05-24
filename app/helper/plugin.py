@@ -8,6 +8,7 @@ import site
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import zipfile
 from pathlib import Path
@@ -25,7 +26,7 @@ from packaging.version import Version, InvalidVersion
 from importlib.metadata import distributions
 from requests import Response
 
-from app.core.cache import cached
+from app.core.cache import cached, is_fresh
 from app.core.config import settings
 from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
@@ -398,6 +399,19 @@ class PluginHelper(metaclass=WeakSingleton):
         return None
 
     @staticmethod
+    def __append_cache_buster(url: str) -> str:
+        """
+        强制刷新插件库索引时追加时间戳，绕过 GitHub 镜像或中间代理的缓存。
+        """
+        if not is_fresh():
+            return url
+
+        parts = urlsplit(url)
+        refresh_param = f"_refresh={time.time_ns()}"
+        query = f"{parts.query}&{refresh_param}" if parts.query else refresh_param
+        return parts._replace(query=query).geturl()
+
+    @staticmethod
     def __parse_plugin_index_response(content: str) -> Optional[Dict[str, dict]]:
         """
         解析插件索引响应，仅缓存成功解析出的字典结果。
@@ -432,6 +446,7 @@ class PluginHelper(metaclass=WeakSingleton):
 
         raw_url = self._base_url.format(user=user, repo=repo)
         package_url = f"{raw_url}package.{package_version}.json" if package_version else f"{raw_url}package.json"
+        package_url = self.__append_cache_buster(package_url)
 
         res = self.__request_with_fallback(package_url, headers=settings.REPO_GITHUB_HEADERS(repo=f"{user}/{repo}"))
         if res is None:
@@ -1934,6 +1949,7 @@ class PluginHelper(metaclass=WeakSingleton):
 
         raw_url = self._base_url.format(user=user, repo=repo)
         package_url = f"{raw_url}package.{package_version}.json" if package_version else f"{raw_url}package.json"
+        package_url = self.__append_cache_buster(package_url)
 
         res = await self.__async_request_with_fallback(package_url,
                                                        headers=settings.REPO_GITHUB_HEADERS(repo=f"{user}/{repo}"))
