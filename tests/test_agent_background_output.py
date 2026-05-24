@@ -50,6 +50,10 @@ class _FakeStreamingFailingAgent(_FakeFailingAgent):
         yield None
 
 
+class StreamChunkTimeoutError(RuntimeError):
+    """模拟 langchain_openai 的流式分块超时异常。"""
+
+
 class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
     async def test_background_non_streaming_does_not_send_by_default(self):
         agent = MoviePilotAgent(session_id="bg-test", user_id="system")
@@ -151,6 +155,45 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         agent.send_agent_message.assert_awaited_once_with(
             UNSUPPORTED_IMAGE_INPUT_MESSAGE, title=""
         )
+        agent._save_agent_message_to_db.assert_not_awaited()
+
+    async def test_streaming_model_chunk_timeout_sends_friendly_notice(self):
+        """流式模型分块超时时应只把主错误信息发给用户。"""
+        agent = MoviePilotAgent(session_id="timeout-test", user_id="user-1")
+        agent.channel = "Telegram"
+        agent.source = "telegram-test"
+        agent._tool_context = {"user_reply_sent": False}
+        agent._streamed_output = ""
+        agent.stream_handler = SimpleNamespace(
+            set_dispatch_policy=lambda allow_dispatch_without_context=False: None,
+            start_streaming=AsyncMock(),
+            flush_pending_tool_summary=lambda: "",
+            stop_streaming=AsyncMock(return_value=(False, "")),
+        )
+        agent._should_stream = lambda: True
+        raw_error = StreamChunkTimeoutError(
+            "No streaming chunk received for 120.0s "
+            "(model=mimo-v2.5-pro, chunks_received=1). "
+            "Tune or disable via the `stream_chunk_timeout` constructor kwarg."
+        )
+        agent._create_agent = AsyncMock(
+            return_value=_FakeStreamingFailingAgent(raw_error)
+        )
+        agent.send_agent_message = AsyncMock()
+        agent._save_agent_message_to_db = AsyncMock()
+
+        result, _ = await agent._execute_agent([HumanMessage(content="测试超时")])
+
+        expected = (
+            "智能助手执行失败: No streaming chunk received for 120.0s "
+            "(model=mimo-v2.5-pro, chunks_received=1)."
+        )
+        self.assertEqual(expected, result)
+        agent.send_agent_message.assert_awaited_once_with(expected, title="")
+        sent_message = agent.send_agent_message.await_args.args[0]
+        self.assertIn("No streaming chunk received for 120.0s", sent_message)
+        self.assertNotIn("Tune or disable", sent_message)
+        self.assertEqual(expected, agent._streamed_output)
         agent._save_agent_message_to_db.assert_not_awaited()
 
     async def test_background_non_streaming_sends_when_reply_mode_dispatch(self):
