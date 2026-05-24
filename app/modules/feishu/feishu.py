@@ -992,7 +992,7 @@ class Feishu:
         if response.success():
             data = getattr(response, "data", None)
             return getattr(data, "card_id", None)
-        logger.error(
+        logger.warn(
             "飞书流式卡片创建失败：code=%s, msg=%s, log_id=%s",
             response.code,
             response.msg,
@@ -1109,9 +1109,9 @@ class Feishu:
             .build()
         )
         if response.success():
-            logger.info("飞书流式卡片更新成功：card_id=%s, sequence=%s, content_len=%s", card_id, sequence, len(content))
+            logger.debug("飞书流式卡片更新成功：card_id=%s, sequence=%s, content_len=%s", card_id, sequence, len(content))
             return True
-        logger.error(
+        logger.warn(
             "飞书流式卡片内容更新失败：card_id=%s, element_id=%s, sequence=%s, code=%s, msg=%s, log_id=%s",
             card_id,
             element_id,
@@ -1139,7 +1139,7 @@ class Feishu:
         )
         if response.success():
             return True
-        logger.error(
+        logger.warn(
             "飞书关闭流式卡片失败：card_id=%s, sequence=%s, code=%s, msg=%s, log_id=%s",
             card_id,
             sequence,
@@ -1556,7 +1556,7 @@ class Feishu:
                     original_message_id=original_message_id,
                 )
             except Exception as err:
-                logger.error(f"飞书流式卡片发送失败：{err}")
+                logger.warn(f"飞书流式卡片发送失败：{err}")
                 return {"success": False}
             if not result:
                 return {"success": False}
@@ -1622,7 +1622,7 @@ class Feishu:
             card_id = str(stream_meta.get("card_id") or "").strip()
             element_id = str(stream_meta.get("element_id") or self.STREAM_CARD_BODY_ELEMENT_ID).strip()
             sequence = int(stream_meta.get("sequence") or 0) + 1
-            logger.info("准备更新飞书流式卡片：card_id=%s, sequence=%s (before incr: %s)", card_id, sequence, stream_meta.get("sequence"))
+            logger.debug("准备更新飞书流式卡片：card_id=%s, sequence=%s (before incr: %s)", card_id, sequence, stream_meta.get("sequence"))
             # 无论远端是否响应成功都自增 sequence，防止某次超时导致后续 sequence 一直因为没有递增而被拒绝
             stream_meta["sequence"] = sequence
             
