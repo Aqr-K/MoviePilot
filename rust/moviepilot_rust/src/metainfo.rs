@@ -40,8 +40,6 @@ static BRACED_METAINFO_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\[([^\]]+)]
 static BRACED_TMDBID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"tmdbid=(\d+)").unwrap());
 static BRACED_DOUBANID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"doubanid=(\d+)").unwrap());
 static BRACED_TYPE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"type=(\w+)").unwrap());
-static BRACED_EPISODE_GROUP_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?:^|;)g=([0-9a-fA-F]+)(?:;|$)").unwrap());
 static BRACED_BEGIN_SEASON_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"s=(\d+)").unwrap());
 static BRACED_END_SEASON_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"s=\d+-(\d+)").unwrap());
 static BRACED_BEGIN_EPISODE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"e=(\d+)").unwrap());
@@ -667,9 +665,7 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
             .captures(&result)
             .and_then(|cap| cap.get(1));
         let mtype = BRACED_TYPE_RE.captures(&result).and_then(|cap| cap.get(1));
-        let episode_group = BRACED_EPISODE_GROUP_RE
-            .captures(&result)
-            .and_then(|cap| cap.get(1));
+        let episode_group = find_explicit_episode_group(&result);
         let begin_season = BRACED_BEGIN_SEASON_RE
             .captures(&result)
             .and_then(|cap| cap.get(1));
@@ -695,8 +691,8 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
                 _ => {}
             }
         }
-        if let Some(value) = episode_group {
-            info.episode_group = Some(value.as_str().to_string());
+        if let Some(value) = episode_group.as_ref() {
+            info.episode_group = Some(value.clone());
         }
         if let Some(value) = begin_season {
             info.begin_season = value.as_str().parse::<i64>().ok();
@@ -750,6 +746,23 @@ fn find_explicit_metainfo(title: &str) -> ExplicitMetaInfo {
     );
     info.title = parsed_title;
     info
+}
+
+/// 从显式标签参数中提取 g= 剧集组，避免普通标题额外走正则匹配。
+fn find_explicit_episode_group(value: &str) -> Option<String> {
+    if !value.starts_with("g=") && !value.contains(";g=") {
+        return None;
+    }
+
+    value.split(';').find_map(|part| {
+        part.strip_prefix("g=").and_then(|group_id| {
+            if !group_id.is_empty() && group_id.chars().all(|item| item.is_ascii_hexdigit()) {
+                Some(group_id.to_string())
+            } else {
+                None
+            }
+        })
+    })
 }
 
 /// 计算显式季集范围总数，兼容倒序输入。
