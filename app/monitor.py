@@ -326,6 +326,8 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             processed_count = 0
             for file_path, file_info in new_snapshot.items():
                 try:
+                    if not self.__is_transfer_candidate_path(Path(file_path)):
+                        continue
                     logger.info(f"处理文件：{file_path}")
                     file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
                     self.__handle_file(storage=storage, event_path=Path(file_path), file_size=file_size)
@@ -416,6 +418,40 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 changes['modified'].append(file_path)
 
         return changes
+
+    @staticmethod
+    def __is_bluray_sub(_path: Path) -> bool:
+        """
+        判断是否蓝光原盘目录内的媒体流文件。
+        """
+        return True if re.search(r"BDMV[/\\]STREAM", _path.as_posix(), re.IGNORECASE) else False
+
+    @staticmethod
+    def __get_bluray_dir(_path: Path) -> Optional[Path]:
+        """
+        获取蓝光原盘BDMV目录的上级目录。
+        """
+        for p in _path.parents:
+            if p.name == "BDMV":
+                return p.parent
+        return None
+
+    @staticmethod
+    def __has_suffix_in(file_path: Path, extensions: List[str]) -> bool:
+        """
+        判断路径后缀是否命中给定扩展名列表。
+        """
+        if not file_path.suffix:
+            return False
+        return file_path.suffix.casefold() in {ext.casefold() for ext in extensions}
+
+    def __is_transfer_candidate_path(self, file_path: Path) -> bool:
+        """
+        判断监控事件路径是否需要进入整理链。
+        """
+        if self.__has_suffix_in(file_path, settings.DOWNLOAD_TMPEXT):
+            return False
+        return self.__has_suffix_in(file_path, self.all_exts)
 
     @staticmethod
     def count_directory_files(directory: Path, max_check: int = 10000) -> int:
@@ -713,24 +749,34 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 if not is_first_snapshot:
                     # 比较快照找出变化
                     changes = self.compare_snapshots(old_snapshot, new_snapshot)
+                    added_files = [
+                        file_path
+                        for file_path in changes['added']
+                        if self.__is_transfer_candidate_path(Path(file_path))
+                    ]
+                    modified_files = [
+                        file_path
+                        for file_path in changes['modified']
+                        if self.__is_transfer_candidate_path(Path(file_path))
+                    ]
 
                     # 处理新增文件
-                    for new_file in changes['added']:
+                    for new_file in added_files:
                         logger.info(f"发现新增文件：{new_file}")
                         file_info = new_snapshot.get(new_file, {})
                         file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
                         self.__handle_file(storage=storage, event_path=Path(new_file), file_size=file_size)
 
                     # 处理修改文件
-                    for modified_file in changes['modified']:
+                    for modified_file in modified_files:
                         logger.info(f"发现修改文件：{modified_file}")
                         file_info = new_snapshot.get(modified_file, {})
                         file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
                         self.__handle_file(storage=storage, event_path=Path(modified_file), file_size=file_size)
 
-                    if changes['added'] or changes['modified']:
+                    if added_files or modified_files:
                         logger.info(
-                            f"{storage} 发现 {len(changes['added'])} 个新增文件，{len(changes['modified'])} 个修改文件")
+                            f"{storage} 发现 {len(added_files)} 个新增文件，{len(modified_files)} 个修改文件")
                     else:
                         logger.debug(f"{storage} 无文件变化")
                 else:
@@ -765,6 +811,8 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         :param file_size: 文件大小
         """
         if not event.is_directory:
+            if not self.__is_transfer_candidate_path(Path(event_path)):
+                return
             # 文件发生变化
             logger.debug(f"检测到文件变化: {event_path} [{text}]")
             # 整理文件
@@ -777,31 +825,17 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         :param event_path: 事件文件路径
         :param file_size: 文件大小
         """
-
-        def __is_bluray_sub(_path: Path) -> bool:
-            """
-            判断是否蓝光原盘目录内的子目录或文件
-            """
-            return True if re.search(r"BDMV/STREAM", _path.as_posix(), re.IGNORECASE) else False
-
-        def __get_bluray_dir(_path: Path) -> Optional[Path]:
-            """
-            获取蓝光原盘BDMV目录的上级目录
-            """
-            for p in _path.parents:
-                if p.name == "BDMV":
-                    return p.parent
-            return None
-
         # 全程加锁
         with lock:
             is_bluray_folder = False
             # 蓝光原盘文件处理
-            if __is_bluray_sub(event_path):
-                event_path = __get_bluray_dir(event_path)
+            if self.__is_bluray_sub(event_path):
+                event_path = self.__get_bluray_dir(event_path)
                 if not event_path:
                     return
                 is_bluray_folder = True
+            elif not self.__is_transfer_candidate_path(event_path):
+                return
 
             # TTL缓存控重
             if self._cache.get(str(event_path)):

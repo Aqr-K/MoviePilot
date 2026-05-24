@@ -94,6 +94,7 @@ class MonitorWatchfilesEventTest(unittest.TestCase):
         文件事件应继续按 local 存储交给整理流程。
         """
         monitor = object.__new__(Monitor)
+        monitor.all_exts = [".mkv"]
         handle_file = MagicMock()
         setattr(monitor, "_Monitor__handle_file", handle_file)
         event_path = Path("/downloads/movie.mkv")
@@ -121,6 +122,7 @@ class MonitorWatchfilesEventTest(unittest.TestCase):
         目录事件不应进入文件整理流程。
         """
         monitor = object.__new__(Monitor)
+        monitor.all_exts = [".mkv"]
         handle_file = MagicMock()
         setattr(monitor, "_Monitor__handle_file", handle_file)
         event_path = Path("/downloads/folder")
@@ -134,6 +136,54 @@ class MonitorWatchfilesEventTest(unittest.TestCase):
             event=event,
             text="新增",
             event_path=event_path.as_posix()
+        )
+
+        handle_file.assert_not_called()
+
+    def test_event_handler_ignores_download_temp_files(self):
+        """
+        下载器临时文件不应进入整理流程。
+        """
+        monitor = object.__new__(Monitor)
+        monitor.all_exts = [".mkv"]
+        handle_file = MagicMock()
+        setattr(monitor, "_Monitor__handle_file", handle_file)
+        event_path = Path("/downloads/movie.mkv.!qB")
+        event = DirectoryChangeEvent(
+            change_type=Change.modified,
+            src_path=event_path.as_posix(),
+            is_directory=False
+        )
+
+        monitor.event_handler(
+            event=event,
+            text="修改",
+            event_path=event_path.as_posix(),
+            file_size=1024
+        )
+
+        handle_file.assert_not_called()
+
+    def test_event_handler_ignores_non_transferable_files(self):
+        """
+        非可整理后缀文件不应进入整理流程。
+        """
+        monitor = object.__new__(Monitor)
+        monitor.all_exts = [".mkv"]
+        handle_file = MagicMock()
+        setattr(monitor, "_Monitor__handle_file", handle_file)
+        event_path = Path("/downloads/movie.nfo")
+        event = DirectoryChangeEvent(
+            change_type=Change.added,
+            src_path=event_path.as_posix(),
+            is_directory=False
+        )
+
+        monitor.event_handler(
+            event=event,
+            text="新增",
+            event_path=event_path.as_posix(),
+            file_size=1024
         )
 
         handle_file.assert_not_called()
