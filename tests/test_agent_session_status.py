@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,11 +8,20 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 
 from app.agent.middleware.usage import UsageMiddleware
+from app.agent import AgentManager
 from app.chain.message import MessageChain
 from app.schemas.types import MessageChannel
 
 
 class TestAgentSessionStatus(unittest.TestCase):
+    def setUp(self):
+        """清理跨用例共享的用户会话状态。"""
+        MessageChain._user_sessions.clear()
+
+    def tearDown(self):
+        """清理测试产生的用户会话状态。"""
+        MessageChain._user_sessions.clear()
+
     def test_usage_middleware_records_usage_metadata(self):
         snapshots = []
         middleware = UsageMiddleware(on_usage=snapshots.append)
@@ -104,3 +113,34 @@ class TestAgentSessionStatus(unittest.TestCase):
 
         notification = post_message.call_args.args[0]
         self.assertEqual(notification.title, "您当前没有活跃的智能体会话")
+
+    def test_get_or_create_session_cleans_expired_session(self):
+        """用户会话超过复用窗口时应调度清理旧 Agent 会话。"""
+        chain = MessageChain()
+        chain._user_sessions.clear()
+        chain._user_sessions["10001"] = (
+            "old-session",
+            datetime.now() - timedelta(minutes=chain._session_timeout_minutes + 1),
+        )
+
+        with patch.object(chain, "_schedule_agent_session_clear") as clear_session:
+            session_id = chain._get_or_create_session_id("10001")
+
+        self.assertNotEqual(session_id, "old-session")
+        self.assertEqual(chain._user_sessions["10001"][0], session_id)
+        clear_session.assert_called_once_with("old-session", "10001")
+
+    def test_agent_manager_collects_idle_sessions(self):
+        """Agent 管理器应只回收超过空闲窗口且未忙碌的会话。"""
+        manager = AgentManager()
+        manager._idle_session_ttl = timedelta(seconds=1)
+        manager._session_last_used["idle-session"] = (
+            "10001",
+            datetime.now() - timedelta(seconds=2),
+        )
+        manager._session_last_used["fresh-session"] = ("10002", datetime.now())
+
+        self.assertEqual(
+            [("idle-session", "10001")],
+            manager._expired_idle_sessions(),
+        )

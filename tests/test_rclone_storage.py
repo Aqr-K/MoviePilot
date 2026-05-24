@@ -200,6 +200,19 @@ class RcloneStorageTest(unittest.TestCase):
         self.assertEqual("/Show/", folder.path)
         run_mock.assert_called_once()
 
+    def test_folder_lock_table_evicts_old_unlocked_paths(self):
+        """路径锁表超过上限时应优先淘汰未占用的旧锁。"""
+        with patch.object(rclone_module, "_MAX_FOLDER_LOCKS", 2):
+            first_lock = Rclone._Rclone__get_path_lock(Path("/A"))
+            second_lock = Rclone._Rclone__get_path_lock(Path("/B"))
+            third_lock = Rclone._Rclone__get_path_lock(Path("/C"))
+
+        self.assertNotIn("/A", rclone_module._folder_locks)
+        self.assertIn("/B", rclone_module._folder_locks)
+        self.assertIn("/C", rclone_module._folder_locks)
+        self.assertIsNot(first_lock, third_lock)
+        self.assertIs(second_lock, rclone_module._folder_locks["/B"])
+
 
 if __name__ == "__main__":
     unittest.main()

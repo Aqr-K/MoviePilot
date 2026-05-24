@@ -84,13 +84,12 @@ class ScrapingOption:
 class ScrapingConfig:
     """媒体刮削配置"""
 
-    _policies: dict[tuple[str], ScrapingOption] = {}
-
     def __init__(self, config_dict: dict[str, str] = None):
         """
         初始化配置对象
         :param config_dict: 用户配置字典（扁平化格式），为 None 时使用默认配置
         """
+        self._policies: dict[tuple[str, str], ScrapingOption] = {}
         # 合并用户配置和默认配置
         if config_dict is None:
             config_dict = {}

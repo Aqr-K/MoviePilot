@@ -27,6 +27,8 @@ class MemoryManager:
         初始化记忆管理器
         """
         try:
+            if self.cleanup_task and not self.cleanup_task.done():
+                return
             # 启动内存缓存清理任务（Redis通过TTL自动过期）
             self.cleanup_task = asyncio.create_task(
                 self._cleanup_expired_memories()
@@ -46,6 +48,7 @@ class MemoryManager:
                 await self.cleanup_task
             except asyncio.CancelledError:
                 pass
+            self.cleanup_task = None
 
         logger.info("对话记忆管理器已关闭")
 

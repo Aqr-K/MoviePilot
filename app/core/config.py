@@ -1130,6 +1130,8 @@ class GlobalVar(object):
     STOP_EVENT: threading.Event = threading.Event()
     # webpush订阅
     SUBSCRIPTIONS: List[dict] = []
+    # webpush订阅读写锁
+    SUBSCRIPTIONS_LOCK: threading.Lock = threading.Lock()
     # 需应急停止的工作流
     EMERGENCY_STOP_WORKFLOWS: List[int] = []
     # 需应急停止文件整理
@@ -1169,13 +1171,37 @@ class GlobalVar(object):
         """
         获取webpush订阅
         """
-        return self.SUBSCRIPTIONS
+        with self.SUBSCRIPTIONS_LOCK:
+            return list(self.SUBSCRIPTIONS)
 
     def push_subscription(self, subscription: dict):
         """
-        添加webpush订阅
+        添加或更新webpush订阅。
         """
-        self.SUBSCRIPTIONS.append(subscription)
+        endpoint = subscription.get("endpoint") if subscription else None
+        if not endpoint:
+            return
+        with self.SUBSCRIPTIONS_LOCK:
+            for index, current in enumerate(self.SUBSCRIPTIONS):
+                if current.get("endpoint") == endpoint:
+                    self.SUBSCRIPTIONS[index] = subscription
+                    return
+            self.SUBSCRIPTIONS.append(subscription)
+
+    def remove_subscription(self, subscription: dict) -> bool:
+        """
+        根据 endpoint 移除webpush订阅，返回是否实际删除。
+        """
+        endpoint = subscription.get("endpoint") if subscription else None
+        if not endpoint:
+            return False
+        with self.SUBSCRIPTIONS_LOCK:
+            before_count = len(self.SUBSCRIPTIONS)
+            self.SUBSCRIPTIONS[:] = [
+                current for current in self.SUBSCRIPTIONS
+                if current.get("endpoint") != endpoint
+            ]
+            return len(self.SUBSCRIPTIONS) != before_count
 
     def stop_workflow(self, workflow_id: int):
         """

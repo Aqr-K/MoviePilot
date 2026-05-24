@@ -4,7 +4,7 @@ import re
 import traceback
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
@@ -966,6 +966,11 @@ class AgentManager:
         self._session_queues: Dict[str, asyncio.Queue] = {}
         # 每个会话的worker任务
         self._session_workers: Dict[str, asyncio.Task] = {}
+        # 每个会话最后活动时间，用于回收空闲 Agent 实例
+        self._session_last_used: Dict[str, tuple[str, datetime]] = {}
+        self._idle_cleanup_task: Optional[asyncio.Task] = None
+        self._idle_session_ttl = timedelta(hours=24)
+        self._idle_cleanup_interval = 60 * 60
 
     def get_session_status(self, session_id: str) -> dict[str, Any]:
         """获取会话当前模型与 token 使用状态。"""
@@ -998,32 +1003,84 @@ class AgentManager:
         )
         return status
 
-    @staticmethod
-    async def initialize():
+    async def initialize(self):
         """
         初始化管理器
         """
         memory_manager.initialize()
+        if self._idle_cleanup_task and not self._idle_cleanup_task.done():
+            return
+        self._idle_cleanup_task = asyncio.create_task(self._cleanup_idle_sessions())
 
     async def close(self):
         """
         关闭管理器
         """
+        if self._idle_cleanup_task:
+            self._idle_cleanup_task.cancel()
+            try:
+                await self._idle_cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._idle_cleanup_task = None
         await memory_manager.close()
         # 取消所有会话worker
-        for task in self._session_workers.values():
+        for task in list(self._session_workers.values()):
             task.cancel()
         # 等待所有worker结束
-        for session_id, task in self._session_workers.items():
+        for session_id, task in list(self._session_workers.items()):
             try:
                 await task
             except asyncio.CancelledError:
                 pass
         self._session_workers.clear()
         self._session_queues.clear()
-        for agent in self.active_agents.values():
+        self._session_last_used.clear()
+        for agent in list(self.active_agents.values()):
             await agent.cleanup()
         self.active_agents.clear()
+
+    def _record_session_activity(self, session_id: str, user_id: str) -> None:
+        """
+        记录会话最近活动时间，供空闲会话清理任务判断是否可释放资源。
+        """
+        self._session_last_used[session_id] = (user_id, datetime.now())
+
+    def _is_session_busy(self, session_id: str) -> bool:
+        """
+        判断会话是否仍有正在执行的 worker 或待处理消息，避免误清理活跃会话。
+        """
+        worker = self._session_workers.get(session_id)
+        if worker and not worker.done():
+            return True
+        queue = self._session_queues.get(session_id)
+        return bool(queue and not queue.empty())
+
+    def _expired_idle_sessions(self) -> list[tuple[str, str]]:
+        """
+        收集已经超过空闲时间且当前不忙的会话。
+        """
+        expire_before = datetime.now() - self._idle_session_ttl
+        expired = []
+        for session_id, (user_id, last_used) in list(self._session_last_used.items()):
+            if last_used < expire_before and not self._is_session_busy(session_id):
+                expired.append((session_id, user_id))
+        return expired
+
+    async def _cleanup_idle_sessions(self) -> None:
+        """
+        周期性清理长时间没有新消息的 Agent 会话，避免长期运行后实例持续累积。
+        """
+        while True:
+            try:
+                await asyncio.sleep(self._idle_cleanup_interval)
+                for session_id, user_id in self._expired_idle_sessions():
+                    await self.clear_session(session_id=session_id, user_id=user_id)
+                    logger.info(f"已清理空闲Agent会话: session_id={session_id}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"清理空闲Agent会话失败: {e}")
 
     async def process_message(
             self,
@@ -1056,6 +1113,7 @@ class AgentManager:
             original_chat_id=original_chat_id,
             reply_mode=reply_mode,
         )
+        self._record_session_activity(session_id, user_id)
 
         # 获取或创建会话队列
         if session_id not in self._session_queues:
@@ -1221,6 +1279,7 @@ class AgentManager:
         """
         清空会话
         """
+        self._session_last_used.pop(session_id, None)
         # 取消该会话的worker
         if session_id in self._session_workers:
             self._session_workers[session_id].cancel()
@@ -1228,7 +1287,7 @@ class AgentManager:
                 await self._session_workers[session_id]
             except asyncio.CancelledError:
                 pass
-            await self._session_workers.pop(session_id, None)
+            self._session_workers.pop(session_id, None)
 
         # 清理队列
         self._session_queues.pop(session_id, None)

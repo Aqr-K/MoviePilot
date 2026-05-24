@@ -47,6 +47,36 @@ class MessageChain(ChainBase):
     # 会话超时时间（分钟）
     _session_timeout_minutes: int = 24 * 60
 
+    @staticmethod
+    def _schedule_agent_session_clear(session_id: str, userid: Union[str, int]) -> None:
+        """
+        异步调度 Agent 会话清理，避免同步消息链阻塞在模型资源释放上。
+        """
+        if not session_id:
+            return
+        clear_task = None
+        try:
+            clear_task = agent_manager.clear_session(session_id=session_id, user_id=str(userid))
+            asyncio.run_coroutine_threadsafe(
+                clear_task,
+                global_vars.loop,
+            )
+        except Exception as e:
+            if clear_task:
+                clear_task.close()
+            logger.warning(f"调度清理智能体会话失败: {e}")
+
+    def _cleanup_expired_user_sessions(self, current_time: datetime) -> None:
+        """
+        清理超过复用窗口的用户会话映射，并同步释放旧 Agent 实例。
+        """
+        timeout = timedelta(minutes=self._session_timeout_minutes)
+        for userid, (session_id, last_time) in list(self._user_sessions.items()):
+            if current_time - last_time <= timeout:
+                continue
+            self._user_sessions.pop(userid, None)
+            self._schedule_agent_session_clear(session_id, userid)
+
     @dataclass
     class _ProcessingStatus:
         channel: MessageChannel
@@ -919,6 +949,7 @@ class MessageChain(ChainBase):
         如果用户上次会话在15分钟内，则复用相同的会话ID；否则创建新的会话ID
         """
         current_time = datetime.now()
+        self._cleanup_expired_user_sessions(current_time)
 
         # 检查用户是否有已存在的会话
         if userid in self._user_sessions:
@@ -946,6 +977,9 @@ class MessageChain(ChainBase):
         """
         将用户会话绑定到指定的 session_id，并刷新最后活动时间。
         """
+        old_session = self._user_sessions.get(userid)
+        if old_session and old_session[0] != session_id:
+            self._schedule_agent_session_clear(old_session[0], userid)
         self._user_sessions[userid] = (session_id, datetime.now())
 
     def _record_user_message(
@@ -1005,14 +1039,18 @@ class MessageChain(ChainBase):
 
         # 如果有会话ID，同时清除智能体的会话记忆
         if session_id:
+            clear_task = None
             try:
+                clear_task = agent_manager.clear_session(
+                    session_id=session_id, user_id=str(userid)
+                )
                 asyncio.run_coroutine_threadsafe(
-                    agent_manager.clear_session(
-                        session_id=session_id, user_id=str(userid)
-                    ),
+                    clear_task,
                     global_vars.loop,
                 )
             except Exception as e:
+                if clear_task:
+                    clear_task.close()
                 logger.warning(f"清除智能体会话记忆失败: {e}")
 
             self.post_message(

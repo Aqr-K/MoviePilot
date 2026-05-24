@@ -15,6 +15,7 @@ from app.db.models import User
 from app.db.models.message import Message
 from app.db.user_oper import get_current_active_superuser
 from app.helper.service import ServiceConfigHelper
+from app.helper.webpush import is_webpush_subscription_gone
 from app.log import logger
 from app.modules.wechat.WXBizMsgCrypt3 import WXBizMsgCrypt
 from app.schemas.types import MessageChannel
@@ -218,8 +219,7 @@ async def subscribe(
     客户端webpush通知订阅
     """
     subinfo = subscription.model_dump()
-    if subinfo not in global_vars.get_subscriptions():
-        global_vars.push_subscription(subinfo)
+    global_vars.push_subscription(subinfo)
     logger.debug(f"通知订阅成功: {subinfo}")
     return schemas.Response(success=True)
 
@@ -244,5 +244,7 @@ def send_notification(
             )
         except WebPushException as err:
             logger.error(f"WebPush发送失败: {str(err)}")
+            if is_webpush_subscription_gone(err) and global_vars.remove_subscription(sub):
+                logger.info(f"已移除失效WebPush订阅: {sub.get('endpoint')}")
             continue
     return schemas.Response(success=True)

@@ -8,7 +8,7 @@ sys.modules['app.db.systemconfig_oper'] = MagicMock()
 sys.modules['app.db.systemconfig_oper'].SystemConfigOper.return_value.get.return_value = None
 
 from app import schemas
-from app.chain.media import MediaChain, ScrapingOption
+from app.chain.media import MediaChain, ScrapingConfig, ScrapingOption
 from app.core.context import MediaInfo
 from app.core.event import Event
 from app.core.metainfo import MetaInfo
@@ -41,6 +41,20 @@ class TestMediaScrapingPaths(unittest.TestCase):
         )
         self.assertEqual(target_item, parent_item)
         self.assertEqual(target_path, Path("/movies/avatar.nfo"))
+
+    def test_scraping_config_does_not_share_policy_state_between_instances(self):
+        """刮削配置实例之间不应共享已删除或覆盖过的策略。"""
+        first_config = ScrapingConfig({"movie_nfo": ScrapingPolicy.SKIP})
+        second_config = ScrapingConfig({})
+
+        self.assertEqual(
+            ScrapingPolicy.SKIP,
+            first_config.option(ScrapingTarget.MOVIE, ScrapingMetadata.NFO).policy,
+        )
+        self.assertEqual(
+            ScrapingPolicy.MISSINGONLY,
+            second_config.option(ScrapingTarget.MOVIE, ScrapingMetadata.NFO).policy,
+        )
 
     def test_movie_dir_nfo_path(self):
         fileitem = schemas.FileItem(path="/movies/Avatar (2009)", name="Avatar (2009)", type="dir", storage="local")

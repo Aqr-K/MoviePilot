@@ -4,6 +4,7 @@ from typing import Union, Tuple
 from pywebpush import webpush, WebPushException
 
 from app.core.config import global_vars, settings
+from app.helper.webpush import is_webpush_subscription_gone
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
 from app.schemas import Notification
@@ -97,6 +98,8 @@ class WebPushModule(_ModuleBase, _MessageBase):
                         )
                     except WebPushException as err:
                         logger.error(f"WebPush发送失败: {str(err)}")
+                        if is_webpush_subscription_gone(err) and global_vars.remove_subscription(sub):
+                            logger.info(f"已移除失效WebPush订阅: {sub.get('endpoint')}")
 
             except Exception as msg_e:
                 logger.error(f"发送消息失败：{msg_e}")

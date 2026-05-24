@@ -105,6 +105,7 @@ class LLMProviderManager(metaclass=Singleton):
     _MODELS_DEV_URL = "https://models.dev/api.json"
     _MODELS_DEV_BUNDLED_PATH = Path(__file__).with_name("models.json")
     _MODELS_DEV_CACHE_TTL = 7 * 24 * 60 * 60
+    _AUTH_SESSION_DONE_RETENTION = 300
     _CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
     _CHATGPT_ISSUER = "https://auth.openai.com"
     _CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
@@ -182,6 +183,33 @@ class LLMProviderManager(metaclass=Singleton):
         self._models_dev_cache_path = (
                 Path(settings.TEMP_PATH) / "llm_provider_models_dev_cache.json"
         )
+
+    def _cleanup_auth_sessions_locked(self, now: Optional[float] = None) -> None:
+        """
+        清理过期或已完成一段时间的临时授权会话。
+
+        调用方必须已经持有 `_lock`，这样 `_pending_sessions` 与
+        `_oauth_state_index` 能保持一致，避免 state 残留。
+        """
+        now = time.time() if now is None else now
+        expired_session_ids = []
+        for session_id, session in self._pending_sessions.items():
+            expires_at = session.expires_at or session.created_at + 600
+            if session.status == "pending":
+                if expires_at <= now:
+                    expired_session_ids.append(session_id)
+            elif expires_at + self._AUTH_SESSION_DONE_RETENTION <= now:
+                expired_session_ids.append(session_id)
+
+        if not expired_session_ids:
+            return
+
+        expired_session_ids_set = set(expired_session_ids)
+        for session_id in expired_session_ids:
+            self._pending_sessions.pop(session_id, None)
+        for state, session_id in list(self._oauth_state_index.items()):
+            if session_id in expired_session_ids_set:
+                self._oauth_state_index.pop(state, None)
 
     @staticmethod
     def _builtin_provider_specs() -> tuple[ProviderSpec, ...]:
@@ -2001,6 +2029,7 @@ class LLMProviderManager(metaclass=Singleton):
                 }
             )
             with self._lock:
+                self._cleanup_auth_sessions_locked()
                 self._pending_sessions[session.session_id] = session
                 self._oauth_state_index[state] = session.session_id
             return {
@@ -2035,6 +2064,7 @@ class LLMProviderManager(metaclass=Singleton):
                 }
             )
             with self._lock:
+                self._cleanup_auth_sessions_locked()
                 self._pending_sessions[session.session_id] = session
             return {
                 "session_id": session.session_id,
@@ -2073,6 +2103,7 @@ class LLMProviderManager(metaclass=Singleton):
                 }
             )
             with self._lock:
+                self._cleanup_auth_sessions_locked()
                 self._pending_sessions[session.session_id] = session
             return {
                 "session_id": session.session_id,
@@ -2089,6 +2120,7 @@ class LLMProviderManager(metaclass=Singleton):
     def get_session_status(self, session_id: str) -> dict[str, Any]:
         """读取临时授权会话状态。"""
         with self._lock:
+            self._cleanup_auth_sessions_locked()
             session = self._pending_sessions.get(session_id)
             if not session:
                 raise LLMProviderAuthError("授权会话不存在或已过期")
@@ -2135,6 +2167,7 @@ class LLMProviderManager(metaclass=Singleton):
         if error:
             message = error_description or error
             with self._lock:
+                self._cleanup_auth_sessions_locked()
                 session_id = self._oauth_state_index.pop(state or "", None)
                 if session_id and session_id in self._pending_sessions:
                     self._mark_session_error(self._pending_sessions[session_id], message)
@@ -2144,6 +2177,7 @@ class LLMProviderManager(metaclass=Singleton):
             return False, "缺少授权码或 state 参数"
 
         with self._lock:
+            self._cleanup_auth_sessions_locked()
             session_id = self._oauth_state_index.pop(state, None)
             session = self._pending_sessions.get(session_id or "")
 
@@ -2186,6 +2220,7 @@ class LLMProviderManager(metaclass=Singleton):
         前端可按 interval_seconds 轮询，直到状态变为 authorized / failed。
         """
         with self._lock:
+            self._cleanup_auth_sessions_locked()
             session = self._pending_sessions.get(session_id)
         if not session:
             raise LLMProviderAuthError("授权会话不存在或已过期")

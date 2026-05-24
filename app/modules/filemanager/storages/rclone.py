@@ -2,6 +2,7 @@ import json
 import subprocess
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, List, Union
 
@@ -13,8 +14,22 @@ from app.schemas.types import StorageSchema
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 
-_folder_locks: dict[str, threading.Lock] = {}
+_MAX_FOLDER_LOCKS = 4096
+_folder_locks: OrderedDict[str, threading.Lock] = OrderedDict()
 _folder_locks_guard = threading.Lock()
+
+
+def _evict_unused_folder_locks_locked() -> None:
+    """
+    在持有全局锁表互斥锁时淘汰旧路径锁，避免大量不同目录导致锁表无限增长。
+    """
+    while len(_folder_locks) >= _MAX_FOLDER_LOCKS:
+        for key, lock in list(_folder_locks.items()):
+            if not lock.locked():
+                _folder_locks.pop(key, None)
+                break
+        else:
+            break
 
 
 class Rclone(StorageBase):
@@ -144,9 +159,14 @@ class Rclone(StorageBase):
         """
         normalized = Rclone.__normalize_remote_path(path)
         with _folder_locks_guard:
-            if normalized not in _folder_locks:
-                _folder_locks[normalized] = threading.Lock()
-            return _folder_locks[normalized]
+            lock = _folder_locks.get(normalized)
+            if lock:
+                _folder_locks.move_to_end(normalized)
+                return lock
+            _evict_unused_folder_locks_locked()
+            lock = threading.Lock()
+            _folder_locks[normalized] = lock
+            return lock
 
     def __wait_for_item(
         self, path: Path, retries: int = 3, delay: float = 0.2

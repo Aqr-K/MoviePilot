@@ -39,11 +39,23 @@ _stub_module(
         TEMP_PATH="/tmp",
         PROXY_HOST=None,
         LLM_MAX_CONTEXT_TOKENS=64,
+        RCLONE_SNAPSHOT_CHECK_FOLDER_MODTIME=True,
+        RMT_MEDIAEXT=[".mkv", ".mp4"],
+        RMT_SUBEXT=[".srt"],
+        RMT_AUDIOEXT=[".flac"],
     ),
 )
 _stub_module("app.db.systemconfig_oper", SystemConfigOper=_DummySystemConfigOper)
 _stub_module("app.log", logger=_DummyLogger())
-_stub_module("app.schemas.types", SystemConfigKey=SimpleNamespace(AIAgentConfig="agent"))
+_stub_module(
+    "app.schemas.types",
+    SystemConfigKey=SimpleNamespace(
+        AIAgentConfig="agent",
+        CustomReleaseGroups="custom_release_groups",
+        Customization="customization",
+        CustomIdentifiers="custom_identifiers",
+    ),
+)
 
 provider_path = Path(__file__).resolve().parents[1] / "app" / "agent" / "llm" / "provider.py"
 spec = importlib.util.spec_from_file_location("test_llm_provider_module", provider_path)
@@ -54,6 +66,7 @@ spec.loader.exec_module(provider_module)
 
 LLMProviderError = provider_module.LLMProviderError
 LLMProviderManager = provider_module.LLMProviderManager
+PendingAuthSession = provider_module.PendingAuthSession
 
 
 class LlmProviderRegistryTest(unittest.TestCase):
@@ -611,6 +624,24 @@ class LlmProviderRegistryTest(unittest.TestCase):
             )
 
         self.assertEqual(models, [])
+
+    def test_expired_auth_session_cleanup_removes_state_index(self):
+        """过期授权会话应同时移除 session 与 OAuth state 索引。"""
+        manager = LLMProviderManager()
+        manager._pending_sessions["session-old"] = PendingAuthSession(
+            session_id="session-old",
+            provider_id="chatgpt",
+            method_id="browser_oauth",
+            flow_type="oauth",
+            expires_at=100,
+        )
+        manager._oauth_state_index["state-old"] = "session-old"
+
+        with manager._lock:
+            manager._cleanup_auth_sessions_locked(now=101)
+
+        self.assertNotIn("session-old", manager._pending_sessions)
+        self.assertNotIn("state-old", manager._oauth_state_index)
 
 
 if __name__ == "__main__":
