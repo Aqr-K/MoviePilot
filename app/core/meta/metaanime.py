@@ -11,6 +11,23 @@ from app.utils.zhconv import convert as zhconv_convert
 from app.schemas.types import MediaType
 
 
+BRACKET_TITLE_RE = re.compile(r'\[(.+?)]')
+RESOURCE_PIX_X_RE = re.compile(r'x', re.IGNORECASE)
+RESOURCE_PIX_SPLIT_RE = re.compile(r'[Xx]')
+ANIME_MARK_RE = re.compile(r"新番|月?番|[日美国][漫剧]")
+ANIME_PREFIX_RE = re.compile(r".*番.|.*[日美国][漫剧].")
+CATEGORY_TAG_RE = re.compile(
+    r"[动漫画纪录片电影视连续剧集日美韩中港台海外亚洲华语大陆综艺原盘高清]{2,}|TV|Animation|Movie|Documentar|Anime",
+    re.IGNORECASE,
+)
+LEADING_BRACKET_BLOCK_RE = re.compile(r"^[^]]*]")
+FILE_SIZE_RE = re.compile(r'[0-9.]+\s*[MGT]i?B(?![A-Z]+)', re.IGNORECASE)
+TV_EPISODE_BRACKET_RE = re.compile(r"\[TV\s+(\d{1,4})", re.IGNORECASE)
+FOUR_K_BRACKET_RE = re.compile(r'\[4k]', re.IGNORECASE)
+NUMERIC_BRACKET_RE = re.compile(r"\[\d+", re.IGNORECASE)
+MIXED_CHINESE_TOKEN_RE = re.compile(r'[\d|#:：\-()（）\u4e00-\u9fff]')
+
+
 class MetaAnime(MetaBase):
     """
     识别动漫
@@ -18,6 +35,8 @@ class MetaAnime(MetaBase):
     _anime_no_words = ['CHS&CHT', 'MP4', 'GB MP4', 'WEB-DL']
     _name_nostring_re = r"S\d{2}\s*-\s*S\d{2}|S\d{2}|\s+S\d{1,2}|EP?\d{2,4}\s*-\s*EP?\d{2,4}|EP?\d{2,4}|\s+EP?\d{1,4}|\s+GB"
     _fps_re = r"(\d{2,3})(?=FPS)"
+    _name_nostring_pattern = re.compile(_name_nostring_re, re.IGNORECASE)
+    _fps_pattern = re.compile(r"(%s)" % _fps_re, re.IGNORECASE)
 
     def __init__(self, title: str, subtitle: str = None, isfile: bool = False):
         super().__init__(title, subtitle, isfile)
@@ -38,7 +57,7 @@ class MetaAnime(MetaBase):
                     if anitopy_info:
                         name = anitopy_info.get("anime_title")
                 if not name or name in self._anime_no_words or (len(name) < 5 and not StringUtils.is_chinese(name)):
-                    name_match = re.search(r'\[(.+?)]', title)
+                    name_match = BRACKET_TITLE_RE.search(title)
                     if name_match and name_match.group(1):
                         name = name_match.group(1).strip()
                 # 拆份中英文名称
@@ -81,9 +100,9 @@ class MetaAnime(MetaBase):
                 if self.cn_name:
                     _, self.cn_name, _, _, _, _ = StringUtils.get_keyword(self.cn_name)
                     if self.cn_name:
-                        self.cn_name = re.sub(r'%s' % self._name_nostring_re, '', self.cn_name, flags=re.IGNORECASE).strip()
+                        self.cn_name = self._name_nostring_pattern.sub('', self.cn_name).strip()
                 if self.en_name:
-                    self.en_name = re.sub(r'%s' % self._name_nostring_re, '', self.en_name, flags=re.IGNORECASE).strip().title()
+                    self.en_name = self._name_nostring_pattern.sub('', self.en_name).strip().title()
                     self._name = StringUtils.str_title(self.en_name)
                 # 年份
                 year = anitopy_info.get("anime_year")
@@ -154,8 +173,8 @@ class MetaAnime(MetaBase):
                 if isinstance(self.resource_pix, list):
                     self.resource_pix = self.resource_pix[0]
                 if self.resource_pix:
-                    if re.search(r'x', self.resource_pix, re.IGNORECASE):
-                        self.resource_pix = re.split(r'[Xx]', self.resource_pix)[-1] + "p"
+                    if RESOURCE_PIX_X_RE.search(self.resource_pix):
+                        self.resource_pix = RESOURCE_PIX_SPLIT_RE.split(self.resource_pix)[-1] + "p"
                     else:
                         self.resource_pix = self.resource_pix.lower()
                     if str(self.resource_pix).isdigit():
@@ -191,7 +210,7 @@ class MetaAnime(MetaBase):
         """
         从原始标题中提取帧率信息，与MetaVideo保持完全一致的实现
         """
-        re_res = re.search(rf"({self._fps_re})", original_title, re.IGNORECASE)
+        re_res = self._fps_pattern.search(original_title)
         if re_res:
             fps_value = None
             if re_res.group(1):  # FPS格式
@@ -211,23 +230,21 @@ class MetaAnime(MetaBase):
         # 所有【】换成[]
         title = title.replace("【", "[").replace("】", "]").strip()
         # 截掉xx番剧漫
-        match = re.search(r"新番|月?番|[日美国][漫剧]", title)
+        match = ANIME_MARK_RE.search(title)
         if match and match.span()[1] < len(title) - 1:
-            title = re.sub(".*番.|.*[日美国][漫剧].", "", title)
+            title = ANIME_PREFIX_RE.sub("", title)
         elif match:
             title = title[:title.rfind('[')]
         # 截掉分类
         first_item = title.split(']')[0]
-        if first_item and re.search(r"[动漫画纪录片电影视连续剧集日美韩中港台海外亚洲华语大陆综艺原盘高清]{2,}|TV|Animation|Movie|Documentar|Anime",
-                                    zhconv_convert(first_item, "zh-hans"),
-                                    re.IGNORECASE):
-            title = re.sub(r"^[^]]*]", "", title).strip()
+        if first_item and CATEGORY_TAG_RE.search(zhconv_convert(first_item, "zh-hans")):
+            title = LEADING_BRACKET_BLOCK_RE.sub("", title).strip()
         # 去掉大小
-        title = re.sub(r'[0-9.]+\s*[MGT]i?B(?![A-Z]+)', "", title, flags=re.IGNORECASE)
+        title = FILE_SIZE_RE.sub("", title)
         # 将TVxx改为xx
-        title = re.sub(r"\[TV\s+(\d{1,4})", r"[\1", title, flags=re.IGNORECASE)
+        title = TV_EPISODE_BRACKET_RE.sub(r"[\1", title)
         # 将4K转为2160p
-        title = re.sub(r'\[4k]', '2160p', title, flags=re.IGNORECASE)
+        title = FOUR_K_BRACKET_RE.sub('2160p', title)
         # 处理/分隔的中英文标题
         names = title.split("]")
         if len(names) > 1 and title.find("- ") == -1:
@@ -246,8 +263,8 @@ class MetaAnime(MetaBase):
                         titles.append("%s%s" % (left_char, name.split("/")[0].strip()))
                 elif name:
                     if StringUtils.is_chinese(name) and not StringUtils.is_all_chinese(name):
-                        if not re.search(r"\[\d+", name, re.IGNORECASE):
-                            name = re.sub(r'[\d|#:：\-()（）\u4e00-\u9fff]', '', name).strip()
+                        if not NUMERIC_BRACKET_RE.search(name):
+                            name = MIXED_CHINESE_TOKEN_RE.sub('', name).strip()
                         if not name or name.strip().isdigit():
                             continue
                     if name == '[':
