@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import List, Tuple, Union, Dict, Optional
 
 from app.core.context import TorrentInfo, MediaInfo
-from app.core.metainfo import clear_rust_parse_options_cache, _rust_parse_options
+from app.core.metainfo import MetaInfo, clear_rust_parse_options_cache, _rust_parse_options
 from app.helper.rule import RuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
@@ -12,6 +12,7 @@ from app.modules.filter.RuleParser import RuleParser
 from app.modules.filter.builtin_rules import BUILTIN_RULE_SET
 from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
 from app.utils import rust_accel
+from app.utils.string import StringUtils
 
 
 _SIZE_UNIT = 1024 * 1024
