@@ -17,7 +17,6 @@ SUPERUSER_PASSWORD=""
 OS_NAME="Unknown"
 PYTHON_BIN=""
 BREW_BIN=""
-RUSTUP_BIN=""
 PACKAGE_MANAGER=""
 PACKAGE_INDEX_UPDATED="false"
 PROMPT_INPUT="/dev/stdin"
@@ -228,20 +227,20 @@ find_uv_python() {
 python_install_hint() {
   case "$OS_NAME" in
     macOS)
-      echo "脚本已尝试自动安装 Git、curl、Python 3.11+、Rust toolchain 和构建工具。" >&2
-      echo "如果自动安装失败，请先安装 Homebrew 和 Xcode Command Line Tools，或手动执行：brew install git curl python@3.11 rustup-init" >&2
+      echo "脚本已尝试自动安装 Git、curl 和 Python 3.11+。" >&2
+      echo "如果自动安装失败，请先安装 Homebrew，或手动执行：brew install git curl python@3.11" >&2
       ;;
     Linux*)
-      echo "脚本已尝试自动安装 Git、curl、Python 3.11+、Rust toolchain 和构建工具。" >&2
-      echo "如果自动安装失败，请先安装 Git、curl、Python 3.11+、cargo，并确保包含 venv 模块。" >&2
-      echo "例如 Debian/Ubuntu: sudo apt install git curl python3.11 python3.11-venv build-essential" >&2
-      echo "例如 Fedora/RHEL:  sudo dnf install git curl python3.11 gcc gcc-c++ make" >&2
+      echo "脚本已尝试自动安装 Git、curl 和 Python 3.11+。" >&2
+      echo "如果自动安装失败，请先安装 Git、curl、Python 3.11+，并确保包含 venv 模块。" >&2
+      echo "例如 Debian/Ubuntu: sudo apt install git curl python3.11 python3.11-venv" >&2
+      echo "例如 Fedora/RHEL:  sudo dnf install git curl python3.11" >&2
       ;;
     Windows)
       echo "推荐在 WSL、Linux 或 macOS 终端中运行此脚本。" >&2
       ;;
     *)
-      echo "请先安装 Git、curl、Python 3.11 或更高版本、cargo 和 C 编译器。" >&2
+      echo "请先安装 Git、curl、Python 3.11 或更高版本。" >&2
       ;;
   esac
 }
@@ -267,74 +266,6 @@ ensure_brew() {
   NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   if ! setup_brew_env; then
     echo "自动安装 Homebrew 失败。" >&2
-    return 1
-  fi
-}
-
-# 检查 cargo 是否已可用，兼容 rustup 安装后 PATH 尚未刷新。
-find_cargo() {
-  local cargo_bin=""
-  cargo_bin="$(command -v cargo 2>/dev/null || true)"
-  if [[ -n "$cargo_bin" ]]; then
-    printf '%s\n' "$cargo_bin"
-    return 0
-  fi
-  if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
-    printf '%s\n' "$HOME/.cargo/bin/cargo"
-  fi
-}
-
-# 判断是否显式跳过 Rust 加速扩展，避免一键安装继续准备构建工具链。
-rust_accel_should_skip() {
-  case "${MOVIEPILOT_SKIP_RUST_ACCEL:-}" in
-    1|true|TRUE|yes|YES|on|ON)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-# 为 CLI 一键安装准备 Rust toolchain，后续 setup 会用它构建加速扩展。
-ensure_rust_toolchain() {
-  if rust_accel_should_skip; then
-    return 0
-  fi
-
-  if [[ -n "$(find_cargo)" ]]; then
-    export PATH="$HOME/.cargo/bin:$PATH"
-    return 0
-  fi
-
-  echo "==> 自动安装 Rust toolchain，用于构建 MoviePilot 加速扩展"
-  case "$PACKAGE_MANAGER" in
-    brew)
-      ensure_brew
-      "$BREW_BIN" install rustup-init
-      RUSTUP_BIN="$(command -v rustup-init 2>/dev/null || true)"
-      ;;
-    *)
-      RUSTUP_BIN="$(command -v rustup 2>/dev/null || true)"
-      if [[ -z "$RUSTUP_BIN" ]]; then
-        curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
-      else
-        "$RUSTUP_BIN" toolchain install stable --profile minimal
-      fi
-      ;;
-  esac
-
-  export PATH="$HOME/.cargo/bin:$PATH"
-  if [[ "$PACKAGE_MANAGER" == "brew" ]]; then
-    RUSTUP_BIN="$(command -v rustup-init 2>/dev/null || true)"
-    if [[ -n "$RUSTUP_BIN" ]]; then
-      "$RUSTUP_BIN" -y --profile minimal
-    fi
-  fi
-
-  hash -r
-  if [[ -z "$(find_cargo)" ]]; then
-    echo "Rust toolchain 安装失败，请手动安装 cargo 后重试。" >&2
     return 1
   fi
 }
@@ -452,54 +383,6 @@ ensure_base_tools() {
   fi
 }
 
-# 安装 Rust 扩展构建需要的本机编译器和链接器。
-ensure_build_tools() {
-  if rust_accel_should_skip; then
-    return 0
-  fi
-
-  if [[ "$OS_NAME" == "macOS" ]]; then
-    if xcode-select -p >/dev/null 2>&1; then
-      return 0
-    fi
-    echo "当前 macOS 缺少 Command Line Tools，请先执行：xcode-select --install" >&2
-    return 1
-  fi
-
-  if command -v cc >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; then
-    return 0
-  fi
-
-  echo "==> 自动安装系统构建工具，用于编译 Rust 加速扩展"
-  case "$PACKAGE_MANAGER" in
-    apt-get)
-      install_system_packages build-essential
-      ;;
-    dnf|yum)
-      install_system_packages gcc gcc-c++ make
-      ;;
-    zypper)
-      install_system_packages gcc gcc-c++ make
-      ;;
-    pacman)
-      install_system_packages base-devel
-      ;;
-    apk)
-      install_system_packages build-base
-      ;;
-    *)
-      echo "当前系统暂不支持自动安装构建工具，请手动安装 C 编译器后重试。" >&2
-      return 1
-      ;;
-  esac
-
-  hash -r
-  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
-    echo "系统构建工具安装失败，请确认 C 编译器可用后重试。" >&2
-    return 1
-  fi
-}
-
 ensure_uv() {
   if command -v uv >/dev/null 2>&1; then
     return 0
@@ -547,13 +430,6 @@ ensure_prereqs() {
   if ! ensure_base_tools || ! ensure_python || ! ensure_uv; then
     python_install_hint
     exit 1
-  fi
-
-  if ! rust_accel_should_skip; then
-    if ! ensure_build_tools || ! ensure_rust_toolchain; then
-      export MOVIEPILOT_SKIP_RUST_ACCEL=1
-      echo "==> Rust 加速扩展准备失败，已跳过；应用将继续使用 Python 实现"
-    fi
   fi
 }
 

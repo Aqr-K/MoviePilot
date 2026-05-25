@@ -85,23 +85,9 @@ RUN python3 -m venv ${VENV_PATH} \
     && ln -sf /usr/local/bin/uv-pip-compat ${VENV_PATH}/bin/pip3.12 \
     && ln -sf /usr/local/bin/uv-pip-compat ${VENV_PATH}/bin/pip-compile \
     && ln -sf /usr/local/bin/uv-pip-compat ${VENV_PATH}/bin/pip-sync \
-    && pip install "Cython~=3.1.2" "maturin>=1.9,<2" \
+    && pip install "Cython~=3.1.2" \
     && pip-compile requirements.in -o requirements.txt \
     && pip install -r requirements.txt
-
-# 准备 Rust 扩展
-FROM prepare_venv AS prepare_rust
-
-ENV PATH="${VENV_PATH}/bin:/root/.cargo/bin:${PATH}"
-
-WORKDIR /app
-COPY rust /app/rust
-
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal \
-    && cd /app/rust/moviepilot_rust \
-    && maturin build --release -o /tmp/wheels \
-    && pip install /tmp/wheels/*.whl \
-    && rm -rf /tmp/wheels /root/.cargo /root/.rustup
 
 # 下载准备代码
 FROM prepare_package AS prepare_code
@@ -128,9 +114,9 @@ FROM prepare_package AS final
 ENV LD_PRELOAD="/usr/local/lib/libjemalloc.so"
 
 # python 环境
-COPY --from=prepare_rust --chmod=777 ${VENV_PATH} ${VENV_PATH}
-COPY --from=prepare_rust /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=prepare_rust /usr/local/bin/uv-pip-compat /usr/local/bin/uv-pip-compat
+COPY --from=prepare_venv --chmod=777 ${VENV_PATH} ${VENV_PATH}
+COPY --from=prepare_venv /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=prepare_venv /usr/local/bin/uv-pip-compat /usr/local/bin/uv-pip-compat
 
 # 浏览器运行依赖
 RUN playwright install-deps chromium \

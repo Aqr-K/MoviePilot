@@ -116,8 +116,8 @@
 | Item | Detail |
 |---|---|
 | Rust extension | `moviepilot_rust` — optional compiled accelerator for core processing paths |
-| Build | Requires Rust `cargo`; built automatically by `moviepilot install deps` |
-| Skip flag | `MOVIEPILOT_SKIP_RUST_ACCEL=1` disables build (falls back to Python implementation) |
+| Install | Installed from the `moviepilot-rust` PyPI package with normal Python dependencies |
+| Source | Maintained in the separate `MoviePilot-Rust` repository |
 | Toggle | Can be disabled/re-enabled at runtime via frontend Advanced Settings → Lab |
 
 ---

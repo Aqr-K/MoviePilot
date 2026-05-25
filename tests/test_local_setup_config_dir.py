@@ -68,8 +68,6 @@ class LocalSetupConfigDirTests(unittest.TestCase):
             venv_pip = venv_dir / "bin" / "pip"
 
             with patch.object(module, "ensure_supported_python"), \
-                    patch.object(module, "ensure_rust_accel_ready") as rust_ready, \
-                    patch.object(module, "install_rust_accel") as install_rust, \
                     patch.object(
                         module,
                         "configure_venv_pip_compat",
@@ -88,74 +86,7 @@ class LocalSetupConfigDirTests(unittest.TestCase):
         run_mock.assert_any_call(
             [str(venv_pip), "install", "-r", str(module.ROOT / "requirements.txt")]
         )
-        rust_ready.assert_called_once_with()
-        install_rust.assert_called_once_with(venv_python)
         install_browser.assert_called_once_with(venv_python)
-
-    def test_install_rust_accel_runs_maturin_develop(self):
-        """
-        验证本地 CLI 安装会通过 maturin 将 Rust 扩展安装进虚拟环境。
-        """
-        module = load_local_setup_module()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            manifest = Path(temp_dir) / "Cargo.toml"
-            manifest.write_text("[package]\nname = \"moviepilot_rust\"\n")
-            venv_python = Path(temp_dir) / "venv" / "bin" / "python"
-
-            with patch.object(module, "RUST_ACCEL_MANIFEST", manifest), \
-                    patch.object(module, "_rust_accel_should_skip", return_value=False), \
-                    patch.object(module, "ensure_rust_accel_ready"), \
-                    patch.object(module, "_cargo_env_path", return_value="/cargo/bin:/bin"), \
-                    patch.object(module, "run") as run_mock:
-                module.install_rust_accel(venv_python)
-
-        run_mock.assert_called_once()
-        command = run_mock.call_args.args[0]
-        self.assertEqual(
-            command,
-            [
-                str(venv_python),
-                "-m",
-                "maturin",
-                "develop",
-                "--release",
-                "--manifest-path",
-                str(manifest),
-            ],
-        )
-        self.assertEqual(run_mock.call_args.kwargs["env"]["PATH"], "/cargo/bin:/bin")
-
-    def test_ensure_rust_accel_ready_requires_cargo(self):
-        """
-        验证 Rust 扩展源码存在时，CLI 安装会检查 cargo 是否可用。
-        """
-        module = load_local_setup_module()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            manifest = Path(temp_dir) / "Cargo.toml"
-            manifest.write_text("[package]\nname = \"moviepilot_rust\"\n")
-
-            with patch.object(module, "RUST_ACCEL_MANIFEST", manifest), \
-                    patch.object(module, "_rust_accel_should_skip", return_value=False), \
-                    patch.object(module, "_find_cargo", return_value=None):
-                with self.assertRaisesRegex(RuntimeError, "cargo"):
-                    module.ensure_rust_accel_ready()
-
-    def test_ensure_rust_accel_ready_allows_skip(self):
-        """
-        验证显式跳过 Rust 扩展时，不再要求本机存在 cargo。
-        """
-        module = load_local_setup_module()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            manifest = Path(temp_dir) / "Cargo.toml"
-            manifest.write_text("[package]\nname = \"moviepilot_rust\"\n")
-
-            with patch.object(module, "RUST_ACCEL_MANIFEST", manifest), \
-                    patch.object(module, "_rust_accel_should_skip", return_value=True), \
-                    patch.object(module, "_find_cargo", return_value=None):
-                module.ensure_rust_accel_ready()
 
 
 if __name__ == "__main__":

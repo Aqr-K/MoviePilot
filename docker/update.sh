@@ -24,63 +24,6 @@ function WARN() {
 VENV_PATH="${VENV_PATH:-/opt/venv}"
 export PATH="${VENV_PATH}/bin:$PATH"
 
-# 配置 Rust 工具链目录，避免 Docker 中 HOME 与 root 真实主目录不一致时 rustup 无法推断路径。
-function configure_rust_build_env() {
-    local home_dir="${HOME:-/root}"
-    export CARGO_HOME="${CARGO_HOME:-${home_dir}/.cargo}"
-    export RUSTUP_HOME="${RUSTUP_HOME:-${home_dir}/.rustup}"
-    if [[ ":${PATH}:" != *":${CARGO_HOME}/bin:"* ]]; then
-        export PATH="${CARGO_HOME}/bin:$PATH"
-    fi
-}
-
-# 按需准备 Rust 构建环境，避免把工具链常驻打进 Docker runtime 镜像。
-function ensure_rust_build_env() {
-    configure_rust_build_env
-    if command -v cargo > /dev/null 2>&1; then
-        return 0
-    fi
-    INFO "→ 当前镜像未包含 cargo，正在按需准备 Rust 构建环境..."
-    if command -v apt-get > /dev/null 2>&1; then
-        if ! apt-get update; then
-            ERROR "更新 apt 索引失败，无法安装 Rust 构建依赖"
-            return 1
-        fi
-        if ! apt-get install -y --no-install-recommends build-essential curl ca-certificates; then
-            ERROR "安装 Rust 构建依赖失败"
-            return 1
-        fi
-        apt-get clean
-        rm -rf /var/lib/apt/lists/*
-    fi
-    if ! curl ${CURL_OPTIONS} https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal; then
-        ERROR "安装 Rust 工具链失败"
-        return 1
-    fi
-    configure_rust_build_env
-    command -v cargo > /dev/null 2>&1
-}
-
-# 更新 Rust 加速扩展，确保 Docker dev/release 更新源码后不会继续加载旧 wheel。
-function install_rust_accel() {
-    local manifest="/app/rust/moviepilot_rust/Cargo.toml"
-    if [ ! -f "${manifest}" ]; then
-        WARN "未找到 Rust 扩展源码，跳过 Rust 加速扩展更新"
-        return 0
-    fi
-    if ! ensure_rust_build_env; then
-        ERROR "Rust 构建环境不可用，无法更新 Rust 加速扩展"
-        return 1
-    fi
-    INFO "→ 正在更新 Rust 加速扩展..."
-    # maturin develop 需要显式的虚拟环境标记，容器内直接调用 venv Python 时不会自动识别。
-    if ! VIRTUAL_ENV="${VENV_PATH}" "${VENV_PATH}/bin/python" -m maturin develop --release --manifest-path "${manifest}"; then
-        ERROR "Rust 加速扩展更新失败"
-        return 1
-    fi
-    INFO "Rust 加速扩展更新成功"
-}
-
 # 下载及解压
 function download_and_unzip() {
     local retries=0
@@ -223,9 +166,6 @@ function install_backend_and_download_resources() {
         WARN "${sites_file} 下载失败，继续使用旧的资源来启动..."
     fi
     INFO "站点资源更新成功"
-    if ! install_rust_accel; then
-        return 1
-    fi
     # 清理临时目录
     rm -rf "${TMP_PATH}"
     return 0

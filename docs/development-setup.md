@@ -10,6 +10,8 @@
 - **pip** (Python 包管理器)
 - **Git** (用于版本控制)
 
+Rust 加速扩展通过 `moviepilot-rust` PyPI 包安装，主项目本地开发不再需要 Rust toolchain。需要修改或发布 Rust 扩展时，请在 `MoviePilot-Rust` 仓库中构建。
+
 ### 1. 创建虚拟环境
 
 在项目根目录下创建并激活虚拟环境：
