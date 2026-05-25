@@ -600,7 +600,7 @@ class ConfigModel(BaseModel):
     # AI智能体自动重试整理失败记录开关
     AI_AGENT_RETRY_TRANSFER: bool = False
 
-    # 音频输入提供商：openai/openai_chat_audio/mimo
+    # 音频输入提供商：openai/openai_chat_audio/mimo/minimax
     AUDIO_INPUT_PROVIDER: str = "openai"
     # 音频输入 API 密钥
     AUDIO_INPUT_API_KEY: Optional[str] = None
@@ -610,7 +610,7 @@ class ConfigModel(BaseModel):
     AUDIO_INPUT_MODEL: str = "gpt-4o-mini-transcribe"
     # 音频输入识别语言
     AUDIO_INPUT_LANGUAGE: str = "zh"
-    # 音频输出提供商：openai/openai_chat_audio/mimo
+    # 音频输出提供商：openai/openai_chat_audio/mimo/minimax
     AUDIO_OUTPUT_PROVIDER: str = "openai"
     # 音频输出 API 密钥
     AUDIO_OUTPUT_API_KEY: Optional[str] = None

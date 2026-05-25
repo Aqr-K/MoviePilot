@@ -9,11 +9,12 @@ import subprocess
 from abc import ABC
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from app.core.config import settings
 from app.log import logger
+from app.utils.http import RequestUtils
 
 
 class AgentCapabilityProvider(ABC):
@@ -411,6 +412,160 @@ class MiMoAudioProvider(OpenAIChatAudioProvider):
         return model
 
 
+class MiniMaxAudioProvider(OpenAIChatAudioProvider):
+    """MiniMax 音频 provider，语音合成使用官方 T2A HTTP 接口。"""
+
+    name = "minimax"
+    DISPLAY_NAME = "MiniMax"
+    DEFAULT_BASE_URL = "https://api.minimaxi.com/v1"
+    DEFAULT_STT_MODEL = "MiniMax-M2.7"
+    DEFAULT_TTS_MODEL = "speech-2.8-turbo"
+    DEFAULT_VOICE = "Chinese (Mandarin)_Lyrical_Voice"
+    AUDIO_INPUT_DATA_URL = True
+    SUPPORTED_TTS_MODELS = frozenset(
+        {
+            "speech-2.8-hd",
+            "speech-2.8-turbo",
+            "speech-2.6-hd",
+            "speech-2.6-turbo",
+            "speech-02-hd",
+            "speech-02-turbo",
+            "speech-01-hd",
+            "speech-01-turbo",
+        }
+    )
+
+    def _build_client(self, api_key: str, base_url: Optional[str]):
+        """构建 MiniMax OpenAI 兼容客户端，兼容用户误填 Anthropic 端点的情况。"""
+        from openai import OpenAI
+
+        return OpenAI(
+            api_key=api_key,
+            base_url=self._normalize_api_base_url(base_url),
+            max_retries=3,
+        )
+
+    @classmethod
+    def _normalize_api_base_url(cls, base_url: Optional[str]) -> str:
+        """归一化 MiniMax API 基础 URL，确保后续可以拼接 OpenAI/T2A 路径。"""
+        normalized = (base_url or cls.DEFAULT_BASE_URL).strip().rstrip("/")
+        if normalized.endswith("/t2a_v2"):
+            normalized = normalized[: -len("/t2a_v2")]
+        for suffix in ("/anthropic/v1", "/openai/v1"):
+            if normalized.endswith(suffix):
+                return normalized[: -len(suffix)] + "/v1"
+        if not normalized.endswith("/v1"):
+            normalized = f"{normalized}/v1"
+        return normalized
+
+    @classmethod
+    def _build_t2a_url(cls, base_url: Optional[str]) -> str:
+        """生成 MiniMax 同步 T2A 接口地址。"""
+        return f"{cls._normalize_api_base_url(base_url)}/t2a_v2"
+
+    def _normalize_stt_model(self) -> str:
+        """将非 MiniMax 的默认转写模型名兜底为 MiniMax 对话模型。"""
+        model = (settings.AUDIO_INPUT_MODEL or "").strip()
+        if not model or model.lower().startswith(("gpt-", "mimo-")):
+            return self.DEFAULT_STT_MODEL
+        return model
+
+    def _normalize_tts_model(self) -> str:
+        """将非 MiniMax 语音模型兜底为官方 T2A 模型。"""
+        model = (settings.AUDIO_OUTPUT_MODEL or "").strip().lower()
+        if model in self.SUPPORTED_TTS_MODELS:
+            return model
+        return self.DEFAULT_TTS_MODEL
+
+    def _normalize_voice_id(self) -> str:
+        """将其他 provider 的默认音色兜底为 MiniMax 中文系统音色。"""
+        voice_id = (settings.AUDIO_OUTPUT_VOICE or "").strip()
+        if not voice_id or voice_id in {"alloy", "mimo_default"}:
+            return self.DEFAULT_VOICE
+        return voice_id
+
+    @staticmethod
+    def _decode_audio_payload(audio_data: str) -> bytes:
+        """解析 MiniMax T2A 返回的音频数据，优先按官方 hex 格式处理。"""
+        normalized = "".join((audio_data or "").split())
+        try:
+            return bytes.fromhex(normalized)
+        except ValueError:
+            return base64.b64decode(audio_data)
+
+    @staticmethod
+    def _extract_minimax_error(data: dict[str, Any]) -> Optional[str]:
+        """提取 MiniMax base_resp 错误信息，成功响应返回 None。"""
+        base_resp = data.get("base_resp") or {}
+        status_code = base_resp.get("status_code")
+        if status_code in (None, 0, "0"):
+            return None
+        status_msg = base_resp.get("status_msg") or "unknown error"
+        return f"{status_code}: {status_msg}"
+
+    def synthesize_speech(self, text: str) -> Optional[Path]:
+        """调用 MiniMax T2A HTTP 接口合成语音文件。"""
+        if not text:
+            return None
+
+        try:
+            api_key, base_url = self._output_credentials()
+            if not api_key:
+                raise ValueError("音频输出 provider 未配置 API Key")
+            response = RequestUtils(
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                proxies=settings.PROXY or {},
+                timeout=60,
+            ).post_res(
+                url=self._build_t2a_url(base_url),
+                json={
+                    "model": self._normalize_tts_model(),
+                    "text": text,
+                    "stream": False,
+                    "language_boost": "auto",
+                    "output_format": "hex",
+                    "voice_setting": {
+                        "voice_id": self._normalize_voice_id(),
+                        "speed": 1,
+                        "vol": 1,
+                        "pitch": 0,
+                    },
+                    "audio_setting": {
+                        "sample_rate": 32000,
+                        "bitrate": 128000,
+                        "format": "opus",
+                        "channel": 1,
+                    },
+                },
+            )
+            if not response:
+                raise ValueError("MiniMax T2A 请求无响应")
+            if response.status_code >= 400:
+                raise ValueError(f"MiniMax T2A HTTP {response.status_code}")
+
+            result = response.json()
+            minimax_error = self._extract_minimax_error(result)
+            if minimax_error:
+                raise ValueError(f"MiniMax T2A 返回错误: {minimax_error}")
+
+            audio_data = ((result.get("data") or {}).get("audio") or "").strip()
+            if not audio_data:
+                raise ValueError("MiniMax T2A 响应中没有音频数据")
+
+            voice_dir = settings.TEMP_PATH / "voice"
+            voice_dir.mkdir(parents=True, exist_ok=True)
+            output_path = voice_dir / f"{uuid4().hex}.opus"
+            output_path.write_bytes(self._decode_audio_payload(audio_data))
+            return output_path
+        except Exception as err:
+            logger.error(f"音频输出合成失败: provider={self.name}, error={err}")
+            return None
+
+
 class AgentCapabilityManager:
     """Agent 能力统一入口。"""
 
@@ -420,6 +575,7 @@ class AgentCapabilityManager:
         OpenAIAudioProvider.name: OpenAIAudioProvider(),
         OpenAIChatAudioProvider.name: OpenAIChatAudioProvider(),
         MiMoAudioProvider.name: MiMoAudioProvider(),
+        MiniMaxAudioProvider.name: MiniMaxAudioProvider(),
     }
 
     @classmethod

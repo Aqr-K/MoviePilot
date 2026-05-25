@@ -21,6 +21,7 @@ spec.loader.exec_module(capability_module)
 
 AgentCapabilityManager = capability_module.AgentCapabilityManager
 MiMoAudioProvider = capability_module.MiMoAudioProvider
+MiniMaxAudioProvider = capability_module.MiniMaxAudioProvider
 OpenAIChatAudioProvider = capability_module.OpenAIChatAudioProvider
 OpenAIAudioProvider = capability_module.OpenAIAudioProvider
 
@@ -32,6 +33,7 @@ class AgentCapabilityManagerTest(unittest.TestCase):
             "openai_chat_audio", AgentCapabilityManager.get_registered_audio_providers()
         )
         self.assertIn("mimo", AgentCapabilityManager.get_registered_audio_providers())
+        self.assertIn("minimax", AgentCapabilityManager.get_registered_audio_providers())
 
     def test_get_audio_provider_uses_separate_input_and_output_settings(self):
         with patch.object(settings, "AUDIO_INPUT_PROVIDER", "openai"), patch.object(
@@ -229,6 +231,66 @@ class AgentCapabilityManagerTest(unittest.TestCase):
             content[0]["input_audio"]["data"].startswith("data:audio/wav;base64,")
         )
         self.assertIn("只输出转写结果", content[1]["text"])
+
+    def test_minimax_stt_normalizes_openai_default_model(self):
+        """校验 MiniMax 音频输入会把 OpenAI 默认模型兜底为 MiniMax 模型。"""
+        provider = MiniMaxAudioProvider()
+
+        with patch.object(settings, "AUDIO_INPUT_MODEL", "gpt-4o-mini-transcribe"):
+            self.assertEqual(provider._normalize_stt_model(), "MiniMax-M2.7")
+
+    def test_minimax_tts_uses_t2a_http_payload(self):
+        """校验 MiniMax 音频输出会调用官方 T2A HTTP 接口并写入音频文件。"""
+        provider = MiniMaxAudioProvider()
+        fake_response = SimpleNamespace(
+            status_code=200,
+            json=Mock(
+                return_value={
+                    "data": {"audio": b"opus-bytes".hex(), "status": 2},
+                    "base_resp": {"status_code": 0, "status_msg": "success"},
+                }
+            ),
+        )
+        request_utils = Mock()
+        request_utils.post_res.return_value = fake_response
+
+        with TemporaryDirectory() as temp_dir, patch.object(
+            capability_module, "RequestUtils", return_value=request_utils
+        ) as request_utils_cls, patch.object(
+            capability_module,
+            "settings",
+            SimpleNamespace(
+                TEMP_PATH=Path(temp_dir),
+                PROXY={},
+                AUDIO_OUTPUT_MODEL="gpt-4o-mini-tts",
+                AUDIO_OUTPUT_VOICE="alloy",
+                AUDIO_OUTPUT_API_KEY="sk-test",
+                AUDIO_OUTPUT_BASE_URL="https://api.minimaxi.com/anthropic/v1",
+            ),
+        ):
+            output_path = provider.synthesize_speech("你好")
+            output_bytes = output_path.read_bytes() if output_path else None
+
+        self.assertIsNotNone(output_path)
+        self.assertEqual(output_bytes, b"opus-bytes")
+        request_utils_cls.assert_called_once()
+        request = request_utils.post_res.call_args.kwargs
+        self.assertEqual(request["url"], "https://api.minimaxi.com/v1/t2a_v2")
+        self.assertEqual(request["json"]["model"], "speech-2.8-turbo")
+        self.assertEqual(
+            request["json"]["voice_setting"]["voice_id"],
+            "Chinese (Mandarin)_Lyrical_Voice",
+        )
+        self.assertEqual(request["json"]["audio_setting"]["format"], "opus")
+
+    def test_minimax_tts_accepts_base64_audio_payload(self):
+        """校验 MiniMax 音频解析兼容部分代理返回的 base64 音频数据。"""
+        provider = MiniMaxAudioProvider()
+
+        self.assertEqual(
+            provider._decode_audio_payload(b64encode(b"opus-bytes").decode("utf-8")),
+            b"opus-bytes",
+        )
 
 
 if __name__ == "__main__":
