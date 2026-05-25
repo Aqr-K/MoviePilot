@@ -32,29 +32,87 @@ class LLMTestTimeout(TimeoutError):
 def _patch_gemini_thought_signature():
     """
     修复 langchain-google-genai 中 Gemini 2.5 思考模型的 thought_signature 兼容问题。
-    langchain-google-genai 的 _is_gemini_3_or_later() 仅检查 "gemini-3"，
-    导致 Gemini 2.5 思考模型（如 gemini-2.5-flash、gemini-2.5-pro）在工具调用时
-    缺少 thought_signature 而报错 400。
-    此补丁将检查范围扩展到 Gemini 2.5 模型。
+
+    问题 1：_is_gemini_3_or_later() 仅检查 "gemini-3"，不包含 Gemini 2.5 模型，
+    导致 _parse_chat_history 的 thought_signature 强制注入逻辑被跳过。
+
+    问题 2：强制注入逻辑使用 first_fc_seen 标志，只给每个 model 消息中
+    第一个缺少 thought_signature 的 function_call 补 dummy，后续并行
+    function_call 仍缺失签名，导致 Gemini API 返回 400。
+
+    此补丁同时修复以上两个问题。
     """
     try:
         import langchain_google_genai.chat_models as _cm
+
+        # 检查版本：需要 >= 4.0 才支持 _is_gemini_3_or_later
+        try:
+            from importlib.metadata import version
+            _version = version("langchain-google-genai") or ""
+        except Exception:
+            _version = ""
+        try:
+            _major = int(_version.split(".")[0]) if _version else 0
+        except (ValueError, TypeError):
+            _major = 0
+        if _major < 4:
+            logger.error(
+                f"langchain-google-genai 版本 {_version or '未知'} 过旧，"
+                f"不支持 Gemini 2.5+ 模型的 thought_signature 处理，"
+                f"请升级到 4.2.3+：pip install langchain-google-genai~=4.2.3"
+            )
+            return
 
         # 仅在未修补时执行
         if getattr(_cm, "_thought_signature_patched", False):
             return
 
+        if not hasattr(_cm, "_is_gemini_3_or_later"):
+            logger.error(
+                "langchain-google-genai 缺少 _is_gemini_3_or_later，"
+                "无法修补 thought_signature 兼容性，请检查包版本"
+            )
+            return
+
+        # 补丁 1：扩展 _is_gemini_3_or_later，使 Gemini 2.5 模型也能触发
+        # _parse_chat_history 中的 thought_signature 强制注入逻辑
         def _patched_is_gemini_3_or_later(model_name: str) -> bool:
             if not model_name:
                 return False
             name = model_name.lower().replace("models/", "")
-            # Gemini 2.5 思考模型也需要 thought_signature 支持
             return "gemini-3" in name or "gemini-2.5" in name
 
         _cm._is_gemini_3_or_later = _patched_is_gemini_3_or_later
+
+        # 补丁 2：修复 _parse_chat_history 中 first_fc_seen 只修复第一个
+        # function_call 的问题。用 wrapper 在原函数返回后，确保所有 model
+        # 消息中所有 function_call 都带有 thought_signature。
+        _original_parse_chat_history = _cm._parse_chat_history
+
+        def _patched_parse_chat_history(*args, **kwargs):
+            result = _original_parse_chat_history(*args, **kwargs)
+            system_instruction, formatted_messages = result
+
+            # 从参数中提取 model 名称
+            model = kwargs.get("model")
+            if model is None and len(args) >= 4:
+                model = args[3]
+
+            if model and _patched_is_gemini_3_or_later(model):
+                dummy = _cm.DUMMY_THOUGHT_SIGNATURE
+                for content_msg in formatted_messages:
+                    if content_msg.role == "model":
+                        for part in content_msg.parts or []:
+                            if part.function_call and not part.thought_signature:
+                                part.thought_signature = dummy
+
+            return result
+
+        _cm._parse_chat_history = _patched_parse_chat_history
         _cm._thought_signature_patched = True
         logger.debug(
-            "已修补 langchain-google-genai thought_signature 兼容性（覆盖 Gemini 2.5 模型）"
+            "已修补 langchain-google-genai thought_signature 兼容性"
+            "（覆盖 Gemini 2.5 模型 + 修复并行 function_call 签名缺失）"
         )
     except Exception as e:
         logger.warning(f"修补 langchain-google-genai thought_signature 失败: {e}")
