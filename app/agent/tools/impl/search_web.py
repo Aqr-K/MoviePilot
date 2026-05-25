@@ -19,10 +19,8 @@ SEARCH_TIMEOUT = 20
 class SearchWebInput(BaseModel):
     """搜索网络内容工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     query: str = Field(
         ..., description="The search query string to search for on the web"
     )

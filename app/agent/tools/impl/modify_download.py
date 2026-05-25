@@ -12,10 +12,8 @@ from app.log import logger
 class ModifyDownloadInput(BaseModel):
     """修改下载任务工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     hash: str = Field(
         ..., description="Task hash (can be obtained from query_download_tasks tool)"
     )

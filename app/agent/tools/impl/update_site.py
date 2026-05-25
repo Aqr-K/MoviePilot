@@ -17,10 +17,8 @@ from app.utils.string import StringUtils
 class UpdateSiteInput(BaseModel):
     """更新站点工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     site_id: int = Field(
         ...,
         description="The ID of the site to update (can be obtained from query_sites tool)",

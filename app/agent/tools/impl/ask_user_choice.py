@@ -38,10 +38,8 @@ class UserChoiceOptionInput(BaseModel):
 class AskUserChoiceInput(BaseModel):
     """按钮选择工具输入。"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why the agent needs the user to choose from buttons",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why the agent needs the user to choose from buttons",)
     message: str = Field(
         ...,
         description="Question or prompt shown to the user together with the buttons",

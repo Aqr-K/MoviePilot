@@ -38,10 +38,8 @@ class BrowserAction(str, Enum):
 class BrowseWebpageInput(BaseModel):
     """浏览器操作工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this browser action is being performed",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this browser action is being performed",)
     action: str = Field(
         ...,
         description=(

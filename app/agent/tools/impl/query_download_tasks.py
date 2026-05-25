@@ -15,7 +15,7 @@ from app.schemas.types import TorrentStatus, media_type_to_agent
 
 class QueryDownloadTasksInput(BaseModel):
     """查询下载工具的输入参数模型"""
-    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     downloader: Optional[str] = Field(None,
                                       description="Name of specific downloader to query (optional, if not provided queries all configured downloaders)")
     status: Optional[str] = Field("all",

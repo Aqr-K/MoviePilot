@@ -11,7 +11,7 @@ from app.log import logger
 
 class QuerySchedulersInput(BaseModel):
     """查询定时服务工具的输入参数模型"""
-    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
 
 
 class QuerySchedulersTool(MoviePilotTool):

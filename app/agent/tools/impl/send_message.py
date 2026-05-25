@@ -11,10 +11,8 @@ from app.log import logger
 class SendMessageInput(BaseModel):
     """发送消息工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     message: Optional[str] = Field(
         None,
         description="The message content to send to the user (should be clear and informative)",

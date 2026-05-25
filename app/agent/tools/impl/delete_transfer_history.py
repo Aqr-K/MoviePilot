@@ -12,10 +12,8 @@ from app.log import logger
 class DeleteTransferHistoryInput(BaseModel):
     """删除整理历史记录工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     history_id: int = Field(
         ..., description="The ID of the transfer history record to delete"
     )

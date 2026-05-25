@@ -1,7 +1,7 @@
 """切换当前激活人格工具。"""
 
 import json
-from typing import Type
+from typing import Type, Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,10 +13,8 @@ from app.log import logger
 class SwitchPersonaInput(BaseModel):
     """切换人格工具的输入参数模型。"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     persona_id: str = Field(
         ...,
         description=(

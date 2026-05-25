@@ -17,10 +17,8 @@ PAGE_SIZE = 20
 class QuerySubscribeHistoryInput(BaseModel):
     """查询订阅历史工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     media_type: Optional[str] = Field(
         "all", description="Allowed values: movie, tv, all"
     )

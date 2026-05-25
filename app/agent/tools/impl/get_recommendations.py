@@ -14,10 +14,8 @@ from app.schemas.types import MediaType, media_type_to_agent
 class GetRecommendationsInput(BaseModel):
     """获取推荐工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     source: Optional[str] = Field(
         "tmdb_trending",
         description="Recommendation source: "

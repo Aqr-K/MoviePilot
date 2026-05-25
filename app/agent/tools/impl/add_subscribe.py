@@ -14,10 +14,8 @@ from app.schemas.types import MediaType, MessageChannel
 class AddSubscribeInput(BaseModel):
     """添加订阅工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     title: str = Field(
         ...,
         description="The title of the media to subscribe to (e.g., 'The Matrix', 'Breaking Bad')",

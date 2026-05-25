@@ -18,10 +18,8 @@ from app.schemas.types import SystemConfigKey
 class DeleteRuleGroupInput(BaseModel):
     """删除过滤规则组工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     name: str = Field(..., description="Rule group name to delete.")
 
 

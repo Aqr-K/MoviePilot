@@ -15,7 +15,7 @@ from app.utils.jieba import cut as jieba_cut
 
 class QueryTransferHistoryInput(BaseModel):
     """查询整理历史记录工具的输入参数模型"""
-    explanation: str = Field(..., description="Clear explanation of why this tool is being used in the current context")
+    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     title: Optional[str] = Field(None, description="Search by title (optional, supports partial match)")
     status: Optional[str] = Field("all",
                                   description="Filter by status: 'success' for successful transfers, 'failed' for failed transfers, 'all' for all records (default: 'all')")

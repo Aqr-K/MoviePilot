@@ -14,10 +14,8 @@ from app.log import logger
 class UpdatePluginConfigInput(BaseModel):
     """修改插件配置工具的输入参数模型"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why this tool is being used in the current context",)
     plugin_id: str = Field(
         ...,
         description="The plugin ID to update. Use query_plugin_config first to inspect the current config.",

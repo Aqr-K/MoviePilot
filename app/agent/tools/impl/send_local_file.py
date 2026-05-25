@@ -15,10 +15,8 @@ from app.schemas.types import MessageChannel
 class SendLocalFileInput(BaseModel):
     """发送本地附件工具输入。"""
 
-    explanation: str = Field(
-        ...,
-        description="Clear explanation of why sending this local file helps the user",
-    )
+    explanation: Optional[str] = Field(None,
+        description="Clear explanation of why sending this local file helps the user",)
     file_path: str = Field(
         ...,
         description="Absolute path to the local image or file to send to the user",
