@@ -8,6 +8,7 @@ from app.db.mediaserver_oper import MediaServerOper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import MediaServerLibrary, MediaServerItem, MediaServerSeasonInfo, MediaServerPlayItem
+from app.utils.security import SecurityUtils
 
 lock = threading.Lock()
 
@@ -17,12 +18,54 @@ class MediaServerChain(ChainBase):
     媒体服务器处理链
     """
 
+    @staticmethod
+    def _sign_image_url(url: Optional[str]) -> Optional[str]:
+        """
+        为返回前端的媒体服务器图片 URL 添加代理签名。
+        """
+        return SecurityUtils.sign_url(url) if url else url
+
+    def _sign_library_images(
+        self, libraries: Optional[List[MediaServerLibrary]]
+    ) -> List[MediaServerLibrary]:
+        """
+        给媒体库列表中的封面和封面组添加代理签名。
+        """
+        for library in libraries or []:
+            if library.image:
+                library.image = self._sign_image_url(library.image)
+            if library.image_list:
+                library.image_list = [
+                    self._sign_image_url(image)
+                    for image in library.image_list
+                    if image
+                ]
+        return libraries or []
+
+    def _sign_play_item_images(
+        self, items: Optional[List[MediaServerPlayItem]]
+    ) -> List[MediaServerPlayItem]:
+        """
+        给媒体服务器播放条目中的图片 URL 添加代理签名。
+        """
+        for item in items or []:
+            if item.image:
+                item.image = self._sign_image_url(item.image)
+        return items or []
+
     def librarys(self, server: str, username: Optional[str] = None,
                  hidden: bool = False) -> List[MediaServerLibrary]:
         """
         获取媒体服务器所有媒体库
         """
-        return self.run_module("mediaserver_librarys", server=server, username=username, hidden=hidden)
+        return self._sign_library_images(
+            self.run_module(
+                "mediaserver_librarys",
+                server=server,
+                username=username,
+                hidden=hidden,
+            )
+        )
 
     def items(self, server: str, library_id: Union[str, int],
               start_index: Optional[int] = 0, limit: Optional[int] = -1) -> Generator[Any, None, None]:
@@ -83,22 +126,46 @@ class MediaServerChain(ChainBase):
         """
         获取媒体服务器正在播放信息
         """
-        return self.run_module("mediaserver_playing", count=count, server=server, username=username)
+        return self._sign_play_item_images(
+            self.run_module(
+                "mediaserver_playing",
+                count=count,
+                server=server,
+                username=username,
+            )
+        )
 
     def latest(self, server: str, count: Optional[int] = 20,
                username: Optional[str] = None) -> List[MediaServerPlayItem]:
         """
         获取媒体服务器最新入库条目
         """
-        return self.run_module("mediaserver_latest", count=count, server=server, username=username)
+        return self._sign_play_item_images(
+            self.run_module(
+                "mediaserver_latest",
+                count=count,
+                server=server,
+                username=username,
+            )
+        )
 
     def get_latest_wallpapers(self, server: Optional[str] = None, count: Optional[int] = 10,
                               remote: bool = True, username: Optional[str] = None) -> List[str]:
         """
         获取最新最新入库条目海报作为壁纸，缓存1小时
         """
-        return self.run_module("mediaserver_latest_images", server=server, count=count,
-                               remote=remote, username=username)
+        wallpapers = self.run_module(
+            "mediaserver_latest_images",
+            server=server,
+            count=count,
+            remote=remote,
+            username=username,
+        )
+        return [
+            self._sign_image_url(wallpaper)
+            for wallpaper in wallpapers or []
+            if wallpaper
+        ]
 
     def get_latest_wallpaper(self, server: Optional[str] = None,
                              remote: bool = True, username: Optional[str] = None) -> Optional[str]:

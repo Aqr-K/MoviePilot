@@ -6,6 +6,44 @@ from app.utils.security import SecurityUtils
 
 
 class SecurityUtilsTest(TestCase):
+    def test_signed_url_roundtrip_returns_clean_url(self):
+        """
+        URL 签名验证成功后返回不含签名片段的真实请求地址。
+        """
+        url = "http://192.168.1.50:8096/Items/abc/Images/Primary?api_key=demo"
+
+        signed_url = SecurityUtils.sign_url(url)
+
+        self.assertIn("#mp_exp=", signed_url)
+        self.assertEqual(SecurityUtils.verify_signed_url(signed_url), url)
+        self.assertEqual(SecurityUtils.strip_url_signature(signed_url), url)
+
+    def test_signed_url_rejects_tampered_url(self):
+        """
+        签名绑定完整 URL，签名后修改路径必须校验失败。
+        """
+        signed_url = SecurityUtils.sign_url(
+            "http://192.168.1.50:8096/Items/abc/Images/Primary"
+        )
+        tampered_url = signed_url.replace(
+            "/Items/abc/Images/Primary",
+            "/System/Info/Public",
+        )
+
+        self.assertIsNone(SecurityUtils.verify_signed_url(tampered_url))
+
+    def test_signed_url_rejects_expired_signature(self):
+        """
+        已过期签名不能继续放行私网图片代理请求。
+        """
+        with patch("app.utils.security.time.time", return_value=1000):
+            signed_url = SecurityUtils.sign_url(
+                "http://192.168.1.50:8096/Items/abc/Images/Primary",
+                expires_in=10,
+            )
+
+        with patch("app.utils.security.time.time", return_value=1011):
+            self.assertIsNone(SecurityUtils.verify_signed_url(signed_url))
 
     def test_is_safe_url_keeps_default_allowlist_behavior(self):
         """

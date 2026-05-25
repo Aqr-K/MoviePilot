@@ -1,11 +1,9 @@
 import asyncio
 import json
-import posixpath
-import re
 from collections import deque
 from datetime import datetime
 from typing import Any, Optional, Union, Annotated
-from urllib.parse import parse_qs, unquote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiofiles
 import pillow_avif  # noqa 用于自动注册AVIF支持
@@ -32,7 +30,6 @@ from app.db.user_oper import (
     get_current_active_user_async,
 )
 from app.helper.image import ImageHelper
-from app.helper.mediaserver import MediaServerHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
@@ -52,21 +49,6 @@ from version import APP_VERSION
 router = APIRouter()
 
 _NETTEST_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
-_MEDIA_SERVER_IMAGE_PATH_PATTERNS = (
-    re.compile(
-        r"^/(?:emby/)?Items/[^/]+/Images/"
-        r"(?:Primary|Art|Backdrop|Banner|Logo|Thumb|Disc|Box|Screenshot|Menu|Chapter)"
-        r"(?:/[^/]+)?$",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^/library/metadata/[^/]+/"
-        r"(?:thumb|art|banner|poster|clearlogo|clearart|background)"
-        r"(?:/[^/]+)?$",
-        re.IGNORECASE,
-    ),
-    re.compile(r"^/api/v1/sys/img/.+", re.IGNORECASE),
-)
 
 
 def _match_nettest_prefix(url: str, prefix: str) -> bool:
@@ -359,95 +341,6 @@ async def _close_nettest_response(response: Any) -> None:
         logger.debug(f"关闭网络测试响应失败: {err}")
 
 
-def _normalize_proxy_image_path(path: str) -> str:
-    """
-    归一化代理图片路径，用于识别媒体服务器图片接口。
-
-    URL path 可能包含编码后的特殊字符，这里先解码再规范化路径，避免
-    `%2e%2e` 或重复斜杠绕过后续的媒体图片路径判断。
-    """
-    decoded_path = unquote(path or "/")
-    normalized_path = posixpath.normpath(decoded_path)
-    if not normalized_path.startswith("/"):
-        normalized_path = f"/{normalized_path}"
-    return normalized_path
-
-
-def _is_known_media_server_image_path(path: str) -> bool:
-    """
-    判断路径是否属于已知媒体服务器图片读取接口。
-
-    这里仅覆盖 MoviePilot 自身会返回给前端的封面、背景图和图片流接口，
-    不允许媒体服务器同 host 下的任意 API 路径继续通过图片代理访问。
-    """
-    normalized_path = _normalize_proxy_image_path(path)
-    return any(
-        pattern.match(normalized_path)
-        for pattern in _MEDIA_SERVER_IMAGE_PATH_PATTERNS
-    )
-
-
-def _is_plex_transcode_image_url(url: str) -> bool:
-    """
-    校验 Plex 图片转码接口只转码 Plex 自身 metadata 图片路径。
-
-    Plex 的 posterUrl/artUrl 可能使用 `/photo/:/transcode` 包装真实图片路径，
-    因此需要额外检查 query 里的 `url` 仍然是 metadata 图片路径，而不是
-    任意可被 Plex 代取的地址。
-    """
-    parsed_url = urlparse(url)
-    if _normalize_proxy_image_path(parsed_url.path) != "/photo/:/transcode":
-        return False
-    source_path = parse_qs(parsed_url.query).get("url", [None])[0]
-    if not source_path:
-        return False
-    source_url = urlparse(source_path)
-    if source_url.scheme or source_url.netloc:
-        return False
-    return _is_known_media_server_image_path(source_path)
-
-
-def _is_ugreen_image_stream_url(url: str) -> bool:
-    """
-    校验绿联本机图片流接口只代理官方 scraper 图片。
-
-    绿联本地图片需要带加密鉴权头，目前模块只会把 scraper.ugnas.com 的签名图
-    转成 getImaStream，本检查避免用户把该接口改造成任意远程 URL 中转。
-    """
-    parsed_url = urlparse(url)
-    if _normalize_proxy_image_path(parsed_url.path) != "/ugreen/v2/video/getImaStream":
-        return False
-    source_url = parse_qs(parsed_url.query).get("name", [None])[0]
-    if not source_url:
-        return False
-    parsed_source = urlparse(source_url)
-    return (
-        parsed_source.scheme in {"http", "https"}
-        and parsed_source.netloc.lower() == "scraper.ugnas.com"
-    )
-
-
-def _is_allowed_media_server_image_url(
-    url: str,
-    media_server_domains: set[str],
-) -> bool:
-    """
-    判断内网媒体服务器 URL 是否可作为图片代理目标。
-
-    私有地址默认仍然禁止；只有 URL host 精确命中已配置媒体服务器，并且路径是
-    已知图片接口时才允许访问，用于兼容前端媒体库和最近入库图片展示。
-    """
-    if not media_server_domains:
-        return False
-    if not SecurityUtils.is_safe_url(url, media_server_domains, strict=True):
-        return False
-    return (
-        _is_known_media_server_image_path(urlparse(url).path)
-        or _is_plex_transcode_image_url(url)
-        or _is_ugreen_image_stream_url(url)
-    )
-
-
 async def fetch_image(
     url: str,
     proxy: Optional[bool] = None,
@@ -455,7 +348,6 @@ async def fetch_image(
     if_none_match: Optional[str] = None,
     cookies: Optional[str | dict] = None,
     allowed_domains: Optional[set[str]] = None,
-    media_server_domains: Optional[set[str]] = None,
 ) -> Optional[Response]:
     """
     处理图片缓存逻辑，支持HTTP缓存和磁盘缓存
@@ -466,17 +358,16 @@ async def fetch_image(
     if allowed_domains is None:
         allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS)
 
+    fetch_url = SecurityUtils.strip_url_signature(url)
     # 验证URL安全性
     if not SecurityUtils.is_safe_url(
         url, allowed_domains, block_private=True
-    ) and not _is_allowed_media_server_image_url(
-        url, media_server_domains or set()
-    ):
+    ) and not (fetch_url := SecurityUtils.verify_signed_url(url)):
         logger.warn(f"Blocked unsafe image URL: {url}")
         return None
 
     content = await ImageHelper().async_fetch_image(
-        url=url,
+        url=fetch_url,
         proxy=proxy,
         use_cache=use_cache,
         cookies=cookies,
@@ -491,7 +382,7 @@ async def fetch_image(
         # 返回缓存图片
         return Response(
             content=content,
-            media_type=UrlUtils.get_mime_type(url, "image/jpeg"),
+            media_type=UrlUtils.get_mime_type(fetch_url, "image/jpeg"),
             headers=headers,
         )
     return None
@@ -509,13 +400,6 @@ async def proxy_img(
     """
     图片代理，可选是否使用代理服务器，支持 HTTP 缓存
     """
-    # 媒体服务器添加图片代理支持
-    hosts = [
-        config.config.get("host")
-        for config in MediaServerHelper().get_configs().values()
-        if config and config.config and config.config.get("host")
-    ]
-    media_server_domains = set(hosts)
     allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS)
     cookies = (
         MediaServerChain().get_image_cookies(server=None, image_url=imgurl)
@@ -529,7 +413,6 @@ async def proxy_img(
         cookies=cookies,
         if_none_match=if_none_match,
         allowed_domains=allowed_domains,
-        media_server_domains=media_server_domains,
     )
 
 
