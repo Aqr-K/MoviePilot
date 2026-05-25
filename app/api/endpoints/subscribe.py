@@ -92,6 +92,8 @@ async def create_subscribe(
     subscribe_dict = subscribe_in.model_dump()
     if subscribe_in.id:
         subscribe_dict.pop("id", None)
+    # completed_episode 是响应派生字段，禁止写入持久层
+    subscribe_dict.pop("completed_episode", None)
     sid, message = await SubscribeChain().async_add(
         mtype=mtype, title=title, exist_ok=True, **subscribe_dict
     )
