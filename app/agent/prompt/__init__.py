@@ -329,6 +329,7 @@ class PromptManager:
             f"- 配置文件目录: {config_path}",
             f"- 日志文件目录: {log_path}",
             f"- 系统安装目录: {settings.ROOT_PATH}",
+            f"- 插件安装目录: {settings.ROOT_PATH / 'app' / 'plugins'}",
         ]
 
         available_commands = self._get_available_shell_commands()

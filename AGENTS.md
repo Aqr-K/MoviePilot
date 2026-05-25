@@ -23,6 +23,7 @@ This file defines the default behavior for AI agents working in the MoviePilot r
 - `app/api/endpoints/`: HTTP entrypoints. Handles auth, parameters, responses, and simple CRUD.
 - `app/chain/`: Business orchestration layer for search, recognition, subscriptions, downloads, messaging flows, and similar use cases.
 - `app/modules/`: Dynamically loaded system modules. Encapsulates pluggable downloaders, media servers, message channels, and other backend capabilities.
+- `app/plugins/`: Directory where plugins are installed and managed.
 - `app/helper/`: Reusable low-level helper logic. Not a place for full business orchestration.
 - `app/core/config.py`: Environment variables, deployment parameters, and startup-level settings.
 - `app/schemas/types.py`: Shared enums and types such as `SystemConfigKey` and module categories.
