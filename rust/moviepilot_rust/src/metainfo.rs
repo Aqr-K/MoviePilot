@@ -126,7 +126,7 @@ static SOURCE_PATTERN: Lazy<Regex> = Lazy::new(|| {
 });
 static EFFECT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     RegexBuilder::new(
-        r"(^SDR$|^HDR\d*$|^DOLBY$|^DOVI$|^DV$|^3D$|^REPACK$|^HLG$|^HDR10(\+|Plus)$|^EDR$|^HQ$)",
+        r"(^SDR$|^HDR\d*$|^DOLBY$|^DOVI$|^DV$|^3D$|^REPACK$|^HLG$|^HDR10(\+|Plus)$|^HDR10P$|^VIVID$|^EDR$|^HQ$)",
     )
     .case_insensitive(true)
     .build()
