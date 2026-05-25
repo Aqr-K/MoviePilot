@@ -314,7 +314,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/system/env` | Get system configuration |
+| GET | `/api/v1/system/env` | Get system configuration, including runtime versions and Rust acceleration availability/enabled status |
 | POST | `/api/v1/system/env` | Update system configuration. Body: JSON object |
 | GET | `/api/v1/system/setting/{key}` | Get system setting |
 | POST | `/api/v1/system/setting/{key}` | Update system setting |

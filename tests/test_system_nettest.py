@@ -82,12 +82,25 @@ _stub_module(
 )
 _stub_module("app.utils.crypto", HashUtils=_Dummy)
 _stub_module("app.utils.http", RequestUtils=_Dummy, AsyncRequestUtils=_Dummy)
-_stub_module("version", APP_VERSION="test")
+_stub_module("version", APP_VERSION="test", FRONTEND_VERSION="frontend-test")
 
 from app.api.endpoints import system as system_endpoint
 
 
 class NettestSecurityTest(unittest.TestCase):
+    def test_get_env_setting_reports_rust_available_and_enabled_separately(self):
+        """
+        系统配置接口应分别返回 Rust 扩展可用性和当前实际启用状态。
+        """
+        with patch.object(system_endpoint.rust_accel, "is_available", return_value=True), patch.object(
+            system_endpoint.rust_accel, "is_enabled", return_value=False
+        ):
+            resp = asyncio.run(system_endpoint.get_env_setting(_="token"))
+
+        self.assertTrue(resp.success)
+        self.assertTrue(resp.data["RUST_ACCEL_AVAILABLE"])
+        self.assertFalse(resp.data["RUST_ACCEL_ENABLED"])
+
     def test_fetch_image_allows_signed_private_url(self):
         """
         服务端签名过的私网图片 URL 可以继续代理，保证前端封面显示。
