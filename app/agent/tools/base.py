@@ -212,8 +212,15 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 执行具体工具逻辑
         try:
             result = await self.run(**kwargs)
-            result_len = len(str(result)) if result is not None else 0
-            logger.debug(f"Tool {self.name} executed, raw result length: {result_len}")
+            
+            # 记录工具执行结果摘要日志
+            str_result = serialize_tool_result_for_agent(result)
+            if len(str_result) > 500:
+                summary = str_result[:500] + f"...(已截断，总长度: {len(str_result)})"
+            else:
+                summary = str_result
+            logger.info(f"Agent工具 {self.name} 执行完成，结果摘要: {summary}")
+            
         except Exception as e:
             error_message = f"工具执行异常 ({type(e).__name__}): {str(e)}"
             logger.error(f"Tool {self.name} execution failed: {e}", exc_info=True)

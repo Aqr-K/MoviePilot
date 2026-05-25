@@ -260,11 +260,16 @@ class MoviePilotToolsManager:
             # 调用工具的run方法。HTTP/MCP 工具调用不会经过 BaseTool._arun，
             # 因此这里也必须复用同一套返回值格式化和兜底截断逻辑。
             result = await tool_instance.run(**normalized_arguments)
-            return format_tool_result_for_agent(
-                result,
-                tool_name=tool_name,
-                max_chars=getattr(tool_instance, "result_max_chars", None),
-            )
+            
+            # 记录工具执行结果摘要日志
+            str_result = format_tool_result_for_agent(result, tool_name=tool_name, max_chars=getattr(tool_instance, "result_max_chars", None))
+            if len(str_result) > 500:
+                summary = str_result[:500] + f"...(已截断，总长度: {len(str_result)})"
+            else:
+                summary = str_result
+            logger.info(f"Agent工具 {tool_name} 执行完成，结果摘要: {summary}")
+            
+            return str_result
         except Exception as e:
             logger.error(f"调用工具 {tool_name} 时发生错误: {e}", exc_info=True)
             error_msg = json.dumps(
