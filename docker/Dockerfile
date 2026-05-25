@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     busybox \
     tini \
+    cron \
     jq \
     ripgrep \
     less \

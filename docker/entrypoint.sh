@@ -27,9 +27,6 @@ export PATH="${VENV_PATH}/bin:$PATH"
 # 校正设置目录
 CONFIG_DIR="${CONFIG_DIR:-/config}"
 
-# 记录非系统环境（docker容器表）提供的变量
-declare -ga VARS_SET_BY_SCRIPT=()
-
 # 环境变量补全
 # 优先级: 系统环境变量 -> .env 文件 (即使为空字符串) -> 预设默认值
 # 精准适配 Python 端 set_key (quote_mode="always", 单引号包裹, \' 转义)
@@ -38,7 +35,7 @@ function load_config_from_app_env() {
     local env_file="${CONFIG_DIR}/app.env"
 
     # 定义 ["变量名"]="预设默认值"
-    # 禁止填入 CONFIG_DIR 变量，ACME_ENV_ 开头的变量暂时不处理，还是交由 cert.sh 处理
+    # 禁止填入 CONFIG_DIR 变量，ACME_ENV_ 开头的变量不设默认值，仅透传 app.env 中已有配置。
     declare -A vars_and_default_values=(
         # update.sh
         ["PIP_PROXY"]=""
@@ -48,19 +45,13 @@ function load_config_from_app_env() {
         ["MOVIEPILOT_AUTO_UPDATE"]="release"
         ["BROWSER_EMULATION"]="cloakbrowser"
 
-        # database
-        ["DB_TYPE"]="sqlite"
-        ["DB_POSTGRESQL_HOST"]="localhost"
-        ["DB_POSTGRESQL_PORT"]="5432"
-        ["DB_POSTGRESQL_DATABASE"]="moviepilot"
-        ["DB_POSTGRESQL_USERNAME"]="moviepilot"
-        ["DB_POSTGRESQL_PASSWORD"]="moviepilot"
-        ["DB_POSTGRESQL_POOL_SIZE"]="20"
-        ["DB_POSTGRESQL_MAX_OVERFLOW"]="30"
-
         # cert
         ["ENABLE_SSL"]="false"
+        ["AUTO_ISSUE_CERT"]="false"
         ["SSL_DOMAIN"]=""
+        ["SSL_EMAIL"]=""
+        ["DNS_PROVIDER"]=""
+        ["SSL_NGINX_PORT"]="443"
         ["NGINX_PORT"]="3000"
         ["PORT"]="3001"
         ["NGINX_CLIENT_MAX_BODY_SIZE"]="50m"
@@ -83,7 +74,7 @@ function load_config_from_app_env() {
                 key_in_file="${BASH_REMATCH[1]}"
                 value_raw_in_file="${BASH_REMATCH[2]}"
 
-                if [[ -n "${vars_and_default_values[$key_in_file]+_}" ]]; then
+                if [[ -n "${vars_and_default_values[$key_in_file]+_}" || "${key_in_file}" == ACME_ENV_* ]]; then
                     local temp_val_after_initial_trim
                     temp_val_after_initial_trim="${value_raw_in_file#"${value_raw_in_file%%[![:space:]]*}"}"
                     temp_val_after_initial_trim="${temp_val_after_initial_trim%"${temp_val_after_initial_trim##*[![:space:]]}"}"
@@ -120,20 +111,16 @@ function load_config_from_app_env() {
         INFO "${env_file} 文件不存在，跳过文件加载。"
      fi
 
-    INFO "正在根据优先级确定并导出配置值..."
     for var_name in "${!vars_and_default_values[@]}"; do
         local fallback_value="${vars_and_default_values[$var_name]}"
         local final_value
         local value_source="未设置"
-        # 标志变量是否来自初始环境
-        local set_by_initial_env=false
 
         # 检查变量是否在环境中已设置（可能为空）
         if eval "[ -n \"\${${var_name}+x}\" ]"; then
             # 获取其值
             final_value="$(eval echo \"\$"${var_name}"\")"
             value_source="系统环境变量"
-            set_by_initial_env=true
         elif [[ -n "${values_from_env_file["${var_name}"]+_}" ]]; then
             final_value="${values_from_env_file["${var_name}"]}"
             value_source=".env 文件"
@@ -142,36 +129,65 @@ function load_config_from_app_env() {
             value_source="内置默认值"
         fi
 
-        # 不论来源如何，都导出变量，以便脚本的其余部分和子进程使用
-        # (例如 envsubst, mp_update.sh, cert.sh)
-        if declare -gx "${var_name}=${final_value}"; then
-            if [ -z "${final_value}" ]; then
-                 INFO "变量 ${var_name}, 值为空 (来源: ${value_source})。"
-            else
-                 INFO "变量 ${var_name}, 值: ${final_value} (来源: ${value_source})。"
-            fi
+        if ! declare -g "${var_name}=${final_value}"; then
+            ERROR "设置变量 ${var_name}, 值: '${final_value}'失败 (来源: ${value_source}) "
+        fi
+    done
 
-            # 如果变量不是来自初始环境变量，则记录下来以便稍后 unset
-            if ! ${set_by_initial_env}; then
-                # 检查是否已在数组中，避免重复添加
-                local found_in_script_vars=false
-                for item in "${VARS_SET_BY_SCRIPT[@]}"; do
-                    if [[ "$item" == "$var_name" ]]; then
-                        found_in_script_vars=true
-                        break
-                    fi
-                done
-                if ! ${found_in_script_vars}; then
-                    VARS_SET_BY_SCRIPT+=("${var_name}")
-                fi
-            fi
-        else
-            ERROR "导出变量 ${var_name}, 值: '${final_value}'失败 (来源: ${value_source}) "
+    for var_name in "${!values_from_env_file[@]}"; do
+        if [[ "${var_name}" != ACME_ENV_* ]]; then
+            continue
+        fi
+        if eval "[ -n \"\${${var_name}+x}\" ]"; then
+            continue
+        fi
+        if ! declare -g "${var_name}=${values_from_env_file["${var_name}"]}"; then
+            ERROR "设置变量 ${var_name} 失败 (来源: .env 文件) "
         fi
     done
 
     shopt -u extglob
     INFO "配置加载流程执行完毕。"
+}
+
+# 生成 nginx 配置，仅为 envsubst 单次调用传入模板变量。
+function render_nginx_config() {
+    local https_server_conf
+    if [ "${ENABLE_SSL}" = "true" ]; then
+        https_server_conf=$(cat <<EOF
+    server {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        listen ${SSL_NGINX_PORT:-443} ssl;
+        listen [::]:${SSL_NGINX_PORT:-443} ssl;
+        server_name ${SSL_DOMAIN:-moviepilot};
+
+        # SSL证书路径
+        ssl_certificate ${CONFIG_DIR}/certs/latest/fullchain.pem;
+        ssl_certificate_key ${CONFIG_DIR}/certs/latest/privkey.pem;
+
+        # SSL安全配置
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+        ssl_prefer_server_ciphers on;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        # 公共配置
+        include common.conf;
+    }
+EOF
+)
+        else
+            https_server_conf="# HTTPS未启用"
+        fi
+
+    NGINX_PORT="${NGINX_PORT}" \
+        PORT="${PORT}" \
+        NGINX_CLIENT_MAX_BODY_SIZE="${NGINX_CLIENT_MAX_BODY_SIZE}" \
+        HTTPS_SERVER_CONF="${https_server_conf}" \
+        envsubst '${NGINX_PORT}${PORT}${NGINX_CLIENT_MAX_BODY_SIZE}${HTTPS_SERVER_CONF}' < /etc/nginx/nginx.template.conf > /etc/nginx/nginx.conf
 }
 
 # 优雅退出
@@ -265,52 +281,21 @@ if [ -f "${ONE_SHOT_UPDATE_FLAG}" ]; then
     fi
     if [ "${ONE_SHOT_UPDATE_MODE}" = "release" ] || [ "${ONE_SHOT_UPDATE_MODE}" = "dev" ]; then
         INFO "检测到一次性升级标记，本次启动将执行 ${ONE_SHOT_UPDATE_MODE} 升级..."
-        export MOVIEPILOT_AUTO_UPDATE="${ONE_SHOT_UPDATE_MODE}"
+        MOVIEPILOT_AUTO_UPDATE="${ONE_SHOT_UPDATE_MODE}"
         ONE_SHOT_UPDATE_APPLIED="true"
     elif [ -n "${ONE_SHOT_UPDATE_MODE}" ]; then
         WARN "检测到无效的一次性升级模式：${ONE_SHOT_UPDATE_MODE}，已忽略"
     fi
 fi
 
-# 生成HTTPS配置块
-if [ "${ENABLE_SSL}" = "true" ]; then
-    export HTTPS_SERVER_CONF=$(cat <<EOF
-    server {
-        include /etc/nginx/mime.types;
-        default_type application/octet-stream;
-
-        listen ${SSL_NGINX_PORT:-443} ssl;
-        listen [::]:${SSL_NGINX_PORT:-443} ssl;
-        server_name ${SSL_DOMAIN:-moviepilot};
-
-        # SSL证书路径
-        ssl_certificate ${CONFIG_DIR}/certs/latest/fullchain.pem;
-        ssl_certificate_key ${CONFIG_DIR}/certs/latest/privkey.pem;
-
-        # SSL安全配置
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
-        ssl_prefer_server_ciphers on;
-        ssl_session_cache shared:SSL:10m;
-        ssl_session_timeout 10m;
-
-        # 公共配置
-        include common.conf;
-    }
-EOF
-)
-else
-    export HTTPS_SERVER_CONF="# HTTPS未启用"
-fi
-
-# 使用 `envsubst` 将模板文件中的 ${NGINX_PORT} 替换为实际的环境变量值
-envsubst '${NGINX_PORT}${PORT}${NGINX_CLIENT_MAX_BODY_SIZE}${ENABLE_SSL}${HTTPS_SERVER_CONF}' < /etc/nginx/nginx.template.conf > /etc/nginx/nginx.conf
+# 使用env配置渲染 nginx 配置
+render_nginx_config
 
 # 自动更新
 cd /
 source /usr/local/bin/mp_update.sh
 if [ "${ONE_SHOT_UPDATE_APPLIED}" = "true" ]; then
-    export MOVIEPILOT_AUTO_UPDATE="${MOVIEPILOT_AUTO_UPDATE_ORIGINAL}"
+    MOVIEPILOT_AUTO_UPDATE="${MOVIEPILOT_AUTO_UPDATE_ORIGINAL}"
 fi
 cd /app || exit
 
@@ -374,22 +359,6 @@ fi
 
 # 设置后端服务权限掩码
 umask "${UMASK}"
-
-# 清除非系统环境导入的变量，保证转移到 dumb-init 的时候，不会带入不必要的环境变量
-INFO "准备为 Python 应用清理的非系统环境导入的变量..."
-if [ ${#VARS_SET_BY_SCRIPT[@]} -gt 0 ]; then
-    for var_to_unset in "${VARS_SET_BY_SCRIPT[@]}"; do
-        # 再次确认变量确实存在于当前环境中（虽然理论上应该存在）
-        if eval "[ -n \"\${${var_to_unset}+x}\" ]"; then
-            INFO "取消设置环境变量: ${var_to_unset}"
-            unset "${var_to_unset}"
-        else
-            WARN "变量 ${var_to_unset} 已不存在，无需取消设置。"
-        fi
-    done
-else
-    INFO "没有由非系统环境导入的变量需要清理。"
-fi
 
 # 启动后端服务
 INFO "→ 启动后端服务..."
