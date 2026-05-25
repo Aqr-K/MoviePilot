@@ -437,6 +437,8 @@ class ConfigModel(BaseModel):
     )
     # 插件安装数据共享
     PLUGIN_STATISTIC_SHARE: bool = True
+    # 安装版本统计上报
+    USAGE_STATISTIC_SHARE: bool = True
     # 是否开启插件热加载
     PLUGIN_AUTO_RELOAD: bool = False
     # 本地插件仓库目录，多个地址使用,分隔

@@ -35,6 +35,7 @@ from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
 from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
+from app.helper.usage import UsageHelper
 from app.log import logger
 from app.scheduler import Scheduler
 from app.schemas import ConfigChangeEventData
@@ -518,6 +519,14 @@ async def get_env_setting(_: User = Depends(get_current_active_user_async)):
         }
     )
     return schemas.Response(success=True, data=info)
+
+
+@router.get("/usage/statistic", summary="查询安装版本统计报表", response_model=schemas.Response)
+async def usage_statistic(_: User = Depends(get_current_active_user_async)):
+    """
+    查询安装版本统计报表
+    """
+    return schemas.Response(success=True, data=await UsageHelper().async_get_statistic())
 
 
 @router.post("/env", summary="更新系统配置", response_model=schemas.Response)

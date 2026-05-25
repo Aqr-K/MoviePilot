@@ -36,6 +36,7 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.image import WallpaperHelper
 from app.helper.message import MessageHelper
 from app.helper.sites import SitesHelper  # noqa
+from app.helper.usage import UsageHelper
 from app.log import logger
 from app.schemas import Notification, NotificationType, Workflow
 from app.schemas.types import EventType, SystemConfigKey
@@ -264,6 +265,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
         "DATA_CLEANUP_DOWNLOAD_HISTORY_DAYS",
         "DATA_CLEANUP_SITE_USERDATA_DAYS",
         "DATA_CLEANUP_TRANSFER_HISTORY_DAYS",
+        "USAGE_STATISTIC_SHARE",
     }
 
     def __init__(self):
@@ -399,6 +401,11 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 "agent_heartbeat": {
                     "name": "智能体定时任务",
                     "func": self.agent_heartbeat,
+                    "running": False,
+                },
+                "usage_report": {
+                    "name": "安装版本统计上报",
+                    "func": UsageHelper().report,
                     "running": False,
                 },
             }
@@ -642,6 +649,17 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     name="智能体定时任务",
                     hours=settings.AI_AGENT_JOB_INTERVAL,
                     kwargs={"job_id": "agent_heartbeat"},
+                )
+
+            # 安装版本统计上报
+            if settings.USAGE_STATISTIC_SHARE:
+                self._scheduler.add_job(
+                    self.start,
+                    "interval",
+                    id="usage_report",
+                    name="安装版本统计上报",
+                    hours=24,
+                    kwargs={"job_id": "usage_report"},
                 )
 
             # 初始化工作流服务

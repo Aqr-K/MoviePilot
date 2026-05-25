@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.chain.system import SystemChain
 from app.core.config import global_vars
 from app.helper.system import SystemHelper
+from app.helper.usage import UsageHelper
 from app.startup.command_initializer import init_command, stop_command, restart_command
 from app.startup.modules_initializer import init_modules, stop_modules
 from app.startup.monitor_initializer import stop_monitor, init_monitor
@@ -29,6 +30,8 @@ async def init_extra():
     SystemHelper().set_system_modified()
     # 重启完成
     SystemChain().restart_finish()
+    # 上报当前安装版本
+    await UsageHelper().async_report()
 
 
 @asynccontextmanager
