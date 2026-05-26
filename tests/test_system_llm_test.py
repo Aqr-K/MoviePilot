@@ -146,7 +146,7 @@ class LlmTestEndpointTest(unittest.TestCase):
         ), patch.object(
             system_endpoint.settings, "LLM_BASE_URL_PRESET", "deepseek-default"
         ), patch.object(
-            system_endpoint.settings, "LLM_USER_AGENT", "MoviePilot-Test/1.0", create=True
+            system_endpoint.settings, "LLM_USER_AGENT", "MoviePilot-Test/1.0"
         ), patch.object(
             system_endpoint.LLMHelper,
             "test_current_settings",

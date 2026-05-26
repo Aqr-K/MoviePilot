@@ -249,7 +249,7 @@ async def llm_test(
         api_key=settings.LLM_API_KEY,
         base_url=settings.LLM_BASE_URL,
         base_url_preset=settings.LLM_BASE_URL_PRESET,
-        user_agent=getattr(settings, "LLM_USER_AGENT", None),
+        user_agent=settings.LLM_USER_AGENT,
     )
 
     if not payload.provider:

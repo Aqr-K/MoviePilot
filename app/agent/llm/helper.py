@@ -724,9 +724,7 @@ class LLMHelper:
         base_url_preset_value = (
             base_url_preset if base_url_preset is not None else settings.LLM_BASE_URL_PRESET
         )
-        user_agent_value = (
-            user_agent if user_agent is not None else getattr(settings, "LLM_USER_AGENT", None)
-        )
+        user_agent_value = user_agent if user_agent is not None else settings.LLM_USER_AGENT
         normalized_thinking_level = cls._resolve_thinking_level(
             thinking_level=thinking_level,
         )

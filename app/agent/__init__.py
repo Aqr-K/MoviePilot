@@ -469,7 +469,7 @@ class MoviePilotAgent:
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
             base_url_preset=settings.LLM_BASE_URL_PRESET,
-            user_agent=getattr(settings, "LLM_USER_AGENT", None),
+            user_agent=settings.LLM_USER_AGENT,
             thinking_level=None,
         )
         selected_event = await eventmanager.async_send_event(
@@ -500,7 +500,7 @@ class MoviePilotAgent:
         )
         user_agent = (
                 self._clean_optional_text(self._get_event_value(resolved_data, "user_agent"))
-                or getattr(settings, "LLM_USER_AGENT", None)
+                or settings.LLM_USER_AGENT
         )
         thinking_level = self._clean_optional_text(
             self._get_event_value(resolved_data, "thinking_level")
