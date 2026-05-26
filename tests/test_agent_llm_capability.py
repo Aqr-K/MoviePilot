@@ -232,6 +232,38 @@ class AgentCapabilityManagerTest(unittest.TestCase):
         )
         self.assertIn("只输出转写结果", content[1]["text"])
 
+    def test_mimo_stt_transcodes_amr_before_payload(self):
+        """校验 MiMo 音频输入会先将企业微信 AMR 转为受支持的 WAV。"""
+        provider = MiMoAudioProvider()
+        fake_client = Mock()
+        fake_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="你好"))]
+        )
+
+        with patch.object(provider, "_build_client", return_value=fake_client), patch.object(
+            provider,
+            "_convert_audio_for_transcription",
+            return_value=(b"wav-bytes", "input.wav"),
+        ) as convert_audio, patch.object(settings, "AUDIO_INPUT_MODEL", "mimo-v2.5"), patch.object(
+            settings, "AUDIO_INPUT_LANGUAGE", "zh"
+        ), patch.object(
+            settings, "AUDIO_INPUT_API_KEY", "sk-test"
+        ), patch.object(
+            settings, "AUDIO_INPUT_BASE_URL", "https://api.xiaomimimo.com/v1"
+        ):
+            result = provider.transcribe_audio(b"amr-bytes", filename="input.amr")
+
+        self.assertEqual(result, "你好")
+        convert_audio.assert_called_once_with(
+            content=b"amr-bytes", filename="input.amr"
+        )
+        request = fake_client.chat.completions.create.call_args.kwargs
+        content = request["messages"][0]["content"]
+        self.assertEqual(
+            content[0]["input_audio"]["data"],
+            f"data:audio/wav;base64,{b64encode(b'wav-bytes').decode('utf-8')}",
+        )
+
     def test_minimax_stt_normalizes_openai_default_model(self):
         """校验 MiniMax 音频输入会把 OpenAI 默认模型兜底为 MiniMax 模型。"""
         provider = MiniMaxAudioProvider()
