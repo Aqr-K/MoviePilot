@@ -657,6 +657,38 @@ class LLMHelper:
         return headers or None
 
     @classmethod
+    def _should_use_openai_responses_api(
+            cls,
+            provider: str,
+            model: str | None,
+            runtime: dict[str, Any],
+    ) -> bool | None:
+        """
+        判断官方 ChatGPT API Key 模式是否应使用 Responses API。
+
+        GPT-5/o 系推理模型在 Chat Completions 中组合 function tools 与
+        reasoning_effort 时会被官方端点拒绝，因此 ChatGPT 官方 API Key
+        模式需要显式切到 Responses API；通用 OpenAI-compatible 入口保持
+        provider 目录解析出的默认行为，避免误伤第三方兼容服务。
+        """
+        runtime_use_responses_api = runtime.get("use_responses_api")
+        if runtime_use_responses_api is not None:
+            return bool(runtime_use_responses_api)
+
+        provider_name = (provider or "").strip().lower()
+        if provider_name != "chatgpt":
+            return None
+
+        base_url = str(runtime.get("base_url") or "").strip().lower()
+        if "api.openai.com" not in base_url:
+            return None
+
+        model_name = cls._normalize_model_name(model)
+        if model_name.startswith(("gpt-5", "o1", "o3", "o4")):
+            return True
+        return None
+
+    @classmethod
     def _resolve_thinking_level(
             cls,
             thinking_level: str | None = None,
@@ -760,6 +792,11 @@ class LLMHelper:
             model=model_name,
             thinking_level=normalized_thinking_level,
         )
+        use_responses_api = cls._should_use_openai_responses_api(
+            provider=provider_name,
+            model=model_name,
+            runtime=runtime,
+        )
 
         if runtime["runtime"] == "google":
             # 修补 Gemini 2.5 思考模型的 thought_signature 兼容性
@@ -832,7 +869,7 @@ class LLMHelper:
                 stream_usage=True,
                 openai_proxy=settings.PROXY_HOST,
                 default_headers=default_headers,
-                use_responses_api=runtime.get("use_responses_api"),
+                use_responses_api=use_responses_api,
                 **thinking_kwargs,
             )
 

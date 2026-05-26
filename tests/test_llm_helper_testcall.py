@@ -599,6 +599,34 @@ class LlmHelperTestCallTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("reasoning_effort"), "xhigh")
 
+    def test_get_llm_uses_responses_api_for_chatgpt_reasoning_models(self):
+        """校验 ChatGPT 官方推理模型会切换到 Responses API。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="chatgpt",
+                    model="gpt-5.4",
+                    thinking_level="max",
+                    api_key="sk-test",
+                    base_url="https://api.openai.com/v1",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].get("use_responses_api"))
+        self.assertEqual(calls[0].get("reasoning_effort"), "xhigh")
+
     def test_get_llm_uses_gemini_builtin_thinking_controls(self):
         calls = []
 
