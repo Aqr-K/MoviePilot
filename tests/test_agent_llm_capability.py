@@ -11,6 +11,8 @@ sys.modules.setdefault("psutil", Mock())
 sys.modules.setdefault("pyquery", Mock())
 
 from app.core.config import settings
+from app.schemas.message import ChannelCapability, ChannelCapabilityManager
+from app.schemas.types import MessageChannel
 
 module_path = Path(__file__).resolve().parents[1] / "app" / "agent" / "llm" / "capability.py"
 spec = importlib.util.spec_from_file_location("test_agent_llm_capability_module", module_path)
@@ -156,6 +158,73 @@ class AgentCapabilityManagerTest(unittest.TestCase):
 
         self.assertEqual(result, Path("/tmp/reply.opus"))
         provider.synthesize_speech.assert_called_once_with(text="你好")
+
+    def test_native_voice_reply_supports_channels_with_audio_output(self):
+        """校验 Agent 语音回复渠道支持判断覆盖常见渠道写法。"""
+        self.assertTrue(
+            AgentCapabilityManager.supports_native_voice_reply("telegram", None)
+        )
+        self.assertTrue(
+            AgentCapabilityManager.supports_native_voice_reply(
+                MessageChannel.Telegram.value, None
+            )
+        )
+        self.assertTrue(
+            AgentCapabilityManager.supports_native_voice_reply(
+                MessageChannel.Feishu.value, None
+            )
+        )
+        self.assertTrue(
+            AgentCapabilityManager.supports_native_voice_reply("Feishu", None)
+        )
+        self.assertFalse(
+            AgentCapabilityManager.supports_native_voice_reply("Slack", None)
+        )
+
+    def test_native_voice_reply_respects_wechat_mode(self):
+        """校验企业微信只有自建应用模式允许 Agent 语音回复。"""
+        configs = [
+            SimpleNamespace(name="wechat-app", config={"WECHAT_MODE": "app"}),
+            SimpleNamespace(name="wechat-bot", config={"WECHAT_MODE": "bot"}),
+        ]
+
+        with patch(
+            "app.helper.service.ServiceConfigHelper.get_notification_configs",
+            return_value=configs,
+        ):
+            self.assertTrue(
+                AgentCapabilityManager.supports_native_voice_reply(
+                    MessageChannel.Wechat.value, "wechat-app"
+                )
+            )
+            self.assertFalse(
+                AgentCapabilityManager.supports_native_voice_reply(
+                    MessageChannel.Wechat.value, "wechat-bot"
+                )
+            )
+            self.assertFalse(
+                AgentCapabilityManager.supports_native_voice_reply(
+                    MessageChannel.Wechat.value, "missing"
+                )
+            )
+
+    def test_channel_capability_marks_voice_output_channels(self):
+        """校验消息渠道能力显式声明原生语音输出支持。"""
+        for channel in (
+            MessageChannel.Telegram,
+            MessageChannel.Feishu,
+            MessageChannel.Wechat,
+        ):
+            self.assertTrue(
+                ChannelCapabilityManager.supports_capability(
+                    channel, ChannelCapability.AUDIO_OUTPUT
+                )
+            )
+        self.assertFalse(
+            ChannelCapabilityManager.supports_capability(
+                MessageChannel.Slack, ChannelCapability.AUDIO_OUTPUT
+            )
+        )
 
     def test_mimo_tts_uses_chat_completions_audio_payload(self):
         provider = MiMoAudioProvider()

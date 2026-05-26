@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import langchain.agents as langchain_agents
@@ -9,6 +10,7 @@ if not hasattr(langchain_agents, "create_agent"):
 
 from app.agent.callback import StreamingHandler
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
 from app.api.endpoints.openai import _OpenAIStreamingHandler
 from app.core.config import settings
 from app.schemas.message import MessageResponse
@@ -396,6 +398,80 @@ class TestAgentToolStreaming(unittest.TestCase):
         self.assertEqual(result, "ok")
         send_tool_message.assert_awaited_once_with("前置内容\n\n⚙️ => run test tool")
         self.assertEqual(buffered_message, "")
+
+    def test_send_voice_message_uses_native_voice_for_supported_channels(self):
+        """校验支持语音输出的渠道会发送原生语音消息。"""
+
+        async def _run(channel: MessageChannel):
+            """运行指定渠道的语音发送工具。"""
+            tool = SendVoiceMessageTool(session_id="session-1", user_id="10001")
+            tool.set_message_attr(
+                channel=channel.value, source=f"{channel.name.lower()}-main", username="tester"
+            )
+
+            with (
+                patch.object(settings, "LLM_SUPPORT_AUDIO_OUTPUT", True),
+                patch.object(settings, "AUDIO_OUTPUT_INCLUDE_TEXT", True),
+                patch(
+                    "app.agent.tools.impl.send_voice_message.AgentCapabilityManager.is_audio_output_available",
+                    return_value=True,
+                ),
+                patch(
+                    "app.agent.tools.impl.send_voice_message.AgentCapabilityManager.synthesize_speech",
+                    return_value=Path("/tmp/reply.opus"),
+                ) as synthesize_speech,
+                patch(
+                    "app.agent.tools.impl.send_voice_message.ToolChain.async_post_message",
+                    new_callable=AsyncMock,
+                ) as async_post_message,
+            ):
+                result = await tool.run("你好")
+            return result, synthesize_speech, async_post_message
+
+        for channel in (MessageChannel.Telegram, MessageChannel.Feishu):
+            result, synthesize_speech, async_post_message = asyncio.run(_run(channel))
+            notification = async_post_message.await_args.args[0]
+
+            self.assertEqual(result, "语音回复已发送")
+            synthesize_speech.assert_called_once_with("你好")
+            self.assertEqual(notification.channel, channel)
+            self.assertEqual(notification.voice_path, "/tmp/reply.opus")
+            self.assertEqual(notification.voice_caption, "你好")
+
+    def test_send_voice_message_falls_back_for_unsupported_channels(self):
+        """校验不支持语音输出的渠道继续回退为文字消息。"""
+
+        async def _run():
+            """运行不支持语音输出渠道的语音发送工具。"""
+            tool = SendVoiceMessageTool(session_id="session-1", user_id="10001")
+            tool.set_message_attr(
+                channel=MessageChannel.Slack.value, source="slack-main", username="tester"
+            )
+
+            with (
+                patch.object(settings, "LLM_SUPPORT_AUDIO_OUTPUT", True),
+                patch(
+                    "app.agent.tools.impl.send_voice_message.AgentCapabilityManager.is_audio_output_available",
+                    return_value=True,
+                ),
+                patch(
+                    "app.agent.tools.impl.send_voice_message.AgentCapabilityManager.synthesize_speech"
+                ) as synthesize_speech,
+                patch(
+                    "app.agent.tools.impl.send_voice_message.ToolChain.async_post_message",
+                    new_callable=AsyncMock,
+                ) as async_post_message,
+            ):
+                result = await tool.run("你好")
+            return result, synthesize_speech, async_post_message
+
+        result, synthesize_speech, async_post_message = asyncio.run(_run())
+        notification = async_post_message.await_args.args[0]
+
+        self.assertEqual(result, "当前渠道不支持语音回复，已自动回退为文字回复")
+        synthesize_speech.assert_not_called()
+        self.assertEqual(notification.text, "你好")
+        self.assertIsNone(notification.voice_path)
 
 
 if __name__ == "__main__":

@@ -734,29 +734,61 @@ class AgentCapabilityManager:
         return cls.REPLY_MODE_TEXT
 
     @classmethod
-    def supports_native_voice_reply(
-        cls, channel: Optional[str], source: Optional[str]
-    ) -> bool:
-        """判断当前渠道是否支持原生语音消息发送。"""
+    def _parse_message_channel(cls, channel: Optional[Any]):
+        """将渠道入参归一化为消息渠道枚举。"""
         if not channel:
+            return None
+
+        from app.schemas.types import MessageChannel
+
+        if isinstance(channel, MessageChannel):
+            return channel
+
+        channel_text = str(channel).strip()
+        if not channel_text:
+            return None
+        lowered_channel = channel_text.lower()
+        for channel_item in MessageChannel:
+            aliases = {
+                channel_item.value.lower(),
+                channel_item.name.lower(),
+                f"{MessageChannel.__name__}.{channel_item.name}".lower(),
+            }
+            if lowered_channel in aliases:
+                return channel_item
+        return None
+
+    @staticmethod
+    def _is_wechat_app_mode(source: Optional[str]) -> bool:
+        """判断企业微信来源是否为自建应用模式。"""
+        if not source:
             return False
 
         from app.helper.service import ServiceConfigHelper
-        from app.schemas.types import MessageChannel
 
-        try:
-            channel_enum = MessageChannel(channel)
-        except (TypeError, ValueError):
-            return False
-
-        if channel_enum == MessageChannel.Telegram:
-            return True
-        if channel_enum != MessageChannel.Wechat:
-            return False
-
-        # 企业微信 bot 模式不支持发送语音，只有应用模式可用。
         for config in ServiceConfigHelper.get_notification_configs():
             if config.name != source:
                 continue
             return (config.config or {}).get("WECHAT_MODE", "app") != "bot"
         return False
+
+    @classmethod
+    def supports_native_voice_reply(
+            cls, channel: Optional[str], source: Optional[str]
+    ) -> bool:
+        """判断当前渠道是否支持原生语音消息发送。"""
+        from app.schemas.message import ChannelCapability, ChannelCapabilityManager
+        from app.schemas.types import MessageChannel
+
+        channel_enum = cls._parse_message_channel(channel)
+        if not channel_enum:
+            return False
+
+        if not ChannelCapabilityManager.supports_capability(
+                channel_enum, ChannelCapability.AUDIO_OUTPUT
+        ):
+            return False
+
+        if channel_enum == MessageChannel.Wechat:
+            return cls._is_wechat_app_mode(source)
+        return True

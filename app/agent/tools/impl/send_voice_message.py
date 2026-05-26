@@ -15,8 +15,10 @@ from app.schemas import Notification, NotificationType
 class SendVoiceMessageInput(BaseModel):
     """发送语音消息工具输入。"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why a voice reply is the best fit in the current context",)
+    explanation: Optional[str] = Field(
+        None,
+        description="Clear explanation of why a voice reply is the best fit in the current context",
+    )
     message: str = Field(
         ...,
         description="The spoken content to send back to the user",
@@ -24,6 +26,8 @@ class SendVoiceMessageInput(BaseModel):
 
 
 class SendVoiceMessageTool(MoviePilotTool):
+    """发送 Agent 语音回复的工具。"""
+
     name: str = "send_voice_message"
     sends_message: bool = True
     description: str = (
@@ -36,12 +40,14 @@ class SendVoiceMessageTool(MoviePilotTool):
     require_admin: bool = False
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
+        """生成语音回复工具的执行提示。"""
         message = kwargs.get("message") or ""
         if len(message) > 40:
             message = message[:40] + "..."
         return f"发送语音回复: {message}"
 
     async def run(self, message: str, **kwargs) -> str:
+        """合成语音并发送到当前对话渠道，不支持时回退为文字。"""
         if not message:
             return "语音回复内容不能为空"
 
@@ -69,11 +75,8 @@ class SendVoiceMessageTool(MoviePilotTool):
             fallback_reason = "当前未配置可用的语音合成能力"
 
         logger.info(
-            "执行工具: %s, channel=%s, use_voice=%s, text_len=%s",
-            self.name,
-            channel,
-            used_voice,
-            len(message),
+            f"执行工具: {self.name}, channel={channel}, "
+            f"use_voice={used_voice}, text_len={len(message)}"
         )
 
         await ToolChain().async_post_message(

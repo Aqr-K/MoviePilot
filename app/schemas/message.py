@@ -273,6 +273,8 @@ class ChannelCapability(Enum):
     IMAGES = "images"
     # 支持链接
     LINKS = "links"
+    # 支持原生语音输出
+    AUDIO_OUTPUT = "audio_output"
     # 支持文件发送
     FILE_SENDING = "file_sending"
     # 支持可收口的消息处理状态提示，如 reaction 或 typing
@@ -313,6 +315,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
+                ChannelCapability.AUDIO_OUTPUT,
                 ChannelCapability.FILE_SENDING,
                 ChannelCapability.PROCESSING_STATUS,
             },
@@ -327,6 +330,7 @@ class ChannelCapabilityManager:
             capabilities={
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
+                ChannelCapability.AUDIO_OUTPUT,
                 ChannelCapability.MENU_COMMANDS,
             },
             fallback_enabled=True,
@@ -341,6 +345,7 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
+                ChannelCapability.AUDIO_OUTPUT,
                 ChannelCapability.FILE_SENDING,
                 ChannelCapability.PROCESSING_STATUS,
             },
