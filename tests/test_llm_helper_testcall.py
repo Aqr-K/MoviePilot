@@ -118,6 +118,10 @@ def _build_fake_openai_modules(chat_openai_cls=_FakeChatOpenAIForPatch):
     }, base_module
 
 
+_ORIGINAL_STUBBED_MODULES = {
+    name: sys.modules.get(name)
+    for name in ("app.core.config", "app.log")
+}
 sys.modules.pop("app.agent.llm.helper", None)
 _stub_module(
     "app.core.config",
@@ -127,6 +131,7 @@ _stub_module(
         LLM_API_KEY="global-key",
         LLM_BASE_URL="https://global.example.com",
         LLM_BASE_URL_PRESET=None,
+        LLM_USER_AGENT=None,
         LLM_THINKING_LEVEL=None,
         LLM_TEMPERATURE=0.1,
         LLM_MAX_CONTEXT_TOKENS=64,
@@ -140,6 +145,11 @@ spec = importlib.util.spec_from_file_location("test_llm_module", module_path)
 llm_module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(llm_module)
+for _module_name, _module in _ORIGINAL_STUBBED_MODULES.items():
+    if _module is None:
+        sys.modules.pop(_module_name, None)
+    else:
+        sys.modules[_module_name] = _module
 
 
 class LlmHelperTestCallTest(unittest.TestCase):
@@ -177,6 +187,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
             api_key="sk-test",
             base_url="https://api.deepseek.com",
             base_url_preset="deepseek-default",
+            user_agent=None,
         )
         self.assertEqual(result["provider"], "deepseek")
         self.assertEqual(result["model"], "deepseek-chat")
@@ -436,7 +447,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
                     "model_id": kwargs["model"],
                     "api_key": kwargs["api_key"],
                     "base_url": kwargs["base_url"],
-                    "default_headers": None,
+                    "default_headers": {"X-Test": "1"},
                     "use_responses_api": None,
                     "model_record": None,
                     "model_metadata": None,
@@ -477,6 +488,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
                 "api_key": "updated-key",
                 "base_url": "https://updated.example.com/v1",
                 "base_url_preset_id": "updated-preset",
+                "user_agent": None,
             },
         )
         self.assertEqual(len(llm_calls), 1)
@@ -485,6 +497,36 @@ class LlmHelperTestCallTest(unittest.TestCase):
         self.assertEqual(
             llm_calls[0].get("base_url"),
             "https://updated.example.com/v1",
+        )
+        self.assertEqual(llm_calls[0].get("default_headers"), {"X-Test": "1"})
+
+    def test_get_llm_passes_user_agent_as_openai_default_header(self):
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5-mini",
+                    api_key="sk-test",
+                    base_url="https://api.example.com/v1",
+                    user_agent="MoviePilot-Test/1.0",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0].get("default_headers"),
+            {"User-Agent": "MoviePilot-Test/1.0"},
         )
 
     def test_get_llm_keeps_openai_patch_global_without_model_marker(self):

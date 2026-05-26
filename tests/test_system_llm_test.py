@@ -5,7 +5,12 @@ from types import ModuleType
 from unittest.mock import AsyncMock, patch
 
 
+_ORIGINAL_STUBBED_MODULES = {}
+
+
 def _stub_module(name: str, **attrs):
+    if name not in _ORIGINAL_STUBBED_MODULES:
+        _ORIGINAL_STUBBED_MODULES[name] = sys.modules.get(name)
     module = sys.modules.get(name)
     if module is None:
         module = ModuleType(name)
@@ -36,7 +41,15 @@ _stub_module("app.helper.sites", SitesHelper=_Dummy)
 _stub_module("app.chain.mediaserver", MediaServerChain=_Dummy)
 _stub_module("app.chain.search", SearchChain=_Dummy)
 _stub_module("app.chain.system", SystemChain=_Dummy)
-_stub_module("app.core.event", eventmanager=_Dummy())
+_stub_module(
+    "app.agent.llm",
+    LLMHelper=_Dummy,
+    LLMProviderManager=_Dummy,
+    LLMTestError=_DummyError,
+    LLMTestTimeout=_DummyError,
+    render_auth_result_html=lambda success, message: message,
+)
+_stub_module("app.core.event", eventmanager=_Dummy(), Event=_Dummy, EventManager=_Dummy)
 _stub_module("app.core.metainfo", MetaInfo=_Dummy)
 _stub_module("app.core.module", ModuleManager=_Dummy)
 _stub_module(
@@ -78,6 +91,12 @@ _stub_module("app.utils.http", RequestUtils=_Dummy, AsyncRequestUtils=_Dummy)
 _stub_module("version", APP_VERSION="test")
 
 from app.api.endpoints import llm as system_endpoint
+
+for _module_name, _module in _ORIGINAL_STUBBED_MODULES.items():
+    if _module is None:
+        sys.modules.pop(_module_name, None)
+    else:
+        sys.modules[_module_name] = _module
 
 
 class LlmTestEndpointTest(unittest.TestCase):
@@ -127,6 +146,8 @@ class LlmTestEndpointTest(unittest.TestCase):
         ), patch.object(
             system_endpoint.settings, "LLM_BASE_URL_PRESET", "deepseek-default"
         ), patch.object(
+            system_endpoint.settings, "LLM_USER_AGENT", "MoviePilot-Test/1.0", create=True
+        ), patch.object(
             system_endpoint.LLMHelper,
             "test_current_settings",
             llm_test_mock,
@@ -141,6 +162,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             api_key="sk-test",
             base_url="https://api.deepseek.com",
             base_url_preset="deepseek-default",
+            user_agent="MoviePilot-Test/1.0",
         )
         self.assertTrue(resp.success)
         self.assertEqual(resp.data["provider"], "deepseek")
@@ -165,6 +187,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             api_key="sk-live",
             base_url="https://example.com/v1",
             base_url_preset="openai-default",
+            user_agent="MoviePilot-Custom/1.0",
         )
 
         with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", False), patch.object(
@@ -188,6 +211,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             api_key="sk-live",
             base_url="https://example.com/v1",
             base_url_preset="openai-default",
+            user_agent="MoviePilot-Custom/1.0",
         )
         self.assertTrue(resp.success)
         self.assertEqual(resp.data["provider"], "openai")
@@ -209,6 +233,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             api_key="sk-live",
             base_url="https://api.deepseek.com",
             base_url_preset="deepseek-default",
+            user_agent=None,
         )
 
         with patch.object(system_endpoint.settings, "AI_AGENT_ENABLE", False), patch.object(
@@ -226,6 +251,7 @@ class LlmTestEndpointTest(unittest.TestCase):
             api_key="sk-live",
             base_url="https://api.deepseek.com",
             base_url_preset="deepseek-default",
+            user_agent=None,
         )
         self.assertTrue(resp.success)
 

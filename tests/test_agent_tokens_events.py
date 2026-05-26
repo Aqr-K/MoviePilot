@@ -79,6 +79,7 @@ class AgentTokensEventsTest(unittest.IsolatedAsyncioTestCase):
             data.api_key = "sk-agent-token"
             data.model = "free-model"
             data.base_url_preset = None
+            data.user_agent = "AgentTokens-UA/1.0"
             data.selected_provider_id = "provider-1"
             data.selected_provider_name = "Free Provider"
             data.source = "AgentTokens"
@@ -105,6 +106,7 @@ class AgentTokensEventsTest(unittest.IsolatedAsyncioTestCase):
             api_key="sk-agent-token",
             base_url="https://tokens.example.com/v1",
             base_url_preset=None,
+            user_agent="AgentTokens-UA/1.0",
             thinking_level=None,
         )
         self.assertEqual("provider-1", agent._llm_provider_selection["selected_provider_id"])

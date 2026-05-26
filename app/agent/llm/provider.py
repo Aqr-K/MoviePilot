@@ -1166,6 +1166,23 @@ class LLMProviderManager(metaclass=Singleton):
             return None
         return value.rstrip("/")
 
+    @staticmethod
+    def _merge_user_agent_header(
+            default_headers: Optional[dict[str, str]],
+            user_agent: Optional[str],
+    ) -> Optional[dict[str, str]]:
+        """
+        合并用户配置的 OpenAI 兼容接口 User-Agent 请求头。
+        """
+        headers = dict(default_headers or {})
+        normalized_user_agent = str(user_agent or "").strip()
+        if normalized_user_agent:
+            for key in list(headers.keys()):
+                if key.lower() == "user-agent":
+                    headers.pop(key)
+            headers["User-Agent"] = normalized_user_agent
+        return headers or None
+
     @classmethod
     def _default_base_url_for_provider(cls, spec: ProviderSpec) -> Optional[str]:
         """获取 provider 的默认 Base URL。"""
@@ -1825,6 +1842,7 @@ class LLMProviderManager(metaclass=Singleton):
             api_key: Optional[str] = None,
             base_url: Optional[str] = None,
             base_url_preset_id: Optional[str] = None,
+            user_agent: Optional[str] = None,
             force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
         """返回标准化后的模型目录。"""
@@ -1854,6 +1872,7 @@ class LLMProviderManager(metaclass=Singleton):
             api_key=api_key,
             base_url=base_url,
             base_url_preset_id=base_url_preset_id,
+            user_agent=user_agent,
         )
 
         if resolved_model_list_strategy == "google":
@@ -1877,7 +1896,10 @@ class LLMProviderManager(metaclass=Singleton):
                     runtime["base_url"],
                     base_url_preset_id=base_url_preset_id,
                 ),
-                default_headers=runtime.get("default_headers"),
+                default_headers=self._merge_user_agent_header(
+                    runtime.get("default_headers"),
+                    user_agent,
+                ),
             )
 
         if resolved_model_list_strategy == "anthropic_compatible":
@@ -1905,7 +1927,10 @@ class LLMProviderManager(metaclass=Singleton):
                 runtime["base_url"],
                 base_url_preset_id=base_url_preset_id,
             ),
-            default_headers=runtime.get("default_headers"),
+            default_headers=self._merge_user_agent_header(
+                runtime.get("default_headers"),
+                user_agent,
+            ),
         )
 
     async def resolve_model_metadata(
@@ -2398,6 +2423,7 @@ class LLMProviderManager(metaclass=Singleton):
             api_key: Optional[str] = None,
             base_url: Optional[str] = None,
             base_url_preset_id: Optional[str] = None,
+            user_agent: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         解析 provider 运行时参数。
@@ -2428,6 +2454,7 @@ class LLMProviderManager(metaclass=Singleton):
                         api_key=api_key,
                         base_url=base_url,
                         base_url_preset_id=normalized_base_url_preset_id,
+                        user_agent=user_agent,
                     )
                         if item["id"] == model
                     ),
@@ -2470,7 +2497,10 @@ class LLMProviderManager(metaclass=Singleton):
                         "runtime": "chatgpt",
                         "api_key": auth["access_token"],
                         "base_url": self._CHATGPT_CODEX_BASE_URL,
-                        "default_headers": headers,
+                        "default_headers": self._merge_user_agent_header(
+                            headers,
+                            user_agent,
+                        ),
                         "use_responses_api": True,
                         "auth_mode": "oauth",
                     }
@@ -2484,6 +2514,10 @@ class LLMProviderManager(metaclass=Singleton):
                         "api_key": normalized_api_key,
                         "base_url": normalized_base_url
                                     or self._default_base_url_for_provider(spec),
+                        "default_headers": self._merge_user_agent_header(
+                            None,
+                            user_agent,
+                        ),
                         "auth_mode": "api_key",
                     }
                 )
@@ -2508,9 +2542,12 @@ class LLMProviderManager(metaclass=Singleton):
                     else "github_copilot",
                     "api_key": token,
                     "base_url": "https://api.githubcopilot.com",
-                    "default_headers": self._copilot_headers(
-                        token,
-                        include_auth=transport == "anthropic",
+                    "default_headers": self._merge_user_agent_header(
+                        self._copilot_headers(
+                            token,
+                            include_auth=transport == "anthropic",
+                        ),
+                        user_agent,
                     ),
                     "auth_mode": "oauth" if auth else "api_key",
                 }
@@ -2543,6 +2580,10 @@ class LLMProviderManager(metaclass=Singleton):
                     "base_url": self._normalize_base_url_for_anthropic(
                         effective_base_url
                     ),
+                    "default_headers": self._merge_user_agent_header(
+                        None,
+                        user_agent,
+                    ),
                     "auth_mode": "api_key",
                 }
             )
@@ -2557,6 +2598,7 @@ class LLMProviderManager(metaclass=Singleton):
             {
                 "api_key": normalized_api_key,
                 "base_url": effective_base_url,
+                "default_headers": self._merge_user_agent_header(None, user_agent),
                 "auth_mode": "api_key",
             }
         )

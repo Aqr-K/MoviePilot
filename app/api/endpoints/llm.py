@@ -24,6 +24,10 @@ router = APIRouter()
 
 
 class LlmTestRequest(BaseModel):
+    """
+    LLM 测试调用请求参数。
+    """
+
     enabled: Optional[bool] = None
     provider: Optional[str] = None
     model: Optional[str] = None
@@ -31,9 +35,14 @@ class LlmTestRequest(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     base_url_preset: Optional[str] = None
+    user_agent: Optional[str] = None
 
 
 class LlmProviderAuthStartRequest(BaseModel):
+    """
+    LLM 提供商授权启动请求参数。
+    """
+
     provider: str
     method: str
 
@@ -67,6 +76,7 @@ async def get_llm_models(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     base_url_preset: Optional[str] = None,
+    user_agent: Optional[str] = None,
     force_refresh: Optional[bool] = False,
     _: User = Depends(get_current_active_user_async),
 ):
@@ -80,6 +90,7 @@ async def get_llm_models(
             api_key=api_key,
             base_url=base_url,
             base_url_preset=base_url_preset,
+            user_agent=user_agent,
             force_refresh=bool(force_refresh),
         )
         return schemas.Response(
@@ -238,6 +249,7 @@ async def llm_test(
         api_key=settings.LLM_API_KEY,
         base_url=settings.LLM_BASE_URL,
         base_url_preset=settings.LLM_BASE_URL_PRESET,
+        user_agent=getattr(settings, "LLM_USER_AGENT", None),
     )
 
     if not payload.provider:
@@ -269,6 +281,7 @@ async def llm_test(
             api_key=payload.api_key,
             base_url=payload.base_url,
             base_url_preset=payload.base_url_preset,
+            user_agent=payload.user_agent,
         )
         if not result.get("reply_preview"):
             return schemas.Response(
