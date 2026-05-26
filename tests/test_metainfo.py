@@ -175,6 +175,13 @@ class MetaInfoTest(TestCase):
         self.assertEqual(meta.video_encode, "X264")
         self.assertEqual(meta.video_bit, "10bit")
 
+    def test_streaming_platform_word_kept_in_movie_title(self):
+        """测试正式片名中的流媒体平台词不会被预置清理规则移除"""
+        with patch("app.core.metainfo.rust_accel.parse_metainfo", return_value=None):
+            meta = MetaInfo(title="Amazon Forever 2004 1080p WEB-DL")
+        self.assertEqual(meta.name, "Amazon Forever")
+        self.assertEqual(meta.year, "2004")
+
     def test_emby_tmdbid_overrides_braced_metainfo_tmdbid(self):
         """
         同时存在内嵌元信息和 Emby [tmdbid] 标签时，保持历史上的 [tmdbid] 优先级。
