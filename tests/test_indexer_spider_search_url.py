@@ -1,4 +1,5 @@
 from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
 
 from app.modules.indexer.spider import SiteSpider
 from app.modules.indexer.spider.haidan import HaiDanSpider
@@ -174,3 +175,39 @@ def test_haidan_empty_keyword_uses_blank_search_value():
 
     assert params["search"] == ""
     assert params["search_area"] == "0"
+
+
+def test_python_spider_remove_does_not_pollute_other_fields():
+    """
+    Python fallback 解析带 remove 的字段时不能影响同一行后续字段选择。
+    """
+    indexer = _build_indexer(
+        torrents={
+            "list": {"selector": "table.torrents > tr"},
+            "fields": {
+                "title": {"selector": "a.title"},
+                "description": {
+                    "selector": "td.desc",
+                    "remove": "span.noise",
+                },
+                "imdbid": {"selector": "span.noise"},
+            },
+        },
+    )
+    html = """
+    <table class="torrents">
+      <tr>
+        <td><a class="title">Movie.Title</a></td>
+        <td class="desc">Main description <span class="noise">tt1234567</span></td>
+      </tr>
+    </table>
+    """
+
+    with patch("app.modules.indexer.spider.rust_accel.parse_indexer_torrents", return_value=None):
+        result = SiteSpider(indexer).parse(html)
+
+    assert result == [{
+        "title": "Movie.Title",
+        "description": "Main description",
+        "imdbid": "tt1234567",
+    }]

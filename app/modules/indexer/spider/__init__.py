@@ -69,6 +69,7 @@ class SiteSpider:
         if not keyword and self.browse:
             self.list = self.browse.get('list') or self.list
             self.fields = self.browse.get('fields') or self.fields
+        self._field_templates = self.__build_field_templates()
         self.domain = indexer.get('domain')
         self.result_num = int(indexer.get('result_num') or self.default_result_num())
         self._timeout = int(indexer.get('timeout') or 15)
@@ -84,6 +85,19 @@ class SiteSpider:
         self.is_error = False
         self.torrents_info = {}
         self.torrents_info_array = []
+
+    def __build_field_templates(self) -> dict:
+        """
+        预编译字段模板，避免按每条种子重复构造 Jinja Template。
+        """
+        templates = {}
+        for name in ("title", "description"):
+            selector = (self.fields or {}).get(name, {})
+            template_text = selector.get("text") if isinstance(selector, dict) else None
+            if not template_text:
+                continue
+            templates[name] = Template(template_text)
+        return templates
 
     @classmethod
     def default_result_num(cls) -> int:
@@ -304,7 +318,8 @@ class SiteSpider:
                 title_optional_selector = self.fields.get('title_optional', {})
                 title_optional = self._safe_query(torrent, title_optional_selector)
                 render_dict.update({'title_optional': title_optional})
-            self.torrents_info['title'] = Template(selector.get('text')).render(fields=render_dict)
+            template = self._field_templates.get("title") or Template(selector.get("text"))
+            self.torrents_info['title'] = template.render(fields=render_dict)
         self.torrents_info['title'] = self.__filter_text(self.torrents_info.get('title'),
                                                          selector.get('filters'))
 
@@ -337,7 +352,8 @@ class SiteSpider:
                 description_normal_selector = self.fields.get("description_normal", {})
                 description_normal = self._safe_query(torrent, description_normal_selector)
                 render_dict.update({"description_normal": description_normal})
-            self.torrents_info['description'] = Template(selector.get('text')).render(fields=render_dict)
+            template = self._field_templates.get("description") or Template(selector.get("text"))
+            self.torrents_info['description'] = template.render(fields=render_dict)
         self.torrents_info['description'] = self.__filter_text(self.torrents_info.get('description'),
                                                                selector.get('filters'))
 
@@ -594,13 +610,17 @@ class SiteSpider:
         if not selector_config or not selector_config.get('selector'):
             return None
 
-        query_obj = torrent(selector_config.get('selector', '')).clone()
+        should_clone = bool(selector_config.get("remove"))
+        query_obj = torrent(selector_config.get('selector', ''))
+        if should_clone:
+            query_obj = query_obj.clone()
         try:
             self.__remove(query_obj, selector_config)
             items = self.__attribute_or_text(query_obj, selector_config)
             return self.__index(items, selector_config)
         finally:
-            query_obj.clear()
+            if should_clone:
+                query_obj.clear()
             del query_obj
 
     def get_info(self, torrent: Any) -> dict:

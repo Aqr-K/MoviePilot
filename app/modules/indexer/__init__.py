@@ -21,6 +21,17 @@ from app.schemas.types import MediaType, ModuleType, OtherModulesType
 from app.utils.string import StringUtils
 
 
+SPIDER_PARSER_CLASSES = {
+    "TNodeSpider": TNodeSpider,
+    "TorrentLeech": TorrentLeech,
+    "mTorrent": MTorrentSpider,
+    "Yema": YemaSpider,
+    "Haidan": HaiDanSpider,
+    "HDDolby": HddolbySpider,
+    "RousiPro": RousiSpider,
+}
+
+
 class IndexerModule(_ModuleBase):
     """
     索引模块
@@ -156,17 +167,8 @@ class IndexerModule(_ModuleBase):
         """
         site = site or {}
         parser = site.get("parser")
-        parser_classes = {
-            "TNodeSpider": TNodeSpider,
-            "TorrentLeech": TorrentLeech,
-            "mTorrent": MTorrentSpider,
-            "Yema": YemaSpider,
-            "Haidan": HaiDanSpider,
-            "HDDolby": HddolbySpider,
-            "RousiPro": RousiSpider,
-        }
-        if parser in parser_classes:
-            return parser_classes[parser].get_search_page_size(keyword=keyword)
+        if parser in SPIDER_PARSER_CLASSES:
+            return SPIDER_PARSER_CLASSES[parser].get_search_page_size(keyword=keyword)
         try:
             page_size = int(site.get("result_num") or SiteSpider.default_result_num())
         except (TypeError, ValueError):
