@@ -135,6 +135,7 @@ _stub_module(
         LLM_THINKING_LEVEL=None,
         LLM_TEMPERATURE=0.1,
         LLM_MAX_CONTEXT_TOKENS=64,
+        LLM_USE_PROXY=True,
         PROXY_HOST=None,
     ),
 )
@@ -188,6 +189,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
             base_url="https://api.deepseek.com",
             base_url_preset="deepseek-default",
             user_agent=None,
+            use_proxy=None,
         )
         self.assertEqual(result["provider"], "deepseek")
         self.assertEqual(result["model"], "deepseek-chat")
@@ -489,6 +491,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
                 "base_url": "https://updated.example.com/v1",
                 "base_url_preset_id": "updated-preset",
                 "user_agent": None,
+                "use_proxy": None,
             },
         )
         self.assertEqual(len(llm_calls), 1)
@@ -499,6 +502,46 @@ class LlmHelperTestCallTest(unittest.TestCase):
             "https://updated.example.com/v1",
         )
         self.assertEqual(llm_calls[0].get("default_headers"), {"X-Test": "1"})
+
+    def test_get_llm_applies_proxy_only_when_enabled(self):
+        """LLM 构造时应按独立开关决定是否传入系统代理。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.object(llm_module.settings, "PROXY_HOST", "http://proxy.example.com:7890"), patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5-mini",
+                    api_key="sk-test",
+                    base_url="https://api.example.com/v1",
+                    use_proxy=True,
+                )
+            )
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5-mini",
+                    api_key="sk-test",
+                    base_url="https://api.example.com/v1",
+                    use_proxy=False,
+                )
+            )
+
+        self.assertEqual(calls[0].get("openai_proxy"), "http://proxy.example.com:7890")
+        self.assertNotIn("http_client", calls[0])
+        self.assertNotIn("http_async_client", calls[0])
+        self.assertIsNone(calls[1].get("openai_proxy"))
+        self.assertIn("http_client", calls[1])
+        self.assertIn("http_async_client", calls[1])
 
     def test_get_llm_passes_user_agent_as_openai_default_header(self):
         calls = []

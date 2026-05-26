@@ -107,6 +107,7 @@ class AgentTokensEventsTest(unittest.IsolatedAsyncioTestCase):
             base_url="https://tokens.example.com/v1",
             base_url_preset=None,
             user_agent="AgentTokens-UA/1.0",
+            use_proxy=True,
             thinking_level=None,
         )
         self.assertEqual("provider-1", agent._llm_provider_selection["selected_provider_id"])

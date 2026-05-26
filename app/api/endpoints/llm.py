@@ -36,6 +36,7 @@ class LlmTestRequest(BaseModel):
     base_url: Optional[str] = None
     base_url_preset: Optional[str] = None
     user_agent: Optional[str] = None
+    use_proxy: Optional[bool] = None
 
 
 class LlmProviderAuthStartRequest(BaseModel):
@@ -77,6 +78,7 @@ async def get_llm_models(
     base_url: Optional[str] = None,
     base_url_preset: Optional[str] = None,
     user_agent: Optional[str] = None,
+    use_proxy: Optional[bool] = None,
     force_refresh: Optional[bool] = False,
     _: User = Depends(get_current_active_user_async),
 ):
@@ -91,6 +93,7 @@ async def get_llm_models(
             base_url=base_url,
             base_url_preset=base_url_preset,
             user_agent=user_agent,
+            use_proxy=use_proxy,
             force_refresh=bool(force_refresh),
         )
         return schemas.Response(
@@ -250,6 +253,7 @@ async def llm_test(
         base_url=settings.LLM_BASE_URL,
         base_url_preset=settings.LLM_BASE_URL_PRESET,
         user_agent=settings.LLM_USER_AGENT,
+        use_proxy=settings.LLM_USE_PROXY,
     )
 
     if not payload.provider:
@@ -282,6 +286,7 @@ async def llm_test(
             base_url=payload.base_url,
             base_url_preset=payload.base_url_preset,
             user_agent=payload.user_agent,
+            use_proxy=payload.use_proxy,
         )
         if not result.get("reply_preview"):
             return schemas.Response(

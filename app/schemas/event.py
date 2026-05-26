@@ -69,7 +69,7 @@ class AgentLLMProviderEventData(ChainEventData):
     Agent LLM 供应商选择事件数据。
 
     事件发出方会带入当前系统配置作为默认值；插件可覆盖 provider、base_url、
-    api_key、model、user_agent 等字段，并通过 selected_provider_id 标记本次选择，方便
+    api_key、model、user_agent、use_proxy 等字段，并通过 selected_provider_id 标记本次选择，方便
     后续用量事件精确回写到同一个配额条目。
     """
 
@@ -79,6 +79,7 @@ class AgentLLMProviderEventData(ChainEventData):
     model: Optional[str] = Field(default=None, description="模型名称")
     base_url_preset: Optional[str] = Field(default=None, description="Base URL 预设ID")
     user_agent: Optional[str] = Field(default=None, description="OpenAI兼容接口User-Agent")
+    use_proxy: Optional[bool] = Field(default=None, description="是否使用系统代理")
     thinking_level: Optional[str] = Field(default=None, description="思考模式级别")
     selected_provider_id: Optional[str] = Field(default=None, description="插件侧供应商ID")
     selected_provider_name: Optional[str] = Field(default=None, description="插件侧供应商名称")

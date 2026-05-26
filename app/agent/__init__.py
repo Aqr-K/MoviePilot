@@ -470,6 +470,7 @@ class MoviePilotAgent:
             base_url=settings.LLM_BASE_URL,
             base_url_preset=settings.LLM_BASE_URL_PRESET,
             user_agent=settings.LLM_USER_AGENT,
+            use_proxy=settings.LLM_USE_PROXY,
             thinking_level=None,
         )
         selected_event = await eventmanager.async_send_event(
@@ -502,6 +503,9 @@ class MoviePilotAgent:
                 self._clean_optional_text(self._get_event_value(resolved_data, "user_agent"))
                 or settings.LLM_USER_AGENT
         )
+        use_proxy = self._get_event_value(resolved_data, "use_proxy")
+        if use_proxy is None:
+            use_proxy = settings.LLM_USE_PROXY
         thinking_level = self._clean_optional_text(
             self._get_event_value(resolved_data, "thinking_level")
         )
@@ -528,6 +532,7 @@ class MoviePilotAgent:
             "base_url": base_url,
             "base_url_preset": base_url_preset,
             "user_agent": user_agent,
+            "use_proxy": bool(use_proxy),
             "thinking_level": thinking_level,
         }
         return self._llm_runtime_config

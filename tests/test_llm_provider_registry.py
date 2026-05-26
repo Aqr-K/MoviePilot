@@ -182,11 +182,15 @@ class LlmProviderRegistryTest(unittest.TestCase):
         with patch.object(
             manager,
             "get_models_dev_data",
-            AsyncMock(side_effect=lambda force_refresh=False: manager.__dict__.update({"_models_dev_data": payload}) or payload),
+            AsyncMock(
+                side_effect=lambda force_refresh=False, use_proxy=None: manager.__dict__.update(
+                    {"_models_dev_data": payload}
+                ) or payload
+            ),
         ) as fetch_mock:
             providers = asyncio.run(manager.list_providers_async())
 
-        fetch_mock.assert_awaited_once_with(force_refresh=False)
+        fetch_mock.assert_awaited_once_with(force_refresh=False, use_proxy=None)
         self.assertIn("frogbot", {item["id"] for item in providers})
 
     def test_list_models_uses_dynamic_provider_after_refresh(self):
@@ -207,7 +211,7 @@ class LlmProviderRegistryTest(unittest.TestCase):
             }
         }
 
-        async def _load_models_dev(force_refresh: bool = False):
+        async def _load_models_dev(force_refresh: bool = False, use_proxy=None):
             manager._models_dev_data = payload
             return payload
 
