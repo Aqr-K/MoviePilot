@@ -172,8 +172,8 @@ class AlistStorageTest(unittest.TestCase):
 
     def test_list_fetches_all_pages_when_per_page_is_default(self):
         responses = [
-            _FakeResponse(self._page_payload(0, 200, 205)),
-            _FakeResponse(self._page_payload(200, 5, 205)),
+            _FakeResponse(self._page_payload(0, 500, 505)),
+            _FakeResponse(self._page_payload(500, 5, 505)),
         ]
         request_utils = MagicMock()
         request_utils.post_res.side_effect = responses
@@ -182,12 +182,14 @@ class AlistStorageTest(unittest.TestCase):
             with patch.object(alist_module, "RequestUtils", return_value=request_utils):
                 items = self.storage.list(self._dir_item())
 
-        self.assertEqual(205, len(items))
+        self.assertEqual(505, len(items))
         self.assertEqual("/dir-0/", items[0].path)
-        self.assertEqual("/dir-204/", items[-1].path)
+        self.assertEqual("/dir-504/", items[-1].path)
         self.assertEqual(2, request_utils.post_res.call_count)
         self.assertEqual(1, request_utils.post_res.call_args_list[0].kwargs["json"]["page"])
         self.assertEqual(2, request_utils.post_res.call_args_list[1].kwargs["json"]["page"])
+        self.assertEqual(500, request_utils.post_res.call_args_list[0].kwargs["json"]["per_page"])
+        self.assertEqual(500, request_utils.post_res.call_args_list[1].kwargs["json"]["per_page"])
 
     def test_list_respects_explicit_per_page_without_auto_paging(self):
         request_utils = MagicMock()
@@ -199,6 +201,7 @@ class AlistStorageTest(unittest.TestCase):
 
         self.assertEqual(50, len(items))
         self.assertEqual(1, request_utils.post_res.call_count)
+        self.assertEqual(50, request_utils.post_res.call_args.kwargs["json"]["per_page"])
 
     def test_create_folder_returns_target_when_openlist_metadata_is_delayed(self):
         """
