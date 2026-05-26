@@ -564,10 +564,10 @@ class ConfigModel(BaseModel):
     LLM_BASE_URL: Optional[str] = "https://api.deepseek.com"
     # LLM Base URL 预设标识，用于区分同一 Base URL 下的不同模型目录
     LLM_BASE_URL_PRESET: Optional[str] = None
-    # LLM OpenAI兼容接口请求User-Agent
-    LLM_USER_AGENT: Optional[str] = None
     # LLM最大上下文Token数量（K）
     LLM_MAX_CONTEXT_TOKENS: int = 64
+    # LLM OpenAI兼容接口请求User-Agent
+    LLM_USER_AGENT: Optional[str] = None
     # LLM温度参数
     LLM_TEMPERATURE: float = 0.3
     # LLM最大迭代次数
