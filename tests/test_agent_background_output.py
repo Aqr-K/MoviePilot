@@ -252,7 +252,7 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         save_messages.assert_called_once()
         self.assertEqual("后台结果", agent._streamed_output)
 
-    async def test_heartbeat_check_jobs_uses_dispatch_reply_mode(self):
+    async def test_heartbeat_check_jobs_captures_final_reply_and_keeps_message_tools(self):
         manager = AgentManager()
 
         with (
@@ -271,10 +271,10 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             await manager.heartbeat_check_jobs()
 
         process_message.assert_awaited_once()
-        self.assertEqual(
-            ReplyMode.DISPATCH,
-            process_message.await_args.kwargs["reply_mode"],
-        )
+        kwargs = process_message.await_args.kwargs
+        self.assertEqual(ReplyMode.CAPTURE_ONLY, kwargs["reply_mode"])
+        self.assertFalse(kwargs["persist_output_message"])
+        self.assertTrue(kwargs["allow_message_tools"])
 
     async def test_heartbeat_check_jobs_skips_when_no_active_jobs(self):
         manager = AgentManager()
@@ -319,6 +319,43 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             ["skills", "jobs", "runtime", "memory", "summary", "patch", "usage"],
             created["middleware"],
         )
+
+    async def test_heartbeat_session_always_keeps_send_message_tool(self):
+        agent = MoviePilotAgent(
+            session_id=f"{HEARTBEAT_SESSION_PREFIX}test__",
+            user_id="system",
+        )
+        send_message_tool = SimpleNamespace(name="send_message")
+        agent._initialize_tools = lambda: [send_message_tool]
+
+        captured = {}
+
+        def fake_tool_selector(*args, **kwargs):
+            captured["always_include"] = kwargs["always_include"]
+            return "selector"
+
+        with (
+            patch.object(settings, "LLM_MAX_TOOLS", 1),
+            patch.object(agent, "_initialize_llm", new=AsyncMock(return_value=object())),
+            patch("app.agent.prompt_manager.get_agent_prompt", return_value="PROMPT"),
+            patch(
+                "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
+                return_value=[],
+            ),
+            patch("app.agent.SkillsMiddleware", side_effect=lambda *args, **kwargs: "skills"),
+            patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
+            patch("app.agent.RuntimeConfigMiddleware", side_effect=lambda *args, **kwargs: "runtime"),
+            patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
+            patch("app.agent.SummarizationMiddleware", side_effect=lambda *args, **kwargs: "summary"),
+            patch("app.agent.PatchToolCallsMiddleware", side_effect=lambda *args, **kwargs: "patch"),
+            patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
+            patch("app.agent.ToolSelectorMiddleware", side_effect=fake_tool_selector),
+            patch("app.agent.InMemorySaver", return_value="checkpointer"),
+            patch("app.agent.create_agent", side_effect=lambda **kwargs: kwargs),
+        ):
+            await agent._create_agent(streaming=False)
+
+        self.assertIn("send_message", captured["always_include"])
 
     async def test_create_agent_keeps_activity_log_for_normal_session(self):
         agent = MoviePilotAgent(session_id="normal-session", user_id="system")

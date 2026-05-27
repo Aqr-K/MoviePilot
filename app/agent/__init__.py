@@ -798,6 +798,12 @@ class MoviePilotAgent:
             always_include_tools = (
                 MoviePilotToolFactory.get_tool_selector_always_include_names(tools)
             )
+            if self.is_heartbeat_session:
+                available_tool_names = {
+                    tool.name for tool in tools if getattr(tool, "name", None)
+                }
+                if "send_message" in available_tool_names:
+                    always_include_tools.append("send_message")
 
             # 中间件
             middlewares = [
@@ -1192,6 +1198,8 @@ class _MessageTask:
     original_chat_id: Optional[str] = None
     processing_status: Optional[dict] = None
     reply_mode: ReplyMode = ReplyMode.DISPATCH
+    persist_output_message: bool = True
+    allow_message_tools: bool = True
 
 
 class AgentManager:
@@ -1335,6 +1343,8 @@ class AgentManager:
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
+            persist_output_message: bool = True,
+            allow_message_tools: bool = True,
     ) -> str:
         """
         处理用户消息：将消息放入会话队列，按顺序依次处理。
@@ -1352,6 +1362,8 @@ class AgentManager:
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
             reply_mode=reply_mode,
+            persist_output_message=persist_output_message,
+            allow_message_tools=allow_message_tools,
         )
         self._record_session_activity(session_id, user_id)
 
@@ -1461,6 +1473,8 @@ class AgentManager:
                 original_message_id=task.original_message_id,
                 original_chat_id=task.original_chat_id,
                 replay_mode=task.reply_mode,
+                persist_output_message=task.persist_output_message,
+                allow_message_tools=task.allow_message_tools,
             )
             self.active_agents[session_id] = agent
         else:
@@ -1475,6 +1489,8 @@ class AgentManager:
             agent.original_message_id = task.original_message_id
             agent.original_chat_id = task.original_chat_id
             agent.reply_mode = task.reply_mode
+            agent.persist_output_message = task.persist_output_message
+            agent.allow_message_tools = task.allow_message_tools
 
         return await agent.process(task.message, images=task.images, files=task.files)
 
@@ -1612,7 +1628,9 @@ class AgentManager:
                 channel=None,
                 source=None,
                 username=settings.SUPERUSER,
-                reply_mode=ReplyMode.DISPATCH,
+                reply_mode=ReplyMode.CAPTURE_ONLY,
+                persist_output_message=False,
+                allow_message_tools=True,
             )
 
             # 等待消息队列处理完成

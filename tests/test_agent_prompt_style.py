@@ -172,6 +172,8 @@ class TestAgentPromptStyle(unittest.TestCase):
         self.assertIn("[System Heartbeat]", message)
         self.assertIn("List all jobs with status 'pending' or 'in_progress'.", message)
         self.assertIn("Do NOT include greetings, explanations, or conversational text.", message)
+        self.assertIn("use the `send_message` tool", message)
+        self.assertIn("Your final response for heartbeat must be empty", message)
         self.assertIn("If no jobs were executed, output nothing.", message)
 
     def test_render_system_task_message_renders_template_context(self):
