@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.core.context import MediaInfo
-from app.helper.subscribe import SubscribeHelper
+from app.helper.server import MoviePilotServerHelper
 from app.log import logger
 from app.schemas.types import MediaType, media_type_to_agent
 
@@ -77,8 +77,7 @@ class QueryPopularSubscribesTool(MoviePilotTool):
             if not media_type_enum:
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv'"
 
-            subscribe_helper = SubscribeHelper()
-            subscribes = await subscribe_helper.async_get_statistic(
+            subscribes = await MoviePilotServerHelper.async_get_subscribe_statistic(
                 stype=media_type_enum.to_agent(),
                 page=page,
                 count=count,

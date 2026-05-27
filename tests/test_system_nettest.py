@@ -6,13 +6,19 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 
+_ORIGINAL_STUBBED_MODULES = {}
+
+
 def _stub_module(name: str, **attrs):
-    module = sys.modules.get(name)
-    if module is None:
-        module = ModuleType(name)
-        sys.modules[name] = module
+    """
+    安装临时 stub 模块，并记录原模块用于导入后恢复。
+    """
+    if name not in _ORIGINAL_STUBBED_MODULES:
+        _ORIGINAL_STUBBED_MODULES[name] = sys.modules.get(name)
+    module = ModuleType(name)
     for key, value in attrs.items():
         setattr(module, key, value)
+    sys.modules[name] = module
     return module
 
 
@@ -70,7 +76,7 @@ _stub_module("app.helper.mediaserver", MediaServerHelper=_Dummy)
 _stub_module("app.helper.message", MessageHelper=_Dummy)
 _stub_module("app.helper.progress", ProgressHelper=_Dummy)
 _stub_module("app.helper.rule", RuleHelper=_Dummy)
-_stub_module("app.helper.subscribe", SubscribeHelper=_Dummy)
+_stub_module("app.helper.server", MoviePilotServerHelper=_Dummy)
 _stub_module("app.helper.system", SystemHelper=_Dummy)
 _stub_module("app.helper.image", ImageHelper=_Dummy)
 _stub_module("app.scheduler", Scheduler=_Dummy)
@@ -85,6 +91,12 @@ _stub_module("app.utils.http", RequestUtils=_Dummy, AsyncRequestUtils=_Dummy)
 _stub_module("version", APP_VERSION="test", FRONTEND_VERSION="frontend-test")
 
 from app.api.endpoints import system as system_endpoint
+
+for _module_name, _module in _ORIGINAL_STUBBED_MODULES.items():
+    if _module is None:
+        sys.modules.pop(_module_name, None)
+    else:
+        sys.modules[_module_name] = _module
 
 
 class NettestSecurityTest(unittest.TestCase):

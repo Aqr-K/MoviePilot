@@ -15,7 +15,7 @@ from app.core.context import MediaInfo
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.chain.media import MediaChain
-from app.helper.recognize import MediaRecognizeShareHelper
+from app.helper.server import MoviePilotServerHelper
 from app.schemas.types import MediaType
 
 
@@ -43,16 +43,16 @@ class TestMediaRecognizeShare(unittest.TestCase):
         mediainfo = MediaInfo(title="测试电影", year="2024", tmdb_id=100, type=MediaType.MOVIE)
 
         with patch.object(self.chain, "run_module", return_value=mediainfo) as run_module, patch(
-            "app.chain.MediaRecognizeShareHelper.report",
+            "app.chain.MoviePilotServerHelper.report_recognize_share",
             return_value=True,
         ) as report_mock, patch(
-            "app.chain.MediaRecognizeShareHelper.query"
+            "app.chain.MoviePilotServerHelper.query_recognize_share"
         ) as query_mock:
             result = self.chain.recognize_media(meta=meta, cache=False)
 
         self.assertIs(result, mediainfo)
         run_module.assert_called_once()
-        report_mock.assert_called_once_with(meta=meta, mediainfo=mediainfo)
+        report_mock.assert_called_once_with(meta=meta, mediainfo=mediainfo, keyword_meta=meta)
         query_mock.assert_not_called()
 
     def test_query_shared_result_when_local_recognize_failed(self):
@@ -67,10 +67,10 @@ class TestMediaRecognizeShare(unittest.TestCase):
             "run_module",
             side_effect=[None, shared_media],
         ) as run_module, patch(
-            "app.chain.MediaRecognizeShareHelper.query",
+            "app.chain.MoviePilotServerHelper.query_recognize_share",
             return_value={"type": "tv", "tmdbid": 200, "season": 1},
         ) as query_mock, patch(
-            "app.chain.MediaRecognizeShareHelper.to_recognize_params",
+            "app.chain.MoviePilotServerHelper.to_recognize_params",
             return_value={
                 "mtype": MediaType.TV,
                 "tmdbid": 200,
@@ -79,7 +79,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
                 "season": 1,
             },
         ), patch(
-            "app.chain.MediaRecognizeShareHelper.report",
+            "app.chain.MoviePilotServerHelper.report_recognize_share",
             return_value=False,
         ), patch.object(
             self.chain,
@@ -89,7 +89,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
 
         self.assertIs(result, shared_media)
         self.assertEqual(run_module.call_count, 2)
-        query_mock.assert_called_once_with(meta=meta, mtype=None)
+        query_mock.assert_called_once_with(meta=meta, mtype=None, keyword_meta=meta)
         second_call = run_module.call_args_list[1]
         self.assertEqual(second_call.kwargs["tmdbid"], 200)
         self.assertEqual(second_call.kwargs["mtype"], MediaType.TV)
@@ -109,10 +109,10 @@ class TestMediaRecognizeShare(unittest.TestCase):
                 "async_run_module",
                 async_run_module,
             ), patch(
-                "app.chain.MediaRecognizeShareHelper.async_query",
+                "app.chain.MoviePilotServerHelper.async_query_recognize_share",
                 AsyncMock(return_value={"type": "tv", "tmdbid": 300, "season": 2}),
             ) as query_mock, patch(
-                "app.chain.MediaRecognizeShareHelper.to_recognize_params",
+                "app.chain.MoviePilotServerHelper.to_recognize_params",
                 return_value={
                     "mtype": MediaType.TV,
                     "tmdbid": 300,
@@ -121,7 +121,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
                     "season": 2,
                 },
             ), patch(
-                "app.chain.MediaRecognizeShareHelper.async_report",
+                "app.chain.MoviePilotServerHelper.async_report_recognize_share",
                 AsyncMock(return_value=False),
             ), patch.object(
                 self.chain,
@@ -135,7 +135,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
 
         self.assertIs(result, shared_media)
         self.assertEqual(async_run_module.await_count, 2)
-        query_mock.assert_awaited_once_with(meta=meta, mtype=None)
+        query_mock.assert_awaited_once_with(meta=meta, mtype=None, keyword_meta=meta)
         backfill_mock.assert_awaited_once()
         self.assertIsNone(meta.begin_season)
 
@@ -158,10 +158,10 @@ class TestMediaRecognizeShare(unittest.TestCase):
             "run_module",
             side_effect=[None, shared_media, None],
         ) as run_module_mock, patch(
-            "app.chain.MediaRecognizeShareHelper.query",
+            "app.chain.MoviePilotServerHelper.query_recognize_share",
             return_value={"type": "movie", "tmdbid": 700},
         ), patch(
-            "app.chain.MediaRecognizeShareHelper.to_recognize_params",
+            "app.chain.MoviePilotServerHelper.to_recognize_params",
             return_value={
                 "mtype": MediaType.MOVIE,
                 "tmdbid": 700,
@@ -170,7 +170,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
                 "season": None,
             },
         ), patch(
-            "app.chain.MediaRecognizeShareHelper.report",
+            "app.chain.MoviePilotServerHelper.report_recognize_share",
             return_value=False,
         ):
             result = self.chain.recognize_media(meta=meta, cache=False)
@@ -188,7 +188,6 @@ class TestMediaRecognizeShare(unittest.TestCase):
         """
         查询和上报共享识别时应优先使用未应用识别词的识别名称
         """
-        helper = MediaRecognizeShareHelper()
         meta = self._build_meta("应用识别词后的名称", MediaType.TV)
         meta.original_name = "未应用识别词的名称"
         meta.year = "2024"
@@ -201,8 +200,8 @@ class TestMediaRecognizeShare(unittest.TestCase):
             season=1,
         )
 
-        query_params = helper._build_query_params(meta=meta)
-        report_payload = helper._build_report_payload(meta=meta, mediainfo=mediainfo)
+        query_params = MoviePilotServerHelper._build_recognize_query_params(meta=meta)
+        report_payload = MoviePilotServerHelper._build_recognize_report_payload(meta=meta, mediainfo=mediainfo)
 
         self.assertEqual(query_params["keyword"], "未应用识别词的名称")
         self.assertEqual(report_payload["keyword"], "未应用识别词的名称")
@@ -211,7 +210,6 @@ class TestMediaRecognizeShare(unittest.TestCase):
         """
         共享识别应允许用原始关键字上报，同时保留辅助识别后的年份/季信息。
         """
-        helper = MediaRecognizeShareHelper()
         meta = self._build_meta("辅助识别后的名称", MediaType.TV)
         meta.year = "2024"
         meta.begin_season = 2
@@ -227,12 +225,12 @@ class TestMediaRecognizeShare(unittest.TestCase):
             season=2,
         )
 
-        query_params = helper._build_query_params(
+        query_params = MoviePilotServerHelper._build_recognize_query_params(
             meta=meta,
             mtype=None,
             keyword_meta=keyword_meta,
         )
-        report_payload = helper._build_report_payload(
+        report_payload = MoviePilotServerHelper._build_recognize_report_payload(
             meta=meta,
             mediainfo=mediainfo,
             keyword_meta=keyword_meta,
@@ -257,7 +255,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
         mediainfo = MediaInfo(title="测试剧集", year="2024", tmdb_id=402, type=MediaType.TV)
 
         with patch.object(self.chain, "run_module", return_value=mediainfo), patch(
-            "app.chain.MediaRecognizeShareHelper.report",
+            "app.chain.MoviePilotServerHelper.report_recognize_share",
             return_value=True,
         ) as report_mock:
             result = self.chain.recognize_media(meta=meta, share_meta=share_meta, cache=False)
@@ -284,10 +282,10 @@ class TestMediaRecognizeShare(unittest.TestCase):
             "run_module",
             side_effect=[None, shared_media],
         ), patch(
-            "app.chain.MediaRecognizeShareHelper.query",
+            "app.chain.MoviePilotServerHelper.query_recognize_share",
             return_value={"type": "tv", "tmdbid": 403, "season": 1},
         ) as query_mock, patch(
-            "app.chain.MediaRecognizeShareHelper.to_recognize_params",
+            "app.chain.MoviePilotServerHelper.to_recognize_params",
             return_value={
                 "mtype": MediaType.TV,
                 "tmdbid": 403,
@@ -296,7 +294,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
                 "season": 1,
             },
         ), patch(
-            "app.chain.MediaRecognizeShareHelper.report",
+            "app.chain.MoviePilotServerHelper.report_recognize_share",
             return_value=False,
         ), patch.object(
             self.chain,
@@ -311,7 +309,7 @@ class TestMediaRecognizeShare(unittest.TestCase):
         self.assertIs(result, shared_media)
         query_mock.assert_called_once_with(
             meta=meta,
-            mtype=None,
+            mtype=MediaType.TV,
             keyword_meta=share_meta,
         )
 
@@ -324,10 +322,10 @@ class TestMediaRecognizeShare(unittest.TestCase):
         mediainfo.recognize_cache_hit = True
 
         with patch.object(self.chain, "run_module", return_value=mediainfo) as run_module, patch(
-            "app.chain.MediaRecognizeShareHelper.report",
+            "app.chain.MoviePilotServerHelper.report_recognize_share",
             return_value=True,
         ) as report_mock, patch(
-            "app.chain.MediaRecognizeShareHelper.query"
+            "app.chain.MoviePilotServerHelper.query_recognize_share"
         ) as query_mock:
             result = self.chain.recognize_media(meta=meta)
 
@@ -350,10 +348,10 @@ class TestMediaRecognizeShare(unittest.TestCase):
                 "async_run_module",
                 AsyncMock(return_value=mediainfo),
             ) as async_run_module, patch(
-                "app.chain.MediaRecognizeShareHelper.async_report",
+                "app.chain.MoviePilotServerHelper.async_report_recognize_share",
                 AsyncMock(return_value=True),
             ) as report_mock, patch(
-                "app.chain.MediaRecognizeShareHelper.async_query",
+                "app.chain.MoviePilotServerHelper.async_query_recognize_share",
                 AsyncMock(),
             ) as query_mock:
                 result = await self.chain.async_recognize_media(meta=meta)

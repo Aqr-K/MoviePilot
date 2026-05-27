@@ -34,7 +34,7 @@ from app.db.models.subscribe import Subscribe
 from app.db.site_oper import SiteOper
 from app.db.subscribe_oper import SubscribeOper
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.subscribe import SubscribeHelper
+from app.helper.server import MoviePilotServerHelper
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import MediaRecognizeConvertEventData
@@ -709,7 +709,7 @@ class SubscribeChain(ChainBase):
             "mediainfo": mediainfo.to_dict(),
         })
         # 统计订阅
-        SubscribeHelper().sub_reg_async({
+        MoviePilotServerHelper.sub_reg_async({
             "name": title,
             "year": year,
             "type": metainfo.type.value,
@@ -890,7 +890,7 @@ class SubscribeChain(ChainBase):
             "mediainfo": mediainfo.to_dict(),
         })
         # 统计订阅
-        await SubscribeHelper().async_sub_reg({
+        await MoviePilotServerHelper.async_sub_reg({
             "name": title,
             "year": year,
             "type": metainfo.type.value,
@@ -1752,7 +1752,7 @@ class SubscribeChain(ChainBase):
         logger.info(f'开始刷新follow用户分享订阅 ...')
         success_count = 0
         subscribeoper = SubscribeOper()
-        for share_sub in SubscribeHelper().get_shares():
+        for share_sub in MoviePilotServerHelper.get_subscribe_shares():
             if global_vars.is_system_stopped:
                 break
             uid = share_sub.get("share_uid")
@@ -2024,7 +2024,7 @@ class SubscribeChain(ChainBase):
             "mediainfo": mediainfo.to_dict(),
         })
         # 统计订阅
-        SubscribeHelper().sub_done_async({
+        MoviePilotServerHelper.sub_done_async({
             "tmdbid": mediainfo.tmdb_id,
             "doubanid": mediainfo.douban_id
         })
@@ -2667,7 +2667,6 @@ class SubscribeChain(ChainBase):
             return False, "请输入至少一个有效的订阅 ID"
 
         subscribeoper = SubscribeOper()
-        subscribehelper = SubscribeHelper()
         deleted = []
         missing = []
         for subscribe_id in subscribe_ids:
@@ -2677,7 +2676,7 @@ class SubscribeChain(ChainBase):
                 continue
             deleted.append(subscribe.name)
             subscribeoper.delete(subscribe_id)
-            subscribehelper.sub_done_async(
+            MoviePilotServerHelper.sub_done_async(
                 {
                     "tmdbid": subscribe.tmdbid,
                     "doubanid": subscribe.doubanid,
@@ -2706,7 +2705,6 @@ class SubscribeChain(ChainBase):
             return
         arg_strs = str(arg_str).split()
         subscribeoper = SubscribeOper()
-        subscribehelper = SubscribeHelper()
         for arg_str in arg_strs:
             arg_str = arg_str.strip()
             if not arg_str.isdigit():
@@ -2720,7 +2718,7 @@ class SubscribeChain(ChainBase):
             # 删除订阅
             subscribeoper.delete(subscribe_id)
             # 统计订阅
-            subscribehelper.sub_done_async({
+            MoviePilotServerHelper.sub_done_async({
                 "tmdbid": subscribe.tmdbid,
                 "doubanid": subscribe.doubanid
             })

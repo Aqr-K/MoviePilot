@@ -18,7 +18,7 @@ from app.db.models.subscribehistory import SubscribeHistory
 from app.db.models.user import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user_async
-from app.helper.subscribe import SubscribeHelper
+from app.helper.server import MoviePilotServerHelper
 from app.scheduler import Scheduler
 from app.schemas.types import MediaType, EventType, SystemConfigKey
 
@@ -491,7 +491,7 @@ async def popular_subscribes(
     """
     查询热门订阅
     """
-    subscribes = await SubscribeHelper().async_get_statistic(
+    subscribes = await MoviePilotServerHelper.async_get_subscribe_statistic(
         stype=stype,
         page=page,
         count=count,
@@ -574,7 +574,7 @@ async def subscribe_share(
     """
     分享订阅
     """
-    state, errmsg = await SubscribeHelper().async_sub_share(
+    state, errmsg = await MoviePilotServerHelper.async_sub_share(
         subscribe_id=sub.subscribe_id,
         share_title=sub.share_title,
         share_comment=sub.share_comment,
@@ -590,7 +590,7 @@ async def subscribe_share_delete(
     """
     删除分享
     """
-    state, errmsg = await SubscribeHelper().async_share_delete(share_id=share_id)
+    state, errmsg = await MoviePilotServerHelper.async_share_delete(share_id=share_id)
     return schemas.Response(success=state, message=errmsg)
 
 
@@ -611,7 +611,7 @@ async def subscribe_fork(
         subscribe_in=schemas.Subscribe(**sub_dict), current_user=current_user
     )
     if result.success:
-        await SubscribeHelper().async_sub_fork(share_id=sub.id)
+        await MoviePilotServerHelper.async_sub_fork(share_id=sub.id)
     return result
 
 
@@ -673,7 +673,7 @@ async def subscribe_shares(
     """
     查询分享的订阅
     """
-    return await SubscribeHelper().async_get_shares(
+    return await MoviePilotServerHelper.async_get_subscribe_shares(
         name=name,
         page=page,
         count=count,
@@ -696,7 +696,7 @@ async def subscribe_share_statistics(
     查询订阅分享统计
     返回每个分享人分享的媒体数量以及总的复用人次
     """
-    return await SubscribeHelper().async_get_share_statistics()
+    return await MoviePilotServerHelper.async_get_subscribe_share_statistics()
 
 
 @router.get("/{subscribe_id}", summary="订阅详情", response_model=schemas.Subscribe)
@@ -733,7 +733,7 @@ async def delete_subscribe(
             {"subscribe_id": subscribe_id, "subscribe_info": subscribe_info},
         )
         # 统计订阅
-        SubscribeHelper().sub_done_async(
+        MoviePilotServerHelper.sub_done_async(
             {"tmdbid": subscribe.tmdbid, "doubanid": subscribe.doubanid}
         )
     return schemas.Response(success=True)

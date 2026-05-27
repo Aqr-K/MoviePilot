@@ -6,7 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.helper.subscribe import SubscribeHelper
+from app.helper.server import MoviePilotServerHelper
 from app.log import logger
 
 MAX_PAGE_SIZE = 50
@@ -68,8 +68,7 @@ class QuerySubscribeSharesTool(MoviePilotTool):
             # 订阅分享是外部列表型结果，限制单页大小能降低工具上下文占用。
             count = min(count, MAX_PAGE_SIZE)
 
-            subscribe_helper = SubscribeHelper()
-            shares = await subscribe_helper.async_get_shares(
+            shares = await MoviePilotServerHelper.async_get_subscribe_shares(
                 name=name,
                 page=page,
                 count=count,

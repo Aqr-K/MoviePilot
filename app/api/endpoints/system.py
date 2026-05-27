@@ -31,11 +31,10 @@ from app.db.user_oper import (
 )
 from app.helper.image import ImageHelper
 from app.helper.message import MessageHelper
+from app.helper.server import MoviePilotServerHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
-from app.helper.subscribe import SubscribeHelper
 from app.helper.system import SystemHelper
-from app.helper.usage import UsageHelper
 from app.log import logger
 from app.scheduler import Scheduler
 from app.schemas import ConfigChangeEventData
@@ -492,10 +491,10 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
         info["LLM_SUPPORT_AUDIO_OUTPUT"] = False
 
     # 追加用户唯一ID和订阅分享管理权限
-    share_admin = SubscribeHelper().is_admin_user()
+    share_admin = MoviePilotServerHelper.is_admin_user()
     info.update(
         {
-            "USER_UNIQUE_ID": SubscribeHelper().get_user_uuid(),
+            "USER_UNIQUE_ID": MoviePilotServerHelper.get_user_uuid(),
             "SUBSCRIBE_SHARE_MANAGE": share_admin,
             "WORKFLOW_SHARE_MANAGE": share_admin,
         }
@@ -527,7 +526,7 @@ async def usage_statistic(_: User = Depends(get_current_active_user_async)):
     """
     查询安装版本统计报表
     """
-    return schemas.Response(success=True, data=await UsageHelper().async_get_statistic())
+    return schemas.Response(success=True, data=await MoviePilotServerHelper.async_get_usage_statistic())
 
 
 @router.post("/env", summary="更新系统配置", response_model=schemas.Response)

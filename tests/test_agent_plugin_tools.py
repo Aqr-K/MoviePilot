@@ -175,7 +175,6 @@ class TestAgentPluginTools(unittest.TestCase):
         plugin_manager = MagicMock()
         plugin_manager.get_plugin_ids.return_value = ["DemoPlugin"]
         plugin_helper = MagicMock()
-        plugin_helper.async_install_reg = AsyncMock(return_value=True)
         config_oper = MagicMock()
         config_oper.get.return_value = ["DemoPlugin"]
         calls = []
@@ -196,6 +195,9 @@ class TestAgentPluginTools(unittest.TestCase):
         ), patch(
             "app.agent.tools.impl._plugin_tool_utils.reload_plugin_runtime",
         ) as reload_runtime, patch(
+            "app.agent.tools.impl._plugin_tool_utils.MoviePilotServerHelper.async_install_plugin_reg",
+            AsyncMock(return_value=True),
+        ) as install_reg, patch(
             "app.agent.tools.impl._plugin_tool_utils.asyncio.to_thread",
             side_effect=fake_to_thread,
         ):
@@ -210,8 +212,8 @@ class TestAgentPluginTools(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual("插件已存在，已刷新加载", message)
         self.assertTrue(refreshed_only)
-        plugin_helper.async_install_reg.assert_awaited_once_with(
-            pid="DemoPlugin",
+        install_reg.assert_awaited_once_with(
+            plugin_id="DemoPlugin",
             repo_url="https://example.com/market",
         )
         self.assertEqual(1, len(calls))

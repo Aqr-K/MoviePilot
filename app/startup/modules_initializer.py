@@ -21,7 +21,7 @@ from app.helper.display import DisplayHelper
 from app.helper.doh import DohHelper
 from app.helper.resource import ResourceHelper
 from app.helper.message import MessageHelper, stop_message
-from app.helper.subscribe import SubscribeHelper
+from app.helper.server import MoviePilotServerHelper
 from app.db import close_database
 from app.db.systemconfig_oper import SystemConfigOper
 from app.command import CommandChain
@@ -152,8 +152,11 @@ def init_modules():
     ModuleManager()
     # 启动事件消费
     EventManager().start()
-    # 初始化订阅分享
-    SubscribeHelper()
+    # 初始化共享服务端状态
+    MoviePilotServerHelper.init_plugin_report()
+    MoviePilotServerHelper.init_subscribe_report()
+    MoviePilotServerHelper.get_user_uuid()
+    MoviePilotServerHelper.get_github_user()
     # 初始化AI智能体
     init_agent()
     # 启动前端服务

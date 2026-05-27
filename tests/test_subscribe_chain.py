@@ -187,17 +187,38 @@ def _load_subscribe_chain_class():
 
     logger_module.logger = _Logger()
 
-    helper_subscribe_module = ensure_module("app.helper.subscribe", types.ModuleType("app.helper.subscribe"))
+    helper_server_module = ensure_module("app.helper.server", types.ModuleType("app.helper.server"))
 
-    class _SubscribeHelper:
-        def sub_done_async(self, *args, **kwargs):
+    class _MoviePilotServerHelper:
+        @staticmethod
+        def sub_done_async(*args, **kwargs):
+            """
+            忽略订阅完成统计上报。
+            """
             return None
 
         @staticmethod
-        def get_shares():
+        def sub_reg_async(*args, **kwargs):
+            """
+            忽略订阅新增统计上报。
+            """
+            return None
+
+        @staticmethod
+        async def async_sub_reg(*args, **kwargs):
+            """
+            忽略异步订阅新增统计上报。
+            """
+            return None
+
+        @staticmethod
+        def get_subscribe_shares():
+            """
+            返回空的订阅共享数据。
+            """
             return []
 
-    helper_subscribe_module.SubscribeHelper = _SubscribeHelper
+    helper_server_module.MoviePilotServerHelper = _MoviePilotServerHelper
 
     helper_torrent_module = ensure_module("app.helper.torrent", types.ModuleType("app.helper.torrent"))
     helper_torrent_module.TorrentHelper = type("TorrentHelper", (), {})

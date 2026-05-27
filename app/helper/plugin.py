@@ -49,9 +49,6 @@ class PluginHelper(metaclass=WeakSingleton):
     """
 
     _base_url = "https://raw.githubusercontent.com/{user}/{repo}/main/"
-    _install_reg = f"{settings.MP_SERVER_HOST}/plugin/install/{{pid}}"
-    _install_report = f"{settings.MP_SERVER_HOST}/plugin/install"
-    _install_statistic = f"{settings.MP_SERVER_HOST}/plugin/statistic"
     # 串行化运行期依赖安装，避免多个 pip 子进程和导入缓存刷新互相踩踏。
     _pip_install_lock = threading.Lock()
     # 这些包一旦被插件覆盖，最容易直接拖垮主程序启动，因此冲突提示需要单独高亮。
@@ -72,10 +69,6 @@ class PluginHelper(metaclass=WeakSingleton):
 
     def __init__(self):
         self.systemconfig = SystemConfigOper()
-        if settings.PLUGIN_STATISTIC_SHARE:
-            if not self.systemconfig.get(SystemConfigKey.PluginInstallReport):
-                if self.install_report():
-                    self.systemconfig.set(SystemConfigKey.PluginInstallReport, "1")
 
     @staticmethod
     def is_local_repo_url(repo_url: Optional[str]) -> bool:
@@ -146,25 +139,6 @@ class PluginHelper(metaclass=WeakSingleton):
             return values[0]
         except Exception:
             return None
-
-    @staticmethod
-    def sanitize_repo_url_for_statistic(repo_url: Optional[str]) -> Optional[str]:
-        """
-        统计上报前脱敏 repo_url，避免泄露本地仓库绝对路径
-        """
-        if not repo_url:
-            return repo_url
-        if not PluginHelper.is_local_repo_url(repo_url):
-            return repo_url
-
-        pid = PluginHelper.parse_local_repo_url(repo_url)
-        if not pid:
-            return LOCAL_REPO_PREFIX.rstrip("/")
-
-        return PluginHelper.make_local_repo_url(
-            pid=pid,
-            package_version=PluginHelper.parse_local_repo_package_version(repo_url)
-        )
 
     @staticmethod
     def get_current_system_version() -> Optional[Version]:
@@ -504,65 +478,6 @@ class PluginHelper(metaclass=WeakSingleton):
             logger.error(f"解析GitHub仓库地址失败：{str(e)} - {traceback.format_exc()}")
             return None, None
         return user, repo
-
-    @cached(maxsize=1, ttl=1800)
-    def get_statistic(self) -> Dict:
-        """
-        获取插件安装统计
-        """
-        if not settings.PLUGIN_STATISTIC_SHARE:
-            return {}
-        res = RequestUtils(proxies=settings.PROXY, timeout=10).get_res(self._install_statistic)
-        if res is not None and res.status_code == 200:
-            return res.json()
-        return {}
-
-    def install_reg(self, pid: str, repo_url: Optional[str] = None) -> bool:
-        """
-        安装插件统计
-        """
-        if not settings.PLUGIN_STATISTIC_SHARE:
-            return False
-        if not pid:
-            return False
-        install_reg_url = self._install_reg.format(pid=pid)
-        res = RequestUtils(
-            proxies=settings.PROXY,
-            content_type="application/json",
-            timeout=5
-        ).post(install_reg_url, json={
-            "plugin_id": pid,
-            "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
-        })
-        if res is not None and res.status_code == 200:
-            return True
-        return False
-
-    def install_report(self, items: Optional[List[Tuple[str, Optional[str]]]] = None) -> bool:
-        """
-        上报存量插件安装统计（批量）。支持上送 repo_url。
-        :param items: 可选，形如 [(plugin_id, repo_url), ...]；不传则回落到历史配置，仅上送 plugin_id。
-        """
-        if not settings.PLUGIN_STATISTIC_SHARE:
-            return False
-        payload_plugins = []
-        if items:
-            for pid, repo_url in items:
-                if pid:
-                    payload_plugins.append({
-                        "plugin_id": pid,
-                        "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
-                    })
-        else:
-            plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
-            if not plugins:
-                return False
-            payload_plugins = [{"plugin_id": plugin, "repo_url": None} for plugin in plugins]
-        res = RequestUtils(proxies=settings.PROXY,
-                           content_type="application/json",
-                           timeout=5).post(self._install_report,
-                                           json={"plugins": payload_plugins})
-        return bool(res is not None and res.status_code == 200)
 
     def install(self, pid: str, repo_url: str, package_version: Optional[str] = None, force_install: bool = False) \
             -> Tuple[bool, str]:
@@ -1595,7 +1510,6 @@ class PluginHelper(metaclass=WeakSingleton):
                 logger.warn(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
-        self.install_reg(pid, repo_url)
         self.refresh_persistent_plugin_backup(pid)
         return True, ""
 
@@ -1960,64 +1874,6 @@ class PluginHelper(metaclass=WeakSingleton):
         if res.status_code != 200:
             return None
         return self.__parse_plugin_index_response(res.text)
-
-    async def async_get_statistic(self) -> Dict:
-        """
-        异步获取插件安装统计
-        """
-        if not settings.PLUGIN_STATISTIC_SHARE:
-            return {}
-        res = await AsyncRequestUtils(proxies=settings.PROXY, timeout=10).get_res(self._install_statistic)
-        if res is not None and res.status_code == 200:
-            return res.json()
-        return {}
-
-    async def async_install_reg(self, pid: str, repo_url: Optional[str] = None) -> bool:
-        """
-        异步安装插件统计
-        """
-        if not settings.PLUGIN_STATISTIC_SHARE:
-            return False
-        if not pid:
-            return False
-        install_reg_url = self._install_reg.format(pid=pid)
-        res = await AsyncRequestUtils(
-            proxies=settings.PROXY,
-            content_type="application/json",
-            timeout=5
-        ).post(install_reg_url, json={
-            "plugin_id": pid,
-            "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
-        })
-        if res is not None and res.status_code == 200:
-            return True
-        return False
-
-    async def async_install_report(self, items: Optional[List[Tuple[str, Optional[str]]]] = None) -> bool:
-        """
-        异步上报存量插件安装统计（批量）。支持上送 repo_url。
-        :param items: 可选，形如 [(plugin_id, repo_url), ...]；不传则回落到历史配置，仅上送 plugin_id。
-        """
-        if not settings.PLUGIN_STATISTIC_SHARE:
-            return False
-        payload_plugins = []
-        if items:
-            for pid, repo_url in items:
-                if pid:
-                    payload_plugins.append({
-                        "plugin_id": pid,
-                        "repo_url": self.sanitize_repo_url_for_statistic(repo_url)
-                    })
-        else:
-            plugins = self.systemconfig.get(SystemConfigKey.UserInstalledPlugins)
-            if not plugins:
-                return False
-            payload_plugins = [{"plugin_id": plugin, "repo_url": None} for plugin in plugins]
-        res = await AsyncRequestUtils(proxies=settings.PROXY,
-                                      content_type="application/json",
-                                      timeout=5).post(self._install_report,
-                                                      json={"plugins": payload_plugins})
-        return bool(res is not None and res.status_code == 200)
 
     async def __async_get_file_list(self, pid: str, user_repo: str, package_version: Optional[str] = None) -> \
             Tuple[Optional[list], Optional[str]]:
@@ -2503,7 +2359,6 @@ class PluginHelper(metaclass=WeakSingleton):
                 logger.warn(f"{pid} 已清理对应插件目录，请尝试重新安装")
             return False, dep_msg
 
-        await self.async_install_reg(pid, repo_url)
         await asyncio.to_thread(self.refresh_persistent_plugin_backup, pid)
         return True, ""
 

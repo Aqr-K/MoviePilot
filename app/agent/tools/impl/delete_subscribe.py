@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.core.event import eventmanager
 from app.db.subscribe_oper import SubscribeOper
-from app.helper.subscribe import SubscribeHelper
+from app.helper.server import MoviePilotServerHelper
 from app.log import logger
 from app.schemas.types import EventType
 
@@ -49,7 +49,7 @@ class DeleteSubscribeTool(MoviePilotTool):
 
             await subscribe_oper.async_delete(subscribe_id)
             # 分享订阅统计刷新本身已异步化，这里只需要在删除后触发即可。
-            SubscribeHelper().sub_done_async(
+            MoviePilotServerHelper.sub_done_async(
                 {"tmdbid": subscribe.tmdbid, "doubanid": subscribe.doubanid}
             )
 

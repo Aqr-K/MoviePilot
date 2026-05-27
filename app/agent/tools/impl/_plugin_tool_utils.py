@@ -8,6 +8,7 @@ from typing import Any, Optional
 from app.core.config import settings
 from app.core.plugin import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
+from app.helper.server import MoviePilotServerHelper
 from app.helper.plugin import PluginHelper
 from app.schemas.types import SystemConfigKey
 
@@ -230,7 +231,7 @@ async def install_plugin_runtime(
     refreshed_only = False
     if not force and plugin_id in plugin_manager.get_plugin_ids():
         refreshed_only = True
-        await plugin_helper.async_install_reg(pid=plugin_id, repo_url=repo_url)
+        await MoviePilotServerHelper.async_install_plugin_reg(plugin_id=plugin_id, repo_url=repo_url)
         message = "插件已存在，已刷新加载"
     else:
         if not repo_url:
@@ -242,6 +243,7 @@ async def install_plugin_runtime(
         )
         if not state:
             return False, message, False
+        await MoviePilotServerHelper.async_install_plugin_reg(plugin_id=plugin_id, repo_url=repo_url)
 
     if plugin_id not in install_plugins:
         install_plugins.append(plugin_id)

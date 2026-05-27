@@ -21,8 +21,8 @@ from app.core.module import ModuleManager
 from app.core.plugin import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
-from app.helper.recognize import MediaRecognizeShareHelper
 from app.helper.message import MessageHelper, MessageQueueManager, MessageTemplateHelper
+from app.helper.server import MoviePilotServerHelper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import (
@@ -591,7 +591,6 @@ class ChainBase(metaclass=ABCMeta):
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
         share_query_meta = share_meta or meta
-        share_helper = MediaRecognizeShareHelper()
         with fresh(not cache):
             mediainfo = self.run_module(
                 "recognize_media",
@@ -605,7 +604,7 @@ class ChainBase(metaclass=ABCMeta):
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
-                share_helper.report(
+                MoviePilotServerHelper.report_recognize_share(
                     meta=meta,
                     mediainfo=mediainfo,
                     keyword_meta=share_query_meta,
@@ -616,12 +615,12 @@ class ChainBase(metaclass=ABCMeta):
                 share_query_meta, tmdbid, doubanid, bangumiid
         ):
             shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
-            shared_item = share_helper.query(
+            shared_item = MoviePilotServerHelper.query_recognize_share(
                 meta=meta,
                 mtype=mtype,
                 keyword_meta=share_query_meta,
             )
-            shared_params = share_helper.to_recognize_params(shared_item)
+            shared_params = MoviePilotServerHelper.to_recognize_params(shared_item)
             if shared_params:
                 with fresh(not cache):
                     mediainfo = self.run_module(
@@ -676,7 +675,6 @@ class ChainBase(metaclass=ABCMeta):
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
         share_query_meta = share_meta or meta
-        share_helper = MediaRecognizeShareHelper()
         async with async_fresh(not cache):
             mediainfo = await self.async_run_module(
                 "async_recognize_media",
@@ -690,7 +688,7 @@ class ChainBase(metaclass=ABCMeta):
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
-                await share_helper.async_report(
+                await MoviePilotServerHelper.async_report_recognize_share(
                     meta=meta,
                     mediainfo=mediainfo,
                     keyword_meta=share_query_meta,
@@ -701,12 +699,12 @@ class ChainBase(metaclass=ABCMeta):
                 share_query_meta, tmdbid, doubanid, bangumiid
         ):
             shared_cache_meta = self._snapshot_recognize_cache_meta(meta)
-            shared_item = await share_helper.async_query(
+            shared_item = await MoviePilotServerHelper.async_query_recognize_share(
                 meta=meta,
                 mtype=mtype,
                 keyword_meta=share_query_meta,
             )
-            shared_params = share_helper.to_recognize_params(shared_item)
+            shared_params = MoviePilotServerHelper.to_recognize_params(shared_item)
             if shared_params:
                 async with async_fresh(not cache):
                     mediainfo = await self.async_run_module(

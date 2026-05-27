@@ -14,23 +14,29 @@ from packaging.version import Version
 
 class PluginHelperTest(TestCase):
 
-    def test_sanitize_repo_url_for_statistic_keeps_remote_url(self):
+    def test_sanitize_plugin_repo_url_keeps_remote_url(self):
+        """
+        插件安装统计脱敏保留远端仓库地址。
+        """
         try:
-            from app.helper.plugin import PluginHelper
+            from app.helper.server import MoviePilotServerHelper
         except ModuleNotFoundError as exc:
             self.skipTest(f"missing dependency: {exc}")
         repo_url = "https://github.com/InfinityPacer/MoviePilot-Plugins"
-        self.assertEqual(repo_url, PluginHelper.sanitize_repo_url_for_statistic(repo_url))
+        self.assertEqual(repo_url, MoviePilotServerHelper.sanitize_plugin_repo_url(repo_url))
 
-    def test_sanitize_repo_url_for_statistic_strips_local_path(self):
+    def test_sanitize_plugin_repo_url_strips_local_path(self):
+        """
+        插件安装统计脱敏移除本地仓库绝对路径。
+        """
         try:
-            from app.helper.plugin import PluginHelper
+            from app.helper.server import MoviePilotServerHelper
         except ModuleNotFoundError as exc:
             self.skipTest(f"missing dependency: {exc}")
         repo_url = "local://TestPlugin?path=/Users/InfinityPacer/GitHub/MoviePilot/MoviePilot-Plugins&version=v2"
         self.assertEqual(
             "local://TestPlugin?version=v2",
-            PluginHelper.sanitize_repo_url_for_statistic(repo_url)
+            MoviePilotServerHelper.sanitize_plugin_repo_url(repo_url)
         )
 
     def test_append_cache_buster_only_during_fresh_context(self):

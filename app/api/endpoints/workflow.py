@@ -16,7 +16,7 @@ from app.db import get_async_db, get_db
 from app.db.models import Workflow
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.workflow_oper import WorkflowOper
-from app.helper.workflow import WorkflowHelper
+from app.helper.server import MoviePilotServerHelper
 from app.scheduler import Scheduler
 from app.schemas.types import EventType, EVENT_TYPE_NAMES
 
@@ -100,7 +100,7 @@ async def workflow_share(
             success=False, message="请填写工作流ID、分享标题和分享人"
         )
 
-    state, errmsg = await WorkflowHelper().async_workflow_share(
+    state, errmsg = await MoviePilotServerHelper.async_workflow_share_by_id(
         workflow_id=workflow.id,
         share_title=workflow.share_title or "",
         share_comment=workflow.share_comment or "",
@@ -116,7 +116,7 @@ async def workflow_share_delete(
     """
     删除分享
     """
-    state, errmsg = await WorkflowHelper().async_share_delete(share_id=share_id)
+    state, errmsg = await MoviePilotServerHelper.async_workflow_share_delete_by_id(share_id=share_id)
     return schemas.Response(success=state, message=errmsg)
 
 
@@ -174,7 +174,7 @@ async def workflow_fork(
 
     # 更新复用次数
     if workflow:
-        await WorkflowHelper().async_workflow_fork(share_id=workflow.id)
+        await MoviePilotServerHelper.async_workflow_fork_by_id(share_id=workflow.id)
 
     return schemas.Response(success=True, message="复用成功")
 
@@ -191,7 +191,7 @@ async def workflow_shares(
     """
     查询分享的工作流
     """
-    return await WorkflowHelper().async_get_shares(name=name, page=page, count=count)
+    return await MoviePilotServerHelper.async_get_workflow_shares(name=name, page=page, count=count)
 
 
 @router.post(
