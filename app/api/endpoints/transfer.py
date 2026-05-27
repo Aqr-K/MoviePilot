@@ -222,6 +222,9 @@ def manual_transfer(
     explicit_selected_files = bool(transer_item.fileitems)
 
     def _build_failure_preview_item(file_item: FileItem, message: str) -> dict:
+        """
+        构造手动整理预览失败项。
+        """
         return {
             "source": file_item.path if file_item else None,
             "target": None,
@@ -234,9 +237,16 @@ def manual_transfer(
             "episode": None,
             "episode_end": None,
             "part": None,
+            "org_string": None,
+            "apply_words": [],
+            "resource_team": None,
+            "customization": None,
         }
 
     def _merge_messages(messages: List[str]) -> str:
+        """
+        合并手动整理批量预览提示信息。
+        """
         valid_messages = [msg for msg in messages if msg]
         if not valid_messages:
             return ""

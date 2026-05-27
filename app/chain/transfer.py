@@ -2792,6 +2792,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     "episode": item_meta.begin_episode if item_meta else None,
                     "episode_end": item_meta.end_episode if item_meta else None,
                     "part": item_meta.part if item_meta else None,
+                    "org_string": item_meta.org_string if item_meta else None,
+                    "apply_words": item_meta.apply_words if item_meta else [],
+                    "resource_team": item_meta.resource_team if item_meta else None,
+                    "customization": item_meta.customization if item_meta else None,
                 }
             )
             return transferinfo.success, transferinfo.message
@@ -2867,6 +2871,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                                     "episode": transfer_task.meta.begin_episode if transfer_task.meta else None,
                                     "episode_end": transfer_task.meta.end_episode if transfer_task.meta else None,
                                     "part": transfer_task.meta.part if transfer_task.meta else None,
+                                    "org_string": transfer_task.meta.org_string if transfer_task.meta else None,
+                                    "apply_words": transfer_task.meta.apply_words if transfer_task.meta else [],
+                                    "resource_team": transfer_task.meta.resource_team if transfer_task.meta else None,
+                                    "customization": transfer_task.meta.customization if transfer_task.meta else None,
                                 }
                             )
                         fail_num += 1
