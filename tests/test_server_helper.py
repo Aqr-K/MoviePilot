@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.helper.server import MoviePilotServerHelper
 
@@ -115,6 +115,41 @@ class MoviePilotServerHelperTests(unittest.TestCase):
             "https://movie-pilot.org/workflow/fork/9",
             timeout=5,
         )
+
+    def test_user_permissions_uses_server_endpoint(self):
+        """
+        用户权限请求使用服务端权限接口。
+        """
+        with patch("app.helper.server.settings.MP_SERVER_HOST", "https://movie-pilot.org"), \
+                patch.object(MoviePilotServerHelper, "_get", return_value=None) as request:
+            MoviePilotServerHelper.user_permissions("jxxghp")
+
+        request.assert_called_once_with(
+            "https://movie-pilot.org/user/permissions",
+            params={"github_user": "jxxghp"},
+            include_user_uid=False,
+            timeout=5,
+        )
+
+    def test_is_admin_user_uses_server_permissions(self):
+        """
+        共享管理权限由服务端权限结果决定。
+        """
+        response = Mock(status_code=200)
+        response.json.return_value = {"is_admin": True}
+        with patch.object(MoviePilotServerHelper, "get_github_user", return_value="jxxghp"), \
+                patch.object(MoviePilotServerHelper, "user_permissions", return_value=response):
+            self.assertTrue(MoviePilotServerHelper.is_admin_user())
+
+    def test_is_admin_user_returns_false_without_server_permission(self):
+        """
+        服务端未返回管理权限时不授予共享管理权限。
+        """
+        response = Mock(status_code=200)
+        response.json.return_value = {"is_admin": False}
+        with patch.object(MoviePilotServerHelper, "get_github_user", return_value="user"), \
+                patch.object(MoviePilotServerHelper, "user_permissions", return_value=response):
+            self.assertFalse(MoviePilotServerHelper.is_admin_user())
 
 
 if __name__ == "__main__":

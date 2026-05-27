@@ -41,20 +41,10 @@ class MoviePilotServerHelper:
     _WORKFLOW_SHARES_PATH = "/workflow/shares"
     _WORKFLOW_FORK_PATH = "/workflow/fork"
     _RECOGNIZE_SHARE_PATH = "/recognize/share"
+    _USER_PERMISSIONS_PATH = "/user/permissions"
     _LOCAL_REPO_PREFIX = "local://"
     _user_uid: Optional[str] = None
     _github_user: Optional[str] = None
-    _admin_users = [
-        "jxxghp",
-        "thsrite",
-        "InfinityPacer",
-        "DDSRem",
-        "Aqr-K",
-        "Putarku",
-        "4Nest",
-        "xyswordzoro",
-        "wikrin"
-    ]
 
     @classmethod
     def get_user_uid(cls) -> Optional[str]:
@@ -141,12 +131,100 @@ class MoviePilotServerHelper:
         return cls._github_user or ""
 
     @classmethod
+    async def async_get_github_user(cls) -> str:
+        """
+        异步获取当前 GitHub 用户名。
+        """
+        if cls._github_user is None and settings.GITHUB_HEADERS:
+            res = await AsyncRequestUtils(
+                headers=settings.GITHUB_HEADERS,
+                proxies=settings.PROXY,
+                timeout=15,
+            ).get_res("https://api.github.com/user")
+            if res:
+                cls._github_user = res.json().get("login")
+                logger.info(f"当前Github用户: {cls._github_user}")
+        return cls._github_user or ""
+
+    @classmethod
+    def user_permissions(cls, github_user: str):
+        """
+        查询服务端用户权限。
+        """
+        return cls._get(
+            cls._server_url(cls._USER_PERMISSIONS_PATH),
+            params={"github_user": github_user},
+            include_user_uid=False,
+            timeout=5,
+        )
+
+    @classmethod
+    async def async_user_permissions(cls, github_user: str):
+        """
+        异步查询服务端用户权限。
+        """
+        return await cls._async_get(
+            cls._server_url(cls._USER_PERMISSIONS_PATH),
+            params={"github_user": github_user},
+            include_user_uid=False,
+            timeout=5,
+        )
+
+    @classmethod
+    def get_user_permissions(cls) -> Dict[str, Any]:
+        """
+        获取当前用户在服务端配置中的权限。
+        """
+        github_user = cls.get_github_user()
+        if not github_user:
+            return {}
+        try:
+            res = cls.user_permissions(github_user)
+            if res is not None and res.status_code == 200:
+                return res.json()
+        except Exception as err:
+            logger.debug(f"获取服务端用户权限失败：{str(err)}")
+        return {}
+
+    @classmethod
+    async def async_get_user_permissions(cls) -> Dict[str, Any]:
+        """
+        异步获取当前用户在服务端配置中的权限。
+        """
+        github_user = await cls.async_get_github_user()
+        if not github_user:
+            return {}
+        try:
+            res = await cls.async_user_permissions(github_user)
+            if res is not None and res.status_code == 200:
+                return res.json()
+        except Exception as err:
+            logger.debug(f"异步获取服务端用户权限失败：{str(err)}")
+        return {}
+
+    @classmethod
     def is_admin_user(cls) -> bool:
         """
         判断当前用户是否为共享管理用户。
         """
-        github_user = cls.get_github_user()
-        return bool(github_user and github_user in cls._admin_users)
+        permissions = cls.get_user_permissions()
+        return bool(
+            permissions.get("is_admin")
+            or permissions.get("subscribe_share_manage")
+            or permissions.get("workflow_share_manage")
+        )
+
+    @classmethod
+    async def async_is_admin_user(cls) -> bool:
+        """
+        异步判断当前用户是否为共享管理用户。
+        """
+        permissions = await cls.async_get_user_permissions()
+        return bool(
+            permissions.get("is_admin")
+            or permissions.get("subscribe_share_manage")
+            or permissions.get("workflow_share_manage")
+        )
 
     @staticmethod
     def get_frontend_version() -> str:
@@ -1588,25 +1666,37 @@ class MoviePilotServerHelper:
         return f"{settings.MP_SERVER_HOST.rstrip('/')}{path}"
 
     @classmethod
-    def _get(cls, url: str, params: Optional[dict] = None, timeout: int = 10):
+    def _get(
+            cls,
+            url: str,
+            params: Optional[dict] = None,
+            timeout: int = 10,
+            include_user_uid: bool = True,
+    ):
         """
-        发送携带安装用户 ID 的服务端 GET 请求。
+        发送服务端 GET 请求，默认携带安装用户 ID。
         """
         return RequestUtils(
             proxies=settings.PROXY,
             timeout=timeout,
-            headers=cls.build_headers(url),
+            headers=cls.build_headers(url) if include_user_uid else {},
         ).get_res(url, params=params)
 
     @classmethod
-    async def _async_get(cls, url: str, params: Optional[dict] = None, timeout: int = 10):
+    async def _async_get(
+            cls,
+            url: str,
+            params: Optional[dict] = None,
+            timeout: int = 10,
+            include_user_uid: bool = True,
+    ):
         """
-        异步发送携带安装用户 ID 的服务端 GET 请求。
+        异步发送服务端 GET 请求，默认携带安装用户 ID。
         """
         return await AsyncRequestUtils(
             proxies=settings.PROXY,
             timeout=timeout,
-            headers=cls.build_headers(url),
+            headers=cls.build_headers(url) if include_user_uid else {},
         ).get_res(url, params=params)
 
     @classmethod

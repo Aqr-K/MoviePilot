@@ -491,7 +491,7 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
         info["LLM_SUPPORT_AUDIO_OUTPUT"] = False
 
     # 追加用户唯一ID和订阅分享管理权限
-    share_admin = MoviePilotServerHelper.is_admin_user()
+    share_admin = await MoviePilotServerHelper.async_is_admin_user()
     info.update(
         {
             "USER_UNIQUE_ID": MoviePilotServerHelper.get_user_uuid(),
