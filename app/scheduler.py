@@ -658,7 +658,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     "interval",
                     id="usage_report",
                     name="安装版本统计上报",
-                    hours=24,
+                    hours=12,
                     kwargs={"job_id": "usage_report"},
                 )
 
