@@ -91,7 +91,7 @@ class MoviePilotToolFactory:
     """
 
     # 这些通用工具需要始终保留，避免大工具集裁剪后让 Agent 丢失基础的
-    # 文件系统、命令执行或交互确认能力。AskUserChoiceTool 仅在支持按钮
+    # 文件系统、命令执行、主动消息发送或交互确认能力。AskUserChoiceTool 仅在支持按钮
     # 的渠道中才会实际注入，因此后续会再按已加载工具做一次求交集。
     TOOL_SELECTOR_ALWAYS_INCLUDE_NAMES = (
         "list_directory",
@@ -99,6 +99,7 @@ class MoviePilotToolFactory:
         "read_file",
         "edit_file",
         "execute_command",
+        "send_message",
         "ask_user_choice",
     )
 

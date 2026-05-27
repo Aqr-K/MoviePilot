@@ -798,12 +798,6 @@ class MoviePilotAgent:
             always_include_tools = (
                 MoviePilotToolFactory.get_tool_selector_always_include_names(tools)
             )
-            if self.is_heartbeat_session:
-                available_tool_names = {
-                    tool.name for tool in tools if getattr(tool, "name", None)
-                }
-                if "send_message" in available_tool_names:
-                    always_include_tools.append("send_message")
 
             # 中间件
             middlewares = [
