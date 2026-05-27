@@ -26,6 +26,20 @@ from app.utils.limit import QpsRateLimiter, RateStats
 lock = Lock()
 
 
+MIN_U115_UPLOAD_PART_SIZE = 1 * 1024 * 1024
+U115_UPLOAD_PART_COUNT_TARGET = 96
+U115_UPLOAD_PART_SIZE_STEPS = (
+    10 * 1024 * 1024,
+    16 * 1024 * 1024,
+    32 * 1024 * 1024,
+    64 * 1024 * 1024,
+    128 * 1024 * 1024,
+    256 * 1024 * 1024,
+    512 * 1024 * 1024,
+    1024 * 1024 * 1024,
+)
+
+
 class NoCheckInException(Exception):
     pass
 
@@ -410,6 +424,24 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
                     sha1.update(chunk)
         return sha1.finalize().hex()
 
+    @staticmethod
+    def __get_upload_part_size(file_size: int) -> int:
+        """
+        根据文件大小获取 115 OSS 上传分片大小。
+        """
+        if file_size <= 0:
+            return U115_UPLOAD_PART_SIZE_STEPS[0]
+
+        target_part_size = max(
+            MIN_U115_UPLOAD_PART_SIZE,
+            (file_size + U115_UPLOAD_PART_COUNT_TARGET - 1)
+            // U115_UPLOAD_PART_COUNT_TARGET,
+        )
+        for part_size in U115_UPLOAD_PART_SIZE_STEPS:
+            if target_part_size <= part_size:
+                return part_size
+        return U115_UPLOAD_PART_SIZE_STEPS[-1]
+
     def init_storage(self):
         pass
 
@@ -675,8 +707,9 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
             security_token=SecurityToken,
         )
         bucket = oss2.Bucket(auth, endpoint, bucket_name)  # noqa
-        # determine_part_size方法用于确定分片大小，设置分片大小为 10M
-        part_size = determine_part_size(file_size, preferred_size=10 * 1024 * 1024)
+        part_size = determine_part_size(
+            file_size, preferred_size=self.__get_upload_part_size(file_size)
+        )
 
         # 初始化进度条
         logger.info(
@@ -729,14 +762,19 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
             result = bucket.complete_multipart_upload(
                 object_name, upload_id, parts, headers=headers
             )
-            if result.status == 200:
-                logger.debug(
-                    f"【115】上传 Step 6 回调结果：{result.resp.response.json()}"
-                )
-                logger.info(f"【115】{target_name} 上传成功")
-            else:
+            if result.status != 200:
                 logger.warn(f"【115】{target_name} 上传失败，错误码: {result.status}")
                 return None
+            try:
+                callback_result = result.resp.response.json()
+            except Exception as e:
+                logger.error(f"【115】{target_name} 上传完成回调解析失败: {str(e)}")
+                return None
+            logger.debug(f"【115】上传 Step 6 回调结果：{callback_result}")
+            if not callback_result or not callback_result.get("state"):
+                logger.warn(f"【115】{target_name} 上传完成回调失败: {callback_result}")
+                return None
+            logger.info(f"【115】{target_name} 上传成功")
         except oss2.exceptions.OssError as e:
             if e.code == "FileAlreadyExists":
                 logger.warn(f"【115】{target_name} 已存在")
