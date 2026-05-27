@@ -6,8 +6,12 @@ import sys
 sys.modules.setdefault("app.helper.sites", ModuleType("app.helper.sites"))
 setattr(sys.modules["app.helper.sites"], "SitesHelper", object)
 
-from app.api.endpoints.transfer import manual_transfer, recommend_episode_format
-from app.schemas import ManualTransferItem, EpisodeFormatRecommendItem
+from app.api.endpoints.transfer import (
+    manual_transfer,
+    match_manual_transfer_target_path,
+    recommend_episode_format,
+)
+from app.schemas import EpisodeFormatRecommendItem, ManualTransferItem, TransferDirectoryConf
 
 
 def test_manual_transfer_from_history_preserves_download_context(monkeypatch):
@@ -178,6 +182,136 @@ def test_manual_transfer_preview_multi_select_collects_failures(monkeypatch):
     assert resp.data["summary"] == {"total": 2, "success": 1, "failed": 1}
     assert [item["source"] for item in resp.data["items"]] == file_paths
     assert resp.data["items"][1]["success"] is False
+
+
+def test_match_manual_transfer_target_path_returns_directory_match(monkeypatch):
+    captured = {}
+
+    class FakeDirectoryHelper:
+        def get_dir(self, **kwargs):
+            captured.update(kwargs)
+            return TransferDirectoryConf(
+                library_storage="rclone",
+                library_path="/library/tv",
+                transfer_type="copy",
+                scraping=True,
+                library_type_folder=True,
+                library_category_folder=False,
+            )
+
+    monkeypatch.setattr("app.api.endpoints.transfer.DirectoryHelper", FakeDirectoryHelper)
+
+    resp = match_manual_transfer_target_path(
+        transer_item=ManualTransferItem(
+            fileitem={
+                "storage": "local",
+                "path": "/downloads/Test Show/Test.Show.S01E01.mkv",
+                "name": "Test.Show.S01E01.mkv",
+                "type": "file",
+            },
+        ),
+        db=object(),
+        _="token",
+    )
+
+    assert resp.success is True
+    assert captured["storage"] == "local"
+    assert captured["src_path"].as_posix() == "/downloads/Test Show/Test.Show.S01E01.mkv"
+    assert captured["target_storage"] is None
+    assert resp.data == {
+        "target_storage": "rclone",
+        "target_path": "/library/tv",
+        "transfer_type": "copy",
+        "scrape": True,
+        "library_type_folder": True,
+        "library_category_folder": False,
+    }
+
+
+def test_match_manual_transfer_target_path_returns_null_for_ambiguous_matches(monkeypatch):
+    class FakeDirectoryHelper:
+        def get_dir(self, **kwargs):
+            src_path = kwargs["src_path"].as_posix()
+            return TransferDirectoryConf(
+                library_storage="local",
+                library_path="/library/tv" if "E01" in src_path else "/library/movie",
+                transfer_type="copy",
+            )
+
+    monkeypatch.setattr("app.api.endpoints.transfer.DirectoryHelper", FakeDirectoryHelper)
+
+    resp = match_manual_transfer_target_path(
+        transer_item=ManualTransferItem(
+            fileitems=[
+                {
+                    "storage": "local",
+                    "path": "/downloads/Test Show/Test.Show.S01E01.mkv",
+                    "name": "Test.Show.S01E01.mkv",
+                    "type": "file",
+                },
+                {
+                    "storage": "local",
+                    "path": "/downloads/Test Show/Test.Show.S01E02.mkv",
+                    "name": "Test.Show.S01E02.mkv",
+                    "type": "file",
+                },
+            ],
+        ),
+        db=object(),
+        _="token",
+    )
+
+    assert resp.success is True
+    assert resp.data["target_path"] is None
+    assert resp.data["target_storage"] is None
+
+
+def test_match_manual_transfer_target_path_accepts_multiple_history_records(monkeypatch):
+    histories = {
+        1: SimpleNamespace(
+            status=0,
+            mode="copy",
+            src_fileitem={
+                "storage": "local",
+                "path": "/downloads/Show/Show.S01E01.mkv",
+                "name": "Show.S01E01.mkv",
+                "type": "file",
+            },
+        ),
+        2: SimpleNamespace(
+            status=0,
+            mode="copy",
+            src_fileitem={
+                "storage": "local",
+                "path": "/downloads/Show/Show.S01E02.mkv",
+                "name": "Show.S01E02.mkv",
+                "type": "file",
+            },
+        ),
+    }
+
+    def fake_get(_db, logid):
+        return histories.get(logid)
+
+    class FakeDirectoryHelper:
+        def get_dir(self, **_kwargs):
+            return TransferDirectoryConf(
+                library_storage="local",
+                library_path="/library/tv",
+                transfer_type="copy",
+            )
+
+    monkeypatch.setattr("app.api.endpoints.transfer.TransferHistory.get", fake_get)
+    monkeypatch.setattr("app.api.endpoints.transfer.DirectoryHelper", FakeDirectoryHelper)
+
+    resp = match_manual_transfer_target_path(
+        transer_item=ManualTransferItem(logids=[1, 2]),
+        db=object(),
+        _="token",
+    )
+
+    assert resp.success is True
+    assert resp.data["target_path"] == "/library/tv"
 
 
 def test_recommend_episode_format_passes_selected_fileitems(monkeypatch):

@@ -92,6 +92,152 @@ async def remove_queue(
     return schemas.Response(success=True)
 
 
+def _resolve_manual_transfer_source_fileitems(
+    transer_item: ManualTransferItem, db: Session
+) -> tuple[List[FileItem], Optional[str]]:
+    """
+    从手动整理请求中解析源文件项。
+    """
+    if transer_item.logids:
+        fileitems: List[FileItem] = []
+        for logid in transer_item.logids:
+            history: TransferHistory = TransferHistory.get(db, logid)
+            if not history:
+                return [], f"整理记录不存在，ID：{logid}"
+            if history.status and ("move" in history.mode):
+                fileitems.append(FileItem(**history.dest_fileitem))
+            else:
+                fileitems.append(FileItem(**history.src_fileitem))
+        return fileitems, None
+
+    if transer_item.logid:
+        history: TransferHistory = TransferHistory.get(db, transer_item.logid)
+        if not history:
+            return [], f"整理记录不存在，ID：{transer_item.logid}"
+        if history.status and ("move" in history.mode):
+            return [FileItem(**history.dest_fileitem)], None
+        return [FileItem(**history.src_fileitem)], None
+
+    if transer_item.fileitems:
+        return [fileitem for fileitem in transer_item.fileitems if fileitem], None
+    if transer_item.fileitem:
+        return [transer_item.fileitem], None
+    return [], None
+
+
+def _deduplicate_fileitems(fileitems: List[FileItem]) -> List[FileItem]:
+    """
+    按存储和路径去重文件项。
+    """
+    dedup_fileitems: List[FileItem] = []
+    seen_paths = set()
+    for current_fileitem in fileitems:
+        storage = current_fileitem.storage or "local"
+        path = current_fileitem.path
+        if not path:
+            continue
+        key = (storage, path)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        dedup_fileitems.append(current_fileitem)
+    return dedup_fileitems
+
+
+def _build_manual_transfer_target_path(
+    directory: Optional[schemas.TransferDirectoryConf] = None,
+) -> schemas.ManualTransferTargetPath:
+    """
+    根据目录配置生成手动整理目的路径响应。
+    """
+    if not directory or not directory.library_path:
+        return schemas.ManualTransferTargetPath()
+
+    return schemas.ManualTransferTargetPath(
+        target_storage=directory.library_storage or "local",
+        target_path=directory.library_path,
+        transfer_type=directory.transfer_type,
+        scrape=directory.scraping or False,
+        library_type_folder=directory.library_type_folder or False,
+        library_category_folder=directory.library_category_folder or False,
+    )
+
+
+def _get_manual_transfer_target_key(
+    directory: schemas.TransferDirectoryConf,
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    生成目的目录唯一键。
+    """
+    return (
+        directory.library_storage or "local",
+        Path(directory.library_path).as_posix() if directory.library_path else None,
+    )
+
+
+@router.post(
+    "/manual/target-path",
+    summary="匹配手动转移目的路径",
+    response_model=schemas.Response,
+)
+def match_manual_transfer_target_path(
+    transer_item: ManualTransferItem,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    根据源文件匹配手动整理目的路径。
+
+    :param transer_item: 手工整理项
+    :param db: 数据库
+    :param _: Token校验
+    """
+    src_fileitems, error_message = _resolve_manual_transfer_source_fileitems(
+        transer_item=transer_item,
+        db=db,
+    )
+    if error_message:
+        return schemas.Response(success=False, message=error_message)
+
+    matched_directories: List[schemas.TransferDirectoryConf] = []
+    target_storage = transer_item.target_storage or None
+    for src_fileitem in _deduplicate_fileitems(src_fileitems):
+        directory = DirectoryHelper().get_dir(
+            media=None,
+            storage=src_fileitem.storage or "local",
+            src_path=Path(src_fileitem.path),
+            target_storage=target_storage,
+        )
+        if not directory or not directory.library_path:
+            return schemas.Response(
+                success=True,
+                data=schemas.ManualTransferTargetPath().model_dump(),
+            )
+        matched_directories.append(directory)
+
+    if not matched_directories:
+        return schemas.Response(
+            success=True,
+            data=schemas.ManualTransferTargetPath().model_dump(),
+        )
+
+    first_directory = matched_directories[0]
+    first_key = _get_manual_transfer_target_key(first_directory)
+    if any(
+        _get_manual_transfer_target_key(directory) != first_key
+        for directory in matched_directories[1:]
+    ):
+        return schemas.Response(
+            success=True,
+            data=schemas.ManualTransferTargetPath().model_dump(),
+        )
+
+    return schemas.Response(
+        success=True,
+        data=_build_manual_transfer_target_path(first_directory).model_dump(),
+    )
+
+
 @router.post("/manual", summary="手动转移", response_model=schemas.Response)
 def manual_transfer(
     transer_item: ManualTransferItem,

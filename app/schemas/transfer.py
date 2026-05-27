@@ -192,6 +192,8 @@ class ManualTransferItem(BaseModel):
     fileitems: Optional[List[FileItem]] = None
     # 日志ID
     logid: Optional[int] = None
+    # 日志ID列表（前端多选历史记录时传入）
+    logids: Optional[List[int]] = None
     # 目标存储
     target_storage: Optional[str] = None
     # 目标路径
@@ -228,3 +230,22 @@ class ManualTransferItem(BaseModel):
     episode_group: Optional[str] = None
     # 仅预览，不执行整理
     preview: Optional[bool] = False
+
+
+class ManualTransferTargetPath(BaseModel):
+    """
+    手动整理目的路径匹配结果
+    """
+
+    # 目标存储
+    target_storage: Optional[str] = None
+    # 目标路径
+    target_path: Optional[str] = None
+    # 整理方式
+    transfer_type: Optional[str] = None
+    # 刮削
+    scrape: Optional[bool] = False
+    # 媒体库类型子目录
+    library_type_folder: Optional[bool] = False
+    # 媒体库类别子目录
+    library_category_folder: Optional[bool] = False
