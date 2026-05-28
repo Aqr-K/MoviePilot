@@ -40,7 +40,9 @@ dedicated tool can complete the task more directly and safely.
 - `browse_webpage` - Real browser actions: `goto`, `get_content`, `screenshot`,
   `click`, `fill`, `select`, `evaluate`, `wait`.
 - `search_web` - Find current pages or official references before opening a
-  target URL.
+  target URL. It supports `search_engine` (`auto`, `duckduckgo`, `google`,
+  `bing`, `brave`, etc.) and `site_url` for limiting results to a specified
+  domain or URL path.
 - `query_sites` - Get MoviePilot site IDs before site-specific operations.
 - `update_site_cookie` - Update a configured site's Cookie and User-Agent using
   username, password, and optional two-step code.
@@ -74,6 +76,12 @@ If the user only described the page, search first:
 
 ```text
 search_web query="official site or page name"
+```
+
+To search within a specific site:
+
+```text
+search_web query="release notes" site_url="https://docs.example.com/"
 ```
 
 Then open the most relevant result with `browse_webpage action="goto"`.
