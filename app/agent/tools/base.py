@@ -16,7 +16,7 @@ from app.db.user_oper import UserOper
 from app.helper.service import ServiceConfigHelper
 from app.log import logger
 from app.schemas import Notification
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, NotificationType
 
 
 class ToolChain(ChainBase):
@@ -407,7 +407,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
     async def send_tool_message(
         self, message: str, title: str = "", image: Optional[str] = None
-    ):
+    ) -> None:
         """
         发送工具消息
         """
@@ -415,6 +415,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             Notification(
                 channel=self._channel,
                 source=self._source,
+                mtype=NotificationType.Agent,
                 userid=self._user_id,
                 username=self._username,
                 title=title,

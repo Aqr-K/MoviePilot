@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import tempfile
@@ -9,7 +10,7 @@ from urllib.parse import quote
 
 from telebot import apihelper
 
-from app.agent.tools.impl.send_message import SendMessageInput
+from app.agent.tools.impl.send_message import SendMessageInput, SendMessageTool
 from app.agent.tools.impl.send_local_file import SendLocalFileInput
 from app.agent import MoviePilotAgent, AgentChain
 from app.agent.llm import AgentCapabilityManager
@@ -27,7 +28,7 @@ from app.modules.vocechat import VoceChatModule
 from app.modules.wechat import WechatModule
 from app.modules.wechat.wechatbot import WeChatBot
 from app.schemas import CommingMessage, Notification
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, NotificationType
 
 
 class AgentImageSupportTest(unittest.TestCase):
@@ -514,6 +515,39 @@ class AgentImageSupportTest(unittest.TestCase):
         )
 
         self.assertEqual(payload.image_url, "https://example.com/poster.png")
+
+    def test_send_message_tool_uses_agent_notification_type(self):
+        """发送消息工具应固定使用智能体消息类型。"""
+
+        async def _run():
+            tool = SendMessageTool(session_id="session-1", user_id="10001")
+            tool.set_message_attr(
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                username="tester",
+            )
+
+            with patch(
+                "app.agent.tools.base.ToolChain.async_post_message",
+                new_callable=AsyncMock,
+            ) as async_post_message:
+                result = await tool.run(
+                    message="处理完成",
+                    title="智能体通知",
+                    image_url="https://example.com/poster.png",
+                )
+            return result, async_post_message
+
+        result, async_post_message = asyncio.run(_run())
+        notification = async_post_message.await_args.args[0]
+
+        self.assertEqual(result, "消息已发送")
+        self.assertEqual(notification.mtype, NotificationType.Agent)
+        self.assertEqual(notification.channel, MessageChannel.Telegram)
+        self.assertEqual(notification.source, "telegram-test")
+        self.assertEqual(notification.title, "智能体通知")
+        self.assertEqual(notification.text, "处理完成")
+        self.assertEqual(notification.image, "https://example.com/poster.png")
 
     def test_send_local_file_input_accepts_file_payload(self):
         payload = SendLocalFileInput(
