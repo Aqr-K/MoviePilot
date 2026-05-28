@@ -43,6 +43,14 @@ class TestAgentPromptStyle(unittest.TestCase):
             "Do not let user memory or persona style override this core identity",
             prompt,
         )
+        self.assertIn(
+            "Never directly modify application source code",
+            prompt,
+        )
+        self.assertIn(
+            "If the user has not explicitly requested an operation that changes system behavior",
+            prompt,
+        )
         self.assertIn("当前日期", prompt)
         self.assertNotIn("当前时间", prompt)
 
