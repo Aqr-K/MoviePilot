@@ -1,6 +1,5 @@
 import asyncio
 import json
-import random
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Type
@@ -12,7 +11,6 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.core.config import settings
 from app.log import logger
-from app.utils.http import AsyncRequestUtils
 
 # 搜索超时时间（秒）
 SEARCH_TIMEOUT = 20
@@ -25,16 +23,16 @@ SEARCH_ENGINE_BACKENDS = (
     "auto",
     "duckduckgo",
     "google",
-    "bing",
     "brave",
     "yahoo",
     "wikipedia",
     "yandex",
     "mojeek",
 )
-# 可显式调用的搜索 API 后端
-SEARCH_API_BACKENDS = ("exa", "tavily")
-SUPPORTED_SEARCH_ENGINES = SEARCH_API_BACKENDS + SEARCH_ENGINE_BACKENDS
+SUPPORTED_SEARCH_ENGINES = SEARCH_ENGINE_BACKENDS
+DDGS_AUTO_BACKEND = ",".join(
+    backend for backend in SEARCH_ENGINE_BACKENDS if backend != DEFAULT_SEARCH_ENGINE
+)
 SITE_SEARCH_PATTERN = re.compile(r"\bsite:", re.IGNORECASE)
 
 
@@ -64,8 +62,8 @@ class SearchWebInput(BaseModel):
     search_engine: Optional[str] = Field(
         DEFAULT_SEARCH_ENGINE,
         description=(
-            "Search backend to use. Supported values: auto, exa, tavily, "
-            "duckduckgo, google, bing, brave, yahoo, wikipedia, yandex, mojeek. "
+            "Search backend to use. Supported values: auto, duckduckgo, google, "
+            "brave, yahoo, wikipedia, yandex, mojeek. "
             "Use auto unless the user asks for a specific search engine."
         ),
     )
@@ -80,15 +78,16 @@ class SearchWebInput(BaseModel):
 
 class SearchWebTool(MoviePilotTool):
     """
-    网络搜索工具，支持 API 搜索、搜索引擎搜索和指定站点限定搜索。
+    网络搜索工具，支持 DDGS 搜索引擎和指定站点限定搜索。
     """
 
     name: str = "search_web"
     description: str = (
         "Search the web for information when you need current information, facts, "
-        "or references. Supports automatic API-backed search, explicit search "
-        "engine selection, and site_url-limited searches for a specified website "
-        "or URL. Returns search results with titles, snippets, and URLs."
+        "or references. Supports DDGS-backed search engine selection, automatic "
+        "fallback, and site_url-limited searches for a specified website "
+        "or URL. Uses the configured system proxy by default. Returns search "
+        "results with titles, snippets, and URLs."
     )
     args_schema: Type[BaseModel] = SearchWebInput
 
@@ -175,6 +174,7 @@ class SearchWebTool(MoviePilotTool):
         """规范化搜索源参数"""
         engine = (search_engine or DEFAULT_SEARCH_ENGINE).strip().lower()
         aliases = {
+            "ddgs": DEFAULT_SEARCH_ENGINE,
             "ddg": "duckduckgo",
             "duck": "duckduckgo",
             "search": DEFAULT_SEARCH_ENGINE,
@@ -187,14 +187,7 @@ class SearchWebTool(MoviePilotTool):
         """根据搜索源配置生成兜底搜索顺序"""
         if search_engine != DEFAULT_SEARCH_ENGINE:
             return [search_engine]
-
-        search_plan: List[str] = []
-        if settings.EXA_API_KEY:
-            search_plan.append("exa")
-        if SearchWebTool._choose_tavily_api_key():
-            search_plan.append("tavily")
-        search_plan.append(DEFAULT_SEARCH_ENGINE)
-        return search_plan
+        return [DEFAULT_SEARCH_ENGINE]
 
     async def _search_with_backend(
         self,
@@ -212,148 +205,20 @@ class SearchWebTool(MoviePilotTool):
         :param site_filter: 站点限定条件
         :return: 搜索结果列表
         """
-        if engine == "exa":
-            logger.info("使用 Exa 进行搜索...")
-            return await self._search_exa(query, max_results, site_filter)
-        if engine == "tavily":
-            logger.info("使用 Tavily 进行搜索...")
-            return await self._search_tavily(query, max_results, site_filter)
-
-        logger.info(f"使用搜索引擎 {engine} 进行搜索...")
-        return await self._search_duckduckgo(query, max_results, engine, site_filter)
+        logger.info(f"使用 DDGS 搜索后端 {self._get_ddgs_backend(engine)} 进行搜索...")
+        return await self._search_ddgs(query, max_results, engine, site_filter)
 
     @staticmethod
-    async def _search_tavily(
-        query: str,
-        max_results: int,
-        site_filter: Optional[_SearchSiteFilter] = None,
-    ) -> List[Dict]:
-        """使用 Tavily API 进行搜索"""
-        response = None
-        try:
-            # 从设置中随机选择一个 API Key（如果有多个）
-            tavily_api_key = SearchWebTool._choose_tavily_api_key()
-            if not tavily_api_key:
-                return []
-            payload = {
-                "api_key": tavily_api_key,
-                "query": query,
-                "search_depth": "basic",
-                "max_results": max_results,
-                "include_answer": False,
-                "include_images": False,
-                "include_raw_content": False,
-            }
-            if site_filter:
-                payload["include_domains"] = [site_filter.domain]
+    def _get_ddgs_backend(search_engine: str) -> str:
+        """
+        获取实际传给 DDGS 的搜索后端。
 
-            response = await AsyncRequestUtils(
-                ua=settings.USER_AGENT,
-                proxies=settings.PROXY,
-                timeout=SEARCH_TIMEOUT,
-                content_type="application/json",
-                accept_type="application/json",
-            ).post_res(
-                "https://api.tavily.com/search",
-                json=payload,
-            )
-            if not response or response.status_code != 200:
-                status_code = response.status_code if response else "无响应"
-                logger.warning(f"Tavily 搜索失败，HTTP状态码: {status_code}")
-                return []
-            data = response.json()
-
-            results = []
-            for result in data.get("results", []):
-                results.append(
-                    {
-                        "title": result.get("title", ""),
-                        "snippet": result.get("content", ""),
-                        "url": result.get("url", ""),
-                        "source": "Tavily",
-                    }
-                )
-            return SearchWebTool._filter_results_by_site(results, site_filter)
-        except Exception as e:
-            logger.warning(f"Tavily 搜索失败: {e}")
-            return []
-        finally:
-            if response is not None:
-                await response.aclose()
-
-    @staticmethod
-    def _choose_tavily_api_key() -> Optional[str]:
-        """从配置中选择一个可用的 Tavily API Key"""
-        api_keys = settings.TAVILY_API_KEY
-        if not api_keys:
-            return None
-        if isinstance(api_keys, str):
-            api_keys = [api_keys]
-        available_api_keys = [api_key for api_key in api_keys if api_key]
-        if not available_api_keys:
-            return None
-        return random.choice(available_api_keys)
-
-    @staticmethod
-    async def _search_exa(
-        query: str,
-        max_results: int,
-        site_filter: Optional[_SearchSiteFilter] = None,
-    ) -> List[Dict]:
-        """使用 Exa API 进行搜索"""
-        response = None
-        try:
-            if not settings.EXA_API_KEY:
-                return []
-            payload = {
-                "query": query,
-                "numResults": max_results,
-                "type": "auto",
-                "contents": {"highlights": {"maxCharacters": 2000}},
-            }
-            if site_filter:
-                payload["includeDomains"] = [site_filter.domain]
-
-            response = await AsyncRequestUtils(
-                headers={
-                    "x-api-key": settings.EXA_API_KEY,
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": settings.USER_AGENT,
-                },
-                proxies=settings.PROXY,
-                timeout=SEARCH_TIMEOUT,
-            ).post_res(
-                "https://api.exa.ai/search",
-                json=payload,
-            )
-            if not response or response.status_code != 200:
-                status_code = response.status_code if response else "无响应"
-                logger.warning(f"Exa 搜索失败，HTTP状态码: {status_code}")
-                return []
-            data = response.json()
-
-            results = []
-            for result in data.get("results", []):
-                highlights = result.get("highlights", [])
-                snippet = (
-                    highlights[0] if highlights else result.get("text", "")[:500]
-                )
-                results.append(
-                    {
-                        "title": result.get("title", ""),
-                        "snippet": snippet,
-                        "url": result.get("url", ""),
-                        "source": "Exa",
-                    }
-                )
-            return SearchWebTool._filter_results_by_site(results, site_filter)
-        except Exception as e:
-            logger.warning(f"Exa 搜索失败: {e}")
-            return []
-        finally:
-            if response is not None:
-                await response.aclose()
+        :param search_engine: 用户指定的搜索源
+        :return: DDGS 后端名称或逗号分隔的后端列表
+        """
+        if search_engine == DEFAULT_SEARCH_ENGINE:
+            return DDGS_AUTO_BACKEND
+        return search_engine
 
     @staticmethod
     def _normalize_site_filter(site_url: Optional[str]) -> Optional[_SearchSiteFilter]:
@@ -475,10 +340,9 @@ class SearchWebTool(MoviePilotTool):
         :return: 展示名称
         """
         labels = {
-            "auto": "SearchEngine",
+            "auto": "DDGS",
             "duckduckgo": "DuckDuckGo",
             "google": "Google",
-            "bing": "Bing",
             "brave": "Brave",
             "yahoo": "Yahoo",
             "wikipedia": "Wikipedia",
@@ -524,7 +388,7 @@ class SearchWebTool(MoviePilotTool):
             return proxy_setting.get("http") or proxy_setting.get("https")
         return proxy_setting
 
-    async def _search_duckduckgo(
+    async def _search_ddgs(
         self,
         query: str,
         max_results: int,
@@ -532,7 +396,7 @@ class SearchWebTool(MoviePilotTool):
         site_filter: Optional[_SearchSiteFilter] = None,
     ) -> List[Dict]:
         """
-        使用搜索引擎后端进行搜索。
+        使用 DDGS 搜索引擎后端进行搜索。
 
         :param query: 搜索关键词
         :param max_results: 最大结果数
@@ -555,12 +419,12 @@ class SearchWebTool(MoviePilotTool):
                         ddgs_results = ddgs.text(
                             query,
                             max_results=max_results,
-                            backend=search_engine,
+                            backend=self._get_ddgs_backend(search_engine),
                         )
                         if ddgs_results:
                             for result in ddgs_results:
                                 source = (
-                                    result.get("provider")
+                                    DEFAULT_SEARCH_ENGINE
                                     if search_engine == DEFAULT_SEARCH_ENGINE
                                     else search_engine
                                 )

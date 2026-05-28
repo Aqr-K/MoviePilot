@@ -40,9 +40,9 @@ dedicated tool can complete the task more directly and safely.
 - `browse_webpage` - Real browser actions: `goto`, `get_content`, `screenshot`,
   `click`, `fill`, `select`, `evaluate`, `wait`.
 - `search_web` - Find current pages or official references before opening a
-  target URL. It supports `search_engine` (`auto`, `duckduckgo`, `google`,
-  `bing`, `brave`, etc.) and `site_url` for limiting results to a specified
-  domain or URL path.
+  target URL. It supports DDGS-backed `search_engine` (`auto`, `duckduckgo`,
+  `google`, `brave`, etc.) and `site_url` for limiting results to a specified
+  domain or URL path. It uses the configured system proxy by default.
 - `query_sites` - Get MoviePilot site IDs before site-specific operations.
 - `update_site_cookie` - Update a configured site's Cookie and User-Agent using
   username, password, and optional two-step code.
