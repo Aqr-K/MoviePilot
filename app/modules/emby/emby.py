@@ -160,6 +160,7 @@ class Emby:
             else:
                 library_type = MediaType.UNKNOWN.value
             image = self.__get_local_image_by_id(library.get("Id"))
+            server_query = f"serverId={self.serverid}&" if self.serverid else ""
             libraries.append(
                 schemas.MediaServerLibrary(
                     server="emby",
@@ -169,7 +170,7 @@ class Emby:
                     type=library_type,
                     image=image,
                     link=f'{self._playhost or self._host}web/index.html'
-                         f'#!/videos?serverId={self.serverid}&parentId={library.get("Id")}',
+                         f'#!/videos?{server_query}parentId={library.get("Id")}',
                     server_type="emby"
                 )
             )
@@ -247,19 +248,22 @@ class Emby:
         """
         if not self._host or not self._apikey:
             return None
-        url = f"{self._host}System/Info"
         params = {
             'api_key': self._apikey
         }
-        try:
-            res = RequestUtils().get_res(url, params)
-            if res:
-                return res.json().get("Id")
-            else:
-                logger.error(f"System/Info 未获取到返回数据")
-        except Exception as e:
-
-            logger.error(f"连接System/Info出错：" + str(e))
+        for path in ("System/Info", "emby/System/Info"):
+            url = f"{self._host}{path}"
+            try:
+                res = RequestUtils().get_res(url, params)
+                if res:
+                    result = res.json() or {}
+                    server_id = result.get("Id") or result.get("ServerId")
+                    if server_id:
+                        return server_id
+                else:
+                    logger.error(f"{path} 未获取到返回数据")
+            except Exception as e:
+                logger.error(f"连接{path}出错：" + str(e))
         return None
 
     def get_user_count(self) -> int:
@@ -1093,8 +1097,9 @@ class Emby:
         拼装媒体播放链接
         :param item_id: 媒体的的ID
         """
+        server_query = f"&serverId={self.serverid}" if self.serverid else ""
         return f"{self._playhost or self._host}web/index.html#!" \
-               f"/item?id={item_id}&context=home&serverId={self.serverid}"
+               f"/item?id={item_id}&context=home{server_query}"
 
     def get_backdrop_url(self, item_id: str, image_tag: str, remote: Optional[bool] = False) -> str:
         """
@@ -1180,6 +1185,8 @@ class Emby:
                             image = self.__get_local_image_by_id(item.get("SeriesId"))
                     ret_resume.append(schemas.MediaServerPlayItem(
                         id=item.get("Id"),
+                        item_id=item.get("Id"),
+                        server_id=self.serverid,
                         title=title,
                         subtitle=subtitle,
                         type=item_type,
@@ -1234,6 +1241,8 @@ class Emby:
                     image = self.__get_local_image_by_id(item_id=item.get("Id"))
                     ret_latest.append(schemas.MediaServerPlayItem(
                         id=item.get("Id"),
+                        item_id=item.get("Id"),
+                        server_id=self.serverid,
                         title=item.get("Name"),
                         subtitle=str(item.get("ProductionYear")) if item.get("ProductionYear") else None,
                         type=item_type,

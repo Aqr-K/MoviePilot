@@ -38,7 +38,13 @@ def play_item(
         if item:
             play_url = media_chain.get_play_url(server=name, item_id=itemid)
             if play_url:
-                return schemas.Response(success=True, data={"url": play_url})
+                return schemas.Response(
+                    success=True,
+                    data={
+                        "url": play_url,
+                        "server_type": item.server,
+                    },
+                )
     return schemas.Response(success=False, message="未找到播放地址")
 
 

@@ -171,6 +171,8 @@ class MediaServerPlayItem(BaseModel):
     媒体服务器可播放项目信息
     """
     id: Optional[Union[str, int]] = None
+    item_id: Optional[Union[str, int]] = None
+    server_id: Optional[str] = None
     title: Optional[str] = None
     subtitle: Optional[str] = None
     type: Optional[str] = None
