@@ -160,11 +160,14 @@ class Emby:
             else:
                 library_type = MediaType.UNKNOWN.value
             image = self.__get_local_image_by_id(library.get("Id"))
-            server_query = f"serverId={self.serverid}&" if self.serverid else ""
+            server_id = library.get("ServerId") or self.serverid
+            server_query = f"serverId={server_id}&" if server_id else ""
             libraries.append(
                 schemas.MediaServerLibrary(
                     server="emby",
                     id=library.get("Id"),
+                    item_id=library.get("Id"),
+                    server_id=server_id,
                     name=library.get("Name"),
                     path=library.get("Path"),
                     type=library_type,
@@ -652,6 +655,7 @@ class Emby:
             return schemas.MediaServerItem(
                 server="emby",
                 library=item.get("ParentId"),
+                server_id=item.get("ServerId"),
                 item_id=item.get("Id"),
                 item_type=item.get("Type"),
                 title=item.get("Name"),
@@ -1092,12 +1096,14 @@ class Emby:
             logger.error(f"连接Emby出错：" + str(e))
             return None
 
-    def get_play_url(self, item_id: str) -> str:
+    def get_play_url(self, item_id: str, server_id: Optional[str] = None) -> str:
         """
         拼装媒体播放链接
         :param item_id: 媒体的的ID
+        :param server_id: 媒体服务器ID
         """
-        server_query = f"&serverId={self.serverid}" if self.serverid else ""
+        server_id = server_id or self.serverid
+        server_query = f"&serverId={server_id}" if server_id else ""
         return f"{self._playhost or self._host}web/index.html#!" \
                f"/item?id={item_id}&context=home{server_query}"
 
@@ -1165,7 +1171,8 @@ class Emby:
                             str(item_path).startswith(folder) for folder in library_folders):
                         continue
                     item_type = MediaType.MOVIE.value if item.get("Type") == "Movie" else MediaType.TV.value
-                    link = self.get_play_url(item.get("Id"))
+                    server_id = item.get("ServerId") or self.serverid
+                    link = self.get_play_url(item.get("Id"), server_id=server_id)
                     if item_type == MediaType.MOVIE.value:
                         title = item.get("Name")
                         subtitle = str(item.get("ProductionYear")) if item.get("ProductionYear") else None
@@ -1186,7 +1193,7 @@ class Emby:
                     ret_resume.append(schemas.MediaServerPlayItem(
                         id=item.get("Id"),
                         item_id=item.get("Id"),
-                        server_id=self.serverid,
+                        server_id=server_id,
                         title=title,
                         subtitle=subtitle,
                         type=item_type,
@@ -1237,12 +1244,13 @@ class Emby:
                             str(item_path).startswith(folder) for folder in library_folders):
                         continue
                     item_type = MediaType.MOVIE.value if item.get("Type") == "Movie" else MediaType.TV.value
-                    link = self.get_play_url(item.get("Id"))
+                    server_id = item.get("ServerId") or self.serverid
+                    link = self.get_play_url(item.get("Id"), server_id=server_id)
                     image = self.__get_local_image_by_id(item_id=item.get("Id"))
                     ret_latest.append(schemas.MediaServerPlayItem(
                         id=item.get("Id"),
                         item_id=item.get("Id"),
-                        server_id=self.serverid,
+                        server_id=server_id,
                         title=item.get("Name"),
                         subtitle=str(item.get("ProductionYear")) if item.get("ProductionYear") else None,
                         type=item_type,

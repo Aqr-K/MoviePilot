@@ -80,6 +80,7 @@ class EmbyDashboardLinksTest(unittest.TestCase):
             request_utils_cls.return_value.get_res.return_value = _FakeResponse([
                 {
                     "Id": "emby-item-id",
+                    "ServerId": "item-server-id",
                     "Name": "测试电影",
                     "Type": "Movie",
                     "ProductionYear": 2026,
@@ -90,13 +91,39 @@ class EmbyDashboardLinksTest(unittest.TestCase):
 
         self.assertEqual(items[0].id, "emby-item-id")
         self.assertEqual(items[0].item_id, "emby-item-id")
-        self.assertEqual(items[0].server_id, "server-id")
+        self.assertEqual(items[0].server_id, "item-server-id")
         self.assertIn("id=emby-item-id", items[0].link)
-        self.assertIn("serverId=server-id", items[0].link)
+        self.assertIn("serverId=item-server-id", items[0].link)
+
+    def test_get_librarys_returns_item_and_server_ids(self):
+        """媒体库卡片需要返回 Emby parentId 和 server_id 供前端生成 App 跳转。"""
+        client = self._build_client()
+
+        with (
+            patch.object(client, "_Emby__get_emby_librarys") as librarys,
+            patch.object(client, "_Emby__get_local_image_by_id") as image_by_id,
+        ):
+            librarys.return_value = [
+                {
+                    "Id": "library-id",
+                    "ServerId": "library-server-id",
+                    "Name": "电影库",
+                    "CollectionType": "movies",
+                }
+            ]
+            image_by_id.return_value = "http://emby.local/image"
+
+            items = client.get_librarys()
+
+        self.assertEqual(items[0].id, "library-id")
+        self.assertEqual(items[0].item_id, "library-id")
+        self.assertEqual(items[0].server_id, "library-server-id")
+        self.assertIn("parentId=library-id", items[0].link)
+        self.assertIn("serverId=library-server-id", items[0].link)
 
     def test_play_item_returns_server_type(self):
         """播放地址接口需要返回 server_type，供前端跳转时选择正确媒体服务器类型。"""
-        item = schemas.MediaServerItem(server="emby", item_id="emby-item-id")
+        item = schemas.MediaServerItem(server="emby", item_id="emby-item-id", server_id="server-id")
 
         with (
             patch("app.api.endpoints.mediaserver.MediaServerHelper") as helper_cls,
@@ -111,6 +138,8 @@ class EmbyDashboardLinksTest(unittest.TestCase):
 
         self.assertTrue(response.success)
         self.assertEqual(response.data["url"], "http://emby.local/web/index.html#!/item?id=emby-item-id")
+        self.assertEqual(response.data["item_id"], "emby-item-id")
+        self.assertEqual(response.data["server_id"], "server-id")
         self.assertEqual(response.data["server_type"], "emby")
 
 

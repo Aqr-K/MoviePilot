@@ -42,6 +42,8 @@ def play_item(
                     success=True,
                     data={
                         "url": play_url,
+                        "item_id": item.item_id or itemid,
+                        "server_id": item.server_id,
                         "server_type": item.server,
                     },
                 )

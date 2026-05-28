@@ -60,6 +60,10 @@ class MediaServerLibrary(BaseModel):
     server: Optional[str] = None
     # ID
     id: Optional[Union[str, int]] = None
+    # 媒体服务器项目ID
+    item_id: Optional[Union[str, int]] = None
+    # 媒体服务器ID
+    server_id: Optional[str] = None
     # 名称
     name: Optional[str] = None
     # 路径
@@ -101,6 +105,8 @@ class MediaServerItem(BaseModel):
     server: Optional[str] = None
     # 媒体库ID
     library: Optional[Union[str, int]] = None
+    # 媒体服务器ID
+    server_id: Optional[str] = None
     # ID
     item_id: Optional[str] = None
     # 类型
