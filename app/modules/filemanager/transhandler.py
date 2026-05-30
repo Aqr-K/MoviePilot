@@ -1137,6 +1137,7 @@ class TransHandler:
         meta = MetaInfoPath(path)
         season = meta.season
         episode = meta.episode
+        part = meta.part
         logger.warn(f"正在删除目标目录中其它版本的文件：{path.parent}")
         # 获取父目录
         parent_item = storage_oper.get_item(path.parent)
@@ -1162,6 +1163,9 @@ class TransHandler:
             filemeta = MetaInfoPath(media_path)
             # 相同季集的文件才删除
             if filemeta.season != season or filemeta.episode != episode:
+                continue
+            # 相同 Part 的文件才删除，避免误删多 Part 文件 (issue #5862)
+            if part and filemeta.part and filemeta.part != part:
                 continue
             logger.info(f"正在删除文件：{media_file.name}")
             storage_oper.delete(media_file)
