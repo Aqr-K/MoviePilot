@@ -685,7 +685,10 @@ class MediaInfo:
             if infobox:
                 akas = [item.get("value") for item in infobox if item.get("key") == "别名"]
                 if akas:
-                    self.names = [aka.get("v") for aka in akas[0]]
+                    if isinstance(akas[0], list):
+                        self.names = [aka.get("v") if isinstance(aka, dict) else aka for aka in akas[0]]
+                    elif isinstance(akas[0], str):
+                        self.names = [akas[0]]
 
         # 剧集
         if self.type == MediaType.TV and not self.seasons:

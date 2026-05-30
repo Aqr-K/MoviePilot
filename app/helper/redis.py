@@ -1,3 +1,4 @@
+import asyncio
 import json
 import pickle
 from typing import Any, Optional, Generator, Tuple, AsyncGenerator, Union
@@ -320,12 +321,18 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
         """
         self.redis_url = settings.CACHE_BACKEND_URL
         self.client: Optional[Redis] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def _connect(self):
         """
         建立异步Redis连接
         """
         try:
+            current_loop = asyncio.get_running_loop()
+            # 检测事件循环是否发生变化，如果变化则重新连接
+            if self.client is not None and self._loop is not current_loop:
+                logger.debug("Event loop changed, reconnecting Redis (async)")
+                await self._close_client()
             if self.client is None:
                 self.client = Redis.from_url(
                     self.redis_url,
@@ -334,6 +341,7 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
                     socket_connect_timeout=_socket_connect_timeout,
                     health_check_interval=_health_check_interval,
                 )
+                self._loop = current_loop
                 # 测试连接，确保Redis可用
                 await self.client.ping()
                 logger.info(f"Successfully connected to Redis (async)：{self.redis_url}")
@@ -341,10 +349,23 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
         except Exception as e:
             logger.error(f"Failed to connect to Redis (async): {e}")
             self.client = None
+            self._loop = None
             raise RuntimeError("Redis async connection failed") from e
 
+    async def _close_client(self):
+        """
+        关闭当前Redis客户端连接
+        """
+        if self.client:
+            try:
+                await self.client.close()
+            except Exception:
+                pass
+            self.client = None
+            self._loop = None
+
     async def on_config_changed(self):
-        await self.close()
+        await self._close_client()
         await self._connect()
 
     def get_reload_name(self):
@@ -526,7 +547,5 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
         """
         关闭异步Redis客户端的连接池
         """
-        if self.client:
-            await self.client.close()
-            self.client = None
-            logger.debug("Redis async connection closed")
+        await self._close_client()
+        logger.debug("Redis async connection closed")
