@@ -102,6 +102,7 @@ class MoviePilotServerHelper:
         user_uid = cls.get_user_uid()
         if user_uid:
             request_headers[cls.USER_UID_HEADER] = user_uid
+        request_headers["User-Agent"] = settings.USER_AGENT
         return request_headers
 
     @classmethod

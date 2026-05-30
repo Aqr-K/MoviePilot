@@ -1458,7 +1458,7 @@ class LLMProviderManager(metaclass=Singleton):
 
     async def _fetch_models_dev(self, use_proxy: Optional[bool] = None) -> dict[str, Any]:
         """通过网络请求获取最新 models.dev 数据。"""
-        headers = {"User-Agent": "MoviePilot/1.0"}
+        headers = {"User-Agent": settings.USER_AGENT}
         async with httpx.AsyncClient(**self._build_httpx_kwargs(use_proxy)) as client:
             response = await client.get(self._MODELS_DEV_URL, headers=headers)
             response.raise_for_status()
@@ -1773,7 +1773,7 @@ class LLMProviderManager(metaclass=Singleton):
         仅补充 Copilot 必需的意图头，避免重复覆盖。
         """
         headers = {
-            "User-Agent": "MoviePilot/1.0",
+            "User-Agent": settings.USER_AGENT,
             "Openai-Intent": "conversation-edits",
             "x-initiator": "user",
         }
@@ -2147,7 +2147,7 @@ class LLMProviderManager(metaclass=Singleton):
                     f"{self._CHATGPT_ISSUER}/api/accounts/deviceauth/usercode",
                     headers={
                         "Content-Type": "application/json",
-                        "User-Agent": "MoviePilot/1.0",
+                        "User-Agent": settings.USER_AGENT,
                     },
                     json={"client_id": self._CHATGPT_CLIENT_ID},
                 )
@@ -2184,7 +2184,7 @@ class LLMProviderManager(metaclass=Singleton):
                     headers={
                         "Accept": "application/json",
                         "Content-Type": "application/json",
-                        "User-Agent": "MoviePilot/1.0",
+                        "User-Agent": settings.USER_AGENT,
                     },
                     json={
                         "client_id": self._COPILOT_CLIENT_ID,
@@ -2380,7 +2380,7 @@ class LLMProviderManager(metaclass=Singleton):
                 f"{self._CHATGPT_ISSUER}/api/accounts/deviceauth/token",
                 headers={
                     "Content-Type": "application/json",
-                    "User-Agent": "MoviePilot/1.0",
+                    "User-Agent": settings.USER_AGENT,
                 },
                 json={
                     "device_auth_id": session.context["device_auth_id"],
@@ -2425,7 +2425,7 @@ class LLMProviderManager(metaclass=Singleton):
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/json",
-                    "User-Agent": "MoviePilot/1.0",
+                    "User-Agent": settings.USER_AGENT,
                 },
                 json={
                     "client_id": self._COPILOT_CLIENT_ID,

@@ -223,7 +223,7 @@ def _release_sort_key(tag: str) -> tuple[int, ...]:
 def _github_api_json(url: str, *, repo: str) -> Any:
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "MoviePilot-CLI",
+        "User-Agent": settings.USER_AGENT,
     }
     headers.update(settings.REPO_GITHUB_HEADERS(repo))
     opener = build_opener(ProxyHandler(settings.PROXY or {}))
