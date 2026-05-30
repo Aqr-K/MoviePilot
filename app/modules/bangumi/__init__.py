@@ -12,19 +12,31 @@ from app.utils.http import RequestUtils
 
 
 class BangumiModule(_ModuleBase):
+    """
+    Bangumi媒体信息匹配
+    """
+    CONFIG_WATCH = {"PROXY_HOST"}
+
     bangumiapi: BangumiApi = None
 
     def init_module(self) -> None:
+        """
+        初始化Bangumi客户端
+        """
         self.bangumiapi = BangumiApi()
 
-    def stop(self):
-        self.bangumiapi.close()
+    def stop(self) -> None:
+        """
+        关闭Bangumi客户端
+        """
+        if self.bangumiapi:
+            self.bangumiapi.close()
 
     def test(self) -> Tuple[bool, str]:
         """
         测试模块连接性
         """
-        ret = RequestUtils().get_res("https://api.bgm.tv/")
+        ret = RequestUtils(proxies=settings.PROXY).get_res("https://api.bgm.tv/")
         if ret and ret.status_code == 200:
             return True, ""
         elif ret:
@@ -36,6 +48,9 @@ class BangumiModule(_ModuleBase):
 
     @staticmethod
     def get_name() -> str:
+        """
+        获取模块名称
+        """
         return "Bangumi"
 
     @staticmethod
