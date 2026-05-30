@@ -632,6 +632,8 @@ class MoviePilotAgent:
         detail = cls._exception_detail_text(error).lower()
         if "no endpoints found that support image input" in detail:
             return True
+        if "unknown variant" in detail and "image_url" in detail:
+            return True
         if "image input" not in detail and "images" not in detail:
             return False
         return any(
