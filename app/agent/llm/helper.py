@@ -405,6 +405,7 @@ def _patch_openai_responses_instructions_support():
         return
 
     _patch_openai_interleaved_reasoning_content_support()
+    _patch_openai_responses_empty_output_support()
 
     if getattr(ChatOpenAI, "_moviepilot_responses_instructions_patched", False):
         return
@@ -462,6 +463,64 @@ def _patch_openai_responses_instructions_support():
     ChatOpenAI._get_request_payload = _patched_get_request_payload
     ChatOpenAI._moviepilot_responses_instructions_patched = True
     logger.debug("已修补 langchain-openai responses API 的 instructions 兼容性")
+
+
+def _patch_openai_responses_empty_output_support():
+    """
+    修补 langchain-openai Responses API 流式完成事件 output 为空的兼容性。
+
+    ChatGPT Codex 后端有时会在 `response.completed` chunk 里返回
+    `response.output = None`，但前面的 delta chunk 已经包含实际文本。
+    langchain-openai 在收尾阶段遍历 output 会抛出 TypeError，这里将缺失
+    output 规整为空列表，让收尾 chunk 只承载 usage/metadata。
+    """
+    try:
+        import langchain_openai.chat_models.base as _openai_base
+    except Exception as err:
+        logger.debug(f"跳过 langchain-openai responses output 修补：{err}")
+        return
+
+    if getattr(_openai_base, "_moviepilot_responses_empty_output_patched", False):
+        return
+
+    original_construct = getattr(
+        _openai_base, "_construct_lc_result_from_responses_api", None
+    )
+    if not callable(original_construct):
+        logger.warning("langchain-openai 缺少 Responses API 结果构造函数，无法修补 output")
+        return
+
+    def _clone_response_with_empty_output(response):
+        """
+        复制 Responses 对象，把缺失 output 规整为空列表。
+        """
+        model_copy = getattr(response, "model_copy", None)
+        if callable(model_copy):
+            try:
+                return model_copy(update={"output": []})
+            except Exception as err:
+                logger.debug(f"复制 Responses 对象失败，回退原地修补 output：{err}")
+
+        try:
+            setattr(response, "output", [])
+        except Exception as err:
+            logger.debug(f"原地修补 Responses output 失败：{err}")
+        return response
+
+    @wraps(original_construct)
+    def _patched_construct_lc_result_from_responses_api(response, *args, **kwargs):
+        """
+        在 Responses API 收尾 chunk 缺少 output 时跳过空内容遍历。
+        """
+        if hasattr(response, "output") and getattr(response, "output", None) is None:
+            response = _clone_response_with_empty_output(response)
+        return original_construct(response, *args, **kwargs)
+
+    _openai_base._construct_lc_result_from_responses_api = (
+        _patched_construct_lc_result_from_responses_api
+    )
+    _openai_base._moviepilot_responses_empty_output_patched = True
+    logger.debug("已修补 langchain-openai responses API 空 output 兼容性")
 
 
 class LLMHelper:

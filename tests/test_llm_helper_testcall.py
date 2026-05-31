@@ -108,8 +108,17 @@ def _build_fake_openai_modules(chat_openai_cls=_FakeChatOpenAIForPatch):
     def _convert_delta_to_message_chunk(delta, default_class):
         return AIMessageChunk(content=delta.get("content") or "")
 
+    def _construct_lc_result_from_responses_api(response, *args, **kwargs):
+        """模拟旧版 langchain-openai 直接遍历 response.output 的行为。"""
+        for _item in response.output:
+            pass
+        return SimpleNamespace(args=args, kwargs=kwargs, response=response)
+
     base_module._convert_dict_to_message = _convert_dict_to_message
     base_module._convert_delta_to_message_chunk = _convert_delta_to_message_chunk
+    base_module._construct_lc_result_from_responses_api = (
+        _construct_lc_result_from_responses_api
+    )
 
     return {
         "langchain_openai": openai_module,
@@ -261,6 +270,39 @@ class LlmHelperTestCallTest(unittest.TestCase):
             chunk.additional_kwargs.get("reasoning_content"),
             "先调用工具",
         )
+
+    def test_openai_responses_patch_handles_completed_chunk_without_output(self):
+        """校验 Responses API 流式完成事件 output 为空时不再崩溃。"""
+
+        class _FakeResponse:
+            """模拟 OpenAI Responses API 完成事件里的 Response 对象。"""
+
+            def __init__(self, output):
+                """保存 output 字段用于复现空输出场景。"""
+                self.output = output
+
+            def model_copy(self, update=None):
+                """模拟 Pydantic v2 model_copy(update=...) 行为。"""
+                copied = _FakeResponse(self.output)
+                for key, value in (update or {}).items():
+                    setattr(copied, key, value)
+                return copied
+
+        fake_modules, openai_base = _build_fake_openai_modules()
+        with patch.dict(sys.modules, fake_modules):
+            with self.assertRaises(TypeError):
+                openai_base._construct_lc_result_from_responses_api(
+                    _FakeResponse(None)
+                )
+
+            llm_module._patch_openai_responses_instructions_support()
+            result = openai_base._construct_lc_result_from_responses_api(
+                _FakeResponse(None),
+                schema=object,
+            )
+
+        self.assertEqual(result.response.output, [])
+        self.assertEqual(result.kwargs.get("schema"), object)
 
     def test_openai_compatible_patch_injects_xiaomi_reasoning_content(self):
         fake_modules, _ = _build_fake_openai_modules()
