@@ -406,7 +406,9 @@ class TestAgentToolStreaming(unittest.TestCase):
             """运行指定渠道的语音发送工具。"""
             tool = SendVoiceMessageTool(session_id="session-1", user_id="10001")
             tool.set_message_attr(
-                channel=channel.value, source=f"{channel.name.lower()}-main", username="tester"
+                channel=channel.value,
+                source=f"{channel.name.lower()}-main",
+                username="tester",
             )
 
             with (
@@ -429,7 +431,9 @@ class TestAgentToolStreaming(unittest.TestCase):
             return result, synthesize_speech, async_post_message
 
         for channel in (MessageChannel.Telegram, MessageChannel.Feishu):
-            result, synthesize_speech, async_post_message = asyncio.run(_run(channel))
+            result, synthesize_speech, async_post_message = asyncio.run(
+                _run(channel)
+            )
             notification = async_post_message.await_args.args[0]
 
             self.assertEqual(result, "语音回复已发送")
@@ -437,6 +441,7 @@ class TestAgentToolStreaming(unittest.TestCase):
             self.assertEqual(notification.channel, channel)
             self.assertEqual(notification.voice_path, "/tmp/reply.opus")
             self.assertEqual(notification.voice_caption, "你好")
+            self.assertTrue(SendVoiceMessageTool.return_direct)
 
     def test_send_voice_message_falls_back_for_unsupported_channels(self):
         """校验不支持语音输出的渠道继续回退为文字消息。"""

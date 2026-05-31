@@ -157,8 +157,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             if explanation:
                 tool_message = explanation
 
-        # 发送工具执行过程消息
-        if self._stream_handler and self._stream_handler.is_streaming:
+        # 发送工具执行过程消息（流式传输且非最后终结工具时）
+        if self._stream_handler and self._stream_handler.is_streaming and not self.return_direct:
             if settings.AI_AGENT_VERBOSE:
                 if self._stream_handler.is_auto_flushing:
                     # 渠道支持编辑：工具消息追加到 buffer，由定时刷新推送
