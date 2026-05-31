@@ -64,6 +64,20 @@ class TestAgentPromptStyle(unittest.TestCase):
         self.assertIn("当前日期", prompt)
         self.assertNotIn("当前时间", prompt)
 
+    def test_base_prompt_requires_parallel_independent_tool_calls(self):
+        """核心提示词应明确要求并行执行互不依赖的工具调用。"""
+        prompt = prompt_manager.get_agent_prompt()
+
+        self.assertIn("Use parallel tool calls by default", prompt)
+        self.assertIn(
+            "issue all tool calls that can run without waiting for each other's results",
+            prompt,
+        )
+        self.assertIn(
+            "Keep tools sequential only when later arguments depend on earlier output",
+            prompt,
+        )
+
     def test_base_prompt_injects_available_shell_commands(self):
         """系统信息应注入 PATH 中已安装的常用命令，帮助 Agent 选择 execute_command。"""
         command_paths = {
