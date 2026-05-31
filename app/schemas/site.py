@@ -115,6 +115,15 @@ class SiteAuth(BaseModel):
     params: Optional[Dict[str, Union[int, str]]] = Field(default_factory=dict)
 
 
+class SiteCookieUpdate(BaseModel):
+    """
+    站点 Cookie 与 UA 更新请求。
+    """
+    username: str = Field(..., description="站点登录用户名")
+    password: str = Field(..., description="站点登录密码")
+    code: Optional[str] = Field(None, description="二步验证码或密钥")
+
+
 class SiteCategory(BaseModel):
     id: Optional[int] = None
     cat: Optional[str] = None

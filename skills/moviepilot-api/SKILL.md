@@ -1,7 +1,7 @@
 ---
 name: moviepilot-api
 version: 1
-description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 237 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
+description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 238 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
 ---
 
 # MoviePilot REST API
@@ -161,7 +161,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/subscribe/shares` | List shared subscriptions. Params: `name`, `page`, `count`, `genre_id`, `min_rating`, `max_rating`, `sort_type` |
 | GET | `/api/v1/subscribe/share/statistics` | Share statistics |
 
-### Site (24 endpoints)
+### Site (25 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -174,7 +174,8 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/site/cookiecloud` | Sync CookieCloud |
 | GET | `/api/v1/site/reset` | Reset sites |
 | POST | `/api/v1/site/priorities` | Batch update site priorities. Body: array |
-| GET | `/api/v1/site/cookie/{site_id}` | Update site cookie & UA. Params: `username`, `password`, `code` |
+| POST | `/api/v1/site/cookie/{site_id}` | Update site cookie & UA. Body: `SiteCookieUpdate` JSON |
+| GET | `/api/v1/site/cookie/{site_id}` | Legacy update site cookie & UA. Params: `username`, `password`, `code` |
 | POST | `/api/v1/site/userdata/{site_id}` | Refresh site user data |
 | GET | `/api/v1/site/userdata/{site_id}` | Get site user data. Params: `workdate` |
 | GET | `/api/v1/site/userdata/latest` | All sites latest user data |
