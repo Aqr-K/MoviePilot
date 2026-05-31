@@ -302,7 +302,8 @@ class _TerminalSessionManager:
         session.wait_task = asyncio.create_task(self._wait_pipe_process(session))
         return session
 
-    async def _read_pty(self, session: _TerminalSession) -> None:
+    @staticmethod
+    async def _read_pty(session: _TerminalSession) -> None:
         """持续从 PTY 读取增量输出。"""
         while session.master_fd is not None:
             try:
@@ -319,9 +320,9 @@ class _TerminalSessionManager:
                 break
             session.append_output("pty", data)
 
+    @staticmethod
     async def _read_pipe(
-        self,
-        session: _TerminalSession,
+            session: _TerminalSession,
         stream: asyncio.StreamReader,
         stream_name: str,
     ) -> None:
@@ -361,7 +362,8 @@ class _TerminalSessionManager:
         finally:
             await self._finish_reader_tasks(session)
 
-    async def _finish_reader_tasks(self, session: _TerminalSession) -> None:
+    @staticmethod
+    async def _finish_reader_tasks(session: _TerminalSession) -> None:
         """等待输出读取任务退出，超时后取消残留任务。"""
         if not session.reader_tasks:
             return

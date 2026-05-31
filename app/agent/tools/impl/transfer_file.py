@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 from app.schemas import FileItem, MediaType
 
@@ -54,6 +55,13 @@ class TransferFileInput(BaseModel):
 
 class TransferFileTool(MoviePilotTool):
     name: str = "transfer_file"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Transfer,
+        ToolTag.Library,
+        ToolTag.File,
+        ToolTag.Admin,
+    ]
     description: str = "Transfer/organize a file or directory to the media library. Automatically recognizes media information and organizes files according to configured rules. Supports custom target paths, media identification, and transfer modes."
     args_schema: Type[BaseModel] = TransferFileInput
     require_admin: bool = True

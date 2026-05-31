@@ -6,6 +6,7 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.search import SearchChain
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.sites import SitesHelper
@@ -29,6 +30,12 @@ class SearchTorrentsInput(BaseModel):
 
 class SearchTorrentsTool(MoviePilotTool):
     name: str = "search_torrents"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Resource,
+        ToolTag.Site,
+        ToolTag.Media,
+    ]
     description: str = ("Search for torrent files by media ID across configured indexer sites, cache the matched results, "
                         "and return available filter options for follow-up selection. "
                         "Requires tmdb_id or douban_id (can be obtained from search_media tool) for accurate matching.")

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.download import DownloadChain
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.log import logger
@@ -27,6 +28,10 @@ class QueryDownloadTasksInput(BaseModel):
 
 class QueryDownloadTasksTool(MoviePilotTool):
     name: str = "query_download_tasks"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Download,
+    ]
     description: str = "Query download status and list download tasks. Can query all active downloads, or search for specific tasks by hash, title, or tag. Shows download progress, completion status, tags, and task details from configured downloaders."
     args_schema: Type[BaseModel] = QueryDownloadTasksInput
 

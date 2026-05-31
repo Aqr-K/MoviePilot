@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional, Type, Union
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._system_setting_utils import (
     SettingSpec,
     get_default_list_match_field,
@@ -73,6 +74,12 @@ class UpdateSystemSettingsInput(BaseModel):
 
 class UpdateSystemSettingsTool(MoviePilotTool):
     name: str = "update_system_settings"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.System,
+        ToolTag.Settings,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Update system settings across both the basic Settings module and all SystemConfig-backed categories. "
         "Supports full replacement, shallow dict merge, and generic list item upsert/remove so the agent can manage downloaders, media servers, notification channels, storages, directories, search-site ranges, subscribe-site ranges, site auth params, AI agent config, and other system settings through one tool."

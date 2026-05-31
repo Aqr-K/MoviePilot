@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.workflow import WorkflowChain
 from app.db import AsyncSessionFactory
 from app.db.workflow_oper import WorkflowOper
@@ -27,6 +28,11 @@ class RunWorkflowInput(BaseModel):
 
 class RunWorkflowTool(MoviePilotTool):
     name: str = "run_workflow"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Workflow,
+        ToolTag.Admin,
+    ]
     description: str = "Execute a specific workflow manually by workflow ID. Supports running from the beginning or continuing from the last executed action."
     args_schema: Type[BaseModel] = RunWorkflowInput
     require_admin: bool = True

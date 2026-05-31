@@ -6,6 +6,7 @@ from typing import Optional, Type, List
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._filter_rule_utils import (
     get_builtin_rules,
     serialize_builtin_rule,
@@ -27,6 +28,10 @@ class QueryBuiltinFilterRulesInput(BaseModel):
 
 class QueryBuiltinFilterRulesTool(MoviePilotTool):
     name: str = "query_builtin_filter_rules"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.FilterRule,
+    ]
     description: str = (
         "Query built-in filter rules defined by the backend filter module. "
         "These rule IDs can be used directly inside rule_string expressions for filter rule groups. "

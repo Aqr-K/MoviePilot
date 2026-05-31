@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool
 from pydantic import PrivateAttr
 
 from app.agent import StreamingHandler
+from app.agent.tools.tags import ToolTag
 from app.chain import ChainBase
 from app.core.config import settings
 from app.db.user_oper import UserOper
@@ -132,6 +133,27 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         self._session_id = session_id
         self._user_id = user_id
         self._require_admin = getattr(self.__class__, "require_admin", False)
+        self.tags = self._build_tool_tags()
+
+    @staticmethod
+    def _normalize_tag_values(tags: Optional[Any]) -> set[str]:
+        """规范化 LangChain 工具标签。"""
+        if not tags:
+            return set()
+        if isinstance(tags, (str, ToolTag)):
+            tags = [tags]
+        normalized_tags = set()
+        for tag in tags:
+            if isinstance(tag, ToolTag):
+                normalized_tags.add(tag.value)
+            elif tag:
+                normalized_tags.add(str(tag))
+        return normalized_tags
+
+    def _build_tool_tags(self) -> list[str]:
+        """规范化工具实现中显式声明的标签。"""
+        explicit_tags = self._normalize_tag_values(getattr(self, "tags", None))
+        return sorted(explicit_tags | {ToolTag.AgentTool.value})
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("MoviePilotTool 只支持异步调用，请使用 _arun")

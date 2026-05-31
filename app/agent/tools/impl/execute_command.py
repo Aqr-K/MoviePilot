@@ -14,7 +14,8 @@ from typing import Any, Literal, Optional, TextIO, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
-from app.agent.tools.impl.terminal_session import (
+from app.agent.tools.tags import ToolTag
+from app.agent.tools.impl._terminal_session import (
     TERMINAL_DEFAULT_READ_BYTES,
     TERMINAL_MAX_READ_BYTES,
     TERMINAL_WAIT_DEFAULT_MS,
@@ -200,6 +201,11 @@ class ExecuteCommandTool(MoviePilotTool):
     """统一执行和管理 Shell 命令的 Agent 工具。"""
 
     name: str = "execute_command"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Command,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Start and manage shell commands on the server. By default action=start "
         "launches a background session and immediately returns session_id/status/"

@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.media import MediaChain
 from app.log import logger
 from app.schemas.types import MediaType
@@ -25,6 +26,10 @@ class QueryMediaDetailInput(BaseModel):
 
 class QueryMediaDetailTool(MoviePilotTool):
     name: str = "query_media_detail"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Media,
+    ]
     description: str = "Query supplementary media details from TMDB by ID and media_type. Accepts tmdb_id or douban_id (at least one required). media_type accepts 'movie' or 'tv'. Returns non-duplicated detail fields such as status, genres, directors, actors, and season info for TV series."
     args_schema: Type[BaseModel] = QueryMediaDetailInput
 

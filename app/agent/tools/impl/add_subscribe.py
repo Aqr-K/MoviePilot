@@ -5,6 +5,7 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.subscribe import SubscribeChain
 from app.db.user_oper import UserOper
 from app.log import logger
@@ -72,6 +73,11 @@ class AddSubscribeInput(BaseModel):
 
 class AddSubscribeTool(MoviePilotTool):
     name: str = "add_subscribe"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Subscription,
+        ToolTag.Media,
+    ]
     description: str = (
         "Add media subscription to create automated download rules for movies and TV shows. "
         "The system will automatically search and download new episodes or releases based on the subscription criteria. "

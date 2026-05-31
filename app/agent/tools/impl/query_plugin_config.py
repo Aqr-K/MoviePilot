@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import get_plugin_snapshot
 from app.core.plugin import PluginManager
 from app.log import logger
@@ -24,6 +25,11 @@ class QueryPluginConfigInput(BaseModel):
 
 class QueryPluginConfigTool(MoviePilotTool):
     name: str = "query_plugin_config"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Plugin,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Query the saved configuration of an installed plugin. "
         "Returns the current saved config and, when available, the plugin's default config model. "

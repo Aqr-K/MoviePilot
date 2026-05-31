@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db import AsyncSessionFactory
 from app.db.models.transferhistory import TransferHistory
 from app.log import logger
@@ -24,6 +25,10 @@ class QueryTransferHistoryInput(BaseModel):
 
 class QueryTransferHistoryTool(MoviePilotTool):
     name: str = "query_transfer_history"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Transfer,
+    ]
     description: str = "Query file transfer history records. Shows transfer status, source and destination paths, media information, and transfer details. Supports filtering by title and status."
     args_schema: Type[BaseModel] = QueryTransferHistoryInput
 

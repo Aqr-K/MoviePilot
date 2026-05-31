@@ -9,6 +9,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.core.config import settings
 from app.log import logger
 
@@ -89,6 +90,10 @@ class BrowseWebpageInput(BaseModel):
 
 class BrowseWebpageTool(MoviePilotTool):
     name: str = "browse_webpage"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Web,
+    ]
     description: str = (
         "Control a real browser (Playwright) to interact with web pages. "
         "Supports navigating to URLs, reading page content, taking screenshots, "

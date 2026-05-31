@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db.site_oper import SiteOper
 from app.log import logger
 
@@ -26,6 +27,11 @@ class QuerySitesInput(BaseModel):
 
 class QuerySitesTool(MoviePilotTool):
     name: str = "query_sites"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Site,
+        ToolTag.Admin,
+    ]
     description: str = "Query site status and list all configured sites. Shows site name, domain, status, priority, and basic configuration. Site priority (pri): smaller values have higher priority (e.g., pri=1 has higher priority than pri=10)."
     require_admin: bool = True
     args_schema: Type[BaseModel] = QuerySitesInput

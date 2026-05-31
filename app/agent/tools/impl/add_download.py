@@ -7,6 +7,7 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
 from app.chain.download import DownloadChain
@@ -37,6 +38,11 @@ class AddDownloadInput(BaseModel):
 
 class AddDownloadTool(MoviePilotTool):
     name: str = "add_download"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Download,
+        ToolTag.Resource,
+    ]
     description: str = "Add torrent download tasks using refs from get_search_results or magnet links."
     args_schema: Type[BaseModel] = AddDownloadInput
 

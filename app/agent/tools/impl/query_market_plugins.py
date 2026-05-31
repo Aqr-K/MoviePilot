@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import (
     DEFAULT_PLUGIN_CANDIDATE_LIMIT,
     MAX_PLUGIN_CANDIDATE_LIMIT,
@@ -38,6 +39,11 @@ class QueryMarketPluginsInput(BaseModel):
 
 class QueryMarketPluginsTool(MoviePilotTool):
     name: str = "query_market_plugins"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Plugin,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Query available plugins from the plugin market and local plugin repositories. "
         "Can return the full plugin list or filter by keywords before install_plugin is used."

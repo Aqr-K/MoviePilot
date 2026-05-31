@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 
@@ -35,6 +36,11 @@ class SendMessageInput(BaseModel):
 
 class SendMessageTool(MoviePilotTool):
     name: str = "send_message"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Message,
+        ToolTag.Admin,
+    ]
     sends_message: bool = True
     description: str = "Send notification message to the user through configured notification channels (Telegram, Slack, WeChat, etc.). Supports optional image_url on channels that can send images. Used to inform users about operation results, errors, important updates, or proactively send a relevant image."
     args_schema: Type[BaseModel] = SendMessageInput

@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
@@ -18,6 +19,11 @@ class QueryDownloadersInput(BaseModel):
 
 class QueryDownloadersTool(MoviePilotTool):
     name: str = "query_downloaders"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Download,
+        ToolTag.Admin,
+    ]
     description: str = "Query downloader configuration and list all available downloaders. Shows downloader status, connection details, and configuration settings."
     require_admin: bool = True
     args_schema: Type[BaseModel] = QueryDownloadersInput

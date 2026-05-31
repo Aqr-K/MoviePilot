@@ -9,6 +9,7 @@ from ddgs import DDGS
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.core.config import settings
 from app.log import logger
 
@@ -82,6 +83,10 @@ class SearchWebTool(MoviePilotTool):
     """
 
     name: str = "search_web"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Web,
+    ]
     description: str = (
         "Search the web for information when you need current information, facts, "
         "or references. Supports DDGS-backed search engine selection, automatic "

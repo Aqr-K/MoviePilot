@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db import AsyncSessionFactory
 from app.db.models.site import Site
 from app.db.models.siteuserdata import SiteUserData
@@ -37,6 +38,11 @@ class QuerySiteUserdataInput(BaseModel):
 
 class QuerySiteUserdataTool(MoviePilotTool):
     name: str = "query_site_userdata"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Site,
+        ToolTag.Admin,
+    ]
     description: str = "Query user data for a specific site including username, user level, upload/download statistics, seeding information, bonus points, and other account details. Supports querying data for a specific date or latest data."
     require_admin: bool = True
     args_schema: Type[BaseModel] = QuerySiteUserdataInput

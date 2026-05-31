@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._filter_rule_utils import (
     build_custom_rule_map,
     collect_rule_group_usages,
@@ -50,6 +51,11 @@ class UpdateRuleGroupInput(BaseModel):
 
 class UpdateRuleGroupTool(MoviePilotTool):
     name: str = "update_rule_group"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.FilterRule,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Update a filter rule group. "
         "If the rule group name changes, its references in global search/subscription settings and per-subscription bindings are updated automatically. "

@@ -7,6 +7,7 @@ import cn2an
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.core.context import MediaInfo
 from app.helper.server import MoviePilotServerHelper
 from app.log import logger
@@ -30,6 +31,11 @@ class QueryPopularSubscribesInput(BaseModel):
 
 class QueryPopularSubscribesTool(MoviePilotTool):
     name: str = "query_popular_subscribes"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Subscription,
+        ToolTag.Recommendation,
+    ]
     description: str = "Query popular subscriptions based on user shared data. Shows media with the most subscribers, supports filtering by genre, rating, minimum subscribers, and pagination."
     args_schema: Type[BaseModel] = QueryPopularSubscribesInput
 

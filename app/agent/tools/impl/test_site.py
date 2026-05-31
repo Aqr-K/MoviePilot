@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.site import SiteChain
 from app.db.site_oper import SiteOper
 from app.log import logger
@@ -18,6 +19,10 @@ class TestSiteInput(BaseModel):
 
 class TestSiteTool(MoviePilotTool):
     name: str = "test_site"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Site,
+    ]
     description: str = "Test site connectivity and availability. This will check if a site is accessible and can be logged in. Accepts site ID only."
     args_schema: Type[BaseModel] = TestSiteInput
 

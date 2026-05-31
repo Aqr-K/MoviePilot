@@ -6,6 +6,7 @@ from typing import Optional, Type, List
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._filter_rule_utils import (
     collect_rule_group_usages,
     get_rule_groups,
@@ -32,6 +33,10 @@ class QueryRuleGroupsInput(BaseModel):
 
 class QueryRuleGroupsTool(MoviePilotTool):
     name: str = "query_rule_groups"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.FilterRule,
+    ]
     description: str = (
         "Query filter rule groups (过滤规则组 / 优先级规则组). "
         "Each rule group contains a rule_string made of built-in rules and/or custom rules. "

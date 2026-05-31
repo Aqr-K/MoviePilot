@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db import AsyncSessionFactory
 from app.db.models.subscribehistory import SubscribeHistory
 from app.log import logger
@@ -33,6 +34,10 @@ class QuerySubscribeHistoryInput(BaseModel):
 
 class QuerySubscribeHistoryTool(MoviePilotTool):
     name: str = "query_subscribe_history"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Subscription,
+    ]
     description: str = "Query subscription history records. Shows completed subscriptions with their details including name, type, rating, completion date, and other subscription information. Supports filtering by media type and name. Supports pagination with 20 records per page."
     args_schema: Type[BaseModel] = QuerySubscribeHistoryInput
 

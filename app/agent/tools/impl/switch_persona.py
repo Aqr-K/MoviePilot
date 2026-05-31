@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.runtime import agent_runtime_manager
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 
@@ -26,6 +27,10 @@ class SwitchPersonaInput(BaseModel):
 
 class SwitchPersonaTool(MoviePilotTool):
     name: str = "switch_persona"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Persona,
+    ]
     description: str = (
         "Switch the active persona (人格) used by the agent runtime. "
         "This change is persistent for future turns. "

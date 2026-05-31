@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._filter_rule_utils import (
     get_rule_groups,
     remove_rule_group_references,
@@ -25,6 +26,11 @@ class DeleteRuleGroupInput(BaseModel):
 
 class DeleteRuleGroupTool(MoviePilotTool):
     name: str = "delete_rule_group"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.FilterRule,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Delete a filter rule group from UserFilterRuleGroups. "
         "The tool also removes dangling references from global settings and subscriptions."

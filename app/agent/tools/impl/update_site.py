@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.core.event import eventmanager
 from app.db import AsyncSessionFactory
 from app.db.models.site import Site
@@ -66,6 +67,11 @@ class UpdateSiteInput(BaseModel):
 
 class UpdateSiteTool(MoviePilotTool):
     name: str = "update_site"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Site,
+        ToolTag.Admin,
+    ]
     description: str = "Update site configuration including URL, priority, authentication credentials (cookie, UA, API key), proxy settings, rate limits, and other site properties. Supports updating multiple site attributes at once. Site priority (pri): smaller values have higher priority (e.g., pri=1 has higher priority than pri=10)."
     args_schema: Type[BaseModel] = UpdateSiteInput
     require_admin: bool = True

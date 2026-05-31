@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.helper.server import MoviePilotServerHelper
 from app.log import logger
 
@@ -26,6 +27,10 @@ class QuerySubscribeSharesInput(BaseModel):
 
 class QuerySubscribeSharesTool(MoviePilotTool):
     name: str = "query_subscribe_shares"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Subscription,
+    ]
     description: str = "Query shared subscriptions from other users. Shows popular subscriptions shared by the community with filtering and pagination support."
     args_schema: Type[BaseModel] = QuerySubscribeSharesInput
 

@@ -7,6 +7,7 @@ from anyio import Path as AsyncPath
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 # 最大读取大小 50KB
@@ -22,6 +23,10 @@ class ReadFileInput(BaseModel):
 
 class ReadFileTool(MoviePilotTool):
     name: str = "read_file"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.File,
+    ]
     description: str = "Read the content of a text file. Supports reading by line range. Each read is limited to 50KB; content exceeding this limit will be truncated."
     args_schema: Type[BaseModel] = ReadFileInput
 

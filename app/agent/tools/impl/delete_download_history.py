@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db import AsyncSessionFactory
 from app.db.models.downloadhistory import DownloadHistory
 from app.log import logger
@@ -22,6 +23,11 @@ class DeleteDownloadHistoryInput(BaseModel):
 
 class DeleteDownloadHistoryTool(MoviePilotTool):
     name: str = "delete_download_history"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Download,
+        ToolTag.Admin,
+    ]
     description: str = "Delete a download history record by ID. This only removes the record from the database, does not delete any actual files."
     args_schema: Type[BaseModel] = DeleteDownloadHistoryInput
     require_admin: bool = True

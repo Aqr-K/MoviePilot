@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.log import logger
 
@@ -21,6 +22,11 @@ class DeleteTransferHistoryInput(BaseModel):
 
 class DeleteTransferHistoryTool(MoviePilotTool):
     name: str = "delete_transfer_history"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Transfer,
+        ToolTag.Admin,
+    ]
     description: str = "Delete a specific transfer history record by its ID. This is useful when you need to remove a failed transfer record before retrying the transfer, as the system skips files that already have transfer history."
     args_schema: Type[BaseModel] = DeleteTransferHistoryInput
     require_admin: bool = True

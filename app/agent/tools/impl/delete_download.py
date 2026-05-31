@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.download import DownloadChain
 from app.log import logger
 
@@ -29,6 +30,11 @@ class DeleteDownloadInput(BaseModel):
 
 class DeleteDownloadTool(MoviePilotTool):
     name: str = "delete_download"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Download,
+        ToolTag.Admin,
+    ]
     description: str = "Delete a download task from the downloader by task hash only. Optionally specify the downloader name and whether to delete downloaded files."
     args_schema: Type[BaseModel] = DeleteDownloadInput
     require_admin: bool = True

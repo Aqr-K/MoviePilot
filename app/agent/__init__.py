@@ -36,6 +36,11 @@ from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
+from app.agent.middleware.subagents import (
+    SUBAGENT_TASK_TOOL_NAME,
+    create_subagent_middlewares,
+    is_subagent_stream_metadata,
+)
 from app.agent.middleware.tool_selection import ToolSelectorMiddleware
 from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
@@ -774,6 +779,25 @@ class MoviePilotAgent:
             allow_message_tools=self.allow_message_tools,
         )
 
+    def _initialize_subagent_tools(self) -> List:
+        """
+        初始化子代理专用静默工具列表。
+        """
+        return MoviePilotToolFactory.create_tools(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            channel=self.channel,
+            source=self.source,
+            username=self.username,
+            stream_handler=None,
+            agent_context={
+                "user_reply_sent": False,
+                "reply_mode": None,
+                "should_dispatch_reply": False,
+            },
+            allow_message_tools=False,
+        )
+
     async def _create_agent(self, streaming: bool = False):
         """
         创建 LangGraph Agent（使用 create_agent + SummarizationMiddleware）
@@ -796,10 +820,21 @@ class MoviePilotAgent:
 
             # 工具列表
             tools = self._initialize_tools()
+            subagent_middlewares, subagent_task_tools = create_subagent_middlewares(
+                model=non_streaming_model,
+                tools=self._initialize_subagent_tools(),
+                stream_handler=self.stream_handler,
+            )
             max_tools = settings.LLM_MAX_TOOLS
             always_include_tools = (
                 MoviePilotToolFactory.get_tool_selector_always_include_names(tools)
             )
+            if subagent_task_tools:
+                always_include_tools.extend(
+                    tool.name
+                    for tool in subagent_task_tools
+                    if getattr(tool, "name", None) == SUBAGENT_TASK_TOOL_NAME
+                )
 
             # 中间件
             middlewares = [
@@ -822,6 +857,8 @@ class MoviePilotAgent:
                 ),
                 # 错误工具调用修复
                 PatchToolCallsMiddleware(),
+                # 子代理委派
+                *subagent_middlewares,
                 # 用量统计
                 UsageMiddleware(on_usage=self._record_usage),
             ]
@@ -839,7 +876,7 @@ class MoviePilotAgent:
                 middlewares.append(
                     ToolSelectorMiddleware(
                         model=non_streaming_model,
-                        selection_tools=tools,
+                        selection_tools=[*tools, *subagent_task_tools],
                         max_tools=max_tools,
                         always_include=always_include_tools,
                     )
@@ -942,6 +979,8 @@ class MoviePilotAgent:
         ):
             if chunk["type"] == "messages":
                 token, metadata = chunk["data"]
+                if is_subagent_stream_metadata(metadata):
+                    continue
                 if not token or not hasattr(token, "tool_call_chunks"):
                     continue
 

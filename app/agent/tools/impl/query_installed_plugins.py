@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import (
     DEFAULT_PLUGIN_CANDIDATE_LIMIT,
     MAX_PLUGIN_CANDIDATE_LIMIT,
@@ -34,6 +35,11 @@ class QueryInstalledPluginsInput(BaseModel):
 
 class QueryInstalledPluginsTool(MoviePilotTool):
     name: str = "query_installed_plugins"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Plugin,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Query installed plugins in MoviePilot. Returns all installed plugins or filters them by keywords. "
         "Use this tool to find the exact plugin_id before uninstall_plugin or other plugin management tools are used."

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.llm.capability import AgentCapabilityManager
 from app.agent.tools.base import MoviePilotTool, ToolChain
+from app.agent.tools.tags import ToolTag
 from app.core.config import settings
 from app.log import logger
 from app.schemas import Notification, NotificationType
@@ -29,6 +30,11 @@ class SendVoiceMessageTool(MoviePilotTool):
     """发送 Agent 语音回复的工具。"""
 
     name: str = "send_voice_message"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Message,
+        ToolTag.TerminalResponse,
+    ]
     sends_message: bool = True
     return_direct: bool = True
     description: str = (

@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._system_setting_utils import (
     SettingSpec,
     list_setting_specs,
@@ -56,6 +57,12 @@ class QuerySystemSettingsInput(BaseModel):
 
 class QuerySystemSettingsTool(MoviePilotTool):
     name: str = "query_system_settings"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.System,
+        ToolTag.Settings,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Query system settings across both the basic Settings module and all SystemConfig-backed categories. "
         "Use this tool to inspect downloaders, media servers, notification channels, storages, directories, search-site ranges, "

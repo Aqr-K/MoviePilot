@@ -35,6 +35,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
             patch.object(
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
+            patch.object(
+                agent_module, "create_subagent_middlewares", return_value=([], [])
+            ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
             patch.object(agent_module.settings, "LLM_MAX_TOOLS", 0),
         ):
@@ -94,6 +97,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
             patch.object(
+                agent_module, "create_subagent_middlewares", return_value=([], [])
+            ),
+            patch.object(
                 agent_module,
                 "ToolSelectorMiddleware",
                 _FakeToolSelectorMiddleware,
@@ -138,6 +144,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
             patch.object(
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
             ),
+            patch.object(
+                agent_module, "create_subagent_middlewares", return_value=([], [])
+            ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
             patch.object(agent_module.settings, "LLM_MAX_TOOLS", 0),
         ):
@@ -166,6 +175,9 @@ class TestAgentSummarizationStreaming(unittest.TestCase):
             patch.object(agent, "_initialize_tools", return_value=[]),
             patch.object(
                 agent_module.prompt_manager, "get_agent_prompt", return_value="prompt"
+            ),
+            patch.object(
+                agent_module, "create_subagent_middlewares", return_value=([], [])
             ),
             patch.object(agent_module, "create_agent", side_effect=_fake_create_agent),
             patch.object(agent_module.settings, "LLM_MAX_TOOLS", 0),

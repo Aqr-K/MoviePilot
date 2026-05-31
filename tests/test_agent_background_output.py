@@ -317,11 +317,13 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             user_id="system",
         )
         agent._initialize_tools = lambda: []
+        agent._initialize_subagent_tools = lambda: []
 
         with (
             patch.object(settings, "LLM_MAX_TOOLS", 0),
             patch.object(agent, "_initialize_llm", new=AsyncMock(return_value=object())),
             patch("app.agent.prompt_manager.get_agent_prompt", return_value="PROMPT"),
+            patch("app.agent.create_subagent_middlewares", return_value=([], [])),
             patch(
                 "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
                 return_value=[],
@@ -356,11 +358,13 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
     async def test_create_agent_keeps_activity_log_for_normal_session(self):
         agent = MoviePilotAgent(session_id="normal-session", user_id="system")
         agent._initialize_tools = lambda: []
+        agent._initialize_subagent_tools = lambda: []
 
         with (
             patch.object(settings, "LLM_MAX_TOOLS", 0),
             patch.object(agent, "_initialize_llm", new=AsyncMock(return_value=object())),
             patch("app.agent.prompt_manager.get_agent_prompt", return_value="PROMPT"),
+            patch("app.agent.create_subagent_middlewares", return_value=([], [])),
             patch(
                 "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
                 return_value=[],

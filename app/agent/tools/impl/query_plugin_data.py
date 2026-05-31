@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import (
     PLUGIN_DATA_KEY_PREVIEW_LIMIT,
     build_preview_payload,
@@ -36,6 +37,11 @@ class QueryPluginDataInput(BaseModel):
 
 class QueryPluginDataTool(MoviePilotTool):
     name: str = "query_plugin_data"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Plugin,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Query persisted data of an installed plugin. "
         "Optionally specify a key to read a single data item; otherwise all plugin data entries are returned. "

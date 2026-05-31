@@ -5,6 +5,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.core.event import eventmanager
 from app.db.subscribe_oper import SubscribeOper
 from app.helper.server import MoviePilotServerHelper
@@ -25,6 +26,11 @@ class DeleteSubscribeInput(BaseModel):
 
 class DeleteSubscribeTool(MoviePilotTool):
     name: str = "delete_subscribe"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Subscription,
+        ToolTag.Admin,
+    ]
     description: str = "Delete a media subscription by its ID. This will remove the subscription and stop automatic downloads for that media."
     args_schema: Type[BaseModel] = DeleteSubscribeInput
     require_admin: bool = True

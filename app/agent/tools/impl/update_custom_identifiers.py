@@ -6,6 +6,7 @@ from typing import List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
@@ -33,6 +34,11 @@ class UpdateCustomIdentifiersInput(BaseModel):
 
 class UpdateCustomIdentifiersTool(MoviePilotTool):
     name: str = "update_custom_identifiers"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.FilterRule,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Update the full list of custom identifiers (自定义识别词) used for preprocessing torrent/file names. "
         "This tool REPLACES all existing identifier rules with the provided list. "

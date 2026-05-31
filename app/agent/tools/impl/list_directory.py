@@ -8,6 +8,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.storage import StorageChain
 from app.log import logger
 from app.schemas.file import FileItem
@@ -24,6 +25,11 @@ class ListDirectoryInput(BaseModel):
 
 class ListDirectoryTool(MoviePilotTool):
     name: str = "list_directory"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Directory,
+        ToolTag.File,
+    ]
     description: str = "List actual files and folders in a file system directory (NOT configuration). Shows files and subdirectories with their names, types, sizes, and modification times. Returns up to 20 items and the total count if there are more items. Use 'query_directory_settings' to query directory configuration settings."
     args_schema: Type[BaseModel] = ListDirectoryInput
 

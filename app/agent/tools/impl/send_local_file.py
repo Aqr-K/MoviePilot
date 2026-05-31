@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.tools.base import MoviePilotTool, ToolChain
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 from app.schemas import Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
@@ -43,6 +44,11 @@ class SendLocalFileInput(BaseModel):
 
 class SendLocalFileTool(MoviePilotTool):
     name: str = "send_local_file"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Message,
+        ToolTag.File,
+    ]
     sends_message: bool = True
     description: str = (
         "Send a local image or file from the server filesystem to the current user. "

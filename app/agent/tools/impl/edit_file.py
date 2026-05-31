@@ -7,6 +7,7 @@ from anyio import Path as AsyncPath
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 
@@ -20,6 +21,11 @@ class EditFileInput(BaseModel):
 
 class EditFileTool(MoviePilotTool):
     name: str = "edit_file"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.File,
+        ToolTag.Admin,
+    ]
     description: str = "Edit a file by replacing specific old text with new text. Useful for modifying configuration files, code, or scripts."
     args_schema: Type[BaseModel] = EditFileInput
     require_admin: bool = True

@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 
@@ -18,6 +19,11 @@ class ListSlashCommandsInput(BaseModel):
 
 class ListSlashCommandsTool(MoviePilotTool):
     name: str = "list_slash_commands"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.SlashCommand,
+        ToolTag.Admin,
+    ]
     description: str = (
         "List all available slash commands in the system, including system preset commands "
         "(e.g. /cookiecloud, /sites, /subscribes, /downloading, /transfer, /restart, etc.) "

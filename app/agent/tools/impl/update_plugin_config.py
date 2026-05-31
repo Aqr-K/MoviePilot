@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import get_plugin_snapshot
 from app.core.plugin import PluginManager
 from app.log import logger
@@ -42,6 +43,11 @@ class UpdatePluginConfigInput(BaseModel):
 
 class UpdatePluginConfigTool(MoviePilotTool):
     name: str = "update_plugin_config"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Plugin,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Update the saved configuration of an installed plugin. "
         "By default this performs a partial merge update and does NOT reload the plugin automatically. "

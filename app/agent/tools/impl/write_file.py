@@ -7,6 +7,7 @@ from anyio import Path as AsyncPath
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 
@@ -19,6 +20,11 @@ class WriteFileInput(BaseModel):
 
 class WriteFileTool(MoviePilotTool):
     name: str = "write_file"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.File,
+        ToolTag.Admin,
+    ]
     description: str = "Write full content to a file. If the file already exists, it will be overwritten. Automatically creates parent directories if they don't exist."
     args_schema: Type[BaseModel] = WriteFileInput
     require_admin: bool = True

@@ -293,6 +293,8 @@ class StreamingHandler:
         tool_message = (tool_message or "").strip()
         tool_message_lower = tool_message.lower()
 
+        if tool_name == "task":
+            return "subagent", tool_kwargs.get("subagent_type")
         if tool_name == "read_file":
             return "file_read", tool_kwargs.get("file_path")
         if tool_name in {"write_file", "edit_file"}:
@@ -408,6 +410,8 @@ class StreamingHandler:
             return f"执行了 {count} 次操作"
         if category == "interaction":
             return f"发起了 {count} 次交互"
+        if category == "subagent":
+            return f"已调用 {count} 个子代理"
         return f"调用了 {count} 次工具"
 
     def _can_stream(self) -> bool:

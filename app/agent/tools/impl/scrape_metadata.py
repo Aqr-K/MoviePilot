@@ -7,6 +7,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.media import MediaChain
 from app.log import logger
 from app.schemas import FileItem
@@ -33,6 +34,13 @@ class ScrapeMetadataInput(BaseModel):
 
 class ScrapeMetadataTool(MoviePilotTool):
     name: str = "scrape_metadata"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Media,
+        ToolTag.Metadata,
+        ToolTag.File,
+        ToolTag.Admin,
+    ]
     description: str = "Generate metadata files (NFO files, posters, backgrounds, etc.) for existing media files or directories. Automatically recognizes media information from the file path and creates metadata files. Supports both local and remote storage. Use 'search_media' to search TMDB database, or 'recognize_media' to extract info from torrent titles/file paths without generating files."
     require_admin: bool = True
     args_schema: Type[BaseModel] = ScrapeMetadataInput

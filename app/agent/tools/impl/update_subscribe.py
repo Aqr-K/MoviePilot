@@ -6,6 +6,7 @@ from typing import Optional, Type, List
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.core.event import eventmanager
 from app.db import AsyncSessionFactory
 from app.db.models.subscribe import Subscribe
@@ -89,6 +90,11 @@ class UpdateSubscribeInput(BaseModel):
 
 class UpdateSubscribeTool(MoviePilotTool):
     name: str = "update_subscribe"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Subscription,
+        ToolTag.Admin,
+    ]
     description: str = "Update subscription properties including filters, episode counts, state, and other settings. Supports updating quality/resolution filters, episode tracking, subscription state, and download configuration."
     args_schema: Type[BaseModel] = UpdateSubscribeInput
     require_admin: bool = True

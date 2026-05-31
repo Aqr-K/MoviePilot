@@ -6,6 +6,7 @@ from typing import Optional, Type, List
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.subscribe import SubscribeChain
 from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
@@ -23,6 +24,12 @@ class SearchSubscribeInput(BaseModel):
 
 class SearchSubscribeTool(MoviePilotTool):
     name: str = "search_subscribe"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Write,
+        ToolTag.Subscription,
+        ToolTag.Resource,
+    ]
     description: str = "Search for missing episodes/resources for a specific subscription. This tool will search torrent sites for the missing episodes of the subscription and automatically download matching resources. Use this when a user wants to search for missing episodes of a specific subscription."
     args_schema: Type[BaseModel] = SearchSubscribeInput
 

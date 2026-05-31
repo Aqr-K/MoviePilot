@@ -5,6 +5,7 @@ from typing import Optional, Type, List
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.chain.download import DownloadChain
 from app.log import logger
 
@@ -37,6 +38,11 @@ class ModifyDownloadTool(MoviePilotTool):
     """修改下载任务工具"""
 
     name: str = "modify_download"
+    tags: list[str] = [
+        ToolTag.Write,
+        ToolTag.Download,
+        ToolTag.Admin,
+    ]
     description: str = (
         "Modify a download task in the downloader by task hash. "
         "Supports: 1) Setting tags on a download task, "

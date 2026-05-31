@@ -6,6 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
+from app.agent.tools.tags import ToolTag
 from app.db import AsyncSessionFactory
 from app.db.workflow_oper import WorkflowOper
 from app.log import logger
@@ -21,6 +22,10 @@ class QueryWorkflowsInput(BaseModel):
 
 class QueryWorkflowsTool(MoviePilotTool):
     name: str = "query_workflows"
+    tags: list[str] = [
+        ToolTag.Read,
+        ToolTag.Workflow,
+    ]
     description: str = "Query workflow list and status. Shows workflow name, description, trigger type, state, execution count, and other workflow details. Supports filtering by state, name, and trigger type."
     args_schema: Type[BaseModel] = QueryWorkflowsInput
 
