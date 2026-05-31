@@ -37,6 +37,7 @@ from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
 from app.agent.middleware.skills import SkillsMiddleware
 from app.agent.middleware.subagents import (
+    SUBAGENT_CONTROL_TOOL_NAME,
     SUBAGENT_TASK_TOOL_NAME,
     create_subagent_middlewares,
     is_subagent_stream_metadata,
@@ -833,7 +834,8 @@ class MoviePilotAgent:
                 always_include_tools.extend(
                     tool.name
                     for tool in subagent_task_tools
-                    if getattr(tool, "name", None) == SUBAGENT_TASK_TOOL_NAME
+                    if getattr(tool, "name", None)
+                    in {SUBAGENT_TASK_TOOL_NAME, SUBAGENT_CONTROL_TOOL_NAME}
                 )
 
             # 中间件
