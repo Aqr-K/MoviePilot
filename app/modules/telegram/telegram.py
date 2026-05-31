@@ -47,7 +47,7 @@ class Telegram:
     _typing_lock = threading.RLock()
     _typing_interval_seconds = 5
     _typing_initial_delay_seconds = 1
-    _typing_max_duration_seconds = 5 * 60
+    _typing_max_duration_seconds = 10 * 60
     _typing_command_max_duration_seconds = 30
     _typing_callback_max_duration_seconds = 60
 
