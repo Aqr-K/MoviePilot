@@ -83,7 +83,7 @@ class Discord:
         self._typing_stop_events: Dict[str, asyncio.Event] = {}
         self._typing_interval_seconds = 5
         self._typing_initial_delay_seconds = 1
-        self._typing_max_duration_seconds = 5 * 60
+        self._typing_max_duration_seconds = 10 * 60
 
         self._register_events()
         self._start()
