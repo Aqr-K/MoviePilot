@@ -10,6 +10,7 @@ from app.agent import (
     AgentManager,
     ReplyMode,
     UNSUPPORTED_IMAGE_INPUT_MESSAGE,
+    _MessageTask,
 )
 from app.agent.memory import memory_manager
 from app.agent.tools.factory import MoviePilotToolFactory
@@ -287,6 +288,28 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             await manager.heartbeat_check_jobs()
 
         process_message.assert_not_awaited()
+
+    async def test_agent_manager_preserves_voice_input_flag(self):
+        """会话队列执行时应把语音输入标记继续传给 Agent。"""
+        manager = AgentManager()
+        agent = MoviePilotAgent(session_id="session-1", user_id="user-1")
+        manager.active_agents["session-1"] = agent
+        agent.process = AsyncMock(return_value="ok")
+        task = _MessageTask(
+            session_id="session-1",
+            user_id="user-1",
+            message="帮我推荐一部电影",
+            has_audio_input=True,
+        )
+
+        await manager._process_message_internal(task)
+
+        agent.process.assert_awaited_once_with(
+            "帮我推荐一部电影",
+            images=None,
+            files=None,
+            has_audio_input=True,
+        )
 
     async def test_create_agent_excludes_activity_log_for_heartbeat_session(self):
         agent = MoviePilotAgent(

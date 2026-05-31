@@ -350,6 +350,7 @@ class MessageChain(ChainBase):
                 original_chat_id=original_chat_id,
                 images=images,
                 files=files,
+                has_audio_input=has_audio_input,
             )
 
         if (
@@ -366,6 +367,7 @@ class MessageChain(ChainBase):
                 original_chat_id=original_chat_id,
                 images=images,
                 files=files,
+                has_audio_input=has_audio_input,
             )
 
         if MediaInteractionChain().handle_text_interaction(
@@ -1204,6 +1206,7 @@ class MessageChain(ChainBase):
             images: Optional[List[CommingMessage.MessageImage]] = None,
             files: Optional[List[CommingMessage.MessageAttachment]] = None,
             session_id: Optional[str] = None,
+            has_audio_input: bool = False,
     ) -> bool:
         """
         处理AI智能体消息
@@ -1317,6 +1320,8 @@ class MessageChain(ChainBase):
                 else None,
                 "original_chat_id": original_chat_id,
             }
+            if has_audio_input:
+                process_kwargs["has_audio_input"] = True
             # 在事件循环中处理
             asyncio.run_coroutine_threadsafe(
                 agent_manager.process_message(**process_kwargs),

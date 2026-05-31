@@ -861,6 +861,7 @@ class MoviePilotAgent:
             message: str,
             images: List[str] = None,
             files: Optional[List[dict]] = None,
+            has_audio_input: bool = False,
     ) -> str:
         """
         处理用户消息，流式推理并返回 Agent 回复
@@ -868,7 +869,8 @@ class MoviePilotAgent:
         try:
             logger.info(
                 f"Agent推理: session_id={self.session_id}, input={message}, "
-                f"images={len(images) if images else 0}, files={len(files) if files else 0}"
+                f"images={len(images) if images else 0}, files={len(files) if files else 0}, "
+                f"audio_input={has_audio_input}"
             )
             self._tool_context = {
                 "user_reply_sent": False,
@@ -885,6 +887,10 @@ class MoviePilotAgent:
             # 构建结构化用户消息内容
             request_payload = {
                 "message": message or "",
+                "input": {
+                    "mode": "voice" if has_audio_input else "text",
+                    "transcribed": bool(has_audio_input),
+                },
                 "images": [
                     {"index": index + 1, "type": "image"}
                     for index, _ in enumerate(images or [])
@@ -1187,6 +1193,7 @@ class _MessageTask:
     message: str
     images: Optional[List[str]] = None
     files: Optional[List[dict]] = None
+    has_audio_input: bool = False
     channel: Optional[str] = None
     source: Optional[str] = None
     username: Optional[str] = None
@@ -1333,6 +1340,7 @@ class AgentManager:
             message: str,
             images: List[str] = None,
             files: Optional[List[dict]] = None,
+            has_audio_input: bool = False,
             channel: str = None,
             source: str = None,
             username: str = None,
@@ -1352,6 +1360,7 @@ class AgentManager:
             message=message,
             images=images,
             files=files,
+            has_audio_input=has_audio_input,
             channel=channel,
             source=source,
             username=username,
@@ -1488,7 +1497,13 @@ class AgentManager:
             agent.persist_output_message = task.persist_output_message
             agent.allow_message_tools = task.allow_message_tools
 
-        return await agent.process(task.message, images=task.images, files=task.files)
+        process_kwargs = {
+            "images": task.images,
+            "files": task.files,
+        }
+        if task.has_audio_input:
+            process_kwargs["has_audio_input"] = True
+        return await agent.process(task.message, **process_kwargs)
 
     async def stop_current_task(self, session_id: str):
         """

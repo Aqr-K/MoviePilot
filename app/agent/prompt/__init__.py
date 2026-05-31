@@ -396,7 +396,12 @@ class PromptManager:
         return (
             "Use normal text replies by default. Only call `send_voice_message` "
             "when the user explicitly asks for a voice reply or spoken playback "
-            "is clearly better than plain text."
+            "is clearly better than plain text. `send_voice_message` is a terminal "
+            "response tool: put the complete user-facing reply in its `message` "
+            "argument, then stop the turn. Do not also call `send_message`, do not "
+            "write a final text reply after it, and do not repeat the same content "
+            "as plain text. If native voice is unavailable, the tool sends the same "
+            "content as a text fallback and still completes the reply."
         )
 
     @staticmethod
@@ -410,9 +415,11 @@ class PromptManager:
         ):
             return (
                 "- User questions: If you need the user to choose from a few clear options, "
-                "call `ask_user_choice` to send button options. After the user clicks a button, "
-                "the selected value will come back as the user's next message. After calling this tool, "
-                "wait for the user's selection instead of repeating the question in plain text."
+                "call `ask_user_choice` to send button options. `ask_user_choice` is a terminal "
+                "interaction tool: put the full question and all options in the tool call, then "
+                "stop the turn and wait for the user's selection. The selected value will come back "
+                "as the user's next message. Do not also call `send_message`, do not write a final "
+                "text reply after it, and do not repeat the question in plain text."
             )
         return "- User questions: When you truly need user input, ask briefly in plain text."
 

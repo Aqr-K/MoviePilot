@@ -35,7 +35,9 @@ class SendVoiceMessageTool(MoviePilotTool):
         "Send a voice reply to the current user. Use this only when the user explicitly asks for "
         "a voice reply or when spoken playback is clearly better than plain text. On channels "
         "without voice support or when TTS is unavailable, it automatically falls back to sending "
-        "the same content as plain text."
+        "the same content as plain text. This is a terminal response tool: put the complete "
+        "user-facing reply in `message`; after this tool runs, do not send another text reply "
+        "or call `send_message` with the same content."
     )
     args_schema: Type[BaseModel] = SendVoiceMessageInput
     require_admin: bool = False

@@ -441,7 +441,9 @@ class TestAgentToolStreaming(unittest.TestCase):
             self.assertEqual(notification.channel, channel)
             self.assertEqual(notification.voice_path, "/tmp/reply.opus")
             self.assertEqual(notification.voice_caption, "你好")
-            self.assertTrue(SendVoiceMessageTool.return_direct)
+            voice_tool = SendVoiceMessageTool(session_id="session-1", user_id="10001")
+            self.assertTrue(voice_tool.return_direct)
+            self.assertIn("terminal response tool", voice_tool.description)
 
     def test_send_voice_message_falls_back_for_unsupported_channels(self):
         """校验不支持语音输出的渠道继续回退为文字消息。"""

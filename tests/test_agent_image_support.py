@@ -242,6 +242,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         handle_ai_message.assert_called_once()
         self.assertEqual(handle_ai_message.call_args.kwargs["text"], "帮我推荐一部电影")
+        self.assertTrue(handle_ai_message.call_args.kwargs["has_audio_input"])
         self.assertNotIn("reply_with_voice", handle_ai_message.call_args.kwargs)
 
     def test_file_message_routes_to_agent_even_when_global_agent_is_disabled(self):
@@ -390,7 +391,35 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertIsInstance(content, list)
         payload = json.loads(content[0]["text"])
         self.assertEqual(payload["message"], "帮我总结这个文件")
+        self.assertEqual(payload["input"]["mode"], "text")
+        self.assertFalse(payload["input"]["transcribed"])
         self.assertEqual(payload["files"][0]["local_path"], "/tmp/report.txt")
+
+    def test_agent_process_marks_voice_input_in_structured_json(self):
+        """语音输入应在结构化消息中标记为转写来源。"""
+        agent = MoviePilotAgent(
+            session_id="session-1",
+            user_id="user-1",
+            channel=MessageChannel.Telegram.value,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch(
+            "app.agent.memory.memory_manager.get_agent_messages", return_value=[]
+        ), patch.object(agent, "_execute_agent", new_callable=AsyncMock) as execute_agent:
+            asyncio.run(
+                agent.process(
+                    "帮我推荐一部电影",
+                    has_audio_input=True,
+                )
+            )
+
+        messages = execute_agent.await_args.args[0]
+        payload = json.loads(messages[-1].content[0]["text"])
+        self.assertEqual(payload["message"], "帮我推荐一部电影")
+        self.assertEqual(payload["input"]["mode"], "voice")
+        self.assertTrue(payload["input"]["transcribed"])
 
     def test_llm_supports_image_input_respects_explicit_override(self):
         with patch.object(settings, "LLM_SUPPORT_IMAGE_INPUT", False):
@@ -446,6 +475,29 @@ class AgentImageSupportTest(unittest.TestCase):
             process_message.call_args.kwargs["files"][0]["local_path"],
             "/tmp/image_1.jpg",
         )
+
+    def test_handle_ai_message_forwards_voice_input_to_agent_manager(self):
+        """AI消息入队时应保留语音输入标记。"""
+        chain = MessageChain()
+
+        with patch.object(settings, "AI_AGENT_ENABLE", True), patch.object(
+            chain, "_get_or_create_session_id", return_value="session-1"
+        ), patch(
+            "app.chain.message.agent_manager.process_message", new_callable=AsyncMock
+        ) as process_message, patch(
+            "app.chain.message.asyncio.run_coroutine_threadsafe",
+            side_effect=lambda coro, _loop: (coro.close(), Mock())[1],
+        ):
+            chain._handle_ai_message(
+                text="帮我推荐一部电影",
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                has_audio_input=True,
+            )
+
+        self.assertTrue(process_message.call_args.kwargs["has_audio_input"])
 
     def test_slack_images_use_authenticated_data_url_download(self):
         chain = MessageChain()

@@ -30,6 +30,8 @@ class TestAgentInteraction(unittest.TestCase):
         )
 
         self.assertIn("ask_user_choice", telegram_prompt)
+        self.assertIn("terminal interaction tool", telegram_prompt)
+        self.assertIn("do not write a final text reply after it", telegram_prompt)
         self.assertNotIn("ask_user_choice", wechat_prompt)
 
     def test_factory_injects_choice_tool_only_for_button_channels(self):
@@ -60,6 +62,7 @@ class TestAgentInteraction(unittest.TestCase):
         tool = AskUserChoiceTool(session_id="session-1", user_id="10001")
 
         self.assertTrue(tool.return_direct)
+        self.assertIn("terminal interaction tool", tool.description)
 
     def test_choice_tool_sends_buttons_and_registers_pending_request(self):
         tool = AskUserChoiceTool(session_id="session-1", user_id="10001")
