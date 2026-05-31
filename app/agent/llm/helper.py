@@ -87,7 +87,7 @@ def _patch_gemini_thought_signature():
         # 补丁 2：修复 _parse_chat_history 中 first_fc_seen 只修复第一个
         # function_call 的问题。用 wrapper 在原函数返回后，确保所有 model
         # 消息中所有 function_call 都带有 thought_signature。
-        _original_parse_chat_history = _cm._parse_chat_history
+        _original_parse_chat_history = _cm._parse_chat_history  # noqa
 
         def _patched_parse_chat_history(*args, **kwargs):
             result = _original_parse_chat_history(*args, **kwargs)
@@ -498,13 +498,13 @@ def _patch_openai_responses_empty_output_support():
         if callable(model_copy):
             try:
                 return model_copy(update={"output": []})
-            except Exception as err:
-                logger.debug(f"复制 Responses 对象失败，回退原地修补 output：{err}")
+            except Exception as e:
+                logger.debug(f"复制 Responses 对象失败，回退原地修补 output：{e}")
 
         try:
             setattr(response, "output", [])
-        except Exception as err:
-            logger.debug(f"原地修补 Responses output 失败：{err}")
+        except Exception as e:
+            logger.debug(f"原地修补 Responses output 失败：{e}")
         return response
 
     @wraps(original_construct)

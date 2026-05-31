@@ -1539,7 +1539,7 @@ class AgentManager:
                 await self._session_workers[session_id]
             except asyncio.CancelledError:
                 pass
-            self._session_workers.pop(session_id, None)
+            self._session_workers.pop(session_id, None)  # noqa
 
         # 清理队列
         self._session_queues.pop(session_id, None)

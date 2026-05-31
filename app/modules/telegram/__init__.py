@@ -610,6 +610,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         :param text: 新的消息内容
         :param title: 消息标题
         :param buttons: 新的按钮列表
+        :param metadata: 其他元信息
         :return: 编辑是否成功
         """
         if channel != self._channel:
