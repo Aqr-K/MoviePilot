@@ -562,6 +562,12 @@ class DownloadChain(ChainBase):
                 return set()
             return set(_context.located_episodes)
 
+        def __get_movie_download_key(_context: Context) -> str:
+            """
+            获取电影下载去重键，确保失败候选不会阻断后续同名资源尝试。
+            """
+            return _context.media_info.title_year
+
         # 发送资源选择事件，允许外部修改上下文数据
         logger.debug(f"Initial contexts: {len(contexts)} items, Downloader: {downloader}")
         event_data = ResourceSelectionEventData(
@@ -578,14 +584,18 @@ class DownloadChain(ChainBase):
                              f"{len(event_data.updated_contexts)} items (source: {event_data.source})")
                 contexts = event_data.updated_contexts
 
-        # 分组排序
-        contexts = TorrentHelper().sort_group_torrents(contexts)
+        # 仅排序，不提前按媒体控重；下载失败时需要继续尝试同组后续候选。
+        contexts = TorrentHelper().sort_torrents(contexts)
 
         # 如果是电影，直接下载
+        downloaded_movies = set()
         for context in contexts:
             if global_vars.is_system_stopped:
                 break
             if context.media_info.type == MediaType.MOVIE:
+                movie_key = __get_movie_download_key(context)
+                if movie_key in downloaded_movies:
+                    continue
                 logger.info(f"开始下载电影 {context.torrent_info.title} ...")
                 if self.download_single(context, save_path=save_path, channel=channel,
                                         source=source, userid=userid, username=username,
@@ -593,6 +603,7 @@ class DownloadChain(ChainBase):
                     # 下载成功
                     logger.info(f"{context.torrent_info.title} 添加下载成功")
                     downloaded_list.append(context)
+                    downloaded_movies.add(movie_key)
 
         # 电视剧整季匹配
         if no_exists:

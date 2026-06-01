@@ -105,8 +105,30 @@ class _FakeBatchTorrentHelper:
 
     episodes = []
 
-    def sort_group_torrents(self, contexts):
+    def sort_torrents(self, contexts):
+        """
+        保持测试输入顺序，避免依赖真实站点优先级配置。
+        """
         return contexts
+
+    def sort_group_torrents(self, contexts):
+        """
+        模拟真实提前控重行为，回归时会丢掉同一媒体季集的后续候选。
+        """
+        results = []
+        added = set()
+        for context in contexts:
+            media = context.media_info
+            meta = context.meta_info
+            if media.type == MediaType.TV:
+                media_name = f"{media.title_year}{meta.season_episode}"
+            else:
+                media_name = media.title_year
+            if media_name in added:
+                continue
+            added.add(media_name)
+            results.append(context)
+        return results
 
     def get_torrent_episodes(self, _files):
         return list(self.episodes)
@@ -118,9 +140,15 @@ def _build_tv_context(episode_list=None):
     """
     episodes = episode_list or []
     return SimpleNamespace(
-        media_info=SimpleNamespace(type=MediaType.TV, tmdb_id=1, douban_id=None),
+        media_info=SimpleNamespace(
+            type=MediaType.TV,
+            title_year="Test Show (2026)",
+            tmdb_id=1,
+            douban_id=None,
+        ),
         meta_info=SimpleNamespace(
             season_list=[1],
+            season_episode="S01E01",
             episode_list=episodes,
             title="Test Show",
             org_string="Test Show S01 2160p",
@@ -162,6 +190,74 @@ def test_batch_download_rejects_complete_coverage_when_files_do_not_cover_target
     assert downloads == []
     assert lefts == no_exists
     chain.download_single.assert_not_called()
+
+
+def test_batch_download_tries_next_episode_candidate_when_first_download_fails(monkeypatch):
+    """
+    同一季集的首个候选下载失败时，应继续尝试排序后的下一个候选资源。
+    """
+    _FakeBatchTorrentHelper.episodes = []
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_single = MagicMock(side_effect=[None, "hash"])
+
+    first_context = _build_tv_context(episode_list=[1])
+    first_context.torrent_info.title = "Test Show S01E01 First"
+    second_context = _build_tv_context(episode_list=[1])
+    second_context.torrent_info.title = "Test Show S01E01 Second"
+    no_exists = {
+        1: {
+            1: NotExistMediaInfo(
+                season=1,
+                episodes=[1],
+                total_episode=1,
+                start_episode=1,
+            )
+        }
+    }
+
+    downloads, lefts = chain.batch_download(
+        contexts=[first_context, second_context],
+        no_exists=no_exists,
+    )
+
+    assert downloads == [second_context]
+    assert lefts == {}
+    assert chain.download_single.call_count == 2
+    assert chain.download_single.call_args_list[0].args[0] is first_context
+    assert chain.download_single.call_args_list[1].args[0] is second_context
+
+
+def test_batch_download_does_not_download_duplicate_movie_after_success(monkeypatch):
+    """
+    电影保留失败重试能力，但同一影片成功一次后不应继续添加后续候选。
+    """
+    _FakeBatchTorrentHelper.episodes = []
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_single = MagicMock(return_value="hash")
+
+    first_context = SimpleNamespace(
+        media_info=SimpleNamespace(type=MediaType.MOVIE, title_year="Demo Movie (2026)"),
+        meta_info=SimpleNamespace(season_episode=""),
+        torrent_info=SimpleNamespace(title="Demo Movie First"),
+    )
+    second_context = SimpleNamespace(
+        media_info=SimpleNamespace(type=MediaType.MOVIE, title_year="Demo Movie (2026)"),
+        meta_info=SimpleNamespace(season_episode=""),
+        torrent_info=SimpleNamespace(title="Demo Movie Second"),
+    )
+
+    downloads, lefts = chain.batch_download(contexts=[first_context, second_context])
+
+    assert downloads == [first_context]
+    assert lefts is None
+    chain.download_single.assert_called_once()
+    assert chain.download_single.call_args.args[0] is first_context
 
 
 def test_batch_download_accepts_complete_coverage_when_files_cover_target_range(monkeypatch):
