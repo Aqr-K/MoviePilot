@@ -146,6 +146,62 @@ def register_plugin(plugin_id: str):
     register_plugin_api(plugin_id)
 
 
+def _merge_plugin_market_metadata(
+    plugin: schemas.Plugin, market_plugin: schemas.Plugin
+) -> schemas.Plugin:
+    """
+    合并插件市场中的远端元数据，供已安装插件按需展示更新说明。
+    """
+    plugin.repo_url = market_plugin.repo_url or plugin.repo_url
+    plugin.history = market_plugin.history or {}
+    plugin.has_update = market_plugin.has_update
+    plugin.system_version = market_plugin.system_version or plugin.system_version
+    plugin.system_version_compatible = market_plugin.system_version_compatible
+    plugin.system_version_message = (
+        market_plugin.system_version_message or plugin.system_version_message
+    )
+    return plugin
+
+
+async def _get_plugin_history_detail(
+    plugin_id: str, force: bool = True
+) -> Optional[schemas.Plugin]:
+    """
+    按需获取插件远端元数据，避免插件列表加载时批量访问网络。
+    """
+    plugin_manager = PluginManager()
+    installed_plugin = next(
+        (
+            plugin
+            for plugin in plugin_manager.get_local_plugins()
+            if plugin.id == plugin_id and plugin.installed
+        ),
+        None,
+    )
+    if not installed_plugin:
+        return None
+
+    local_repo_plugin = next(
+        (plugin for plugin in plugin_manager.get_local_repo_plugins() if plugin.id == plugin_id),
+        None,
+    )
+    if local_repo_plugin:
+        return _merge_plugin_market_metadata(installed_plugin, local_repo_plugin)
+
+    market_plugin = next(
+        (
+            plugin
+            for plugin in await plugin_manager.async_get_online_plugins(force=force)
+            if plugin.id == plugin_id
+        ),
+        None,
+    )
+    if not market_plugin:
+        return installed_plugin
+
+    return _merge_plugin_market_metadata(installed_plugin, market_plugin)
+
+
 @router.get("/", summary="所有插件", response_model=List[schemas.Plugin])
 async def all_plugins(
     _: User = Depends(get_current_active_superuser_async),
@@ -211,6 +267,24 @@ async def installed(_: User = Depends(get_current_active_superuser_async)) -> An
     查询用户已安装插件清单
     """
     return SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+
+
+@router.get("/history/{plugin_id}", summary="获取插件更新说明", response_model=schemas.Plugin)
+async def plugin_history(
+    plugin_id: str,
+    _: User = Depends(get_current_active_superuser_async),
+    force: bool = True,
+) -> schemas.Plugin:
+    """
+    按需获取指定插件的更新说明。
+    """
+    plugin = await _get_plugin_history_detail(plugin_id=plugin_id, force=force)
+    if not plugin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 不存在或未安装",
+        )
+    return plugin
 
 
 @router.get("/statistic", summary="插件安装统计", response_model=dict)
