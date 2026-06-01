@@ -241,14 +241,7 @@ class BangumiModule(_ModuleBase):
         """
         personinfo = self.bangumiapi.person_detail(person_id)
         if personinfo:
-            return schemas.MediaPerson(source='bangumi', **{
-                "id": personinfo.get("id"),
-                "name": personinfo.get("name"),
-                "images": personinfo.get("images"),
-                "biography": personinfo.get("summary"),
-                "birthday": personinfo.get("birth_day"),
-                "gender": personinfo.get("gender")
-            })
+            return self._build_person_detail(personinfo)
         return None
 
     async def async_bangumi_person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
@@ -258,15 +251,35 @@ class BangumiModule(_ModuleBase):
         """
         personinfo = await self.bangumiapi.async_person_detail(person_id)
         if personinfo:
-            return schemas.MediaPerson(source='bangumi', **{
-                "id": personinfo.get("id"),
-                "name": personinfo.get("name"),
-                "images": personinfo.get("images"),
-                "biography": personinfo.get("summary"),
-                "birthday": personinfo.get("birth_day"),
-                "gender": personinfo.get("gender")
-            })
+            return self._build_person_detail(personinfo)
         return None
+
+    @classmethod
+    def _build_person_detail(cls, personinfo: dict) -> schemas.MediaPerson:
+        """
+        构造Bangumi人物详情信息。
+        :param personinfo: Bangumi人物详情接口返回数据
+        :return: 媒体人物信息
+        """
+        return schemas.MediaPerson(source='bangumi', **{
+            "id": personinfo.get("id"),
+            "name": personinfo.get("name"),
+            "images": personinfo.get("images"),
+            "biography": personinfo.get("summary"),
+            "birthday": cls._normalize_optional_string(personinfo.get("birth_day")),
+            "gender": personinfo.get("gender")
+        })
+
+    @staticmethod
+    def _normalize_optional_string(value: object) -> Optional[str]:
+        """
+        规范化Bangumi接口中可能返回非字符串的可选文本字段。
+        :param value: 原始字段值
+        :return: 字符串字段值或None
+        """
+        if value is None:
+            return None
+        return str(value)
 
     def bangumi_person_credits(self, person_id: int) -> List[MediaInfo]:
         """
