@@ -670,6 +670,11 @@ class AgentCapabilityManager:
     def _normalize_provider_name(provider: Optional[str]) -> str:
         return (provider or "openai").strip().lower()
 
+    @staticmethod
+    def _get_provider_log_name(provider: AudioCapabilityProvider) -> str:
+        provider_name = getattr(provider, "name", None)
+        return provider_name if isinstance(provider_name, str) else provider.__class__.__name__
+
     @classmethod
     def get_audio_provider(cls, mode: str) -> Optional[AudioCapabilityProvider]:
         provider_name = cls._normalize_provider_name(
@@ -714,17 +719,45 @@ class AgentCapabilityManager:
 
     @classmethod
     def transcribe_audio(cls, content: bytes, filename: str = "input.ogg") -> Optional[str]:
+        """将语音文件内容转写为文字，并记录能力调用日志。"""
         provider = cls.get_audio_provider("input")
         if not provider or not cls.is_audio_input_available():
+            logger.info("语音转文字跳过：音频输入能力未启用或 provider 不可用")
             return None
-        return provider.transcribe_audio(content=content, filename=filename)
+        provider_name = cls._get_provider_log_name(provider)
+        logger.info(
+            f"语音转文字开始：provider={provider_name}, filename={filename}, "
+            f"bytes={len(content) if content else 0}"
+        )
+        transcript = provider.transcribe_audio(content=content, filename=filename)
+        if transcript:
+            logger.info(
+                f"语音转文字完成：provider={provider_name}, filename={filename}, "
+                f"text_len={len(transcript)}"
+            )
+        else:
+            logger.info(
+                f"语音转文字无结果：provider={provider_name}, filename={filename}"
+            )
+        return transcript
 
     @classmethod
     def synthesize_speech(cls, text: str) -> Optional[Path]:
+        """将文字合成为语音文件，并记录能力调用日志。"""
         provider = cls.get_audio_provider("output")
         if not provider or not cls.is_audio_output_available():
+            logger.info("文字转语音跳过：音频输出能力未启用或 provider 不可用")
             return None
-        return provider.synthesize_speech(text=text)
+        provider_name = cls._get_provider_log_name(provider)
+        logger.info(
+            f"文字转语音开始：provider={provider_name}, text_len={len(text) if text else 0}"
+        )
+        output_path = provider.synthesize_speech(text=text)
+        if output_path:
+            logger.info(f"文字转语音完成：provider={provider_name}, path={output_path}")
+        else:
+            logger.info(f"文字转语音无结果：provider={provider_name}")
+        return output_path
 
     @classmethod
     def resolve_reply_mode(cls, channel: Optional[str], source: Optional[str]) -> str:

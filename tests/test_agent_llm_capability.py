@@ -135,29 +135,43 @@ class AgentCapabilityManagerTest(unittest.TestCase):
 
     def test_transcribe_audio_routes_to_input_provider(self):
         provider = Mock()
+        provider.name = "mock_audio"
         provider.is_available_for_audio_input.return_value = True
         provider.transcribe_audio.return_value = "你好"
 
         with patch.object(settings, "LLM_SUPPORT_AUDIO_INPUT", True), patch.object(
             AgentCapabilityManager, "get_audio_provider", return_value=provider
-        ):
+        ), patch.object(capability_module.logger, "info") as log_info:
             result = AgentCapabilityManager.transcribe_audio(b"audio")
 
         self.assertEqual(result, "你好")
         provider.transcribe_audio.assert_called_once()
+        self.assertTrue(
+            any("语音转文字开始" in call.args[0] for call in log_info.call_args_list)
+        )
+        self.assertTrue(
+            any("语音转文字完成" in call.args[0] for call in log_info.call_args_list)
+        )
 
     def test_synthesize_speech_routes_to_output_provider(self):
         provider = Mock()
+        provider.name = "mock_audio"
         provider.is_available_for_audio_output.return_value = True
         provider.synthesize_speech.return_value = Path("/tmp/reply.opus")
 
         with patch.object(settings, "LLM_SUPPORT_AUDIO_OUTPUT", True), patch.object(
             AgentCapabilityManager, "get_audio_provider", return_value=provider
-        ):
+        ), patch.object(capability_module.logger, "info") as log_info:
             result = AgentCapabilityManager.synthesize_speech("你好")
 
         self.assertEqual(result, Path("/tmp/reply.opus"))
         provider.synthesize_speech.assert_called_once_with(text="你好")
+        self.assertTrue(
+            any("文字转语音开始" in call.args[0] for call in log_info.call_args_list)
+        )
+        self.assertTrue(
+            any("文字转语音完成" in call.args[0] for call in log_info.call_args_list)
+        )
 
     def test_native_voice_reply_supports_channels_with_audio_output(self):
         """校验 Agent 语音回复渠道支持判断覆盖常见渠道写法。"""
