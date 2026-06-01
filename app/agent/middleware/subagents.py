@@ -52,7 +52,7 @@ Delegation modes:
   batch and wait for the batch in one tool call.
 
 Rules:
-- Delegate when a task benefits from focused investigation, such as media identity checks, site/resource search, subscription analysis, download/transfer diagnosis, or read-only system inspection.
+- Delegate when a task benefits from focused investigation, such as media identity checks, site/resource search, subscription analysis, download/transfer diagnosis, MoviePilot code/config exploration, or read-only system inspection.
 - Subagent output is private context for your decision-making. Do not expose a subagent's process or final report verbatim to the user.
 - Subagents must not send messages to the user, ask for interaction, or reveal their internal tool activity.
 - Give the user only your synthesized final answer and the minimum necessary next step.
@@ -256,6 +256,25 @@ def _builtin_subagent_profiles() -> tuple[_SubAgentProfile, ...]:
                     ToolTag.Recommendation.value,
                     ToolTag.Metadata.value,
                     ToolTag.Web.value,
+                }
+            ),
+            exclude_tags=default_exclude_tags,
+        ),
+        _SubAgentProfile(
+            name="moviepilot-explorer",
+            description="MoviePilot exploration subagent for source-code inspection, configuration structure analysis, logs, and code-level troubleshooting clues.",
+            prompt=(
+                f"{SUBAGENT_BASE_PROMPT}\n"
+                "You specialize in MoviePilot source-code structure, local configuration files, directory layout, logs or read-only command output, and code-level root-cause troubleshooting. "
+                "Prefer reading relevant code paths before judging behavior, and distinguish code/config evidence from runtime system state."
+            ),
+            include_tags=frozenset(
+                {
+                    ToolTag.System.value,
+                    ToolTag.Settings.value,
+                    ToolTag.File.value,
+                    ToolTag.Directory.value,
+                    ToolTag.Command.value,
                 }
             ),
             exclude_tags=default_exclude_tags,

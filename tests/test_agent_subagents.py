@@ -36,6 +36,7 @@ class TestAgentSubagents(unittest.TestCase):
             [SUBAGENT_TASK_TOOL_NAME, SUBAGENT_CONTROL_TOOL_NAME],
         )
         self.assertIn("media-researcher", task_tools[0].description)
+        self.assertIn("moviepilot-explorer", task_tools[0].description)
         self.assertIn("system-diagnostician", task_tools[0].description)
         self.assertIn("action=start", task_tools[1].description)
         self.assertIn("action=wait", task_tools[1].description)
@@ -75,6 +76,56 @@ class TestAgentSubagents(unittest.TestCase):
         self.assertEqual(
             [tool.name for tool in captured["tools"]],
             ["custom_media_lookup"],
+        )
+
+    def test_moviepilot_explorer_selects_code_and_settings_tools(self):
+        """MoviePilot 探索子代理应能读取代码、目录、设置和命令诊断工具。"""
+        model = FakeListChatModel(responses=["ok"])
+        tools = [
+            SimpleNamespace(
+                name="custom_code_reader",
+                tags=[ToolTag.Read.value, ToolTag.File.value],
+            ),
+            SimpleNamespace(
+                name="custom_directory_lister",
+                tags=[ToolTag.Read.value, ToolTag.Directory.value],
+            ),
+            SimpleNamespace(
+                name="custom_settings_reader",
+                tags=[ToolTag.Read.value, ToolTag.Settings.value],
+            ),
+            SimpleNamespace(
+                name="custom_command_runner",
+                tags=[ToolTag.Read.value, ToolTag.Command.value],
+            ),
+            SimpleNamespace(
+                name="custom_code_writer",
+                tags=[ToolTag.Read.value, ToolTag.Write.value, ToolTag.File.value],
+            ),
+        ]
+        captured = {}
+
+        def _fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return kwargs
+
+        middleware = MoviePilotSubAgentMiddleware(
+            model=model,
+            profiles=subagent_module._builtin_subagent_profiles(),
+            tools=tools,
+        )
+
+        with patch.object(subagent_module, "create_agent", side_effect=_fake_create_agent):
+            middleware._get_agent("moviepilot-explorer")
+
+        self.assertEqual(
+            [tool.name for tool in captured["tools"]],
+            [
+                "custom_code_reader",
+                "custom_directory_lister",
+                "custom_settings_reader",
+                "custom_command_runner",
+            ],
         )
 
     def test_builtin_tools_declare_tags_in_implementation(self):
