@@ -12,6 +12,7 @@ from app.agent.middleware.subagents import (
     MoviePilotSubAgentMiddleware,
     SUBAGENT_CONTROL_TOOL_NAME,
     SUBAGENT_TASK_TOOL_NAME,
+    SubAgentCallSummaryMiddleware,
     SubAgentTaskControlMiddleware,
     create_subagent_middlewares,
 )
@@ -93,6 +94,30 @@ class TestAgentSubagents(unittest.TestCase):
 
 
 class TestSubAgentTaskControlMiddleware(unittest.IsolatedAsyncioTestCase):
+    async def test_call_summary_middleware_logs_subagent_tool_operations(self):
+        """子代理工具包装层应记录工具执行开始和完成日志。"""
+        middleware = SubAgentCallSummaryMiddleware()
+        request = SimpleNamespace(
+            tool=SimpleNamespace(name=SUBAGENT_CONTROL_TOOL_NAME),
+            tool_call={
+                "args": {
+                    "action": "status",
+                    "subagent_type": "general-purpose",
+                }
+            },
+        )
+
+        async def _fake_handler(_request):
+            return "ok"
+
+        with patch.object(subagent_module.logger, "info") as log_info:
+            result = await middleware.awrap_tool_call(request, _fake_handler)
+
+        messages = [call.args[0] for call in log_info.call_args_list]
+        self.assertEqual("ok", result)
+        self.assertTrue(any("开始执行子代理工具" in message for message in messages))
+        self.assertTrue(any("子代理工具执行完成" in message for message in messages))
+
     async def test_control_tool_starts_tasks_concurrently_and_waits(self):
         """异步子代理管控工具应批量启动任务，并在 wait 时收集结果。"""
         model = FakeListChatModel(responses=["ok"])
