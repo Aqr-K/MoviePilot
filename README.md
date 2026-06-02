@@ -51,6 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
    内置 Skills 列表见 [skills/](skills/)，自定义 Skill 可参考 [skills/create-moviepilot-skill/SKILL.md](skills/create-moviepilot-skill/SKILL.md)。
 3. 其它 MCP 客户端可以通过 MoviePilot 的 MCP 端点 `/api/v1/mcp` 调用工具，认证方式、客户端配置和工具 API 见 [docs/mcp-api.md](docs/mcp-api.md)。
 
+- MCP 工具 API 文档：[docs/mcp-api.md](docs/mcp-api.md)
+
 ## 参与开发
 
 开发前请先阅读仓库规则和本地环境说明，保持变更聚焦，通过测试后再提交 PR。常用入口：
@@ -59,7 +61,6 @@ curl -fsSL https://raw.githubusercontent.com/jxxghp/MoviePilot/v2/scripts/bootst
 - 开发环境与本地源码运行：[docs/development-setup.md](docs/development-setup.md)
 - 测试说明：[docs/testing.md](docs/testing.md)
 - REST API 文档：https://api.movie-pilot.org
-- MCP 工具 API 文档：[docs/mcp-api.md](docs/mcp-api.md)
 - 插件开发说明：https://wiki.movie-pilot.org/zh/plugindev
 
 ## 相关项目
