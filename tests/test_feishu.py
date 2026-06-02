@@ -8,7 +8,6 @@ from unittest.mock import ANY, MagicMock, patch
 
 
 sys.modules.setdefault("psutil", ModuleType("psutil"))
-sys.modules.setdefault("cn2an", ModuleType("cn2an"))
 sys.modules.setdefault("dateparser", ModuleType("dateparser"))
 
 if "Pinyin2Hanzi" not in sys.modules:
@@ -1477,7 +1476,3 @@ class TestFeishu(unittest.TestCase):
             client.send_notification.call_args.kwargs["original_message_id"],
             "om_source",
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

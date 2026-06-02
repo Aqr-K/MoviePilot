@@ -8,15 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-
-def _stub_module(name: str, **attrs):
-    module = sys.modules.get(name)
-    if module is None:
-        module = ModuleType(name)
-        sys.modules[name] = module
-    for key, value in attrs.items():
-        setattr(module, key, value)
-    return module
+from app.testing import stub_modules
 
 
 class _DummyLogger:
@@ -127,42 +119,90 @@ def _build_fake_openai_modules(chat_openai_cls=_FakeChatOpenAIForPatch):
     }, base_module
 
 
-_ORIGINAL_STUBBED_MODULES = {
-    name: sys.modules.get(name)
-    for name in ("app.core.config", "app.log")
-}
-sys.modules.pop("app.agent.llm.helper", None)
-_stub_module(
-    "app.core.config",
-    settings=SimpleNamespace(
-        LLM_PROVIDER="global-provider",
-        LLM_MODEL="global-model",
-        LLM_API_KEY="global-key",
-        LLM_BASE_URL="https://global.example.com",
-        LLM_BASE_URL_PRESET=None,
-        LLM_USER_AGENT=None,
-        LLM_THINKING_LEVEL=None,
-        LLM_TEMPERATURE=0.1,
-        LLM_MAX_CONTEXT_TOKENS=64,
-        LLM_USE_PROXY=True,
-        PROXY_HOST=None,
-    ),
+# 以假 settings/log 控制 helper 加载期行为；用唯一模块名加载，并以 stub_modules 上下文
+# 在 import 期注入、退出后还原真实 app.core.config / app.log，避免污染其他测试。
+_config_stub = ModuleType("app.core.config")
+_config_stub.settings = SimpleNamespace(
+    LLM_PROVIDER="global-provider",
+    LLM_MODEL="global-model",
+    LLM_API_KEY="global-key",
+    LLM_BASE_URL="https://global.example.com",
+    LLM_BASE_URL_PRESET=None,
+    LLM_USER_AGENT=None,
+    LLM_THINKING_LEVEL=None,
+    LLM_TEMPERATURE=0.1,
+    LLM_MAX_CONTEXT_TOKENS=64,
+    LLM_USE_PROXY=True,
+    PROXY_HOST=None,
 )
-_stub_module("app.log", logger=_DummyLogger())
+_log_stub = ModuleType("app.log")
+_log_stub.logger = _DummyLogger()
 
 module_path = Path(__file__).resolve().parents[1] / "app" / "agent" / "llm" / "helper.py"
-spec = importlib.util.spec_from_file_location("test_llm_module", module_path)
-llm_module = importlib.util.module_from_spec(spec)
-assert spec and spec.loader
-spec.loader.exec_module(llm_module)
-for _module_name, _module in _ORIGINAL_STUBBED_MODULES.items():
-    if _module is None:
-        sys.modules.pop(_module_name, None)
-    else:
-        sys.modules[_module_name] = _module
+with stub_modules({"app.core.config": _config_stub, "app.log": _log_stub}):
+    spec = importlib.util.spec_from_file_location("test_llm_module", module_path)
+    llm_module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(llm_module)
+
+
+class _OfflineProviderManager:
+    """离线 provider 解析替身，杜绝单测访问 models.dev。
+
+    真实 ``LLMProviderManager.resolve_runtime`` 会请求 models.dev 目录、并按
+    base_url 列模型，单测中走它会产生不可接受的网络 IO，且结果随外部可达性漂移。
+    这里按 provider 直接给出运行时结构，provider→runtime 映射与
+    ``helper._build_legacy_runtime`` 保持一致：google/gemini→google、
+    deepseek→deepseek、其余→openai_compatible；``use_responses_api`` 等留空，
+    交由 ``get_llm`` 自身逻辑（如 ChatGPT 官方推理模型）推导，避免改变被测行为。
+    """
+
+    # provider 标识到运行时类型的映射，与 helper 内置回退逻辑保持一致
+    _RUNTIME_BY_PROVIDER = {
+        "google": "google",
+        "gemini": "google",
+        "deepseek": "deepseek",
+    }
+
+    async def resolve_runtime(
+            self,
+            *,
+            provider_id,
+            model=None,
+            api_key=None,
+            base_url=None,
+            base_url_preset_id=None,
+            user_agent=None,
+            use_proxy=None,
+    ):
+        """按 provider 返回离线运行时结构，全程不触发网络请求。"""
+        normalized = (provider_id or "").strip().lower()
+        return {
+            "provider_id": normalized,
+            "runtime": self._RUNTIME_BY_PROVIDER.get(normalized, "openai_compatible"),
+            "model_id": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "default_headers": None,
+            "use_responses_api": None,
+            "model_record": None,
+            "model_metadata": None,
+        }
 
 
 class LlmHelperTestCallTest(unittest.TestCase):
+    def setUp(self):
+        """为每个用例默认注入离线 provider，确保 get_llm 不会真访问 models.dev。
+
+        需要校验特定 resolve_runtime 行为的用例，可在自身 patch.dict 中再覆盖
+        ``sys.modules['app.agent.llm.provider']``；用例结束后由 addCleanup 还原。
+        """
+        provider_module = ModuleType("app.agent.llm.provider")
+        provider_module.LLMProviderManager = _OfflineProviderManager
+        patcher = patch.dict(sys.modules, {"app.agent.llm.provider": provider_module})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_extract_text_content_ignores_non_text_blocks(self):
         content = [
             {"type": "reasoning", "text": "internal"},
@@ -773,7 +813,3 @@ class LlmHelperTestCallTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("thinking_level"), "high")
         self.assertFalse(calls[0].get("include_thoughts"))
-
-
-if __name__ == "__main__":
-    unittest.main()
