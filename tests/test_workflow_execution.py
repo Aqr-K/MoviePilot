@@ -1,28 +1,32 @@
 import base64
 import pickle
 import threading
+import time
 from types import SimpleNamespace
 
 from app.chain import workflow as workflow_module
-from app.schemas import ActionContext, ActionResult
+from app.schemas import Action, ActionContext, ActionResult
 from app.schemas.types import EventType
 from app import workflow as workflow_package
 
 
-def _build_workflow(current_action=None, context=None, actions=None, flows=None):
+def _build_workflow(current_action=None, context=None, actions=None, flows=None,
+                    execution_config=None, execution_state=None):
     """构造最小工作流对象。"""
     return SimpleNamespace(
         id=1,
         name="测试工作流",
-        actions=actions or [
+        actions=actions if actions is not None else [
             {"id": "A", "type": "FakeAction", "name": "动作A", "data": {}},
             {"id": "B", "type": "FakeAction", "name": "动作B", "data": {}},
         ],
-        flows=flows or [
+        flows=flows if flows is not None else [
             {"id": "flow-1", "source": "A", "target": "B", "animated": True},
         ],
         current_action=current_action,
         context=context,
+        execution_config=execution_config or {},
+        execution_state=execution_state or {},
     )
 
 
@@ -39,9 +43,12 @@ class _FakeWorkflowManager:
     def __init__(self, calls, results=None):
         self.calls = calls
         self.results = results or {}
+        self.received_inputs = []
 
-    def execute(self, workflow_id, action, context=None):
+    def execute(self, workflow_id, action, context=None, inputs=None, runtime=None, cancel_token=None):
+        """执行伪动作并记录新版输入。"""
         self.calls.append(action.id)
+        self.received_inputs.append((action.id, inputs or {}, runtime or {}, cancel_token))
         result = self.results.get(action.id)
         if callable(result):
             return result(action, context or ActionContext())
@@ -262,6 +269,220 @@ def test_workflow_executor_all_done_join_can_continue_after_failure(monkeypatch)
     assert executor.success is True
 
 
+def test_workflow_executor_exclusive_branch_uses_first_matching_flow(monkeypatch):
+    """互斥分支应只执行第一条满足条件的出边。"""
+    calls = []
+    fake_manager = _FakeWorkflowManager(
+        calls,
+        results={
+            "A": lambda action, context: ActionResult(
+                success=True,
+                message=f"{action.name}完成",
+                context=context,
+                outputs={"count": 2}
+            )
+        }
+    )
+    workflow = _build_workflow(
+        actions=[
+            {"id": "A", "type": "FakeAction", "name": "动作A", "data": {"branch_policy": "exclusive"}},
+            {"id": "B", "type": "FakeAction", "name": "动作B", "data": {}},
+            {"id": "C", "type": "FakeAction", "name": "动作C", "data": {}},
+        ],
+        flows=[
+            {"id": "flow-ab", "source": "A", "target": "B", "condition": "outputs.A.count > 0"},
+            {"id": "flow-ac", "source": "A", "target": "C", "condition": "outputs.A.count > 1"},
+        ],
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(workflow)
+    executor.execute()
+
+    assert calls == ["A", "B"]
+    assert executor.node_states["C"] == "skipped"
+
+
+def test_workflow_executor_passes_declared_inputs(monkeypatch):
+    """动作输入声明应从 node_outputs 中读取指定路径。"""
+    calls = []
+    fake_manager = _FakeWorkflowManager(
+        calls,
+        results={
+            "A": lambda action, context: ActionResult(
+                success=True,
+                message=f"{action.name}完成",
+                context=context,
+                outputs={"torrents": ["a", "b"]}
+            )
+        }
+    )
+    workflow = _build_workflow(
+        actions=[
+            {"id": "A", "type": "FakeAction", "name": "动作A", "data": {}},
+            {
+                "id": "B",
+                "type": "FakeAction",
+                "name": "动作B",
+                "data": {"inputs": ["A.torrents", "outputs.A.torrents.count"]},
+            },
+        ],
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(workflow)
+    executor.execute()
+
+    b_inputs = [item for action_id, item, _, _ in fake_manager.received_inputs if action_id == "B"][0]
+    assert b_inputs == {
+        "A.torrents": ["a", "b"],
+        "outputs.A.torrents.count": 2,
+    }
+
+
+def test_workflow_executor_persists_structured_state(monkeypatch):
+    """步骤回调应收到可持久化的结构化执行状态。"""
+    calls = []
+    states = []
+    fake_manager = _FakeWorkflowManager(
+        calls,
+        results={
+            "A": lambda action, context: ActionResult(
+                success=True,
+                message=f"{action.name}完成",
+                context=context,
+                outputs={"items": ["movie"]}
+            )
+        }
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(
+        _build_workflow(actions=[{"id": "A", "type": "FakeAction", "name": "动作A", "data": {}}], flows=[]),
+        step_callback=lambda action, context, execution_state, completed: states.append(execution_state),
+    )
+    executor.execute()
+
+    assert states[-1]["nodes"]["A"]["state"] == "success"
+    assert states[-1]["outputs"]["A"]["items"] == ["movie"]
+    assert states[-1]["runtime"]["progress"] == 100
+
+
+def test_workflow_executor_restores_outputs_from_execution_state(monkeypatch):
+    """恢复执行时应从结构化状态读取节点输出并继续判断条件边。"""
+    calls = []
+    fake_manager = _FakeWorkflowManager(calls)
+    workflow = _build_workflow(
+        execution_state={
+            "nodes": {
+                "A": {"state": "success", "attempt": 1},
+            },
+            "outputs": {
+                "A": {"torrents": ["movie"]},
+            },
+        },
+        flows=[
+            {"id": "flow-ab", "source": "A", "target": "B", "condition": "A.torrents.count > 0"},
+        ],
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(workflow)
+    executor.execute()
+
+    assert calls == ["B"]
+    assert executor.context.node_outputs["A"]["torrents"] == ["movie"]
+
+
+def test_workflow_executor_concurrency_key_serializes_parallel_nodes(monkeypatch):
+    """相同 concurrency_key 的并行节点不应同时运行。"""
+    calls = []
+    active_count = 0
+    max_active_count = 0
+    lock = threading.Lock()
+
+    def run_action(action, context):
+        """记录同一并发键下的同时运行数量。"""
+        nonlocal active_count, max_active_count
+        with lock:
+            active_count += 1
+            max_active_count = max(max_active_count, active_count)
+        time.sleep(0.05)
+        with lock:
+            active_count -= 1
+        return ActionResult(success=True, message=f"{action.name}完成", context=context)
+
+    fake_manager = _FakeWorkflowManager(calls, results={"A": run_action, "B": run_action})
+    workflow = _build_workflow(
+        actions=[
+            {"id": "A", "type": "FakeAction", "name": "动作A", "data": {"concurrency_key": "download"}},
+            {"id": "B", "type": "FakeAction", "name": "动作B", "data": {"concurrency_key": "download"}},
+        ],
+        flows=[],
+        execution_config={"max_workers": 2},
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(workflow)
+    executor.execute()
+
+    assert set(calls) == {"A", "B"}
+    assert max_active_count == 1
+
+
+def test_workflow_executor_filter_action_replaces_artifact_outputs(monkeypatch):
+    """过滤类动作默认应替换列表输出，避免把过滤前数据重新合并回来。"""
+    calls = []
+    fake_manager = _FakeWorkflowManager(
+        calls,
+        results={
+            "A": lambda action, context: ActionResult(
+                success=True,
+                message=f"{action.name}完成",
+                context=context,
+                outputs={"torrents": ["old", "keep"]}
+            ),
+            "B": lambda action, context: ActionResult(
+                success=True,
+                message=f"{action.name}完成",
+                context=context,
+                outputs={"torrents": ["keep"]}
+            ),
+        }
+    )
+    workflow = _build_workflow(
+        actions=[
+            {"id": "A", "type": "FakeAction", "name": "动作A", "data": {}},
+            {"id": "B", "type": "FilterTorrentsAction", "name": "过滤资源", "data": {}},
+        ],
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(workflow)
+    executor.execute()
+
+    assert executor.context.torrents == ["keep"]
+    assert executor.context.artifacts["torrents"] == ["keep"]
+
+
 def test_workflow_executor_stop_is_not_success(monkeypatch):
     """停止信号不应被执行器汇报为成功完成。"""
     calls = []
@@ -328,3 +549,43 @@ def test_workflow_event_listener_keeps_shared_handler_until_last_workflow(monkey
 
     assert fake_eventmanager.removed == [EventType.DownloadAdded]
     assert manager.get_event_workflows() == {}
+
+
+def test_workflow_manager_retries_action_until_success(monkeypatch):
+    """动作管理器应按 retry 配置重试失败动作。"""
+
+    class RetryAction:
+        """模拟第二次才成功的动作。"""
+
+        call_count = 0
+
+        def __init__(self, action_id):
+            self.action_id = action_id
+
+        def execute_with_inputs(self, workflow_id, params, inputs, runtime, context):
+            """执行动作并在第二次返回成功。"""
+            _ = workflow_id, params, inputs, runtime
+            RetryAction.call_count += 1
+            if RetryAction.call_count == 1:
+                return ActionResult(success=False, message="第一次失败", context=context)
+            return ActionResult(success=True, message="第二次成功", context=context, outputs={"ok": True})
+
+    manager = object.__new__(workflow_package.WorkFlowManager)
+    manager._actions = {"RetryAction": RetryAction}
+    monkeypatch.setattr(workflow_package.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    result = manager.execute(
+        workflow_id=1,
+        action=Action(
+            id="retry",
+            type="RetryAction",
+            name="重试动作",
+            data={"retry": {"max_attempts": 2, "interval": 0}},
+        ),
+        context=ActionContext(),
+    )
+
+    assert result.success is True
+    assert result.attempts == 2
+    assert result.outputs == {"ok": True}
+    assert RetryAction.call_count == 2

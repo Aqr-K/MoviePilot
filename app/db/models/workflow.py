@@ -40,6 +40,10 @@ class Workflow(Base):
     flows = Column(JSON, default=builtin_list)
     # 执行上下文
     context = Column(JSON, default=dict)
+    # 执行配置
+    execution_config = Column(JSON, default=dict)
+    # 结构化执行状态
+    execution_state = Column(JSON, default=dict)
     # 创建时间
     add_time = Column(String, default=lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     # 最后执行时间
@@ -218,6 +222,7 @@ class Workflow(Base):
             "result": None,
             "current_action": None,
             "context": {},
+            "execution_state": {},
             "run_count": 0 if reset_count else cls.run_count,
         })
         return True
@@ -231,39 +236,48 @@ class Workflow(Base):
             result=None,
             current_action=None,
             context={},
+            execution_state={},
             run_count=0 if reset_count else cls.run_count,
         ))
         return True
 
     @classmethod
     @db_update
-    def update_current_action(cls, db, wid: int, action_id: str, context: dict):
+    def update_current_action(cls, db, wid: int, action_id: str, context: dict,
+                              execution_state: Optional[dict] = None):
         workflow = db.query(cls).filter(cls.id == wid).first()
         current_actions = []
         if workflow and workflow.current_action:
             current_actions = [item for item in workflow.current_action.split(",") if item]
-        if action_id not in current_actions:
+        if action_id and action_id not in current_actions:
             current_actions.append(action_id)
-        db.query(cls).filter(cls.id == wid).update({
+        update_values = {
             "current_action": ",".join(current_actions),
             "context": context
-        })
+        }
+        if execution_state is not None:
+            update_values["execution_state"] = execution_state
+        db.query(cls).filter(cls.id == wid).update(update_values)
         return True
 
     @classmethod
     @async_db_update
-    async def async_update_current_action(cls, db: AsyncSession, wid: int, action_id: str, context: dict):
+    async def async_update_current_action(cls, db: AsyncSession, wid: int, action_id: str, context: dict,
+                                          execution_state: Optional[dict] = None):
         from sqlalchemy import update
         # 先获取当前current_action
         result = await db.execute(select(cls.current_action).where(cls.id == wid))
         current_action = result.scalar()
         current_actions = [item for item in (current_action or "").split(",") if item]
-        if action_id not in current_actions:
+        if action_id and action_id not in current_actions:
             current_actions.append(action_id)
         new_current_action = ",".join(current_actions)
 
-        await db.execute(update(cls).where(cls.id == wid).values(
-            current_action=new_current_action,
-            context=context
-        ))
+        update_values = {
+            "current_action": new_current_action,
+            "context": context
+        }
+        if execution_state is not None:
+            update_values["execution_state"] = execution_state
+        await db.execute(update(cls).where(cls.id == wid).values(**update_values))
         return True

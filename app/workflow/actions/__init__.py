@@ -3,7 +3,7 @@ from typing import Union
 
 from app.chain import ChainBase
 from app.db.systemconfig_oper import SystemConfigOper
-from app.schemas import ActionContext, ActionParams
+from app.schemas import ActionContext, ActionParams, ActionResult
 
 
 class ActionChain(ChainBase):
@@ -109,3 +109,16 @@ class BaseAction(ABC):
         执行动作
         """
         raise NotImplementedError
+
+    def execute_with_inputs(self, workflow_id: int, params: ActionParams, inputs: dict,
+                            runtime: dict, context: ActionContext) -> ActionResult:
+        """
+        使用显式输入与运行期信息执行动作。
+        """
+        _ = inputs, runtime
+        result_context = self.execute(workflow_id, params, context)
+        return ActionResult(
+            success=self.success,
+            message=self.message,
+            context=result_context
+        )
