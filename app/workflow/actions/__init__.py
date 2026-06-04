@@ -26,6 +26,8 @@ class BaseAction(ABC):
 
     def __init__(self, action_id: str):
         self._action_id = action_id
+        self._done_flag = False
+        self._message = ""
         self.systemconfigoper = SystemConfigOper()
 
     @classmethod
@@ -92,9 +94,12 @@ class BaseAction(ABC):
         workflow_cache = self.systemconfigoper.get(workflow_key) or {}
         action_cache = workflow_cache.get(self._action_id) or []
         if isinstance(data, list):
-            action_cache.extend(data)
+            for item in data:
+                if item not in action_cache:
+                    action_cache.append(item)
         else:
-            action_cache.append(data)
+            if data not in action_cache:
+                action_cache.append(data)
         workflow_cache[self._action_id] = action_cache
         self.systemconfigoper.set(workflow_key, workflow_cache)
 

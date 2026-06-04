@@ -1,22 +1,21 @@
 import base64
+import copy
 import pickle
 import threading
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
-from typing import List, Tuple, Optional
-
-from pydantic.fields import Callable
+from typing import Callable, List, Optional, Tuple
 
 from app.chain import ChainBase
 from app.core.config import global_vars
 from app.core.event import Event, eventmanager
-from app.workflow import WorkFlowManager
 from app.db.models import Workflow
 from app.db.workflow_oper import WorkflowOper
 from app.log import logger
 from app.schemas import ActionContext, ActionFlow, Action, ActionExecution
 from app.schemas.types import EventType
+from app.workflow import WorkFlowManager
 
 
 class WorkflowExecutor:
@@ -36,9 +35,14 @@ class WorkflowExecutor:
         self.actions = {action['id']: Action(**action) for action in workflow.actions}
         self.flows = [ActionFlow(**flow) for flow in workflow.flows]
         self.total_actions = len(self.actions)
-        self.finished_actions = 0
+        self.completed_actions = {
+            action_id for action_id in (workflow.current_action or "").split(",")
+            if action_id in self.actions
+        }
+        self.finished_actions = len(self.completed_actions)
 
         self.success = True
+        self.stopped = False
         self.errmsg = ""
 
         # 工作流管理器
@@ -66,6 +70,10 @@ class WorkflowExecutor:
             if action_id not in self.indegree:
                 self.indegree[action_id] = 0
 
+        for action_id in self.completed_actions:
+            for succ_id in self.adjacency.get(action_id, []):
+                self.indegree[succ_id] -= 1
+
         # 初始上下文
         if workflow.current_action and workflow.context:
             logger.info(f"工作流已执行动作：{workflow.current_action}")
@@ -80,47 +88,68 @@ class WorkflowExecutor:
         global_vars.workflow_resume(self.workflow.id)
         # 初始化队列，添加入度为0的节点
         for action_id in self.actions:
-            if self.indegree[action_id] == 0:
+            if action_id not in self.completed_actions and self.indegree[action_id] == 0:
                 self.queue.append(action_id)
 
-    def execute(self):
+    def execute(self) -> None:
         """
         执行工作流
         """
-        while True:
-            with self.lock:
-                # 退出条件：队列为空且无运行任务
-                if not self.queue and self.running_tasks == 0:
-                    break
-                # 退出条件：出现了错误
-                if not self.success:
-                    break
-                if not self.queue:
+        try:
+            while True:
+                should_sleep = False
+                with self.lock:
+                    if global_vars.is_workflow_stopped(self.workflow.id):
+                        self.success = False
+                        self.stopped = True
+                        self.errmsg = "工作流已停止"
+                        if self.running_tasks == 0:
+                            break
+                        should_sleep = True
+                    # 退出条件：队列为空且无运行任务
+                    elif not self.queue and self.running_tasks == 0:
+                        break
+                    # 出错后不再调度新节点，但等待已提交节点完成，避免后台线程继续写状态。
+                    if not self.success:
+                        if self.running_tasks == 0:
+                            break
+                        should_sleep = True
+                    elif not self.queue:
+                        should_sleep = True
+                    else:
+                        # 取出队首节点
+                        node_id = self.queue.popleft()
+                        # 标记任务开始
+                        self.running_tasks += 1
+
+                if should_sleep:
                     sleep(0.1)
                     continue
-                # 取出队首节点
-                node_id = self.queue.popleft()
-                # 标记任务开始
-                self.running_tasks += 1
 
-            # 已停机
-            if global_vars.is_workflow_stopped(self.workflow.id):
-                global_vars.workflow_resume(self.workflow.id)
-                break
+                # 已停机
+                if global_vars.is_workflow_stopped(self.workflow.id):
+                    with self.lock:
+                        self.success = False
+                        self.stopped = True
+                        self.errmsg = "工作流已停止"
+                        self.running_tasks -= 1
+                    break
 
-            # 已执行的跳过
-            if (self.workflow.current_action
-                    and node_id in self.workflow.current_action.split(',')):
-                continue
+                # 已执行的跳过，并继续释放后继节点。
+                if node_id in self.completed_actions:
+                    self.on_node_skipped(node_id)
+                    continue
 
-            # 提交任务到线程池
-            future = self.executor.submit(
-                self.execute_node,
-                self.workflow.id,
-                node_id,
-                self.context
-            )
-            future.add_done_callback(self.on_node_complete)
+                # 提交任务到线程池，每个节点使用上下文快照，避免并行节点互相修改同一个对象。
+                future = self.executor.submit(
+                    self.execute_node,
+                    self.workflow.id,
+                    node_id,
+                    copy.deepcopy(self.context)
+                )
+                future.add_done_callback(self.on_node_complete)
+        finally:
+            self.executor.shutdown(wait=True, cancel_futures=True)
 
     def execute_node(self, workflow_id: int, node_id: int,
                      context: ActionContext) -> Tuple[Action, bool, str, ActionContext]:
@@ -135,31 +164,38 @@ class WorkflowExecutor:
         """
         节点完成回调：更新上下文、处理后继节点
         """
-        action, state, message, result_ctx = future.result()
-
         try:
-            self.finished_actions += 1
-            # 更新当前进度
-            self.context.progress = round(self.finished_actions / self.total_actions) * 100
+            action, state, message, result_ctx = future.result()
+            with self.lock:
+                if global_vars.is_workflow_stopped(self.workflow.id):
+                    self.success = False
+                    self.stopped = True
+                    self.errmsg = "工作流已停止"
+                    return
+                self.finished_actions += 1
+                # 更新当前进度
+                self.context.progress = round(self.finished_actions / self.total_actions * 100) if self.total_actions else 100
 
-            # 补充执行历史
-            self.context.execute_history.append(
-                ActionExecution(
-                    action=action.name,
-                    result=state,
-                    message=message
+                # 补充执行历史
+                self.context.execute_history.append(
+                    ActionExecution(
+                        action=action.name,
+                        result=state,
+                        message=message
+                    )
                 )
-            )
 
             # 节点执行失败
             if not state:
-                self.success = False
-                self.errmsg = f"{action.name} 失败"
+                with self.lock:
+                    self.success = False
+                    self.errmsg = f"{action.name} 失败"
                 return
 
             with self.lock:
                 # 更新主上下文
                 self.merge_context(result_ctx)
+                self.completed_actions.add(action.id)
                 # 回调
                 if self.step_callback:
                     self.step_callback(action, self.context)
@@ -171,17 +207,51 @@ class WorkflowExecutor:
                     self.indegree[succ_id] -= 1
                     if self.indegree[succ_id] == 0:
                         self.queue.append(succ_id)
+        except Exception as err:
+            logger.error(f"工作流节点执行回调失败: {str(err)}")
+            with self.lock:
+                self.success = False
+                self.errmsg = str(err)
         finally:
             # 标记任务完成
             with self.lock:
                 self.running_tasks -= 1
 
-    def merge_context(self, context: ActionContext):
+    def on_node_skipped(self, node_id: str) -> None:
+        """
+        跳过已完成节点，并释放其后继节点。
+        """
+        with self.lock:
+            for succ_id in self.adjacency.get(node_id, []):
+                self.indegree[succ_id] -= 1
+                if succ_id not in self.completed_actions and self.indegree[succ_id] == 0:
+                    self.queue.append(succ_id)
+            self.running_tasks -= 1
+
+    def merge_context(self, context: ActionContext) -> None:
         """
         合并上下文
         """
-        for key, value in context.model_dump().items():
-            if not getattr(self.context, key, None):
+        if not context:
+            return
+        for key in context.__class__.model_fields:
+            value = getattr(context, key, None)
+            if key in ("execute_history", "progress") or value in (None, "", [], {}):
+                continue
+            current_value = getattr(self.context, key, None)
+            if isinstance(value, list):
+                if current_value is None:
+                    setattr(self.context, key, value)
+                    continue
+                for item in value:
+                    if item not in current_value:
+                        current_value.append(item)
+            elif isinstance(value, dict):
+                if not current_value:
+                    setattr(self.context, key, value)
+                else:
+                    current_value.update(value)
+            elif not current_value:
                 setattr(self.context, key, value)
 
 
@@ -217,7 +287,7 @@ class WorkflowChain(ChainBase):
             serialized_data = pickle.dumps(context)
             # 使用Base64编码字节流
             encoded_data = base64.b64encode(serialized_data).decode('utf-8')
-            workflowoper.step(workflow_id, action_id=action.id, context={
+            WorkflowOper().step(workflow_id, action_id=action.id, context={
                 "content": encoded_data
             })
 
@@ -243,6 +313,10 @@ class WorkflowChain(ChainBase):
         # 执行工作流
         executor = WorkflowExecutor(workflow, step_callback=save_step)
         executor.execute()
+
+        if executor.stopped:
+            logger.info(f"工作流 {workflow.name} 已停止")
+            return False, executor.errmsg
 
         if not executor.success:
             logger.info(f"工作流 {workflow.name} 执行失败：{executor.errmsg}")

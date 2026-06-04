@@ -41,7 +41,7 @@ class Workflow(Base):
     # 执行上下文
     context = Column(JSON, default=dict)
     # 创建时间
-    add_time = Column(String, default=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    add_time = Column(String, default=lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     # 最后执行时间
     last_time = Column(String)
 
@@ -79,7 +79,7 @@ class Workflow(Base):
             and_(
                 or_(
                     cls.trigger_type == 'timer',
-                    not cls.trigger_type
+                    cls.trigger_type.is_(None)
                 ),
                 cls.state != 'P'
             )
@@ -93,7 +93,7 @@ class Workflow(Base):
             and_(
                 or_(
                     cls.trigger_type == 'timer',
-                    not cls.trigger_type
+                    cls.trigger_type.is_(None)
                 ),
                 cls.state != 'P'
             )
@@ -217,6 +217,7 @@ class Workflow(Base):
             "state": 'W',
             "result": None,
             "current_action": None,
+            "context": {},
             "run_count": 0 if reset_count else cls.run_count,
         })
         return True
@@ -229,6 +230,7 @@ class Workflow(Base):
             state='W',
             result=None,
             current_action=None,
+            context={},
             run_count=0 if reset_count else cls.run_count,
         ))
         return True
@@ -236,8 +238,14 @@ class Workflow(Base):
     @classmethod
     @db_update
     def update_current_action(cls, db, wid: int, action_id: str, context: dict):
+        workflow = db.query(cls).filter(cls.id == wid).first()
+        current_actions = []
+        if workflow and workflow.current_action:
+            current_actions = [item for item in workflow.current_action.split(",") if item]
+        if action_id not in current_actions:
+            current_actions.append(action_id)
         db.query(cls).filter(cls.id == wid).update({
-            "current_action": cls.current_action + f",{action_id}" if cls.current_action else action_id,
+            "current_action": ",".join(current_actions),
             "context": context
         })
         return True
@@ -249,7 +257,10 @@ class Workflow(Base):
         # 先获取当前current_action
         result = await db.execute(select(cls.current_action).where(cls.id == wid))
         current_action = result.scalar()
-        new_current_action = current_action + f",{action_id}" if current_action else action_id
+        current_actions = [item for item in (current_action or "").split(",") if item]
+        if action_id not in current_actions:
+            current_actions.append(action_id)
+        new_current_action = ",".join(current_actions)
 
         await db.execute(update(cls).where(cls.id == wid).values(
             current_action=new_current_action,

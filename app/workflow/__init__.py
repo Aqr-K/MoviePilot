@@ -63,8 +63,17 @@ class WorkFlowManager(metaclass=Singleton):
         """
         停止
         """
+        for event_type_str in list(self._event_workflows.keys()):
+            self.remove_workflow_event(event_type_str=event_type_str)
         self._actions = {}
         self._event_workflows = {}
+
+    def execute(self, workflow_id: int, action: Action,
+                context: ActionContext = None) -> Tuple[bool, str, ActionContext]:
+        """
+        执行工作流动作
+        """
+        return self.excute(workflow_id=workflow_id, action=action, context=context)
 
     def excute(self, workflow_id: int, action: Action,
                context: ActionContext = None) -> Tuple[bool, str, ActionContext]:
@@ -126,8 +135,8 @@ class WorkFlowManager(metaclass=Singleton):
         """
         更新工作流事件触发器
         """
-        # 确保先移除旧的事件监听器
-        self.remove_workflow_event(workflow_id=workflow.id, event_type_str=workflow.event_type)
+        # 工作流可能切换触发事件，先按工作流ID从所有事件映射中移除。
+        self.remove_workflow_event(workflow_id=workflow.id)
         # 如果工作流是事件触发类型且未被禁用
         if workflow.trigger_type == "event" and workflow.state != 'P':
             # 注册事件触发器
@@ -154,41 +163,46 @@ class WorkFlowManager(metaclass=Singleton):
         """
         注册工作流事件触发器
         """
+        if not event_type_str:
+            return
         try:
             event_type = EventType(event_type_str)
         except ValueError:
             logger.error(f"无效的事件类型: {event_type_str}")
             return
         if event_type in EventType:
-            # 确保先移除旧的事件监听器
-            self.remove_workflow_event(workflow_id, event_type.value)
             with self._lock:
-                # 添加新的事件监听器
-                eventmanager.add_event_listener(event_type, self._handle_event)
-                # 记录工作流事件触发器
                 if event_type.value not in self._event_workflows:
                     self._event_workflows[event_type.value] = []
-                self._event_workflows[event_type.value].append(workflow_id)
+                    eventmanager.add_event_listener(event_type, self._handle_event)
+                # 记录工作流事件触发器
+                if workflow_id not in self._event_workflows[event_type.value]:
+                    self._event_workflows[event_type.value].append(workflow_id)
                 logger.info(f"已注册工作流 {workflow_id} 事件触发器: {event_type.value}")
 
-    def remove_workflow_event(self, workflow_id: int, event_type_str: str):
+    def remove_workflow_event(self, workflow_id: Optional[int] = None, event_type_str: Optional[str] = None):
         """
         移除工作流事件触发器
         """
-        try:
-            event_type = EventType(event_type_str)
-        except ValueError:
-            logger.error(f"无效的事件类型: {event_type_str}")
-            return
-        if event_type in EventType:
+        event_type_values = [event_type_str] if event_type_str else list(self._event_workflows.keys())
+        for event_type_value in event_type_values:
+            try:
+                event_type = EventType(event_type_value)
+            except ValueError:
+                logger.error(f"无效的事件类型: {event_type_value}")
+                continue
             with self._lock:
-                eventmanager.remove_event_listener(event_type, self._handle_event)
-                if event_type.value in self._event_workflows:
-                    if workflow_id in self._event_workflows[event_type.value]:
-                        self._event_workflows[event_type.value].remove(workflow_id)
-                        if not self._event_workflows[event_type.value]:
-                            del self._event_workflows[event_type.value]
-                logger.info(f"已移除工作流 {workflow_id} 事件触发器")
+                workflow_ids = self._event_workflows.get(event_type.value)
+                if not workflow_ids:
+                    continue
+                if workflow_id is None:
+                    workflow_ids.clear()
+                elif workflow_id in workflow_ids:
+                    workflow_ids.remove(workflow_id)
+                if not workflow_ids:
+                    self._event_workflows.pop(event_type.value, None)
+                    eventmanager.remove_event_listener(event_type, self._handle_event)
+                logger.info(f"已移除工作流 {workflow_id or ''} 事件触发器")
 
     def _handle_event(self, event: Event):
         """
