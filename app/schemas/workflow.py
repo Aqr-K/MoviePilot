@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -50,6 +50,8 @@ class Action(BaseModel):
     description: Optional[str] = Field(default=None, description="动作描述")
     position: Optional[dict] = Field(default_factory=dict, description="位置")
     data: Optional[dict] = Field(default_factory=dict, description="参数")
+    join_policy: Optional[str] = Field(default=None, description="多上游节点汇合策略")
+    fail_policy: Optional[str] = Field(default=None, description="动作失败后的工作流处理策略")
 
 
 class ActionExecution(BaseModel):
@@ -72,8 +74,19 @@ class ActionContext(BaseModel):
     downloads: Optional[List[DownloadTask]] = Field(default_factory=list, description="下载任务列表")
     sites: Optional[List[Site]] = Field(default_factory=list, description="站点列表")
     subscribes: Optional[List[Subscribe]] = Field(default_factory=list, description="订阅列表")
+    node_outputs: Optional[dict] = Field(default_factory=dict, description="节点输出数据")
     execute_history: Optional[List[ActionExecution]] = Field(default_factory=list, description="执行历史")
     progress: Optional[int] = Field(default=0, description="执行进度（%）")
+
+
+class ActionResult(BaseModel):
+    """
+    动作执行结果。
+    """
+    success: Optional[bool] = Field(default=True, description="动作是否执行成功")
+    message: Optional[str] = Field(default=None, description="动作执行消息")
+    context: Optional[ActionContext] = Field(default=None, description="动作执行后的上下文")
+    outputs: Optional[dict[str, Any]] = Field(default_factory=dict, description="当前节点显式输出")
 
 
 class ActionFlow(BaseModel):
@@ -84,6 +97,9 @@ class ActionFlow(BaseModel):
     source: Optional[str] = Field(default=None, description="源动作")
     target: Optional[str] = Field(default=None, description="目标动作")
     animated: Optional[bool] = Field(default=True, description="是否动画流程")
+    data: Optional[dict] = Field(default_factory=dict, description="流程扩展配置")
+    condition: Optional[str] = Field(default=None, description="流转条件表达式")
+    join_policy: Optional[str] = Field(default=None, description="目标节点汇合策略")
 
 
 class WorkflowShare(BaseModel):

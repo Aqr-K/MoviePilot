@@ -9,7 +9,7 @@ from app.db.models import Workflow
 from app.db.workflow_oper import WorkflowOper
 from app.helper.module import ModuleHelper
 from app.log import logger
-from app.schemas import ActionContext, Action
+from app.schemas import ActionContext, Action, ActionResult
 from app.schemas.types import EventType
 from app.utils.singleton import Singleton
 
@@ -69,14 +69,7 @@ class WorkFlowManager(metaclass=Singleton):
         self._event_workflows = {}
 
     def execute(self, workflow_id: int, action: Action,
-                context: ActionContext = None) -> Tuple[bool, str, ActionContext]:
-        """
-        执行工作流动作
-        """
-        return self.excute(workflow_id=workflow_id, action=action, context=context)
-
-    def excute(self, workflow_id: int, action: Action,
-               context: ActionContext = None) -> Tuple[bool, str, ActionContext]:
+                context: ActionContext = None) -> ActionResult:
         """
         执行工作流动作
         """
@@ -91,11 +84,12 @@ class WorkFlowManager(metaclass=Singleton):
             logger.info(f"执行动作: {action.id} - {action.name}")
             try:
                 result_context = action_obj.execute(workflow_id, action.data, context)
+                action_result = self._normalize_action_result(result_context, action_obj, context)
             except Exception as err:
                 logger.error(f"{action.name} 执行失败: {err}")
-                return False, f"{err}", context
-            loop = action.data.get("loop")
-            loop_interval = action.data.get("loop_interval")
+                return ActionResult(success=False, message=f"{err}", context=context)
+            loop = (action.data or {}).get("loop")
+            loop_interval = (action.data or {}).get("loop_interval")
             if loop and loop_interval:
                 while not action_obj.done:
                     if global_vars.is_workflow_stopped(workflow_id):
@@ -105,15 +99,40 @@ class WorkFlowManager(metaclass=Singleton):
                     sleep(loop_interval)
                     # 执行
                     logger.info(f"继续执行动作: {action.id} - {action.name}")
-                    result_context = action_obj.execute(workflow_id, action.data, result_context)
-            if action_obj.success:
+                    result_context = action_obj.execute(workflow_id, action.data, action_result.context)
+                    action_result = self._normalize_action_result(result_context, action_obj, action_result.context)
+            if action_result.success:
                 logger.info(f"{action.name} 执行成功")
             else:
                 logger.error(f"{action.name} 执行失败！")
-            return action_obj.success, action_obj.message, result_context
+            return action_result
         else:
             logger.error(f"未找到动作: {action.type} - {action.name}")
-            return False, " ", context
+            return ActionResult(success=False, message=" ", context=context)
+
+    def excute(self, workflow_id: int, action: Action,
+               context: ActionContext = None) -> Tuple[bool, str, ActionContext]:
+        """
+        执行工作流动作，兼容历史拼写错误的方法名。
+        """
+        action_result = self.execute(workflow_id=workflow_id, action=action, context=context)
+        return bool(action_result.success), action_result.message or "", action_result.context or context or ActionContext()
+
+    @staticmethod
+    def _normalize_action_result(result: Any, action_obj: Any, fallback_context: ActionContext) -> ActionResult:
+        """
+        将旧版动作上下文与新版结构化结果统一为动作执行结果。
+        """
+        if isinstance(result, ActionResult):
+            result.context = result.context or fallback_context
+            if result.message is None:
+                result.message = action_obj.message
+            return result
+        return ActionResult(
+            success=action_obj.success,
+            message=action_obj.message,
+            context=result or fallback_context
+        )
 
     def list_actions(self) -> List[dict]:
         """
