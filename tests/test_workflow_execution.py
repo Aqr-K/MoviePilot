@@ -67,6 +67,15 @@ class _FakeWorkflowManager:
         return self.contracts.get(action_type) or {}
 
 
+class _OpaqueValue:
+    """模拟无法直接 JSON 序列化的值。"""
+
+    __slots__ = ()
+
+    def __str__(self):
+        return "opaque-value"
+
+
 def test_workflow_executor_resumes_downstream_nodes(monkeypatch):
     """恢复执行时应释放已完成节点的后继节点。"""
     calls = []
@@ -447,6 +456,36 @@ def test_workflow_executor_restores_outputs_from_execution_state(monkeypatch):
 
     assert calls == ["B"]
     assert executor.context.node_outputs["A"]["torrents"] == ["movie"]
+
+
+def test_workflow_executor_keeps_execution_state_dict_for_non_json_leaf(monkeypatch):
+    """结构化状态遇到不可序列化叶子节点时仍应保持字典结构。"""
+    calls = []
+    states = []
+    fake_manager = _FakeWorkflowManager(
+        calls,
+        results={
+            "A": lambda action, context: ActionResult(
+                success=True,
+                message=f"{action.name}完成",
+                context=context,
+                outputs={"opaque": _OpaqueValue()}
+            )
+        }
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(
+        _build_workflow(actions=[{"id": "A", "type": "FakeAction", "name": "动作A", "data": {}}], flows=[]),
+        step_callback=lambda action, context, execution_state, completed: states.append(execution_state),
+    )
+    executor.execute()
+
+    assert isinstance(states[-1], dict)
+    assert states[-1]["outputs"]["A"]["opaque"] == "opaque-value"
 
 
 def test_workflow_executor_concurrency_key_serializes_parallel_nodes(monkeypatch):

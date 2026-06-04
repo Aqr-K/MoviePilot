@@ -260,10 +260,25 @@ class WorkflowExecutor:
         """
         将运行期对象转换为可写入 JSON 列的数据。
         """
+        if isinstance(value, dict):
+            return {
+                str(key): WorkflowExecutor.make_json_safe(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [WorkflowExecutor.make_json_safe(item) for item in value]
         try:
-            return jsonable_encoder(value)
+            encoded_value = jsonable_encoder(value)
         except Exception:
             return str(value)
+        if isinstance(encoded_value, dict):
+            return {
+                str(key): WorkflowExecutor.make_json_safe(item)
+                for key, item in encoded_value.items()
+            }
+        if isinstance(encoded_value, list):
+            return [WorkflowExecutor.make_json_safe(item) for item in encoded_value]
+        return encoded_value
 
     def execute(self) -> None:
         """
