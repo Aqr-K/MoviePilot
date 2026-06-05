@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional, List, Dict, Tuple, Callable, Union
 
 from tqdm import tqdm
@@ -104,6 +104,38 @@ class StorageBase(metaclass=ABCMeta):
         """
         self.storagehelper.reset_storage(self.schema.value)
         self.init_storage()
+
+    @staticmethod
+    def _safe_download_name(name: Optional[str]) -> Optional[str]:
+        """
+        提取可安全落盘的文件名。
+        """
+        if not name:
+            return None
+
+        safe_name = PurePosixPath(str(name).replace("\\", "/")).name
+        if safe_name in ("", ".", ".."):
+            return None
+        return safe_name
+
+    def _build_download_path(
+        self, fileitem: schemas.FileItem, path: Path
+    ) -> Optional[Path]:
+        """
+        构造本地下载路径，避免远端文件名携带目录片段时越过目标目录。
+        """
+        safe_name = self._safe_download_name(fileitem.name)
+        if not safe_name:
+            logger.error(f"【存储】下载文件名无效：{fileitem.name}")
+            return None
+
+        local_path = path / safe_name
+        try:
+            local_path.resolve().relative_to(path.resolve())
+        except ValueError:
+            logger.error(f"【存储】下载路径越界：{fileitem.name} -> {local_path}")
+            return None
+        return local_path
 
     @abstractmethod
     def check(self) -> bool:

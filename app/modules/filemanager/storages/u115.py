@@ -830,7 +830,9 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
             logger.error(f"【115】下载链接为空: {fileitem.name}")
             return None
 
-        local_path = (path or settings.TEMP_PATH) / fileitem.name
+        local_path = self._build_download_path(fileitem, path or settings.TEMP_PATH)
+        if not local_path:
+            return None
 
         # 获取文件大小
         file_size = detail.size

@@ -511,7 +511,9 @@ class SMB(StorageBase, metaclass=WeakSingleton):
         """
         带实时进度显示的下载
         """
-        local_path = (path or settings.TEMP_PATH) / fileitem.name
+        local_path = self._build_download_path(fileitem, path or settings.TEMP_PATH)
+        if not local_path:
+            return None
         smb_path = self._normalize_path(fileitem.path)
         try:
             self._check_connection()

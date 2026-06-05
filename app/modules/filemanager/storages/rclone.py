@@ -340,7 +340,9 @@ class Rclone(StorageBase):
         """
         带实时进度显示的下载
         """
-        local_path = (path or settings.TEMP_PATH) / fileitem.name
+        local_path = self._build_download_path(fileitem, path or settings.TEMP_PATH)
+        if not local_path:
+            return None
         
         # 初始化进度条
         logger.info(f"【rclone】开始下载: {fileitem.name} -> {local_path}")
