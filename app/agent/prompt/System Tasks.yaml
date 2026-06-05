@@ -124,6 +124,8 @@ task_types:
       - "When several records obviously share the same media identity, avoid repeated `recognize_media` or `search_media` calls."
       - "Process every selected record exactly once."
       - "Keep the final response short and focused on the aggregate outcome."
+      - "Final response must be plain text only: one concise Chinese sentence or paragraph describing the aggregate result."
+      - "Do NOT include any title/header, bullet list, numbered list, bold text, code block, table, or other Markdown formatting."
   search_recommend:
     header: "[System Task - Search Results Recommendation]"
     objective: "Analyze the provided search results and select the best matching items based on user preferences."
