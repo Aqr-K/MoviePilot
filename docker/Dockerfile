@@ -41,7 +41,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     netcat-openbsd \
     lsof \
-    ffmpeg \
     nano \
     libjemalloc2 \
     && dpkg-reconfigure --frontend noninteractive tzdata \
@@ -113,6 +112,10 @@ RUN FRONTEND_VERSION=$(sed -n "s/^FRONTEND_VERSION\s*=\s*'\([^']*\)'/\1/p" /app/
 FROM prepare_package AS final
 
 ENV LD_PRELOAD="/usr/local/lib/libjemalloc.so"
+
+# 引入支持 amr 编码的静态 ffmpeg
+COPY --from=mwader/static-ffmpeg:7.1.0 /ffmpeg /usr/local/bin/
+COPY --from=mwader/static-ffmpeg:7.1.0 /ffprobe /usr/local/bin/
 
 # python 环境
 COPY --from=prepare_venv --chmod=777 ${VENV_PATH} ${VENV_PATH}
