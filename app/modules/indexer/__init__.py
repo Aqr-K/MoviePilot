@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Tuple, Union
 
-from app.core.context import TorrentInfo
+from app.core.context import SubtitleInfo, TorrentInfo
 from app.db.site_oper import SiteOper
 from app.helper.module import ModuleHelper
 from app.helper.sites import SitesHelper  # noqa
@@ -161,6 +161,24 @@ class IndexerModule(_ModuleBase):
                             **result) for result in result_array]
 
     @staticmethod
+    def __parse_subtitle_result(site: dict, result_array: list, seconds: int) -> List[SubtitleInfo]:
+        """
+        解析字幕搜索结果为 SubtitleInfo 对象。
+        """
+        if not result_array or len(result_array) == 0:
+            logger.warn(f"{site.get('name')} 未搜索到字幕，耗时 {seconds} 秒")
+            return []
+        logger.info(
+            f"{site.get('name')} 字幕搜索完成，耗时 {seconds} 秒，返回数据：{len(result_array)}")
+        return [SubtitleInfo(site=site.get("id"),
+                             site_name=site.get("name"),
+                             site_cookie=site.get("cookie"),
+                             site_ua=site.get("ua"),
+                             site_proxy=site.get("proxy"),
+                             site_order=site.get("pri"),
+                             **result) for result in result_array]
+
+    @staticmethod
     def get_search_page_size(site: dict, keyword: Optional[str] = None) -> Optional[int]:
         """
         获取站点搜索单页容量；None 表示当前搜索入口不支持可靠翻页。
@@ -270,6 +288,47 @@ class IndexerModule(_ModuleBase):
             seconds=seconds
         )
 
+    def search_subtitles(self, site: dict,
+                         keyword: str = None,
+                         page: Optional[int] = 0) -> List[SubtitleInfo]:
+        """
+        搜索一个站点的字幕资源。
+        :param site: 站点
+        :param keyword: 搜索关键词
+        :param page: 页码
+        :return: 字幕列表
+        """
+
+        result = []
+        start_time = datetime.now()
+        error_flag = False
+
+        if not site.get("subtitles"):
+            return []
+
+        if not self.__search_check(site, keyword):
+            return []
+
+        search_word = self.__clear_search_text(keyword)
+
+        try:
+            error_flag, result = self.__spider_search(
+                search_word=search_word,
+                indexer=site,
+                page=page,
+                search_type="subtitles"
+            )
+        except Exception as err:
+            logger.error(f"{site.get('name')} 字幕搜索出错：{str(err)}")
+
+        seconds = (datetime.now() - start_time).seconds
+        self.__indexer_statistic(site=site, error_flag=error_flag, seconds=seconds)
+        return self.__parse_subtitle_result(
+            site=site,
+            result_array=result,
+            seconds=seconds
+        )
+
     async def async_search_torrents(self, site: dict,
                                     keyword: str = None,
                                     mtype: MediaType = None,
@@ -365,12 +424,54 @@ class IndexerModule(_ModuleBase):
             seconds=seconds
         )
 
+    async def async_search_subtitles(self, site: dict,
+                                     keyword: str = None,
+                                     page: Optional[int] = 0) -> List[SubtitleInfo]:
+        """
+        异步搜索一个站点的字幕资源。
+        :param site: 站点
+        :param keyword: 搜索关键词
+        :param page: 页码
+        :return: 字幕列表
+        """
+
+        result = []
+        start_time = datetime.now()
+        error_flag = False
+
+        if not site.get("subtitles"):
+            return []
+
+        if not self.__search_check(site, keyword):
+            return []
+
+        search_word = self.__clear_search_text(keyword)
+
+        try:
+            error_flag, result = await self.__async_spider_search(
+                search_word=search_word,
+                indexer=site,
+                page=page,
+                search_type="subtitles"
+            )
+        except Exception as err:
+            logger.error(f"{site.get('name')} 字幕搜索出错：{str(err)}")
+
+        seconds = (datetime.now() - start_time).seconds
+        await self.__async_indexer_statistic(site=site, error_flag=error_flag, seconds=seconds)
+        return self.__parse_subtitle_result(
+            site=site,
+            result_array=result,
+            seconds=seconds
+        )
+
     @staticmethod
     def __spider_search(indexer: dict,
                         search_word: Optional[str] = None,
                         mtype: MediaType = None,
                         cat: Optional[str] = None,
-                        page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
+                        page: Optional[int] = 0,
+                        search_type: Optional[str] = "torrents") -> Tuple[bool, List[dict]]:
         """
         根据关键字搜索单个站点
         :param: indexer: 站点配置
@@ -385,7 +486,8 @@ class IndexerModule(_ModuleBase):
                              keyword=search_word,
                              mtype=mtype,
                              cat=cat,
-                             page=page)
+                             page=page,
+                             search_type=search_type)
 
         try:
             return _spider.is_error, _spider.get_torrents()
@@ -397,7 +499,8 @@ class IndexerModule(_ModuleBase):
                                     search_word: Optional[str] = None,
                                     mtype: MediaType = None,
                                     cat: Optional[str] = None,
-                                    page: Optional[int] = 0) -> Tuple[bool, List[dict]]:
+                                    page: Optional[int] = 0,
+                                    search_type: Optional[str] = "torrents") -> Tuple[bool, List[dict]]:
         """
         异步根据关键字搜索单个站点
         :param: indexer: 站点配置
@@ -412,7 +515,8 @@ class IndexerModule(_ModuleBase):
                              keyword=search_word,
                              mtype=mtype,
                              cat=cat,
-                             page=page)
+                             page=page,
+                             search_type=search_type)
 
         try:
             result = await _spider.async_get_torrents()

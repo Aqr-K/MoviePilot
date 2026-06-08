@@ -242,6 +242,54 @@ class TorrentInfo(BaseModel):
     freedate_diff: Optional[str] = None
 
 
+class SubtitleInfo(BaseModel):
+    """
+    搜索字幕信息
+    """
+    # 站点ID
+    site: Optional[int] = None
+    # 站点名称
+    site_name: Optional[str] = None
+    # 站点Cookie
+    site_cookie: Optional[str] = None
+    # 站点UA
+    site_ua: Optional[str] = None
+    # 站点是否使用代理
+    site_proxy: Optional[bool] = False
+    # 站点优先级
+    site_order: Optional[int] = 0
+    # 字幕标题
+    title: Optional[str] = None
+    # 字幕描述
+    description: Optional[str] = None
+    # 字幕下载链接
+    enclosure: Optional[str] = None
+    # 详情页面
+    page_url: Optional[str] = None
+    # 语言
+    language: Optional[str] = None
+    # 语言图标
+    language_icon: Optional[str] = None
+    # 字幕大小
+    size: Optional[float] = 0.0
+    # 发布时间
+    pubdate: Optional[str] = None
+    # 已过时间
+    date_elapsed: Optional[str] = None
+    # 点击/下载次数
+    grabs: Optional[int] = 0
+    # 上传者
+    uploader: Optional[str] = None
+    # 举报页面
+    report_url: Optional[str] = None
+    # 种子ID
+    torrent_id: Optional[str] = None
+    # 字幕ID
+    subtitle_id: Optional[str] = None
+    # 下载文件名
+    file_name: Optional[str] = None
+
+
 class Context(BaseModel):
     """
     上下文

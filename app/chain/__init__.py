@@ -14,7 +14,7 @@ from transmission_rpc import File
 
 from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
-from app.core.context import Context, MediaInfo, TorrentInfo
+from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
@@ -1053,6 +1053,23 @@ class ChainBase(metaclass=ABCMeta):
             "search_torrents", site=site, keyword=keyword, mtype=mtype, page=page
         )
 
+    def search_subtitles(
+            self,
+            site: dict,
+            keyword: str,
+            page: Optional[int] = 0,
+    ) -> List[SubtitleInfo]:
+        """
+        搜索一个站点的字幕资源。
+        :param site: 站点
+        :param keyword: 搜索关键词
+        :param page: 页码
+        :return: 字幕列表
+        """
+        return self.run_module(
+            "search_subtitles", site=site, keyword=keyword, page=page
+        )
+
     async def async_search_torrents(
             self,
             site: dict,
@@ -1070,6 +1087,23 @@ class ChainBase(metaclass=ABCMeta):
         """
         return await self.async_run_module(
             "async_search_torrents", site=site, keyword=keyword, mtype=mtype, page=page
+        )
+
+    async def async_search_subtitles(
+            self,
+            site: dict,
+            keyword: str,
+            page: Optional[int] = 0,
+    ) -> List[SubtitleInfo]:
+        """
+        异步搜索一个站点的字幕资源。
+        :param site: 站点
+        :param keyword: 搜索关键词
+        :param page: 页码
+        :return: 字幕列表
+        """
+        return await self.async_run_module(
+            "async_search_subtitles", site=site, keyword=keyword, page=page
         )
 
     def refresh_torrents(

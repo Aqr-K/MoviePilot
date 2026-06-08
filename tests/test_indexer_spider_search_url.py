@@ -211,3 +211,59 @@ def test_python_spider_remove_does_not_pollute_other_fields():
         "description": "Main description",
         "imdbid": "tt1234567",
     }]
+
+
+def test_nexus_php_subtitle_table_parse_extracts_common_fields():
+    """
+    NexusPHP 字幕表格应解析出下载链接、语言、标题、时间、大小、点击、上传者等字段。
+    """
+    indexer = _build_indexer(
+        subtitles={
+            "search": {
+                "paths": [{"path": "subtitles.php?search={keyword}&lang_id=0"}],
+            },
+            "list": {"selector": "table tr:has(td.rowfollow)"},
+            "fields": {
+                "language": {"selector": "td:nth-child(1) img", "attribute": "title"},
+                "language_icon": {"selector": "td:nth-child(1) img", "attribute": "src"},
+                "title": {"selector": "td:nth-child(2) a"},
+                "download": {"selector": "td:nth-child(2) a", "attribute": "href"},
+                "date_added": {"selector": "td:nth-child(3) span", "attribute": "title"},
+                "date_elapsed": {"selector": "td:nth-child(3) span"},
+                "size": {"selector": "td:nth-child(4)"},
+                "grabs": {"selector": "td:nth-child(5)"},
+                "uploader": {"selector": "td:nth-child(6)"},
+                "report": {"selector": "td:nth-child(7) a", "attribute": "href"},
+            },
+        },
+    )
+    html = """
+    <table width="940" border="1" cellspacing="0" cellpadding="5">
+    <tbody><tr><td class="colhead">语言</td><td width="100%" class="colhead" align="center">标题</td></tr>
+    <tr><td class="rowfollow" align="center" valign="middle"><img border="0" src="pic/flag/japan.gif" alt="日本語" title="日本語"></td>
+    <td class="rowfollow" align="left"><a href="downloadsubs.php?torrentid=514068&amp;subid=2179">739437-second-to-last-love-s03-2025-1080p-fod-web-dl-aac20-h264-magicstar-japanese-subtitle</a></td>
+    <td class="rowfollow" align="center"><nobr><span title="2026-03-17 19:48:55">2月23天</span></nobr></td>
+    <td class="rowfollow" align="center">233.19&nbsp;KB</td>
+    <td class="rowfollow" align="center">0</td>
+    <td class="rowfollow" align="center"><i>匿名</i></td>
+    <td class="rowfollow" align="center"><a href="report.php?subtitle=2179"><img class="f_report" src="pic/trans.gif" alt="Report" title="举报该字幕"></a></td>
+    </tr>
+    </tbody></table>
+    """
+
+    result = SiteSpider(indexer, keyword="love", search_type="subtitles").parse(html)
+
+    assert result == [{
+        "title": "739437-second-to-last-love-s03-2025-1080p-fod-web-dl-aac20-h264-magicstar-japanese-subtitle",
+        "enclosure": "https://example.com/downloadsubs.php?torrentid=514068&subid=2179",
+        "size": 238787,
+        "pubdate": "2026-03-17 19:48:55",
+        "date_elapsed": "2月23天",
+        "grabs": 0,
+        "language_icon": "https://example.com/pic/flag/japan.gif",
+        "report_url": "https://example.com/report.php?subtitle=2179",
+        "language": "日本語",
+        "uploader": "匿名",
+        "torrent_id": "514068",
+        "subtitle_id": "2179",
+    }]

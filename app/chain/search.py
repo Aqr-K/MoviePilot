@@ -14,7 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from app.chain import ChainBase
 from app.core.config import global_vars, settings
 from app.core.context import Context
-from app.core.context import MediaInfo, TorrentInfo
+from app.core.context import MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.event import eventmanager, Event
 from app.core.metainfo import MetaInfo
 from app.db.systemconfig_oper import SystemConfigOper
@@ -33,6 +33,7 @@ class SearchChain(ChainBase):
     """
 
     __result_temp_file = "__search_result__"
+    __subtitle_result_temp_file = "__subtitle_search_result__"
     __search_params_temp_file = "__search_params__"
     __ai_indices_cache_file = "__ai_recommend_indices__"
 
@@ -75,6 +76,18 @@ class SearchChain(ChainBase):
         """
         page_size = self.get_search_page_size(site=site, keyword=keyword)
         return page_size is not None and len(page_results or []) >= page_size
+
+    @staticmethod
+    def _should_continue_subtitle_search_pages(site: dict, page_results: Optional[List[Any]]) -> bool:
+        """
+        判断字幕搜索是否继续抓取下一页。
+        """
+        subtitle_conf = (site or {}).get("subtitles") or {}
+        try:
+            page_size = int(subtitle_conf.get("result_num") or site.get("result_num") or 100)
+        except (TypeError, ValueError):
+            page_size = 100
+        return page_size > 0 and len(page_results or []) >= page_size
 
     @property
     def is_ai_recommend_enabled(self) -> bool:
@@ -192,6 +205,7 @@ class SearchChain(ChainBase):
             "year": str(params.get("year") or ""),
             "season": str(params.get("season") or ""),
             "sites": str(params.get("sites") or ""),
+            "result_type": str(params.get("result_type") or "torrent"),
         }
         return normalized if normalized["keyword"] else None
 
@@ -205,6 +219,7 @@ class SearchChain(ChainBase):
             year: Optional[str] = None,
             season: Optional[int] = None,
             sites: Optional[List[int]] = None,
+            result_type: Optional[str] = "torrent",
     ) -> None:
         """
         保存最后一次资源搜索参数。
@@ -218,6 +233,7 @@ class SearchChain(ChainBase):
                 "year": year,
                 "season": season,
                 "sites": self._stringify_sites(sites),
+                "result_type": result_type or "torrent",
             }
         )
         if params:
@@ -233,6 +249,7 @@ class SearchChain(ChainBase):
             year: Optional[str] = None,
             season: Optional[int] = None,
             sites: Optional[List[int]] = None,
+            result_type: Optional[str] = "torrent",
     ) -> None:
         """
         异步保存最后一次资源搜索参数。
@@ -246,6 +263,7 @@ class SearchChain(ChainBase):
                 "year": year,
                 "season": season,
                 "sites": self._stringify_sites(sites),
+                "result_type": result_type or "torrent",
             }
         )
         if params:
@@ -554,6 +572,83 @@ class SearchChain(ChainBase):
         异步获取上次搜索结果
         """
         return await self.async_load_cache(self.__result_temp_file)
+
+    async def async_last_subtitle_search_results(self) -> Optional[List[SubtitleInfo]]:
+        """
+        异步获取上次字幕搜索结果。
+        """
+        return await self.async_load_cache(self.__subtitle_result_temp_file)
+
+    async def async_search_subtitles_by_title(self, title: str, page: Optional[int] = 0,
+                                              sites: List[int] = None,
+                                              cache_local: Optional[bool] = False) -> List[SubtitleInfo]:
+        """
+        根据标题异步搜索字幕，不识别不过滤，直接返回站点字幕内容。
+        :param title: 标题关键词
+        :param page: 页码
+        :param sites: 站点ID列表
+        :param cache_local: 是否缓存到本地
+        """
+        if cache_local:
+            self.cancel_ai_recommend()
+            await self.async_save_last_search_params(
+                keyword=title,
+                area="title",
+                sites=sites,
+                result_type="subtitle",
+            )
+        logger.info(f'开始搜索字幕，关键词：{title} ...')
+        subtitles = await self.__async_search_subtitles_all_sites(
+            keyword=title, sites=sites, page=page
+        ) or []
+        if not subtitles:
+            logger.warn(f'{title} 未搜索到字幕')
+            return []
+        if cache_local:
+            await self.async_save_cache(subtitles, self.__subtitle_result_temp_file)
+        return subtitles
+
+    async def async_search_subtitles_by_title_stream(self, title: str, page: Optional[int] = 0,
+                                                     sites: List[int] = None,
+                                                     cache_local: Optional[bool] = False) -> AsyncIterator[dict]:
+        """
+        根据标题渐进式搜索字幕，不识别不过滤，按站点完成顺序返回结果。
+        """
+        if cache_local:
+            self.cancel_ai_recommend()
+            await self.async_save_last_search_params(
+                keyword=title,
+                area="title",
+                sites=sites,
+                result_type="subtitle",
+            )
+        logger.info(f'开始渐进式搜索字幕，关键词：{title} ...')
+
+        subtitles: List[SubtitleInfo] = []
+        async for event in self.__async_search_subtitles_all_sites_stream(
+                keyword=title, sites=sites, page=page):
+            result = event.pop("items", []) or []
+            if result:
+                subtitles.extend(result)
+            yield {
+                **event,
+                "type": "append",
+                "items": [subtitle.to_dict() for subtitle in result],
+                "total_items": len(subtitles)
+            }
+
+        if cache_local:
+            await self.async_save_cache(subtitles, self.__subtitle_result_temp_file)
+
+        if not subtitles:
+            logger.warn(f'{title} 未搜索到字幕')
+        yield {
+            "type": "done",
+            "stage": "done",
+            "text": f"搜索完成，共 {len(subtitles)} 个字幕",
+            "items": [subtitle.to_dict() for subtitle in subtitles],
+            "total_items": len(subtitles)
+        }
 
     async def async_search_by_id(self, tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
                                  mtype: MediaType = None, area: Optional[str] = "title", season: Optional[int] = None,
@@ -1620,6 +1715,231 @@ class SearchChain(ChainBase):
         progress.update(value=100,
                         text=f"站点搜索完成，有效资源数：{results_count}，总耗时 {(end_time - start_time).seconds} 秒")
         logger.info(f"站点搜索完成，有效资源数：{results_count}，总耗时 {(end_time - start_time).seconds} 秒")
+        progress.end()
+
+    async def __async_search_subtitles_all_sites(self, keyword: str,
+                                                 sites: List[int] = None,
+                                                 page: Optional[int] = 0) -> Optional[List[SubtitleInfo]]:
+        """
+        异步搜索多个站点的字幕资源。
+        :param keyword: 搜索关键词
+        :param sites: 指定站点ID列表，如有则只搜索指定站点，否则搜索所有站点
+        :param page: 搜索页码
+        :reutrn: 字幕资源列表
+        """
+        indexer_sites = []
+
+        if not sites:
+            sites = SystemConfigOper().get(SystemConfigKey.IndexerSites) or []
+
+        for indexer in await SitesHelper().async_get_indexers():
+            if not indexer.get("subtitles"):
+                continue
+            if not sites or indexer.get("id") in sites:
+                indexer_sites.append(indexer)
+        if not indexer_sites:
+            logger.warn('未开启任何支持字幕搜索的有效站点，无法搜索字幕')
+            return []
+
+        progress = ProgressHelper(ProgressKey.Search)
+        progress.start()
+        start_time = datetime.now()
+        search_pages = self._build_search_pages(page)
+        total_num = len(indexer_sites) * len(search_pages)
+        finish_count = 0
+        progress.update(value=0,
+                        text=f"开始搜索字幕，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...")
+        results = []
+        semaphore = asyncio.Semaphore(settings.CONF.threadpool or total_num)
+
+        async def search_site_page(site: dict, search_page: int) -> List[SubtitleInfo]:
+            """
+            控制单次字幕站点页请求的并发量，并返回该页的字幕列表。
+            """
+            async with semaphore:
+                return await self.async_search_subtitles(
+                    site=site, keyword=keyword, page=search_page
+                )
+
+        pending_tasks = {}
+
+        def submit_site_page(site: dict, page_index: int):
+            """
+            提交异步字幕站点页搜索任务，并记录站点和页码位置。
+            """
+            search_page = search_pages[page_index]
+            task = asyncio.create_task(search_site_page(site=site, search_page=search_page))
+            pending_tasks[task] = (site, page_index, search_page)
+
+        for site in indexer_sites:
+            submit_site_page(site=site, page_index=0)
+
+        try:
+            while pending_tasks:
+                if global_vars.is_system_stopped:
+                    break
+                done_tasks, _ = await asyncio.wait(
+                    pending_tasks.keys(),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for future in done_tasks:
+                    site, page_index, search_page = pending_tasks.pop(future)
+                    finish_count += 1
+                    result = await future
+                    if result:
+                        results.extend(result)
+                    if (
+                            self._should_continue_subtitle_search_pages(site=site, page_results=result)
+                            and page_index + 1 < len(search_pages)
+                    ):
+                        submit_site_page(site=site, page_index=page_index + 1)
+                    else:
+                        logger.debug(
+                            f"{site.get('name')} 字幕第 {search_page} 页返回 {len(result or [])} 条，停止继续翻页"
+                        )
+                    logger.info(f"站点字幕搜索进度：{finish_count} / {total_num}")
+                    progress.update(value=finish_count / total_num * 100,
+                                    text=f"正在搜索字幕{keyword or ''}，已完成 {finish_count} / {total_num} 个请求 ...")
+        finally:
+            for task in pending_tasks:
+                if not task.done():
+                    task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks.keys(), return_exceptions=True)
+
+        end_time = datetime.now()
+        progress.update(value=100,
+                        text=f"站点字幕搜索完成，有效字幕数：{len(results)}，总耗时 {(end_time - start_time).seconds} 秒")
+        logger.info(f"站点字幕搜索完成，有效字幕数：{len(results)}，总耗时 {(end_time - start_time).seconds} 秒")
+        progress.end()
+        return results
+
+    async def __async_search_subtitles_all_sites_stream(self, keyword: str,
+                                                        sites: List[int] = None,
+                                                        page: Optional[int] = 0) -> AsyncIterator[Dict[str, Any]]:
+        """
+        异步搜索多个站点的字幕资源，按站点完成顺序渐进式返回结果。
+        :param keyword: 搜索关键词
+        :param sites: 指定站点ID列表，如有则只搜索指定站点，否则搜索所有站点
+        :param page: 搜索页码
+        """
+        indexer_sites = []
+
+        if not sites:
+            sites = SystemConfigOper().get(SystemConfigKey.IndexerSites) or []
+
+        for indexer in await SitesHelper().async_get_indexers():
+            if not indexer.get("subtitles"):
+                continue
+            if not sites or indexer.get("id") in sites:
+                indexer_sites.append(indexer)
+        if not indexer_sites:
+            logger.warn('未开启任何支持字幕搜索的有效站点，无法搜索字幕')
+            yield {
+                "type": "done",
+                "stage": "searching",
+                "value": 100,
+                "text": "未开启任何支持字幕搜索的有效站点，无法搜索字幕",
+                "items": [],
+                "finished": 0,
+                "total": 0
+            }
+            return
+
+        progress = ProgressHelper(ProgressKey.Search)
+        progress.start()
+        start_time = datetime.now()
+        search_pages = self._build_search_pages(page)
+        total_num = len(indexer_sites) * len(search_pages)
+        finish_count = 0
+        progress.update(value=0,
+                        text=f"开始搜索字幕，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...")
+        yield {
+            "type": "progress",
+            "stage": "searching",
+            "value": 0,
+            "text": f"开始搜索字幕，共 {len(indexer_sites)} 个站点，{len(search_pages)} 页 ...",
+            "items": [],
+            "finished": 0,
+            "total": total_num
+        }
+
+        semaphore = asyncio.Semaphore(settings.CONF.threadpool or total_num)
+
+        async def search_site(site: dict, search_page: int) -> List[SubtitleInfo]:
+            """
+            搜索单个站点字幕页，用于渐进式返回入口。
+            """
+            async with semaphore:
+                site_result = await self.async_search_subtitles(
+                    site=site, keyword=keyword, page=search_page
+                )
+                return site_result or []
+
+        tasks = {}
+
+        def submit_site_page(site: dict, page_index: int):
+            """
+            提交渐进式字幕站点页搜索任务，并保留站点和页码上下文。
+            """
+            search_page = search_pages[page_index]
+            task = asyncio.create_task(search_site(site=site, search_page=search_page))
+            tasks[task] = (site, page_index, search_page)
+
+        for site in indexer_sites:
+            submit_site_page(site=site, page_index=0)
+
+        results_count = 0
+        try:
+            while tasks:
+                if global_vars.is_system_stopped:
+                    break
+                done_tasks, _ = await asyncio.wait(
+                    tasks.keys(),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for future in done_tasks:
+                    site, page_index, search_page = tasks.pop(future)
+                    finish_count += 1
+                    result = await future
+                    results_count += len(result)
+                    if (
+                            self._should_continue_subtitle_search_pages(site=site, page_results=result)
+                            and page_index + 1 < len(search_pages)
+                    ):
+                        submit_site_page(site=site, page_index=page_index + 1)
+                    else:
+                        logger.debug(
+                            f"{site.get('name')} 字幕第 {search_page} 页返回 {len(result)} 条，停止继续翻页"
+                        )
+                    logger.info(f"站点字幕搜索进度：{finish_count} / {total_num}")
+                    progress_value = finish_count / total_num * 100
+                    progress_text = f"正在搜索字幕{keyword or ''}，已完成 {finish_count} / {total_num} 个请求 ..."
+                    progress.update(value=progress_value, text=progress_text)
+                    yield {
+                        "type": "append",
+                        "stage": "searching",
+                        "value": progress_value,
+                        "text": progress_text,
+                        "items": result,
+                        "site": site.get("name"),
+                        "site_id": site.get("id"),
+                        "page": search_page,
+                        "finished": finish_count,
+                        "total": total_num,
+                        "total_items": results_count
+                    }
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks.keys(), return_exceptions=True)
+
+        end_time = datetime.now()
+        progress.update(value=100,
+                        text=f"站点字幕搜索完成，有效字幕数：{results_count}，总耗时 {(end_time - start_time).seconds} 秒")
+        logger.info(f"站点字幕搜索完成，有效字幕数：{results_count}，总耗时 {(end_time - start_time).seconds} 秒")
         progress.end()
 
     @eventmanager.register(EventType.SiteDeleted)

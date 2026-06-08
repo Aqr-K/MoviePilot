@@ -1,7 +1,7 @@
 ---
 name: moviepilot-api
 version: 1
-description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 238 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
+description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 244 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
 ---
 
 # MoviePilot REST API
@@ -107,22 +107,28 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/bangumi/person/{person_id}` | Person detail |
 | GET | `/api/v1/bangumi/person/credits/{person_id}` | Person filmography. Params: `page`, `count` |
 
-### Search / Torrents (4 endpoints)
+### Search / Torrents / Subtitles (9 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/search/media/{mediaid}` | Search torrents by media ID (format: `tmdb:123` / `douban:123` / `bangumi:123`). Params: `mtype`, `area`, `title`, `year`, `season`, `sites` |
+| GET | `/api/v1/search/media/{mediaid}/stream` | Stream torrent search by media ID with SSE. Params: `mtype`, `area`, `title`, `year`, `season`, `sites` |
 | GET | `/api/v1/search/title` | Fuzzy search torrents by keyword. Params: `keyword`, `page`, `sites` |
+| GET | `/api/v1/search/title/stream` | Stream fuzzy torrent search with SSE. Params: `keyword`, `page`, `sites` |
+| GET | `/api/v1/search/subtitle/title` | Fuzzy search site subtitles by keyword. Params: `keyword`, `page`, `sites` |
+| GET | `/api/v1/search/subtitle/title/stream` | Stream fuzzy site subtitle search with SSE. Params: `keyword`, `page`, `sites` |
 | GET | `/api/v1/search/last` | Get latest search results |
+| GET | `/api/v1/search/last/context` | Get latest search results with replayable params. `params.result_type` is `torrent` or `subtitle` |
 | POST | `/api/v1/search/recommend` | AI recommended resources. Body: `filtered_indices`, `check_only`, `force` |
 
-### Download (7 endpoints)
+### Download (8 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/download/` | List active downloads. Params: `name` (downloader name) |
 | POST | `/api/v1/download/` | Add download (with media info). Body: JSON |
 | POST | `/api/v1/download/add` | Add download (without media info). Body: JSON with `torrent_url` |
+| POST | `/api/v1/download/subtitle` | Download subtitle file to the recognized media download directory. Body: `subtitle_in`, optional `tmdbid`, `doubanid`, `save_path` |
 | GET | `/api/v1/download/start/{hashString}` | Resume download task |
 | GET | `/api/v1/download/stop/{hashString}` | Pause download task |
 | GET | `/api/v1/download/clients` | List available download clients |
@@ -484,6 +490,19 @@ python scripts/mp-api.py GET /api/v1/search/last
 
 # 5. Add download
 python scripts/mp-api.py POST /api/v1/download/add --json '{"torrent_url":"<url_from_search>"}'
+```
+
+### Search and download subtitles
+
+```bash
+# 1. Search site subtitles by keyword
+python scripts/mp-api.py GET /api/v1/search/subtitle/title keyword="Inception" sites="1,2"
+
+# 2. Restore the last subtitle search with replayable params
+python scripts/mp-api.py GET /api/v1/search/last/context
+
+# 3. Download a subtitle result to the recognized media directory
+python scripts/mp-api.py POST /api/v1/download/subtitle --json '{"subtitle_in":{"title":"Inception.2010.1080p.chs","enclosure":"https://example.com/downloadsubs.php?torrentid=1&subid=2","site_name":"Example"},"tmdbid":27205}'
 ```
 
 ### Add a subscription

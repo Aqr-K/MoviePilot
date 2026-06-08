@@ -151,6 +151,72 @@ class TorrentInfo:
 
 
 @dataclass
+class SubtitleInfo:
+    """
+    字幕搜索结果信息。
+    """
+
+    # 站点ID
+    site: int = None
+    # 站点名称
+    site_name: str = None
+    # 站点Cookie
+    site_cookie: str = None
+    # 站点UA
+    site_ua: str = None
+    # 站点是否使用代理
+    site_proxy: bool = False
+    # 站点优先级
+    site_order: int = 0
+    # 字幕标题
+    title: str = None
+    # 字幕描述
+    description: str = None
+    # 字幕下载链接
+    enclosure: str = None
+    # 详情页面
+    page_url: str = None
+    # 语言
+    language: str = None
+    # 语言图标
+    language_icon: str = None
+    # 字幕大小
+    size: float = 0.0
+    # 发布时间
+    pubdate: str = None
+    # 已过时间
+    date_elapsed: str = None
+    # 点击/下载次数
+    grabs: int = 0
+    # 上传者
+    uploader: str = None
+    # 举报页面
+    report_url: str = None
+    # 种子ID
+    torrent_id: str = None
+    # 字幕ID
+    subtitle_id: str = None
+    # 下载文件名
+    file_name: str = None
+
+    def __setattr__(self, name: str, value: Any):
+        self.__dict__[name] = value
+
+    def from_dict(self, data: dict):
+        """
+        从字典中初始化。
+        """
+        for key, value in data.items():
+            setattr(self, key, value)
+
+    def to_dict(self):
+        """
+        返回字典。
+        """
+        return vars(self).copy()
+
+
+@dataclass
 class MediaInfo:
     # 内部标记：是否命中本地识别缓存，不参与序列化
     recognize_cache_hit = False

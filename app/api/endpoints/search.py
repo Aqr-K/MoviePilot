@@ -150,13 +150,16 @@ async def search_latest_context(_: schemas.TokenPayload = Depends(verify_token))
     查询上次搜索结果及其对应的搜索参数。
     """
     search_chain = SearchChain()
-    torrents = await search_chain.async_last_search_results() or []
     params = await search_chain.async_last_search_params() or {}
+    if params.get("result_type") == "subtitle":
+        results = await search_chain.async_last_subtitle_search_results() or []
+    else:
+        results = await search_chain.async_last_search_results() or []
     return schemas.Response(
         success=True,
         data={
             "params": params,
-            "results": [torrent.to_dict() for torrent in torrents],
+            "results": [result.to_dict() for result in results],
         },
     )
 
@@ -597,6 +600,46 @@ async def search_by_title(
         return schemas.Response(success=False, message="未搜索到任何资源")
     return schemas.Response(
         success=True, data=[torrent.to_dict() for torrent in torrents]
+    )
+
+
+@router.get("/subtitle/title/stream", summary="渐进式模糊搜索字幕")
+async def search_subtitle_by_title_stream(
+    request: Request,
+    keyword: Optional[str] = None,
+    page: Optional[int] = 0,
+    sites: Optional[str] = None,
+    _: schemas.TokenPayload = Depends(verify_resource_token),
+) -> Any:
+    """
+    根据名称渐进式模糊搜索站点字幕资源，返回格式为SSE。
+    """
+
+    event_source = SearchChain().async_search_subtitles_by_title_stream(
+        title=keyword, page=page, sites=_parse_site_list(sites), cache_local=True
+    )
+    return StreamingResponse(
+        _stream_search_events(request, event_source), media_type="text/event-stream"
+    )
+
+
+@router.get("/subtitle/title", summary="模糊搜索字幕", response_model=schemas.Response)
+async def search_subtitle_by_title(
+    keyword: Optional[str] = None,
+    page: Optional[int] = 0,
+    sites: Optional[str] = None,
+    _: schemas.TokenPayload = Depends(verify_token),
+) -> Any:
+    """
+    根据名称模糊搜索站点字幕资源，支持分页。
+    """
+    subtitles = await SearchChain().async_search_subtitles_by_title(
+        title=keyword, page=page, sites=_parse_site_list(sites), cache_local=True
+    )
+    if not subtitles:
+        return schemas.Response(success=False, message="未搜索到任何字幕")
+    return schemas.Response(
+        success=True, data=[subtitle.to_dict() for subtitle in subtitles]
     )
 
 

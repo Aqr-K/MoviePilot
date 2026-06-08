@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Body
 from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
-from app.core.context import MediaInfo, Context, TorrentInfo
+from app.core.context import MediaInfo, Context, SubtitleInfo, TorrentInfo
 from app.core.metainfo import MetaInfo
 from app.core.security import verify_token
 from app.db.models.user import User
@@ -112,6 +112,33 @@ def add(
     if not did:
         return schemas.Response(success=False, message="任务添加失败")
     return schemas.Response(success=True, data={"download_id": did})
+
+
+@router.post("/subtitle", summary="下载字幕", response_model=schemas.Response)
+def download_subtitle(
+    subtitle_in: schemas.SubtitleInfo,
+    tmdbid: Annotated[int | None, Body()] = None,
+    doubanid: Annotated[str | None, Body()] = None,
+    save_path: Annotated[str | None, Body()] = None,
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """
+    下载字幕资源。
+    """
+    subtitle_info = SubtitleInfo()
+    subtitle_info.from_dict(subtitle_in.model_dump())
+    success, message, saved_files = DownloadChain().download_subtitle(
+        subtitle=subtitle_info,
+        tmdbid=tmdbid,
+        doubanid=doubanid,
+        save_path=save_path,
+        username=current_user.name,
+    )
+    return schemas.Response(
+        success=success,
+        message=message,
+        data={"files": saved_files} if saved_files else None,
+    )
 
 
 @router.get("/start/{hashString}", summary="开始任务", response_model=schemas.Response)
