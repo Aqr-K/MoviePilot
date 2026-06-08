@@ -373,6 +373,9 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             "wechat": "WECHAT_BOT_CHAT_ID",
             "feishu": "FEISHU_OPEN_ID",
             "wechatclawbot": "WECHATCLAWBOT_DEFAULT_TARGET",
+            "discord": "DISCORD_CHANNEL_ID",
+            "slack": "SLACK_CHANNEL",
+            "qqbot": "QQ_OPENID",
         }
 
         admin_key = admin_key_map.get(channel_type)
