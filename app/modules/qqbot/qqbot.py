@@ -347,13 +347,43 @@ class QQBot:
             logger.warn("QQ Bot: 消息内容为空")
             return False
 
+        # 处理按钮
+        buttons = kwargs.get("buttons")
+        keyboard = None
+        if buttons:
+            rows = []
+            btn_id = 1
+            for row in buttons:
+                btns = []
+                for btn in row:
+                    action_type = 0 if btn.get("url") else 2
+                    btns.append({
+                        "id": str(btn_id),
+                        "render_data": {
+                            "label": btn.get("text", "按钮")[:30],
+                            "visited_label": btn.get("text", "按钮")[:30],
+                            "style": 1
+                        },
+                        "action": {
+                            "type": action_type,
+                            "data": btn.get("url") if action_type == 0 else btn.get("callback_data", ""),
+                            "permission": {"type": 2}
+                        }
+                    })
+                    btn_id += 1
+                if btns:
+                    rows.append({"buttons": btns})
+            if rows:
+                keyboard = {"rows": rows}
+                use_markdown = True
+
         success_count = 0
         try:
             token = get_access_token(self._app_id, self._app_secret)
             for tgt, tgt_is_group in targets_to_send:
                 send_fn = send_proactive_group_message if tgt_is_group else send_proactive_c2c_message
                 try:
-                    send_fn(token, tgt, content, use_markdown=use_markdown)
+                    send_fn(token, tgt, content, use_markdown=use_markdown, keyboard=keyboard)
                     success_count += 1
                     logger.debug(f"QQ Bot: 消息已发送到 {'群' if tgt_is_group else '用户'} {tgt}")
                 except Exception as e:
@@ -371,7 +401,7 @@ class QQBot:
                             plain_parts.append(link)
                         plain_content = "\n".join(plain_parts).strip()
                         if plain_content:
-                            send_fn(token, tgt, plain_content, use_markdown=False)
+                            send_fn(token, tgt, plain_content, use_markdown=False, keyboard=None)
                             success_count += 1
                             logger.debug(f"QQ Bot: Markdown 不可用，已回退纯文本发送至 {tgt}")
                     else:

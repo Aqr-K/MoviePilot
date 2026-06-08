@@ -450,7 +450,12 @@ class ChannelCapabilityManager:
                 ChannelCapability.RICH_TEXT,
                 ChannelCapability.IMAGES,
                 ChannelCapability.LINKS,
+                ChannelCapability.INLINE_BUTTONS,
+                ChannelCapability.CALLBACK_QUERIES,
             },
+            max_buttons_per_row=5,
+            max_button_rows=5,
+            max_button_text_length=30,
             fallback_enabled=True,
         ),
     }

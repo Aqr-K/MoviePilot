@@ -4,6 +4,7 @@ QQ Bot Gateway WebSocket 客户端
 """
 
 import json
+import re
 import threading
 import time
 from typing import Callable, List, Optional
@@ -108,6 +109,9 @@ def run_gateway(
                 author = d.get("author", {})
                 user_openid = author.get("user_openid", "")
                 content = d.get("content", "").strip()
+                match = re.search(r'(agent_interaction:choice:[\w\-]+:\d+|agent_choice:[\w\-]+:\d+)', content)
+                if match:
+                    content = f"CALLBACK:{match.group(1)}"
                 msg_id = d.get("id", "")
                 if content:
                     on_message_fn({
@@ -122,6 +126,9 @@ def run_gateway(
                 member_openid = author.get("member_openid", "")
                 group_openid = d.get("group_openid", "")
                 content = d.get("content", "").strip()
+                match = re.search(r'(agent_interaction:choice:[\w\-]+:\d+|agent_choice:[\w\-]+:\d+)', content)
+                if match:
+                    content = f"CALLBACK:{match.group(1)}"
                 msg_id = d.get("id", "")
                 if content:
                     on_message_fn({

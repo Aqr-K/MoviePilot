@@ -100,6 +100,7 @@ def send_proactive_c2c_message(
     openid: str,
     content: str,
     use_markdown: bool = False,
+    keyboard: Optional[dict] = None,
 ) -> dict:
     """
     主动发送 C2C 单聊消息（不需要 msg_id）
@@ -108,11 +109,14 @@ def send_proactive_c2c_message(
     :param openid: 用户 openid
     :param content: 消息内容
     :param use_markdown: 是否使用 Markdown 格式（需机器人开通 Markdown 能力）
+    :param keyboard: 键盘按钮配置
     """
     if not content or not content.strip():
         raise ValueError("主动消息内容不能为空")
     content = content.strip()
     body = {"markdown": {"content": content}, "msg_type": 2} if use_markdown else {"content": content, "msg_type": 0}
+    if keyboard:
+        body["keyboard"] = {"content": keyboard}
     return _api_request(
         access_token, "POST", f"/v2/users/{openid}/messages", body
     )
@@ -123,6 +127,7 @@ def send_proactive_group_message(
     group_openid: str,
     content: str,
     use_markdown: bool = False,
+    keyboard: Optional[dict] = None,
 ) -> dict:
     """
     主动发送群聊消息（不需要 msg_id）
@@ -131,11 +136,14 @@ def send_proactive_group_message(
     :param group_openid: 群聊 openid
     :param content: 消息内容
     :param use_markdown: 是否使用 Markdown 格式（需机器人开通 Markdown 能力）
+    :param keyboard: 键盘按钮配置
     """
     if not content or not content.strip():
         raise ValueError("主动消息内容不能为空")
     content = content.strip()
     body = {"markdown": {"content": content}, "msg_type": 2} if use_markdown else {"content": content, "msg_type": 0}
+    if keyboard:
+        body["keyboard"] = {"content": keyboard}
     return _api_request(
         access_token, "POST", f"/v2/groups/{group_openid}/messages", body
     )
@@ -146,11 +154,14 @@ def send_c2c_message(
     openid: str,
     content: str,
     msg_id: Optional[str] = None,
+    keyboard: Optional[dict] = None,
 ) -> dict:
     """被动回复 C2C 单聊消息（1 小时内最多 4 次）"""
     body = {"content": content, "msg_type": 0, "msg_seq": 1}
     if msg_id:
         body["msg_id"] = msg_id
+    if keyboard:
+        body["keyboard"] = {"content": keyboard}
     return _api_request(
         access_token, "POST", f"/v2/users/{openid}/messages", body
     )
@@ -161,11 +172,14 @@ def send_group_message(
     group_openid: str,
     content: str,
     msg_id: Optional[str] = None,
+    keyboard: Optional[dict] = None,
 ) -> dict:
     """被动回复群聊消息（1 小时内最多 4 次）"""
     body = {"content": content, "msg_type": 0, "msg_seq": 1}
     if msg_id:
         body["msg_id"] = msg_id
+    if keyboard:
+        body["keyboard"] = {"content": keyboard}
     return _api_request(
         access_token, "POST", f"/v2/groups/{group_openid}/messages", body
     )
@@ -188,6 +202,7 @@ def send_message(
     content: str,
     msg_type: Literal["c2c", "group"] = "c2c",
     msg_id: Optional[str] = None,
+    keyboard: Optional[dict] = None,
 ) -> dict:
     """
     统一发送接口
@@ -196,11 +211,12 @@ def send_message(
     :param content: 消息内容
     :param msg_type: c2c 单聊 / group 群聊
     :param msg_id: 可选，被动回复时传入原消息 id
+    :param keyboard: 可选，键盘按钮配置
     """
     if msg_id:
         if msg_type == "c2c":
-            return send_c2c_message(access_token, target, content, msg_id)
-        return send_group_message(access_token, target, content, msg_id)
+            return send_c2c_message(access_token, target, content, msg_id, keyboard)
+        return send_group_message(access_token, target, content, msg_id, keyboard)
     if msg_type == "c2c":
-        return send_proactive_c2c_message(access_token, target, content)
-    return send_proactive_group_message(access_token, target, content)
+        return send_proactive_c2c_message(access_token, target, content, keyboard=keyboard)
+    return send_proactive_group_message(access_token, target, content, keyboard=keyboard)
