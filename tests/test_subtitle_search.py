@@ -3,6 +3,7 @@ import pytest
 from app.api.endpoints.search import _parse_media_type
 from app.chain.search import SearchChain
 from app.core.context import MediaInfo, SubtitleInfo
+from app.modules.indexer import IndexerModule
 from app.modules.indexer.spider import SiteSpider
 from app.schemas.types import MediaType
 from app.utils import rust_accel
@@ -380,6 +381,47 @@ def test_subtitle_site_spider_marks_login_page_as_error():
 
     assert result == []
     assert spider.is_error
+
+
+def test_sync_subtitle_search_reports_spider_error(monkeypatch):
+    """
+    同步字幕搜索应在解析完成后上报爬虫错误状态。
+    """
+    captured = {}
+
+    def fake_check(_site, _search_word=None):
+        """
+        跳过站点流控检查。
+        """
+        return True
+
+    def fake_get_torrents(self):
+        """
+        模拟登录页解析后设置错误状态。
+        """
+        self.is_error = True
+        return []
+
+    def fake_statistic(site, error_flag=False, seconds=0):
+        """
+        捕获同步搜索传给统计的错误状态。
+        """
+        captured["site"] = site
+        captured["error_flag"] = error_flag
+        captured["seconds"] = seconds
+
+    monkeypatch.setattr(IndexerModule, "_IndexerModule__search_check", staticmethod(fake_check))
+    monkeypatch.setattr(SiteSpider, "get_torrents", fake_get_torrents)
+    monkeypatch.setattr(IndexerModule, "_IndexerModule__indexer_statistic", staticmethod(fake_statistic))
+
+    site = _audiences_indexer()
+    site["subtitles"]["search"] = {"paths": [{"path": "subtitles.php?search={keyword}"}]}
+
+    result = IndexerModule().search_subtitles(site=site, keyword="The.Capture")
+
+    assert result == []
+    assert captured["site"] == site
+    assert captured["error_flag"] is True
 
 
 def test_subtitle_site_spider_uses_direct_nexus_row(monkeypatch):

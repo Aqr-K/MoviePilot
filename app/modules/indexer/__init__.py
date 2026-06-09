@@ -490,7 +490,8 @@ class IndexerModule(_ModuleBase):
                              search_type=search_type)
 
         try:
-            return _spider.is_error, _spider.get_torrents()
+            result = _spider.get_torrents()
+            return _spider.is_error, result
         finally:
             del _spider
 
