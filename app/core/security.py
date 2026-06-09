@@ -148,7 +148,9 @@ def create_access_token(
     return encoded_jwt
 
 
-def __set_or_refresh_resource_token_cookie(request: Request, response: Response, payload: schemas.TokenPayload):
+def set_or_refresh_resource_token_cookie(
+        request: Request, response: Response, payload: schemas.TokenPayload
+) -> None:
     """
     设置资源令牌 Cookie
     :param request: 包含请求相关的上下文数据
@@ -258,7 +260,7 @@ def verify_token(
         payload = __verify_token(token=jwt_token, purpose="authentication")
 
         # 如果没有 resource_token，生成并写入到 Cookie
-        __set_or_refresh_resource_token_cookie(request, response, payload)
+        set_or_refresh_resource_token_cookie(request, response, payload)
 
         return payload
     elif api_key:

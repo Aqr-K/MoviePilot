@@ -49,6 +49,19 @@ from version import APP_VERSION
 router = APIRouter()
 
 _NETTEST_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+_PUBLIC_SYSTEM_CONFIG_KEYS = {
+    item.value: item
+    for item in (
+        SystemConfigKey.Directories,
+        SystemConfigKey.Storages,
+        SystemConfigKey.IndexerSites,
+        SystemConfigKey.EpisodeFormatRuleTable,
+        SystemConfigKey.DefaultMovieSubscribeConfig,
+        SystemConfigKey.DefaultTvSubscribeConfig,
+        SystemConfigKey.FollowSubscribers,
+    )
+}
+_PUBLIC_SETTINGS_KEYS = {"PLUGIN_MARKET"}
 
 
 def _match_nettest_prefix(url: str, prefix: str) -> bool:
@@ -501,7 +514,9 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
 
 
 @router.get("/env", summary="查询系统配置", response_model=schemas.Response)
-async def get_env_setting(_: User = Depends(get_current_active_user_async)):
+async def get_env_setting(
+    _: User = Depends(get_current_active_superuser_async),
+) -> schemas.Response:
     """
     查询系统环境变量，包括当前版本号（仅管理员）
     """
@@ -525,6 +540,14 @@ async def usage_statistic(_: User = Depends(get_current_active_user_async)):
     查询安装版本统计报表
     """
     return schemas.Response(success=True, data=await MoviePilotServerHelper.async_get_usage_statistic())
+
+
+@router.get("/ping", summary="服务存活检测", response_model=schemas.Response)
+async def ping(_: User = Depends(get_current_active_user_async)) -> schemas.Response:
+    """
+    检测服务是否可用
+    """
+    return schemas.Response(success=True)
 
 
 @router.post("/env", summary="更新系统配置", response_model=schemas.Response)
@@ -587,8 +610,25 @@ async def get_progress(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+@router.get("/setting/public/{key}", summary="查询公开系统设置", response_model=schemas.Response)
+async def get_public_setting(
+    key: str, _: User = Depends(get_current_active_user_async)
+) -> schemas.Response:
+    """
+    查询普通用户可读取的非敏感系统设置
+    """
+    if key in _PUBLIC_SETTINGS_KEYS:
+        return schemas.Response(success=True, data={"value": getattr(settings, key)})
+    if key not in _PUBLIC_SYSTEM_CONFIG_KEYS:
+        raise HTTPException(status_code=404, detail="配置项不存在")
+    value = SystemConfigOper().get(_PUBLIC_SYSTEM_CONFIG_KEYS[key])
+    return schemas.Response(success=True, data={"value": value})
+
+
 @router.get("/setting/{key}", summary="查询系统设置", response_model=schemas.Response)
-async def get_setting(key: str, _: User = Depends(get_current_active_user_async)):
+async def get_setting(
+    key: str, _: User = Depends(get_current_active_superuser_async)
+) -> schemas.Response:
     """
     查询系统设置（仅管理员）
     """

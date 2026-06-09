@@ -4,7 +4,7 @@ from typing import Annotated, Any, List, Optional
 
 import aiofiles
 from anyio import Path as AsyncPath
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Security
 from fastapi.concurrency import run_in_threadpool
 from starlette import status
 from starlette.responses import StreamingResponse
@@ -13,7 +13,12 @@ from app import schemas
 from app.command import Command
 from app.core.config import settings
 from app.core.plugin import PluginManager
-from app.core.security import verify_apikey, verify_token
+from app.core.security import (
+    resource_token_cookie,
+    verify_apikey,
+    verify_resource_token,
+    verify_token,
+)
 from app.db.models import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import (
@@ -161,6 +166,48 @@ def _merge_plugin_market_metadata(
         market_plugin.system_version_message or plugin.system_version_message
     )
     return plugin
+
+
+def _is_plugin_auth_remote_file(plugin_id: str, filepath: str) -> bool:
+    """
+    判断静态文件是否属于插件声明的匿名登录认证远程组件。
+
+    登录页加载插件认证组件时尚未产生登录态和资源 Cookie，因此仅对插件主动
+    声明的认证 remote 保留匿名读取能力，其余插件静态资源仍需资源令牌。
+    """
+    path = filepath.lstrip("/")
+    normalized_plugin_id = plugin_id.lower()
+    plugin_manager = PluginManager()
+    for provider in plugin_manager.get_plugin_auth_providers():
+        remote = provider.get("remote") or {}
+        if str(remote.get("id") or "").lower() != normalized_plugin_id:
+            continue
+        remote_path = str(remote.get("url") or "").lstrip("/")
+        remote_path_lower = remote_path.lower()
+        expected_prefix = f"plugin/file/{normalized_plugin_id}/"
+        if not remote_path_lower.startswith(expected_prefix):
+            continue
+        remote_file = remote_path[len(expected_prefix):]
+        remote_dir = remote_file.rsplit("/", 1)[0] if "/" in remote_file else ""
+        if path == remote_file or (remote_dir and path.startswith(f"{remote_dir}/")):
+            return True
+    return False
+
+
+def _verify_plugin_static_file_access(
+    plugin_id: str,
+    filepath: str,
+    resource_token: Annotated[Optional[str], Security(resource_token_cookie)] = None,
+) -> None:
+    """
+    校验插件静态文件访问权限。
+
+    普通插件资源依赖登录后写入的资源 Cookie；登录认证插件的远程组件需要在
+    登录前加载，因此仅对插件声明的认证 remote 放行匿名读取。
+    """
+    if _is_plugin_auth_remote_file(plugin_id, filepath):
+        return
+    verify_resource_token(resource_token)
 
 
 async def _get_plugin_history_detail(
@@ -440,7 +487,7 @@ def plugin_page(
 
 @router.get("/dashboard/meta", summary="获取所有插件仪表板元信息")
 def plugin_dashboard_meta(
-    _: schemas.TokenPayload = Depends(verify_token),
+    _: User = Depends(get_current_active_superuser),
 ) -> List[dict]:
     """
     获取所有插件仪表板元信息
@@ -453,7 +500,7 @@ def plugin_dashboard_by_key(
     plugin_id: str,
     key: str,
     user_agent: Annotated[str | None, Header()] = None,
-    _: schemas.TokenPayload = Depends(verify_token),
+    _: User = Depends(get_current_active_superuser),
 ) -> Optional[schemas.PluginDashboard]:
     """
     根据插件ID获取插件仪表板
@@ -465,7 +512,7 @@ def plugin_dashboard_by_key(
 def plugin_dashboard(
     plugin_id: str,
     user_agent: Annotated[str | None, Header()] = None,
-    _: schemas.TokenPayload = Depends(verify_token),
+    _: User = Depends(get_current_active_superuser),
 ) -> schemas.PluginDashboard:
     """
     根据插件ID获取插件仪表板
@@ -493,7 +540,11 @@ def reset_plugin(
 
 
 @router.get("/file/{plugin_id}/{filepath:path}", summary="获取插件静态文件")
-async def plugin_static_file(plugin_id: str, filepath: str):
+async def plugin_static_file(
+    plugin_id: str,
+    filepath: str,
+    _: None = Depends(_verify_plugin_static_file_access),
+) -> StreamingResponse:
     """
     获取插件静态文件
     """

@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import Any, Annotated, Optional
 
 from app.helper.sites import SitesHelper
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
@@ -356,7 +356,9 @@ def passkey_authenticate_start(
     summary="完成 PassKey 认证",
     response_model=schemas.Token,
 )
-def passkey_authenticate_finish(passkey_req: PassKeyAuthenticationFinish) -> Any:
+def passkey_authenticate_finish(
+    request: Request, response: Response, passkey_req: PassKeyAuthenticationFinish
+) -> Any:
     """完成 PassKey 认证 - 验证凭证并返回 token"""
     try:
         # 提取并标准化凭证ID
@@ -393,14 +395,27 @@ def passkey_authenticate_finish(passkey_req: PassKeyAuthenticationFinish) -> Any
             and not settings.ADVANCED_MODE
         )
 
-        return schemas.Token(
-            access_token=security.create_access_token(
-                userid=user.id,
+        access_token = security.create_access_token(
+            userid=user.id,
+            username=user.name,
+            super_user=user.is_superuser,
+            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+            level=level,
+        )
+        security.set_or_refresh_resource_token_cookie(
+            request,
+            response,
+            schemas.TokenPayload(
+                sub=user.id,
                 username=user.name,
                 super_user=user.is_superuser,
-                expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
                 level=level,
+                purpose="authentication",
             ),
+        )
+
+        return schemas.Token(
+            access_token=access_token,
             token_type="bearer",
             super_user=user.is_superuser,
             user_id=user.id,

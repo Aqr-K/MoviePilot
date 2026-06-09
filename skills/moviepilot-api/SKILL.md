@@ -320,12 +320,14 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | POST | `/api/v1/workflow/fork` | Fork shared workflow. Body: WorkflowShare JSON |
 | GET | `/api/v1/workflow/shares` | List shared workflows. Params: `name`, `page`, `count` |
 
-### System (21 endpoints)
+### System (23 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/system/env` | Get system configuration, including runtime versions and Rust acceleration availability/enabled status |
 | POST | `/api/v1/system/env` | Update system configuration. Body: JSON object |
+| GET | `/api/v1/system/ping` | Check service availability for authenticated users |
+| GET | `/api/v1/system/setting/public/{key}` | Get allowlisted non-sensitive system setting for authenticated users |
 | GET | `/api/v1/system/setting/{key}` | Get system setting |
 | POST | `/api/v1/system/setting/{key}` | Update system setting |
 | GET | `/api/v1/system/global` | Non-sensitive settings. Params: `token` (required) |

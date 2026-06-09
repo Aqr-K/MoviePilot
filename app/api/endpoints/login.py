@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Any, List, Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app import schemas
@@ -18,6 +18,8 @@ router = APIRouter()
 
 @router.post("/access-token", summary="获取token", response_model=schemas.Token)
 def login_access_token(
+    request: Request,
+    response: Response,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     otp_password: Annotated[str | None, Form()] = None,
 ) -> Any:
@@ -45,14 +47,27 @@ def login_access_token(
         not SystemConfigOper().get(SystemConfigKey.SetupWizardState)
         and not settings.ADVANCED_MODE
     )
-    return schemas.Token(
-        access_token=security.create_access_token(
-            userid=user_or_message.id,
+    access_token = security.create_access_token(
+        userid=user_or_message.id,
+        username=user_or_message.name,
+        super_user=user_or_message.is_superuser,
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        level=level,
+    )
+    security.set_or_refresh_resource_token_cookie(
+        request,
+        response,
+        schemas.TokenPayload(
+            sub=user_or_message.id,
             username=user_or_message.name,
             super_user=user_or_message.is_superuser,
-            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
             level=level,
+            purpose="authentication",
         ),
+    )
+
+    return schemas.Token(
+        access_token=access_token,
         token_type="bearer",
         super_user=user_or_message.is_superuser,
         user_id=user_or_message.id,

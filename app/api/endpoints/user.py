@@ -104,11 +104,14 @@ async def upload_avatar(
     user_id: int,
     db: AsyncSession = Depends(get_async_db),
     file: UploadFile = File(...),
-    _: User = Depends(get_current_active_user_async),
-):
+    current_user: User = Depends(get_current_active_user_async),
+) -> schemas.Response:
     """
     上传用户头像
     """
+    if current_user.id != user_id and not current_user.is_superuser:
+        raise HTTPException(status_code=400, detail="用户权限不足")
+
     # 将文件转换为Base64
     file_base64 = base64.b64encode(file.file.read())
     # 更新到用户表
