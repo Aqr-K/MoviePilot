@@ -450,8 +450,6 @@ class SiteSpider:
             return
         selector = self.fields.get('size', {})
         item = self._safe_query(torrent, selector)
-        if not item:
-            item = self.__get_default_value(selector)
         if item is not None and item != "":
             size_val = item.replace("\n", "").strip()
             size_val = self.__filter_text(size_val,
@@ -494,8 +492,6 @@ class SiteSpider:
             return
         selector = self.fields.get('grabs', {})
         item = self._safe_query(torrent, selector)
-        if not item:
-            item = self.__get_default_value(selector)
         if item is not None and item != "":
             grabs_val = item.split("/")[0]
             grabs_val = grabs_val.replace(",", "")
@@ -650,8 +646,6 @@ class SiteSpider:
             return
         item = self._safe_query(torrent, selector)
         value = self.__filter_text(item, selector.get('filters'))
-        if not value:
-            value = self.__get_default_value(selector)
         if value is not None:
             self.torrents_info[field_name] = value
 
@@ -876,33 +870,6 @@ class SiteSpider:
         return item
 
     @staticmethod
-    def __fallback_rows(html_doc: Any, selector_text: Optional[str]) -> Optional[list]:
-        """
-        为 PyQuery 不支持的列表选择器提供等价行集合。
-        """
-        if selector_text in ("tr:has(td.rowfollow)", "table tr:has(td.rowfollow)"):
-            return [
-                row
-                for row in html_doc("tr")
-                if len(PyQuery(row).children("td.rowfollow")) >= 3
-                and len(PyQuery(row).children("td.rowfollow").find("table")) == 0
-                and len(PyQuery(row).children("td.rowfollow").find('a[href*="downloadsubs.php"]')) > 0
-            ]
-        return None
-
-    @staticmethod
-    def __get_default_value(selector: Optional[dict]) -> Optional[str]:
-        """
-        读取字段默认值，兼容历史配置里的 defualt_value 拼写。
-        """
-        if not selector:
-            return None
-        value = selector.get("default_value", selector.get("defualt_value"))
-        if value is None:
-            return None
-        return str(value)
-
-    @staticmethod
     def __is_login_or_permission_page(html_doc: Any) -> bool:
         """
         判断返回内容是否是登录或权限提示页。
@@ -941,7 +908,7 @@ class SiteSpider:
             return []
         finally:
             if 'status_doc' in locals():
-                status_doc.clear()
+                status_doc.clear()  # noqa
                 del status_doc
 
         if self.search_type == "subtitles":
@@ -975,9 +942,6 @@ class SiteSpider:
             # 种子筛选器
             torrents_selector = self.list.get('selector', '')
             rows = html_doc(torrents_selector)
-            fallback_rows = self.__fallback_rows(html_doc, torrents_selector)
-            if fallback_rows is not None:
-                rows = fallback_rows
             # 遍历种子html列表
             for i, torn in enumerate(rows):
                 if i >= int(self.result_num):
