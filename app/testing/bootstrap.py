@@ -17,10 +17,52 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 # 本进程隔离出的临时 CONFIG_DIR，兼作幂等标记
 _isolated_config_dir: Optional[str] = None
+
+
+class _SitesHelperStub:
+    """
+    测试环境站点资源垫片，用于动态站点资源仓缺失时提供基础只读接口。
+    """
+
+    auth_level = 0
+    auth_version = ""
+    indexer_version = ""
+
+    def get_indexers(self) -> list:
+        """返回空站点索引列表。"""
+        return []
+
+    async def async_get_indexers(self) -> list:
+        """异步返回空站点索引列表。"""
+        return []
+
+    def get_indexer(self, *_args: Any, **_kwargs: Any) -> Optional[dict]:
+        """返回空站点索引详情。"""
+        return None
+
+    async def async_get_indexer(self, *_args: Any, **_kwargs: Any) -> Optional[dict]:
+        """异步返回空站点索引详情。"""
+        return None
+
+    def get_authsites(self) -> list:
+        """返回空认证站点列表。"""
+        return []
+
+    def get_indexsites(self) -> list:
+        """返回空索引站点列表。"""
+        return []
+
+    def check(self, *_args: Any, **_kwargs: Any) -> tuple[bool, str]:
+        """返回站点资源不可用的检查结果。"""
+        return False, "站点资源未加载"
+
+    def check_user(self, *_args: Any, **_kwargs: Any) -> tuple[bool, str]:
+        """返回用户认证站点不可用的检查结果。"""
+        return False, "站点资源未加载"
 
 
 def isolate_config_dir() -> str:
@@ -84,7 +126,7 @@ def ensure_sites_stub() -> None:
     except (ModuleNotFoundError, ImportError):
         from types import ModuleType
         stub = ModuleType("app.helper.sites")
-        stub.SitesHelper = object
+        stub.SitesHelper = _SitesHelperStub
         sys.modules["app.helper.sites"] = stub
 
 
