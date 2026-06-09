@@ -300,7 +300,6 @@ def test_subtitle_info_serializes_title_season_episode():
             HHANCLUB_SUBTITLE_HTML,
             {
                 "title": "The.Capture.S01.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb[chs&eng]",
-                "language": "简体中文",
                 "language_icon": "https://hhanclub.net/pic/flag/china.gif",
                 "enclosure": "https://hhanclub.net/downloadsubs.php?torrentid=1435&subid=1733",
                 "pubdate": "2026-03-25 23:26:37",
@@ -424,9 +423,9 @@ def test_sync_subtitle_search_reports_spider_error(monkeypatch):
     assert captured["error_flag"] is True
 
 
-def test_subtitle_site_spider_uses_direct_nexus_row(monkeypatch):
+def test_subtitle_site_spider_keeps_parseable_nested_nexus_rows(monkeypatch):
     """
-    Python 字幕解析应只使用 NexusPHP 内层字幕行，避免外层布局行字段错位。
+    Python 字幕解析应保留可解析的 NexusPHP 嵌套行结果。
     """
     monkeypatch.setattr(rust_accel, "parse_indexer_subtitles", lambda **_kwargs: None)
     html = """
@@ -452,10 +451,15 @@ def test_subtitle_site_spider_uses_direct_nexus_row(monkeypatch):
 
     result = SiteSpider(_audiences_indexer(), keyword="The.Capture", search_type="subtitles").parse(html)
 
-    assert [item["title"] for item in result] == ["The.Capture.S01", "The.Capture.S02"]
+    assert [item["title"] for item in result] == [
+        "The.Capture.S01",
+        "The.Capture.S01",
+        "The.Capture.S02",
+    ]
     assert result[0]["language"] == "添加时间"
     assert result[0]["language_icon"] == "data:image/svg+xml;base64,xxx"
-    assert result[1]["language"] == "English"
+    assert result[1]["language"] == "添加时间"
+    assert result[2]["language"] == "English"
 
 
 def test_exact_subtitle_match_uses_torrent_helper_for_media_names():
