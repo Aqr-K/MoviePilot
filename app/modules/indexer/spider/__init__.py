@@ -866,7 +866,17 @@ class SiteSpider:
             self.is_error = True
             return []
 
-        if self.search_type != "subtitles":
+        if self.search_type == "subtitles":
+            rust_subtitles = rust_accel.parse_indexer_subtitles(
+                html_text=html_text,
+                domain=self.domain,
+                list_config=self.list,
+                fields=self.fields,
+                result_num=self.result_num
+            )
+            if rust_subtitles is not None:
+                return rust_subtitles
+        else:
             rust_torrents = rust_accel.parse_indexer_torrents(
                 html_text=html_text,
                 domain=self.domain,

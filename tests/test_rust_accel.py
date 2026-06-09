@@ -1,3 +1,5 @@
+import os
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -387,6 +389,136 @@ def test_rust_indexer_parser_handles_jinja_pyquery_filters_and_links():
         "hit_and_run": True,
         "category": "电视剧",
     }]
+
+
+def test_rust_indexer_subtitle_parser_dispatches_to_extension(monkeypatch):
+    """
+    Rust 字幕解析入口应将站点配置透传给扩展函数。
+    """
+    calls = []
+    expected = [{"title": "Green Snake"}]
+
+    def fake_parse_indexer_subtitles_fast(html_text, domain, list_config, fields, result_num):
+        """
+        记录字幕解析扩展入口调用参数。
+        """
+        calls.append((html_text, domain, list_config, fields, result_num))
+        return expected
+
+    fake_extension = SimpleNamespace(
+        is_available=lambda: True,
+        parse_indexer_subtitles_fast=fake_parse_indexer_subtitles_fast,
+    )
+    monkeypatch.setattr(rust_accel, "_moviepilot_rust", fake_extension)
+    fields = {
+        "language_icon": {"selector": "div:nth-child(1) img", "attribute": "src"},
+        "title": {"selector": 'div:nth-child(2) a[href*="downloadsubs.php"]'},
+    }
+    list_config = {"selector": "#subtitles-table > div"}
+
+    result = rust_accel.parse_indexer_subtitles(
+        html_text="<div></div>",
+        domain="https://hhanclub.net/",
+        list_config=list_config,
+        fields=fields,
+        result_num=100,
+    )
+
+    assert result == expected
+    assert calls == [("<div></div>", "https://hhanclub.net/", list_config, fields, 100)]
+
+
+@pytest.mark.skipif(
+    os.environ.get("MP_RUST_PERF_TEST") != "1",
+    reason="性能测试仅在显式开启 MP_RUST_PERF_TEST=1 时运行",
+)
+def test_rust_subtitle_parser_is_several_times_faster_than_python(monkeypatch):
+    """
+    Rust 字幕解析在生产 SiteSpider 路径下应显著快于 Python 兜底解析。
+    """
+    if not hasattr(rust_accel._moviepilot_rust, "parse_indexer_subtitles_fast"):
+        pytest.skip("当前 Rust 扩展未包含字幕解析入口")
+
+    def subtitle_row(index: int) -> str:
+        """
+        构造憨憨新版字幕卡片行，放大样本以稳定性能对比。
+        """
+        return f"""
+        <div class="grid grid-cols-[10%_60%_10%_10%_10%]">
+            <div><img src="pic/flag/china.gif"></div>
+            <div>
+                <a href="downloadsubs.php?torrentid={index}&amp;subid={index + 1000}">
+                    Example Show S01E03 1080p WEB-DL CHS {index}
+                </a>
+                <a href="https://hhanclub.net/userdetails.php?id={index}"><b>tester{index}</b></a>
+            </div>
+            <div><div>111.99&nbsp;KB</div></div>
+            <div><span title="2026-04-21 20:54:37">1月18天</span></div>
+            <div><a href="report.php?subtitle={index + 1000}">举报</a></div>
+        </div>
+        """
+
+    html = f'<div id="subtitles-table">{"".join(subtitle_row(index) for index in range(600))}</div>'
+    indexer = {
+        "id": "hhanclub",
+        "name": "憨憨",
+        "domain": "https://hhanclub.net/",
+        "public": False,
+        "subtitles": {
+            "list": {"selector": "#subtitles-table > div"},
+            "fields": {
+                "language_icon": {"selector": "div:nth-child(1) img", "attribute": "src"},
+                "title": {"selector": 'div:nth-child(2) a[href*="downloadsubs.php"]'},
+                "download": {
+                    "selector": 'div:nth-child(2) a[href*="downloadsubs.php"]',
+                    "attribute": "href",
+                },
+                "size": {"selector": "div:nth-child(3)"},
+                "date_added": {"selector": "div:nth-child(4) span", "attribute": "title"},
+                "date_elapsed": {"selector": "div:nth-child(4) span"},
+                "grabs": {"defualt_value": 0},
+                "uploader": {"selector": 'div:nth-child(2) a[href*="userdetails.php"]'},
+                "report": {"selector": 'div:nth-child(5) a[href*="report.php"]', "attribute": "href"},
+            },
+            "result_num": 600,
+        },
+    }
+
+    def best_time(parse_func):
+        """
+        多次运行取最短时间，降低偶发调度抖动对倍数判断的影响。
+        """
+        elapsed_times = []
+        result = None
+        for _ in range(5):
+            start = time.perf_counter()
+            result = parse_func()
+            elapsed_times.append(time.perf_counter() - start)
+        return min(elapsed_times), result
+
+    def parse_with_python():
+        """
+        强制禁用 Rust 字幕解析，测量 Python 兜底解析路径。
+        """
+        with monkeypatch.context() as patch_context:
+            patch_context.setattr(rust_accel, "parse_indexer_subtitles", lambda **_kwargs: None)
+            return SiteSpider(indexer, keyword="Example Show", search_type="subtitles").parse(html)
+
+    def parse_with_rust():
+        """
+        使用生产配置中的 Rust 字幕解析路径。
+        """
+        return SiteSpider(indexer, keyword="Example Show", search_type="subtitles").parse(html)
+
+    monkeypatch.setattr(settings, "RUST_ACCEL", True)
+    python_time, python_result = best_time(parse_with_python)
+    rust_time, rust_result = best_time(parse_with_rust)
+
+    assert len(rust_result) == len(python_result) == 600
+    assert rust_result[0] == python_result[0]
+    assert rust_time * 3 <= python_time, (
+        f"Rust 字幕解析未达到 3 倍性能要求：python={python_time:.6f}s, rust={rust_time:.6f}s"
+    )
 
 
 def test_rust_indexer_parser_handles_default_values_and_template_arithmetic():

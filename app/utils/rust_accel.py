@@ -118,6 +118,32 @@ def parse_indexer_torrents(
         return None
 
 
+def parse_indexer_subtitles(
+        html_text: str,
+        domain: str,
+        list_config: dict,
+        fields: dict,
+        result_num: int = 100
+) -> Optional[List[dict]]:
+    """
+    使用 Rust 批量解析普通配置站点字幕列表，不可用时返回 None。
+    """
+    if not is_enabled():
+        return None
+    try:
+        return _moviepilot_rust.parse_indexer_subtitles_fast(
+            html_text,
+            domain,
+            list_config,
+            fields,
+            result_num
+        )
+    except BaseException as err:
+        _raise_non_rust_panic(err)
+        logger.debug(f"Rust 字幕列表解析失败，使用 Python 解析兜底：{err}")
+        return None
+
+
 def parse_rss_items(xml_text: str, max_items: int = 1000) -> Optional[List[dict]]:
     """
     使用 Rust 解析 RSS/Atom 条目，不可用或异常时返回 None。

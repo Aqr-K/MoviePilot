@@ -107,7 +107,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/bangumi/person/{person_id}` | Person detail |
 | GET | `/api/v1/bangumi/person/credits/{person_id}` | Person filmography. Params: `page`, `count` |
 
-### Search / Torrents / Subtitles (9 endpoints)
+### Search / Torrents / Subtitles (11 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -117,6 +117,8 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/search/title/stream` | Stream fuzzy torrent search with SSE. Params: `keyword`, `page`, `sites` |
 | GET | `/api/v1/search/subtitle/title` | Fuzzy search site subtitles by keyword. Params: `keyword`, `page`, `sites` |
 | GET | `/api/v1/search/subtitle/title/stream` | Stream fuzzy site subtitle search with SSE. Params: `keyword`, `page`, `sites` |
+| GET | `/api/v1/search/subtitle/media/{mediaid}` | Exact subtitle search by media ID (format: `tmdb:123` / `douban:123` / `bangumi:123`). Params: `mtype`, `title`, `year`, `season`, `episode`, `sites` |
+| GET | `/api/v1/search/subtitle/media/{mediaid}/stream` | Stream exact subtitle search by media ID with SSE. Params: `mtype`, `title`, `year`, `season`, `episode`, `sites` |
 | GET | `/api/v1/search/last` | Get latest search results |
 | GET | `/api/v1/search/last/context` | Get latest search results with replayable params. `params.result_type` is `torrent` or `subtitle` |
 | POST | `/api/v1/search/recommend` | AI recommended resources. Body: `filtered_indices`, `check_only`, `force` |
