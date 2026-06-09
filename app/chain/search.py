@@ -1480,11 +1480,11 @@ class SearchChain(ChainBase):
     @staticmethod
     def __build_subtitle_names(subtitle: SubtitleInfo) -> List[str]:
         """
-        提取字幕标题和下载文件名，作为精确匹配的名称候选。
+        提取字幕标题、下载文件名和描述，作为精确匹配的名称候选。
         """
         return list(dict.fromkeys(
             name.strip()
-            for name in (subtitle.title, subtitle.file_name)
+            for name in (subtitle.title, subtitle.file_name, subtitle.description)
             if name and name.strip()
         ))
 

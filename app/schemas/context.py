@@ -288,6 +288,12 @@ class SubtitleInfo(BaseModel):
     subtitle_id: Optional[str] = None
     # 下载文件名
     file_name: Optional[str] = None
+    # 识别元数据
+    meta_info: Optional[MetaInfo] = None
+    # SxxExx
+    season_episode: Optional[str] = None
+    # 集列表
+    episode_list: Optional[List[int]] = Field(default_factory=list)
 
 
 class Context(BaseModel):

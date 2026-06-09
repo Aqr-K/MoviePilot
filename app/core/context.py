@@ -199,6 +199,21 @@ class SubtitleInfo:
     # 下载文件名
     file_name: str = None
 
+    def __build_meta_info(self) -> Optional[dict]:
+        """
+        从字幕标题、文件名和描述中识别可展示的季集信息。
+        """
+        for title in (self.title, self.file_name, self.description):
+            if not title:
+                continue
+            try:
+                meta_dict = MetaInfo(title=title, subtitle=self.description).to_dict()
+            except Exception:
+                continue
+            if meta_dict.get("season_episode") or meta_dict.get("episode_list"):
+                return meta_dict
+        return None
+
     def __setattr__(self, name: str, value: Any):
         self.__dict__[name] = value
 
@@ -213,7 +228,13 @@ class SubtitleInfo:
         """
         返回字典。
         """
-        return vars(self).copy()
+        dicts = vars(self).copy()
+        meta_info = self.__build_meta_info()
+        if meta_info:
+            dicts["meta_info"] = meta_info
+            dicts["season_episode"] = meta_info.get("season_episode")
+            dicts["episode_list"] = meta_info.get("episode_list")
+        return dicts
 
 
 @dataclass
