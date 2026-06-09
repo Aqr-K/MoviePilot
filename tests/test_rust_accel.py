@@ -521,21 +521,32 @@ def test_rust_subtitle_parser_is_several_times_faster_than_python(monkeypatch):
     )
 
 
-def test_rust_indexer_parser_handles_default_values_and_template_arithmetic():
+def test_rust_indexer_parser_handles_title_template_fallback_and_links():
     """
-    Rust indexer 解析应支持 defualt_value、Jinja int filter 和模板算术表达式。
+    Rust indexer 解析应支持标题模板兜底并补全详情与下载链接。
     """
     html = """
     <table class="torrents">
       <tr>
-        <td><a href="details.php?id=200">Default.Title</a></td>
+        <td>
+          <a href="details.php?id=200">Default.Title</a>
+          <a href="download.php?id=200">DL</a>
+        </td>
       </tr>
     </table>
     """
     fields = {
         "title_default": {"selector": 'a[href*="details.php?id="]'},
-        "missing_days": {"defualt_value": "2", "selector": "span.missing"},
-        "title": {"text": "{{ fields['title_default'] }} {{ (fields['missing_days']|int)*86400 }}"},
+        "title_optional": {
+            "selector": 'a[title][href*="details.php?id="]',
+            "attribute": "title",
+        },
+        "title": {
+            "text": "{% if fields['title_optional'] %}{{ fields['title_optional'] }}{% else %}"
+                    "{{ fields['title_default'] }}{% endif %}"
+        },
+        "details": {"selector": 'a[href*="details.php?id="]', "attribute": "href"},
+        "download": {"selector": 'a[href*="download.php?id="]', "attribute": "href"},
     }
 
     result = rust_accel.parse_indexer_torrents(
@@ -547,7 +558,11 @@ def test_rust_indexer_parser_handles_default_values_and_template_arithmetic():
         result_num=100,
     )
 
-    assert result == [{"title": "Default.Title 172800"}]
+    assert result == [{
+        "page_url": "https://example.com/details.php?id=200",
+        "enclosure": "https://example.com/download.php?id=200",
+        "title": "Default.Title",
+    }]
 
 
 def test_rust_indexer_parser_handles_lstrip_and_english_elapsed_date():
