@@ -902,6 +902,25 @@ class SiteSpider:
             return None
         return str(value)
 
+    @staticmethod
+    def __is_login_or_permission_page(html_doc: Any) -> bool:
+        """
+        判断返回内容是否是登录或权限提示页。
+        """
+        title = (html_doc("title").text() or "").strip()
+        page_text = " ".join((html_doc.text() or "").split())[:1000]
+        if title == "登录" or ":: 登录" in title:
+            return True
+        return any(
+            marker in page_text
+            for marker in (
+                "未登录",
+                "登录 / 注册",
+                "必须在登录后才能访问",
+                "你需要启用cookies才能登录",
+            )
+        )
+
     def parse(self, html_text: str) -> List[dict]:
         """
         解析整个页面
@@ -938,6 +957,10 @@ class SiteSpider:
         try:
             # 解析站点文本对象
             html_doc = PyQuery(html_text)
+            if self.__is_login_or_permission_page(html_doc):
+                self.is_error = True
+                logger.warn(f"错误：{self.indexername} 返回登录或权限提示页")
+                return []
             # 种子筛选器
             torrents_selector = self.list.get('selector', '')
             rows = html_doc(torrents_selector)

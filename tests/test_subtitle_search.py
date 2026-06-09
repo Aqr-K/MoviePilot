@@ -366,6 +366,23 @@ def test_subtitle_site_spider_skips_empty_rows(monkeypatch):
     assert result[0]["title"] == "The.Capture.S01"
 
 
+def test_subtitle_site_spider_marks_login_page_as_error(monkeypatch):
+    """
+    Python 字幕解析遇到登录页时应标记站点错误，避免误判为无字幕。
+    """
+    monkeypatch.setattr(rust_accel, "parse_indexer_subtitles", lambda **_kwargs: None)
+    html = """
+    <html><head><title>1PTBA.COM :: 登录 - Powered by NexusPHP</title></head>
+    <body>未登录! 错误: 该页面必须在登录后才能访问 你需要启用cookies才能登录</body></html>
+    """
+    spider = SiteSpider(_audiences_indexer(), keyword="The.Capture", search_type="subtitles")
+
+    result = spider.parse(html)
+
+    assert result == []
+    assert spider.is_error
+
+
 def test_subtitle_site_spider_uses_direct_nexus_row(monkeypatch):
     """
     Python 字幕解析应只使用 NexusPHP 内层字幕行，避免外层布局行字段错位。
