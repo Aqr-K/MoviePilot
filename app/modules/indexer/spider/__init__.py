@@ -678,6 +678,9 @@ class SiteSpider:
         """
         if not link:
             return None
+        parsed_link = urlparse(link)
+        if parsed_link.scheme:
+            return link
         if not link.startswith("http"):
             if link.startswith("//"):
                 return self.domain.split(":")[0] + ":" + link

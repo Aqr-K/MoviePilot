@@ -396,6 +396,7 @@ def test_subtitle_site_spider_uses_direct_nexus_row(monkeypatch):
 
     assert [item["title"] for item in result] == ["The.Capture.S01", "The.Capture.S02"]
     assert result[0]["language"] == "添加时间"
+    assert result[0]["language_icon"] == "data:image/svg+xml;base64,xxx"
     assert result[1]["language"] == "English"
 
 
