@@ -929,6 +929,21 @@ class SiteSpider:
             self.is_error = True
             return []
 
+        try:
+            status_doc = PyQuery(html_text)
+            if self.__is_login_or_permission_page(status_doc):
+                self.is_error = True
+                logger.warn(f"错误：{self.indexername} 返回登录或权限提示页")
+                return []
+        except Exception as err:
+            self.is_error = True
+            logger.warn(f"错误：{self.indexername} {str(err)}")
+            return []
+        finally:
+            if 'status_doc' in locals():
+                status_doc.clear()
+                del status_doc
+
         if self.search_type == "subtitles":
             rust_subtitles = rust_accel.parse_indexer_subtitles(
                 html_text=html_text,
@@ -957,10 +972,6 @@ class SiteSpider:
         try:
             # 解析站点文本对象
             html_doc = PyQuery(html_text)
-            if self.__is_login_or_permission_page(html_doc):
-                self.is_error = True
-                logger.warn(f"错误：{self.indexername} 返回登录或权限提示页")
-                return []
             # 种子筛选器
             torrents_selector = self.list.get('selector', '')
             rows = html_doc(torrents_selector)

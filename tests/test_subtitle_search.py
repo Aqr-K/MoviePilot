@@ -366,11 +366,10 @@ def test_subtitle_site_spider_skips_empty_rows(monkeypatch):
     assert result[0]["title"] == "The.Capture.S01"
 
 
-def test_subtitle_site_spider_marks_login_page_as_error(monkeypatch):
+def test_subtitle_site_spider_marks_login_page_as_error():
     """
     Python 字幕解析遇到登录页时应标记站点错误，避免误判为无字幕。
     """
-    monkeypatch.setattr(rust_accel, "parse_indexer_subtitles", lambda **_kwargs: None)
     html = """
     <html><head><title>1PTBA.COM :: 登录 - Powered by NexusPHP</title></head>
     <body>未登录! 错误: 该页面必须在登录后才能访问 你需要启用cookies才能登录</body></html>
