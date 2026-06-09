@@ -148,6 +148,7 @@ class DownloadChain(ChainBase):
             return []
 
         saved_files = []
+        settings.TEMP_PATH.mkdir(parents=True, exist_ok=True)
         temp_file = settings.TEMP_PATH / file_name
         temp_extract_dir = temp_file.with_name(temp_file.stem)
         try:
