@@ -120,16 +120,27 @@ class MTorrentSiteUserInfo(SiteParserBase):
         seeding_info = json.loads(html_text)
         if not seeding_info or seeding_info.get("code") != "0":
             return None
-        torrents = seeding_info.get("data", {}).get("data", [])
+        seeding_data = seeding_info.get("data") or {}
+        if not isinstance(seeding_data, dict):
+            return None
+        torrents = seeding_data.get("data") or []
+        if not isinstance(torrents, list):
+            return None
+        page_seeding = 0
         page_seeding_size = 0
         page_seeding_info = []
         for info in torrents:
-            torrent = info.get("torrent", {})
+            if not isinstance(info, dict):
+                continue
+            torrent = info.get("torrent")
+            if not isinstance(torrent, dict):
+                continue
             size = int(torrent.get("size") or '0')
             seeders = int(torrent.get("source") or '0')
+            page_seeding += 1
             page_seeding_size += size
             page_seeding_info.append([seeders, size])
-        self.seeding += len(torrents)
+        self.seeding += page_seeding
         self.seeding_size += page_seeding_size
         self.seeding_info.extend(page_seeding_info)
 
