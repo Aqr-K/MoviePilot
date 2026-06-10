@@ -20,7 +20,6 @@ from app.schemas import SiteUserData
 from app.schemas.types import MediaType, ModuleType, OtherModulesType
 from app.utils.string import StringUtils
 
-
 SPIDER_PARSER_CLASSES = {
     "TNodeSpider": TNodeSpider,
     "TorrentLeech": TorrentLeech,
@@ -176,7 +175,8 @@ class IndexerModule(_ModuleBase):
                              site_ua=site.get("ua"),
                              site_proxy=site.get("proxy"),
                              site_order=site.get("pri"),
-                             **result) for result in result_array]
+                             **result) for result in result_array if
+                result.get("language") and result.get("enclosure") and result.get("title") and result.get("size")]
 
     @staticmethod
     def get_search_page_size(site: dict, keyword: Optional[str] = None) -> Optional[int]:
@@ -184,9 +184,9 @@ class IndexerModule(_ModuleBase):
         获取站点搜索单页容量；None 表示当前搜索入口不支持可靠翻页。
         """
         site = site or {}
-        parser = site.get("parser")
-        if parser in SPIDER_PARSER_CLASSES:
-            return SPIDER_PARSER_CLASSES[parser].get_search_page_size(keyword=keyword)
+        site_parser = site.get("parser")
+        if site_parser in SPIDER_PARSER_CLASSES:
+            return SPIDER_PARSER_CLASSES[site_parser].get_search_page_size(keyword=keyword)
         try:
             page_size = int(site.get("result_num") or SiteSpider.default_result_num())
         except (TypeError, ValueError):
