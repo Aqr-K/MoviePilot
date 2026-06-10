@@ -107,13 +107,13 @@ class DownloadChain(ChainBase):
     def _resolve_media_download_dir(
             media_info: MediaInfo,
             save_path: Optional[str] = None,
-    ) -> Optional[Path]:
+    ) -> Union[str, Path]:
         """
         根据媒体信息解析下载目录。
         """
         storage = 'local'
         if save_path:
-            return Path(save_path)
+            return storage, Path(save_path)
 
         dir_info = DirectoryHelper().get_dir(media_info, include_unsorted=True)
         storage = dir_info.storage if dir_info else storage
@@ -129,8 +129,7 @@ class DownloadChain(ChainBase):
         if not dir_info.media_category and dir_info.download_category_folder and media_info.category:
             download_dir = download_dir / media_info.category
 
-        file_uri = FileURI(storage=storage, path=download_dir.as_posix())
-        return Path(file_uri.uri)
+        return storage, download_dir
 
     @staticmethod
     def _upload_subtitle_file(
@@ -179,6 +178,7 @@ class DownloadChain(ChainBase):
             self,
             subtitle: SubtitleInfo,
             response,
+            storage: str,
             target_dir: Path,
     ) -> Tuple[bool, str, List[str]]:
         """
@@ -197,14 +197,11 @@ class DownloadChain(ChainBase):
             logger.warn(f"{message}，链接：{subtitle.enclosure}")
             return False, message, []
 
-        file_uri = FileURI.from_uri(target_dir.as_posix())
-        storage = file_uri.storage
-        target_path = Path(file_uri.path)
         storage_chain = StorageChain()
         working_dir_item, message = self._get_subtitle_working_dir(
             storage_chain=storage_chain,
             storage=storage,
-            target_path=target_path,
+            target_path=target_dir,
         )
         if not working_dir_item:
             return False, message, []
@@ -296,7 +293,7 @@ class DownloadChain(ChainBase):
         if not mediainfo:
             return False, "无法识别媒体信息", []
 
-        target_dir = self._resolve_media_download_dir(
+        storage, target_dir = self._resolve_media_download_dir(
             media_info=mediainfo,
             save_path=save_path,
         )
@@ -324,6 +321,7 @@ class DownloadChain(ChainBase):
         success, message, saved_files = self._save_subtitle_response(
             subtitle=subtitle,
             response=response,
+            storage=storage,
             target_dir=target_dir,
         )
         if not success:
@@ -351,8 +349,8 @@ class DownloadChain(ChainBase):
                     download_dir=download_dir,
                     torrent_content=torrent_content,
                 )
-            except Exception as err:
-                logger.error(f"执行下载成功后处理失败：{str(err)}")
+            except Exception as e:
+                logger.error(f"执行下载成功后处理失败：{str(e)}")
 
         try:
             ThreadHelper().submit(_run_download_added)
