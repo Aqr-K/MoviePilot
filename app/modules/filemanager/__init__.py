@@ -299,6 +299,18 @@ class FileManagerModule(_ModuleBase):
             return None
         return storage_oper.create_folder(fileitem, name)
 
+    def get_folder(self, storage: str, path: Path) -> Optional[FileItem]:
+        """
+        获取目录，如目录不存在则创建
+        """
+        if storage not in self._support_storages:
+            return None
+        storage_oper = self.__get_storage_oper(storage)
+        if not storage_oper:
+            logger.error(f"不支持 {storage} 的目录获取")
+            return None
+        return storage_oper.get_folder(path)
+
     def delete_file(self, fileitem: FileItem) -> Optional[bool]:
         """
         删除文件或目录
