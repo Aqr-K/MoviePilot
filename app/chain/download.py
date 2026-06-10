@@ -36,6 +36,11 @@ class DownloadChain(ChainBase):
     下载处理链
     """
 
+    _SUBTITLE_ARCHIVE_FORMATS = {
+        ".zip": "zip",
+        ".rar": "rar",
+    }
+
     @staticmethod
     def _safe_subtitle_file_name(file_name: str, fallback_name: str) -> str:
         """
@@ -51,7 +56,14 @@ class DownloadChain(ChainBase):
         """
         判断是否为字幕压缩包。
         """
-        return Path(file_name).suffix.lower() == ".zip"
+        return Path(file_name).suffix.lower() in DownloadChain._SUBTITLE_ARCHIVE_FORMATS
+
+    @classmethod
+    def _subtitle_archive_format(cls, file_name: str) -> Optional[str]:
+        """
+        获取字幕压缩包格式。
+        """
+        return cls._SUBTITLE_ARCHIVE_FORMATS.get(Path(file_name).suffix.lower())
 
     @staticmethod
     def _is_subtitle_file(file_name: str) -> bool:
@@ -154,7 +166,15 @@ class DownloadChain(ChainBase):
         try:
             temp_file.write_bytes(response.content)
             if self._is_subtitle_archive(file_name):
-                shutil.unpack_archive(temp_file, temp_extract_dir, format='zip')
+                try:
+                    SystemUtils.unpack_archive(
+                        temp_file,
+                        temp_extract_dir,
+                        archive_format=self._subtitle_archive_format(file_name),
+                    )
+                except Exception as err:
+                    logger.error(f"字幕压缩包解压失败：{temp_file} - {str(err)}")
+                    return []
                 for sub_file in SystemUtils.list_files(temp_extract_dir, settings.RMT_SUBEXT):
                     uploaded_path = self._upload_subtitle_file(
                         storage_chain=storage_chain,

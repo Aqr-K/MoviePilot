@@ -28,6 +28,11 @@ class SubtitleModule(_ModuleBase):
     字幕下载模块
     """
 
+    _SUBTITLE_ARCHIVE_FORMATS = {
+        ".zip": "zip",
+        ".rar": "rar",
+    }
+
     # 站点详情页字幕下载元素识别XPATH
     _SITE_SUBTITLE_XPATH = [
         '//td[@class="rowhead"][text()="字幕"]/following-sibling::td//a[not(@class)]',
@@ -233,40 +238,52 @@ class SubtitleModule(_ModuleBase):
             ua=torrent.site_ua,
             proxies=settings.PROXY if torrent.site_proxy else None,
         )
+        settings.TEMP_PATH.mkdir(parents=True, exist_ok=True)
         for sublink in sublink_list:
             logger.info(f"找到字幕下载链接：{sublink}，开始下载...")
             # 下载
             ret = request.get_res(sublink)
             if ret and ret.status_code == 200:
-                # 保存ZIP
                 file_name = TorrentHelper.get_url_filename(ret, sublink)
                 if not file_name:
                     logger.warn(f"链接不是字幕文件：{sublink}")
                     continue
-                if file_name.lower().endswith(".zip"):
-                    # ZIP包
-                    zip_file = settings.TEMP_PATH / file_name
+                archive_format = self._SUBTITLE_ARCHIVE_FORMATS.get(Path(file_name).suffix.lower())
+                if archive_format:
+                    archive_file = settings.TEMP_PATH / file_name
                     # 保存
-                    zip_file.write_bytes(ret.content)
+                    archive_file.write_bytes(ret.content)
                     # 解压路径
-                    zip_path = zip_file.with_name(zip_file.stem)
-                    # 解压文件
-                    shutil.unpack_archive(zip_file, zip_path, format='zip')
-                    # 遍历转移文件
-                    for sub_file in SystemUtils.list_files(zip_path, settings.RMT_SUBEXT):
-                        target_sub_file = Path(working_dir_item.path) / Path(sub_file.name)
-                        if storageChain.get_file_item(storage, target_sub_file):
-                            logger.info(f"字幕文件已存在：{target_sub_file}")
-                            continue
-                        logger.info(f"转移字幕 {sub_file} 到 {target_sub_file} ...")
-                        storageChain.upload_file(working_dir_item, sub_file)
+                    archive_path = archive_file.with_name(archive_file.stem)
+                    try:
+                        # 解压文件
+                        SystemUtils.unpack_archive(
+                            archive_file,
+                            archive_path,
+                            archive_format=archive_format,
+                        )
+                        # 遍历转移文件
+                        for sub_file in SystemUtils.list_files(archive_path, settings.RMT_SUBEXT):
+                            target_sub_file = Path(working_dir_item.path) / Path(sub_file.name)
+                            if storageChain.get_file_item(storage, target_sub_file):
+                                logger.info(f"字幕文件已存在：{target_sub_file}")
+                                continue
+                            logger.info(f"转移字幕 {sub_file} 到 {target_sub_file} ...")
+                            storageChain.upload_file(working_dir_item, sub_file)
+                    except Exception as err:
+                        logger.error(f"字幕压缩包解压失败：{archive_file} - {str(err)}")
                     # 删除临时文件
                     try:
-                        shutil.rmtree(zip_path)
-                        zip_file.unlink()
+                        if archive_path.exists():
+                            shutil.rmtree(archive_path)
+                        if archive_file.exists():
+                            archive_file.unlink()
                     except Exception as err:
                         logger.error(f"删除临时文件失败：{str(err)}")
                 else:
+                    if Path(file_name).suffix.lower() not in settings.RMT_SUBEXT:
+                        logger.warn(f"链接不是支持的字幕文件：{sublink} - {file_name}")
+                        continue
                     sub_file = settings.TEMP_PATH / file_name
                     # 保存
                     sub_file.write_bytes(ret.content)

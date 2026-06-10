@@ -9,6 +9,7 @@
 - **Python 3.11 或更高版本**
 - **pip** (Python 包管理器)
 - **Git** (用于版本控制)
+- **RAR 解压工具**：本地开发如需测试或使用 `.rar` 字幕包解压，请安装 `unar`、`unrar`、`7z` 或 `bsdtar` 之一；Docker 镜像会内置 `unar`。
 
 Rust 加速扩展通过 `moviepilot-rust` PyPI 包安装，主项目本地开发不再需要 Rust toolchain。需要修改或发布 Rust 扩展时，请在 `MoviePilot-Rust` 仓库中构建。
 

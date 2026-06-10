@@ -263,6 +263,84 @@ class SystemUtils:
         return files
 
     @staticmethod
+    def unpack_archive(archive_file: Path, extract_dir: Path, archive_format: Optional[str] = None) -> None:
+        """
+        解压压缩包，并补充标准库未覆盖的 RAR 格式支持。
+
+        :param archive_file: 待解压的压缩包文件
+        :param extract_dir: 解压目标目录
+        :param archive_format: 压缩包格式，未指定时按文件后缀推断
+        """
+        if archive_format == "rar" or (not archive_format and archive_file.suffix.lower() == ".rar"):
+            SystemUtils.__unpack_rar_archive(archive_file, extract_dir)
+            return
+        shutil.unpack_archive(archive_file, extract_dir, format=archive_format)
+
+    @staticmethod
+    def __unpack_rar_archive(archive_file: Path, extract_dir: Path) -> None:
+        """
+        调用系统解压工具处理 RAR 压缩包。
+        """
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        commands = []
+        if shutil.which("unar"):
+            commands.append([
+                "unar",
+                "-quiet",
+                "-force-overwrite",
+                "-output-directory",
+                extract_dir.as_posix(),
+                archive_file.as_posix(),
+            ])
+        if shutil.which("unrar"):
+            commands.append([
+                "unrar",
+                "x",
+                "-o+",
+                "-idq",
+                archive_file.as_posix(),
+                f"{extract_dir.as_posix()}/",
+            ])
+        if shutil.which("7z"):
+            commands.append([
+                "7z",
+                "x",
+                "-y",
+                f"-o{extract_dir.as_posix()}",
+                archive_file.as_posix(),
+            ])
+        if shutil.which("bsdtar"):
+            commands.append([
+                "bsdtar",
+                "-xf",
+                archive_file.as_posix(),
+                "-C",
+                extract_dir.as_posix(),
+            ])
+        if not commands:
+            raise RuntimeError("未找到可用的 RAR 解压工具，请安装 unar、unrar、7z 或 bsdtar")
+
+        errors = []
+        for command in commands:
+            try:
+                result = subprocess.run(
+                    command,
+                    check=False,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=120,
+                )
+            except Exception as err:
+                errors.append(f"{command[0]}：{str(err)}")
+                continue
+            if result.returncode == 0:
+                return
+            output = (result.stderr or result.stdout or "").strip()
+            errors.append(f"{command[0]}：{output or f'返回码 {result.returncode}'}")
+        raise RuntimeError(f"RAR 压缩包解压失败：{'；'.join(errors)}")
+
+    @staticmethod
     def exits_files(directory: Path, extensions: list, min_filesize: int = 0, recursive: bool = True) -> bool:
         """
         判断目录下是否存在指定扩展名的文件

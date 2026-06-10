@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     lsof \
     nano \
+    unar \
     libjemalloc2 \
     && dpkg-reconfigure --frontend noninteractive tzdata \
     && curl https://rclone.org/install.sh | bash \
