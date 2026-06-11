@@ -32,15 +32,43 @@ class TMDb(object):
         self._total_results = None
         self._total_pages = None
 
-        if not self._session:
-            self._session = requests.Session()
-        self._req = RequestUtils(ua=settings.NORMAL_USER_AGENT, session=self._session, proxies=self.proxies)
+        self._owns_session = session is None
+        self._init_session(session=session)
 
-        self._async_req = AsyncRequestUtils(ua=settings.NORMAL_USER_AGENT, proxies=self.proxies)
+        # TMDB 在部分代理和运营商链路下的 HTTP/2 长连接偶发卡死，识别路径优先保证稳定性。
+        self._async_req = AsyncRequestUtils(
+            ua=settings.NORMAL_USER_AGENT,
+            proxies=self.proxies,
+            http2=False,
+        )
 
         self._remaining = 40
         self._reset = None
         self._timeout = 15
+
+    def _init_session(self, session=None):
+        """
+        初始化同步请求会话。
+        """
+        self._session = session or requests.Session()
+        self._req = RequestUtils(
+            ua=settings.NORMAL_USER_AGENT,
+            session=self._session,
+            proxies=self.proxies,
+        )
+
+    def _reset_owned_session(self):
+        """
+        重建当前实例自持有的同步请求会话。
+        """
+        if not self._owns_session:
+            return
+        if self._session:
+            try:
+                self._session.close()
+            except Exception as err:
+                logger.debug(f"关闭TMDB同步会话失败：{err!r}")
+        self._init_session()
 
     @property
     def page(self):
@@ -110,13 +138,22 @@ class TMDb(object):
 
     @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True)
     def request(self, method, url, data, json, **kwargs):
-        if method == "GET":
-            req = self._req.get_res(url, params=data, json=json)
-        else:
-            req = self._req.post_res(url, data=data, json=json)
+        req = self._request_once(method, url, data, json)
+        if req is None and method == "GET" and self._owns_session:
+            logger.debug("TMDB同步请求失败，重建会话后重试一次")
+            self._reset_owned_session()
+            req = self._request_once(method, url, data, json)
         if req is None:
             raise TMDbException("无法连接TheMovieDb，请检查网络连接！")
         return self._snapshot_response(req)
+
+    def _request_once(self, method, url, data, json):
+        """
+        执行一次TMDB同步请求，调用方负责决定是否重建会话后重试。
+        """
+        if method == "GET":
+            return self._req.get_res(url, params=data, json=json)
+        return self._req.post_res(url, data=data, json=json)
 
     @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True)
     async def async_request(self, method, url, data, json, **kwargs):

@@ -2222,4 +2222,17 @@ class TmdbApi:
         """
         关闭连接
         """
-        self.tmdb.close()
+        for client in (
+            self.tmdb,
+            self.search,
+            self.movie,
+            self.tv,
+            self.season_obj,
+            self.episode_obj,
+            self.discover,
+            self.trending,
+            self.person,
+            self.collection,
+        ):
+            if client:
+                client.close()
