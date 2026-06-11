@@ -347,7 +347,7 @@ class MTorrentSpider:
                 return [item["id"] for item in result.get("data", []) if "id" in item]
             else:
                 logger.warn(
-                    f"{self._name} 获取字幕列表失败，返回：{result.get("message", "未知")}"
+                    f'{self._name} 获取字幕列表失败，返回：{result.get("message", "未知")}'
                 )
                 return None
         elif res is not None:
@@ -383,7 +383,7 @@ class MTorrentSpider:
                 return self._subtitle_download_url % (self._domain, result["data"])
             else:
                 logger.warn(
-                    f"{self._name} 获取字幕下载链接失败，返回：{result.get("message", "未知")}"
+                    f'{self._name} 获取字幕下载链接失败，返回：{result.get("message", "未知")}'
                 )
                 return None
         elif res is not None:
