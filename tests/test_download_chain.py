@@ -179,13 +179,16 @@ def test_save_subtitle_response_creates_missing_temp_directory(monkeypatch, tmp_
         file_name="Demo.Movie.zh-cn.srt",
     )
 
-    saved_files = chain._save_subtitle_response(
+    success, message, saved_files = chain._save_subtitle_response(
         subtitle=subtitle,
         response=_FakeSubtitleResponse(),
+        storage="local",
         target_dir=Path("/downloads"),
     )
 
     assert temp_path.exists()
+    assert success
+    assert message == "字幕文件保存成功"
     assert saved_files == ["/downloads/Demo.Movie.zh-cn.srt"]
     assert storage_chain.uploaded_files
 
@@ -219,12 +222,15 @@ def test_save_subtitle_response_accepts_rar_filename_from_header(monkeypatch, tm
         enclosure="https://audiences.me/downloadsubs.php?torrentid=666519&subid=2195",
     )
 
-    saved_files = chain._save_subtitle_response(
+    success, message, saved_files = chain._save_subtitle_response(
         subtitle=subtitle,
         response=_FakeSubtitleResponseWithHeader(),
+        storage="local",
         target_dir=Path("/downloads"),
     )
 
+    assert success
+    assert message == "字幕文件保存成功"
     assert saved_files == ["/downloads/Hypnosis_AKA_Saimin_(1999).srt"]
     assert storage_chain.uploaded_files == [extracted_subtitle]
 
@@ -253,12 +259,15 @@ def test_save_subtitle_response_rejects_unsupported_filename_from_header(monkeyp
         enclosure="https://audiences.me/downloadsubs.php?torrentid=666519&subid=2195",
     )
 
-    saved_files = chain._save_subtitle_response(
+    success, message, saved_files = chain._save_subtitle_response(
         subtitle=subtitle,
         response=response,
+        storage="local",
         target_dir=Path("/downloads"),
     )
 
+    assert not success
+    assert message == "下载链接不是支持的字幕文件：error.html"
     assert saved_files == []
     assert storage_chain.uploaded_files == []
 
