@@ -104,7 +104,7 @@ class SiteSpider:
         预编译字段模板，避免按每条种子重复构造 Jinja Template。
         """
         templates = {}
-        for name in ("title", "description"):
+        for name in ("title", "description", "date"):
             selector = (self.fields or {}).get(name, {})
             template_text = selector.get("text") if isinstance(selector, dict) else None
             if not template_text:
@@ -502,19 +502,107 @@ class SiteSpider:
 
     def __get_pubdate(self, torrent: Any):
         # torrent pubdate yyyy-mm-dd hh:mm:ss
-        if 'date_added' not in self.fields:
+        if 'date_added' not in self.fields and 'date' not in self.fields:
             return
         selector = self.fields.get('date_added', {})
         pubdate_str = self._safe_query(torrent, selector)
+        if not pubdate_str:
+            selector = self.fields.get('date', {})
+            pubdate_str = self.__get_date(torrent, selector)
         if pubdate_str:
             pubdate_str = pubdate_str.replace('\n', ' ').strip()
         self.torrents_info['pubdate'] = self.__filter_text(pubdate_str, selector.get('filters'))
         if self.torrents_info.get('pubdate'):
             try:
-                if not isinstance(self.torrents_info['pubdate'], datetime.datetime):
+                if isinstance(self.torrents_info['pubdate'], datetime.datetime):
+                    self.torrents_info['pubdate'] = self.torrents_info['pubdate'].strftime('%Y-%m-%d %H:%M:%S')
+                else:
                     datetime.datetime.strptime(str(self.torrents_info['pubdate']), '%Y-%m-%d %H:%M:%S')
             except (ValueError, TypeError):
                 self.torrents_info['pubdate'] = StringUtils.unify_datetime_str(str(self.torrents_info['pubdate']))
+            if self.__is_invalid_pubdate_text(self.torrents_info.get('pubdate')):
+                self.torrents_info.pop('pubdate', None)
+
+    def __get_date(self, torrent: Any, selector: dict) -> Optional[str]:
+        """
+        从 date 模板解析发布时间。
+        """
+        if not selector:
+            return None
+        if "selector" in selector:
+            return self._safe_query(torrent, selector)
+        template_text = selector.get("text")
+        if not template_text:
+            return None
+
+        render_dict = {}
+        for field_name in ("date_elapsed", "date_added"):
+            field_selector = self.fields.get(field_name, {})
+            field_value = self._safe_query(torrent, field_selector)
+            if not field_value:
+                field_value = self.__get_date_from_cell(torrent, field_selector)
+            render_dict[field_name] = field_value
+        if not any(render_dict.values()):
+            return None
+
+        template = self._field_templates.get("date") or Template(template_text)
+        pubdate_str = template.render(fields=render_dict)
+        if pubdate_str == "now" or self.__is_relative_pubdate_text(pubdate_str):
+            return None
+        return pubdate_str
+
+    def __get_date_from_cell(self, torrent: Any, selector: dict) -> Optional[str]:
+        """
+        兼容 NexusPHP 发生时间模式下不再渲染 span 的时间单元格。
+        """
+        cell_selector = self.__date_cell_selector(selector.get("selector"))
+        if not cell_selector:
+            return None
+        return self._safe_query(torrent, {"selector": cell_selector})
+
+    @staticmethod
+    def __date_cell_selector(selector: Optional[str]) -> Optional[str]:
+        """
+        从时间字段选择器推导父级 td 选择器。
+        """
+        if not selector:
+            return None
+        selector = selector.strip()
+        if not selector or "> span" not in selector:
+            return None
+        return selector.split("> span", 1)[0].strip()
+
+    @staticmethod
+    def __is_relative_pubdate_text(pubdate: Optional[str]) -> bool:
+        """
+        判断是否为相对时间，避免写入不可排序的发布时间。
+        """
+        if not pubdate:
+            return False
+        text = str(pubdate).strip().lower()
+        if re.search(r"\d{4}[-/年]\d{1,2}", text):
+            return False
+        if "ago" in text:
+            return True
+        return bool(re.search(r"\d+\s*(秒|分钟|分|小时|天|周|月|年)", text))
+
+    @classmethod
+    def __is_invalid_pubdate_text(cls, pubdate: Optional[str]) -> bool:
+        """
+        判断是否为不可用发布时间，避免列错位文本污染 pubdate。
+        """
+        if not pubdate:
+            return True
+        text = str(pubdate).strip()
+        if text.lower() == "now" or text == "0":
+            return True
+        if cls.__is_relative_pubdate_text(text):
+            return True
+        try:
+            datetime.datetime.strptime(text, '%Y-%m-%d %H:%M:%S')
+            return False
+        except (ValueError, TypeError):
+            return True
 
     def __get_date_elapsed(self, torrent: Any):
         # torrent date elapsed text
@@ -822,7 +910,7 @@ class SiteSpider:
                     text = param_value[0] if param_value else ''
             except Exception as err:
                 logger.debug(f'过滤器 {method_name} 处理失败：{str(err)} - {traceback.format_exc()}')
-        return text.strip()
+        return text.strip() if isinstance(text, str) else text
 
     @staticmethod
     def __remove(item: Any, selector: Optional[dict]):

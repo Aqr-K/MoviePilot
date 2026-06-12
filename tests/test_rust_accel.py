@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,22 @@ pytestmark = pytest.mark.skipif(
     not rust_accel.is_available(),
     reason="moviepilot_rust 扩展未安装",
 )
+
+
+def _require_rust_package_version(min_version: str) -> None:
+    """
+    跳过依赖尚未发布到 PyPI 的 Rust 扩展新行为用例。
+    """
+    try:
+        installed_version = version("moviepilot-rust")
+    except PackageNotFoundError:
+        pytest.skip("moviepilot-rust 包版本不可用")
+    installed_parts = tuple(
+        int(part) for part in installed_version.split("+", 1)[0].split(".")[:3]
+    )
+    required_parts = tuple(int(part) for part in min_version.split(".")[:3])
+    if installed_parts < required_parts:
+        pytest.skip(f"需要 moviepilot-rust>={min_version}，当前为 {installed_version}")
 
 
 def test_rust_filter_rule_parser_matches_boolean_semantics():
@@ -640,3 +657,118 @@ def test_rust_indexer_parser_prefers_date_added_when_date_template_returns_elaps
     )
 
     assert result[0]["pubdate"] == "2025-06-02 03:04:05"
+
+
+def test_rust_indexer_parser_reads_nexus_php_occurrence_time_cell():
+    """
+    Rust indexer 解析应兼容 NexusPHP 发生时间模式下没有 span 的时间单元格。
+    """
+    _require_rust_package_version("0.1.9")
+    html = """
+    <table class="torrents">
+      <tr>
+        <td></td>
+        <td><table class="torrentname"><tr><td><a href="details.php?id=1">Movie.Title</a></td></tr></table></td>
+        <td></td>
+        <td class="rowfollow nowrap">2025-05-01<br/>12:13:14</td>
+      </tr>
+    </table>
+    """
+    fields = {
+        "title": {"selector": 'a[href*="details.php?id="]'},
+        "date_elapsed": {"selector": "td:nth-child(4) > span", "optional": True},
+        "date_added": {
+            "selector": "td:nth-child(4) > span",
+            "attribute": "title",
+            "optional": True,
+        },
+        "date": {
+            "text": "{% if fields['date_elapsed'] or fields['date_added'] %}"
+                    "{{ fields['date_elapsed'] if fields['date_elapsed'] else fields['date_added'] }}"
+                    "{% else %}now{% endif %}",
+            "filters": [{"name": "dateparse", "args": "%Y-%m-%d %H:%M:%S"}],
+        },
+    }
+
+    result = rust_accel.parse_indexer_torrents(
+        html_text=html,
+        domain="https://example.com/",
+        list_config={"selector": 'table.torrents > tr:has("table.torrentname")'},
+        fields=fields,
+        category=None,
+        result_num=100,
+    )
+
+    assert result[0]["pubdate"] == "2025-05-01 12:13:14"
+
+
+def test_rust_indexer_parser_does_not_use_relative_date_as_pubdate():
+    """
+    Rust indexer 解析不能把相对时间写入 pubdate。
+    """
+    _require_rust_package_version("0.1.9")
+    html = """
+    <table class="torrents">
+      <tr><td><a>Movie.Title</a><span class="elapsed">1小时</span></td></tr>
+    </table>
+    """
+    fields = {
+        "title": {"selector": "a"},
+        "date_elapsed": {"selector": "span.elapsed"},
+        "date": {
+            "text": "{% if fields['date_elapsed'] or fields['date_added'] %}"
+                    "{{ fields['date_elapsed'] if fields['date_elapsed'] else fields['date_added'] }}"
+                    "{% else %}now{% endif %}",
+            "filters": [{"name": "dateparse", "args": "%Y-%m-%d %H:%M:%S"}],
+        },
+    }
+
+    result = rust_accel.parse_indexer_torrents(
+        html_text=html,
+        domain="https://example.com/",
+        list_config={"selector": "table.torrents > tr"},
+        fields=fields,
+        category=None,
+        result_num=100,
+    )
+
+    assert "pubdate" not in result[0]
+
+
+def test_rust_indexer_parser_does_not_use_invalid_date_as_pubdate():
+    """
+    Rust indexer 解析不能把列错位的无效日期写入 pubdate。
+    """
+    _require_rust_package_version("0.1.9")
+    html = """
+    <table class="torrents">
+      <tr>
+        <td><a>Movie.Title</a></td>
+        <td></td>
+        <td></td>
+        <td>0</td>
+      </tr>
+    </table>
+    """
+    fields = {
+        "title": {"selector": "a"},
+        "date_added": {"selector": "td:nth-child(4) > span", "attribute": "title"},
+        "date_elapsed": {"selector": "td:nth-child(4) > span"},
+        "date": {
+            "text": "{% if fields['date_elapsed'] or fields['date_added'] %}"
+                    "{{ fields['date_elapsed'] if fields['date_elapsed'] else fields['date_added'] }}"
+                    "{% else %}now{% endif %}",
+            "filters": [{"name": "dateparse", "args": "%Y-%m-%d %H:%M:%S"}],
+        },
+    }
+
+    result = rust_accel.parse_indexer_torrents(
+        html_text=html,
+        domain="https://example.com/",
+        list_config={"selector": "table.torrents > tr"},
+        fields=fields,
+        category=None,
+        result_num=100,
+    )
+
+    assert "pubdate" not in result[0]

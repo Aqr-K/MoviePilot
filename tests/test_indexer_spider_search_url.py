@@ -213,6 +213,115 @@ def test_python_spider_remove_does_not_pollute_other_fields():
     }]
 
 
+def test_python_spider_parses_nexus_php_occurrence_time_cell():
+    """
+    Python 兜底解析应兼容 NexusPHP 发生时间模式下没有 span 的时间单元格。
+    """
+    indexer = _build_indexer(
+        torrents={
+            "list": {"selector": 'table.torrents > tr:has("table.torrentname")'},
+            "fields": {
+                "title": {"selector": 'a[href*="details.php?id="]'},
+                "date_elapsed": {"selector": "td:nth-child(4) > span", "optional": True},
+                "date_added": {
+                    "selector": "td:nth-child(4) > span",
+                    "attribute": "title",
+                    "optional": True,
+                },
+                "date": {
+                    "text": "{% if fields['date_elapsed'] or fields['date_added'] %}"
+                            "{{ fields['date_elapsed'] if fields['date_elapsed'] else fields['date_added'] }}"
+                            "{% else %}now{% endif %}",
+                    "filters": [{"name": "dateparse", "args": "%Y-%m-%d %H:%M:%S"}],
+                },
+            },
+        },
+    )
+    html = """
+    <table class="torrents">
+      <tr>
+        <td></td>
+        <td><table class="torrentname"><tr><td><a href="details.php?id=1">Movie.Title</a></td></tr></table></td>
+        <td></td>
+        <td class="rowfollow nowrap">2025-05-01<br/>12:13:14</td>
+      </tr>
+    </table>
+    """
+
+    with patch("app.modules.indexer.spider.rust_accel.parse_indexer_torrents", return_value=None):
+        result = SiteSpider(indexer).parse(html)
+
+    assert result[0]["pubdate"] == "2025-05-01 12:13:14"
+
+
+def test_python_spider_does_not_use_relative_date_as_pubdate():
+    """
+    Python 兜底解析不能把相对时间写入 pubdate。
+    """
+    indexer = _build_indexer(
+        torrents={
+            "list": {"selector": "table.torrents > tr"},
+            "fields": {
+                "title": {"selector": "a.title"},
+                "date_elapsed": {"selector": "span.elapsed"},
+                "date": {
+                    "text": "{% if fields['date_elapsed'] or fields['date_added'] %}"
+                            "{{ fields['date_elapsed'] if fields['date_elapsed'] else fields['date_added'] }}"
+                            "{% else %}now{% endif %}",
+                    "filters": [{"name": "dateparse", "args": "%Y-%m-%d %H:%M:%S"}],
+                },
+            },
+        },
+    )
+    html = """
+    <table class="torrents">
+      <tr><td><a class="title">Movie.Title</a><span class="elapsed">1小时</span></td></tr>
+    </table>
+    """
+
+    with patch("app.modules.indexer.spider.rust_accel.parse_indexer_torrents", return_value=None):
+        result = SiteSpider(indexer).parse(html)
+
+    assert "pubdate" not in result[0] or result[0]["pubdate"] is None
+
+
+def test_python_spider_does_not_use_invalid_date_as_pubdate():
+    """
+    Python 兜底解析不能把列错位的无效日期写入 pubdate。
+    """
+    indexer = _build_indexer(
+        torrents={
+            "list": {"selector": "table.torrents > tr"},
+            "fields": {
+                "title": {"selector": "a.title"},
+                "date_added": {"selector": "td:nth-child(4) > span", "attribute": "title"},
+                "date_elapsed": {"selector": "td:nth-child(4) > span"},
+                "date": {
+                    "text": "{% if fields['date_elapsed'] or fields['date_added'] %}"
+                            "{{ fields['date_elapsed'] if fields['date_elapsed'] else fields['date_added'] }}"
+                            "{% else %}now{% endif %}",
+                    "filters": [{"name": "dateparse", "args": "%Y-%m-%d %H:%M:%S"}],
+                },
+            },
+        },
+    )
+    html = """
+    <table class="torrents">
+      <tr>
+        <td><a class="title">Movie.Title</a></td>
+        <td></td>
+        <td></td>
+        <td>0</td>
+      </tr>
+    </table>
+    """
+
+    with patch("app.modules.indexer.spider.rust_accel.parse_indexer_torrents", return_value=None):
+        result = SiteSpider(indexer).parse(html)
+
+    assert "pubdate" not in result[0] or result[0]["pubdate"] is None
+
+
 def test_nexus_php_subtitle_table_parse_extracts_common_fields():
     """
     NexusPHP 字幕表格应解析出下载链接、语言、标题、时间、大小、点击、上传者等字段。
