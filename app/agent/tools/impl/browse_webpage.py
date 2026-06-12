@@ -3,13 +3,13 @@
 import base64
 import json
 from enum import Enum
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
-from app.core.config import settings
+from app.helper.browser import BrowserSessionHelper
 from app.log import logger
 
 # 页面内容最大长度
@@ -26,13 +26,22 @@ class BrowserAction(str, Enum):
     """浏览器操作类型"""
 
     GOTO = "goto"
+    SNAPSHOT = "snapshot"
     GET_CONTENT = "get_content"
     SCREENSHOT = "screenshot"
     CLICK = "click"
+    CLICK_REF = "click_ref"
     FILL = "fill"
+    FILL_REF = "fill_ref"
     SELECT = "select"
+    SELECT_REF = "select_ref"
     EVALUATE = "evaluate"
     WAIT = "wait"
+    LIST_TABS = "list_tabs"
+    OPEN_TAB = "open_tab"
+    FOCUS_TAB = "focus_tab"
+    CLOSE_TAB = "close_tab"
+    CLOSE_SESSION = "close_session"
 
 
 class BrowseWebpageInput(BaseModel):
@@ -45,13 +54,22 @@ class BrowseWebpageInput(BaseModel):
         description=(
             "The browser action to perform. Available actions:\n"
             "- 'goto': Navigate to a URL, returns page title and text summary\n"
+            "- 'snapshot': Get current page snapshot with interactive element refs\n"
             "- 'get_content': Get current page content (text or HTML)\n"
             "- 'screenshot': Take a screenshot of the current page, returns base64 image\n"
             "- 'click': Click on an element specified by selector\n"
+            "- 'click_ref': Click an element by ref from the latest snapshot\n"
             "- 'fill': Fill text into an input element specified by selector\n"
+            "- 'fill_ref': Fill text into an input element by ref from the latest snapshot\n"
             "- 'select': Select an option from a dropdown element\n"
+            "- 'select_ref': Select an option by ref from the latest snapshot\n"
             "- 'evaluate': Execute JavaScript code on the page and return the result\n"
-            "- 'wait': Wait for an element to appear on the page"
+            "- 'wait': Wait for an element to appear on the page\n"
+            "- 'list_tabs': List browser tabs in the current session\n"
+            "- 'open_tab': Open a new tab, optionally navigating to a URL\n"
+            "- 'focus_tab': Switch active tab by index\n"
+            "- 'close_tab': Close a tab by index\n"
+            "- 'close_session': Close the current browser session"
         ),
     )
     url: Optional[str] = Field(
@@ -61,6 +79,10 @@ class BrowseWebpageInput(BaseModel):
         None,
         description="CSS selector or text selector for the target element (for 'click', 'fill', 'select', 'wait' actions). "
         "Supports CSS selectors like '#id', '.class', 'tag', and Playwright text selectors like 'text=Click me'",
+    )
+    ref: Optional[str] = Field(
+        None,
+        description="Element ref returned by 'snapshot' or action results (for 'click_ref', 'fill_ref', 'select_ref')",
     )
     value: Optional[str] = Field(
         None,
@@ -85,6 +107,18 @@ class BrowseWebpageInput(BaseModel):
     user_agent: Optional[str] = Field(
         None, description="Custom User-Agent string for the browser context"
     )
+    session_key: Optional[str] = Field(
+        None,
+        description="Browser session key. Defaults to the current agent session id.",
+    )
+    tab_index: Optional[int] = Field(
+        None,
+        description="Tab index for 'focus_tab' and 'close_tab' actions.",
+    )
+    allow_private_network: bool = Field(
+        False,
+        description="Allow browser navigation to localhost, loopback, private, or link-local addresses.",
+    )
 
 
 class BrowseWebpageTool(MoviePilotTool):
@@ -96,11 +130,13 @@ class BrowseWebpageTool(MoviePilotTool):
     description: str = (
         "Control a real browser (Playwright) to interact with web pages. "
         "Supports navigating to URLs, reading page content, taking screenshots, "
-        "clicking elements, filling forms, selecting dropdown options, executing JavaScript, and waiting for elements. "
+        "clicking elements, filling forms, selecting dropdown options, executing JavaScript, waiting for elements, "
+        "and managing tabs. "
         "Use this tool when you need to interact with dynamic web pages, "
         "fill in forms, click buttons, or extract content from JavaScript-rendered pages. "
         "The browser session persists across multiple calls within the same conversation - "
-        "first call 'goto' to open a page, then use other actions to interact with it."
+        "first call 'goto' to open a page, inspect 'interactive_elements', then use *_ref actions when possible. "
+        "For safety, localhost and private network URLs are blocked by default unless allow_private_network is true."
     )
     args_schema: Type[BaseModel] = BrowseWebpageInput
 
@@ -111,13 +147,22 @@ class BrowseWebpageTool(MoviePilotTool):
         selector = kwargs.get("selector", "")
         action_messages = {
             "goto": f"打开网页: {url}",
+            "snapshot": "读取页面快照",
             "get_content": "获取页面内容",
             "screenshot": "截取页面截图",
             "click": f"点击元素: {selector}",
+            "click_ref": f"点击元素引用: {kwargs.get('ref', '')}",
             "fill": f"填写表单: {selector}",
+            "fill_ref": f"填写元素引用: {kwargs.get('ref', '')}",
             "select": f"选择选项: {selector}",
+            "select_ref": f"选择元素引用: {kwargs.get('ref', '')}",
             "evaluate": "执行 JavaScript",
             "wait": f"等待元素: {selector}",
+            "list_tabs": "列出浏览器标签页",
+            "open_tab": f"打开新标签页: {url}",
+            "focus_tab": f"切换浏览器标签页: {kwargs.get('tab_index', '')}",
+            "close_tab": f"关闭浏览器标签页: {kwargs.get('tab_index', '')}",
+            "close_session": "关闭浏览器会话",
         }
         return action_messages.get(action, f"执行浏览器操作: {action}")
 
@@ -126,12 +171,16 @@ class BrowseWebpageTool(MoviePilotTool):
         action: str,
         url: Optional[str] = None,
         selector: Optional[str] = None,
+        ref: Optional[str] = None,
         value: Optional[str] = None,
         script: Optional[str] = None,
         content_type: Optional[str] = "text",
         timeout: Optional[int] = DEFAULT_TIMEOUT,
         cookies: Optional[str] = None,
         user_agent: Optional[str] = None,
+        session_key: Optional[str] = None,
+        tab_index: Optional[int] = None,
+        allow_private_network: bool = False,
         **kwargs,
     ) -> str:
         """执行浏览器操作"""
@@ -150,6 +199,8 @@ class BrowseWebpageTool(MoviePilotTool):
             # 参数校验
             if browser_action == BrowserAction.GOTO and not url:
                 return "错误: 'goto' 操作需要提供 url 参数"
+            if browser_action == BrowserAction.OPEN_TAB and not url:
+                return "错误: 'open_tab' 操作需要提供 url 参数"
             if (
                 browser_action
                 in (
@@ -161,10 +212,29 @@ class BrowseWebpageTool(MoviePilotTool):
                 and not selector
             ):
                 return f"错误: '{action}' 操作需要提供 selector 参数"
+            if (
+                browser_action
+                in (
+                    BrowserAction.CLICK_REF,
+                    BrowserAction.FILL_REF,
+                    BrowserAction.SELECT_REF,
+                )
+                and not ref
+            ):
+                return f"错误: '{action}' 操作需要提供 ref 参数"
             if browser_action == BrowserAction.FILL and value is None:
                 return "错误: 'fill' 操作需要提供 value 参数"
+            if browser_action == BrowserAction.FILL_REF and value is None:
+                return "错误: 'fill_ref' 操作需要提供 value 参数"
             if browser_action == BrowserAction.EVALUATE and not script:
                 return "错误: 'evaluate' 操作需要提供 script 参数"
+            if (
+                browser_action in (BrowserAction.FOCUS_TAB, BrowserAction.CLOSE_TAB)
+                and tab_index is None
+            ):
+                return f"错误: '{action}' 操作需要提供 tab_index 参数"
+
+            effective_session_key = session_key or self._session_id
 
             result = await self.run_blocking(
                 "web",
@@ -172,12 +242,16 @@ class BrowseWebpageTool(MoviePilotTool):
                 browser_action=browser_action,
                 url=url,
                 selector=selector,
+                ref=ref,
                 value=value,
                 script=script,
                 content_type=content_type,
                 timeout=timeout,
                 cookies=cookies,
                 user_agent=user_agent,
+                session_key=effective_session_key,
+                tab_index=tab_index,
+                allow_private_network=allow_private_network,
             )
             return result
 
@@ -190,65 +264,61 @@ class BrowseWebpageTool(MoviePilotTool):
         browser_action: BrowserAction,
         url: Optional[str],
         selector: Optional[str],
+        ref: Optional[str],
         value: Optional[str],
         script: Optional[str],
         content_type: Optional[str],
         timeout: int,
         cookies: Optional[str],
         user_agent: Optional[str],
+        session_key: str,
+        tab_index: Optional[int],
+        allow_private_network: bool,
     ) -> str:
         """在同步上下文中执行 CloakBrowser 浏览器操作"""
-        from cloakbrowser import launch_context
 
         try:
-            context = None
-            page = None
-            try:
-                context_kwargs = {
-                    "viewport": {
-                        "width": SCREENSHOT_MAX_WIDTH,
-                        "height": SCREENSHOT_MAX_HEIGHT,
+            if browser_action == BrowserAction.CLOSE_SESSION:
+                closed = BrowserSessionHelper.close_session(session_key)
+                message = "浏览器会话已关闭" if closed else "浏览器会话不存在"
+                return self._json_response(
+                    {
+                        "success": closed,
+                        "message": message,
                     }
-                }
-                if user_agent:
-                    context_kwargs["user_agent"] = user_agent
-
-                context = launch_context(
-                    headless=True,
-                    humanize=settings.CLOAKBROWSER_HUMANIZE,
-                    human_preset=settings.CLOAKBROWSER_HUMAN_PRESET,
-                    **context_kwargs,
                 )
-                page = context.new_page()
-                page.set_default_timeout(timeout * 1000)
 
-                # 设置 cookies
-                if cookies:
-                    page.set_extra_http_headers({"cookie": cookies})
+            helper = BrowserSessionHelper(
+                headless=True,
+                viewport={
+                    "width": SCREENSHOT_MAX_WIDTH,
+                    "height": SCREENSHOT_MAX_HEIGHT,
+                },
+            )
 
-                # 对于非 goto 操作，如果提供了 url 先导航
-                if url and browser_action != BrowserAction.GOTO:
-                    page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-                    page.wait_for_load_state("networkidle", timeout=timeout * 1000)
-
-                # 执行具体操作
-                result = self._do_action(
-                    page,
-                    browser_action,
-                    url,
-                    selector,
-                    value,
-                    script,
-                    content_type,
-                    timeout,
+            def _callback(session) -> str:
+                return self._do_action(
+                    helper=helper,
+                    session=session,
+                    browser_action=browser_action,
+                    url=url,
+                    selector=selector,
+                    ref=ref,
+                    value=value,
+                    script=script,
+                    content_type=content_type,
+                    timeout=timeout,
+                    tab_index=tab_index,
+                    allow_private_network=allow_private_network,
                 )
-                return result
 
-            finally:
-                if page:
-                    page.close()
-                if context:
-                    context.close()
+            return helper.with_session(
+                session_key=session_key,
+                callback=_callback,
+                user_agent=user_agent,
+                cookies=cookies,
+                timeout=timeout,
+            )
 
         except Exception as e:
             logger.error(f"CloakBrowser 执行失败: {e}", exc_info=True)
@@ -256,19 +326,38 @@ class BrowseWebpageTool(MoviePilotTool):
 
     def _do_action(
         self,
-        page,
+        helper: BrowserSessionHelper,
+        session,
         browser_action: BrowserAction,
         url: Optional[str],
         selector: Optional[str],
+        ref: Optional[str],
         value: Optional[str],
         script: Optional[str],
         content_type: Optional[str],
         timeout: int,
+        tab_index: Optional[int],
+        allow_private_network: bool,
     ) -> str:
         """执行具体的浏览器操作"""
+        page = session.active_page
 
         if browser_action == BrowserAction.GOTO:
-            return self._action_goto(page, url, timeout)
+            return self._action_goto(
+                helper,
+                page,
+                url,
+                timeout,
+                allow_private_network=allow_private_network,
+            )
+
+        elif browser_action == BrowserAction.SNAPSHOT:
+            return self._json_response(
+                BrowserSessionHelper.build_snapshot(
+                    page,
+                    max_text_chars=MAX_CONTENT_LENGTH,
+                )
+            )
 
         elif browser_action == BrowserAction.GET_CONTENT:
             return self._action_get_content(page, content_type)
@@ -279,11 +368,37 @@ class BrowseWebpageTool(MoviePilotTool):
         elif browser_action == BrowserAction.CLICK:
             return self._action_click(page, selector, timeout)
 
+        elif browser_action == BrowserAction.CLICK_REF:
+            return self._action_click(
+                page,
+                BrowserSessionHelper.ref_to_selector(ref),
+                timeout,
+                ref=ref,
+            )
+
         elif browser_action == BrowserAction.FILL:
             return self._action_fill(page, selector, value, timeout)
 
+        elif browser_action == BrowserAction.FILL_REF:
+            return self._action_fill(
+                page,
+                BrowserSessionHelper.ref_to_selector(ref),
+                value,
+                timeout,
+                ref=ref,
+            )
+
         elif browser_action == BrowserAction.SELECT:
             return self._action_select(page, selector, value, timeout)
+
+        elif browser_action == BrowserAction.SELECT_REF:
+            return self._action_select(
+                page,
+                BrowserSessionHelper.ref_to_selector(ref),
+                value,
+                timeout,
+                ref=ref,
+            )
 
         elif browser_action == BrowserAction.EVALUATE:
             return self._action_evaluate(page, script)
@@ -291,77 +406,75 @@ class BrowseWebpageTool(MoviePilotTool):
         elif browser_action == BrowserAction.WAIT:
             return self._action_wait(page, selector, timeout)
 
+        elif browser_action == BrowserAction.LIST_TABS:
+            return self._json_response({"tabs": BrowserSessionHelper.list_tabs(session)})
+
+        elif browser_action == BrowserAction.OPEN_TAB:
+            page = helper.open_tab(
+                session,
+                url=url,
+                timeout=timeout,
+                allow_private_network=allow_private_network,
+            )
+            return self._json_response(
+                {
+                    "success": True,
+                    "active_tab": session.active_index,
+                    "tabs": BrowserSessionHelper.list_tabs(session),
+                    "snapshot": BrowserSessionHelper.build_snapshot(
+                        page,
+                        max_text_chars=MAX_CONTENT_LENGTH,
+                    ),
+                }
+            )
+
+        elif browser_action == BrowserAction.FOCUS_TAB:
+            page = BrowserSessionHelper.focus_tab(session, tab_index)
+            return self._json_response(
+                {
+                    "success": True,
+                    "active_tab": session.active_index,
+                    "tabs": BrowserSessionHelper.list_tabs(session),
+                    "snapshot": BrowserSessionHelper.build_snapshot(
+                        page,
+                        max_text_chars=MAX_CONTENT_LENGTH,
+                    ),
+                }
+            )
+
+        elif browser_action == BrowserAction.CLOSE_TAB:
+            tabs = BrowserSessionHelper.close_tab(session, tab_index)
+            return self._json_response({"success": True, "tabs": tabs})
+
         return f"未知操作: {browser_action}"
 
     @staticmethod
-    def _action_goto(page, url: str, timeout: int) -> str:
+    def _json_response(payload: dict[str, Any]) -> str:
+        """返回格式化 JSON 字符串"""
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _action_goto(
+        helper: BrowserSessionHelper,
+        page,
+        url: str,
+        timeout: int,
+        allow_private_network: bool,
+    ) -> str:
         """导航到URL"""
-        response = page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-        try:
-            page.wait_for_load_state("networkidle", timeout=min(timeout, 15) * 1000)
-        except Exception:
-            # networkidle 超时不是致命错误，页面可能已经可用
-            pass
-
+        response = helper.goto(
+            page,
+            url,
+            timeout=timeout,
+            allow_private_network=allow_private_network,
+        )
         status = response.status if response else "unknown"
-        title = page.title()
-        page_url = page.url
-
-        # 提取页面可读文本摘要
-        text_content = page.inner_text("body")
-        if text_content and len(text_content) > MAX_CONTENT_LENGTH:
-            text_content = text_content[:MAX_CONTENT_LENGTH] + "\n\n...(内容已截断)"
-
-        # 提取页面链接
-        links = page.evaluate("""
-            () => {
-                const links = [];
-                document.querySelectorAll('a[href]').forEach(a => {
-                    const text = a.innerText.trim();
-                    const href = a.href;
-                    if (text && href && !href.startsWith('javascript:')) {
-                        links.push({text: text.substring(0, 80), href: href});
-                    }
-                });
-                return links.slice(0, 30);
-            }
-        """)
-
-        # 提取表单信息
-        forms = page.evaluate("""
-            () => {
-                const forms = [];
-                document.querySelectorAll('input, textarea, select, button').forEach(el => {
-                    const info = {
-                        tag: el.tagName.toLowerCase(),
-                        type: el.type || '',
-                        name: el.name || '',
-                        id: el.id || '',
-                        placeholder: el.placeholder || '',
-                        value: el.tagName.toLowerCase() === 'select' ? '' : (el.value || '').substring(0, 50),
-                        text: el.innerText ? el.innerText.trim().substring(0, 50) : ''
-                    };
-                    // 只保留有标识信息的元素
-                    if (info.name || info.id || info.placeholder || info.text) {
-                        forms.push(info);
-                    }
-                });
-                return forms.slice(0, 30);
-            }
-        """)
-
-        result = {
-            "status": status,
-            "url": page_url,
-            "title": title,
-            "text_content": text_content,
-        }
-        if links:
-            result["links"] = links
-        if forms:
-            result["form_elements"] = forms
-
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        result = BrowserSessionHelper.build_snapshot(
+            page,
+            status=status,
+            max_text_chars=MAX_CONTENT_LENGTH,
+        )
+        return BrowseWebpageTool._json_response(result)
 
     @staticmethod
     def _action_get_content(page, content_type: Optional[str]) -> str:
@@ -383,7 +496,7 @@ class BrowseWebpageTool(MoviePilotTool):
             "content_type": content_type,
             "content": content,
         }
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return BrowseWebpageTool._json_response(result)
 
     @staticmethod
     def _action_screenshot(page) -> str:
@@ -416,10 +529,15 @@ class BrowseWebpageTool(MoviePilotTool):
             "format": "jpeg",
             "note": "截图已以 base64 编码返回",
         }
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return BrowseWebpageTool._json_response(result)
 
     @staticmethod
-    def _action_click(page, selector: str, timeout: int) -> str:
+    def _action_click(
+        page,
+        selector: str,
+        timeout: int,
+        ref: Optional[str] = None,
+    ) -> str:
         """点击元素"""
         page.click(selector, timeout=timeout * 1000)
 
@@ -429,49 +547,62 @@ class BrowseWebpageTool(MoviePilotTool):
         except Exception:
             pass
 
-        title = page.title()
-        page_url = page.url
-
-        return json.dumps(
+        return BrowseWebpageTool._json_response(
             {
                 "success": True,
-                "message": f"成功点击元素: {selector}",
-                "current_url": page_url,
-                "current_title": title,
-            },
-            ensure_ascii=False,
-            indent=2,
+                "message": f"成功点击元素: {ref or selector}",
+                "snapshot": BrowserSessionHelper.build_snapshot(
+                    page,
+                    max_text_chars=MAX_CONTENT_LENGTH,
+                ),
+            }
         )
 
     @staticmethod
-    def _action_fill(page, selector: str, value: str, timeout: int) -> str:
+    def _action_fill(
+        page,
+        selector: str,
+        value: str,
+        timeout: int,
+        ref: Optional[str] = None,
+    ) -> str:
         """填写表单"""
         page.fill(selector, value, timeout=timeout * 1000)
 
-        return json.dumps(
+        return BrowseWebpageTool._json_response(
             {
                 "success": True,
-                "message": f"成功填写元素 '{selector}' 的值为 '{value}'",
-            },
-            ensure_ascii=False,
-            indent=2,
+                "message": f"成功填写元素 '{ref or selector}'",
+                "snapshot": BrowserSessionHelper.build_snapshot(
+                    page,
+                    max_text_chars=MAX_CONTENT_LENGTH,
+                ),
+            }
         )
 
     @staticmethod
-    def _action_select(page, selector: str, value: Optional[str], timeout: int) -> str:
+    def _action_select(
+        page,
+        selector: str,
+        value: Optional[str],
+        timeout: int,
+        ref: Optional[str] = None,
+    ) -> str:
         """选择下拉选项"""
         if value:
             page.select_option(selector, value=value, timeout=timeout * 1000)
         else:
             return "错误: 'select' 操作需要提供 value 参数"
 
-        return json.dumps(
+        return BrowseWebpageTool._json_response(
             {
                 "success": True,
-                "message": f"成功选择元素 '{selector}' 的选项 '{value}'",
-            },
-            ensure_ascii=False,
-            indent=2,
+                "message": f"成功选择元素 '{ref or selector}' 的选项 '{value}'",
+                "snapshot": BrowserSessionHelper.build_snapshot(
+                    page,
+                    max_text_chars=MAX_CONTENT_LENGTH,
+                ),
+            }
         )
 
     @staticmethod
@@ -491,13 +622,11 @@ class BrowseWebpageTool(MoviePilotTool):
         if len(formatted) > MAX_CONTENT_LENGTH:
             formatted = formatted[:MAX_CONTENT_LENGTH] + "\n\n...(结果已截断)"
 
-        return json.dumps(
+        return BrowseWebpageTool._json_response(
             {
                 "success": True,
                 "result": formatted,
-            },
-            ensure_ascii=False,
-            indent=2,
+            }
         )
 
     @staticmethod
@@ -511,22 +640,22 @@ class BrowseWebpageTool(MoviePilotTool):
             if text and len(text) > 200:
                 text = text[:200] + "..."
 
-            return json.dumps(
+            return BrowseWebpageTool._json_response(
                 {
                     "success": True,
                     "message": f"元素 '{selector}' 已出现",
                     "visible": visible,
                     "text": text,
-                },
-                ensure_ascii=False,
-                indent=2,
+                    "snapshot": BrowserSessionHelper.build_snapshot(
+                        page,
+                        max_text_chars=MAX_CONTENT_LENGTH,
+                    ),
+                }
             )
         else:
-            return json.dumps(
+            return BrowseWebpageTool._json_response(
                 {
                     "success": False,
                     "message": f"等待元素 '{selector}' 超时",
-                },
-                ensure_ascii=False,
-                indent=2,
+                }
             )
