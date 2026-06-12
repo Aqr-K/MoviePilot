@@ -19,6 +19,7 @@ from feedback_issue_common import (
     check_recent_duplicate,
     check_user_rate_limit,
     classify_failure,
+    format_doctor_summary,
     load_diagnostics_logs,
     load_submission_state,
     read_json_file,
@@ -150,7 +151,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         }
 
     try:
-        logs, _ = load_diagnostics_logs(payload["diagnostics_file"])
+        logs, diagnostics = load_diagnostics_logs(payload["diagnostics_file"])
     except Exception as err:
         return {
             "success": False,
@@ -166,12 +167,18 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
             "message": error,
         }
 
+    combined_logs = "\n\n".join(
+        part for part in (
+            f"### Doctor 摘要\n{format_doctor_summary(diagnostics.get('doctor'))}",
+            logs,
+        ) if part
+    )
     body = build_issue_body(
         version=payload["version"],
         environment=payload["environment"],
         issue_type=payload["issue_type"],
         description=payload["description"],
-        logs=logs,
+        logs=combined_logs,
     )
     state = load_submission_state()
     if check_recent_duplicate(payload["title"], body, state):
@@ -186,7 +193,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         result = build_api_failure_result(
             reason="rate_limited_user",
             payload=payload,
-            logs=logs,
+            logs=combined_logs,
         )
         result["message"] = rate_error + " 如确实是另一个真实问题，请使用 prefill_url 手动提交。"
         save_submission_state(state)
@@ -195,7 +202,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
     record_user_submission(username, state)
     if not settings.GITHUB_TOKEN:
         save_submission_state(state)
-        return build_no_token_result(payload, logs)
+        return build_no_token_result(payload, combined_logs)
 
     record_submission(payload["title"], body, state)
     save_submission_state(state)
@@ -205,7 +212,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         return build_api_failure_result(
             reason="network_error",
             payload=payload,
-            logs=logs,
+            logs=combined_logs,
             github_message=str(err),
         )
 
@@ -213,7 +220,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         return build_api_failure_result(
             reason="network_error",
             payload=payload,
-            logs=logs,
+            logs=combined_logs,
         )
 
     if response.status_code == 201:
@@ -234,7 +241,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
     return build_api_failure_result(
         reason=reason,
         payload=payload,
-        logs=logs,
+        logs=combined_logs,
         github_message=api_message,
     )
 

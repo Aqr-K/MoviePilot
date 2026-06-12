@@ -17,7 +17,7 @@ except Exception:
     pass
 
 from app.chain.system import SystemChain
-from app.core.config import global_vars
+from app.core.config import global_vars, settings
 from app.helper.server import MoviePilotServerHelper
 from app.helper.system import SystemHelper
 from app.startup.command_initializer import init_command, stop_command, restart_command
@@ -38,6 +38,10 @@ async def init_extra():
     """
     同步插件及重启相关依赖服务
     """
+    if settings.MOVIEPILOT_SAFE_MODE:
+        SystemHelper().set_system_modified()
+        SystemChain().restart_finish()
+        return
     if await sync_plugins():
         # 重新注册插件定时服务
         init_plugin_scheduler()
@@ -63,18 +67,21 @@ async def lifespan(app: FastAPI):
     init_routers(app)
     # 初始化模块
     init_modules()
-    # 恢复插件备份
-    SystemChain().restore_plugins()
-    # 初始化插件
-    init_plugins()
-    # 初始化定时器
-    init_scheduler()
-    # 初始化监控器
-    init_monitor()
-    # 初始化命令
-    init_command()
-    # 初始化工作流
-    init_workflow()
+    if settings.MOVIEPILOT_SAFE_MODE:
+        print("MoviePilot safe mode enabled: skip plugins, scheduler, monitor, commands and workflow.")
+    else:
+        # 恢复插件备份
+        SystemChain().restore_plugins()
+        # 初始化插件
+        init_plugins()
+        # 初始化定时器
+        init_scheduler()
+        # 初始化监控器
+        init_monitor()
+        # 初始化命令
+        init_command()
+        # 初始化工作流
+        init_workflow()
     # 插件同步到本地
     sync_plugins_task = asyncio.create_task(init_extra())
     try:
@@ -90,18 +97,19 @@ async def lifespan(app: FastAPI):
             pass
         except Exception as e:
             print(str(e))
-        # 备份插件
-        SystemChain().backup_plugins()
-        # 停止工作流
-        stop_workflow()
-        # 停止命令
-        stop_command()
-        # 停止监控器
-        stop_monitor()
-        # 停止定时器
-        stop_scheduler()
-        # 停止插件
-        stop_plugins()
+        if not settings.MOVIEPILOT_SAFE_MODE:
+            # 备份插件
+            SystemChain().backup_plugins()
+            # 停止工作流
+            stop_workflow()
+            # 停止命令
+            stop_command()
+            # 停止监控器
+            stop_monitor()
+            # 停止定时器
+            stop_scheduler()
+            # 停止插件
+            stop_plugins()
         # 停止模块
         await stop_modules()
         # 关闭共享的异步 HTTP 连接池，释放底层连接资源

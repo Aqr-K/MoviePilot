@@ -107,6 +107,12 @@ moviepilot restart
 moviepilot restart --start-timeout 60 --stop-timeout 30
 moviepilot status
 moviepilot version
+moviepilot doctor
+moviepilot doctor --json
+moviepilot doctor --fix
+moviepilot doctor --deep
+moviepilot doctor --json --fix
+moviepilot start --safe
 ```
 
 ```bash
@@ -237,6 +243,16 @@ moviepilot agent --new-session "Summarize any obvious problems with the current 
 ```
 
 **Prerequisites:** `AI_AGENT_ENABLE` must be set to true, and LLM provider settings (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`) must be configured.
+
+---
+
+## Docker CLI — Doctor
+
+```bash
+docker exec -it <container> moviepilot doctor
+docker exec -it <container> moviepilot doctor --json
+docker run --rm --entrypoint python -v <config-dir>:/config <image> -m app.cli doctor
+```
 
 ---
 

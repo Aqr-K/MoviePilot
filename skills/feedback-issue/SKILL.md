@@ -93,6 +93,10 @@ The script outputs JSON. Keep `diagnostics_file` and `runtime_dir`.
 The raw logs are written into `diagnostics_file`, already redacted and
 capped; do not paste the full file back into the model context unless
 you need to show the preview generated in the next step.
+The collect script also runs `moviepilot doctor --json` or falls back to
+`python -m app.cli doctor --json`, stores the structured doctor report
+inside `diagnostics_file`, and later preview/submit steps include a
+short doctor summary automatically.
 
 If `success=false` with `no_explicit_feedback_intent`, stop this skill
 and return to local diagnosis.

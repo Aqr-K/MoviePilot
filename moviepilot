@@ -21,6 +21,7 @@ Bootstrap Commands:
 
 Runtime Commands:
   moviepilot start|stop|restart|status|logs|version
+  moviepilot doctor [--json] [--fix] [--deep]
   moviepilot config ...
   moviepilot tool ...
   moviepilot scheduler ...
@@ -46,6 +47,7 @@ Examples:
   moviepilot help config
   moviepilot config keys
   moviepilot start
+  moviepilot doctor
   moviepilot tool list
 EOF
 }
@@ -73,6 +75,7 @@ Runtime Commands
   restart
   status
   logs
+  doctor
   version
   config path
   config list
@@ -233,6 +236,23 @@ Options:
 EOF
 }
 
+show_doctor_help() {
+  cat <<'EOF'
+Usage:
+  moviepilot doctor [OPTIONS]
+
+Options:
+  --json   输出 JSON 报告，便于 Agent、脚本或 Issue 流程收集
+  --fix    执行白名单安全修复，如清理过期 runtime 文件或补齐 API_TOKEN
+  --deep   执行可能较慢的深度检查
+  -h, --help  显示帮助
+
+说明:
+  - doctor 是离线诊断入口，不依赖后端服务已经启动
+  - Docker 环境可执行 docker exec <container> moviepilot doctor
+EOF
+}
+
 python_version_ok() {
   local python_bin="$1"
   "$python_bin" - <<'PY' >/dev/null 2>&1
@@ -358,6 +378,10 @@ show_command_help() {
       show_agent_help
       exit 0
       ;;
+    doctor)
+      show_doctor_help
+      exit 0
+      ;;
     update)
       show_update_help
       exit 0
@@ -479,6 +503,9 @@ case "${1:-}" in
     shift
     require_bootstrap_python
     exec "$BOOTSTRAP_PYTHON" "$SETUP_SCRIPT" agent "$@"
+    ;;
+  doctor)
+    run_runtime_cli "$@"
     ;;
 esac
 

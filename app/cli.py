@@ -625,23 +625,27 @@ def _spawn_process(
     return subprocess.Popen(command, **kwargs)
 
 
-def _spawn_backend_process() -> subprocess.Popen:
+def _spawn_backend_process(*, safe: bool = False) -> subprocess.Popen:
+    backend_env = {
+        **os.environ,
+        "PYTHONUNBUFFERED": "1",
+        "MOVIEPILOT_DISABLE_CONSOLE_LOG": "1",
+        "MOVIEPILOT_STDIO_LOG_FILE": str(BACKEND_STDIO_LOG_FILE),
+        "MOVIEPILOT_STDIO_LOG_MAX_BYTES": str(
+            max(int(settings.LOG_MAX_FILE_SIZE or 0), 1) * 1024 * 1024
+        ),
+        "MOVIEPILOT_STDIO_LOG_BACKUP_COUNT": str(
+            max(int(settings.LOG_BACKUP_COUNT or 0), 0)
+        ),
+    }
+    if safe:
+        backend_env["MOVIEPILOT_SAFE_MODE"] = "true"
+
     return _spawn_process(
         [sys.executable, "-m", "app.main"],
         cwd=_repo_root(),
         log_file=None,
-        env={
-            **os.environ,
-            "PYTHONUNBUFFERED": "1",
-            "MOVIEPILOT_DISABLE_CONSOLE_LOG": "1",
-            "MOVIEPILOT_STDIO_LOG_FILE": str(BACKEND_STDIO_LOG_FILE),
-            "MOVIEPILOT_STDIO_LOG_MAX_BYTES": str(
-                max(int(settings.LOG_MAX_FILE_SIZE or 0), 1) * 1024 * 1024
-            ),
-            "MOVIEPILOT_STDIO_LOG_BACKUP_COUNT": str(
-                max(int(settings.LOG_BACKUP_COUNT or 0), 0)
-            ),
-        },
+        env=backend_env,
     )
 
 
@@ -719,7 +723,7 @@ def _wait_until_frontend_ready(runtime: Dict[str, Any], timeout: int) -> Dict[st
     raise click.ClickException(f"前端进程已启动，但在 {timeout} 秒内未通过健康检查，请执行 `moviepilot logs --frontend` 查看前端日志")
 
 
-def _start_backend_service(timeout: int) -> Dict[str, Any]:
+def _start_backend_service(timeout: int, safe: bool = False) -> Dict[str, Any]:
     state, runtime, process, health_payload = _managed_backend_status()
     if state in {"running", "starting"} and runtime and process:
         return {"status": state, "runtime": runtime, "process": process, "health": health_payload, "started": False}
@@ -728,7 +732,7 @@ def _start_backend_service(timeout: int) -> Dict[str, Any]:
 
     _ensure_local_api_token()
     _clear_json_file(BACKEND_RUNTIME_FILE)
-    process = _spawn_backend_process()
+    process = _spawn_backend_process(safe=safe)
     ps_process = psutil.Process(process.pid)
     runtime = {
         "pid": process.pid,
@@ -739,6 +743,7 @@ def _start_backend_service(timeout: int) -> Dict[str, Any]:
         "started_at": int(time.time()),
         "python": sys.executable,
         "stdio_log": str(BACKEND_STDIO_LOG_FILE),
+        "safe_mode": safe,
     }
     _write_json_file(BACKEND_RUNTIME_FILE, runtime)
     health_payload = _wait_until_backend_ready(runtime, timeout)
@@ -833,7 +838,8 @@ def cli() -> None:
 
 @cli.command(context_settings=CONTEXT_SETTINGS)
 @click.option("--timeout", default=60, show_default=True, help="等待后端与前端就绪的秒数")
-def start(timeout: int) -> None:
+@click.option("--safe", is_flag=True, help="安全模式启动，仅保留核心 API，跳过插件和后台任务")
+def start(timeout: int, safe: bool) -> None:
     """后台启动本地 MoviePilot 前后端服务"""
     _ensure_frontend_not_running_alone(timeout=min(timeout, 15))
     backend_state, _, _, _ = _managed_backend_status()
@@ -841,7 +847,7 @@ def start(timeout: int) -> None:
     if backend_state == "stopped" and frontend_state == "stopped":
         _best_effort_auto_update()
 
-    backend_result = _start_backend_service(timeout=timeout)
+    backend_result = _start_backend_service(timeout=timeout, safe=safe)
     backend_runtime = backend_result["runtime"]
     try:
         frontend_result = _start_frontend_service(timeout=timeout, backend_port=int(backend_runtime["port"]))
@@ -864,6 +870,8 @@ def start(timeout: int) -> None:
     click.echo(f"Frontend URL: {_frontend_base_url(frontend_result['runtime'])}")
     click.echo(f"Backend Version: {backend_version}")
     click.echo(f"Frontend Version: {frontend_version}")
+    if safe or backend_runtime.get("safe_mode"):
+        click.echo("Safe Mode: enabled")
 
 
 @cli.command(context_settings=CONTEXT_SETTINGS)
@@ -970,6 +978,23 @@ def logs(lines: int, follow: bool, stdio: bool, frontend_log: bool) -> None:
         click.echo(line)
     if follow:
         _follow_file(log_file)
+
+
+@cli.command(context_settings=CONTEXT_SETTINGS)
+@click.option("--json", "json_output", is_flag=True, help="输出 JSON 报告")
+@click.option("--fix", is_flag=True, help="执行白名单安全修复")
+@click.option("--deep", is_flag=True, help="执行可能较慢的深度检查")
+def doctor(json_output: bool, fix: bool, deep: bool) -> None:
+    """离线诊断本地 MoviePilot 运行环境"""
+    from app.doctor import run_doctor
+    from app.doctor.formatters import format_json_report, format_text_report
+
+    report = run_doctor(fix=fix, deep=deep)
+    if json_output:
+        click.echo(format_json_report(report))
+    else:
+        click.echo(format_text_report(report))
+    raise click.exceptions.Exit(report.exit_code())
 
 
 @cli.group(context_settings=CONTEXT_SETTINGS)

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -107,6 +110,67 @@ def candidate_log_files() -> list[Path]:
     if plugin_log_dir.exists():
         files.extend(sorted(plugin_log_dir.rglob("*.log")))
     return [path for path in files if path.exists() and path.is_file()]
+
+
+def collect_doctor_report() -> dict:
+    """调用离线 doctor 命令收集结构化诊断报告。"""
+    commands = []
+    moviepilot_bin = shutil.which("moviepilot")
+    if moviepilot_bin:
+        commands.append([moviepilot_bin, "doctor", "--json"])
+    commands.append([sys.executable, "-m", "app.cli", "doctor", "--json"])
+
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(settings.ROOT_PATH),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as err:
+            last_error = str(err)
+            continue
+
+        output = (result.stdout or "").strip()
+        if not output:
+            last_error = f"{' '.join(command)} 没有输出"
+            continue
+        try:
+            payload = json_loads_from_output(output)
+        except ValueError as err:
+            last_error = str(err)
+            continue
+        payload["_command"] = " ".join(command)
+        payload["_returncode"] = result.returncode
+        return {
+            "success": True,
+            "report": payload,
+        }
+
+    return {
+        "success": False,
+        "error": last_error if "last_error" in locals() else "doctor 命令不可用",
+    }
+
+
+def json_loads_from_output(output: str) -> dict:
+    """从命令输出中解析 doctor JSON 对象。"""
+    import json
+
+    start = output.find("{")
+    end = output.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("doctor 输出中未找到 JSON 对象")
+    payload = json.loads(output[start:end + 1])
+    if not isinstance(payload, dict):
+        raise ValueError("doctor JSON 顶层不是对象")
+    return payload
 
 
 def normalize_keywords(keywords: Optional[list[str]]) -> list[str]:
@@ -256,6 +320,7 @@ def collect_diagnostics(
         "keywords": normalized_keywords,
         "found": bool(logs.strip()),
         "logs": logs,
+        "doctor": collect_doctor_report(),
         "source_files": source_files,
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -268,6 +333,7 @@ def collect_diagnostics(
         "source_files": source_files,
         "log_bytes": len(logs.encode("utf-8", errors="replace")),
         "log_lines": len(logs.splitlines()) if logs else 0,
+        "doctor_collected": bool(diagnostics["doctor"].get("success")),
         "message": (
             "已收集并写入反馈诊断日志文件。"
             if logs

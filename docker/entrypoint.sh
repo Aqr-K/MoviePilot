@@ -43,6 +43,8 @@ function load_config_from_app_env() {
         ["PROXY_HOST"]=""
         ["GITHUB_TOKEN"]=""
         ["MOVIEPILOT_AUTO_UPDATE"]="release"
+        ["MOVIEPILOT_DOCKER_KEEPALIVE_ON_FAILURE"]="true"
+        ["MOVIEPILOT_SAFE_MODE"]="false"
         ["BROWSER_EMULATION"]="cloakbrowser"
 
         # cert
@@ -197,6 +199,8 @@ function graceful_exit() {
 
     if [ "$reason" = "signal" ]; then
         INFO "→ 收到停止信号，执行精准清理程序..."
+    elif [ "$reason" = "intentional_restart" ]; then
+        INFO "→ 检测到内置重启流程，执行清理程序..."
     else
         INFO "→ 主进程已退出 (代码: $exit_code)，执行清理程序..."
     fi
@@ -224,13 +228,39 @@ function graceful_exit() {
     # 根据退出码判断最终日志性质
     # 0: 正常退出
     # 130/143: 被系统信号终止（通常也视为预期的清理退出）
-    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 130 ] || [ "$exit_code" -eq 143 ]; then
+    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 130 ] || [ "$exit_code" -eq 143 ] || [ "$reason" = "intentional_restart" ]; then
         INFO "→ 所有服务已按序清理，容器正常退出 (ExitCode: $exit_code)。"
     else
         # 非预期退出码，使用 ERROR 级别并加重提示
         ERROR "→ 清理完成，但主进程检测到异常退出 (ExitCode: $exit_code)！"
     fi
     exit "$exit_code"
+}
+
+# 后端异常退出时默认保留容器，避免无法 docker exec 进入容器运行 doctor。
+function diagnostic_keepalive() {
+    local exit_code=${1:-1}
+    local keepalive="${MOVIEPILOT_DOCKER_KEEPALIVE_ON_FAILURE:-true}"
+    keepalive="${keepalive,,}"
+
+    if [ "${keepalive}" = "false" ] || [ "${keepalive}" = "0" ] || [ "${keepalive}" = "no" ]; then
+        graceful_exit "$exit_code" "python_exit"
+    fi
+
+    ERROR "→ 后端主进程异常退出 (ExitCode: ${exit_code})，容器将保持运行以便执行 moviepilot doctor。"
+    WARN "→ 可运行：docker exec <container> moviepilot doctor"
+    WARN "→ 如需恢复旧行为，可设置 MOVIEPILOT_DOCKER_KEEPALIVE_ON_FAILURE=false。"
+
+    if [ "${START_NOGOSU:-false}" = "true" ]; then
+        "${VENV_PATH}/bin/python3" -m app.cli doctor || true
+    else
+        gosu moviepilot:moviepilot "${VENV_PATH}/bin/python3" -m app.cli doctor || true
+    fi
+
+    while true; do
+        sleep 3600 &
+        wait $! || true
+    done
 }
 
 # 启动前先检查后端核心依赖是否仍然可导入。
@@ -255,12 +285,12 @@ function ensure_backend_runtime_dependencies() {
 
     if ! "${pip_cmd[@]}" > /dev/stdout 2> /dev/stderr; then
         ERROR "→ 自动恢复主程序依赖失败，后端无法启动。"
-        exit 1
+        diagnostic_keepalive 1
     fi
 
     if ! "${VENV_PATH}/bin/python3" -c "${probe_code}" >/dev/null 2>&1; then
         ERROR "→ 主程序依赖恢复后仍然异常，后端无法启动。"
-        exit 1
+        diagnostic_keepalive 1
     fi
 
     INFO "→ 已自动恢复主程序依赖，继续启动后端。"
@@ -376,4 +406,19 @@ wait "$PYTHON_PID" 2>/dev/null
 exit_code=$?
 
 # 如果 Python 自己退出了（非信号触发），执行清理
-graceful_exit "$exit_code" "python_exit"
+INTENTIONAL_RESTART_FLAG="${CONFIG_DIR}/temp/moviepilot.intentional_restart"
+if [ -f "${INTENTIONAL_RESTART_FLAG}" ]; then
+    rm -f "${INTENTIONAL_RESTART_FLAG}"
+    restart_exit_code="$exit_code"
+    if [ "$restart_exit_code" -eq 0 ]; then
+        restart_exit_code=1
+    fi
+    WARN "→ 检测到内置手动重启标记，退出容器并交给 Docker 重启策略处理..."
+    graceful_exit "$restart_exit_code" "intentional_restart"
+fi
+
+if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 130 ] || [ "$exit_code" -eq 143 ]; then
+    graceful_exit "$exit_code" "python_exit"
+fi
+
+diagnostic_keepalive "$exit_code"

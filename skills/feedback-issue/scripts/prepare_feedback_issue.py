@@ -13,6 +13,7 @@ from feedback_issue_common import (
     MAX_TITLE_CHARS,
     build_issue_body,
     check_content_quality,
+    format_doctor_summary,
     load_diagnostics_logs,
     read_json_file,
     result_payload,
@@ -63,6 +64,7 @@ def validate_draft(draft: dict[str, Any], logs: str) -> Optional[str]:
 def build_preview_text(draft: dict[str, Any], logs: str, diagnostics: dict[str, Any]) -> str:
     """构造给用户确认的 Markdown 预览文本。"""
     preview_logs = sanitize_logs(logs, MAX_PREVIEW_LOGS_CHARS) or "会话中未捕获到相关后端日志。"
+    doctor_summary = format_doctor_summary(diagnostics.get("doctor"))
     source_files = diagnostics.get("source_files") or []
     sources = "\n".join(f"- {item}" for item in source_files) or "- 未命中具体日志文件"
     return (
@@ -73,6 +75,8 @@ def build_preview_text(draft: dict[str, Any], logs: str, diagnostics: dict[str, 
         f"类型：{draft['issue_type']}\n\n"
         "诊断来源：\n"
         f"{sources}\n\n"
+        "Doctor 摘要：\n"
+        f"```text\n{doctor_summary}\n```\n\n"
         "问题描述：\n"
         f"{draft['description'].strip()}\n\n"
         "日志预览（已脱敏）：\n"
@@ -119,12 +123,18 @@ def prepare_issue(draft_file: str | Path) -> dict[str, Any]:
     preview_text = build_preview_text(draft, logs, diagnostics)
     preview_file.write_text(preview_text, encoding="utf-8")
 
+    combined_logs = "\n\n".join(
+        part for part in (
+            f"### Doctor 摘要\n{format_doctor_summary(diagnostics.get('doctor'))}",
+            logs,
+        ) if part
+    )
     body_preview = build_issue_body(
         version=draft["version"],
         environment=draft["environment"],
         issue_type=draft["issue_type"],
         description=draft["description"],
-        logs=logs,
+        logs=combined_logs,
     )
     return {
         "success": True,

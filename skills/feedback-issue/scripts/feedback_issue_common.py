@@ -47,6 +47,7 @@ MAX_BODY_CHARS = 60 * 1024
 MAX_LOGS_CHARS = 8 * 1024
 MAX_URL_LOGS_CHARS = 3 * 1024
 MAX_PREVIEW_LOGS_CHARS = 3 * 1024
+MAX_DOCTOR_SUMMARY_CHARS = 2 * 1024
 
 DEDUP_TTL_SECONDS = 60
 USER_COOLDOWN_SECONDS = 30 * 60
@@ -273,6 +274,53 @@ def build_prefill_url(
         f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in params.items()
     )
     return f"{FEEDBACK_ISSUE_NEW_URL}?{encoded}"
+
+
+def format_doctor_summary(doctor: Optional[dict[str, Any]]) -> str:
+    """把 doctor JSON 报告压缩成适合 Issue 和预览展示的摘要。"""
+    if not isinstance(doctor, dict):
+        return "未收集到 doctor 报告。"
+    if not doctor.get("success"):
+        return f"doctor 收集失败：{doctor.get('error') or '未知错误'}"
+
+    report = doctor.get("report") or {}
+    if not isinstance(report, dict):
+        return "doctor 报告格式异常。"
+
+    lines = [
+        f"状态：{report.get('status') or 'unknown'}",
+    ]
+    environment = report.get("environment") or {}
+    if isinstance(environment, dict):
+        runtime = environment.get("runtime")
+        if runtime:
+            lines.append(f"运行环境：{runtime}")
+    summary = report.get("summary") or {}
+    if isinstance(summary, dict):
+        lines.append(
+            "汇总："
+            f"total={summary.get('total', 0)} "
+            f"error={summary.get('error', 0)} "
+            f"warn={summary.get('warn', 0)} "
+            f"fixed={summary.get('fixed', 0)}"
+        )
+
+    findings = report.get("findings") or []
+    if isinstance(findings, list):
+        important = [
+            item for item in findings
+            if isinstance(item, dict) and item.get("severity") in {"error", "warn"}
+        ][:8]
+        if important:
+            lines.append("关键发现：")
+            for item in important:
+                title = str(item.get("title") or item.get("id") or "未知诊断项")
+                recommendation = str(item.get("recommendation") or "").strip()
+                line = f"- [{item.get('severity')}] {title}"
+                if recommendation:
+                    line = f"{line}；建议：{recommendation}"
+                lines.append(line)
+    return truncate("\n".join(lines), MAX_DOCTOR_SUMMARY_CHARS)
 
 
 def classify_failure(status_code: Optional[int], headers: Optional[dict] = None) -> str:

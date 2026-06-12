@@ -35,6 +35,7 @@ class SystemHelper(ConfigReloadMixin):
     __local_backend_runtime_file = settings.TEMP_PATH / "moviepilot.runtime.json"
     __local_restart_log_file = settings.LOG_PATH / "moviepilot.restart.stdout.log"
     __one_shot_update_flag_file = settings.TEMP_PATH / "moviepilot.pending_update"
+    __docker_restart_intent_file = settings.TEMP_PATH / "moviepilot.intentional_restart"
 
     def on_config_changed(self):
         logger.update_loggers()
@@ -261,6 +262,25 @@ class SystemHelper(ConfigReloadMixin):
             return False
 
     @staticmethod
+    def _mark_docker_intentional_restart() -> None:
+        try:
+            SystemHelper.__docker_restart_intent_file.parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            SystemHelper.__docker_restart_intent_file.write_text(
+                str(os.getpid()), encoding="utf-8"
+            )
+        except OSError as err:
+            logger.warning(f"写入内置重启标记失败: {err}")
+
+    @staticmethod
+    def _clear_docker_intentional_restart() -> None:
+        try:
+            SystemHelper.__docker_restart_intent_file.unlink(missing_ok=True)
+        except OSError as err:
+            logger.warning(f"清理内置重启标记失败: {err}")
+
+    @staticmethod
     def restart() -> Tuple[bool, str]:
         """
         执行Docker重启操作
@@ -283,6 +303,7 @@ class SystemHelper(ConfigReloadMixin):
             if has_restart_policy:
                 # 有重启策略，使用优雅退出方式
                 logger.info("检测到容器配置了自动重启策略，使用优雅重启方式...")
+                SystemHelper._mark_docker_intentional_restart()
                 # 启动优雅退出超时监控
                 SystemHelper._start_graceful_shutdown_monitor()
                 # 发送SIGTERM信号给当前进程，触发优雅停止
@@ -294,6 +315,7 @@ class SystemHelper(ConfigReloadMixin):
                 return SystemHelper._docker_api_restart()
         except Exception as err:
             logger.error(f"重启失败: {str(err)}")
+            SystemHelper._clear_docker_intentional_restart()
             # 降级为Docker API重启
             logger.warning("降级为Docker API重启...")
             return SystemHelper._docker_api_restart()

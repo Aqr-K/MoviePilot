@@ -101,6 +101,21 @@ class FeedbackIssueScriptTestCase(unittest.TestCase):
                 "original_user_request": "订阅刷新接口返回 500，帮我提交上游 Issue",
                 "found": bool(logs),
                 "logs": logs,
+                "doctor": {
+                    "success": True,
+                    "report": {
+                        "status": "degraded",
+                        "summary": {"total": 2, "error": 1, "warn": 1, "fixed": 0},
+                        "environment": {"runtime": "Docker"},
+                        "findings": [
+                            {
+                                "severity": "error",
+                                "title": "后端端口被占用",
+                                "recommendation": "修改 PORT 或停止占用进程",
+                            }
+                        ],
+                    },
+                },
                 "source_files": [str(settings.LOG_PATH / "moviepilot.log")],
             },
         )
@@ -225,6 +240,7 @@ class TestCollectFeedbackDiagnosticsScript(FeedbackIssueScriptTestCase):
         self.assertIn("TMDB lookup failed", diagnostics["logs"])
         self.assertIn("Cookie: <REDACTED>", diagnostics["logs"])
         self.assertNotIn("secret", diagnostics["logs"])
+        self.assertIn("doctor", diagnostics)
 
 
 class TestPrepareAndSubmitScripts(FeedbackIssueScriptTestCase):
@@ -242,6 +258,8 @@ class TestPrepareAndSubmitScripts(FeedbackIssueScriptTestCase):
         self.assertTrue(Path(result["payload_file"]).exists())
         preview = Path(result["preview_file"]).read_text(encoding="utf-8")
         self.assertIn("请确认是否提交以下问题反馈", preview)
+        self.assertIn("Doctor 摘要", preview)
+        self.assertIn("后端端口被占用", preview)
         self.assertIn("Cookie: <REDACTED>", preview)
         self.assertNotIn("secret", preview)
 
