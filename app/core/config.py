@@ -575,17 +575,13 @@ class ConfigModel(BaseModel):
     # LLM温度参数
     LLM_TEMPERATURE: float = 0.3
     # LLM最大迭代次数
-    LLM_MAX_ITERATIONS: int = 128
+    LLM_MAX_ITERATIONS: int = 512
     # LLM工具调用超时时间（秒）
     LLM_TOOL_TIMEOUT: int = 300
     # 是否启用详细日志
     LLM_VERBOSE: bool = False
-    # 最大记忆消息数量
-    LLM_MAX_MEMORY_MESSAGES: int = 30
     # 内存记忆保留天数
     LLM_MEMORY_RETENTION_DAYS: int = 1
-    # Redis记忆保留天数（如果使用Redis）
-    LLM_REDIS_MEMORY_RETENTION_DAYS: int = 7
     # 是否启用AI推荐
     AI_RECOMMEND_ENABLED: bool = False
     # AI推荐用户偏好
