@@ -69,8 +69,9 @@ Only enter this skill when both conditions are true:
   bug, or the user explicitly asks to escalate after troubleshooting.
 
 For ordinary symptoms, first use normal Agent diagnostic tools such as
-subscription, download, site, plugin, scheduler, and log queries. If the
-cause is local configuration or environment, do not file an issue.
+`query_doctor_report`, subscription, download, site, plugin, scheduler,
+and log queries. If the cause is local configuration or environment, do
+not file an issue.
 
 ### 2. Collect Diagnostics
 
