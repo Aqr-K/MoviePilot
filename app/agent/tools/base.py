@@ -76,6 +76,7 @@ def format_tool_result_for_agent(
 
 # 将常见的阻塞调用按能力域拆分到独立线程池，避免外部慢 IO 抢占同一批 worker。
 _BLOCKING_BUCKET_LIMITS = {
+    "command": 4,
     "default": 4,
     "config": 2,
     "db": 4,
@@ -86,6 +87,7 @@ _BLOCKING_BUCKET_LIMITS = {
     "site": 4,
     "storage": 4,
     "subscribe": 2,
+    "web": 2,
     "workflow": 2,
 }
 _blocking_semaphores = {
@@ -110,6 +112,54 @@ def _get_blocking_executor(bucket: str) -> ThreadPoolExecutor:
         )
         _blocking_executors[bucket] = executor
         return executor
+
+
+class ToolExecutionTimeoutError(TimeoutError):
+    """Agent 工具执行超时异常。"""
+
+
+def _get_tool_timeout_seconds() -> Optional[float]:
+    """读取工具执行超时时间，配置为 0 或负数时表示不限制。"""
+    try:
+        timeout = float(settings.LLM_TOOL_TIMEOUT or 0)
+    except (TypeError, ValueError):
+        timeout = 0
+    return timeout if timeout > 0 else None
+
+
+async def run_agent_blocking(
+        bucket: str, func: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    """
+    在受控线程池中运行阻塞型同步代码。
+
+    调用方被取消时不会提前释放并发名额，避免底层阻塞调用仍在运行时继续接纳
+    新任务，把同一类慢 IO 的线程池持续打满。
+    """
+    bucket_name = bucket if bucket in _BLOCKING_BUCKET_LIMITS else "default"
+    semaphore = _blocking_semaphores[bucket_name]
+    bound_call = partial(func, *args, **kwargs)
+    loop = asyncio.get_running_loop()
+
+    await semaphore.acquire()
+    try:
+        future = _get_blocking_executor(bucket_name).submit(bound_call)
+    except Exception:
+        semaphore.release()
+        raise
+
+    def _release_semaphore(_future) -> None:
+        try:
+            _future.exception()
+        except Exception:
+            pass
+        try:
+            loop.call_soon_threadsafe(semaphore.release)
+        except RuntimeError:
+            pass
+
+    future.add_done_callback(_release_semaphore)
+    return await asyncio.shield(asyncio.wrap_future(future, loop=loop))
 
 
 class MoviePilotTool(BaseTool, metaclass=ABCMeta):
@@ -236,7 +286,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
         # 执行具体工具逻辑
         try:
-            result = await self.run(**kwargs)
+            result = await self.run_with_timeout(**kwargs)
             
             # 记录工具执行结果摘要日志
             str_result = serialize_tool_result_for_agent(result)
@@ -246,6 +296,10 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 summary = str_result
             logger.info(f"Agent工具 {self.name} 执行完成，结果摘要: {summary}")
             
+        except ToolExecutionTimeoutError as e:
+            error_message = str(e)
+            logger.warning(error_message)
+            result = error_message
         except Exception as e:
             error_message = f"工具执行异常 ({type(e).__name__}): {str(e)}"
             logger.error(f"Tool {self.name} execution failed: {e}", exc_info=True)
@@ -276,6 +330,18 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         """子类实现具体的工具执行逻辑"""
         raise NotImplementedError
 
+    async def run_with_timeout(self, **kwargs) -> str:
+        """按系统配置限制单个工具调用的最长执行时间。"""
+        timeout = _get_tool_timeout_seconds()
+        if not timeout:
+            return await self.run(**kwargs)
+        try:
+            return await asyncio.wait_for(self.run(**kwargs), timeout=timeout)
+        except asyncio.TimeoutError as err:
+            raise ToolExecutionTimeoutError(
+                f"工具 {self.name} 执行超时（超过 {timeout:g} 秒），已停止等待结果。"
+            ) from err
+
     @staticmethod
     async def run_blocking(
             bucket: str, func: Callable[..., Any], *args: Any, **kwargs: Any
@@ -283,15 +349,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         """
         在受控线程池中运行阻塞型同步代码，避免拖住 FastAPI 主事件循环。
         """
-        bucket_name = bucket if bucket in _BLOCKING_BUCKET_LIMITS else "default"
-        semaphore = _blocking_semaphores[bucket_name]
-        bound_call = partial(func, *args, **kwargs)
-
-        async with semaphore:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                _get_blocking_executor(bucket_name), bound_call
-            )
+        return await run_agent_blocking(bucket, func, *args, **kwargs)
 
     def set_message_attr(self, channel: str, source: str, username: str):
         """

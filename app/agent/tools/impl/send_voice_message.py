@@ -1,6 +1,4 @@
 """发送语音消息工具。"""
-
-import asyncio
 from typing import Optional, Type
 
 from pydantic import BaseModel, Field
@@ -74,7 +72,8 @@ class SendVoiceMessageTool(MoviePilotTool):
             reply_mode == AgentCapabilityManager.REPLY_MODE_NATIVE
             and AgentCapabilityManager.is_audio_output_available()
         ):
-            voice_file = await asyncio.to_thread(
+            voice_file = await self.run_blocking(
+                "default",
                 AgentCapabilityManager.synthesize_speech, message
             )
             if voice_file:

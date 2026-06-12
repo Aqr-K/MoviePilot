@@ -451,6 +451,9 @@ class ExecuteCommandTool(MoviePilotTool):
             except asyncio.TimeoutError:
                 timed_out = True
                 await self._cleanup_process(process, wait_task)
+            except asyncio.CancelledError:
+                await self._cleanup_process(process, wait_task)
+                raise
 
             try:
                 await self._finish_reader_tasks(reader_tasks)

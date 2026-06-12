@@ -179,8 +179,8 @@ class TestAgentPluginTools(unittest.TestCase):
         config_oper.get.return_value = ["DemoPlugin"]
         calls = []
 
-        async def fake_to_thread(func, *args, **kwargs):
-            calls.append((func, args, kwargs))
+        async def fake_run_agent_blocking(bucket, func, *args, **kwargs):
+            calls.append((bucket, func, args, kwargs))
             return None
 
         with patch(
@@ -198,8 +198,8 @@ class TestAgentPluginTools(unittest.TestCase):
             "app.agent.tools.impl._plugin_tool_utils.MoviePilotServerHelper.async_install_plugin_reg",
             AsyncMock(return_value=True),
         ) as install_reg, patch(
-            "app.agent.tools.impl._plugin_tool_utils.asyncio.to_thread",
-            side_effect=fake_to_thread,
+            "app.agent.tools.base.run_agent_blocking",
+            side_effect=fake_run_agent_blocking,
         ):
             success, message, refreshed_only = asyncio.run(
                 install_plugin_runtime(
@@ -217,9 +217,10 @@ class TestAgentPluginTools(unittest.TestCase):
             repo_url="https://example.com/market",
         )
         self.assertEqual(1, len(calls))
-        self.assertEqual(reload_runtime, calls[0][0])
-        self.assertEqual(("DemoPlugin",), calls[0][1])
-        self.assertEqual({}, calls[0][2])
+        self.assertEqual("plugin", calls[0][0])
+        self.assertEqual(reload_runtime, calls[0][1])
+        self.assertEqual(("DemoPlugin",), calls[0][2])
+        self.assertEqual({}, calls[0][3])
 
     def test_uninstall_plugin_uninstalls_installed_candidate(self):
         tool = UninstallPluginTool(session_id="session-1", user_id="10001")

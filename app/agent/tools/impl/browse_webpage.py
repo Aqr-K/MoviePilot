@@ -1,6 +1,5 @@
 """浏览器操作工具 - 让Agent能够通过Playwright控制浏览器进行网页交互"""
 
-import asyncio
 import base64
 import json
 from enum import Enum
@@ -167,21 +166,18 @@ class BrowseWebpageTool(MoviePilotTool):
             if browser_action == BrowserAction.EVALUATE and not script:
                 return "错误: 'evaluate' 操作需要提供 script 参数"
 
-            # 在线程池中运行同步的 Playwright 操作
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self._execute_browser_action(
-                    browser_action=browser_action,
-                    url=url,
-                    selector=selector,
-                    value=value,
-                    script=script,
-                    content_type=content_type,
-                    timeout=timeout,
-                    cookies=cookies,
-                    user_agent=user_agent,
-                ),
+            result = await self.run_blocking(
+                "web",
+                self._execute_browser_action,
+                browser_action=browser_action,
+                url=url,
+                selector=selector,
+                value=value,
+                script=script,
+                content_type=content_type,
+                timeout=timeout,
+                cookies=cookies,
+                user_agent=user_agent,
             )
             return result
 

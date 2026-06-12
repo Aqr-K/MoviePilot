@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -445,8 +444,7 @@ class SearchWebTool(MoviePilotTool):
                     logger.warning(f"搜索引擎搜索进程失败: {err}")
                 return results
 
-            loop = asyncio.get_running_loop()
-            results = await loop.run_in_executor(None, sync_search)
+            results = await self.run_blocking("web", sync_search)
             return self._filter_results_by_site(results, site_filter)
 
         except Exception as e:

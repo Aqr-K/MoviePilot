@@ -2,7 +2,7 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional
 
-from app.agent.tools.base import format_tool_result_for_agent
+from app.agent.tools.base import ToolExecutionTimeoutError, format_tool_result_for_agent
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.log import logger
 
@@ -259,10 +259,14 @@ class MoviePilotToolsManager:
 
             # 调用工具的run方法。HTTP/MCP 工具调用不会经过 BaseTool._arun，
             # 因此这里也必须复用同一套返回值格式化和兜底截断逻辑。
-            result = await tool_instance.run(**normalized_arguments)
+            result = await tool_instance.run_with_timeout(**normalized_arguments)
             
             # 记录工具执行结果摘要日志
-            str_result = format_tool_result_for_agent(result, tool_name=tool_name, max_chars=getattr(tool_instance, "result_max_chars", None))
+            str_result = format_tool_result_for_agent(
+                result,
+                tool_name=tool_name,
+                max_chars=getattr(tool_instance, "result_max_chars", None),
+            )
             if len(str_result) > 500:
                 summary = str_result[:500] + f"...(已截断，总长度: {len(str_result)})"
             else:
@@ -270,6 +274,13 @@ class MoviePilotToolsManager:
             logger.info(f"Agent工具 {tool_name} 执行完成，结果摘要: {summary}")
             
             return str_result
+        except ToolExecutionTimeoutError as e:
+            logger.warning(str(e))
+            return format_tool_result_for_agent(
+                str(e),
+                tool_name=tool_name,
+                max_chars=getattr(tool_instance, "result_max_chars", None),
+            )
         except Exception as e:
             logger.error(f"调用工具 {tool_name} 时发生错误: {e}", exc_info=True)
             error_msg = json.dumps(

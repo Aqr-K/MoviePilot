@@ -279,6 +279,15 @@ class MoviePilotAgent:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _get_recursion_limit() -> int:
+        """读取 LangGraph 递归上限，防止模型持续循环调用工具。"""
+        try:
+            limit = int(settings.LLM_MAX_ITERATIONS or 0)
+        except (TypeError, ValueError):
+            limit = 0
+        return limit if limit > 0 else 128
+
     @classmethod
     def _get_model_name(cls, model: Any) -> Optional[str]:
         return (
@@ -1024,7 +1033,8 @@ class MoviePilotAgent:
             agent_config = {
                 "configurable": {
                     "thread_id": self.session_id,
-                }
+                },
+                "recursion_limit": self._get_recursion_limit(),
             }
 
             # 判断是否启用流式输出

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest.mock import patch
 
 from app.agent.tools.impl.execute_command import (
     ExecuteCommandTool,
@@ -68,6 +69,39 @@ class TestExecuteCommandTool(unittest.TestCase):
         self.assertLess(duration, 4)
         self.assertIn("命令执行超时", result)
         self.assertIn("started", result)
+
+    def test_cancelled_run_cleans_up_process(self):
+        """外层取消 action=run 时应同步清理已经启动的子进程。"""
+        async def _run_and_cancel():
+            tool = ExecuteCommandTool(session_id="session-1", user_id="10001")
+            command = _python_command("import time; time.sleep(20)")
+            original_create = asyncio.create_subprocess_shell
+            process_holder = {}
+
+            async def wrapped_create(*args, **kwargs):
+                process = await original_create(*args, **kwargs)
+                process_holder["process"] = process
+                return process
+
+            with patch(
+                "app.agent.tools.impl.execute_command.asyncio.create_subprocess_shell",
+                side_effect=wrapped_create,
+            ):
+                task = asyncio.create_task(
+                    tool.run(action="run", command=command, timeout=60)
+                )
+                for _ in range(50):
+                    if "process" in process_holder:
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertIn("process", process_holder)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                return process_holder["process"]
+
+        process = asyncio.run(_run_and_cancel())
+        self.assertIsNotNone(process.returncode)
 
     def test_timeout_with_large_output_writes_partial_full_log_to_temp_file(self):
         """超时且输出较大时，终止前完整输出应写入临时文件。"""
