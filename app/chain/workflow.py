@@ -115,6 +115,11 @@ class WorkflowExecutor:
         # 工作流数据
         self.workflow = workflow
         self.step_callback = step_callback
+        self.step_callback_extended = (
+            len(inspect.signature(step_callback).parameters) > 2
+            if step_callback
+            else False
+        )
         self.actions = {action['id']: Action(**action) for action in workflow.actions}
         self.flows = [ActionFlow(**flow) for flow in workflow.flows]
         self.execution_config = getattr(workflow, "execution_config", None) or {}
@@ -820,11 +825,10 @@ class WorkflowExecutor:
         """
         if not self.step_callback:
             return
-        callback_params = inspect.signature(self.step_callback).parameters
-        if len(callback_params) <= 2:
-            self.step_callback(action, self.context)
+        if self.step_callback_extended:
+            self.step_callback(action, self.context, self.build_execution_state(), completed)
             return
-        self.step_callback(action, self.context, self.build_execution_state(), completed)
+        self.step_callback(action, self.context)
 
     @staticmethod
     def extract_context_outputs(context: ActionContext) -> dict:

@@ -1079,6 +1079,14 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
     """
 
     def decorator(func):
+        # 函数签名在装饰后不会变化，预计算可避免每次缓存访问都重复反射。
+        signature = inspect.signature(func)
+        parameter_names = list(signature.parameters.keys())
+        cache_parameter_names = (
+            parameter_names[1:]
+            if parameter_names and parameter_names[0] in ("self", "cls")
+            else parameter_names
+        )
 
         def should_cache(value: Any) -> bool:
             """
@@ -1143,17 +1151,12 @@ def cached(region: Optional[str] = None, maxsize: Optional[int] = 1024, ttl: Opt
             :param kwargs: 关键字参数
             :return: 缓存键
             """
-            signature = inspect.signature(func)
             # 绑定传入的参数并应用默认值
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()
-            # 忽略第一个参数，如果它是实例(self)或类(cls)
-            parameters = list(signature.parameters.keys())
-            if parameters and parameters[0] in ("self", "cls"):
-                bound.arguments.pop(parameters[0], None)
             # 按照函数签名顺序提取参数值列表
             keys = [
-                bound.arguments[param] for param in signature.parameters if param in bound.arguments
+                bound.arguments[param] for param in cache_parameter_names if param in bound.arguments
             ]
             # 使用有序参数生成缓存键
             return f"{func_name}_{hashkey(*keys)}"
