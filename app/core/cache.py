@@ -421,7 +421,8 @@ class MemoryBackend(CacheBackend):
         region_cache = self.__get_region_cache(region)
         if region_cache is None:
             return False
-        return key in region_cache
+        with self._lock:
+            return key in region_cache
 
     def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Any:
         """
@@ -434,7 +435,8 @@ class MemoryBackend(CacheBackend):
         region_cache = self.__get_region_cache(region)
         if region_cache is None:
             return None
-        return region_cache.get(key)
+        with self._lock:
+            return region_cache.get(key)
 
     def delete(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION):
         """
@@ -447,7 +449,8 @@ class MemoryBackend(CacheBackend):
         if region_cache is None:
             return
         with self._lock:
-            del region_cache[key]
+            if key in region_cache:
+                del region_cache[key]
 
     def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
@@ -803,8 +806,10 @@ class FileBackend(CacheBackend):
         :param region: 缓存的区
         """
         cache_path = self.base / region / key
-        if cache_path.exists():
+        if cache_path.is_file():
             cache_path.unlink()
+        elif cache_path.exists():
+            shutil.rmtree(cache_path, ignore_errors=True)
 
     def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
@@ -840,10 +845,11 @@ class FileBackend(CacheBackend):
         if not cache_path.exists():
             yield from ()
             return
-        for item in cache_path.iterdir():
+        for item in sorted(cache_path.rglob("*")):
             if item.is_file():
-                with open(item, 'r') as f:
-                    yield item.as_posix(), f.read()
+                key = item.relative_to(cache_path).as_posix()
+                with open(item, 'rb') as f:
+                    yield key, f.read()
 
     def close(self) -> None:
         """
@@ -916,8 +922,10 @@ class AsyncFileBackend(AsyncCacheBackend):
         :param region: 缓存的区
         """
         cache_path = AsyncPath(self.base) / region / key
-        if await cache_path.exists():
+        if await cache_path.is_file():
             await cache_path.unlink()
+        elif await cache_path.exists():
+            await aioshutil.rmtree(cache_path, ignore_errors=True)
 
     async def clear(self, region: Optional[str] = DEFAULT_CACHE_REGION) -> None:
         """
@@ -951,12 +959,12 @@ class AsyncFileBackend(AsyncCacheBackend):
         """
         cache_path = AsyncPath(self.base) / region
         if not await cache_path.exists():
-            yield "", None
             return
-        async for item in cache_path.iterdir():
+        async for item in cache_path.rglob("*"):
             if await item.is_file():
-                async with aiofiles.open(item, 'r') as f:
-                    yield item.as_posix(), await f.read()
+                key = Path(str(item)).relative_to(Path(str(cache_path))).as_posix()
+                async with aiofiles.open(item, 'rb') as f:
+                    yield key, await f.read()
 
     async def close(self) -> None:
         """

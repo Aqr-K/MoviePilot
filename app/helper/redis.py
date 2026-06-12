@@ -2,7 +2,7 @@ import asyncio
 import json
 import pickle
 from typing import Any, Optional, Generator, Tuple, AsyncGenerator, Union
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import redis
 from redis.asyncio import Redis
@@ -160,7 +160,7 @@ class RedisHelper(ConfigReloadMixin, metaclass=Singleton):
             if isinstance(redis_key, bytes):
                 redis_key = redis_key.decode("utf-8")
             parts = redis_key.split(":key:")
-            return parts[-1]
+            return unquote(parts[-1])
         except Exception as e:
             logger.warn(f"Failed to parse redis key: {redis_key}, error: {e}")
             return redis_key
@@ -410,7 +410,7 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
             if isinstance(redis_key, bytes):
                 redis_key = redis_key.decode("utf-8")
             parts = redis_key.split(":key:")
-            return parts[-1]
+            return unquote(parts[-1])
         except Exception as e:
             logger.warn(f"Failed to parse redis key: {redis_key}, error: {e}")
             return redis_key
