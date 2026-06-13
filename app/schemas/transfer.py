@@ -219,7 +219,7 @@ class ManualTransferItem(BaseModel):
     # 最小文件大小
     min_filesize: Optional[int] = 0
     # 刮削
-    scrape: bool = False
+    scrape: Optional[bool] = False
     # 媒体库类型子目录
     library_type_folder: Optional[bool] = None
     # 媒体库类别子目录
