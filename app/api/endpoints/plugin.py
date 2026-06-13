@@ -513,7 +513,7 @@ def plugin_dashboard(
     plugin_id: str,
     user_agent: Annotated[str | None, Header()] = None,
     _: User = Depends(get_current_active_superuser),
-) -> schemas.PluginDashboard:
+) -> Optional[schemas.PluginDashboard]:
     """
     根据插件ID获取插件仪表板
     """

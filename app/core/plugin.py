@@ -1080,7 +1080,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 logger.error(f"获取插件[{plugin_id}]仪表盘元数据出错：{str(e)}")
         return dashboard_meta
 
-    def get_plugin_dashboard(self, pid: str, key: str, user_agent: str = None) -> schemas.PluginDashboard:
+    def get_plugin_dashboard(self, pid: str, key: str, user_agent: str = None) -> Optional[schemas.PluginDashboard]:
         """
         获取插件仪表盘
         """
@@ -1113,6 +1113,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             logger.error(f"插件 {pid} 调用方法 get_dashboard 出错: {str(e)}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail=f"插件 {pid} 调用方法 get_dashboard 出错: {str(e)}")
+        if dashboard is None:
+            return None
+        if not isinstance(dashboard, (tuple, list)) or len(dashboard) != 3:
+            logger.error(f"插件 {pid} 返回的仪表盘数据格式错误")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail=f"插件 {pid} 返回的仪表盘数据格式错误")
         cols, attrs, elements = dashboard
         return schemas.PluginDashboard(
             id=pid,
