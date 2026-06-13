@@ -68,6 +68,14 @@ def _sanitize_llm_test_error(message: str, api_key: Optional[str] = None) -> str
         "Authorization: ***",
         sanitized,
     )
+
+    normalized_message = sanitized.lower().replace("_", "").replace(" ", "")
+    if "str" in normalized_message and "modeldump" in normalized_message:
+        return (
+            "LLM 调用失败：服务返回内容不是兼容的模型响应，"
+            "请检查基础地址是否填写为 API Base URL，不要填写网页地址或完整的 "
+            "chat/completions 路径"
+        )
     return sanitized
 
 
