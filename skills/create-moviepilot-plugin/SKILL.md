@@ -9,7 +9,7 @@ description: >-
   sources, plugin APIs, forms, pages, dashboards, commands, services, workflow
   actions, agent tools, and local install/reload flows. Also use for Chinese
   requests mentioning 编写插件、本地插件源、插件开发、V2插件、插件市场、本地安装插件、插件热加载.
-allowed-tools: list_directory read_file write_file edit_file execute_command query_system_settings query_market_plugins install_plugin reload_plugin query_installed_plugins
+allowed-tools: list_directory read_file write_file edit_file execute_command query_system_settings update_system_settings query_market_plugins install_plugin reload_plugin query_installed_plugins
 ---
 
 # Create MoviePilot Plugin
@@ -41,9 +41,12 @@ a local plugin source and installed into the running MoviePilot instance.
    - If exactly one local plugin repository is configured, prefer that path.
    - If several are configured, choose the one the user named; otherwise ask
      which repository to use.
-   - If none is configured and the user only wants immediate local debugging,
-     use `app/plugins/<plugin_id_lower>/`; explain that market-style local
-     install requires `PLUGIN_LOCAL_REPO_PATHS`.
+   - If none is configured, set it before writing plugin code:
+     `update_system_settings(setting_key="PLUGIN_LOCAL_REPO_PATHS", value="local-plugins", operation="replace")`.
+     `local-plugins` is resolved relative to the MoviePilot root by the local
+     plugin source loader. Create that source directory and write the plugin
+     under it; do not write new plugin source directly into `app/plugins/`
+     unless the user explicitly asks for a runtime-only experiment.
 4. Choose the plugin ID:
    - Class name is the plugin ID, for example `MyNotifier`.
    - Directory name is the class name lowercased, for example `mynotifier`.
