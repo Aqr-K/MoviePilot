@@ -88,7 +88,7 @@ class SystemChain(ChainBase):
                     if target_path.exists():
                         continue
                     shutil.copytree(item, target_path)
-                    logger.info(f"已备份插件目录: {item.name}")
+                    logger.debug(f"已备份插件目录: {item.name}")
                 # 如果是文件
                 elif item.is_file():
                     if target_path.exists():
