@@ -20,7 +20,8 @@ class Transmission:
               "error", "errorString", "doneDate", "queuePosition", "activityDate", "trackers"]
 
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None,
-                 username: Optional[str] = None, password: Optional[str] = None, **kwargs):
+                 username: Optional[str] = None, password: Optional[str] = None,
+                 rename_partial_files: Optional[bool] = True, **kwargs):
         """
         若不设置参数，则创建配置文件设置的下载器
         """
@@ -39,12 +40,13 @@ class Transmission:
             return
         self._username = username
         self._password = password
+        self._rename_partial_files = rename_partial_files
         self.trc = self.__login_transmission()
 
     @staticmethod
-    def __enable_incomplete_file_suffix(trt: Client) -> None:
+    def __sync_incomplete_file_suffix(trt: Client, enabled: bool) -> None:
         """
-        开启未完成文件后缀，避免监控流程提前整理仍在下载的媒体文件。
+        同步未完成文件后缀开关，避免监控流程提前整理仍在下载的媒体文件。
         """
         try:
             session = trt.get_session()
@@ -53,12 +55,13 @@ class Transmission:
                 rename_partial_files = getter("rename-partial-files")
             else:
                 rename_partial_files = getattr(session, "rename_partial_files", None)
-            if rename_partial_files is True:
+            if rename_partial_files is enabled:
                 return
-            trt.set_session(rename_partial_files=True)
-            logger.info("已开启 transmission 未完成文件追加 .part 后缀")
+            trt.set_session(rename_partial_files=enabled)
+            action = "开启" if enabled else "关闭"
+            logger.info(f"已{action} transmission 未完成文件追加 .part 后缀")
         except Exception as err:
-            logger.warning(f"开启 transmission 未完成文件后缀失败：{str(err)}")
+            logger.warning(f"同步 transmission 未完成文件后缀失败：{str(err)}")
 
     def __login_transmission(self) -> Optional[Client]:
         """
@@ -76,7 +79,7 @@ class Transmission:
                                           username=self._username,
                                           password=self._password,
                                           timeout=60)
-            self.__enable_incomplete_file_suffix(trt)
+            self.__sync_incomplete_file_suffix(trt, enabled=bool(self._rename_partial_files))
             return trt
         except Exception as err:
             logger.error(f"transmission 连接出错：{str(err)}")

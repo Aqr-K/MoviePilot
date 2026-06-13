@@ -23,6 +23,7 @@ class Qbittorrent:
                  apikey: Optional[str] = None,
                  category: Optional[bool] = False, sequentail: Optional[bool] = False,
                  force_resume: Optional[bool] = False, first_last_piece=False,
+                 incomplete_files_ext: Optional[bool] = True,
                  **kwargs):
         """
         若不设置参数，则创建配置文件设置的下载器
@@ -42,6 +43,7 @@ class Qbittorrent:
         self._sequentail = sequentail
         self._force_resume = force_resume
         self._first_last_piece = first_last_piece
+        self._incomplete_files_ext = incomplete_files_ext
         self.qbc = self.__login_qbittorrent()
 
     @staticmethod
@@ -154,18 +156,19 @@ class Qbittorrent:
             return False
 
     @staticmethod
-    def __enable_incomplete_file_suffix(qbt: Client) -> None:
+    def __sync_incomplete_file_suffix(qbt: Client, enabled: bool) -> None:
         """
-        开启未完成文件后缀，避免监控流程提前整理仍在下载的媒体文件。
+        同步未完成文件后缀开关，避免监控流程提前整理仍在下载的媒体文件。
         """
         try:
             preferences = qbt.app_preferences() or {}
-            if isinstance(preferences, dict) and preferences.get("incomplete_files_ext") is True:
+            if isinstance(preferences, dict) and preferences.get("incomplete_files_ext") is enabled:
                 return
-            qbt.app_set_preferences({"incomplete_files_ext": True})
-            logger.info("已开启 qbittorrent 未完成文件追加 .!qB 后缀")
+            qbt.app_set_preferences({"incomplete_files_ext": enabled})
+            action = "开启" if enabled else "关闭"
+            logger.info(f"已{action} qbittorrent 未完成文件追加 .!qB 后缀")
         except Exception as err:
-            logger.warning(f"开启 qbittorrent 未完成文件后缀失败：{str(err)}")
+            logger.warning(f"同步 qbittorrent 未完成文件后缀失败：{str(err)}")
 
     def is_inactive(self) -> bool:
         """
@@ -212,7 +215,7 @@ class Qbittorrent:
                 stack_trace = "".join(traceback.format_exception(None, e, e.__traceback__))[:2000]
                 logger.error(f"qbittorrent 登录失败：{str(e)}\n{stack_trace}")
                 return None
-            self.__enable_incomplete_file_suffix(qbt)
+            self.__sync_incomplete_file_suffix(qbt, enabled=bool(self._incomplete_files_ext))
             return qbt
         except Exception as err:
             logger.error(f"qbittorrent 连接出错：{str(err)}")

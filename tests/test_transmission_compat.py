@@ -1,7 +1,6 @@
 import importlib.util
 import sys
 import types
-import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -93,29 +92,43 @@ transmission_module = _load_transmission_client_module()
 Transmission = transmission_module.Transmission
 
 
-class TestTransmissionCompat(unittest.TestCase):
-    def test_login_enables_incomplete_file_suffix(self):
-        """
-        登录成功后应开启未完成文件后缀，避免下载中的媒体文件被提前整理。
-        """
-        fake_client = MagicMock()
-        fake_client.get_session.return_value = {"rename-partial-files": False}
+def test_login_enables_incomplete_file_suffix_by_default():
+    """
+    登录成功后默认开启未完成文件后缀，避免下载中的媒体文件被提前整理。
+    """
+    fake_client = MagicMock()
+    fake_client.get_session.return_value = {"rename-partial-files": False}
 
-        with patch.object(transmission_module.transmission_rpc, "Client", return_value=fake_client):
-            downloader = Transmission(host="127.0.0.1", port=9091)
+    with patch.object(transmission_module.transmission_rpc, "Client", return_value=fake_client):
+        downloader = Transmission(host="127.0.0.1", port=9091)
 
-        self.assertIs(downloader.trc, fake_client)
-        fake_client.set_session.assert_called_once_with(rename_partial_files=True)
+    assert downloader.trc is fake_client
+    fake_client.set_session.assert_called_once_with(rename_partial_files=True)
 
-    def test_login_skips_incomplete_file_suffix_when_already_enabled(self):
-        """
-        远端已开启未完成文件后缀时不重复写入全局会话配置。
-        """
-        fake_client = MagicMock()
-        fake_client.get_session.return_value = types.SimpleNamespace(rename_partial_files=True)
 
-        with patch.object(transmission_module.transmission_rpc, "Client", return_value=fake_client):
-            downloader = Transmission(host="127.0.0.1", port=9091)
+def test_login_disables_incomplete_file_suffix_when_configured():
+    """
+    用户关闭配置后应同步关闭 Transmission 未完成文件后缀偏好。
+    """
+    fake_client = MagicMock()
+    fake_client.get_session.return_value = types.SimpleNamespace(rename_partial_files=True)
 
-        self.assertIs(downloader.trc, fake_client)
-        fake_client.set_session.assert_not_called()
+    with patch.object(transmission_module.transmission_rpc, "Client", return_value=fake_client):
+        downloader = Transmission(host="127.0.0.1", port=9091, rename_partial_files=False)
+
+    assert downloader.trc is fake_client
+    fake_client.set_session.assert_called_once_with(rename_partial_files=False)
+
+
+def test_login_skips_incomplete_file_suffix_when_already_matches():
+    """
+    远端未完成文件后缀状态已匹配配置时不重复写入全局会话配置。
+    """
+    fake_client = MagicMock()
+    fake_client.get_session.return_value = types.SimpleNamespace(rename_partial_files=True)
+
+    with patch.object(transmission_module.transmission_rpc, "Client", return_value=fake_client):
+        downloader = Transmission(host="127.0.0.1", port=9091)
+
+    assert downloader.trc is fake_client
+    fake_client.set_session.assert_not_called()
