@@ -37,6 +37,7 @@ from app.agent.tools.impl.query_media_detail import QueryMediaDetailTool
 from app.agent.tools.impl.search_torrents import SearchTorrentsTool
 from app.agent.tools.impl.get_search_results import GetSearchResultsTool
 from app.agent.tools.impl.search_web import SearchWebTool
+from app.agent.tools.impl.recognize_captcha import RecognizeCaptchaTool
 from app.agent.tools.impl.send_message import SendMessageTool
 from app.agent.tools.impl.ask_user_choice import AskUserChoiceTool
 from app.agent.tools.impl.send_local_file import SendLocalFileTool
@@ -165,6 +166,7 @@ class MoviePilotToolFactory:
             SearchTorrentsTool,
             GetSearchResultsTool,
             SearchWebTool,
+            RecognizeCaptchaTool,
             AddDownloadTool,
             QuerySubscribesTool,
             QuerySubscribeSharesTool,

@@ -8,7 +8,7 @@ description: >-
   interaction, such as checking a site page, confirming a JavaScript-rendered
   result, testing login state, capturing visible errors, or updating and
   validating tracker site cookies.
-allowed-tools: browse_webpage search_web query_sites update_site_cookie test_site update_site
+allowed-tools: browse_webpage recognize_captcha search_web query_sites update_site_cookie test_site update_site
 ---
 
 # Browser Use
@@ -41,6 +41,9 @@ dedicated tool can complete the task more directly and safely.
   `get_content`, `screenshot`, `click`, `click_ref`, `fill`, `fill_ref`,
   `select`, `select_ref`, `evaluate`, `wait`, `list_tabs`, `open_tab`,
   `focus_tab`, `close_tab`, `close_session`.
+- `recognize_captcha` - Recognize graphic captcha text from an image URL or
+  `data:image/...;base64,...` value extracted from the page. Pass Cookie and
+  User-Agent when the image requires the current browser session.
 - `search_web` - Find current pages or official references before opening a
   target URL. It supports DDGS-backed `search_engine` (`auto`, `duckduckgo`,
   `google`, `brave`, etc.) and `site_url` for limiting results to a specified
@@ -174,6 +177,28 @@ update_site_cookie site_identifier=<id> username="..." password="..." two_step_c
 Ask for missing username, password, or two-step code only when required for the
 operation. Do not expose secrets in the final answer.
 
+### Login Page With A Graphic Captcha
+
+When a user explicitly asks to complete a login flow that contains a normal
+graphic captcha:
+
+1. Open the login page and inspect the form with `snapshot`.
+2. Extract the captcha image URL with `evaluate`, for example:
+
+```text
+browse_webpage action="evaluate" script="() => document.querySelector('img[src*=\"captcha\"], img[alt*=\"验证码\"], img[title*=\"验证码\"]')?.src || ''"
+```
+
+3. If the captcha image needs session cookies, extract `document.cookie` and the
+   current `navigator.userAgent` with `evaluate`.
+4. Call `recognize_captcha image_url="<img.src>"` and pass `cookie` /
+   `user_agent` when needed.
+5. Fill the returned `captcha_text`, submit the form, and verify the login
+   result.
+
+If recognition fails, refresh the captcha once and retry. Stop after a second
+failure and tell the user manual input is needed.
+
 ### Inspect A Tracker Page
 
 When the user asks what is visible on a site page:
@@ -187,8 +212,9 @@ When the user asks what is visible on a site page:
 
 - Ask before submitting forms that create, delete, purchase, publish, or change
   account/security settings.
-- Never solve captchas, bypass access controls, or scrape private content beyond
-  the user's explicit task.
+- Solve graphic captchas only for a user-requested login flow. Do not use this
+  to bypass access controls, defeat anti-bot challenges, or scrape private
+  content beyond the user's explicit task.
 - Do not print passwords, tokens, cookies, two-step secrets, or full session
   headers in the response.
 - Localhost, loopback, private, and link-local URLs are blocked by default. Set
