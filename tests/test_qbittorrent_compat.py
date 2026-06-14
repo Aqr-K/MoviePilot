@@ -92,9 +92,25 @@ def _load_qbittorrent_modules():
         def from_string(content):
             return types.SimpleNamespace(name="test", total_size=len(content))
 
+    class _DownloaderTorrent:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
     class TorrentStatus(Enum):
         TRANSFER = "transfer"
         DOWNLOADING = "downloading"
+
+    class TorrentQueryStatus(Enum):
+        ALL = "all"
+        TRANSFER = "transfer"
+        DOWNLOADING = "downloading"
+        COMPLETED = "completed"
+        PAUSED = "paused"
+
+    class DownloadTaskState(Enum):
+        DOWNLOADING = "downloading"
+        PAUSED = "paused"
+        COMPLETED = "completed"
 
     class ModuleType(Enum):
         Downloader = "Downloader"
@@ -109,7 +125,10 @@ def _load_qbittorrent_modules():
     schemas_module.DownloaderInfo = object
     schemas_module.TransferTorrent = object
     schemas_module.DownloadingTorrent = object
+    schemas_module.DownloaderTorrent = _DownloaderTorrent
     schema_types_module.TorrentStatus = TorrentStatus
+    schema_types_module.TorrentQueryStatus = TorrentQueryStatus
+    schema_types_module.DownloadTaskState = DownloadTaskState
     schema_types_module.ModuleType = ModuleType
     schema_types_module.DownloaderType = DownloaderType
     string_module.StringUtils = _StringUtils
@@ -251,6 +270,83 @@ def test_login_skips_incomplete_file_suffix_when_already_matches():
 
     assert downloader.qbc is fake_client
     fake_client.app_set_preferences.assert_not_called()
+
+
+def test_completed_status_includes_qbittorrent_finished_upload_states():
+    """
+    qBittorrent 按完成状态查询时应包含非下载中、非暂停的上传侧状态。
+    """
+    server = MagicMock()
+    server.get_torrents.return_value = (
+        [
+            {
+                "name": "QB Done",
+                "content_path": "/downloads/QB Done",
+                "hash": "hash-qb",
+                "total_size": 1024,
+                "completed": 1024,
+                "progress": 1,
+                "state": "stalledUP",
+                "tags": "moviepilot-tag",
+                "dlspeed": 0,
+                "upspeed": 128,
+            },
+            {
+                "name": "QB Downloading",
+                "content_path": "/downloads/QB Downloading",
+                "hash": "hash-downloading",
+                "total_size": 2048,
+                "completed": 1024,
+                "progress": 0.5,
+                "state": "queuedDL",
+                "tags": "moviepilot-tag",
+                "dlspeed": 64,
+                "upspeed": 0,
+            },
+        ],
+        False,
+    )
+    module = QbittorrentModule.__new__(QbittorrentModule)
+    module.get_instances = MagicMock(return_value={"qb": server})
+    module.normalize_return_path = MagicMock(side_effect=lambda path, _name: str(path))
+
+    torrents = module.list_torrents(status="completed")
+
+    assert [torrent.hash for torrent in torrents] == ["hash-qb"]
+    assert torrents[0].state == "completed"
+    server.get_torrents.assert_called_once_with(tags="moviepilot-tag")
+
+
+def test_list_torrents_include_all_tags_removes_builtin_tag_filter():
+    """
+    智能体扩大查询范围时，qBittorrent 查询应取消内置标签过滤。
+    """
+    server = MagicMock()
+    server.get_torrents.return_value = (
+        [
+            {
+                "name": "External Task",
+                "content_path": "/downloads/External Task",
+                "hash": "hash-external",
+                "total_size": 1024,
+                "completed": 1024,
+                "progress": 1,
+                "state": "stalledUP",
+                "tags": "external",
+                "dlspeed": 0,
+                "upspeed": 0,
+            }
+        ],
+        False,
+    )
+    module = QbittorrentModule.__new__(QbittorrentModule)
+    module.get_instances = MagicMock(return_value={"qb": server})
+    module.normalize_return_path = MagicMock(side_effect=lambda path, _name: str(path))
+
+    torrents = module.list_torrents(include_all_tags=True)
+
+    assert [torrent.hash for torrent in torrents] == ["hash-external"]
+    server.get_torrents.assert_called_once_with(tags=None)
 
 
 def test_add_torrent_accepts_structured_success_response():

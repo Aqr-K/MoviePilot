@@ -17,7 +17,7 @@ from app.schemas.types import SystemConfigKey
 router = APIRouter()
 
 
-@router.get("/", summary="正在下载", response_model=List[schemas.DownloadingTorrent])
+@router.get("/", summary="正在下载", response_model=List[schemas.DownloaderTorrent])
 def current(
     name: Optional[str] = None, _: schemas.TokenPayload = Depends(verify_token)
 ) -> Any:

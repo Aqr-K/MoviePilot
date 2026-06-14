@@ -126,6 +126,8 @@ Subscribe starting from a specific episode:
 List download tasks and get hash for further operations:
 `node scripts/mp-cli.js query_download_tasks status=downloading`
 
+Use `status=completed` for tasks that are neither downloading nor paused in the downloader; use `status=all` to include every MoviePilot-tagged downloader task. Add `include_all_tags=true` when diagnosing tasks that do not have the MoviePilot built-in tag.
+
 Delete a download task (confirm with user first — irreversible):
 `node scripts/mp-cli.js delete_download hash=<hash>`
 

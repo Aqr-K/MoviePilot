@@ -133,9 +133,25 @@ def _load_transmission_module():
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
+    class _DownloaderTorrent:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
     class TorrentStatus(Enum):
         TRANSFER = "transfer"
         DOWNLOADING = "downloading"
+
+    class TorrentQueryStatus(Enum):
+        ALL = "all"
+        TRANSFER = "transfer"
+        DOWNLOADING = "downloading"
+        COMPLETED = "completed"
+        PAUSED = "paused"
+
+    class DownloadTaskState(Enum):
+        DOWNLOADING = "downloading"
+        PAUSED = "paused"
+        COMPLETED = "completed"
 
     class _Logger:
         def debug(self, *_args, **_kwargs):
@@ -179,8 +195,11 @@ def _load_transmission_module():
     cache_module.FileCache = _FileCache
     schemas_module.TransferTorrent = _TransferTorrent
     schemas_module.DownloadingTorrent = _DownloadingTorrent
+    schemas_module.DownloaderTorrent = _DownloaderTorrent
     schemas_module.DownloaderInfo = object
     schema_types_module.TorrentStatus = TorrentStatus
+    schema_types_module.TorrentQueryStatus = TorrentQueryStatus
+    schema_types_module.DownloadTaskState = DownloadTaskState
     schema_types_module.ModuleType = Enum("ModuleType", {"Downloader": "downloader"})
     schema_types_module.DownloaderType = Enum(
         "DownloaderType", {"Transmission": "Transmission"}
@@ -359,3 +378,62 @@ class TransmissionPathMappingTest(unittest.TestCase):
             Path("/mnt/raid5/home_lt999lt/video/downloads/movie/Movie"),
             "tr",
         )
+
+    def test_all_torrents_include_completed_and_downloading_states(self):
+        server = MagicMock()
+        server.get_torrents.return_value = (
+            [
+                SimpleNamespace(
+                    name="Completed",
+                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
+                    hashString="hash-completed",
+                    total_size=1024,
+                    labels=[],
+                    progress=100,
+                    status="seed_pending",
+                ),
+                SimpleNamespace(
+                    name="Downloading",
+                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
+                    hashString="hash-downloading",
+                    total_size=2048,
+                    labels=[],
+                    progress=50,
+                    status="downloading",
+                    rate_download=1024,
+                    rate_upload=0,
+                    left_until_done=1024,
+                ),
+            ],
+            False,
+        )
+        module = self._build_module(server)
+
+        torrents = module.list_torrents()
+
+        self.assertEqual(["completed", "downloading"], [torrent.state for torrent in torrents])
+        self.assertEqual(["hash-completed", "hash-downloading"], [torrent.hash for torrent in torrents])
+        server.get_torrents.assert_called_once_with(tags="moviepilot-tag")
+
+    def test_include_all_tags_removes_builtin_tag_filter(self):
+        server = MagicMock()
+        server.get_torrents.return_value = (
+            [
+                SimpleNamespace(
+                    name="External",
+                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
+                    hashString="hash-external",
+                    total_size=1024,
+                    labels=["external"],
+                    progress=100,
+                    status="seeding",
+                )
+            ],
+            False,
+        )
+        module = self._build_module(server)
+
+        torrents = module.list_torrents(include_all_tags=True)
+
+        self.assertEqual(["hash-external"], [torrent.hash for torrent in torrents])
+        server.get_torrents.assert_called_once_with(tags=None)

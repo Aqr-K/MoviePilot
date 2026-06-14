@@ -43,6 +43,22 @@ class TorrentStatus(Enum):
     DOWNLOADING = "下载中"
 
 
+# 下载器任务查询状态
+class TorrentQueryStatus(Enum):
+    ALL = "all"
+    TRANSFER = "transfer"
+    DOWNLOADING = "downloading"
+    COMPLETED = "completed"
+    PAUSED = "paused"
+
+
+# 下载器任务归一状态
+class DownloadTaskState(Enum):
+    DOWNLOADING = "downloading"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+
+
 # 异步广播事件
 class EventType(Enum):
     # 插件需要重载

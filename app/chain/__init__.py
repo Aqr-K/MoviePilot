@@ -28,9 +28,8 @@ from app.log import logger
 from app.schemas import (
     RateLimitExceededException,
     TransferInfo,
-    TransferTorrent,
     ExistMediaInfo,
-    DownloadingTorrent,
+    DownloaderTorrent,
     CommingMessage,
     Notification,
     WebhookEventInfo,
@@ -1221,16 +1220,22 @@ class ChainBase(metaclass=ABCMeta):
             status: TorrentStatus = None,
             hashs: Union[list, str] = None,
             downloader: Optional[str] = None,
-    ) -> Optional[List[Union[TransferTorrent, DownloadingTorrent]]]:
+            include_all_tags: bool = False,
+    ) -> Optional[List[DownloaderTorrent]]:
         """
         获取下载器种子列表
         :param status:  种子状态
         :param hashs:  种子Hash
         :param downloader:  下载器
+        :param include_all_tags:  是否包含未打内置标签的下载任务
         :return: 下载器中符合状态的种子列表
         """
         return self.run_module(
-            "list_torrents", status=status, hashs=hashs, downloader=downloader
+            "list_torrents",
+            status=status,
+            hashs=hashs,
+            downloader=downloader,
+            include_all_tags=include_all_tags,
         )
 
     def transfer(

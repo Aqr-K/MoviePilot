@@ -10,24 +10,9 @@ from app.schemas.system import TransferDirectoryConf
 from app.schemas.tmdb import TmdbEpisode
 
 
-class TransferTorrent(BaseModel):
+class DownloaderTorrent(BaseModel):
     """
-    待转移任务信息
-    """
-    downloader: Optional[str] = None
-    title: Optional[str] = None
-    path: Optional[Path] = None
-    hash: Optional[str] = None
-    tags: Optional[str] = None
-    size: Optional[int] = 0
-    userid: Optional[str] = None
-    progress: Optional[float] = 0.0
-    state: Optional[str] = None
-
-
-class DownloadingTorrent(BaseModel):
-    """
-    下载中任务信息
+    下载器任务信息
     """
     downloader: Optional[str] = None
     hash: Optional[str] = None
@@ -35,6 +20,7 @@ class DownloadingTorrent(BaseModel):
     name: Optional[str] = None
     year: Optional[str] = None
     season_episode: Optional[str] = None
+    path: Optional[Path] = None
     size: Optional[float] = 0.0
     progress: Optional[float] = 0.0
     state: Optional[str] = 'downloading'
@@ -45,6 +31,18 @@ class DownloadingTorrent(BaseModel):
     userid: Optional[str] = None
     username: Optional[str] = None
     left_time: Optional[str] = None
+
+
+class TransferTorrent(DownloaderTorrent):
+    """
+    待转移任务信息
+    """
+
+
+class DownloadingTorrent(DownloaderTorrent):
+    """
+    下载中任务信息
+    """
 
 
 class TransferTask(BaseModel):
