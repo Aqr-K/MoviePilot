@@ -982,12 +982,35 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         )
 
     @property
-    def PROXY(self):
+    def PROXY(self) -> Optional[Dict[str, str]]:
+        """
+        获取 requests 兼容的系统代理配置。
+        """
         if self.PROXY_HOST and self.PROXY_HOST.strip():
+            proxy_host = self.PROXY_HOST.strip()
             return {
-                "http": self.PROXY_HOST,
-                "https": self.PROXY_HOST,
+                "http": proxy_host,
+                "https": proxy_host,
             }
+        https_proxy = self._get_env_proxy("HTTPS_PROXY", "https_proxy")
+        http_proxy = self._get_env_proxy("HTTP_PROXY", "http_proxy")
+        proxy_host = https_proxy or http_proxy
+        if proxy_host:
+            return {
+                "http": http_proxy or proxy_host,
+                "https": https_proxy or proxy_host,
+            }
+        return None
+
+    @staticmethod
+    def _get_env_proxy(*names: str) -> Optional[str]:
+        """
+        按顺序读取非空代理环境变量。
+        """
+        for name in names:
+            proxy_host = os.environ.get(name)
+            if proxy_host and proxy_host.strip():
+                return proxy_host.strip()
         return None
 
     @property
