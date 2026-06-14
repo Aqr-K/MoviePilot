@@ -24,6 +24,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from app.agent.middleware.utils import append_to_system_message
+from app.agent.runtime import SubAgentDefinition, agent_runtime_manager
 from app.agent.tools.tags import ToolTag
 from app.log import logger
 
@@ -87,7 +88,7 @@ Requirements:
 
 @dataclass(frozen=True)
 class _SubAgentProfile:
-    """内置子代理定义。"""
+    """子代理运行时定义。"""
 
     name: str
     description: str
@@ -197,40 +198,15 @@ def builtin_subagent_names() -> frozenset[str]:
 
 @lru_cache(maxsize=1)
 def _builtin_subagent_profiles() -> tuple[_SubAgentProfile, ...]:
-    """构建 MoviePilot 默认内置子代理定义。"""
-    default_exclude_tags = frozenset(
-        {
-            ToolTag.Write.value,
-            ToolTag.Message.value,
-            ToolTag.UserInteraction.value,
-        }
+    """从运行时配置目录加载 MoviePilot 子代理定义。"""
+    definitions = agent_runtime_manager.list_subagents()
+    profiles = tuple(
+        _profile_from_runtime_definition(definition)
+        for definition in definitions
     )
-    general_tags = frozenset(
-        {
-            ToolTag.Media.value,
-            ToolTag.Resource.value,
-            ToolTag.Site.value,
-            ToolTag.Subscription.value,
-            ToolTag.Download.value,
-            ToolTag.Library.value,
-            ToolTag.Transfer.value,
-            ToolTag.System.value,
-            ToolTag.Settings.value,
-            ToolTag.Plugin.value,
-            ToolTag.Workflow.value,
-            ToolTag.Scheduler.value,
-            ToolTag.File.value,
-            ToolTag.Directory.value,
-            ToolTag.Web.value,
-            ToolTag.Command.value,
-            ToolTag.FilterRule.value,
-            ToolTag.Persona.value,
-            ToolTag.SlashCommand.value,
-            ToolTag.Recommendation.value,
-            ToolTag.Metadata.value,
-        }
-    )
-
+    if profiles:
+        return profiles
+    logger.warning("未加载到任何子代理定义，使用通用兜底子代理。")
     return (
         _SubAgentProfile(
             name="general-purpose",
@@ -239,123 +215,31 @@ def _builtin_subagent_profiles() -> tuple[_SubAgentProfile, ...]:
                 f"{SUBAGENT_BASE_PROMPT}\n"
                 "You specialize in synthesizing media, site, subscription, download, and system status signals."
             ),
-            include_tags=general_tags,
-            exclude_tags=default_exclude_tags,
-        ),
-        _SubAgentProfile(
-            name="media-researcher",
-            description="Media research subagent for title recognition, people, episodes, metadata, and library existence checks.",
-            prompt=(
-                f"{SUBAGENT_BASE_PROMPT}\n"
-                "You specialize in media identity resolution, metadata validation, person credits, and library status analysis."
-            ),
-            include_tags=frozenset(
+            include_tags=frozenset(tag.value for tag in ToolTag),
+            exclude_tags=frozenset(
                 {
-                    ToolTag.Media.value,
-                    ToolTag.Library.value,
-                    ToolTag.Recommendation.value,
-                    ToolTag.Metadata.value,
-                    ToolTag.Web.value,
+                    ToolTag.Write.value,
+                    ToolTag.Message.value,
+                    ToolTag.UserInteraction.value,
                 }
             ),
-            exclude_tags=default_exclude_tags,
         ),
-        _SubAgentProfile(
-            name="moviepilot-explorer",
-            description="MoviePilot exploration subagent for source-code inspection, configuration structure analysis, logs, and code-level troubleshooting clues.",
-            prompt=(
-                f"{SUBAGENT_BASE_PROMPT}\n"
-                "You specialize in MoviePilot source-code structure, local configuration files, directory layout, logs or read-only command output, and code-level root-cause troubleshooting. "
-                "Prefer reading relevant code paths before judging behavior, and distinguish code/config evidence from runtime system state."
-            ),
-            include_tags=frozenset(
-                {
-                    ToolTag.System.value,
-                    ToolTag.Settings.value,
-                    ToolTag.File.value,
-                    ToolTag.Directory.value,
-                    ToolTag.Command.value,
-                }
-            ),
-            exclude_tags=default_exclude_tags,
-        ),
-        _SubAgentProfile(
-            name="resource-searcher",
-            description="Site and resource search subagent for site checks, torrent search, and resource quality analysis.",
-            prompt=(
-                f"{SUBAGENT_BASE_PROMPT}\n"
-                "You specialize in site status, site user data, torrent search results, and resource quality judgment."
-            ),
-            include_tags=frozenset(
-                {
-                    ToolTag.Resource.value,
-                    ToolTag.Site.value,
-                    ToolTag.Web.value,
-                    ToolTag.Media.value,
-                }
-            ),
-            exclude_tags=default_exclude_tags,
-        ),
-        _SubAgentProfile(
-            name="subscription-analyst",
-            description="Subscription analysis subagent for subscriptions, history, filter rules, and custom identifiers.",
-            prompt=(
-                f"{SUBAGENT_BASE_PROMPT}\n"
-                "You specialize in current subscription state, subscription history, filter rules, and subscription optimization suggestions."
-            ),
-            include_tags=frozenset(
-                {
-                    ToolTag.Subscription.value,
-                    ToolTag.FilterRule.value,
-                    ToolTag.Settings.value,
-                    ToolTag.Media.value,
-                }
-            ),
-            exclude_tags=default_exclude_tags,
-        ),
-        _SubAgentProfile(
-            name="system-diagnostician",
-            description="System diagnosis subagent for read-only inspection of settings, schedulers, workflows, plugins, directories, and command output.",
-            prompt=(
-                f"{SUBAGENT_BASE_PROMPT}\n"
-                "You specialize in settings, plugins, scheduled tasks, workflows, directories, and read-only command diagnostics."
-            ),
-            include_tags=frozenset(
-                {
-                    ToolTag.System.value,
-                    ToolTag.Settings.value,
-                    ToolTag.Plugin.value,
-                    ToolTag.Workflow.value,
-                    ToolTag.Scheduler.value,
-                    ToolTag.File.value,
-                    ToolTag.Directory.value,
-                    ToolTag.Web.value,
-                    ToolTag.Command.value,
-                    ToolTag.Persona.value,
-                    ToolTag.SlashCommand.value,
-                }
-            ),
-            exclude_tags=default_exclude_tags,
-        ),
-        _SubAgentProfile(
-            name="download-diagnostician",
-            description="Download and transfer diagnosis subagent for downloaders, download tasks, transfer history, and library status.",
-            prompt=(
-                f"{SUBAGENT_BASE_PROMPT}\n"
-                "You specialize in downloaders, download tasks, transfer history, directory settings, and library ingestion state."
-            ),
-            include_tags=frozenset(
-                {
-                    ToolTag.Download.value,
-                    ToolTag.Transfer.value,
-                    ToolTag.Library.value,
-                    ToolTag.Directory.value,
-                    ToolTag.File.value,
-                    ToolTag.Media.value,
-                }
-            ),
-            exclude_tags=default_exclude_tags,
-        ),
+    )
+
+
+def _profile_from_runtime_definition(
+    definition: SubAgentDefinition,
+) -> _SubAgentProfile:
+    """把运行时子代理定义转换为中间件可用的 profile。"""
+    prompt_parts = [SUBAGENT_BASE_PROMPT]
+    if definition.text.strip():
+        prompt_parts.append(definition.text.strip())
+    return _SubAgentProfile(
+        name=definition.subagent_id,
+        description=definition.description,
+        prompt="\n".join(prompt_parts),
+        include_tags=frozenset(definition.include_tags),
+        exclude_tags=frozenset(definition.exclude_tags),
     )
 
 
@@ -1055,6 +939,8 @@ def create_subagent_middlewares(
     stream_handler: Any = None,
 ) -> tuple[list[AgentMiddleware], list[BaseTool]]:
     """创建子代理中间件列表和任务工具列表。"""
+    _builtin_subagent_profiles.cache_clear()
+    builtin_subagent_names.cache_clear()
     profiles = _builtin_subagent_profiles()
     subagent_middleware = _try_create_deepagents_middleware(
         profiles=profiles,
