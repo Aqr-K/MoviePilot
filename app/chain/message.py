@@ -42,6 +42,8 @@ class MessageChain(ChainBase):
     外来消息处理链
     """
 
+    _ai_prefix = "/ai"
+    _no_ai_prefix = "/noai"
     # 用户会话信息 {userid: (session_id, last_time)}
     _user_sessions: Dict[Union[str, int], tuple] = {}
     # 会话超时时间（分钟）
@@ -283,7 +285,22 @@ class MessageChain(ChainBase):
                 )
             return False
 
-        if text.startswith("/") and not text.lower().startswith("/ai"):
+        no_ai_requested, no_ai_text = self._strip_no_ai_prefix(text)
+        if no_ai_requested:
+            text = no_ai_text
+            if not text:
+                self.post_message(
+                    Notification(
+                        channel=channel,
+                        source=source,
+                        userid=userid,
+                        username=username,
+                        title="请输入要使用传统交互处理的内容",
+                    )
+                )
+                return False
+
+        if text.startswith("/") and not self._has_ai_prefix(text):
             self.eventmanager.send_event(
                 EventType.CommandExcute,
                 {
@@ -298,7 +315,7 @@ class MessageChain(ChainBase):
             )
             return bool(processing_status)
 
-        if text.lower().startswith("/ai"):
+        if not no_ai_requested and self._has_ai_prefix(text):
             return self._handle_ai_message(
                 text=text,
                 channel=channel,
@@ -354,6 +371,8 @@ class MessageChain(ChainBase):
                 return False
 
         if (
+                not no_ai_requested
+                and
                 settings.AI_AGENT_ENABLE
                 and (settings.AI_AGENT_GLOBAL or images or files or has_audio_input)
         ):
@@ -390,6 +409,25 @@ class MessageChain(ChainBase):
         )
         return False
 
+    @classmethod
+    def _strip_no_ai_prefix(cls, text: str) -> Tuple[bool, str]:
+        """
+        解析 /noai 前缀，显式要求本条消息绕过全局智能体。
+        """
+        normalized = (text or "").strip()
+        pattern = rf"^{re.escape(cls._no_ai_prefix)}(?:\s+|[:：]\s*|$)(.*)$"
+        match = re.match(pattern, normalized, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return False, text
+        return True, match.group(1).strip()
+
+    @classmethod
+    def _has_ai_prefix(cls, text: str) -> bool:
+        """
+        判断消息是否使用显式 AI 前缀。
+        """
+        return (text or "").lower().startswith(cls._ai_prefix)
+
     def _is_agent_message(
             self,
             channel: MessageChannel,
@@ -404,7 +442,7 @@ class MessageChain(ChainBase):
         """
         if text.startswith("CALLBACK:"):
             return self._parse_agent_choice_callback(text[9:]) is not None
-        if text.lower().startswith("/ai"):
+        if self._has_ai_prefix(text):
             return True
         if text.startswith("/"):
             return False
@@ -1229,8 +1267,9 @@ class MessageChain(ChainBase):
             images = CommingMessage.MessageImage.normalize_list(images)
 
             # 提取用户消息
-            if text.lower().startswith("/ai"):
-                user_message = text[3:].strip()  # 移除 "/ai" 前缀（大小写不敏感）
+            if self._has_ai_prefix(text):
+                # 前缀匹配不区分大小写，但保留原始正文避免改变用户输入内容。
+                user_message = text[len(self._ai_prefix):].strip()
             else:
                 user_message = text.strip()  # 按原消息处理
 
