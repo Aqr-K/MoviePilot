@@ -132,3 +132,35 @@ def test_login_skips_incomplete_file_suffix_when_already_matches():
 
     assert downloader.trc is fake_client
     fake_client.set_session.assert_not_called()
+
+
+def test_get_files_uses_transmission_rpc_v7_get_files():
+    """
+    transmission-rpc v7 任务对象应使用 get_files 获取文件列表。
+    """
+    downloader = Transmission.__new__(Transmission)
+    torrent_files = [object()]
+    torrent = types.SimpleNamespace(get_files=MagicMock(return_value=torrent_files))
+    fake_client = MagicMock()
+    fake_client.get_torrent.return_value = torrent
+    downloader.trc = fake_client
+
+    assert downloader.get_files("1") == torrent_files
+    fake_client.get_torrent.assert_called_once_with("1")
+    torrent.get_files.assert_called_once_with()
+
+
+def test_get_files_falls_back_to_legacy_files_method():
+    """
+    旧版 transmission-rpc 任务对象仍应通过 files 获取文件列表。
+    """
+    downloader = Transmission.__new__(Transmission)
+    torrent_files = [object()]
+    torrent = types.SimpleNamespace(files=MagicMock(return_value=torrent_files))
+    fake_client = MagicMock()
+    fake_client.get_torrent.return_value = torrent
+    downloader.trc = fake_client
+
+    assert downloader.get_files("1") == torrent_files
+    fake_client.get_torrent.assert_called_once_with("1")
+    torrent.files.assert_called_once_with()

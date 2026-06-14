@@ -278,9 +278,15 @@ class Transmission:
         except Exception as err:
             logger.error(f"获取种子文件列表出错：{str(err)}")
             return None
-        if torrent:
+        if not torrent:
+            return None
+        try:
+            get_files = getattr(torrent, "get_files", None)
+            if callable(get_files):
+                return get_files()
             return torrent.files()
-        else:
+        except Exception as err:
+            logger.error(f"获取种子文件列表出错：{str(err)}")
             return None
 
     def set_files(self, tid: str, file_ids: list) -> bool:
