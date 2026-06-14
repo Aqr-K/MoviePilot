@@ -1,7 +1,7 @@
 ---
 name: moviepilot-api
 version: 1
-description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 244 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
+description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 245 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
 ---
 
 # MoviePilot REST API
@@ -320,7 +320,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | POST | `/api/v1/workflow/fork` | Fork shared workflow. Body: WorkflowShare JSON |
 | GET | `/api/v1/workflow/shares` | List shared workflows. Params: `name`, `page`, `count` |
 
-### System (23 endpoints)
+### System (24 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -330,6 +330,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/system/setting/public/{key}` | Get allowlisted non-sensitive system setting for authenticated users |
 | GET | `/api/v1/system/setting/{key}` | Get system setting |
 | POST | `/api/v1/system/setting/{key}` | Update system setting |
+| POST | `/api/v1/system/setting/PLUGIN_MARKET/sync-wiki` | Sync plugin market repository URLs from the MoviePilot Wiki and merge with local `PLUGIN_MARKET` |
 | GET | `/api/v1/system/global` | Non-sensitive settings. Params: `token` (required) |
 | GET | `/api/v1/system/global/user` | User-related settings |
 | GET | `/api/v1/system/restart` | Restart system |

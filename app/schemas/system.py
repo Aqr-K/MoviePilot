@@ -86,6 +86,17 @@ class NotificationSwitchConf(BaseModel):
     action: Optional[str] = "all"
 
 
+class PluginMarketSyncRequest(BaseModel):
+    """
+    插件市场仓库同步请求
+    """
+
+    # Wiki 插件文档 Markdown 原始文件地址
+    wiki_url: Optional[str] = Field(
+        default="https://raw.githubusercontent.com/jxxghp/MoviePilot-Wiki/main/plugin.md",
+    )
+
+
 class StorageConf(BaseModel):
     """
     存储配置
