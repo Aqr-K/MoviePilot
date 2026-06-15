@@ -83,7 +83,6 @@ class AskUserChoiceTool(MoviePilotTool):
         "back as the user's next message. Do not also send the same question as plain text."
     )
     args_schema: Type[BaseModel] = AskUserChoiceInput
-    require_admin: bool = False
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         message = kwargs.get("message", "") or ""

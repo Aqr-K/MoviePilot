@@ -39,6 +39,7 @@ SUBAGENT_MAX_ACTIVE_TASKS = 8
 SUBAGENT_MAX_CONCURRENT_TASKS = 4
 SUBAGENT_RESULT_MAX_CHARS = 12000
 SUBAGENT_DESCRIPTION_MAX_CHARS = 500
+SUBAGENT_PIPELINE_CONTEXT_MAX_CHARS = 12000
 
 SUBAGENT_PARENT_PROMPT = """<subagents>
 You may use subagent tools to delegate independent research, retrieval,
@@ -51,6 +52,9 @@ Delegation modes:
   `action=wait`, or `action=cancel` with the returned task IDs.
 - Use `subagent_task` with `action=run` when you want to launch a bounded
   batch and wait for the batch in one tool call.
+- Use `subagent_task` with `action=pipeline` when later subtasks must use
+  previous subagent results. Pipeline steps run sequentially, and each step's
+  result is passed as private context to the next step.
 
 Rules:
 - Delegate when a task benefits from focused investigation, such as media identity checks, site/resource search, subscription analysis, download/transfer diagnosis, MoviePilot code/config exploration, or read-only system inspection.
@@ -71,7 +75,9 @@ SUBAGENT_CONTROL_DESCRIPTION = (
     "Use action=start with tasks=[{description, subagent_type}] to launch a batch "
     "and get task IDs immediately. Use action=status to inspect tasks, action=wait "
     "to wait for all or any task result, action=cancel to stop running tasks, and "
-    "action=run to launch a bounded batch and wait in one call."
+    "action=run to launch a bounded batch and wait in one call. Use action=pipeline "
+    "to run tasks sequentially while passing each result as private context to the "
+    "next task."
 )
 
 SUBAGENT_BASE_PROMPT = """You are a silent subagent working for the MoviePilot main agent.
@@ -120,9 +126,9 @@ class _SubAgentTaskSpec(BaseModel):
 class _SubAgentControlInput(BaseModel):
     """异步子代理管控工具输入。"""
 
-    action: Literal["start", "status", "wait", "cancel", "run"] = Field(
+    action: Literal["start", "status", "wait", "cancel", "run", "pipeline"] = Field(
         default="start",
-        description="Task action: start, status, wait, cancel, or run.",
+        description="Task action: start, status, wait, cancel, run, or pipeline.",
     )
     description: Optional[str] = Field(
         default=None,
@@ -150,7 +156,10 @@ class _SubAgentControlInput(BaseModel):
     )
     timeout_ms: Optional[int] = Field(
         default=SUBAGENT_DEFAULT_WAIT_TIMEOUT_MS,
-        description="Maximum wait time in milliseconds for action=wait or action=run.",
+        description=(
+            "Maximum wait time in milliseconds for action=wait, action=run, "
+            "or each action=pipeline step."
+        ),
     )
 
 
@@ -742,7 +751,8 @@ class SubAgentTaskControlMiddleware(AgentMiddleware):
             f"pending={len(pending_tasks) - finished_count}"
         )
 
-    async def _cancel_records(self, records: list[_SubAgentRuntimeTask]) -> None:
+    @staticmethod
+    async def _cancel_records(records: list[_SubAgentRuntimeTask]) -> None:
         """取消一组尚未完成的任务。"""
         cancellable_tasks = [
             record.task for record in records if not record.task.done()
@@ -754,6 +764,156 @@ class SubAgentTaskControlMiddleware(AgentMiddleware):
         if cancellable_tasks:
             await asyncio.gather(*cancellable_tasks, return_exceptions=True)
             logger.info(f"子代理任务取消完成: tasks={len(cancellable_tasks)}")
+
+    @staticmethod
+    def _pipeline_description(
+        *,
+        description: str,
+        previous_results: list[tuple[_SubAgentRuntimeTask, str]],
+    ) -> str:
+        """追加上游子代理结果，生成当前管道步骤的任务描述。"""
+        normalized_description = description.strip()
+        if not previous_results:
+            return normalized_description
+
+        context_parts = []
+        for step_index, (record, result) in enumerate(previous_results, start=1):
+            clipped_result, result_truncated = _clip_text(
+                result,
+                SUBAGENT_RESULT_MAX_CHARS,
+            )
+            truncated_note = "\n[Result truncated]" if result_truncated else ""
+            context_parts.append(
+                f"Step {step_index} ({record.subagent_type}) result:\n"
+                f"{clipped_result}{truncated_note}"
+            )
+        context_text, context_truncated = _clip_text(
+            "\n\n".join(context_parts),
+            SUBAGENT_PIPELINE_CONTEXT_MAX_CHARS,
+        )
+        truncated_note = "\n[Pipeline context truncated]" if context_truncated else ""
+        return (
+            f"{normalized_description}\n\n"
+            "<pipeline_context>\n"
+            "Previous subagent results are private context for this delegated "
+            "subtask. Use them to complete the current task, but do not expose "
+            "the prior reports verbatim.\n\n"
+            f"{context_text}{truncated_note}\n"
+            "</pipeline_context>"
+        )
+
+    async def _execute_pipeline_task(
+        self,
+        *,
+        record: _SubAgentRuntimeTask,
+        description: str,
+    ) -> str:
+        """执行单个管道步骤，保留原始步骤描述用于状态展示。"""
+        async with self._semaphore:
+            record.started_at = datetime.now()
+            logger.info(
+                f"管道子代理任务开始执行: task_id={record.task_id}, "
+                f"subagent_type={record.subagent_type}"
+            )
+            try:
+                result = await self._provider.run_task(
+                    description=description,
+                    subagent_type=record.subagent_type,
+                    task_id=record.task_id,
+                )
+                logger.info(
+                    f"管道子代理任务执行完成: task_id={record.task_id}, "
+                    f"subagent_type={record.subagent_type}, result_chars={len(result)}"
+                )
+                return result
+            except asyncio.CancelledError:
+                logger.info(
+                    f"管道子代理任务已取消: task_id={record.task_id}, "
+                    f"subagent_type={record.subagent_type}"
+                )
+                raise
+            except Exception as err:
+                logger.error(f"管道子代理任务执行失败: task_id={record.task_id}, error={err}")
+                raise
+
+    @staticmethod
+    def _create_pipeline_record(
+            spec: _SubAgentTaskSpec,
+    ) -> _SubAgentRuntimeTask:
+        """创建一个管道步骤记录。"""
+        task_id = f"subagent-{uuid.uuid4().hex[:12]}"
+        return _SubAgentRuntimeTask(
+            task_id=task_id,
+            description=spec.description.strip(),
+            subagent_type=spec.subagent_type or "general-purpose",
+            task=None,
+            created_at=datetime.now(),
+        )
+
+    def _track_pipeline_task(
+        self,
+        record: _SubAgentRuntimeTask,
+        task: asyncio.Task,
+    ) -> None:
+        """登记管道步骤任务，复用统一的状态和异常收口逻辑。"""
+        record.task = task
+        task.add_done_callback(
+            lambda finished_task, finished_task_id=record.task_id: self._mark_task_finished(
+                finished_task_id,
+                finished_task,
+            )
+        )
+        self._tasks[record.task_id] = record
+
+    async def _run_pipeline(
+        self,
+        specs: list[_SubAgentTaskSpec],
+        timeout_ms: Optional[int],
+    ) -> tuple[list[_SubAgentRuntimeTask], Optional[str]]:
+        """按顺序执行管道任务，并把每一步结果传给下一步。"""
+        normalized_timeout_ms = self._normalize_timeout_ms(timeout_ms)
+        if normalized_timeout_ms <= 0:
+            return [], "管道任务需要大于 0 的等待时间。"
+
+        records: list[_SubAgentRuntimeTask] = []
+        previous_results: list[tuple[_SubAgentRuntimeTask, str]] = []
+        timeout = normalized_timeout_ms / 1000
+        for step_index, spec in enumerate(specs, start=1):
+            record = self._create_pipeline_record(spec)
+            records.append(record)
+            pipeline_description = self._pipeline_description(
+                description=record.description,
+                previous_results=previous_results,
+            )
+            task = asyncio.create_task(
+                self._execute_pipeline_task(
+                    record=record,
+                    description=pipeline_description,
+                ),
+                name=record.task_id,
+            )
+            self._track_pipeline_task(record, task)
+            logger.info(
+                f"已启动管道子代理任务: step={step_index}, task_id={record.task_id}, "
+                f"subagent_type={record.subagent_type}"
+            )
+
+            try:
+                result = await asyncio.wait_for(task, timeout=timeout)
+            except asyncio.TimeoutError:
+                error = f"第 {step_index} 个管道子代理任务等待超时。"
+                logger.info(
+                    f"{error} task_id={record.task_id}, timeout_ms={normalized_timeout_ms}"
+                )
+                return records, error
+            except Exception as err:
+                error = f"第 {step_index} 个管道子代理任务执行失败: {err}"
+                logger.info(f"{error} task_id={record.task_id}")
+                return records, error
+
+            previous_results.append((record, result))
+
+        return records, None
 
     async def _control_task(
         self,
@@ -768,7 +928,7 @@ class SubAgentTaskControlMiddleware(AgentMiddleware):
     ) -> str:
         """管理异步子代理任务。"""
         logger.info(f"收到子代理管控操作: action={action}")
-        if action in {"start", "run"}:
+        if action in {"start", "run", "pipeline"}:
             specs, error = self._normalize_specs(
                 description=description,
                 subagent_type=subagent_type,
@@ -779,6 +939,20 @@ class SubAgentTaskControlMiddleware(AgentMiddleware):
                 return self._json_response({"success": False, "error": error})
 
             logger.info(f"准备启动子代理任务: action={action}, tasks={len(specs)}")
+            if action == "pipeline":
+                records, pipeline_error = await self._run_pipeline(
+                    specs=specs,
+                    timeout_ms=timeout_ms,
+                )
+                return self._json_response(
+                    {
+                        "success": pipeline_error is None,
+                        "action": action,
+                        "error": pipeline_error,
+                        "tasks": [self._task_output(record) for record in records],
+                    }
+                )
+
             records = self._start_tasks(specs)
             if action == "run":
                 await self._wait_records(

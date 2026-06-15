@@ -49,6 +49,8 @@ dedicated tool can complete the task more directly and safely.
   `google`, `brave`, etc.) and `site_url` for limiting results to a specified
   domain or URL path. It uses the configured system proxy by default.
 - `query_sites` - Get MoviePilot site IDs before site-specific operations.
+  Non-admin callers receive a safe view without Cookie, RSS, Token, or API Key
+  fields.
 - `update_site_cookie` - Update a configured site's Cookie and User-Agent using
   username, password, and optional two-step code.
 - `test_site` - Verify configured site connectivity and login status.

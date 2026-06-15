@@ -50,6 +50,7 @@ from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.event import eventmanager
+from app.db.user_oper import UserOper
 from app.log import logger
 from app.schemas import AgentLLMProviderEventData, AgentTokensUsageEventData, Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
@@ -417,6 +418,38 @@ class MoviePilotAgent:
         否则会让这类高频后台调用持续带入无关动态上下文，影响缓存命中率。
         """
         return self.session_id.startswith(HEARTBEAT_SESSION_PREFIX)
+
+    async def _is_system_admin_context(self) -> bool:
+        """
+        判断当前 Agent 会话是否应按系统管理员上下文运行工具。
+        """
+        if self.is_background:
+            return True
+        if self.channel == MessageChannel.Web.value and self.source in {
+            "openai",
+            "openai.responses",
+            "anthropic",
+        }:
+            return True
+        if not self.username:
+            return False
+        try:
+            user = await UserOper().async_get_by_name(self.username)
+        except Exception as e:
+            logger.error(f"检查 Agent 用户管理员身份失败: {e}")
+            return False
+        return bool(user and user.is_superuser)
+
+    async def _build_tool_context(self, should_dispatch_reply: bool) -> Dict[str, object]:
+        """
+        构造本轮工具共享上下文。
+        """
+        return {
+            "user_reply_sent": False,
+            "reply_mode": None,
+            "should_dispatch_reply": should_dispatch_reply,
+            "is_admin": await self._is_system_admin_context(),
+        }
 
     def _should_stream(self) -> bool:
         """
@@ -804,6 +837,7 @@ class MoviePilotAgent:
                 "user_reply_sent": False,
                 "reply_mode": None,
                 "should_dispatch_reply": False,
+                "is_admin": bool(self._tool_context.get("is_admin")),
             },
             allow_message_tools=False,
         )
@@ -920,11 +954,9 @@ class MoviePilotAgent:
                 f"images={len(images) if images else 0}, files={len(files) if files else 0}, "
                 f"audio_input={has_audio_input}"
             )
-            self._tool_context = {
-                "user_reply_sent": False,
-                "reply_mode": None,
-                "should_dispatch_reply": self.should_dispatch_reply,
-            }
+            self._tool_context = await self._build_tool_context(
+                should_dispatch_reply=self.should_dispatch_reply
+            )
             self._streamed_output = ""
 
             # 获取历史消息

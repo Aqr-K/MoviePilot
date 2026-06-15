@@ -55,7 +55,7 @@ class SendLocalFileTool(MoviePilotTool):
         "Use this when you have generated or identified a local file the user should download."
     )
     args_schema: Type[BaseModel] = SendLocalFileInput
-    require_admin: bool = False
+    require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         file_path = kwargs.get("file_path", "")

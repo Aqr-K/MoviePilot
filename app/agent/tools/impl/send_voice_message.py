@@ -44,7 +44,6 @@ class SendVoiceMessageTool(MoviePilotTool):
         "or call `send_message` with the same content."
     )
     args_schema: Type[BaseModel] = SendVoiceMessageInput
-    require_admin: bool = False
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """生成语音回复工具的执行提示。"""

@@ -4,6 +4,7 @@ import threading
 from abc import ABCMeta, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable, ClassVar, Optional
 
 from langchain_core.tools import BaseTool
@@ -373,6 +374,119 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         # 独立的新 dict，跨工具状态（例如质量门槛拒绝标记）无法传播。
         self._agent_context = {} if agent_context is None else agent_context
 
+    async def is_admin_user(self) -> bool:
+        """
+        判断当前工具调用者是否拥有管理员级权限。
+
+        :return: 当前调用者是系统管理员、渠道管理员或显式管理员上下文时返回 True
+        """
+        if bool(self._agent_context.get("is_admin")):
+            return True
+
+        if not self._channel or not self._source:
+            return False
+
+        return await self._has_channel_admin_permission()
+
+    @staticmethod
+    def _resolve_local_path(path: str) -> Path:
+        """
+        解析本地路径并展开符号链接。
+
+        :param path: 用户传入的本地文件或目录路径
+        :return: 规范化后的绝对路径
+        """
+        return Path(path).expanduser().resolve(strict=False)
+
+    @staticmethod
+    def _is_path_relative_to(path: Path, root: Path) -> bool:
+        """
+        判断路径是否位于指定目录内。
+
+        :param path: 待检查路径
+        :param root: 允许访问的根目录
+        :return: 路径在根目录内或等于根目录时返回 True
+        """
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False
+
+    @classmethod
+    def _get_non_admin_local_file_roots(cls) -> list[Path]:
+        """
+        获取普通用户可访问的本地文件根目录。
+
+        :return: 普通用户允许读写的本地目录列表
+        """
+        roots = [
+            settings.CONFIG_PATH,
+            settings.LOG_PATH,
+            settings.CONFIG_PATH / "agent" / "memory",
+            settings.CONFIG_PATH / "agent" / "activity",
+        ]
+        resolved_roots = []
+        for root in roots:
+            resolved_root = cls._resolve_local_path(str(root))
+            if resolved_root not in resolved_roots:
+                resolved_roots.append(resolved_root)
+        return resolved_roots
+
+    async def _check_local_file_access(
+        self, path: str, operation: str = "访问"
+    ) -> tuple[Optional[Path], Optional[str]]:
+        """
+        检查当前用户是否可访问指定本地路径。
+
+        :param path: 用户传入的本地文件或目录路径
+        :param operation: 当前操作名称，用于生成拒绝提示
+        :return: 解析后的路径和拒绝原因；拒绝原因为空表示允许访问
+        """
+        if not path:
+            return None, "错误：路径不能为空"
+
+        resolved_path = self._resolve_local_path(path)
+        if await self.is_admin_user():
+            return resolved_path, None
+
+        allowed_roots = self._get_non_admin_local_file_roots()
+        if any(
+            self._is_path_relative_to(resolved_path, root)
+            for root in allowed_roots
+        ):
+            return resolved_path, None
+
+        allowed_text = "、".join(str(root) for root in allowed_roots)
+        return (
+            resolved_path,
+            f"抱歉，普通用户只能{operation}配置目录、Agent记忆目录和日志目录内的文件或目录：{allowed_text}",
+        )
+
+    async def _check_local_storage_access(
+        self,
+        path: str,
+        storage: Optional[str] = "local",
+        operation: str = "访问",
+    ) -> tuple[Optional[Path], Optional[str]]:
+        """
+        检查当前用户是否可访问指定存储路径。
+
+        :param path: 用户传入的文件或目录路径
+        :param storage: 存储类型，普通用户只允许 local
+        :param operation: 当前操作名称，用于生成拒绝提示
+        :return: 本地存储时返回解析后的路径和拒绝原因；远程存储无本地路径
+        """
+        if (storage or "local") != "local":
+            if await self.is_admin_user():
+                return None, None
+            return (
+                None,
+                f"抱歉，普通用户只能{operation}本地配置目录、Agent记忆目录和日志目录，不能访问远程存储。",
+            )
+
+        return await self._check_local_file_access(path=path, operation=operation)
+
     async def _check_permission(self) -> Optional[str]:
         """
         检查用户权限：
@@ -385,8 +499,27 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         if not self._require_admin:
             return None
 
+        if await self.is_admin_user():
+            return None
+
         if not self._channel or not self._source:
             return None
+
+        return (
+            "抱歉，您没有执行此工具的权限。"
+            "只有渠道管理员或系统管理员才能执行工具操作。"
+            "如需执行工具，请联系渠道管理员将您的用户ID添加到渠道管理员列表中，"
+            "或联系系统管理员为您设置权限。"
+        )
+
+    async def _has_channel_admin_permission(self) -> bool:
+        """
+        检查当前消息渠道身份是否具备管理员权限。
+
+        :return: 当前渠道用户是渠道管理员、系统管理员或默认接收人时返回 True
+        """
+        if not self._channel or not self._source:
+            return False
 
         # 渠道配置来自 SystemConfigOper 内存缓存，可以直接读取；
         # 只有用户信息需要走异步数据库查询。
@@ -411,7 +544,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 break
 
         if not channel_type:
-            return None
+            return False
 
         admin_key_map = {
             "telegram": "TELEGRAM_ADMINS",
@@ -451,7 +584,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                             if aid.strip()
                         ]
                         if user_id_str and user_id_str in admin_list:
-                            return None
+                            return True
 
                         user = (
                             await UserOper().async_get_by_name(self._username)
@@ -459,14 +592,9 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                             else None
                         )
                         if user and user.is_superuser:
-                            return None
+                            return True
 
-                        return (
-                            "抱歉，您没有执行此工具的权限。"
-                            "只有渠道管理员或系统管理员才能执行工具操作。"
-                            "如需执行工具，请联系渠道管理员将您的用户ID添加到渠道管理员列表中，"
-                            "或联系系统管理员为您设置权限。"
-                        )
+                        return False
                     else:
                         user = (
                             await UserOper().async_get_by_name(self._username)
@@ -474,22 +602,18 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                             else None
                         )
                         if user and user.is_superuser:
-                            return None
+                            return True
 
                         if user_id_key:
                             config_user_id = config.config.get(user_id_key)
                             if config_user_id and str(config_user_id) == user_id_str:
-                                return None
+                                return True
 
-                        return (
-                            "抱歉，您没有执行此工具的权限。"
-                            "只有系统管理员才能执行工具操作。"
-                            "如需执行工具，请联系系统管理员为您设置权限。"
-                        )
+                        return False
         except Exception as e:
             logger.error(f"检查权限失败: {e}")
 
-        return None
+        return False
 
     async def send_tool_message(
         self, message: str, title: str = "", image: Optional[str] = None

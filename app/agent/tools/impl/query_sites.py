@@ -30,10 +30,12 @@ class QuerySitesTool(MoviePilotTool):
     tags: list[str] = [
         ToolTag.Read,
         ToolTag.Site,
-        ToolTag.Admin,
     ]
-    description: str = "Query site status and list all configured sites. Shows site name, domain, status, priority, and basic configuration. Site priority (pri): smaller values have higher priority (e.g., pri=1 has higher priority than pri=10)."
-    require_admin: bool = True
+    description: str = (
+        "Query site status and list configured sites. Non-admin users receive a safe view "
+        "that omits sensitive fields: cookie, token, API key and RSS URL. "
+        "Site priority (pri): smaller values have higher priority (e.g., pri=1 has higher priority than pri=10)."
+    )
     args_schema: Type[BaseModel] = QuerySitesInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -57,6 +59,7 @@ class QuerySitesTool(MoviePilotTool):
     ) -> str:
         logger.info(f"执行工具: {self.name}, 参数: status={status}, name={name}")
         try:
+            is_admin = await self.is_admin_user()
             site_oper = SiteOper()
             # 获取所有站点（按优先级排序）
             sites = await site_oper.async_list()
@@ -82,11 +85,25 @@ class QuerySitesTool(MoviePilotTool):
                         "url": s.url,
                         "pri": s.pri,
                         "is_active": s.is_active,
-                        "cookie": s.cookie,
                         "downloader": s.downloader,
+                        "ua": s.ua,
                         "proxy": s.proxy,
+                        "filter": s.filter,
+                        "render": s.render,
+                        "public": s.public,
+                        "note": s.note,
+                        "limit_interval": s.limit_interval,
+                        "limit_count": s.limit_count,
+                        "limit_seconds": s.limit_seconds,
                         "timeout": s.timeout,
                     }
+                    if is_admin:
+                        simplified.update({
+                            "rss": s.rss,
+                            "cookie": s.cookie,
+                            "apikey": s.apikey,
+                            "token": s.token,
+                        })
                     simplified_sites.append(simplified)
                 result_json = json.dumps(simplified_sites, ensure_ascii=False, indent=2)
                 return result_json

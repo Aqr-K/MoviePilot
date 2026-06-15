@@ -23,11 +23,12 @@ class WriteFileTool(MoviePilotTool):
     tags: list[str] = [
         ToolTag.Write,
         ToolTag.File,
-        ToolTag.Admin,
     ]
-    description: str = "Write full content to a file. If the file already exists, it will be overwritten. Automatically creates parent directories if they don't exist."
+    description: str = (
+        "Write full content to a local text file. Non-admin users can only write "
+        "inside the MoviePilot config, Agent memory/activity, and log directories."
+    )
     args_schema: Type[BaseModel] = WriteFileInput
-    require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据参数生成友好的提示消息"""
@@ -39,10 +40,16 @@ class WriteFileTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: file_path={file_path}")
 
         try:
-            path = AsyncPath(file_path)
+            resolved_path, access_error = await self._check_local_file_access(
+                file_path, operation="写入"
+            )
+            if access_error:
+                return access_error
+
+            path = AsyncPath(resolved_path)
 
             if await path.exists() and not await path.is_file():
-                return f"错误：{file_path} 路径已存在但不是一个文件"
+                return f"错误：{resolved_path} 路径已存在但不是一个文件"
 
             # 自动创建父目录
             await path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,8 +57,8 @@ class WriteFileTool(MoviePilotTool):
             # 写入文件
             await path.write_text(content, encoding="utf-8")
 
-            logger.info(f"成功写入文件 {file_path}")
-            return f"成功写入文件 {file_path}"
+            logger.info(f"成功写入文件 {resolved_path}")
+            return f"成功写入文件 {resolved_path}"
 
         except PermissionError:
             return f"错误：没有权限写入 {file_path}"

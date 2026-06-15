@@ -116,6 +116,13 @@ class ListDirectoryTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: path={path}, storage={storage}, sort_by={sort_by}")
 
         try:
+            resolved_path, access_error = await self._check_local_storage_access(
+                path=path, storage=storage, operation="列出"
+            )
+            if access_error:
+                return access_error
+            if resolved_path:
+                path = str(resolved_path)
             return await self.run_blocking(
                 "storage", self._list_directory_sync, path, storage, sort_by
             )

@@ -55,6 +55,7 @@ class MoviePilotToolsManager:
                 source="api",
                 username="API Client",
                 stream_handler=None,
+                agent_context={"is_admin": self.is_admin},
             )
             logger.info(f"成功加载 {len(self.tools)} 个工具")
         except Exception as e:

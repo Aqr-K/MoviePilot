@@ -41,13 +41,19 @@ class ReadFileTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: file_path={file_path}, start_line={start_line}, end_line={end_line}")
 
         try:
-            path = AsyncPath(file_path)
+            resolved_path, access_error = await self._check_local_file_access(
+                file_path, operation="读取"
+            )
+            if access_error:
+                return access_error
+
+            path = AsyncPath(resolved_path)
 
             if not await path.exists():
-                return f"错误：文件 {file_path} 不存在"
+                return f"错误：文件 {resolved_path} 不存在"
 
             if not await path.is_file():
-                return f"错误：{file_path} 不是一个文件"
+                return f"错误：{resolved_path} 不是一个文件"
 
             content = await path.read_text(encoding="utf-8")
             truncated = False
