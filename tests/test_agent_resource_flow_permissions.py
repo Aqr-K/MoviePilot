@@ -10,7 +10,6 @@ from app.agent.tools.impl.list_directory import ListDirectoryTool
 from app.agent.tools.impl.query_downloaders import QueryDownloadersTool
 from app.agent.tools.impl.query_sites import QuerySitesTool
 from app.agent.tools.impl.read_file import ReadFileTool
-from app.agent.tools.impl.send_local_file import SendLocalFileTool
 from app.agent.tools.impl.write_file import WriteFileTool
 from app.agent.tools.manager import MoviePilotToolsManager
 from app.agent import MoviePilotAgent
@@ -51,6 +50,15 @@ def test_non_admin_manager_exposes_restricted_file_tools():
 
     tool_names = {tool.name for tool in manager.list_tools()}
     assert {"read_file", "write_file", "edit_file", "list_directory"} <= tool_names
+
+
+def test_non_admin_manager_hides_admin_only_send_local_file_tool():
+    """普通用户不能看到仅管理员可用的本地附件发送工具。"""
+    manager = MoviePilotToolsManager(is_admin=False)
+
+    tool_names = {tool.name for tool in manager.list_tools()}
+
+    assert "send_local_file" not in tool_names
 
 
 def test_query_sites_hides_only_sensitive_fields_for_non_admin_user():
@@ -189,25 +197,17 @@ def test_non_admin_file_tools_block_paths_outside_allowed_roots(
     write_tool = WriteFileTool(session_id="session-1", user_id="10001")
     edit_tool = EditFileTool(session_id="session-1", user_id="10001")
     list_tool = ListDirectoryTool(session_id="session-1", user_id="10001")
-    send_tool = SendLocalFileTool(session_id="session-1", user_id="10001")
-    send_tool.set_message_attr(
-        channel=MessageChannel.Telegram.value,
-        source="telegram-main",
-        username="normal-user",
-    )
 
     read_result = asyncio.run(read_tool.run(str(outside_path)))
     write_result = asyncio.run(write_tool.run(str(outside_path), "changed"))
     edit_result = asyncio.run(edit_tool.run(str(outside_path), "secret", "changed"))
     with patch.object(ListDirectoryTool, "_list_directory_sync") as list_directory:
         list_result = asyncio.run(list_tool.run(str(tmp_path)))
-    send_result = asyncio.run(send_tool.run(str(outside_path)))
 
     assert "普通用户只能读取" in read_result
     assert "普通用户只能写入" in write_result
     assert "普通用户只能编辑" in edit_result
     assert "普通用户只能列出" in list_result
-    assert "普通用户只能发送" in send_result
     assert outside_path.read_text(encoding="utf-8") == "secret"
     list_directory.assert_not_called()
 
