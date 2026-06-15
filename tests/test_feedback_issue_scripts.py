@@ -117,6 +117,21 @@ class FeedbackIssueScriptTestCase(unittest.TestCase):
                     },
                 },
                 "source_files": [str(settings.LOG_PATH / "moviepilot.log")],
+                "log_selection": {
+                    "strategy": "time_window_and_keyword_block_match",
+                    "time_window_minutes": 30,
+                    "window_start": datetime.now().isoformat(timespec="seconds"),
+                    "keywords": ["RecognizeError"],
+                    "max_lines_per_file": 80,
+                    "matched_files": [
+                        {
+                            "path": str(settings.LOG_PATH / "moviepilot.log"),
+                            "matched_keywords": ["RecognizeError"],
+                            "line_count": 1,
+                        }
+                    ],
+                    "warning": "",
+                },
             },
         )
         return diagnostics_file
@@ -198,6 +213,7 @@ class TestCollectFeedbackDiagnosticsScript(FeedbackIssueScriptTestCase):
     def test_has_explicit_feedback_intent(self):
         """入口意图门只放行明确提 Issue 的请求。"""
         self.assertTrue(collect_script.has_explicit_feedback_intent("TMDB 出错了，帮我提 issue"))
+        self.assertTrue(collect_script.has_explicit_feedback_intent("希望增加一个能力，帮我提需求"))
         self.assertFalse(collect_script.has_explicit_feedback_intent("TMDB 一直在报错"))
 
     def test_filter_lines_drops_history_and_meta_noise(self):
@@ -211,7 +227,7 @@ class TestCollectFeedbackDiagnosticsScript(FeedbackIssueScriptTestCase):
             f"【ERROR】{recent.strftime('%Y-%m-%d %H:%M:%S')},123 - tmdb - TMDB failed 当前",
             "    Traceback (most recent call last):",
         ])
-        out = collect_script.filter_lines(
+        out, matched_keywords = collect_script.filter_lines(
             text,
             keywords=["TMDB"],
             max_lines=80,
@@ -222,6 +238,25 @@ class TestCollectFeedbackDiagnosticsScript(FeedbackIssueScriptTestCase):
         self.assertIn("Traceback", joined)
         self.assertNotIn("历史", joined)
         self.assertNotIn("Executing tool", joined)
+        self.assertEqual(matched_keywords, ["TMDB"])
+
+    def test_filter_lines_requires_specific_keyword_match(self):
+        """没有具体关键词时不应回退采集近期无关日志。"""
+        now = datetime.now()
+        recent = now - timedelta(minutes=5)
+        text = (
+            f"【ERROR】{recent.strftime('%Y-%m-%d %H:%M:%S')},123 - tmdb - unrelated error"
+        )
+
+        out, matched_keywords = collect_script.filter_lines(
+            text,
+            keywords=[],
+            max_lines=80,
+            window_start=now - timedelta(minutes=30),
+        )
+
+        self.assertEqual(out, [])
+        self.assertEqual(matched_keywords, [])
 
     def test_collect_writes_diagnostics_file_without_returning_logs(self):
         """collect 脚本结果应返回文件句柄和统计，不直接返回日志正文。"""
@@ -241,6 +276,27 @@ class TestCollectFeedbackDiagnosticsScript(FeedbackIssueScriptTestCase):
         self.assertIn("Cookie: <REDACTED>", diagnostics["logs"])
         self.assertNotIn("secret", diagnostics["logs"])
         self.assertIn("doctor", diagnostics)
+        self.assertIn("log_selection", diagnostics)
+        self.assertEqual(diagnostics["log_selection"]["matched_files"][0]["matched_keywords"], ["TMDB"])
+
+    def test_collect_without_keywords_records_selection_but_no_logs(self):
+        """无有效关键词时只记录筛选依据，不采集近期无关日志正文。"""
+        recent = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._write_log(f"【ERROR】{recent},000 - tmdb - TMDB lookup failed")
+
+        result = collect_script.collect_diagnostics(
+            original_user_request="TMDB 报错，帮我反馈 issue",
+            keywords=["错误"],
+            max_lines=80,
+            time_window_minutes=30,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["found"])
+        self.assertIn("未提供具体关键词", result["log_selection_summary"])
+        diagnostics = common.read_json_file(result["diagnostics_file"])
+        self.assertEqual(diagnostics["logs"], "")
+        self.assertEqual(diagnostics["log_selection"]["matched_files"], [])
 
 
 class TestPrepareAndSubmitScripts(FeedbackIssueScriptTestCase):
@@ -259,6 +315,7 @@ class TestPrepareAndSubmitScripts(FeedbackIssueScriptTestCase):
         preview = Path(result["preview_file"]).read_text(encoding="utf-8")
         self.assertIn("请确认是否提交以下问题反馈", preview)
         self.assertIn("Doctor 摘要", preview)
+        self.assertIn("日志筛选依据", preview)
         self.assertIn("后端端口被占用", preview)
         self.assertIn("Cookie: <REDACTED>", preview)
         self.assertNotIn("secret", preview)

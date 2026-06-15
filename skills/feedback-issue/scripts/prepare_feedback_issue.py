@@ -9,18 +9,22 @@ from typing import Any, Optional
 from feedback_issue_common import (
     ALLOWED_ENVIRONMENTS,
     ALLOWED_ISSUE_TYPES,
+    FEEDBACK_REPO,
     MAX_PREVIEW_LOGS_CHARS,
     MAX_TITLE_CHARS,
     build_issue_body,
     check_content_quality,
     format_doctor_summary,
+    format_log_selection,
     load_diagnostics_logs,
+    normalize_target_repo,
     read_json_file,
     result_payload,
     runtime_file,
     sanitize_logs,
     truncate,
     validate_enum,
+    validate_target_repo_for_issue,
     write_json_file,
 )
 
@@ -41,6 +45,7 @@ def normalize_draft(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     draft = {key: str(raw.get(key) or "").strip() for key in REQUIRED_DRAFT_FIELDS}
     missing = [key for key, value in draft.items() if not value]
     draft["title"] = truncate(draft["title"], MAX_TITLE_CHARS, marker="...")
+    draft["target_repo"] = str(raw.get("target_repo") or FEEDBACK_REPO).strip()
     return draft, missing
 
 
@@ -53,11 +58,15 @@ def validate_draft(draft: dict[str, Any], logs: str) -> Optional[str]:
         error = validate_enum(value, allowed, field_name)
         if error:
             return error
+    repo_error = validate_target_repo_for_issue(draft["issue_type"], draft["target_repo"])
+    if repo_error:
+        return repo_error
     return check_content_quality(
         title=draft["title"],
         description=draft["description"],
         original_user_request=draft["original_user_request"],
         logs=logs,
+        issue_type=draft["issue_type"],
     )
 
 
@@ -65,11 +74,13 @@ def build_preview_text(draft: dict[str, Any], logs: str, diagnostics: dict[str, 
     """构造给用户确认的 Markdown 预览文本。"""
     preview_logs = sanitize_logs(logs, MAX_PREVIEW_LOGS_CHARS) or "会话中未捕获到相关后端日志。"
     doctor_summary = format_doctor_summary(diagnostics.get("doctor"))
+    log_selection_summary = format_log_selection(diagnostics.get("log_selection"))
     source_files = diagnostics.get("source_files") or []
     sources = "\n".join(f"- {item}" for item in source_files) or "- 未命中具体日志文件"
     return (
         "请确认是否提交以下问题反馈：\n\n"
         f"标题：{draft['title']}\n"
+        f"目标仓库：{draft['target_repo']}\n"
         f"版本：{draft['version']}\n"
         f"环境：{draft['environment']}\n"
         f"类型：{draft['issue_type']}\n\n"
@@ -77,6 +88,8 @@ def build_preview_text(draft: dict[str, Any], logs: str, diagnostics: dict[str, 
         f"{sources}\n\n"
         "Doctor 摘要：\n"
         f"```text\n{doctor_summary}\n```\n\n"
+        "日志筛选依据：\n"
+        f"```text\n{log_selection_summary}\n```\n\n"
         "问题描述：\n"
         f"{draft['description'].strip()}\n\n"
         "日志预览（已脱敏）：\n"
@@ -94,6 +107,14 @@ def prepare_issue(draft_file: str | Path) -> dict[str, Any]:
             "success": False,
             "reason": "missing_fields",
             "message": f"草稿缺少必填字段：{', '.join(missing)}",
+        }
+    try:
+        draft["target_repo"] = normalize_target_repo(draft["target_repo"])
+    except ValueError as err:
+        return {
+            "success": False,
+            "reason": "invalid_target_repo",
+            "message": str(err),
         }
 
     try:
@@ -126,6 +147,7 @@ def prepare_issue(draft_file: str | Path) -> dict[str, Any]:
     combined_logs = "\n\n".join(
         part for part in (
             f"### Doctor 摘要\n{format_doctor_summary(diagnostics.get('doctor'))}",
+            f"### 日志筛选依据\n{format_log_selection(diagnostics.get('log_selection'))}",
             logs,
         ) if part
     )
@@ -135,9 +157,11 @@ def prepare_issue(draft_file: str | Path) -> dict[str, Any]:
         issue_type=draft["issue_type"],
         description=draft["description"],
         logs=combined_logs,
+        target_repo=draft["target_repo"],
     )
     return {
         "success": True,
+        "target_repo": draft["target_repo"],
         "payload_file": str(payload_file),
         "preview_file": str(preview_file),
         "body_chars": len(body_preview),

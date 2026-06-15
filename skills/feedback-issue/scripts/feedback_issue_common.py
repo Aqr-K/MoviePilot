@@ -10,7 +10,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 
 def _find_repo_root() -> Path:
@@ -34,13 +34,14 @@ from app.core.config import settings  # noqa: E402
 FEEDBACK_REPO_OWNER = "jxxghp"
 FEEDBACK_REPO_NAME = "MoviePilot"
 FEEDBACK_REPO = f"{FEEDBACK_REPO_OWNER}/{FEEDBACK_REPO_NAME}"
-FEEDBACK_ISSUE_API = f"https://api.github.com/repos/{FEEDBACK_REPO}/issues"
-FEEDBACK_ISSUE_NEW_URL = f"https://github.com/{FEEDBACK_REPO}/issues/new"
 FEEDBACK_ISSUE_TEMPLATE = "bug_report.yml"
 FEEDBACK_REQUEST_TIMEOUT = 15
 
+_GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
 ALLOWED_ENVIRONMENTS = ("Docker", "Windows")
-ALLOWED_ISSUE_TYPES = ("主程序运行问题", "插件问题", "其他问题")
+FEATURE_ISSUE_TYPE = "功能请求"
+ALLOWED_ISSUE_TYPES = ("主程序运行问题", "插件问题", FEATURE_ISSUE_TYPE, "其他问题")
 
 MAX_TITLE_CHARS = 256
 MAX_BODY_CHARS = 60 * 1024
@@ -58,6 +59,7 @@ MAX_USER_SUBMISSIONS_BUCKETS = 200
 MIN_TITLE_BODY_CHARS = 8
 MIN_DESCRIPTION_CHARS = 50
 TITLE_PREFIX = "[错误报告]:"
+TITLE_PREFIXES = (TITLE_PREFIX, "[功能请求]:")
 
 _QUALITY_BLOCKLIST = (
     "测试issue", "测试 issue", "test issue",
@@ -82,6 +84,11 @@ _DESCRIPTION_REQUIRED_SIGNALS = (
     ("现象", ("现象", "报错", "错误", "无法", "失败", "异常")),
     ("复现步骤", ("复现", "步骤", "触发", "操作", "调用", "点击")),
     ("期望行为", ("期望", "应该", "预期", "正常")),
+)
+_FEATURE_DESCRIPTION_REQUIRED_SIGNALS = (
+    ("需求背景", ("需求背景", "背景", "痛点", "原因", "为什么", "场景")),
+    ("使用场景", ("使用场景", "场景", "用户", "当我", "希望在", "需要在")),
+    ("期望能力", ("期望", "希望", "支持", "能够", "可以", "新增", "功能")),
 )
 
 _REPEAT_GIBBERISH = re.compile(r"([^\s=\-_*#~`./\\+|])\1{7,}", re.UNICODE)
@@ -198,6 +205,54 @@ def validate_enum(value: str, allowed: tuple[str, ...], field_name: str) -> Opti
     return None
 
 
+def normalize_target_repo(target_repo: Optional[str]) -> str:
+    """把目标仓库规范化为 GitHub 的 owner/repo 形式。"""
+    repo = (target_repo or FEEDBACK_REPO).strip()
+    if not repo:
+        return FEEDBACK_REPO
+    repo = repo.removesuffix(".git").strip("/")
+    if repo.startswith(("http://", "https://")):
+        parsed = urlparse(repo)
+        if (parsed.hostname or "").lower() not in {"github.com", "www.github.com"}:
+            raise ValueError(f"目标仓库只支持 GitHub 地址：{target_repo}")
+        parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if len(parts) < 2:
+            raise ValueError(f"GitHub 仓库地址缺少 owner/repo：{target_repo}")
+        repo = f"{parts[0]}/{parts[1].removesuffix('.git')}"
+    if not _GITHUB_REPO_PATTERN.fullmatch(repo):
+        raise ValueError(f"目标仓库必须是 owner/repo 或 GitHub 仓库 URL：{target_repo}")
+    return repo
+
+
+def issue_api_url(target_repo: Optional[str]) -> str:
+    """返回指定仓库的 GitHub Issues API 地址。"""
+    return f"https://api.github.com/repos/{normalize_target_repo(target_repo)}/issues"
+
+
+def issue_new_url(target_repo: Optional[str]) -> str:
+    """返回指定仓库的新建 Issue 页面地址。"""
+    return f"https://github.com/{normalize_target_repo(target_repo)}/issues/new"
+
+
+def validate_target_repo_for_issue(issue_type: str, target_repo: str) -> Optional[str]:
+    """校验 Issue 类型与目标仓库是否匹配，避免插件问题误投主仓库。"""
+    if issue_type == "插件问题" and target_repo == FEEDBACK_REPO:
+        return (
+            "issue_type 为「插件问题」时必须把 target_repo 设置为插件所属 GitHub 仓库，"
+            f"不能提交到主仓库 {FEEDBACK_REPO}。"
+        )
+    return None
+
+
+def issue_labels(issue_type: str, target_repo: Optional[str]) -> list[str]:
+    """返回提交 Issue 时应使用的标签列表。"""
+    if issue_type == FEATURE_ISSUE_TYPE:
+        return ["feature request"]
+    if normalize_target_repo(target_repo) == FEEDBACK_REPO:
+        return ["bug"]
+    return []
+
+
 def redact_logs(raw: str) -> str:
     """对日志文本做统一脱敏，覆盖常见 token、Cookie、PII 和本机路径。"""
     out = raw
@@ -227,14 +282,31 @@ def build_issue_body(
     issue_type: str,
     description: str,
     logs: Optional[str],
+    target_repo: Optional[str] = None,
 ) -> str:
     """构造与上游 bug_report.yml 表单渲染接近的 Issue Markdown 正文。"""
+    repo = normalize_target_repo(target_repo)
     log_block = sanitize_logs(logs, MAX_LOGS_CHARS) or "会话中未捕获到相关后端日志。"
+    if issue_type == FEATURE_ISSUE_TYPE:
+        body = (
+            "### 需求类型\n\n"
+            f"{FEATURE_ISSUE_TYPE}\n\n"
+            f"### 当前程序版本\n\n{version}\n\n"
+            f"### 运行环境\n\n{environment}\n\n"
+            f"### 目标仓库\n\n{repo}\n\n"
+            f"### 需求描述\n\n{description.strip()}\n\n"
+            "### 补充诊断信息\n\n"
+            f"```text\n{log_block}\n```\n"
+            "\n---\n"
+            "_本 Issue 由 MoviePilot Agent 协助用户提交。_"
+        )
+        return truncate(body, MAX_BODY_CHARS)
+
     body = (
         "### 确认\n\n"
         "- [x] 我的版本是最新版本，我的版本号与 "
         "[version](https://github.com/jxxghp/MoviePilot/releases/latest) 相同。\n"
-        "- [x] 我已经 [issue](https://github.com/jxxghp/MoviePilot/issues) "
+        f"- [x] 我已经 [issue](https://github.com/{repo}/issues) "
         "中搜索过，确认我的问题没有被提出过。\n"
         "- [x] 我已经 [Telegram频道](https://t.me/moviepilot_channel) "
         "中搜索过，确认我的问题没有被提出过。\n"
@@ -259,8 +331,31 @@ def build_prefill_url(
     issue_type: str,
     description: str,
     logs: Optional[str],
+    target_repo: Optional[str] = None,
 ) -> str:
     """生成 GitHub Issue Forms 预填 URL，供无 token 或 API 失败时手动提交。"""
+    repo = normalize_target_repo(target_repo)
+    labels = issue_labels(issue_type, repo)
+    if repo != FEEDBACK_REPO or issue_type == FEATURE_ISSUE_TYPE:
+        body = build_issue_body(
+            version=version,
+            environment=environment,
+            issue_type=issue_type,
+            description=description,
+            logs=sanitize_logs(logs, MAX_URL_LOGS_CHARS),
+            target_repo=repo,
+        )
+        params = {
+            "title": title,
+            "body": body,
+        }
+        if labels:
+            params["labels"] = ",".join(labels)
+        encoded = "&".join(
+            f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in params.items()
+        )
+        return f"{issue_new_url(repo)}?{encoded}"
+
     params = {
         "template": FEEDBACK_ISSUE_TEMPLATE,
         "title": title,
@@ -273,7 +368,7 @@ def build_prefill_url(
     encoded = "&".join(
         f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in params.items()
     )
-    return f"{FEEDBACK_ISSUE_NEW_URL}?{encoded}"
+    return f"{issue_new_url(repo)}?{encoded}"
 
 
 def format_doctor_summary(doctor: Optional[dict[str, Any]]) -> str:
@@ -323,6 +418,43 @@ def format_doctor_summary(doctor: Optional[dict[str, Any]]) -> str:
     return truncate("\n".join(lines), MAX_DOCTOR_SUMMARY_CHARS)
 
 
+def format_log_selection(selection: Optional[dict[str, Any]]) -> str:
+    """把日志筛选依据格式化为便于用户确认的摘要。"""
+    if not isinstance(selection, dict):
+        return "未记录日志筛选依据。"
+
+    keywords = selection.get("keywords") or []
+    keyword_text = "、".join(str(item) for item in keywords) if keywords else "未提供具体关键词"
+    lines = [
+        f"策略：{selection.get('strategy') or '时间窗口 + 模块噪音过滤 + 关键词块匹配'}",
+        f"时间窗口：最近 {selection.get('time_window_minutes') or '?'} 分钟",
+        f"窗口起点：{selection.get('window_start') or '未知'}",
+        f"关键词：{keyword_text}",
+        f"单文件最多保留：{selection.get('max_lines_per_file') or '?'} 行",
+    ]
+    warning = str(selection.get("warning") or "").strip()
+    if warning:
+        lines.append(f"提示：{warning}")
+
+    matched_files = selection.get("matched_files") or []
+    if not matched_files:
+        lines.append("命中文件：无")
+        return truncate("\n".join(lines), MAX_DOCTOR_SUMMARY_CHARS)
+
+    lines.append("命中文件：")
+    for item in matched_files[:8]:
+        if not isinstance(item, dict):
+            continue
+        matched_keywords = item.get("matched_keywords") or []
+        matched_text = "、".join(str(keyword) for keyword in matched_keywords) or "仅按时间窗口"
+        lines.append(
+            f"- {item.get('path') or '未知文件'}；"
+            f"命中关键词：{matched_text}；"
+            f"行数：{item.get('line_count') or 0}"
+        )
+    return truncate("\n".join(lines), MAX_DOCTOR_SUMMARY_CHARS)
+
+
 def classify_failure(status_code: Optional[int], headers: Optional[dict] = None) -> str:
     """把 GitHub API HTTP 状态码映射成脚本输出的稳定失败原因。"""
     headers = headers or {}
@@ -361,6 +493,7 @@ def check_content_quality(
     description: str,
     original_user_request: str,
     logs: Optional[str] = None,
+    issue_type: str = "主程序运行问题",
 ) -> Optional[str]:
     """检查 Issue 内容质量，拦截测试、占位、乱码和结构缺失的提交。"""
     original_stripped = (original_user_request or "").strip()
@@ -371,11 +504,13 @@ def check_content_quality(
         )
 
     title_body = title.strip()
-    if title_body.startswith(TITLE_PREFIX):
-        title_body = title_body[len(TITLE_PREFIX):].strip()
+    for prefix in TITLE_PREFIXES:
+        if title_body.startswith(prefix):
+            title_body = title_body[len(prefix):].strip()
+            break
     if len(title_body) < MIN_TITLE_BODY_CHARS:
         return (
-            f"标题正文太短（剔除 {TITLE_PREFIX!r} 前缀后只有 {len(title_body)} 字，"
+            f"标题正文太短（剔除标题前缀后只有 {len(title_body)} 字，"
             f"至少 {MIN_TITLE_BODY_CHARS} 字）。请用一句完整的话概括症状。"
         )
 
@@ -386,14 +521,19 @@ def check_content_quality(
             "请补充：现象 / 复现步骤 / 期望行为。"
         )
 
+    required_signals = (
+        _FEATURE_DESCRIPTION_REQUIRED_SIGNALS
+        if issue_type == FEATURE_ISSUE_TYPE else _DESCRIPTION_REQUIRED_SIGNALS
+    )
     missing_signals = [
         label
-        for label, choices in _DESCRIPTION_REQUIRED_SIGNALS
+        for label, choices in required_signals
         if not any(choice in desc_stripped for choice in choices)
     ]
     if missing_signals:
+        content_name = "功能请求" if issue_type == FEATURE_ISSUE_TYPE else "可复现 bug"
         return (
-            "问题描述缺少可复现 bug 所需的结构信息："
+            f"问题描述缺少{content_name}所需的结构信息："
             f"{' / '.join(missing_signals)}。请补充真实现象、触发步骤和期望行为。"
         )
 
@@ -454,22 +594,34 @@ def save_submission_state(state: dict[str, Any]) -> None:
     write_json_file(feedback_runtime_dir() / "submission-state.json", state)
 
 
-def check_recent_duplicate(title: str, body: str, state: dict[str, Any]) -> Optional[str]:
+def check_recent_duplicate(
+    title: str,
+    body: str,
+    state: dict[str, Any],
+    target_repo: Optional[str] = None,
+) -> Optional[str]:
     """检查 60 秒内是否提交过同 title + body 的内容。"""
     now = time.time()
     recent = state.setdefault("recent_submissions", {})
     for key, ts in list(recent.items()):
         if now - float(ts or 0) > DEDUP_TTL_SECONDS:
             recent.pop(key, None)
-    key = hashlib.sha256(f"{title}\x00{body}".encode("utf-8", errors="replace")).hexdigest()
+    repo = normalize_target_repo(target_repo)
+    key = hashlib.sha256(f"{repo}\x00{title}\x00{body}".encode("utf-8", errors="replace")).hexdigest()
     if key in recent:
         return key
     return None
 
 
-def record_submission(title: str, body: str, state: dict[str, Any]) -> None:
+def record_submission(
+    title: str,
+    body: str,
+    state: dict[str, Any],
+    target_repo: Optional[str] = None,
+) -> None:
     """记录一次提交内容摘要，供短时间去重使用。"""
-    key = hashlib.sha256(f"{title}\x00{body}".encode("utf-8", errors="replace")).hexdigest()
+    repo = normalize_target_repo(target_repo)
+    key = hashlib.sha256(f"{repo}\x00{title}\x00{body}".encode("utf-8", errors="replace")).hexdigest()
     state.setdefault("recent_submissions", {})[key] = time.time()
 
 

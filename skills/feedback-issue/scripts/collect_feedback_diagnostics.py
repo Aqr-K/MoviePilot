@@ -13,6 +13,7 @@ from typing import Optional
 
 from feedback_issue_common import (
     MAX_LOGS_CHARS,
+    format_log_selection,
     feedback_runtime_dir,
     result_payload,
     runtime_file,
@@ -62,31 +63,39 @@ _VAGUE_KEYWORDS = frozenset({
 _FEEDBACK_VERB_PHRASES: tuple[str, ...] = (
     "反馈", "提交", "上报", "汇报",
     "提 issue", "提issue", "提 bug", "提bug",
+    "提需求", "提交需求", "反馈需求", "提功能", "功能请求",
     "报 bug", "报bug", "报告 bug", "报告bug",
     "新建 issue", "新建issue", "开 issue", "开issue",
     "让上游", "给上游",
     "file an issue", "report a bug", "open an upstream issue",
     "submit an issue", "raise an issue", "report this upstream",
-    "report upstream",
+    "report upstream", "feature request", "submit a feature request",
+    "open a feature request",
 )
 _FEEDBACK_TARGET_TOKENS: tuple[str, ...] = (
     "issue", "bug", "问题", "错误报告",
-    "上游", "mp", "moviepilot",
+    "上游", "mp", "moviepilot", "需求", "功能", "feature",
 )
 _FEEDBACK_STANDALONE_PHRASES: tuple[str, ...] = (
     "file an issue", "report a bug", "open an upstream issue",
     "submit an issue", "raise an issue", "report this upstream",
-    "report upstream",
+    "report upstream", "feature request", "submit a feature request",
+    "open a feature request",
     "新建 issue", "新建issue", "开 issue", "开issue",
     "提 issue", "提issue", "提 bug", "提bug",
+    "提需求", "提交需求", "反馈需求", "提功能请求", "功能请求",
     "报 bug", "报bug", "报告 bug", "报告bug",
     "让上游", "给上游",
 )
 _FEEDBACK_REGEX_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"提.{0,6}(bug|issue|问题|错误报告)", re.IGNORECASE),
+    re.compile(r"提.{0,6}(需求|功能请求|feature request)", re.IGNORECASE),
+    re.compile(r"提交.{0,6}(需求|功能请求|feature request)", re.IGNORECASE),
     re.compile(r"报.{0,6}(bug|issue|错误报告)", re.IGNORECASE),
     re.compile(r"反馈.{0,8}(issue|bug|问题|上游|错误)", re.IGNORECASE),
+    re.compile(r"反馈.{0,8}(需求|功能请求|feature request)", re.IGNORECASE),
     re.compile(r"开.{0,4}(issue|bug)", re.IGNORECASE),
+    re.compile(r"开.{0,8}(需求|功能请求|feature request)", re.IGNORECASE),
     re.compile(r"上报.{0,6}(bug|issue|问题|错误)", re.IGNORECASE),
 )
 
@@ -234,7 +243,7 @@ def filter_lines(
     keywords: list[str],
     max_lines: int,
     window_start: datetime,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """按时间窗、模块噪音和关键词筛选日志行。"""
     candidates: list[str] = []
     last_seen_in_window: Optional[bool] = None
@@ -254,22 +263,30 @@ def filter_lines(
             candidates.append(line)
 
     if not candidates:
-        return []
-    if keywords:
-        lowered_keywords = [item.lower() for item in keywords]
-        matched: list[str] = []
-        keep_block = False
-        for line in candidates:
-            has_timestamp = parse_line_timestamp(line) is not None
-            if has_timestamp:
-                keep_block = any(keyword in line.lower() for keyword in lowered_keywords)
-                if keep_block:
-                    matched.append(line)
-            elif keep_block:
+        return [], []
+    if not keywords:
+        return [], []
+
+    lowered_keywords = [item.lower() for item in keywords]
+    matched: list[str] = []
+    matched_keywords: set[str] = set()
+    keep_block = False
+    for line in candidates:
+        has_timestamp = parse_line_timestamp(line) is not None
+        if has_timestamp:
+            line_keywords = [
+                keyword for keyword, lowered in zip(keywords, lowered_keywords)
+                if lowered in line.lower()
+            ]
+            keep_block = bool(line_keywords)
+            if keep_block:
+                matched_keywords.update(line_keywords)
                 matched.append(line)
-        if matched:
-            return matched[-max_lines:]
-    return candidates[-max_lines:]
+        elif keep_block:
+            matched.append(line)
+    if matched:
+        return matched[-max_lines:], sorted(matched_keywords)
+    return [], []
 
 
 def collect_diagnostics(
@@ -297,12 +314,13 @@ def collect_diagnostics(
     normalized_keywords = normalize_keywords(keywords)
     collected: list[str] = []
     source_files: list[str] = []
+    matched_files: list[dict] = []
 
     for path in candidate_log_files():
         text = read_tail(path)
         if not text:
             continue
-        lines = filter_lines(
+        lines, matched_keywords = filter_lines(
             text=text,
             keywords=normalized_keywords,
             max_lines=normalized_max_lines,
@@ -311,15 +329,33 @@ def collect_diagnostics(
         if not lines:
             continue
         source_files.append(str(path))
+        matched_files.append({
+            "path": str(path),
+            "matched_keywords": matched_keywords,
+            "line_count": len(lines),
+        })
         collected.append(f"### {path.name}\n" + "\n".join(lines))
 
     logs = sanitize_logs("\n\n".join(collected), MAX_LOGS_CHARS)
+    log_selection = {
+        "strategy": "time_window_and_keyword_block_match",
+        "time_window_minutes": window_minutes,
+        "window_start": window_start.isoformat(timespec="seconds"),
+        "keywords": normalized_keywords,
+        "max_lines_per_file": normalized_max_lines,
+        "matched_files": matched_files,
+        "warning": (
+            "未提供具体关键词，已跳过日志正文收集以避免误带无关日志。"
+            if not normalized_keywords else ""
+        ),
+    }
     diagnostics_file = runtime_file("diagnostics", ".json")
     diagnostics = {
         "original_user_request": original_user_request,
         "keywords": normalized_keywords,
         "found": bool(logs.strip()),
         "logs": logs,
+        "log_selection": log_selection,
         "doctor": collect_doctor_report(),
         "source_files": source_files,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -331,6 +367,7 @@ def collect_diagnostics(
         "diagnostics_file": str(diagnostics_file),
         "runtime_dir": str(feedback_runtime_dir()),
         "source_files": source_files,
+        "log_selection_summary": format_log_selection(log_selection),
         "log_bytes": len(logs.encode("utf-8", errors="replace")),
         "log_lines": len(logs.splitlines()) if logs else 0,
         "doctor_collected": bool(diagnostics["doctor"].get("success")),

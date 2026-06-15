@@ -1,4 +1,4 @@
-"""提交 feedback-issue payload 到 MoviePilot 上游 GitHub 仓库。"""
+"""提交 feedback-issue payload 到目标 GitHub 仓库。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Any, Optional
 from feedback_issue_common import (
     ALLOWED_ENVIRONMENTS,
     ALLOWED_ISSUE_TYPES,
-    FEEDBACK_ISSUE_API,
     FEEDBACK_REPO,
     FEEDBACK_REQUEST_TIMEOUT,
     MAX_TITLE_CHARS,
@@ -20,8 +19,12 @@ from feedback_issue_common import (
     check_user_rate_limit,
     classify_failure,
     format_doctor_summary,
+    format_log_selection,
+    issue_api_url,
+    issue_labels,
     load_diagnostics_logs,
     load_submission_state,
+    normalize_target_repo,
     read_json_file,
     record_submission,
     record_user_submission,
@@ -31,6 +34,7 @@ from feedback_issue_common import (
     settings,
     truncate,
     validate_enum,
+    validate_target_repo_for_issue,
 )
 from app.utils.http import RequestUtils
 
@@ -51,6 +55,7 @@ def normalize_payload(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     payload = {key: str(raw.get(key) or "").strip() for key in REQUIRED_PAYLOAD_FIELDS}
     missing = [key for key, value in payload.items() if not value]
     payload["title"] = truncate(payload["title"], MAX_TITLE_CHARS, marker="...")
+    payload["target_repo"] = str(raw.get("target_repo") or FEEDBACK_REPO).strip()
     return payload, missing
 
 
@@ -63,11 +68,15 @@ def validate_payload(payload: dict[str, Any], logs: str) -> Optional[str]:
         error = validate_enum(value, allowed, field_name)
         if error:
             return error
+    repo_error = validate_target_repo_for_issue(payload["issue_type"], payload["target_repo"])
+    if repo_error:
+        return repo_error
     return check_content_quality(
         title=payload["title"],
         description=payload["description"],
         original_user_request=payload["original_user_request"],
         logs=logs,
+        issue_type=payload["issue_type"],
     )
 
 
@@ -80,11 +89,12 @@ def build_no_token_result(payload: dict[str, Any], logs: str) -> dict[str, Any]:
         issue_type=payload["issue_type"],
         description=payload["description"],
         logs=logs,
+        target_repo=payload["target_repo"],
     )
     return {
         "success": False,
         "reason": "no_token",
-        "repo": FEEDBACK_REPO,
+        "repo": payload["target_repo"],
         "prefill_url": prefill_url,
         "message": (
             "MoviePilot 未配置可写入的 GitHub Token，无法自动提交 Issue。"
@@ -104,13 +114,15 @@ def post_github_issue(payload: dict[str, Any], body: str) -> Any:
     request_payload = {
         "title": payload["title"],
         "body": body,
-        "labels": ["bug"],
     }
+    labels = issue_labels(payload["issue_type"], payload["target_repo"])
+    if labels:
+        request_payload["labels"] = labels
     return RequestUtils(
         proxies=settings.PROXY,
         headers=request_headers,
         timeout=FEEDBACK_REQUEST_TIMEOUT,
-    ).post(FEEDBACK_ISSUE_API, json=request_payload)
+    ).post(issue_api_url(payload["target_repo"]), json=request_payload)
 
 
 def build_api_failure_result(
@@ -128,11 +140,12 @@ def build_api_failure_result(
         issue_type=payload["issue_type"],
         description=payload["description"],
         logs=logs,
+        target_repo=payload["target_repo"],
     )
     return {
         "success": False,
         "reason": reason,
-        "repo": FEEDBACK_REPO,
+        "repo": payload["target_repo"],
         "prefill_url": prefill_url,
         "github_message": github_message,
         "message": "GitHub API 未能自动创建 Issue，请把 prefill_url 原样发给用户手动提交。",
@@ -148,6 +161,14 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
             "success": False,
             "reason": "missing_fields",
             "message": f"payload 缺少必填字段：{', '.join(missing)}",
+        }
+    try:
+        payload["target_repo"] = normalize_target_repo(payload["target_repo"])
+    except ValueError as err:
+        return {
+            "success": False,
+            "reason": "invalid_target_repo",
+            "message": str(err),
         }
 
     try:
@@ -170,6 +191,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
     combined_logs = "\n\n".join(
         part for part in (
             f"### Doctor 摘要\n{format_doctor_summary(diagnostics.get('doctor'))}",
+            f"### 日志筛选依据\n{format_log_selection(diagnostics.get('log_selection'))}",
             logs,
         ) if part
     )
@@ -179,9 +201,10 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         issue_type=payload["issue_type"],
         description=payload["description"],
         logs=combined_logs,
+        target_repo=payload["target_repo"],
     )
     state = load_submission_state()
-    if check_recent_duplicate(payload["title"], body, state):
+    if check_recent_duplicate(payload["title"], body, state, payload["target_repo"]):
         return {
             "success": False,
             "reason": "duplicate",
@@ -204,7 +227,7 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         save_submission_state(state)
         return build_no_token_result(payload, combined_logs)
 
-    record_submission(payload["title"], body, state)
+    record_submission(payload["title"], body, state, payload["target_repo"])
     save_submission_state(state)
     try:
         response = post_github_issue(payload, body)
@@ -227,10 +250,10 @@ def submit_issue(payload_file: str | Path, username: str) -> dict[str, Any]:
         data = safe_response_dict(response)
         return {
             "success": True,
-            "repo": FEEDBACK_REPO,
+            "repo": payload["target_repo"],
             "issue_number": data.get("number"),
             "issue_url": data.get("html_url"),
-            "message": "Issue 已成功提交到 MoviePilot 上游仓库。",
+            "message": f"Issue 已成功提交到 {payload['target_repo']} 仓库。",
         }
 
     reason = classify_failure(response.status_code, headers=dict(response.headers or {}))
