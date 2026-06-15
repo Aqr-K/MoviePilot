@@ -421,10 +421,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         :return: 普通用户允许读写的本地目录列表
         """
         roots = [
-            settings.CONFIG_PATH,
-            settings.LOG_PATH,
-            settings.CONFIG_PATH / "agent" / "memory",
-            settings.CONFIG_PATH / "agent" / "activity",
+            settings.CONFIG_PATH / "agent"
         ]
         resolved_roots = []
         for root in roots:
