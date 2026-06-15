@@ -267,8 +267,10 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
             兼容 transmission-rpc 新旧字段名。
             """
             for attr_name in attr_names:
-                if hasattr(torrent_data, attr_name):
+                try:
                     return getattr(torrent_data, attr_name)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    continue
             return None
 
         def __get_torrent_progress(torrent_data) -> float:

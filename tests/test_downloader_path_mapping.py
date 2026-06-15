@@ -379,6 +379,50 @@ def test_hash_lookup_return_moviepilot_accessible_path():
     assert torrents[0].content_path == "/media/video/downloads/movie/Movie"
 
 
+def test_list_torrents_ignores_missing_transmission_limit_fields():
+    """Transmission 任务缺少做种限制字段时不应中断列表查询。"""
+
+    class _TorrentWithMissingLimitFields:
+        """
+        模拟 transmission-rpc 属性访问缺失字段时抛出 KeyError 的任务对象。
+        """
+
+        name = "Movie"
+        download_dir = "/mnt/raid5/home_lt999lt/video/downloads/movie"
+        hashString = "hash-missing-limit"
+        total_size = 1024
+        labels = []
+        progress = 100
+        status = "seeding"
+
+        @property
+        def seed_ratio_limit(self):
+            """
+            模拟 seedRatioLimit 原始字段缺失。
+            """
+            raise KeyError("seedRatioLimit")
+
+        @property
+        def seed_idle_limit(self):
+            """
+            模拟 seedIdleLimit 原始字段缺失。
+            """
+            raise KeyError("seedIdleLimit")
+
+    server = MagicMock()
+    server.get_torrents.return_value = (
+        [_TorrentWithMissingLimitFields()],
+        False,
+    )
+    module = _build_transmission_module(server)
+
+    torrents = module.list_torrents()
+
+    assert torrents[0].hash == "hash-missing-limit"
+    assert torrents[0].ratio_limit is None
+    assert torrents[0].seeding_time_limit is None
+
+
 def test_all_torrents_include_completed_and_downloading_states():
     """Transmission 默认列表应同时包含已完成和下载中的任务状态。"""
     server = MagicMock()
