@@ -1,6 +1,5 @@
 import sys
 import types
-import unittest
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -263,177 +262,183 @@ DownloaderBase = _load_downloader_base()
 TransmissionModule, TransmissionTorrentStatus = _load_transmission_module()
 
 
-class DownloaderPathMappingTest(unittest.TestCase):
-    def _build_base(self, path_mapping):
-        downloader = DownloaderBase.__new__(DownloaderBase)
-        downloader.get_config = MagicMock(
-            return_value=SimpleNamespace(path_mapping=path_mapping)
+def _build_base(path_mapping):
+    downloader = DownloaderBase.__new__(DownloaderBase)
+    downloader.get_config = MagicMock(
+        return_value=SimpleNamespace(path_mapping=path_mapping)
+    )
+    return downloader
+
+
+def _build_transmission_module(server):
+    module = TransmissionModule.__new__(TransmissionModule)
+    module.get_instances = MagicMock(return_value={"tr": server})
+    module.get_instance = MagicMock(return_value=server)
+    module.normalize_return_path = MagicMock(
+        side_effect=lambda path, _downloader: str(path).replace(
+            "/mnt/raid5/home_lt999lt", "/media", 1
         )
-        return downloader
+    )
+    return module
 
-    def test_normalize_path_maps_moviepilot_path_to_downloader_path(self):
-        downloader = self._build_base(
-            [("/media", "/mnt/raid5/home_lt999lt")]
+
+def test_normalize_path_maps_moviepilot_path_to_downloader_path():
+    """MoviePilot 访问路径应转换为下载器容器内路径。"""
+    downloader = _build_base([("/media", "/mnt/raid5/home_lt999lt")])
+
+    result = downloader.normalize_path(Path("/media/video/downloads/movie"), "tr")
+
+    assert result == "/mnt/raid5/home_lt999lt/video/downloads/movie"
+
+
+def test_normalize_return_path_maps_downloader_path_back_to_moviepilot_path():
+    """下载器容器内路径应转换回 MoviePilot 可访问路径。"""
+    downloader = _build_base([("/media", "/mnt/raid5/home_lt999lt")])
+
+    result = downloader.normalize_return_path(
+        Path("/mnt/raid5/home_lt999lt/video/downloads/TV/Show.mkv"), "tr"
+    )
+
+    assert result == "/media/video/downloads/TV/Show.mkv"
+
+
+def test_path_mapping_matches_complete_path_segment_only():
+    """路径映射只应命中完整路径段，避免误伤相似前缀。"""
+    downloader = _build_base([("/media", "/mnt/media")])
+
+    result = downloader.normalize_return_path(Path("/mnt/media2/Show.mkv"), "tr")
+
+    assert result == "/mnt/media2/Show.mkv"
+
+
+def test_blank_path_mapping_entry_is_ignored():
+    """空路径映射项应被忽略，继续使用后续有效配置。"""
+    downloader = _build_base(
+        [("", "/downloads"), ("/media2", ""), ("/media", "/mnt/media")]
+    )
+
+    result = downloader.normalize_return_path(Path("/mnt/media/Show.mkv"), "tr")
+
+    assert result == "/media/Show.mkv"
+
+
+def test_normalize_path_strips_storage_prefix_after_mapping():
+    """带存储类型前缀的路径映射后应返回下载器原生路径。"""
+    downloader = _build_base([("local:/media", "/downloads")])
+
+    result = downloader.normalize_path(Path("local:/media/movie"), "qb")
+
+    assert result == "/downloads/movie"
+
+
+def test_completed_torrents_return_moviepilot_accessible_path():
+    """Transmission 已完成任务返回的路径字段均应为 MoviePilot 可访问路径。"""
+    server = MagicMock()
+    server.get_completed_torrents.return_value = [
+        SimpleNamespace(
+            name="Show.S01E01.mkv",
+            download_dir="/mnt/raid5/home_lt999lt/video/downloads/TV",
+            hashString="hash-tr",
+            labels=[],
+            progress=100,
+            status="seeding",
         )
+    ]
+    module = _build_transmission_module(server)
 
-        result = downloader.normalize_path(
-            Path("/media/video/downloads/movie"), "tr"
-        )
+    torrents = module.list_torrents(status=TransmissionTorrentStatus.TRANSFER)
 
-        self.assertEqual(result, "/mnt/raid5/home_lt999lt/video/downloads/movie")
-
-    def test_normalize_return_path_maps_downloader_path_back_to_moviepilot_path(self):
-        downloader = self._build_base(
-            [("/media", "/mnt/raid5/home_lt999lt")]
-        )
-
-        result = downloader.normalize_return_path(
-            Path("/mnt/raid5/home_lt999lt/video/downloads/TV/Show.mkv"), "tr"
-        )
-
-        self.assertEqual(result, "/media/video/downloads/TV/Show.mkv")
-
-    def test_path_mapping_matches_complete_path_segment_only(self):
-        downloader = self._build_base([("/media", "/mnt/media")])
-
-        result = downloader.normalize_return_path(
-            Path("/mnt/media2/Show.mkv"), "tr"
-        )
-
-        self.assertEqual(result, "/mnt/media2/Show.mkv")
-
-    def test_blank_path_mapping_entry_is_ignored(self):
-        downloader = self._build_base(
-            [("", "/downloads"), ("/media2", ""), ("/media", "/mnt/media")]
-        )
-
-        result = downloader.normalize_return_path(Path("/mnt/media/Show.mkv"), "tr")
-
-        self.assertEqual(result, "/media/Show.mkv")
-
-    def test_normalize_path_strips_storage_prefix_after_mapping(self):
-        downloader = self._build_base([("local:/media", "/downloads")])
-
-        result = downloader.normalize_path(Path("local:/media/movie"), "qb")
-
-        self.assertEqual(result, "/downloads/movie")
+    assert torrents[0].path == Path("/media/video/downloads/TV/Show.S01E01.mkv")
+    assert torrents[0].save_path == "/media/video/downloads/TV"
+    assert torrents[0].content_path == "/media/video/downloads/TV/Show.S01E01.mkv"
 
 
-class TransmissionPathMappingTest(unittest.TestCase):
-    def _build_module(self, server):
-        module = TransmissionModule.__new__(TransmissionModule)
-        module.get_instances = MagicMock(return_value={"tr": server})
-        module.get_instance = MagicMock(return_value=server)
-        module.normalize_return_path = MagicMock(
-            side_effect=lambda path, _downloader: str(path).replace(
-                "/mnt/raid5/home_lt999lt", "/media", 1
-            )
-        )
-        return module
-
-    def test_completed_torrents_return_moviepilot_accessible_path(self):
-        server = MagicMock()
-        server.get_completed_torrents.return_value = [
+def test_hash_lookup_return_moviepilot_accessible_path():
+    """Transmission 按 Hash 查询时返回的路径字段均应完成路径映射。"""
+    server = MagicMock()
+    server.get_torrents.return_value = (
+        [
             SimpleNamespace(
-                name="Show.S01E01.mkv",
-                download_dir="/mnt/raid5/home_lt999lt/video/downloads/TV",
+                name="Movie",
+                download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
                 hashString="hash-tr",
+                total_size=1024,
                 labels=[],
                 progress=100,
                 status="seeding",
             )
-        ]
-        module = self._build_module(server)
+        ],
+        False,
+    )
+    module = _build_transmission_module(server)
 
-        torrents = module.list_torrents(status=TransmissionTorrentStatus.TRANSFER)
+    torrents = module.list_torrents(hashs=["hash-tr"], downloader="tr")
 
-        self.assertEqual(torrents[0].path, Path("/media/video/downloads/TV/Show.S01E01.mkv"))
-        module.normalize_return_path.assert_called_once_with(
-            Path("/mnt/raid5/home_lt999lt/video/downloads/TV/Show.S01E01.mkv"),
-            "tr",
-        )
+    assert torrents[0].path == Path("/media/video/downloads/movie/Movie")
+    assert torrents[0].save_path == "/media/video/downloads/movie"
+    assert torrents[0].content_path == "/media/video/downloads/movie/Movie"
 
-    def test_hash_lookup_return_moviepilot_accessible_path(self):
-        server = MagicMock()
-        server.get_torrents.return_value = (
-            [
-                SimpleNamespace(
-                    name="Movie",
-                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
-                    hashString="hash-tr",
-                    total_size=1024,
-                    labels=[],
-                    progress=100,
-                    status="seeding",
-                )
-            ],
-            False,
-        )
-        module = self._build_module(server)
 
-        torrents = module.list_torrents(hashs=["hash-tr"], downloader="tr")
+def test_all_torrents_include_completed_and_downloading_states():
+    """Transmission 默认列表应同时包含已完成和下载中的任务状态。"""
+    server = MagicMock()
+    server.get_torrents.return_value = (
+        [
+            SimpleNamespace(
+                name="Completed",
+                download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
+                hashString="hash-completed",
+                total_size=1024,
+                labels=[],
+                progress=100,
+                status="seed_pending",
+            ),
+            SimpleNamespace(
+                name="Downloading",
+                download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
+                hashString="hash-downloading",
+                total_size=2048,
+                labels=[],
+                progress=50,
+                status="downloading",
+                rate_download=1024,
+                rate_upload=0,
+                left_until_done=1024,
+            ),
+        ],
+        False,
+    )
+    module = _build_transmission_module(server)
 
-        self.assertEqual(torrents[0].path, Path("/media/video/downloads/movie/Movie"))
-        module.normalize_return_path.assert_called_once_with(
-            Path("/mnt/raid5/home_lt999lt/video/downloads/movie/Movie"),
-            "tr",
-        )
+    torrents = module.list_torrents()
 
-    def test_all_torrents_include_completed_and_downloading_states(self):
-        server = MagicMock()
-        server.get_torrents.return_value = (
-            [
-                SimpleNamespace(
-                    name="Completed",
-                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
-                    hashString="hash-completed",
-                    total_size=1024,
-                    labels=[],
-                    progress=100,
-                    status="seed_pending",
-                ),
-                SimpleNamespace(
-                    name="Downloading",
-                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
-                    hashString="hash-downloading",
-                    total_size=2048,
-                    labels=[],
-                    progress=50,
-                    status="downloading",
-                    rate_download=1024,
-                    rate_upload=0,
-                    left_until_done=1024,
-                ),
-            ],
-            False,
-        )
-        module = self._build_module(server)
+    assert ["completed", "downloading"] == [torrent.state for torrent in torrents]
+    assert ["hash-completed", "hash-downloading"] == [
+        torrent.hash for torrent in torrents
+    ]
+    server.get_torrents.assert_called_once_with(tags="moviepilot-tag")
 
-        torrents = module.list_torrents()
 
-        self.assertEqual(["completed", "downloading"], [torrent.state for torrent in torrents])
-        self.assertEqual(["hash-completed", "hash-downloading"], [torrent.hash for torrent in torrents])
-        server.get_torrents.assert_called_once_with(tags="moviepilot-tag")
+def test_include_all_tags_removes_builtin_tag_filter():
+    """查询全部标签任务时不应附加 MoviePilot 内置标签过滤。"""
+    server = MagicMock()
+    server.get_torrents.return_value = (
+        [
+            SimpleNamespace(
+                name="External",
+                download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
+                hashString="hash-external",
+                total_size=1024,
+                labels=["external"],
+                progress=100,
+                status="seeding",
+            )
+        ],
+        False,
+    )
+    module = _build_transmission_module(server)
 
-    def test_include_all_tags_removes_builtin_tag_filter(self):
-        server = MagicMock()
-        server.get_torrents.return_value = (
-            [
-                SimpleNamespace(
-                    name="External",
-                    download_dir="/mnt/raid5/home_lt999lt/video/downloads/movie",
-                    hashString="hash-external",
-                    total_size=1024,
-                    labels=["external"],
-                    progress=100,
-                    status="seeding",
-                )
-            ],
-            False,
-        )
-        module = self._build_module(server)
+    torrents = module.list_torrents(include_all_tags=True)
 
-        torrents = module.list_torrents(include_all_tags=True)
-
-        self.assertEqual(["hash-external"], [torrent.hash for torrent in torrents])
-        server.get_torrents.assert_called_once_with(tags=None)
+    assert ["hash-external"] == [torrent.hash for torrent in torrents]
+    server.get_torrents.assert_called_once_with(tags=None)
