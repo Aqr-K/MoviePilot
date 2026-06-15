@@ -10,7 +10,7 @@ from app.chain.download import DownloadChain
 from app.log import logger
 
 
-class DeleteDownloadInput(BaseModel):
+class DeleteDownloadTasksInput(BaseModel):
     """删除下载任务工具的输入参数模型"""
 
     explanation: Optional[str] = Field(None,
@@ -28,15 +28,17 @@ class DeleteDownloadInput(BaseModel):
     )
 
 
-class DeleteDownloadTool(MoviePilotTool):
-    name: str = "delete_download"
+class DeleteDownloadTasksTool(MoviePilotTool):
+    """删除下载任务工具"""
+
+    name: str = "delete_download_tasks"
     tags: list[str] = [
         ToolTag.Write,
         ToolTag.Download,
         ToolTag.Admin,
     ]
     description: str = "Delete a download task from the downloader by task hash only. Optionally specify the downloader name and whether to delete downloaded files."
-    args_schema: Type[BaseModel] = DeleteDownloadInput
+    args_schema: Type[BaseModel] = DeleteDownloadTasksInput
     require_admin: bool = True
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -69,6 +71,7 @@ class DeleteDownloadTool(MoviePilotTool):
         delete_files: Optional[bool] = False,
         **kwargs,
     ) -> str:
+        """执行删除下载任务。"""
         logger.info(
             f"执行工具: {self.name}, 参数: hash={hash}, downloader={downloader}, delete_files={delete_files}"
         )

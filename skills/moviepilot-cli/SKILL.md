@@ -24,7 +24,7 @@ Always run `show <command>` before calling a command — parameter names are not
 |---|---|
 | Media Search | search_media, recognize_media, query_media_detail, get_recommendations, search_person, search_person_credits |
 | Torrent | search_torrents, get_search_results |
-| Download | add_download, query_download_tasks, update_download_tasks, delete_download, query_downloaders |
+| Download | add_download_tasks, query_download_tasks, update_download_tasks, delete_download_tasks, query_downloaders |
 | Subscription | add_subscribe, query_subscribes, update_subscribe, delete_subscribe, search_subscribe, query_subscribe_history, query_popular_subscribes, query_subscribe_shares |
 | Library | query_library_exists, query_library_latest, transfer_file, scrape_metadata, query_transfer_history |
 | Files | list_directory, query_directory_settings |
@@ -95,7 +95,7 @@ If the media already exists in the library or is already subscribed, **stop** an
 #### 6. Add download
 
 Download one or more torrents (`torrent_url` comes from `get_search_results` output):
-`node scripts/mp-cli.js add_download torrent_url="abc1234:1,def5678:2"`
+`node scripts/mp-cli.js add_download_tasks torrent_url="abc1234:1,def5678:2"`
 
 #### Error handling
 
@@ -104,7 +104,7 @@ Download one or more torrents (`torrent_url` comes from `get_search_results` out
 | `search_media` empty | Retry with alternative title (English/original), inform user. Still empty → ask for title or TMDB ID. |
 | `search_torrents` empty | Inform user, ask whether to retry with different sites. |
 | `get_search_results` empty | Do not silently broaden filters. Suggest which filter to relax, ask before retrying. |
-| `add_download` fails | Run `query_downloaders` + `query_download_tasks` to diagnose, then report to user. |
+| `add_download_tasks` fails | Run `query_downloaders` + `query_download_tasks` to diagnose, then report to user. |
 
 ### Add Subscription
 
@@ -135,10 +135,10 @@ Add trackers to a download task:
 `node scripts/mp-cli.js update_download_tasks hash=<hash> trackers='https://tracker.example/announce,udp://tracker.example:80/announce'`
 
 Delete a download task (confirm with user first — irreversible):
-`node scripts/mp-cli.js delete_download hash=<hash>`
+`node scripts/mp-cli.js delete_download_tasks hash=<hash>`
 
 Delete a download task and also remove its files (confirm with user first — irreversible):
-`node scripts/mp-cli.js delete_download hash=<hash> delete_files=true`
+`node scripts/mp-cli.js delete_download_tasks hash=<hash> delete_files=true`
 
 ### Manage Subscriptions
 

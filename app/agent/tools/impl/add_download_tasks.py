@@ -1,28 +1,29 @@
-"""添加下载工具"""
+"""添加下载任务工具"""
 
 import re
 from pathlib import Path
-from typing import List, Optional, Type
+from typing import List, Optional, Type, Union
 
 from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
+from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
-from app.chain.download import DownloadChain
 from app.core.config import settings
 from app.core.context import Context
 from app.core.metainfo import MetaInfo
 from app.db.site_oper import SiteOper
 from app.helper.directory import DirectoryHelper
 from app.log import logger
-from app.schemas import TorrentInfo, FileURI
+from app.schemas import FileURI, TorrentInfo
 from app.utils.crypto import HashUtils
 
 
-class AddDownloadInput(BaseModel):
-    """添加下载工具的输入参数模型"""
+class AddDownloadTasksInput(BaseModel):
+    """添加下载任务工具的输入参数模型"""
+
     explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     torrent_url: List[str] = Field(
         ...,
@@ -36,15 +37,17 @@ class AddDownloadInput(BaseModel):
                                   description="Comma-separated list of labels/tags to assign to the download (optional, e.g., 'movie,hd,bluray')")
 
 
-class AddDownloadTool(MoviePilotTool):
-    name: str = "add_download"
+class AddDownloadTasksTool(MoviePilotTool):
+    """添加下载任务工具"""
+
+    name: str = "add_download_tasks"
     tags: list[str] = [
         ToolTag.Write,
         ToolTag.Download,
         ToolTag.Resource,
     ]
     description: str = "Add torrent download tasks using refs from get_search_results or magnet links."
-    args_schema: Type[BaseModel] = AddDownloadInput
+    args_schema: Type[BaseModel] = AddDownloadTasksInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据下载参数生成友好的提示消息"""
@@ -157,16 +160,16 @@ class AddDownloadTool(MoviePilotTool):
         prefix = "添加种子任务失败："
         if normalized_error.startswith(prefix):
             normalized_error = normalized_error[len(prefix):].lstrip()
-        if AddDownloadTool._is_magnet_link_input(normalized_error):
+        if AddDownloadTasksTool._is_magnet_link_input(normalized_error):
             normalized_error = ""
         if normalized_error:
             return f"{torrent_ref} {normalized_error}"
-        if AddDownloadTool._is_torrent_ref(torrent_ref):
+        if AddDownloadTasksTool._is_torrent_ref(torrent_ref):
             return torrent_ref
         return ""
 
     @classmethod
-    def _normalize_torrent_urls(cls, torrent_url: Optional[List[str] | str]) -> List[str]:
+    def _normalize_torrent_urls(cls, torrent_url: Optional[Union[List[str], str]]) -> List[str]:
         """统一规范 torrent_url 输入，保留所有非空值"""
         if torrent_url is None:
             return []
@@ -234,6 +237,7 @@ class AddDownloadTool(MoviePilotTool):
     async def run(self, torrent_url: Optional[List[str]] = None,
                   downloader: Optional[str] = None, save_path: Optional[str] = None,
                   labels: Optional[str] = None, **kwargs) -> str:
+        """执行添加下载任务。"""
         logger.info(
             f"执行工具: {self.name}, 参数: torrent_url={torrent_url}, downloader={downloader}, save_path={save_path}, labels={labels}")
 

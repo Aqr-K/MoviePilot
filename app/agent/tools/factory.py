@@ -1,6 +1,6 @@
 from typing import List, Callable
 
-from app.agent.tools.impl.add_download import AddDownloadTool
+from app.agent.tools.impl.add_download_tasks import AddDownloadTasksTool
 from app.agent.tools.impl.add_subscribe import AddSubscribeTool
 from app.agent.tools.impl.update_subscribe import UpdateSubscribeTool
 from app.agent.tools.impl.search_subscribe import SearchSubscribeTool
@@ -50,7 +50,7 @@ from app.agent.tools.impl.query_personas import QueryPersonasTool
 from app.agent.tools.impl.switch_persona import SwitchPersonaTool
 from app.agent.tools.impl.update_persona_definition import UpdatePersonaDefinitionTool
 from app.agent.tools.impl.update_site_cookie import UpdateSiteCookieTool
-from app.agent.tools.impl.delete_download import DeleteDownloadTool
+from app.agent.tools.impl.delete_download_tasks import DeleteDownloadTasksTool
 from app.agent.tools.impl.delete_download_history import DeleteDownloadHistoryTool
 from app.agent.tools.impl.delete_transfer_history import DeleteTransferHistoryTool
 from app.agent.tools.impl.update_download_tasks import UpdateDownloadTasksTool
@@ -167,7 +167,7 @@ class MoviePilotToolFactory:
             GetSearchResultsTool,
             SearchWebTool,
             RecognizeCaptchaTool,
-            AddDownloadTool,
+            AddDownloadTasksTool,
             QuerySubscribesTool,
             QuerySubscribeSharesTool,
             QueryPopularSubscribesTool,
@@ -183,7 +183,7 @@ class MoviePilotToolFactory:
             QuerySubscribeHistoryTool,
             DeleteSubscribeTool,
             QueryDownloadTasksTool,
-            DeleteDownloadTool,
+            DeleteDownloadTasksTool,
             DeleteDownloadHistoryTool,
             DeleteTransferHistoryTool,
             UpdateDownloadTasksTool,
