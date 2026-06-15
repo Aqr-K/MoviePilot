@@ -64,6 +64,14 @@ def test_run_completed_status_formats_completed_download_tasks():
             progress=100,
             state="completed",
             tags="moviepilot",
+            save_path="/downloads",
+            content_path="/downloads/QB Done",
+            category="电影",
+            download_limit=1024,
+            upload_limit=512,
+            ratio_limit=2.0,
+            seeding_time_limit=1440,
+            trackers=["https://tracker.example/announce"],
         )
     ]
 
@@ -81,6 +89,50 @@ def test_run_completed_status_formats_completed_download_tasks():
     payload = json.loads(result)
     assert payload[0]["hash"] == "hash-qb"
     assert payload[0]["state"] == "completed"
+    assert payload[0]["save_path"] == "/downloads"
+    assert payload[0]["content_path"] == "/downloads/QB Done"
+    assert payload[0]["category"] == "电影"
+    assert payload[0]["download_limit"] == 1024
+    assert payload[0]["upload_limit"] == 512
+    assert payload[0]["ratio_limit"] == 2.0
+    assert payload[0]["seeding_time_limit"] == 1440
+    assert payload[0]["trackers"] == ["https://tracker.example/announce"]
+
+
+def test_hash_query_loads_trackers_for_matching_task():
+    """
+    按 Hash 查询详情时应额外加载下载器支持的 Tracker 列表。
+    """
+    torrent = DownloaderTorrent(
+        downloader="qb",
+        hash="a" * 40,
+        title="Task With Trackers",
+        size=1024,
+        progress=10,
+        state="downloading",
+        tags="moviepilot",
+    )
+    download_chain = MagicMock()
+    download_chain.list_torrents.return_value = [torrent]
+    download_chain.get_torrent_trackers.return_value = {
+        "qb": ["https://tracker.example/announce"]
+    }
+
+    with patch(
+        "app.agent.tools.impl.query_download_tasks.DownloadChain",
+        return_value=download_chain,
+    ), patch.object(
+        QueryDownloadTasksTool,
+        "_load_history_map",
+        return_value={},
+    ):
+        result = QueryDownloadTasksTool._query_downloads_sync(hash_value="a" * 40)
+
+    assert result["downloads"][0].trackers == ["https://tracker.example/announce"]
+    download_chain.get_torrent_trackers.assert_called_once_with(
+        hash_string="a" * 40,
+        downloader="qb",
+    )
 
 
 def test_include_all_tags_passes_scope_to_downloader_query():

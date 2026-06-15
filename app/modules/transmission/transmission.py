@@ -402,43 +402,44 @@ class Transmission:
         """
         if not hash_string:
             return False
-        if upload_limit:
-            uploadLimited = True
-            uploadLimit = int(upload_limit)
-        else:
-            uploadLimited = False
-            uploadLimit = 0
-        if download_limit:
-            downloadLimited = True
-            downloadLimit = int(download_limit)
-        else:
-            downloadLimited = False
-            downloadLimit = 0
-        if ratio_limit:
-            seedRatioMode = 1
-            seedRatioLimit = round(float(ratio_limit), 2)
-        else:
-            seedRatioMode = 2
-            seedRatioLimit = 0
-        if seeding_time_limit:
-            seedIdleMode = 1
-            seedIdleLimit = int(seeding_time_limit)
-        else:
-            seedIdleMode = 2
-            seedIdleLimit = 0
+        change_kwargs = {"ids": hash_string}
+        if upload_limit is not None:
+            change_kwargs["uploadLimited"] = bool(upload_limit)
+            change_kwargs["uploadLimit"] = int(upload_limit)
+        if download_limit is not None:
+            change_kwargs["downloadLimited"] = bool(download_limit)
+            change_kwargs["downloadLimit"] = int(download_limit)
+        if ratio_limit is not None:
+            change_kwargs["seedRatioMode"] = 1 if ratio_limit else 2
+            change_kwargs["seedRatioLimit"] = round(float(ratio_limit), 2) if ratio_limit else 0
+        if seeding_time_limit is not None:
+            change_kwargs["seedIdleMode"] = 1 if seeding_time_limit else 2
+            change_kwargs["seedIdleLimit"] = int(seeding_time_limit) if seeding_time_limit else 0
         try:
-            self.trc.change_torrent(ids=hash_string,
-                                    uploadLimited=uploadLimited,
-                                    uploadLimit=uploadLimit,
-                                    downloadLimited=downloadLimited,
-                                    downloadLimit=downloadLimit,
-                                    seedRatioMode=seedRatioMode,
-                                    seedRatioLimit=seedRatioLimit,
-                                    seedIdleMode=seedIdleMode,
-                                    seedIdleLimit=seedIdleLimit)
+            self.trc.change_torrent(**change_kwargs)
             return True
         except Exception as err:
             logger.error(f"设置种子出错：{str(err)}")
+            return False
+
+    def set_torrent_location(self, hash_string: str, location: str) -> bool:
+        """
+        修改种子保存目录。
+        :param hash_string: 种子Hash
+        :param location: 新保存目录
+        :return: 是否修改成功
+        """
+        if not self.trc or not hash_string or not location:
+            return False
+        try:
+            move_torrent_data = getattr(self.trc, "move_torrent_data", None)
+            if callable(move_torrent_data):
+                move_torrent_data(ids=hash_string, location=location)
+            else:
+                self.trc.change_torrent(ids=hash_string, download_dir=location)
+            return True
+        except Exception as err:
+            logger.error(f"设置种子保存目录出错：{str(err)}")
             return False
 
     def update_tracker(self, hash_string: str, tracker_list: list = None) -> bool:
@@ -455,6 +456,34 @@ class Transmission:
         except Exception as err:
             logger.error(f"修改tracker出错：{str(err)}")
             return False
+
+    def get_trackers(self, hash_string: str) -> Optional[List[str]]:
+        """
+        获取种子Tracker列表。
+        :param hash_string: 种子Hash
+        :return: Tracker URL列表
+        """
+        if not self.trc or not hash_string:
+            return None
+        try:
+            torrents = self.trc.get_torrents(ids=hash_string, arguments=self._trarg)
+            if not torrents:
+                return []
+            torrent = torrents[0]
+            tracker_list = getattr(torrent, "tracker_list", None) \
+                or getattr(torrent, "trackerList", None) \
+                or []
+            if tracker_list:
+                return list(tracker_list)
+            trackers = getattr(torrent, "trackers", None) or []
+            return [
+                tracker.get("announce")
+                for tracker in trackers
+                if isinstance(tracker, dict) and tracker.get("announce")
+            ]
+        except Exception as err:
+            logger.error(f"获取tracker出错：{str(err)}")
+            return None
 
     def get_session(self) -> Optional[Session]:
         """

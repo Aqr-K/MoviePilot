@@ -338,6 +338,10 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
                 year=meta.year,
                 season_episode=meta.season_episode,
                 path=Path(self.normalize_return_path(torrent_path, downloader_name)),
+                save_path=self.normalize_return_path(
+                    Path(torrent_data.get("save_path") or ""), downloader_name
+                ) if torrent_data.get("save_path") else None,
+                content_path=self.normalize_return_path(torrent_path, downloader_name),
                 progress=torrent_data.get("progress", 0),
                 size=total_size,
                 state=self.__normalize_torrent_state(
@@ -521,6 +525,54 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
         if not server:
             return None
         return server.set_torrents_tag(ids=hashs, tags=tags)
+
+    def update_torrent(
+            self,
+            hash_string: str,
+            downloader: Optional[str] = None,
+            download_limit: Optional[float] = None,
+            upload_limit: Optional[float] = None,
+            tracker_list: Optional[list] = None,
+            save_path: Optional[str] = None,
+            category: Optional[str] = None,
+            ratio_limit: Optional[float] = None,
+            seeding_time_limit: Optional[int] = None,
+    ) -> Optional[Dict[str, bool]]:
+        """
+        修改下载任务属性。
+        :param hash_string: 种子Hash
+        :param downloader: 下载器
+        :param download_limit: 下载限速，单位 KB/s
+        :param upload_limit: 上传限速，单位 KB/s
+        :param tracker_list: Tracker URL列表，rTorrent 当前封装不支持
+        :param save_path: 保存目录
+        :param category: 分类，rTorrent 当前封装不支持
+        :param ratio_limit: 分享率限制，rTorrent 当前封装不支持
+        :param seeding_time_limit: 做种时间限制，rTorrent 当前封装不支持
+        :return: 各项修改结果
+        """
+        server: Rtorrent = self.get_instance(downloader)
+        if not server:
+            return None
+        results = {}
+        if download_limit is not None or upload_limit is not None:
+            results["limits"] = server.change_torrent(
+                hash_string=hash_string,
+                download_limit=download_limit,
+                upload_limit=upload_limit,
+            )
+        if ratio_limit is not None or seeding_time_limit is not None:
+            results["seeding_limits"] = False
+        if tracker_list is not None:
+            results["trackers"] = False
+        if save_path is not None:
+            results["save_path"] = server.set_torrent_location(
+                hash_string=hash_string,
+                location=self.normalize_path(Path(save_path), downloader),
+            )
+        if category is not None:
+            results["category"] = False
+        return results
 
     def start_torrents(
         self, hashs: Union[list, str], downloader: Optional[str] = None

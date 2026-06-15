@@ -530,6 +530,62 @@ class Rtorrent:
                 break
         return torrent_id
 
+    @staticmethod
+    def __build_throttle_name(torrent_hash: str) -> str:
+        """
+        生成单任务限速组名称。
+        """
+        return f"mp_{torrent_hash.lower()[:16]}"
+
+    def change_torrent(
+            self,
+            hash_string: str,
+            upload_limit: Optional[float] = None,
+            download_limit: Optional[float] = None,
+    ) -> bool:
+        """
+        修改单个种子的上传和下载限速。
+        :param hash_string: 种子Hash
+        :param upload_limit: 上传限速，单位 KB/s，0 表示不限速
+        :param download_limit: 下载限速，单位 KB/s，0 表示不限速
+        :return: 是否修改成功
+        """
+        if not self._proxy or not hash_string:
+            return False
+        try:
+            throttle_name = self.__build_throttle_name(hash_string)
+            if download_limit is not None:
+                self._proxy.throttle.down.max.set(
+                    throttle_name,
+                    int(float(download_limit) * 1024),
+                )
+            if upload_limit is not None:
+                self._proxy.throttle.up.max.set(
+                    throttle_name,
+                    int(float(upload_limit) * 1024),
+                )
+            self._proxy.d.throttle_name.set(hash_string, throttle_name)
+            return True
+        except Exception as err:
+            logger.error(f"设置种子限速出错：{str(err)}")
+            return False
+
+    def set_torrent_location(self, hash_string: str, location: str) -> bool:
+        """
+        修改种子保存目录。
+        :param hash_string: 种子Hash
+        :param location: 新保存目录
+        :return: 是否修改成功
+        """
+        if not self._proxy or not hash_string or not location:
+            return False
+        try:
+            self._proxy.d.directory.set(hash_string, location)
+            return True
+        except Exception as err:
+            logger.error(f"设置种子保存目录出错：{str(err)}")
+            return False
+
     def transfer_info(self) -> Optional[Dict]:
         """
         获取传输信息

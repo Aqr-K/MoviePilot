@@ -27,6 +27,14 @@ class DownloaderTorrent(BaseModel):
     upspeed: Optional[str] = None
     dlspeed: Optional[str] = None
     tags: Optional[str] = None
+    save_path: Optional[str] = None
+    content_path: Optional[str] = None
+    category: Optional[str] = None
+    download_limit: Optional[float] = None
+    upload_limit: Optional[float] = None
+    ratio_limit: Optional[float] = None
+    seeding_time_limit: Optional[int] = None
+    trackers: Optional[List[str]] = Field(default_factory=list)
     media: Optional[dict] = Field(default_factory=dict)
     userid: Optional[str] = None
     username: Optional[str] = None

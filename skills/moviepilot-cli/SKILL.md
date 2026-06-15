@@ -24,7 +24,7 @@ Always run `show <command>` before calling a command — parameter names are not
 |---|---|
 | Media Search | search_media, recognize_media, query_media_detail, get_recommendations, search_person, search_person_credits |
 | Torrent | search_torrents, get_search_results |
-| Download | add_download, query_download_tasks, delete_download, query_downloaders |
+| Download | add_download, query_download_tasks, update_download_tasks, delete_download, query_downloaders |
 | Subscription | add_subscribe, query_subscribes, update_subscribe, delete_subscribe, search_subscribe, query_subscribe_history, query_popular_subscribes, query_subscribe_shares |
 | Library | query_library_exists, query_library_latest, transfer_file, scrape_metadata, query_transfer_history |
 | Files | list_directory, query_directory_settings |
@@ -126,7 +126,13 @@ Subscribe starting from a specific episode:
 List download tasks and get hash for further operations:
 `node scripts/mp-cli.js query_download_tasks status=downloading`
 
-Use `status=completed` for tasks that are neither downloading nor paused in the downloader; use `status=all` to include every MoviePilot-tagged downloader task. Add `include_all_tags=true` when diagnosing tasks that do not have the MoviePilot built-in tag.
+Use `status=completed` for tasks that are neither downloading nor paused in the downloader; use `status=all` to include every MoviePilot-tagged downloader task. Add `include_all_tags=true` when diagnosing tasks that do not have the MoviePilot built-in tag. Add `include_trackers=true` or query by `hash` when tracker URLs are needed.
+
+Update a download task (supports start/stop, tags, speed limits, trackers, save path, category, ratio, and seeding time where the downloader supports them):
+`node scripts/mp-cli.js update_download_tasks hash=<hash> action=stop upload_limit=512 download_limit=2048`
+
+Add trackers to a download task:
+`node scripts/mp-cli.js update_download_tasks hash=<hash> trackers='https://tracker.example/announce,udp://tracker.example:80/announce'`
 
 Delete a download task (confirm with user first — irreversible):
 `node scripts/mp-cli.js delete_download hash=<hash>`

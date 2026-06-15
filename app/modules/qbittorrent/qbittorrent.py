@@ -537,8 +537,8 @@ class Qbittorrent:
         """
         if not self.qbc:
             return False
-        download_limit = download_limit * 1024
-        upload_limit = upload_limit * 1024
+        download_limit = (download_limit or 0) * 1024
+        upload_limit = (upload_limit or 0) * 1024
         try:
             self.qbc.transfer.upload_limit = int(upload_limit)
             self.qbc.transfer.download_limit = int(download_limit)
@@ -578,6 +578,87 @@ class Qbittorrent:
             logger.error(f"重新校验种子出错：{str(err)}")
             return False
 
+    def change_torrent(
+            self,
+            hash_string: str,
+            upload_limit: Optional[float] = None,
+            download_limit: Optional[float] = None,
+            ratio_limit: Optional[float] = None,
+            seeding_time_limit: Optional[int] = None,
+    ) -> bool:
+        """
+        修改单个种子的限速和做种策略。
+        :param hash_string: 种子Hash
+        :param upload_limit: 上传限速，单位 KB/s，0 表示不限速
+        :param download_limit: 下载限速，单位 KB/s，0 表示不限速
+        :param ratio_limit: 分享率限制
+        :param seeding_time_limit: 做种时间限制，单位分钟
+        :return: 是否修改成功
+        """
+        if not self.qbc or not hash_string:
+            return False
+        try:
+            if upload_limit is not None:
+                self.qbc.torrents_set_upload_limit(
+                    limit=int(float(upload_limit) * 1024),
+                    torrent_hashes=hash_string,
+                )
+            if download_limit is not None:
+                self.qbc.torrents_set_download_limit(
+                    limit=int(float(download_limit) * 1024),
+                    torrent_hashes=hash_string,
+                )
+            if ratio_limit is not None:
+                self.qbc.torrents_set_share_limits(
+                    ratio_limit=round(float(ratio_limit), 2),
+                    seeding_time_limit=int(seeding_time_limit or -1),
+                    inactive_seeding_time_limit=-1,
+                    torrent_hashes=hash_string,
+                )
+            elif seeding_time_limit is not None:
+                self.qbc.torrents_set_share_limits(
+                    ratio_limit=-2,
+                    seeding_time_limit=int(seeding_time_limit),
+                    inactive_seeding_time_limit=-1,
+                    torrent_hashes=hash_string,
+                )
+            return True
+        except Exception as err:
+            logger.error(f"设置种子属性出错：{str(err)}")
+            return False
+
+    def set_torrent_location(self, hash_string: str, location: str) -> bool:
+        """
+        修改种子保存目录。
+        :param hash_string: 种子Hash
+        :param location: 新保存目录
+        :return: 是否修改成功
+        """
+        if not self.qbc or not hash_string or not location:
+            return False
+        try:
+            self.qbc.torrents_set_location(location=location, torrent_hashes=hash_string)
+            return True
+        except Exception as err:
+            logger.error(f"设置种子保存目录出错：{str(err)}")
+            return False
+
+    def set_torrent_category(self, hash_string: str, category: str) -> bool:
+        """
+        修改种子分类。
+        :param hash_string: 种子Hash
+        :param category: 分类名称
+        :return: 是否修改成功
+        """
+        if not self.qbc or not hash_string:
+            return False
+        try:
+            self.qbc.torrents_set_category(category=category or "", torrent_hashes=hash_string)
+            return True
+        except Exception as err:
+            logger.error(f"设置种子分类出错：{str(err)}")
+            return False
+
     def update_tracker(self, hash_string: str, tracker_list: list) -> bool:
         """
         添加tracker
@@ -590,6 +671,25 @@ class Qbittorrent:
         except Exception as err:
             logger.error(f"修改tracker出错：{str(err)}")
             return False
+
+    def get_trackers(self, hash_string: str) -> Optional[List[str]]:
+        """
+        获取种子Tracker列表。
+        :param hash_string: 种子Hash
+        :return: Tracker URL列表
+        """
+        if not self.qbc or not hash_string:
+            return None
+        try:
+            trackers = self.qbc.torrents_trackers(torrent_hash=hash_string) or []
+            return [
+                tracker.get("url")
+                for tracker in trackers
+                if tracker.get("url")
+            ]
+        except Exception as err:
+            logger.error(f"获取tracker出错：{str(err)}")
+            return None
 
     def get_content_layout(self) -> Optional[str]:
         """

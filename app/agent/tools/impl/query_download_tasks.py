@@ -25,6 +25,10 @@ class QueryDownloadTasksInput(BaseModel):
         False,
         description="Include tasks without the MoviePilot built-in tag. Default false keeps the normal MoviePilot task scope.",
     )
+    include_trackers: Optional[bool] = Field(
+        False,
+        description="Include tracker URLs when supported. Hash queries always include trackers.",
+    )
     hash: Optional[str] = Field(None, description="Query specific download task by hash (optional, if provided will search for this specific task regardless of status)")
     title: Optional[str] = Field(None, description="Query download tasks by title/name (optional, supports partial match, searches all tasks if provided)")
     tag: Optional[str] = Field(None, description="Filter download tasks by tag (optional, supports partial match, e.g. 'movie' will match tasks with tag 'movie' or 'movie_2024')")
@@ -131,6 +135,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
         title: Optional[str] = None,
         tag: Optional[str] = None,
         include_all_tags: bool = False,
+        include_trackers: bool = False,
     ) -> Dict[str, Any]:
         """
         同步查询下载器和下载历史，整个链路放在线程池中执行。
@@ -214,6 +219,16 @@ class QueryDownloadTasksTool(MoviePilotTool):
         if not filtered_downloads:
             return {"message": "未找到相关下载任务"}
 
+        if hash_value or include_trackers:
+            for torrent in filtered_downloads:
+                if not getattr(torrent, "hash", None):
+                    continue
+                tracker_map = download_chain.get_torrent_trackers(
+                    hash_string=torrent.hash,
+                    downloader=getattr(torrent, "downloader", None) or downloader,
+                ) or {}
+                torrent.trackers = tracker_map.get(getattr(torrent, "downloader", None)) or []
+
         return {"downloads": filtered_downloads}
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -245,6 +260,8 @@ class QueryDownloadTasksTool(MoviePilotTool):
             parts.append(f"标签: {tag}")
         if include_all_tags:
             parts.append("范围: 全部标签")
+        if kwargs.get("include_trackers"):
+            parts.append("包含Tracker")
         
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
@@ -254,10 +271,12 @@ class QueryDownloadTasksTool(MoviePilotTool):
                   title: Optional[str] = None,
                   tag: Optional[str] = None,
                   include_all_tags: Optional[bool] = False,
+                  include_trackers: Optional[bool] = False,
                   **kwargs) -> str:
         logger.info(
             f"执行工具: {self.name}, 参数: downloader={downloader}, status={status}, "
-            f"hash={hash}, title={title}, tag={tag}, include_all_tags={include_all_tags}"
+            f"hash={hash}, title={title}, tag={tag}, include_all_tags={include_all_tags}, "
+            f"include_trackers={include_trackers}"
         )
         try:
             payload = await self.run_blocking(
@@ -269,6 +288,7 @@ class QueryDownloadTasksTool(MoviePilotTool):
                 title,
                 tag,
                 self._normalize_include_all_tags(include_all_tags),
+                self._normalize_include_all_tags(include_trackers),
             )
             if payload.get("message"):
                 return payload["message"]
@@ -294,6 +314,16 @@ class QueryDownloadTasksTool(MoviePilotTool):
                         "upspeed": getattr(d, "upspeed", None),
                         "dlspeed": getattr(d, "dlspeed", None),
                         "tags": d.tags,
+                        "save_path": getattr(d, "save_path", None),
+                        "content_path": getattr(d, "content_path", None) or (
+                            d.path.as_posix() if getattr(d, "path", None) else None
+                        ),
+                        "category": getattr(d, "category", None),
+                        "download_limit": getattr(d, "download_limit", None),
+                        "upload_limit": getattr(d, "upload_limit", None),
+                        "ratio_limit": getattr(d, "ratio_limit", None),
+                        "seeding_time_limit": getattr(d, "seeding_time_limit", None),
+                        "trackers": getattr(d, "trackers", None) or [],
                         "left_time": getattr(d, "left_time", None)
                     }
                     # 精简 media 字段

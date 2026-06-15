@@ -492,3 +492,17 @@ def test_download_falls_back_to_tag_lookup_when_added_ids_missing():
     assert result == ("qb", "def456", "Original", "添加下载成功")
     fake_server.delete_torrents_tag.assert_not_called()
     fake_server.get_torrent_id_by_tag.assert_called_once_with(tags="tmp-tag-01")
+
+
+def test_set_speed_limit_allows_single_direction_limit():
+    """
+    设置全局限速时允许只传一个方向，未传方向按不限速处理。
+    """
+    fake_client = MagicMock()
+
+    with patch.object(Qbittorrent, "_Qbittorrent__login_qbittorrent", return_value=fake_client):
+        downloader = Qbittorrent(host="http://127.0.0.1", port=8080, username="admin", password="adminadmin")
+
+    assert downloader.set_speed_limit(download_limit=1024)
+    assert fake_client.transfer.download_limit == 1024 * 1024
+    assert fake_client.transfer.upload_limit == 0

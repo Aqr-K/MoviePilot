@@ -164,3 +164,73 @@ def test_get_files_falls_back_to_legacy_files_method():
     assert downloader.get_files("1") == torrent_files
     fake_client.get_torrent.assert_called_once_with("1")
     torrent.files.assert_called_once_with()
+
+
+def test_change_torrent_only_sends_explicit_fields():
+    """
+    修改单个任务时只能写入显式传入的策略字段。
+    """
+    downloader = Transmission.__new__(Transmission)
+    fake_client = MagicMock()
+    downloader.trc = fake_client
+
+    assert downloader.change_torrent("hash", ratio_limit=2.5)
+
+    fake_client.change_torrent.assert_called_once_with(
+        ids="hash",
+        seedRatioMode=1,
+        seedRatioLimit=2.5,
+    )
+
+
+def test_change_torrent_disables_speed_limit_with_zero_value():
+    """
+    单任务限速传 0 时应显式关闭对应限速。
+    """
+    downloader = Transmission.__new__(Transmission)
+    fake_client = MagicMock()
+    downloader.trc = fake_client
+
+    assert downloader.change_torrent("hash", download_limit=0, upload_limit=512)
+
+    fake_client.change_torrent.assert_called_once_with(
+        ids="hash",
+        uploadLimited=True,
+        uploadLimit=512,
+        downloadLimited=False,
+        downloadLimit=0,
+    )
+
+
+def test_set_torrent_location_prefers_move_torrent_data():
+    """
+    Transmission 修改保存目录应优先使用移动数据接口。
+    """
+    downloader = Transmission.__new__(Transmission)
+    fake_client = MagicMock()
+    downloader.trc = fake_client
+
+    assert downloader.set_torrent_location("hash", "/downloads/new")
+
+    fake_client.move_torrent_data.assert_called_once_with(
+        ids="hash",
+        location="/downloads/new",
+    )
+    fake_client.change_torrent.assert_not_called()
+
+
+def test_set_torrent_location_falls_back_to_change_torrent():
+    """
+    旧版 transmission-rpc 没有移动数据接口时回退到 change_torrent。
+    """
+    downloader = Transmission.__new__(Transmission)
+    fake_client = MagicMock()
+    fake_client.move_torrent_data = None
+    downloader.trc = fake_client
+
+    assert downloader.set_torrent_location("hash", "/downloads/new")
+
+    fake_client.change_torrent.assert_called_once_with(
+        ids="hash",
+        download_dir="/downloads/new",
+    )

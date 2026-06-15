@@ -307,9 +307,18 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 year=meta.year,
                 season_episode=meta.season_episode,
                 path=Path(self.normalize_return_path(torrent_path, downloader_name)),
+                save_path=self.normalize_return_path(
+                    Path(torrent_data.get('save_path') or ""), downloader_name
+                ) if torrent_data.get('save_path') else None,
+                content_path=self.normalize_return_path(torrent_path, downloader_name),
                 hash=torrent_data.get('hash'),
                 size=total_size,
                 tags=torrent_data.get('tags'),
+                category=torrent_data.get('category'),
+                download_limit=(torrent_data.get('dl_limit') or 0) / 1024,
+                upload_limit=(torrent_data.get('up_limit') or 0) / 1024,
+                ratio_limit=torrent_data.get('ratio_limit'),
+                seeding_time_limit=torrent_data.get('seeding_time_limit'),
                 progress=(torrent_data.get('progress') or 0) * 100,
                 state=self.__normalize_torrent_state(torrent_data.get('state')),
                 dlspeed=StringUtils.str_filesize(dlspeed),
@@ -463,6 +472,86 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             return None
         server.set_torrents_tag(ids=hashs, tags=tags)
         return True
+
+    def update_torrent(
+            self,
+            hash_string: str,
+            downloader: Optional[str] = None,
+            download_limit: Optional[float] = None,
+            upload_limit: Optional[float] = None,
+            tracker_list: Optional[list] = None,
+            save_path: Optional[str] = None,
+            category: Optional[str] = None,
+            ratio_limit: Optional[float] = None,
+            seeding_time_limit: Optional[int] = None,
+    ) -> Optional[Dict[str, bool]]:
+        """
+        修改下载任务属性。
+        :param hash_string: 种子Hash
+        :param downloader: 下载器
+        :param download_limit: 下载限速，单位 KB/s
+        :param upload_limit: 上传限速，单位 KB/s
+        :param tracker_list: Tracker URL列表
+        :param save_path: 保存目录
+        :param category: 分类
+        :param ratio_limit: 分享率限制
+        :param seeding_time_limit: 做种时间限制，单位分钟
+        :return: 各项修改结果
+        """
+        server: Qbittorrent = self.get_instance(downloader)
+        if not server:
+            return None
+        results = {}
+        if any(
+                value is not None
+                for value in (download_limit, upload_limit, ratio_limit, seeding_time_limit)
+        ):
+            results["limits"] = server.change_torrent(
+                hash_string=hash_string,
+                download_limit=download_limit,
+                upload_limit=upload_limit,
+                ratio_limit=ratio_limit,
+                seeding_time_limit=seeding_time_limit,
+            )
+        if tracker_list is not None:
+            results["trackers"] = server.update_tracker(
+                hash_string=hash_string, tracker_list=tracker_list
+            )
+        if save_path is not None:
+            results["save_path"] = server.set_torrent_location(
+                hash_string=hash_string,
+                location=self.normalize_path(Path(save_path), downloader),
+            )
+        if category is not None:
+            results["category"] = server.set_torrent_category(
+                hash_string=hash_string, category=category
+            )
+        return results
+
+    def get_torrent_trackers(
+            self,
+            hash_string: str,
+            downloader: Optional[str] = None,
+    ) -> Optional[Dict[str, List[str]]]:
+        """
+        查询下载任务Tracker列表。
+        :param hash_string: 种子Hash
+        :param downloader: 下载器
+        :return: 下载器名称到Tracker列表的映射
+        """
+        if downloader:
+            server: Qbittorrent = self.get_instance(downloader)
+            if not server:
+                return None
+            servers = {downloader: server}
+        else:
+            servers: Dict[str, Qbittorrent] = self.get_instances()
+        ret_trackers = {}
+        for name, server in servers.items():
+            trackers = server.get_trackers(hash_string)
+            if trackers is not None:
+                ret_trackers[name] = trackers
+        return ret_trackers
 
     def start_torrents(self, hashs: Union[list, str],
                        downloader: Optional[str] = None) -> Optional[bool]:
