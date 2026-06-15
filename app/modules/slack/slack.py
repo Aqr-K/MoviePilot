@@ -1,7 +1,8 @@
+import json
 import re
 from threading import Lock
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import requests
@@ -20,14 +21,32 @@ lock = Lock()
 
 
 class Slack:
+    """Slack 通知与交互客户端。"""
+
     _client: WebClient = None
     _service: SocketModeHandler = None
     _ds_url = f"http://127.0.0.1:{settings.PORT}/api/v1/message?token={settings.API_TOKEN}"
     _channel = ""
     _oauth_token = ""
+    _MAX_SLASH_COMMANDS = 50
+    _SLASH_COMMAND_USAGE_HINT = "MoviePilot 可选参数"
 
     def __init__(self, SLACK_OAUTH_TOKEN: Optional[str] = None, SLACK_APP_TOKEN: Optional[str] = None,
-                 SLACK_CHANNEL: Optional[str] = None, **kwargs):
+                 SLACK_CHANNEL: Optional[str] = None,
+                 SLACK_APP_ID: Optional[str] = None,
+                 SLACK_APP_CONFIG_TOKEN: Optional[str] = None,
+                 SLACK_COMMAND_REQUEST_URL: Optional[str] = None,
+                 **kwargs):
+        """
+        初始化 Slack 客户端。
+
+        :param SLACK_OAUTH_TOKEN: Slack Bot User OAuth Token
+        :param SLACK_APP_TOKEN: Slack Socket Mode App Token
+        :param SLACK_CHANNEL: 默认发送频道
+        :param SLACK_APP_ID: Slack App ID，用于可选的 Manifest 命令自动注册
+        :param SLACK_APP_CONFIG_TOKEN: Slack App Configuration Token，用于可选的 Manifest 命令自动注册
+        :param SLACK_COMMAND_REQUEST_URL: Slash Command 请求 URL，Socket Mode 下可为空
+        """
 
         if not SLACK_OAUTH_TOKEN or not SLACK_APP_TOKEN:
             logger.error("Slack 配置不完整！")
@@ -44,6 +63,14 @@ class Slack:
         self._client = slack_app.client
         self._channel = SLACK_CHANNEL
         self._oauth_token = SLACK_OAUTH_TOKEN
+        self._app_id = (SLACK_APP_ID or "").strip()
+        self._command_request_url = (SLACK_COMMAND_REQUEST_URL or "").strip()
+        self._manifest_client = (
+            WebClient(token=SLACK_APP_CONFIG_TOKEN)
+            if SLACK_APP_CONFIG_TOKEN and self._app_id
+            else None
+        )
+        self._registered_command_names: set[str] = set()
 
         # 标记消息来源
         if kwargs.get("name"):
@@ -105,6 +132,127 @@ class Slack:
         获取状态
         """
         return True if self._client else False
+
+    def register_commands(self, commands: Dict[str, dict]) -> bool:
+        """
+        通过 Slack App Manifest 注册 Slash Commands。
+
+        :param commands: 命令字典，键为斜杠命令，值包含描述和分类等元数据
+        :return: 注册是否成功
+        """
+        if not self._manifest_client or not self._app_id:
+            logger.debug("Slack 未配置 SLACK_APP_ID/SLACK_APP_CONFIG_TOKEN，跳过命令自动注册")
+            return False
+        return self._update_manifest_commands(commands or {})
+
+    def delete_commands(self) -> bool:
+        """
+        清理本实例自动注册过的 Slack Slash Commands。
+
+        :return: 清理是否成功
+        """
+        if not self._manifest_client or not self._app_id:
+            logger.debug("Slack 未配置 SLACK_APP_ID/SLACK_APP_CONFIG_TOKEN，跳过命令清理")
+            return False
+        return self._update_manifest_commands({})
+
+    def _update_manifest_commands(self, commands: Dict[str, dict]) -> bool:
+        """更新 Slack Manifest 中的 Slash Commands，保留非本实例管理的命令。"""
+        try:
+            manifest = self._export_manifest()
+            if not manifest:
+                return False
+            features = manifest.setdefault("features", {})
+            existing_commands = features.get("slash_commands") or []
+            generated_commands = self._build_slash_commands(commands)
+            managed_names = self._registered_command_names | {
+                item["command"] for item in generated_commands
+            }
+            preserved_commands = [
+                item
+                for item in existing_commands
+                if (
+                    isinstance(item, dict)
+                    and item.get("command") not in managed_names
+                    and item.get("usage_hint") != self._SLASH_COMMAND_USAGE_HINT
+                )
+            ]
+            available = max(self._MAX_SLASH_COMMANDS - len(preserved_commands), 0)
+            if len(generated_commands) > available:
+                logger.warning(
+                    f"Slack Slash Commands 超过平台上限，仅注册前 {available} 个"
+                )
+                generated_commands = generated_commands[:available]
+            features["slash_commands"] = preserved_commands + generated_commands
+
+            result = self._manifest_client.apps_manifest_update(
+                app_id=self._app_id,
+                manifest=manifest,
+            )
+            if result and result.get("ok") is False:
+                logger.error(f"Slack Manifest 更新失败：{result.get('error')}")
+                return False
+            self._registered_command_names = {
+                item["command"] for item in generated_commands
+            }
+            logger.info(f"Slack Slash Commands 已同步：{len(generated_commands)} 个")
+            return True
+        except Exception as err:
+            logger.error(f"Slack Slash Commands 自动注册失败：{err}")
+            return False
+
+    def _export_manifest(self) -> Optional[Dict[str, Any]]:
+        """导出 Slack App Manifest。"""
+        result = self._manifest_client.apps_manifest_export(app_id=self._app_id)
+        if result and result.get("ok") is False:
+            logger.error(f"Slack Manifest 导出失败：{result.get('error')}")
+            return None
+        manifest = result.get("manifest") if result else None
+        if isinstance(manifest, str):
+            manifest = json.loads(manifest)
+        return manifest if isinstance(manifest, dict) else None
+
+    def _build_slash_commands(self, commands: Dict[str, dict]) -> List[Dict[str, Any]]:
+        """构建 Slack Manifest Slash Commands 配置。"""
+        slash_commands = []
+        seen_commands = set()
+        for command_text, command_data in commands.items():
+            command = self._normalize_slack_command(command_text)
+            if not command or command in seen_commands:
+                logger.warning(f"跳过无效或重复的 Slack Slash Command：{command_text}")
+                continue
+            seen_commands.add(command)
+            description = self._normalize_slack_description(
+                command_data.get("description") if isinstance(command_data, dict) else None,
+                command,
+            )
+            item = {
+                "command": command,
+                "description": description,
+                "should_escape": False,
+                "usage_hint": self._SLASH_COMMAND_USAGE_HINT,
+            }
+            if self._command_request_url:
+                item["url"] = self._command_request_url
+            slash_commands.append(item)
+        return slash_commands
+
+    @staticmethod
+    def _normalize_slack_command(command_text: str) -> str:
+        """转换为 Slack Slash Command 名称。"""
+        command = f"/{str(command_text or '').strip().lstrip('/').lower()}"
+        if not re.fullmatch(r"/[a-z0-9_-]{1,31}", command):
+            return ""
+        return command
+
+    @staticmethod
+    def _normalize_slack_description(
+        description: Optional[str],
+        fallback: str,
+    ) -> str:
+        """整理 Slack Slash Command 描述。"""
+        normalized = str(description or fallback or "MoviePilot").strip()
+        return normalized[:2000] or "MoviePilot"
 
     def download_file(self, file_url: str) -> Optional[Tuple[bytes, str]]:
         """

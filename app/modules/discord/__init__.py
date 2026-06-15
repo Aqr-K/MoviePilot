@@ -1,13 +1,22 @@
+import copy
 import json
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import quote, unquote
-from typing import Optional, Union, List, Tuple, Any
 
 from app.core.context import MediaInfo, Context
+from app.core.event import eventmanager
 from app.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.schemas import MessageChannel, CommingMessage, Notification, MessageResponse
-from app.schemas.types import ModuleType
+from app.schemas import (
+    CommandRegisterEventData,
+    CommingMessage,
+    MessageChannel,
+    MessageResponse,
+    Notification,
+)
+from app.schemas.types import ChainEventType, ModuleType
 from app.utils.http import RequestUtils
+from app.utils.structures import DictUtils
 
 try:
     from app.modules.discord.discord import Discord
@@ -529,6 +538,54 @@ class DiscordModule(_ModuleBase, _MessageBase[Discord]):
                 elif result:
                     return True
         return False
+
+    def register_commands(self, commands: Dict[str, dict]) -> None:
+        """
+        注册命令，实现这个函数接收系统可用的命令菜单。
+
+        :param commands: 命令字典
+        """
+        for client_config in self.get_configs().values():
+            client = self.get_instance(client_config.name)
+            if not client:
+                continue
+
+            scoped_commands = copy.deepcopy(commands)
+            event = eventmanager.send_event(
+                ChainEventType.CommandRegister,
+                CommandRegisterEventData(
+                    commands=scoped_commands,
+                    origin="Discord",
+                    service=client_config.name,
+                ),
+            )
+
+            if event and event.event_data:
+                event_data: CommandRegisterEventData = event.event_data
+                if event_data.cancel:
+                    client.delete_commands()
+                    logger.debug(
+                        f"Command registration for {client_config.name} canceled by event: {event_data.source}"
+                    )
+                    continue
+                scoped_commands = event_data.commands or {}
+                if not scoped_commands:
+                    logger.debug("Filtered commands are empty, skipping registration.")
+                    client.delete_commands()
+
+            filtered_scoped_commands = DictUtils.filter_keys_to_subset(
+                scoped_commands,
+                commands,
+            )
+            if not filtered_scoped_commands:
+                logger.debug("Filtered commands are empty, skipping registration.")
+                client.delete_commands()
+                continue
+            if filtered_scoped_commands != commands:
+                logger.debug(
+                    f"Command set has changed, Updating new commands: {filtered_scoped_commands}"
+                )
+            client.register_commands(filtered_scoped_commands)
 
     def mark_message_processing_started(
         self,
