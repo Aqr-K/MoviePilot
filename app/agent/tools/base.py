@@ -612,13 +612,30 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
         return False
 
+    async def send_notification_message(self, notification: Notification) -> None:
+        """
+        发送工具通知消息。
+
+        WebAgent 渠道没有后端模块实例，前端流式面板通过 Agent 上下文中的
+        回调直接接收通知；其它渠道继续走统一消息链。
+        """
+        callback = self._agent_context.get("notification_callback")
+        if (
+            self._channel == MessageChannel.WebAgent.value
+            and callable(callback)
+        ):
+            callback(notification)
+            return
+
+        await ToolChain().async_post_message(notification)
+
     async def send_tool_message(
         self, message: str, title: str = "", image: Optional[str] = None
     ) -> None:
         """
         发送工具消息
         """
-        await ToolChain().async_post_message(
+        await self.send_notification_message(
             Notification(
                 channel=self._channel,
                 source=self._source,

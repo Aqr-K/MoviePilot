@@ -342,6 +342,7 @@ class MessageChannel(Enum):
     SynologyChat = "SynologyChat"
     VoceChat = "VoceChat"
     Web = "Web"
+    WebAgent = "WebAgent"
     WebPush = "WebPush"
     QQ = "QQ"
 

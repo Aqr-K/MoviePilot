@@ -5,7 +5,7 @@ from typing import Optional, Type
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.agent.tools.base import MoviePilotTool, ToolChain
+from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.log import logger
 from app.schemas import Notification, NotificationType
@@ -96,7 +96,7 @@ class SendLocalFileTool(MoviePilotTool):
             resolved_path,
         )
 
-        await ToolChain().async_post_message(
+        await self.send_notification_message(
             Notification(
                 channel=channel,
                 source=self._source,
