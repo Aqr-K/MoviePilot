@@ -12,6 +12,7 @@ from starlette.responses import StreamingResponse
 from app import schemas
 from app.command import Command
 from app.core.config import settings
+from app.core.event import eventmanager
 from app.core.plugin import PluginManager
 from app.core.security import (
     resource_token_cookie,
@@ -30,7 +31,8 @@ from app.helper.server import MoviePilotServerHelper
 from app.helper.plugin import PluginHelper
 from app.log import logger
 from app.scheduler import Scheduler
-from app.schemas.types import SystemConfigKey
+from app.schemas.event import PluginDataResetEventData
+from app.schemas.types import ChainEventType, SystemConfigKey
 
 PROTECTED_ROUTES = {"/api/v1/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 PLUGIN_PREFIX = f"{settings.API_V1_STR}/plugin"
@@ -530,6 +532,12 @@ def reset_plugin(
     根据插件ID重置插件配置及数据
     """
     plugin_manager = PluginManager()
+    eventmanager.send_event(
+        ChainEventType.PluginDataReset,
+        PluginDataResetEventData(plugin_id=plugin_id, reset_config=True, reset_data=True),
+    )
+    # 事件处理器需要运行中插件完成补偿；补偿后先停止插件，避免删除数据时仍有任务读写旧状态。
+    plugin_manager.stop(plugin_id)
     # 删除配置
     plugin_manager.delete_plugin_config(plugin_id)
     # 删除插件所有数据
