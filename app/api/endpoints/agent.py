@@ -7,14 +7,15 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app import schemas
 from app.agent import MoviePilotAgent, ReplyMode, StreamingHandler
 from app.core.config import global_vars, settings
 from app.db.models import User
-from app.db.user_oper import get_current_active_superuser
+from app.db.user_oper import UserOper, get_current_active_user
+from app.helper.interaction import agent_interaction_manager
 from app.log import logger
 from app.schemas.types import MessageChannel
 
@@ -24,6 +25,8 @@ WEB_AGENT_SESSION_PREFIX = "web-agent:"
 WEB_AGENT_SOURCE = "web-agent"
 WEB_AGENT_FILE_TTL_SECONDS = 6 * 60 * 60
 WEB_AGENT_FILE_MAX_ITEMS = 256
+WEB_AGENT_UPLOAD_MAX_BYTES = 32 * 1024 * 1024
+WEB_AGENT_UPLOAD_CHUNK_SIZE = 1024 * 1024
 _WEB_AGENT_FILE_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
@@ -113,8 +116,17 @@ class _WebAgentMoviePilotAgent(MoviePilotAgent):
         return True
 
     async def _is_system_admin_context(self) -> bool:
-        """Web Agent 入口已要求超级管理员，工具上下文可直接按管理员处理。"""
-        return True
+        """Web Agent 根据当前登录用户 ID 判断工具管理员上下文。"""
+        if not self.user_id:
+            return False
+        try:
+            user = await UserOper().async_get_by_id(int(self.user_id))
+        except (TypeError, ValueError):
+            return False
+        except Exception as e:
+            logger.error(f"检查 Web Agent 用户管理员身份失败: {e}")
+            return False
+        return bool(user and user.is_superuser)
 
     async def _build_tool_context(self, should_dispatch_reply: bool) -> dict[str, object]:
         """向工具上下文注入 Web SSE 通知回调。"""
@@ -151,6 +163,73 @@ def _build_web_agent_sse(event_type: str, data: Optional[dict] = None) -> str:
     """
     payload = {"type": event_type, **(data or {})}
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _sanitize_web_agent_upload_name(
+    filename: Optional[str], mime_type: Optional[str] = None
+) -> str:
+    """
+    规范化 Web Agent 上传文件名，避免路径穿越和空文件名。
+
+    :param filename: 浏览器上传的原始文件名
+    :param mime_type: 浏览器上报的 MIME 类型
+    :return: 可安全落盘的文件名
+    """
+    name = Path(filename or "attachment").name.strip()
+    safe_name = "".join(
+        char for char in name if char.isalnum() or char in (" ", ".", "_", "-")
+    ).strip(" .")
+    if not safe_name:
+        safe_name = "attachment"
+    if "." not in safe_name:
+        suffix = mimetypes.guess_extension(mime_type or "") or ""
+        safe_name = f"{safe_name}{suffix}"
+    return safe_name
+
+
+def _get_web_agent_upload_dir(user: User, session_id: Optional[str]) -> Path:
+    """
+    计算当前 Web Agent 会话的临时附件目录。
+
+    :param user: 当前登录用户
+    :param session_id: 前端会话标识
+    :return: 已创建的临时附件目录
+    """
+    server_session_id = _build_web_agent_session_id(user, session_id)
+    safe_session_id = server_session_id.replace(":", "_")
+    upload_dir = settings.TEMP_PATH / "agent_uploads" / safe_session_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
+
+
+async def _save_web_agent_upload(upload_file: UploadFile, target_path: Path) -> int:
+    """
+    分块保存 Web Agent 上传文件，并限制单文件体积。
+
+    :param upload_file: FastAPI 上传文件对象
+    :param target_path: 目标落盘路径
+    :return: 已写入的字节数
+    """
+    size = 0
+    try:
+        with target_path.open("wb") as output:
+            while True:
+                chunk = await upload_file.read(WEB_AGENT_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > WEB_AGENT_UPLOAD_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="附件超过 32MB，无法发送给智能助手",
+                    )
+                output.write(chunk)
+    except Exception:
+        target_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload_file.close()
+    return size
 
 
 def _cleanup_web_agent_file_registry() -> None:
@@ -220,6 +299,7 @@ def _register_web_agent_file(
     file_path: Optional[str],
     file_name: Optional[str] = None,
     kind: Optional[str] = None,
+    mime_type: Optional[str] = None,
 ) -> Optional[dict]:
     """
     注册 Web Agent 本地附件并返回前端可访问的短期下载地址。
@@ -227,6 +307,7 @@ def _register_web_agent_file(
     :param file_path: 本地文件路径
     :param file_name: 前端展示文件名
     :param kind: 附件展示类型
+    :param mime_type: 已知 MIME 类型
     :return: 前端附件描述，文件不可访问时返回 None
     """
     if not file_path:
@@ -241,21 +322,126 @@ def _register_web_agent_file(
     _cleanup_web_agent_file_registry()
     file_id = uuid.uuid4().hex
     display_name = file_name or resolved_path.name
-    mime_type = mimetypes.guess_type(display_name or str(resolved_path))[0]
+    resolved_mime_type = mime_type or mimetypes.guess_type(
+        display_name or str(resolved_path)
+    )[0]
     file_url = f"message/agent/file/{file_id}"
     _WEB_AGENT_FILE_REGISTRY[file_id] = {
         "path": resolved_path,
         "name": display_name,
-        "mime_type": mime_type or "application/octet-stream",
+        "mime_type": resolved_mime_type or "application/octet-stream",
         "created_at": time.time(),
     }
     return {
-        "kind": kind or _guess_web_agent_attachment_kind(mime_type),
+        "kind": kind or _guess_web_agent_attachment_kind(resolved_mime_type),
         "url": file_url,
         "download_url": file_url,
         "name": display_name,
-        "mime_type": mime_type,
+        "mime_type": resolved_mime_type,
         "size": resolved_path.stat().st_size,
+    }
+
+
+def _parse_web_agent_choice_callback(callback_data: str) -> Optional[tuple[str, int]]:
+    """
+    解析 Web Agent 按钮选择回调数据。
+
+    :param callback_data: Agent 按钮携带的回调数据
+    :return: 请求 ID 与选项序号，格式无效时返回 None
+    """
+    if not callback_data.startswith("agent_interaction:choice:"):
+        return None
+    try:
+        _, _, request_id, option_index = callback_data.split(":", 3)
+    except ValueError:
+        return None
+    if not request_id or not option_index.isdigit():
+        return None
+    return request_id, int(option_index)
+
+
+def _flatten_web_agent_choice_buttons(buttons: Optional[list[list[dict]]]) -> list[dict]:
+    """
+    将消息渠道按钮二维结构转换为 Web 前端可渲染的一维选项列表。
+
+    :param buttons: Notification 中的按钮行
+    :return: Web 选择卡片按钮列表
+    """
+    flattened = []
+    for row in buttons or []:
+        for button in row or []:
+            text = str(button.get("text") or "").strip()
+            callback_data = str(button.get("callback_data") or "").strip()
+            if not text or not callback_data:
+                continue
+            flattened.append(
+                {
+                    "label": text,
+                    "callback_data": callback_data,
+                }
+            )
+    return flattened
+
+
+def _build_web_agent_choice_event(notification: schemas.Notification) -> Optional[dict]:
+    """
+    将带按钮通知转换为 Web Agent 选择卡片事件。
+
+    :param notification: Agent 工具发出的按钮通知
+    :return: 选择卡片事件，按钮为空时返回 None
+    """
+    buttons = _flatten_web_agent_choice_buttons(notification.buttons)
+    if not buttons:
+        return None
+
+    choice_id = None
+    parsed = _parse_web_agent_choice_callback(buttons[0]["callback_data"])
+    if parsed:
+        choice_id = parsed[0]
+
+    return {
+        "type": "choice",
+        "choice": {
+            "id": choice_id or uuid.uuid4().hex,
+            "title": notification.title,
+            "prompt": notification.text or "",
+            "buttons": buttons,
+        },
+    }
+
+
+def _resolve_web_agent_choice_payload(callback_data: str, user_id: str) -> Optional[dict]:
+    """
+    解析并消费 Web Agent 按钮选择，生成前端反馈与下一条用户消息。
+
+    :param callback_data: 前端点击的按钮回调数据
+    :param user_id: 当前登录用户 ID
+    :return: 可返回给前端的数据，选择无效时返回 None
+    """
+    parsed = _parse_web_agent_choice_callback(callback_data)
+    if not parsed:
+        return None
+
+    request_id, option_index = parsed
+    resolved = agent_interaction_manager.resolve(
+        request_id=request_id,
+        option_index=option_index,
+        user_id=str(user_id),
+    )
+    if not resolved:
+        return None
+
+    request, option = resolved
+    return {
+        "message": option.value,
+        "session_id": request.session_id,
+        "feedback": {
+            "request_id": request.request_id,
+            "title": request.title,
+            "prompt": request.prompt,
+            "selected_label": option.label,
+            "selected_value": option.value,
+        },
     }
 
 
@@ -269,12 +455,16 @@ def _build_web_agent_notification_events(
     :return: 前端可直接应用到当前助手消息的事件列表
     """
     events = []
+    choice_event = _build_web_agent_choice_event(notification)
+    if choice_event:
+        events.append(choice_event)
+
     text_parts = [
         str(item).strip()
         for item in (notification.title, notification.text)
         if str(item or "").strip()
     ]
-    if text_parts:
+    if text_parts and not choice_event:
         events.append({"type": "delta", "content": "\n\n".join(text_parts)})
 
     if notification.image:
@@ -402,18 +592,79 @@ async def download_web_agent_file(file_id: str) -> FileResponse:
     )
 
 
+@router.post("/upload", summary="上传 Web 智能助手附件", response_model=schemas.Response)
+async def upload_web_agent_file(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_active_user),
+) -> schemas.Response:
+    """
+    上传 Web 智能助手对话附件。
+
+    :param file: 浏览器选择的文件
+    :param session_id: 前端会话标识
+    :param current_user: 当前登录用户
+    :return: Agent 可消费的附件描述
+    """
+    mime_type = file.content_type or mimetypes.guess_type(file.filename or "")[0]
+    safe_name = _sanitize_web_agent_upload_name(file.filename, mime_type)
+    upload_dir = _get_web_agent_upload_dir(current_user, session_id)
+    target_path = upload_dir / f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    size = await _save_web_agent_upload(file, target_path)
+    attachment = _register_web_agent_file(
+        str(target_path),
+        file_name=safe_name,
+        kind=_guess_web_agent_attachment_kind(mime_type),
+        mime_type=mime_type,
+    )
+    if not attachment:
+        target_path.unlink(missing_ok=True)
+        return schemas.Response(success=False, message="附件保存失败")
+
+    attachment.update(
+        {
+            "ref": attachment["url"],
+            "local_path": str(target_path),
+            "status": "ready",
+            "size": size,
+        }
+    )
+    return schemas.Response(success=True, data=attachment)
+
+
+@router.post("/callback", summary="Web 智能助手按钮回调", response_model=schemas.Response)
+async def web_agent_callback(
+    payload: schemas.AgentWebChoiceRequest,
+    current_user: User = Depends(get_current_active_user),
+) -> schemas.Response:
+    """
+    接收 Web 智能助手选择卡片回调。
+
+    :param payload: 按钮选择请求
+    :param current_user: 当前登录用户
+    :return: 下一条需要发送给 Agent 的用户消息与卡片反馈
+    """
+    result = _resolve_web_agent_choice_payload(
+        callback_data=payload.callback_data,
+        user_id=str(current_user.id),
+    )
+    if not result:
+        return schemas.Response(success=False, message="该选择已失效，请重新发起选择")
+    return schemas.Response(success=True, data=result)
+
+
 @router.post("/stream", summary="Web智能助手流式对话")
 async def web_agent_stream(
     payload: schemas.AgentWebChatRequest,
     request: Request,
-    current_user: User = Depends(get_current_active_superuser),
+    current_user: User = Depends(get_current_active_user),
 ) -> StreamingResponse:
     """
     Web 智能助手流式对话。
 
     :param payload: 对话请求
     :param request: 当前 HTTP 请求
-    :param current_user: 当前登录管理员
+    :param current_user: 当前登录用户
     :return: SSE 流式响应
     """
     if not settings.AI_AGENT_ENABLE:
@@ -428,12 +679,12 @@ async def web_agent_stream(
         )
 
     prompt = payload.text.strip()
-    if not prompt:
+    if not prompt and not payload.images and not payload.files and not payload.audio_refs:
         return StreamingResponse(
             iter([
                 _build_web_agent_sse(
                     "error",
-                    {"message": "请输入要发送给智能助手的内容。"},
+                    {"message": "请输入要发送给智能助手的内容或选择附件。"},
                 )
             ]),
             media_type="text/event-stream",

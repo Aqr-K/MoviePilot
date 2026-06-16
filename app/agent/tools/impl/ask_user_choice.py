@@ -4,7 +4,7 @@ from typing import List, Optional, Type
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.agent.tools.base import MoviePilotTool, ToolChain
+from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.helper.interaction import (
     AgentInteractionOption,
@@ -188,7 +188,7 @@ class AskUserChoiceTool(MoviePilotTool):
             len(choice_options),
         )
 
-        await ToolChain().async_post_message(
+        await self.send_notification_message(
             Notification(
                 channel=channel,
                 source=self._source,

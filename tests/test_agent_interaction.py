@@ -25,11 +25,15 @@ class TestAgentInteraction(unittest.TestCase):
         telegram_prompt = prompt_manager.get_agent_prompt(
             channel=MessageChannel.Telegram.value
         )
+        web_agent_prompt = prompt_manager.get_agent_prompt(
+            channel=MessageChannel.WebAgent.value
+        )
         wechat_prompt = prompt_manager.get_agent_prompt(
             channel=MessageChannel.Wechat.value
         )
 
         self.assertIn("ask_user_choice", telegram_prompt)
+        self.assertIn("ask_user_choice", web_agent_prompt)
         self.assertIn("terminal interaction tool", telegram_prompt)
         self.assertIn("do not write a final text reply after it", telegram_prompt)
         self.assertNotIn("ask_user_choice", wechat_prompt)
@@ -46,6 +50,13 @@ class TestAgentInteraction(unittest.TestCase):
                 source="telegram-test",
                 username="tester",
             )
+            web_agent_tools = MoviePilotToolFactory.create_tools(
+                session_id="session-web",
+                user_id="10001",
+                channel=MessageChannel.WebAgent.value,
+                source="web-agent",
+                username="tester",
+            )
             wechat_tools = MoviePilotToolFactory.create_tools(
                 session_id="session-2",
                 user_id="10001",
@@ -55,6 +66,7 @@ class TestAgentInteraction(unittest.TestCase):
             )
 
         self.assertIn("ask_user_choice", [tool.name for tool in telegram_tools])
+        self.assertIn("ask_user_choice", [tool.name for tool in web_agent_tools])
         self.assertNotIn("ask_user_choice", [tool.name for tool in wechat_tools])
 
     def test_choice_tool_returns_direct_after_sending_interaction(self):
@@ -74,7 +86,7 @@ class TestAgentInteraction(unittest.TestCase):
         tool.set_agent_context(agent_context={})
 
         with patch(
-            "app.agent.tools.impl.ask_user_choice.ToolChain.async_post_message",
+            "app.agent.tools.base.ToolChain.async_post_message",
             new=AsyncMock(),
         ) as async_post_message:
             result = asyncio.run(
@@ -115,7 +127,7 @@ class TestAgentInteraction(unittest.TestCase):
         )
 
         with patch(
-            "app.agent.tools.impl.ask_user_choice.ToolChain.async_post_message",
+            "app.agent.tools.base.ToolChain.async_post_message",
             new=AsyncMock(),
         ) as async_post_message:
             result = asyncio.run(
