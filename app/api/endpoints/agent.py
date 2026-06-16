@@ -517,7 +517,7 @@ def _split_web_agent_output(text: str) -> list[dict]:
 
     def append_text(content: str) -> None:
         """将工具汇总行从普通文本中拆出，便于前端独立展示。"""
-        if not content or not content.strip():
+        if not content:
             return
         lines = content.splitlines(keepends=True)
         buffer = ""

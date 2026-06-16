@@ -37,6 +37,25 @@ def test_split_web_agent_output_extracts_summary_tool_message():
     ]
 
 
+def test_split_web_agent_output_preserves_standalone_newline_delta():
+    """独立换行增量应保留，避免流式 Markdown 列表被拼成同一行。"""
+    chunks = [
+        "可以这样操作：",
+        "\n",
+        "- **搜索资源**：搜索电影",
+        "\n",
+        "- **下载管理**：添加任务",
+    ]
+    content = ""
+
+    for chunk in chunks:
+        for event in _split_web_agent_output(chunk):
+            if event["type"] == "delta":
+                content += event["content"]
+
+    assert content == "可以这样操作：\n- **搜索资源**：搜索电影\n- **下载管理**：添加任务"
+
+
 def test_build_web_agent_session_id_is_stable_per_user_and_seed():
     """同一用户和前端会话标识应生成稳定的服务端会话 ID。"""
     user = SimpleNamespace(id=1, name="admin")
