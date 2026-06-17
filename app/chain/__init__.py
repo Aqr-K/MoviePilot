@@ -16,7 +16,7 @@ from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
 from app.helper.message import MessageHelper, MessageQueueManager, MessageTemplateHelper

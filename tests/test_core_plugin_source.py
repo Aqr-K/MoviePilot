@@ -36,7 +36,7 @@ class CorePluginSourceSeamTest(TestCase):
 
     def test_core_plugin_no_top_level_helper_plugin_import(self):
         """app/core/plugin.py 不再顶层 import helper.plugin / 引用 PluginHelper"""
-        import app.core.plugin as plugin
+        import app.helper.plugin_manager as plugin
         source = Path(plugin.__file__).read_text(encoding="utf-8")
         for line in source.splitlines():
             stripped = line.strip()

@@ -47,7 +47,7 @@ class PluginRepoUrlTest(TestCase):
 
     def test_core_plugin_uses_utils_not_pluginhelper_for_url(self):
         """app/core/plugin.py 不再经由 PluginHelper 调用这两个 URL 工具"""
-        import app.core.plugin as plugin
+        import app.helper.plugin_manager as plugin
         source = Path(plugin.__file__).read_text(encoding="utf-8")
         self.assertNotIn("PluginHelper.is_local_repo_url", source)
         self.assertNotIn("PluginHelper.make_local_repo_url", source)

@@ -5,7 +5,7 @@ import shutil
 from typing import Any, Optional
 
 from app.core.config import settings
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.server import MoviePilotServerHelper
 from app.helper.plugin import PluginHelper

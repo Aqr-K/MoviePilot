@@ -13,7 +13,7 @@ from app import schemas
 from app.command import Command
 from app.core.config import settings
 from app.core.event import eventmanager
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.core.security import (
     resource_token_cookie,
     verify_apikey,

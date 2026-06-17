@@ -12,7 +12,7 @@ from app.chain.subscribe import SubscribeChain
 from app.chain.system import SystemChain
 from app.chain.transfer import TransferChain
 from app.core.event import Event as ManagerEvent, eventmanager, Event
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.core.thread import ThreadHelper
 from app.helper.message import MessageHelper
 from app.log import logger

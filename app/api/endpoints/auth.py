@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app import schemas
 from app.core.auth_bridge import build_token_response, consume_plugin_auth_ticket
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
 
