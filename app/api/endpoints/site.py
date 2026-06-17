@@ -11,7 +11,7 @@ from app.chain.site import SiteChain
 from app.chain.torrents import TorrentsChain
 from app.command import Command
 from app.core.event import eventmanager
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.core.security import verify_token
 from app.db import get_db, get_async_db
 from app.db.models import User

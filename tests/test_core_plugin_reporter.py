@@ -43,7 +43,7 @@ class CorePluginReporterSeamTest(TestCase):
 
     def test_core_plugin_no_longer_imports_helper_server(self):
         """app/core/plugin.py 不再 import app.helper.server / 引用 MoviePilotServerHelper"""
-        import app.core.plugin as plugin
+        import app.helper.plugin_manager as plugin
         source = Path(plugin.__file__).read_text(encoding="utf-8")
         self.assertNotIn("from app.helper.server", source)
         self.assertNotIn("import app.helper.server", source)

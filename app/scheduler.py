@@ -26,7 +26,7 @@ from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
 from app.core.config import settings, global_vars
 from app.core.event import eventmanager
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.db import SessionFactory
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.message import Message

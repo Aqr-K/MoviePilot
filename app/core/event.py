@@ -491,7 +491,7 @@ class EventManager(metaclass=Singleton):
         """
         class_name, method_name = self.__parse_handler_names(handler)
 
-        from app.core.plugin import PluginManager
+        from app.helper.plugin_manager import PluginManager
         from app.core.module import ModuleManager
 
         plugin_manager = PluginManager()
@@ -545,7 +545,7 @@ class EventManager(metaclass=Singleton):
         """
         class_name, method_name = self.__parse_handler_names(handler)
 
-        from app.core.plugin import PluginManager
+        from app.helper.plugin_manager import PluginManager
         from app.core.module import ModuleManager
 
         plugin_manager = PluginManager()
