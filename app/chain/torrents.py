@@ -2,6 +2,8 @@ import re
 import traceback
 from typing import Dict, List, Union, Optional
 
+from app.helper.sites import SitesHelper  # noqa
+
 from app.chain import ChainBase
 from app.chain.media import MediaChain
 from app.core.config import settings, global_vars
@@ -10,7 +12,6 @@ from app.core.metainfo import MetaInfo
 from app.db.site_oper import SiteOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.rss import RssHelper
-from app.helper.sites import SitesHelper  # noqa
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import Notification
@@ -39,11 +40,17 @@ class TorrentsChain(ChainBase):
         """
         远程刷新订阅，发送消息
         """
-        self.post_message(Notification(channel=channel,
-                                       title=f"开始刷新种子 ...", userid=userid))
+        self.post_message(Notification(
+            channel=channel,
+            title=f"开始刷新种子 ...",
+            userid=userid,
+            save_history=False))
         self.refresh()
-        self.post_message(Notification(channel=channel,
-                                       title=f"种子刷新完成！", userid=userid))
+        self.post_message(Notification(
+            channel=channel,
+            title=f"种子刷新完成！",
+            userid=userid,
+            save_history=False))
 
     def get_torrents(self, stype: Optional[str] = None) -> Dict[str, List[Context]]:
         """
@@ -150,7 +157,8 @@ class TorrentsChain(ChainBase):
             return []
         # 解析RSS
         rss_items = RssHelper().parse(site.get("rss"), True if site.get("proxy") else False,
-                                      timeout=int(site.get("timeout") or 30), ua=site.get("ua") if site.get("ua") else None)
+                                      timeout=int(site.get("timeout") or 30),
+                                      ua=site.get("ua") if site.get("ua") else None)
         if rss_items is None:
             # rss过期，尝试保留原配置生成新的rss
             self.__renew_rss_url(domain=domain, site=site)

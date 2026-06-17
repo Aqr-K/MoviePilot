@@ -2945,6 +2945,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     title="请输入正确的命令格式：/redo [id] 或 /redo [id] [tmdbid/豆瓣id]|[类型]，"
                           "[id] 为整理记录编号",
                     userid=userid,
+                    save_history=False,
                 )
             )
 
@@ -2971,6 +2972,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         text=errmsg,
                         userid=userid,
                         link=settings.MP_DOMAIN("#/history"),
+                        save_history=False,
                     )
                 )
             return
@@ -2997,6 +2999,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     text=errmsg,
                     userid=userid,
                     link=settings.MP_DOMAIN("#/history"),
+                    save_history=False,
                 )
             )
             return

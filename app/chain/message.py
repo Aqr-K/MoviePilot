@@ -194,6 +194,7 @@ class MessageChain(ChainBase):
                             userid=userid,
                             username=username,
                             title="语音识别失败，请稍后重试",
+                            save_history=False,
                         )
                     )
                     return
@@ -298,6 +299,7 @@ class MessageChain(ChainBase):
                         userid=userid,
                         username=username,
                         title="请输入要使用传统交互处理的内容",
+                        save_history=False,
                     )
                 )
                 return False
@@ -623,6 +625,7 @@ class MessageChain(ChainBase):
                 userid=userid,
                 username=username,
                 title="回调数据格式错误，请检查！",
+                save_history=False,
             )
         )
         return False
@@ -751,6 +754,7 @@ class MessageChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="该选择已失效，请重新发起选择",
+                    save_history=False,
                 )
             )
             return False
@@ -823,6 +827,7 @@ class MessageChain(ChainBase):
                 userid=userid,
                 username=username,
                 title=f"开始重新整理记录 #{history_id} ...",
+                save_history=False,
             )
         )
 
@@ -836,6 +841,7 @@ class MessageChain(ChainBase):
                     username=username,
                     title=f"整理记录 #{history_id} 已重新整理",
                     link=settings.MP_DOMAIN("#/history"),
+                    save_history=False,
                 )
             )
             return
@@ -849,6 +855,7 @@ class MessageChain(ChainBase):
                 title="重新整理失败",
                 text=errmsg,
                 link=settings.MP_DOMAIN("#/history"),
+                save_history=False,
             )
         )
 
@@ -902,6 +909,7 @@ class MessageChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="MoviePilot智能助手未启用，请在系统设置中启用",
+                    save_history=False,
                 )
             )
             return
@@ -917,6 +925,7 @@ class MessageChain(ChainBase):
                     title="重新整理失败",
                     text=f"整理记录 #{history_id} 不存在",
                     link=settings.MP_DOMAIN("#/history"),
+                    save_history=False,
                 )
             )
             return
@@ -932,6 +941,7 @@ class MessageChain(ChainBase):
                 title=f"已将整理记录 #{history_id} 交给智能助手处理",
                 text="处理完成后会在这里回复结果。",
                 link=settings.MP_DOMAIN("#/history"),
+                save_history=False,
             )
         )
 
@@ -960,6 +970,7 @@ class MessageChain(ChainBase):
                         text=final_output.strip()
                              or f"整理记录 #{history_id} 已由智能助手处理完成。",
                         link=settings.MP_DOMAIN("#/history"),
+                        save_history=False,
                     )
                 )
             except Exception as e:
@@ -972,6 +983,7 @@ class MessageChain(ChainBase):
                         title="智能助手整理失败",
                         text=str(e),
                         link=settings.MP_DOMAIN("#/history"),
+                        save_history=False,
                     )
                 )
 
@@ -1093,6 +1105,7 @@ class MessageChain(ChainBase):
                     source=source,
                     title="智能体会话已清除，下次将创建新的会话",
                     userid=userid,
+                    save_history=False,
                 )
             )
         else:
@@ -1102,6 +1115,7 @@ class MessageChain(ChainBase):
                     source=source,
                     title="您当前没有活跃的智能体会话",
                     userid=userid,
+                    save_history=False,
                 )
             )
 
@@ -1137,6 +1151,7 @@ class MessageChain(ChainBase):
                         source=source,
                         title="智能体推理已应急停止，会话记忆已保留，您可以继续对话",
                         userid=userid,
+                        save_history=False,
                     )
                 )
             else:
@@ -1146,6 +1161,7 @@ class MessageChain(ChainBase):
                         source=source,
                         title="当前没有正在执行的智能体任务",
                         userid=userid,
+                        save_history=False,
                     )
                 )
         else:
@@ -1155,6 +1171,7 @@ class MessageChain(ChainBase):
                     source=source,
                     title="您当前没有活跃的智能体会话",
                     userid=userid,
+                    save_history=False,
                 )
             )
 
@@ -1210,6 +1227,7 @@ class MessageChain(ChainBase):
                     source=source,
                     title="您当前没有活跃的智能体会话",
                     userid=userid,
+                    save_history=False,
                 )
             )
             return
@@ -1223,6 +1241,7 @@ class MessageChain(ChainBase):
                 title="当前智能体会话状态",
                 text=self._format_session_status_text(status),
                 userid=userid,
+                save_history=False,
             )
         )
 
@@ -1253,6 +1272,7 @@ class MessageChain(ChainBase):
                         userid=userid,
                         username=username,
                         title="MoviePilot智能助手未启用，请在系统设置中启用",
+                        save_history=False,
                     )
                 )
                 return False
@@ -1274,6 +1294,7 @@ class MessageChain(ChainBase):
                         userid=userid,
                         username=username,
                         title="请输入您的问题或需求",
+                        save_history=False,
                     )
                 )
                 return False
@@ -1297,6 +1318,7 @@ class MessageChain(ChainBase):
                             userid=userid,
                             username=username,
                             title="附件读取失败，请稍后重试",
+                            save_history=False,
                         )
                     )
                     return False
@@ -1315,6 +1337,7 @@ class MessageChain(ChainBase):
                             userid=userid,
                             username=username,
                             title="附件读取失败，请稍后重试",
+                            save_history=False,
                         )
                     )
                     return False
@@ -1335,6 +1358,7 @@ class MessageChain(ChainBase):
                         userid=userid,
                         username=username,
                         title="文件读取失败，请稍后重试",
+                        save_history=False,
                     )
                 )
                 return False
@@ -2002,6 +2026,7 @@ class MediaInteractionChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="交互已失效，请重新搜索或订阅",
+                    save_history=False,
                 )
             )
             return True
@@ -2115,6 +2140,7 @@ class MediaInteractionChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="媒体交互已结束",
+                    save_history=False,
                 )
             )
             return True
@@ -2282,6 +2308,7 @@ class MediaInteractionChain(ChainBase):
                     userid=userid,
                     username=username,
                     title=f"{meta.name} 没有找到对应的媒体信息！",
+                    save_history=False,
                 )
             )
             return
@@ -2386,6 +2413,7 @@ class MediaInteractionChain(ChainBase):
                     userid=userid,
                     username=username,
                     title=f"【{mediainfo.title_year}{request.meta.sea} 媒体库中已存在，如需重新下载请发送：搜索 名称 或 下载 名称】",
+                    save_history=False,
                 )
             )
             return
@@ -2405,6 +2433,7 @@ class MediaInteractionChain(ChainBase):
                     userid=userid,
                     username=username,
                     title=f"{mediainfo.title_year}：\n" + "\n".join(messages),
+                    save_history=False,
                 )
             )
 
@@ -2416,6 +2445,7 @@ class MediaInteractionChain(ChainBase):
                 userid=userid,
                 username=username,
                 title=f"开始搜索 {mediainfo.type.value} {mediainfo.title_year} ...",
+                save_history=False,
             )
         )
 
@@ -2428,6 +2458,7 @@ class MediaInteractionChain(ChainBase):
                     userid=userid,
                     username=username,
                     title=f"{mediainfo.title}{request.meta.sea} 未搜索到需要的资源！",
+                    save_history=False,
                 )
             )
             return
@@ -2501,6 +2532,7 @@ class MediaInteractionChain(ChainBase):
                         userid=userid,
                         username=username,
                         title=f"【{mediainfo.title_year}{request.meta.sea} 媒体库中已存在，如需洗版请发送：洗版 XXX】",
+                        save_history=False,
                     )
                 )
                 return
@@ -2904,6 +2936,7 @@ class MediaInteractionChain(ChainBase):
                 buttons=buttons,
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
+                save_history=False,
             ),
             medias=page_items,
         )
@@ -2953,6 +2986,7 @@ class MediaInteractionChain(ChainBase):
                 buttons=buttons,
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
+                save_history=False,
             ),
             torrents=page_items,
         )
@@ -3006,6 +3040,7 @@ class MediaInteractionChain(ChainBase):
                 buttons=buttons,
                 original_message_id=original_message_id,
                 original_chat_id=original_chat_id,
+                save_history=False,
             )
         )
 
@@ -3324,5 +3359,6 @@ class MediaInteractionChain(ChainBase):
                 userid=userid,
                 username=username,
                 title=title,
+                save_history=False,
             )
         )

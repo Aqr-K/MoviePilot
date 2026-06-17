@@ -223,6 +223,8 @@ class Notification(BaseModel):
     original_chat_id: Optional[str] = None
     # 是否禁用链接预览（仅Telegram支持）
     disable_web_page_preview: Optional[bool] = None
+    # 是否写入消息历史
+    save_history: bool = True
 
     def to_dict(self):
         """

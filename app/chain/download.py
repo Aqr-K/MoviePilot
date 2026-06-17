@@ -1337,7 +1337,8 @@ class DownloadChain(ChainBase):
                 mtype=NotificationType.Download,
                 title="没有正在下载的任务！",
                 userid=userid,
-                link=settings.MP_DOMAIN('#/downloading')
+                link=settings.MP_DOMAIN('#/downloading'),
+                save_history=False,
             ))
             return
         # 发送消息
@@ -1356,7 +1357,8 @@ class DownloadChain(ChainBase):
             title=title,
             text="\n".join(messages),
             userid=userid,
-            link=settings.MP_DOMAIN('#/downloading')
+            link=settings.MP_DOMAIN('#/downloading'),
+            save_history=False,
         ))
 
     def downloading(self, name: Optional[str] = None) -> List[DownloaderTorrent]:

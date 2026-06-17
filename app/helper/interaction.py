@@ -218,6 +218,7 @@ def update_or_post_message(
             title=title,
             text=text,
             buttons=buttons,
+            save_history=False,
         )
     )
 
