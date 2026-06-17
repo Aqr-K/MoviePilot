@@ -5,9 +5,11 @@ from app.db import SessionFactory
 from app.db.message_oper import MessageOper
 from app.db.models.message import Message
 from app.chain import ChainBase
+from app.core.context import Context, MediaInfo, TorrentInfo
+from app.core.meta import MetaBase
 from app.helper.message import MessageHelper
 from app.schemas import Notification
-from app.schemas.types import NotificationType
+from app.schemas.types import MediaType, NotificationType
 
 
 def _clear_messages() -> None:
@@ -167,3 +169,59 @@ def test_agent_notification_post_message_is_persisted_without_sse_queue() -> Non
     assert messages[0].mtype == NotificationType.Agent.value
     assert helper.get() is None
     chain.messagequeue.send_message.assert_called_once()
+
+
+def test_transient_notification_post_message_skips_history_but_dispatches() -> None:
+    """
+    标记为不保存历史的过程消息应跳过数据库登记，但仍正常派发。
+    """
+    _clear_messages()
+    chain = ChainBase()
+
+    chain.messagequeue.send_message = Mock()
+    chain.eventmanager.send_event = Mock()
+
+    chain.post_message(
+        Notification(
+            title="请选择下载目录",
+            text="1. 默认目录",
+            save_history=False,
+        )
+    )
+
+    assert MessageOper().list_by_page(page=1, count=10) == []
+    assert "save_history" not in chain.eventmanager.send_event.call_args.kwargs["data"]
+    chain.eventmanager.send_event.assert_called_once()
+    chain.messagequeue.send_message.assert_called_once()
+
+
+def test_transient_media_and_torrent_lists_skip_history_but_dispatch() -> None:
+    """
+    传统交互候选列表标记为不保存历史时，只发送到渠道，不写入消息表。
+    """
+    _clear_messages()
+    chain = ChainBase()
+    media = MediaInfo(type=MediaType.MOVIE, title="星际穿越", year="2014")
+    torrent = Context(
+        meta_info=MetaBase("星际穿越"),
+        media_info=media,
+        torrent_info=TorrentInfo(
+            title="星际穿越.2014.1080p",
+            site_name="TestSite",
+            enclosure="https://example.com/demo.torrent",
+        ),
+    )
+
+    chain.messagequeue.send_message = Mock()
+
+    chain.post_medias_message(
+        Notification(title="请选择媒体", save_history=False),
+        medias=[media],
+    )
+    chain.post_torrents_message(
+        Notification(title="请选择资源", save_history=False),
+        torrents=[torrent],
+    )
+
+    assert MessageOper().list_by_page(page=1, count=10) == []
+    assert chain.messagequeue.send_message.call_count == 2

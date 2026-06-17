@@ -12,15 +12,6 @@ from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
 from app.chain.search import SearchChain
-from app.helper.interaction import (
-    SlashInteractionManager,
-    build_navigation_buttons,
-    format_markdown_table,
-    page_items,
-    supports_interaction_buttons,
-    supports_markdown,
-    update_or_post_message,
-)
 from app.chain.tmdb import TmdbChain
 from app.chain.torrents import TorrentsChain
 from app.core.config import settings, global_vars
@@ -34,6 +25,15 @@ from app.db.models.subscribe import Subscribe
 from app.db.site_oper import SiteOper
 from app.db.subscribe_oper import SubscribeOper
 from app.db.systemconfig_oper import SystemConfigOper
+from app.helper.interaction import (
+    SlashInteractionManager,
+    build_navigation_buttons,
+    format_markdown_table,
+    page_items,
+    supports_interaction_buttons,
+    supports_markdown,
+    update_or_post_message,
+)
 from app.helper.server import MoviePilotServerHelper
 from app.helper.torrent import TorrentHelper
 from app.log import logger
@@ -41,7 +41,6 @@ from app.schemas import (MediaRecognizeConvertEventData, SubscribeEpisodesRefres
                          SubscribeCompletionCheckEventData)
 from app.schemas.types import MediaType, SystemConfigKey, MessageChannel, NotificationType, EventType, ChainEventType, \
     ContentType
-
 
 subscribe_interaction_manager = SlashInteractionManager()
 
@@ -365,9 +364,9 @@ class SubscribeChain(ChainBase):
         判断当前订阅是否启用了电视剧全集洗版。
         """
         return (
-            bool(subscribe.best_version_full)
-            and bool(subscribe.best_version)
-            and subscribe.type == MediaType.TV.value
+                bool(subscribe.best_version_full)
+                and bool(subscribe.best_version)
+                and subscribe.type == MediaType.TV.value
         )
 
     @classmethod
@@ -435,9 +434,9 @@ class SubscribeChain(ChainBase):
         构造分集洗版优先全集时使用的整季缺失范围。
         """
         if (
-            not subscribe.best_version
-            or cls.__is_full_best_version_enabled(subscribe)
-            or subscribe.type != MediaType.TV.value
+                not subscribe.best_version
+                or cls.__is_full_best_version_enabled(subscribe)
+                or subscribe.type != MediaType.TV.value
         ):
             return None
 
@@ -474,7 +473,7 @@ class SubscribeChain(ChainBase):
         full_season_contexts = [
             context for context in contexts
             if context.media_info.type == MediaType.TV
-            and self.__is_full_season_resource(meta=context.meta_info, subscribe=subscribe)
+               and self.__is_full_season_resource(meta=context.meta_info, subscribe=subscribe)
         ] if full_pack_no_exists else []
         full_pack_contexts = [
             context for context in full_season_contexts
@@ -1081,10 +1080,10 @@ class SubscribeChain(ChainBase):
                                 # 洗版
                                 if subscribe.best_version:
                                     if (
-                                        torrent_mediainfo.type == MediaType.TV
-                                        and not self.__is_full_season_best_version_resource(
-                                            meta=torrent_meta, subscribe=subscribe
-                                        )
+                                            torrent_mediainfo.type == MediaType.TV
+                                            and not self.__is_full_season_best_version_resource(
+                                        meta=torrent_meta, subscribe=subscribe
+                                    )
                                     ):
                                         logger.info(
                                             f"{subscribe.name} 正在全集洗版，{torrent_info.title} 不是全集资源"
@@ -1092,10 +1091,10 @@ class SubscribeChain(ChainBase):
                                         continue
                                     # 洗版时，不符合订阅集数的不要
                                     if (
-                                        torrent_mediainfo.type == MediaType.TV
-                                        and not self._is_episode_range_covered(
-                                            meta=torrent_meta, subscribe=subscribe
-                                        )
+                                            torrent_mediainfo.type == MediaType.TV
+                                            and not self._is_episode_range_covered(
+                                        meta=torrent_meta, subscribe=subscribe
+                                    )
                                     ):
                                         logger.info(
                                             f"{subscribe.name} 正在洗版，{torrent_info.title} 不符合订阅集数范围"
@@ -1116,9 +1115,9 @@ class SubscribeChain(ChainBase):
                                         # 防止标题元数据与实际种子文件错位导致同优先级集被重复下载。
                                         context.allowed_episodes = set(interested_episodes)
                                     if (
-                                        torrent_mediainfo.type != MediaType.TV
-                                        and subscribe.current_priority
-                                        and torrent_info.pri_order <= subscribe.current_priority
+                                            torrent_mediainfo.type != MediaType.TV
+                                            and subscribe.current_priority
+                                            and torrent_info.pri_order <= subscribe.current_priority
                                     ):
                                         logger.info(
                                             f'{subscribe.name} 正在洗版，{torrent_info.title} 优先级低于或等于已下载优先级')
@@ -1585,8 +1584,8 @@ class SubscribeChain(ChainBase):
                                                 continue
                                 else:
                                     if not self.__is_full_season_best_version_resource(
-                                        meta=torrent_meta,
-                                        subscribe=subscribe,
+                                            meta=torrent_meta,
+                                            subscribe=subscribe,
                                     ):
                                         logger.debug(
                                             f"{subscribe.name} 正在全集洗版，{torrent_info.title} 不是全集资源"
@@ -1594,11 +1593,11 @@ class SubscribeChain(ChainBase):
                                         continue
                                     # 洗版时，不符合订阅集数的不要
                                     if (
-                                        meta.type == MediaType.TV
-                                        and not self._is_episode_range_covered(
-                                            meta=torrent_meta,
-                                            subscribe=subscribe,
-                                        )
+                                            meta.type == MediaType.TV
+                                            and not self._is_episode_range_covered(
+                                        meta=torrent_meta,
+                                        subscribe=subscribe,
+                                    )
                                     ):
                                         logger.debug(
                                             f"{subscribe.name} 正在洗版，{torrent_info.title} 不符合订阅集数范围"
@@ -1642,9 +1641,9 @@ class SubscribeChain(ChainBase):
                                     # 避免 RSS / 订阅刷新场景下标题元数据与种子文件错位导致同优先级集重复下载。
                                     _context.allowed_episodes = set(interested_episodes)
                                 if (
-                                    meta.type != MediaType.TV
-                                    and subscribe.current_priority
-                                    and torrent_info.pri_order <= subscribe.current_priority
+                                        meta.type != MediaType.TV
+                                        and subscribe.current_priority
+                                        and torrent_info.pri_order <= subscribe.current_priority
                                 ):
                                     logger.info(
                                         f'{subscribe.name} 正在洗版，{torrent_info.title} 优先级低于或等于已下载优先级')
@@ -2087,11 +2086,11 @@ class SubscribeChain(ChainBase):
         })
 
     def remote_list(
-        self,
-        arg_str: str = "",
-        channel: MessageChannel = None,
-        userid: Union[str, int] = None,
-        source: Optional[str] = None,
+            self,
+            arg_str: str = "",
+            channel: MessageChannel = None,
+            userid: Union[str, int] = None,
+            source: Optional[str] = None,
     ):
         """
         /subscribes 统一入口。
@@ -2105,11 +2104,11 @@ class SubscribeChain(ChainBase):
         )
         normalized_arg = (arg_str or "").strip()
         if normalized_arg and self.handle_text_interaction(
-            channel=channel,
-            source=source,
-            userid=userid,
-            username="",
-            text=normalized_arg,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username="",
+                text=normalized_arg,
         ):
             return
         self._render_subscribe_interaction(
@@ -2133,14 +2132,14 @@ class SubscribeChain(ChainBase):
         return parts[1], parts[2]
 
     def handle_callback_interaction(
-        self,
-        callback_data: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            callback_data: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
     ) -> bool:
         """
         处理 /subscribes 按钮交互。
@@ -2211,12 +2210,12 @@ class SubscribeChain(ChainBase):
         return True
 
     def handle_text_interaction(
-        self,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
-        text: str,
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
+            text: str,
     ) -> bool:
         """
         处理 /subscribes 文本补充输入。
@@ -2416,14 +2415,14 @@ class SubscribeChain(ChainBase):
         return True
 
     def _render_subscribe_interaction(
-        self,
-        request,
-        channel: MessageChannel,
-        source: Optional[str],
-        userid: Union[str, int],
-        username: Optional[str],
-        original_message_id: Optional[Union[str, int]] = None,
-        original_chat_id: Optional[str] = None,
+            self,
+            request,
+            channel: MessageChannel,
+            source: Optional[str],
+            userid: Union[str, int],
+            username: Optional[str],
+            original_message_id: Optional[Union[str, int]] = None,
+            original_chat_id: Optional[str] = None,
     ) -> None:
         """
         渲染 /subscribes 当前页面。
@@ -2502,7 +2501,7 @@ class SubscribeChain(ChainBase):
         )
 
     def _format_subscribe_list(
-        self, subscribes: List[Subscribe], channel: Optional[MessageChannel]
+            self, subscribes: List[Subscribe], channel: Optional[MessageChannel]
     ) -> str:
         """
         根据渠道能力格式化订阅列表。
@@ -2590,11 +2589,11 @@ class SubscribeChain(ChainBase):
         )
 
     def _run_refresh_action(
-        self,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
     ) -> None:
         """
         执行订阅刷新。
@@ -2620,11 +2619,11 @@ class SubscribeChain(ChainBase):
         )
 
     def _run_metadata_refresh_action(
-        self,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
+            self,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
     ) -> None:
         """
         执行订阅元数据刷新。
@@ -2657,12 +2656,12 @@ class SubscribeChain(ChainBase):
         return [int(item) for item in re.findall(r"\d+", arg_str or "")]
 
     def _run_search_action(
-        self,
-        arg_str: str,
-        channel: MessageChannel,
-        source: str,
-        userid: Union[str, int],
-        username: str,
+            self,
+            arg_str: str,
+            channel: MessageChannel,
+            source: str,
+            userid: Union[str, int],
+            username: str,
     ) -> Tuple[bool, str]:
         """
         手动执行订阅搜索。
@@ -2756,9 +2755,13 @@ class SubscribeChain(ChainBase):
         删除订阅
         """
         if not arg_str:
-            self.post_message(schemas.Notification(channel=channel, source=source,
-                                                   title="请输入正确的命令格式：/subscribe_delete [id]，"
-                                                         "[id]为订阅编号", userid=userid))
+            self.post_message(schemas.Notification(
+                channel=channel,
+                source=source,
+                title="请输入正确的命令格式：/subscribe_delete [id]，"
+                      "[id]为订阅编号",
+                userid=userid,
+                save_history=False))
             return
         arg_strs = str(arg_str).split()
         subscribeoper = SubscribeOper()
@@ -2769,8 +2772,11 @@ class SubscribeChain(ChainBase):
             subscribe_id = int(arg_str)
             subscribe = subscribeoper.get(subscribe_id)
             if not subscribe:
-                self.post_message(schemas.Notification(channel=channel, source=source,
-                                                       title=f"订阅编号 {subscribe_id} 不存在！", userid=userid))
+                self.post_message(schemas.Notification(
+                    channel=channel, source=source,
+                    title=f"订阅编号 {subscribe_id} 不存在！",
+                    userid=userid,
+                    save_history=False))
                 return
             # 删除订阅
             subscribeoper.delete(subscribe_id)

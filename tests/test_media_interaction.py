@@ -224,6 +224,7 @@ def test_media_interaction_starts_search_and_posts_media_list():
     assert handled
     post_medias_message.assert_called_once()
     notification = post_medias_message.call_args.args[0]
+    assert notification.save_history is False
     assert notification.buttons
     assert notification.buttons[0][0]["callback_data"].startswith("media:")
 
@@ -306,6 +307,7 @@ def test_torrent_selection_prompts_download_dir_buttons_before_download():
     assert request.phase == "download-dir"
     post_message.assert_called_once()
     notification = post_message.call_args.args[0]
+    assert notification.save_history is False
     assert "请选择下载目录" in notification.title
     assert "电影下载 (/downloads/movies)" in notification.text
     assert notification.buttons[0][0]["callback_data"] == f"media:{request.request_id}:download-dir:1"
@@ -342,6 +344,7 @@ def test_torrent_selection_prompts_text_download_dir_for_plain_channel():
 
     assert handled
     notification = post_message.call_args.args[0]
+    assert notification.save_history is False
     assert "请回复对应数字" in notification.title
     assert notification.buttons is None
     assert "2. 动画下载 (rclone:/media/anime)" in notification.text
