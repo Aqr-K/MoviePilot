@@ -20,6 +20,7 @@ from starlette import status
 from watchfiles import watch
 
 from app import schemas
+from app.core.auth_level import get_auth_level
 from app.core.cache import fresh, async_fresh
 from app.core.config import settings
 from app.core.event import eventmanager
@@ -27,7 +28,6 @@ from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.server import MoviePilotServerHelper
 from app.helper.plugin import PluginHelper
-from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
@@ -1663,8 +1663,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 3 - 站点&密钥认证可见
         # 99 - 站点&特殊密钥认证可见
         # 如果当前站点认证级别大于 1 且插件级别为 99，并存在插件公钥，说明为特殊密钥认证，通过密钥匹配进行认证
-        siteshelper = SitesHelper()
-        if siteshelper.auth_level > 1 and plugin.auth_level == 99 and hasattr(plugin, "plugin_public_key"):
+        current_auth_level = get_auth_level()
+        if current_auth_level > 1 and plugin.auth_level == 99 and hasattr(plugin, "plugin_public_key"):
             plugin_id = plugin.id if isinstance(plugin, schemas.Plugin) else plugin.__name__
             public_key = plugin.plugin_public_key
             if public_key:
@@ -1672,7 +1672,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 verify = RSAUtils.verify_rsa_keys(public_key=public_key, private_key=private_key)
                 return verify
         # 如果当前站点认证级别小于插件级别，则返回 False
-        if siteshelper.auth_level < plugin.auth_level:
+        if current_auth_level < plugin.auth_level:
             return False
         return True
 

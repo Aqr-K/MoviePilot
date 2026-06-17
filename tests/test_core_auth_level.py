@@ -49,6 +49,15 @@ class CoreAuthLevelSeamTest(TestCase):
         self.assertNotIn("from app.helper.sites", source)
         self.assertNotIn("import app.helper.sites", source)
 
+    def test_core_plugin_no_longer_imports_helper_sites(self):
+        """app/core/plugin.py 的 auth_level 读取改走 seam,不再 import app.helper.sites
+        （plugin.py 仍保留 helper.server / helper.plugin,属各自独立接缝）"""
+        import app.core.plugin as plugin
+        source = Path(plugin.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("from app.helper.sites", source)
+        self.assertNotIn("import app.helper.sites", source)
+        self.assertNotIn("SitesHelper", source)
+
     def test_seam_module_has_no_helper_dependency(self):
         """app/core/auth_level.py 自身不依赖 app.helper（方向正确）"""
         source = Path(auth_level.__file__).read_text(encoding="utf-8")
