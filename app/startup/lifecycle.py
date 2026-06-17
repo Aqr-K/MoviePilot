@@ -17,8 +17,10 @@ except Exception:
     pass
 
 from app.chain.system import SystemChain
+from app.core.auth_level import set_auth_level_provider
 from app.core.config import global_vars, settings
 from app.helper.server import MoviePilotServerHelper
+from app.helper.sites import SitesHelper
 from app.helper.system import SystemHelper
 from app.startup.command_initializer import init_command, stop_command, restart_command
 from app.startup.modules_initializer import init_modules, stop_modules
@@ -63,6 +65,8 @@ async def lifespan(app: FastAPI):
     print("Starting up...")
     # 存储当前循环
     global_vars.set_loop(asyncio.get_event_loop())
+    # 注入站点认证等级提供者（解耦 core -> helper.sites）
+    set_auth_level_provider(lambda: SitesHelper().auth_level)
     # 初始化路由
     init_routers(app)
     # 初始化模块
