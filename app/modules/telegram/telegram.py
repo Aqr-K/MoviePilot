@@ -20,8 +20,8 @@ from telegramify_markdown.type import ContentTypes, SentType
 from app.core.config import settings
 from app.core.context import MediaInfo, Context
 from app.core.metainfo import MetaInfo
+from app.core.thread import ThreadHelper
 from app.helper.image import ImageHelper
-from app.helper.thread import ThreadHelper
 from app.log import logger
 from app.utils.common import retry
 from app.utils.http import RequestUtils
