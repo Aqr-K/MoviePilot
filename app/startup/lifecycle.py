@@ -18,6 +18,7 @@ except Exception:
 
 from app.chain.system import SystemChain
 from app.core.config import global_vars, settings
+from app.core.plugin_reporter import set_plugin_install_reporter
 from app.helper.server import MoviePilotServerHelper
 from app.helper.system import SystemHelper
 from app.startup.command_initializer import init_command, stop_command, restart_command
@@ -63,6 +64,8 @@ async def lifespan(app: FastAPI):
     print("Starting up...")
     # 存储当前循环
     global_vars.set_loop(asyncio.get_event_loop())
+    # 注入插件安装上报器（解耦 core/plugin -> helper.server）
+    set_plugin_install_reporter(MoviePilotServerHelper.install_plugin_reg)
     # 初始化路由
     init_routers(app)
     # 初始化模块

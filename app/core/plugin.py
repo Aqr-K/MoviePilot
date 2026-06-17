@@ -23,9 +23,9 @@ from app import schemas
 from app.core.cache import fresh, async_fresh
 from app.core.config import settings
 from app.core.event import eventmanager
+from app.core.plugin_reporter import report_plugin_install
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.server import MoviePilotServerHelper
 from app.helper.plugin import PluginHelper
 from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
@@ -591,7 +591,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             state, msg = PluginHelper().install(pid=plugin.id, repo_url=plugin.repo_url, force_install=True)
             elapsed_time = time.time() - start_time
             if state:
-                MoviePilotServerHelper.install_plugin_reg(plugin_id=plugin.id, repo_url=plugin.repo_url)
+                report_plugin_install(plugin_id=plugin.id, repo_url=plugin.repo_url)
                 logger.info(
                     f"插件 {plugin.plugin_name} 安装成功，版本：{plugin.plugin_version}，耗时：{elapsed_time:.2f} 秒")
                 sync_plugins.append(plugin.id)
