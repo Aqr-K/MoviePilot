@@ -238,3 +238,50 @@ def test_send_msg_markdown_escaping(telegram):
 
     # 验证返回值：send_msg 失败时返回 {"success": False}（非空字典），故显式断言 success
     assert result and result.get("success")
+
+
+def test_edit_msg_falls_back_to_caption_when_original_message_has_no_text(telegram):
+    """编辑图片消息时应在文本编辑失败后回退为 caption 编辑。"""
+    telegram.bot.edit_message_text.side_effect = Exception(
+        "Bad Request: there is no text in the message to edit"
+    )
+
+    result = telegram.edit_msg(
+        chat_id="1051253579",
+        message_id="110502",
+        title="【真人快打2】请选择下载目录",
+        text="1. 默认目录 (/volume1/Download/)\n2. 目录监控 (/volume1/Download/目录监控/)",
+        buttons=[
+            [
+                {"text": "1", "callback_data": "media:f64b855a2be7:download-dir:1"},
+                {"text": "2", "callback_data": "media:f64b855a2be7:download-dir:2"},
+            ]
+        ],
+    )
+
+    assert result is True
+    telegram.bot.edit_message_text.assert_called_once()
+    telegram.bot.edit_message_caption.assert_called_once()
+    caption_kwargs = telegram.bot.edit_message_caption.call_args.kwargs
+    assert caption_kwargs["chat_id"] == "1051253579"
+    assert caption_kwargs["message_id"] == 110502
+    assert "请选择下载目录" in caption_kwargs["caption"]
+    assert caption_kwargs["reply_markup"] is not None
+
+
+def test_edit_msg_keeps_other_edit_errors_failed(telegram):
+    """非图片 caption 场景的编辑错误不应被错误标记为成功。"""
+    telegram.bot.edit_message_text.side_effect = Exception(
+        "Bad Request: message is not modified"
+    )
+
+    result = telegram.edit_msg(
+        chat_id="1051253579",
+        message_id="110502",
+        title="测试标题",
+        text="测试内容",
+    )
+
+    assert result is False
+    telegram.bot.edit_message_text.assert_called_once()
+    telegram.bot.edit_message_caption.assert_not_called()

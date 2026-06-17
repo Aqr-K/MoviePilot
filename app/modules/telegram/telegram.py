@@ -979,6 +979,13 @@ class Telegram:
         finally:
             self._stop_typing_if_needed(chat_id, stop_typing)
 
+    @staticmethod
+    def __is_no_text_edit_error(err: Exception) -> bool:
+        """
+        判断 Telegram 是否因为原消息没有 text 字段而拒绝文本编辑。
+        """
+        return "there is no text in the message to edit" in str(err).lower()
+
     def __edit_message(
             self,
             chat_id: str,
@@ -1031,7 +1038,18 @@ class Telegram:
                     edit_text_kwargs["disable_web_page_preview"] = (
                         disable_web_page_preview
                     )
-                self._bot.edit_message_text(**edit_text_kwargs)
+                try:
+                    self._bot.edit_message_text(**edit_text_kwargs)
+                except Exception as err:
+                    if not self.__is_no_text_edit_error(err):
+                        raise
+                    self._bot.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        caption=standardize(text),
+                        parse_mode="MarkdownV2",
+                        reply_markup=reply_markup,
+                    )
             return True
         except Exception as e:
             logger.error(f"编辑消息失败：{str(e)}")
