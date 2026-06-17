@@ -33,6 +33,7 @@ from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
 from app.utils.mixins import ConfigReloadMixin
 from app.utils.object import ObjectUtils
+from app.utils.plugin_repo import is_local_repo_url, make_local_repo_url
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
@@ -1319,7 +1320,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             plugin = self._process_plugin_info(
                 pid=pid,
                 plugin_info=plugin_info,
-                market=PluginHelper.make_local_repo_url(
+                market=make_local_repo_url(
                     pid,
                     plugin_info.get("repo_path"),
                     package_version
@@ -1418,7 +1419,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         markets = [item for item in settings.PLUGIN_MARKET.split(",") if item]
 
         def repo_order(plugin: schemas.Plugin) -> int:
-            if PluginHelper.is_local_repo_url(plugin.repo_url):
+            if is_local_repo_url(plugin.repo_url):
                 return len(markets) + 1
             if plugin.repo_url in markets:
                 return markets.index(plugin.repo_url)
@@ -1432,7 +1433,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if not exists:
                 dedup_plugins[key] = plugin
                 continue
-            if PluginHelper.is_local_repo_url(exists.repo_url) and not PluginHelper.is_local_repo_url(plugin.repo_url):
+            if is_local_repo_url(exists.repo_url) and not is_local_repo_url(plugin.repo_url):
                 dedup_plugins[key] = plugin
 
         # 相同 ID 的插件保留版本号最大的版本；同版本市场来源优先。
@@ -1445,8 +1446,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if StringUtils.compare_version(plugin.plugin_version, ">", exists.plugin_version):
                 result_by_id[plugin.id] = plugin
             elif plugin.plugin_version == exists.plugin_version \
-                    and PluginHelper.is_local_repo_url(exists.repo_url) \
-                    and not PluginHelper.is_local_repo_url(plugin.repo_url):
+                    and is_local_repo_url(exists.repo_url) \
+                    and not is_local_repo_url(plugin.repo_url):
                 result_by_id[plugin.id] = plugin
 
         return list(result_by_id.values())
