@@ -2,6 +2,8 @@ import asyncio
 import hashlib
 import json
 import mimetypes
+import shutil
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -12,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from app import schemas
 from app.agent import MoviePilotAgent, ReplyMode, StreamingHandler
+from app.agent.llm.capability import AgentCapabilityManager
 from app.core.config import global_vars, settings
 from app.db.models import User
 from app.db.user_oper import UserOper, get_current_active_user
@@ -27,6 +30,7 @@ WEB_AGENT_FILE_TTL_SECONDS = 6 * 60 * 60
 WEB_AGENT_FILE_MAX_ITEMS = 256
 WEB_AGENT_UPLOAD_MAX_BYTES = 32 * 1024 * 1024
 WEB_AGENT_UPLOAD_CHUNK_SIZE = 1024 * 1024
+WEB_AGENT_BROWSER_AUDIO_SUFFIXES = {".aac", ".m4a", ".mp3", ".mp4", ".wav", ".wave"}
 _WEB_AGENT_FILE_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
@@ -342,6 +346,137 @@ def _register_web_agent_file(
     }
 
 
+def _get_web_agent_audio_mime_type(audio_path: Path) -> Optional[str]:
+    """
+    生成浏览器播放更友好的音频 MIME 类型。
+
+    :param audio_path: 音频文件路径
+    :return: 可用于 FileResponse/audio 标签的 MIME 类型
+    """
+    suffix = audio_path.suffix.lower()
+    if suffix in {".wav", ".wave"}:
+        return "audio/wav"
+    if suffix == ".mp3":
+        return "audio/mpeg"
+    if suffix in {".m4a", ".mp4"}:
+        return "audio/mp4"
+    if suffix == ".aac":
+        return "audio/aac"
+
+    return mimetypes.guess_type(audio_path.name)[0]
+
+
+def _prepare_web_agent_audio_attachment_path(voice_path: str) -> Path:
+    """
+    将 Agent 语音回复准备成 Web 面板可稳定播放的音频文件。
+
+    部分 TTS provider 会生成 Opus/Ogg，桌面 Chromium 通常可播放，但 iOS/Safari
+    兼容性不稳定；WebAgent 只在浏览器内播放，因此这里单独转成 WAV。
+    """
+    try:
+        source_path = Path(voice_path).expanduser().resolve(strict=True)
+    except OSError:
+        return Path(voice_path)
+    if source_path.suffix.lower() in WEB_AGENT_BROWSER_AUDIO_SUFFIXES:
+        return source_path
+    if not shutil.which("ffmpeg"):
+        logger.warning("WebAgent 语音转 WAV 跳过：ffmpeg 不可用，path=%s", source_path)
+        return source_path
+
+    voice_dir = settings.TEMP_PATH / "voice"
+    voice_dir.mkdir(parents=True, exist_ok=True)
+    output_path = voice_dir / f"{source_path.stem}_web_{uuid.uuid4().hex[:8]}.wav"
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(source_path),
+        "-ar",
+        "24000",
+        "-ac",
+        "1",
+        "-f",
+        "wav",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0 or not output_path.exists():
+        logger.warning(
+            "WebAgent 语音转 WAV 失败，将回退原文件: returncode=%s, stderr=%s",
+            result.returncode,
+            (result.stderr or "").strip()[:500],
+        )
+        return source_path
+    return output_path
+
+
+def _get_web_agent_registered_file(ref: str) -> Optional[dict[str, Any]]:
+    """
+    根据前端附件引用读取 WebAgent 临时文件登记信息。
+
+    :param ref: message/agent/file/{file_id} 形式的短期引用
+    :return: 文件登记信息，引用无效或过期时返回 None
+    """
+    normalized_ref = (ref or "").strip()
+    prefix = "message/agent/file/"
+    if not normalized_ref.startswith(prefix):
+        return None
+
+    _cleanup_web_agent_file_registry()
+    file_id = normalized_ref[len(prefix):].split("/", 1)[0]
+    return _WEB_AGENT_FILE_REGISTRY.get(file_id)
+
+
+def _transcribe_web_agent_audio_refs(audio_refs: list[str]) -> Optional[str]:
+    """
+    转写 WebAgent 上传的本地录音附件。
+
+    Web 面板上传后的音频已经保存在短期文件登记表里，不能再像第三方渠道那样
+    走模块下载逻辑；这里直接读取临时文件并调用当前音频输入 provider。
+    """
+    if not audio_refs:
+        return None
+    if not AgentCapabilityManager.is_audio_input_available():
+        logger.warning("WebAgent 音频输入能力未配置或未启用，跳过语音识别")
+        return None
+
+    transcripts = []
+    for audio_ref in audio_refs:
+        file_info = _get_web_agent_registered_file(audio_ref)
+        if not file_info:
+            logger.warning("WebAgent 语音引用不存在或已过期: ref=%s", audio_ref)
+            continue
+
+        file_path = Path(file_info["path"])
+        try:
+            content = file_path.read_bytes()
+        except OSError as err:
+            logger.warning("WebAgent 语音文件读取失败: ref=%s, error=%s", audio_ref, err)
+            continue
+
+        transcript = AgentCapabilityManager.transcribe_audio(
+            content=content,
+            filename=file_info.get("name") or file_path.name,
+        )
+        if transcript:
+            transcripts.append(transcript)
+
+    return "\n".join(transcripts).strip() if transcripts else None
+
+
+def _merge_web_agent_prompt_with_transcript(prompt: str, transcript: Optional[str]) -> str:
+    """合并用户输入文本和语音转写文本，避免重复发送相同内容。"""
+    merged_parts = []
+    seen_parts = set()
+    for item in (prompt, transcript or ""):
+        normalized = item.strip()
+        if not normalized or normalized in seen_parts:
+            continue
+        seen_parts.add(normalized)
+        merged_parts.append(normalized)
+    return "\n".join(merged_parts).strip()
+
+
 def _parse_web_agent_choice_callback(callback_data: str) -> Optional[tuple[str, int]]:
     """
     解析 Web Agent 按钮选择回调数据。
@@ -484,10 +619,12 @@ def _build_web_agent_notification_events(
         events.append({"type": "attachment", "attachment": attachment})
 
     if notification.voice_path:
+        audio_path = _prepare_web_agent_audio_attachment_path(notification.voice_path)
         attachment = _register_web_agent_file(
-            notification.voice_path,
-            file_name=Path(notification.voice_path).name,
+            str(audio_path),
+            file_name=audio_path.name,
             kind="audio",
+            mime_type=_get_web_agent_audio_mime_type(audio_path),
         )
         if attachment:
             events.append({"type": "attachment", "attachment": attachment})
@@ -679,6 +816,19 @@ async def web_agent_stream(
         )
 
     prompt = payload.text.strip()
+    transcript = _transcribe_web_agent_audio_refs(payload.audio_refs or [])
+    prompt = _merge_web_agent_prompt_with_transcript(prompt, transcript)
+    has_audio_input = bool(transcript)
+    if not prompt and payload.audio_refs and not payload.images and not payload.files:
+        return StreamingResponse(
+            iter([
+                _build_web_agent_sse(
+                    "error",
+                    {"message": "语音识别失败，请稍后重试。"},
+                )
+            ]),
+            media_type="text/event-stream",
+        )
     if not prompt and not payload.images and not payload.files and not payload.audio_refs:
         return StreamingResponse(
             iter([
@@ -715,9 +865,11 @@ async def web_agent_stream(
         """
         生成前端 Agent SSE 事件。
         """
+        audio_ref_set = set(payload.audio_refs or [])
         files = [
             file.model_dump(exclude_none=True)
             for file in (payload.files or [])
+            if file.ref not in audio_ref_set
         ]
         for audio_ref in payload.audio_refs or []:
             files.append({"ref": audio_ref, "mime_type": "audio/*"})
@@ -742,7 +894,7 @@ async def web_agent_stream(
                     message=prompt,
                     images=payload.images or [],
                     files=files or None,
-                    has_audio_input=bool(payload.audio_refs),
+                    has_audio_input=has_audio_input,
                 )
             except Exception as err:
                 logger.error(f"Web智能助手执行失败: {str(err)}")

@@ -182,6 +182,11 @@ class AgentCapabilityManagerTest(unittest.TestCase):
         self.assertTrue(
             AgentCapabilityManager.supports_native_voice_reply("Feishu", None)
         )
+        self.assertTrue(
+            AgentCapabilityManager.supports_native_voice_reply(
+                MessageChannel.WebAgent.value, None
+            )
+        )
         self.assertFalse(
             AgentCapabilityManager.supports_native_voice_reply("Slack", None)
         )
@@ -219,6 +224,7 @@ class AgentCapabilityManagerTest(unittest.TestCase):
             MessageChannel.Telegram,
             MessageChannel.Feishu,
             MessageChannel.Wechat,
+            MessageChannel.WebAgent,
         ):
             self.assertTrue(
                 ChannelCapabilityManager.supports_capability(

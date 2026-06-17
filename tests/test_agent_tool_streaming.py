@@ -463,7 +463,7 @@ class TestAgentToolStreaming:
                 result = await tool.run("你好")
             return result, synthesize_speech, send_notification_message
 
-        for channel in (MessageChannel.Telegram, MessageChannel.Feishu):
+        for channel in (MessageChannel.Telegram, MessageChannel.Feishu, MessageChannel.WebAgent):
             result, synthesize_speech, send_notification_message = asyncio.run(
                 _run(channel)
             )

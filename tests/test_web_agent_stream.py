@@ -1,4 +1,5 @@
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -6,8 +7,12 @@ from app import schemas
 from app.agent import ReplyMode
 from app.api.endpoints.agent import (
     _WebAgentMoviePilotAgent,
+    _WEB_AGENT_FILE_REGISTRY,
     _build_web_agent_notification_events,
     _build_web_agent_session_id,
+    _prepare_web_agent_audio_attachment_path,
+    _transcribe_web_agent_audio_refs,
+    web_agent_stream,
     _resolve_web_agent_choice_payload,
     _split_web_agent_output,
 )
@@ -160,6 +165,112 @@ def test_build_web_agent_notification_events_registers_local_file(tmp_path):
     assert attachment["mime_type"] == "text/plain"
     assert attachment["size"] == 5
     assert attachment["url"].startswith("message/agent/file/")
+
+
+def test_build_web_agent_notification_events_registers_voice_attachment(tmp_path):
+    """Agent 工具发送语音时应转换为可播放的音频附件事件。"""
+    voice_path = tmp_path / "reply.wav"
+    voice_path.write_bytes(b"wav-bytes")
+
+    events = _build_web_agent_notification_events(
+        schemas.Notification(
+            channel=MessageChannel.WebAgent,
+            mtype=NotificationType.Agent,
+            text="你好",
+            voice_path=str(voice_path),
+        )
+    )
+
+    assert len(events) == 2
+    assert events[0] == {"type": "delta", "content": "你好"}
+    attachment = events[1]["attachment"]
+    assert events[1]["type"] == "attachment"
+    assert attachment["kind"] == "audio"
+    assert attachment["name"] == "reply.wav"
+    assert attachment["mime_type"] == "audio/wav"
+    assert attachment["size"] == len(b"wav-bytes")
+    assert attachment["url"].startswith("message/agent/file/")
+
+
+def test_prepare_web_agent_audio_attachment_converts_unsupported_audio(tmp_path):
+    """WebAgent 会把浏览器不稳定支持的语音格式转为 WAV 供面板播放。"""
+    source_path = tmp_path / "reply.opus"
+    source_path.write_bytes(b"opus-bytes")
+    converted_path = tmp_path / "voice" / "reply_web_abcdef12.wav"
+
+    with patch("app.api.endpoints.agent.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+        "app.api.endpoints.agent.uuid.uuid4",
+        return_value=SimpleNamespace(hex="abcdef1234567890"),
+    ), patch("app.api.endpoints.agent.subprocess.run") as run:
+        def write_converted_file(*args, **kwargs):
+            converted_path.write_bytes(b"wav-bytes")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        run.side_effect = write_converted_file
+        with patch("app.api.endpoints.agent.settings", SimpleNamespace(TEMP_PATH=tmp_path)):
+            output_path = _prepare_web_agent_audio_attachment_path(str(source_path))
+
+    assert output_path == converted_path
+    assert output_path.read_bytes() == b"wav-bytes"
+
+
+def test_transcribe_web_agent_audio_refs_reads_registered_upload(tmp_path):
+    """WebAgent 上传录音应从临时附件登记表读取并转写为文本。"""
+    voice_path = tmp_path / "recording.webm"
+    voice_path.write_bytes(b"webm-bytes")
+    _WEB_AGENT_FILE_REGISTRY["audio-test"] = {
+        "path": voice_path,
+        "name": "recording.webm",
+        "mime_type": "audio/webm",
+        "created_at": time.time(),
+    }
+
+    try:
+        with patch(
+            "app.api.endpoints.agent.AgentCapabilityManager.is_audio_input_available",
+            return_value=True,
+        ), patch(
+            "app.api.endpoints.agent.AgentCapabilityManager.transcribe_audio",
+            return_value="帮我推荐一部电影",
+        ) as transcribe_audio:
+            transcript = _transcribe_web_agent_audio_refs(["message/agent/file/audio-test"])
+    finally:
+        _WEB_AGENT_FILE_REGISTRY.pop("audio-test", None)
+
+    assert transcript == "帮我推荐一部电影"
+    transcribe_audio.assert_called_once_with(
+        content=b"webm-bytes",
+        filename="recording.webm",
+    )
+
+
+def test_web_agent_stream_returns_error_when_voice_transcription_fails():
+    """仅发送语音且转写失败时应直接返回错误事件。"""
+    payload = schemas.AgentWebChatRequest(
+        text="",
+        session_id="browser-session",
+        audio_refs=["message/agent/file/missing"],
+    )
+    request = SimpleNamespace()
+    user = SimpleNamespace(id=1, name="admin")
+
+    with patch("app.api.endpoints.agent.settings.AI_AGENT_ENABLE", True), patch(
+        "app.api.endpoints.agent._transcribe_web_agent_audio_refs",
+        return_value=None,
+    ):
+        response = asyncio.run(web_agent_stream(payload, request, user))
+        body = "".join(asyncio.run(_collect_streaming_response(response)))
+
+    assert "error" in body
+    assert "语音识别失败" in body
+
+
+async def _collect_streaming_response(response):
+    """读取 StreamingResponse，便于断言 SSE 内容。"""
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
+    return chunks
 
 
 def test_build_web_agent_notification_events_extracts_choice_card():
