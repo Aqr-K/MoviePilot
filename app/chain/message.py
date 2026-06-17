@@ -11,8 +11,13 @@ from pathlib import Path
 from typing import Any, Optional, Dict, Union, List, Tuple
 from urllib.parse import unquote, urlparse
 
-from app.agent import ReplyMode, agent_manager, prompt_manager
-from app.agent.llm import AgentCapabilityManager, LLMHelper
+from app.core.agent_gateway import (
+    get_agent_capability,
+    get_agent_llm,
+    get_agent_manager,
+    get_prompt_manager,
+)
+from app.schemas.types import ReplyMode
 from app.chain import ChainBase
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
@@ -58,7 +63,7 @@ class MessageChain(ChainBase):
             return
         clear_task = None
         try:
-            clear_task = agent_manager.clear_session(session_id=session_id, user_id=str(userid))
+            clear_task = get_agent_manager().clear_session(session_id=session_id, user_id=str(userid))
             asyncio.run_coroutine_threadsafe(
                 clear_task,
                 global_vars.loop,
@@ -895,7 +900,7 @@ class MessageChain(ChainBase):
                 "doubanid": his.doubanid or "none",
                 "error_message": his.errmsg or "none",
             }
-            return prompt_manager.render_system_task_message(
+            return get_prompt_manager().render_system_task_message(
                 "manual_transfer_redo",
                 template_context=template_context,
             )
@@ -949,7 +954,7 @@ class MessageChain(ChainBase):
                 final_output = text_output or ""
 
             try:
-                await agent_manager.run_background_prompt(
+                await get_agent_manager().run_background_prompt(
                     message=redo_prompt,
                     session_prefix=f"__agent_manual_redo_{history_id}",
                     output_callback=_capture_output,
@@ -1082,7 +1087,7 @@ class MessageChain(ChainBase):
         if session_id:
             clear_task = None
             try:
-                clear_task = agent_manager.clear_session(
+                clear_task = get_agent_manager().clear_session(
                     session_id=session_id, user_id=str(userid)
                 )
                 asyncio.run_coroutine_threadsafe(
@@ -1129,7 +1134,7 @@ class MessageChain(ChainBase):
             session_id, _ = session_info
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    agent_manager.stop_current_task(session_id=session_id),
+                    get_agent_manager().stop_current_task(session_id=session_id),
                     global_vars.loop,
                 )
                 stopped = future.result(timeout=10)
@@ -1222,7 +1227,7 @@ class MessageChain(ChainBase):
             return
 
         session_id, _ = session_info
-        status = agent_manager.get_session_status(session_id=session_id)
+        status = get_agent_manager().get_session_status(session_id=session_id)
         self.post_message(
             Notification(
                 channel=channel,
@@ -1292,7 +1297,7 @@ class MessageChain(ChainBase):
             # 将可直接输入给 LLM 的附件统一转换为 data URL
             original_images = images
             all_files = list(files or [])
-            if images and LLMHelper.supports_image_input():
+            if images and get_agent_llm().supports_image_input():
                 images = self._download_attachments_to_data_urls(
                     images, channel, source
                 )
@@ -1364,7 +1369,7 @@ class MessageChain(ChainBase):
                 process_kwargs["has_audio_input"] = True
             # 在事件循环中处理
             asyncio.run_coroutine_threadsafe(
-                agent_manager.process_message(**process_kwargs),
+                get_agent_manager().process_message(**process_kwargs),
                 global_vars.loop,
             )
             return True
@@ -1384,7 +1389,7 @@ class MessageChain(ChainBase):
         """
         if not audio_refs:
             return None
-        if not AgentCapabilityManager.is_audio_input_available():
+        if not get_agent_capability().is_audio_input_available():
             logger.warning("音频输入能力未配置或未启用，跳过语音识别")
             return None
 
@@ -1491,7 +1496,7 @@ class MessageChain(ChainBase):
                     )
                     continue
 
-                transcript = AgentCapabilityManager.transcribe_audio(
+                transcript = get_agent_capability().transcribe_audio(
                     content=content, filename=filename
                 )
                 if transcript:

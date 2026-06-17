@@ -5,7 +5,6 @@ import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi.concurrency import run_in_threadpool
@@ -54,7 +53,7 @@ from app.db.user_oper import UserOper
 from app.log import logger
 from app.schemas import AgentLLMProviderEventData, AgentTokensUsageEventData, Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
-from app.schemas.types import ChainEventType, EventType, MessageChannel
+from app.schemas.types import ChainEventType, EventType, MessageChannel, ReplyMode
 from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
@@ -216,13 +215,7 @@ class _ThinkTagStripper:
             self.buffer = ""
 
 
-class ReplyMode(str, Enum):
-    """
-    Agent 最终回复处理模式。
-    """
-
-    DISPATCH = "dispatch"
-    CAPTURE_ONLY = "capture_only"
+# ReplyMode 已迁移至 app.schemas.types(打断 chain↔agent 循环 S4),此处经 import 顶层 re-export 保持 `from app.agent import ReplyMode` 向后兼容
 
 
 HEARTBEAT_SESSION_PREFIX = "__agent_heartbeat_"
