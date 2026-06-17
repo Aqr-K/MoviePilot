@@ -1,6 +1,7 @@
 import time
 from typing import Optional, Union
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.db import DbOper
@@ -13,7 +14,7 @@ class MessageOper(DbOper):
     消息数据管理
     """
 
-    def __init__(self, db: Session = None):
+    def __init__(self, db: Union[Session, AsyncSession] = None):
         super().__init__(db)
 
     def add(self,
@@ -27,7 +28,7 @@ class MessageOper(DbOper):
             userid: Optional[str] = None,
             action: Optional[int] = 1,
             note: Union[list, dict] = None,
-            **kwargs):
+            **kwargs) -> dict:
         """
         新增消息
         :param channel: 消息渠道
@@ -60,7 +61,7 @@ class MessageOper(DbOper):
             if k not in Message.__table__.columns.keys():  # noqa
                 kwargs.pop(k)
 
-        Message(**kwargs).create(self._db)
+        return Message(**kwargs).create_and_to_dict(self._db)
 
     async def async_add(self,
                         channel: MessageChannel = None,
@@ -73,7 +74,7 @@ class MessageOper(DbOper):
                         userid: Optional[str] = None,
                         action: Optional[int] = 1,
                         note: Union[list, dict] = None,
-                        **kwargs):
+                        **kwargs) -> Message:
         """
         异步新增消息
         """
@@ -96,10 +97,26 @@ class MessageOper(DbOper):
             if k not in Message.__table__.columns.keys():  # noqa
                 kwargs.pop(k)
 
-        await Message(**kwargs).async_create(self._db)
+        return await Message(**kwargs).async_create(self._db)
 
-    def list_by_page(self, page: Optional[int] = 1, count: Optional[int] = 30) -> Optional[str]:
+    def list_by_page(self, page: Optional[int] = 1, count: Optional[int] = 30) -> list[Message]:
         """
-        获取媒体服务器数据ID
+        分页获取消息记录。
         """
         return Message.list_by_page(self._db, page, count)
+
+    async def async_list_by_page(
+            self, page: Optional[int] = 1, count: Optional[int] = 30
+    ) -> list[Message]:
+        """
+        分页获取消息记录。
+        """
+        return await Message.async_list_by_page(self._db, page, count)
+
+    async def async_list_sent_by_page(
+            self, page: Optional[int] = 1, count: Optional[int] = 30
+    ) -> list[Message]:
+        """
+        分页获取系统发送的通知消息。
+        """
+        return await Message.async_list_sent_by_page(self._db, page, count)

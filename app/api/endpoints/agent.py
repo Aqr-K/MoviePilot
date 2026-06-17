@@ -881,7 +881,6 @@ async def web_agent_stream(
             source=WEB_AGENT_SOURCE,
             username=current_user.name,
             replay_mode=ReplyMode.CAPTURE_ONLY,
-            persist_output_message=False,
             allow_message_tools=True,
             output_callback=output_callback,
             notification_callback=notification_callback,

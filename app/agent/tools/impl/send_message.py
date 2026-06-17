@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field, model_validator
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.log import logger
+from app.schemas import Notification
+from app.schemas.types import NotificationType
 
 
 class SendMessageInput(BaseModel):
@@ -77,7 +79,18 @@ class SendMessageTool(MoviePilotTool):
             f"执行工具: {self.name}, 参数: title={title}, message={text}, image_url={image_url}"
         )
         try:
-            await self.send_tool_message(text, title=title, image=image_url)
+            await self.send_notification_message(
+                Notification(
+                    channel=self._channel,
+                    source=self._source,
+                    mtype=NotificationType.Other,
+                    userid=self._user_id,
+                    username=self._username,
+                    title=title,
+                    text=text,
+                    image=image_url,
+                )
+            )
             return "消息已发送"
         except Exception as e:
             logger.error(f"发送消息失败: {e}")

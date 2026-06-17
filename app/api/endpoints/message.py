@@ -12,7 +12,7 @@ from app.core.config import settings, global_vars
 from app.core.security import verify_token, verify_apitoken
 from app.db import get_async_db
 from app.db.models import User
-from app.db.models.message import Message
+from app.db.message_oper import MessageOper
 from app.db.user_oper import get_current_active_superuser
 from app.helper.service import ServiceConfigHelper
 from app.helper.webpush import is_webpush_subscription_gone
@@ -120,7 +120,7 @@ async def get_web_message(
     获取WEB消息列表
     """
     ret_messages = []
-    messages = await Message.async_list_by_page(db, page=page, count=count)
+    messages = await MessageOper(db).async_list_by_page(page=page, count=count)
     for message in messages:
         try:
             ret_messages.append(message.to_dict())
@@ -128,6 +128,20 @@ async def get_web_message(
             logger.error(f"获取WEB消息列表失败: {str(e)}")
             continue
     return ret_messages
+
+
+@router.get("/notification", summary="获取通知消息", response_model=List[schemas.NotificationHistoryItem])
+async def get_notification_message(
+    _: schemas.TokenPayload = Depends(verify_token),
+    db: AsyncSession = Depends(get_async_db),
+    page: Optional[int] = 1,
+    count: Optional[int] = 20,
+):
+    """
+    获取系统发送的通知消息列表。
+    """
+    messages = await MessageOper(db).async_list_sent_by_page(page=page, count=count)
+    return [schemas.NotificationHistoryItem(**message.to_dict()) for message in messages]
 
 
 def wechat_verify(

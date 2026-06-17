@@ -26,6 +26,37 @@ class MessageResponse(BaseModel):
     success: bool = False
 
 
+class NotificationHistoryItem(BaseModel):
+    """
+    通知历史记录。
+    """
+
+    # 消息ID
+    id: Optional[int] = None
+    # 消息渠道
+    channel: Optional[str] = None
+    # 消息来源
+    source: Optional[str] = None
+    # 消息类型
+    mtype: Optional[str] = None
+    # 标题
+    title: Optional[str] = None
+    # 文本内容
+    text: Optional[str] = None
+    # 图片
+    image: Optional[str] = None
+    # 链接
+    link: Optional[str] = None
+    # 用户ID
+    userid: Optional[str] = None
+    # 登记时间
+    reg_time: Optional[str] = None
+    # 消息方向：0-接收消息，1-发送消息
+    action: Optional[int] = None
+    # 附件json
+    note: Optional[Union[list, dict]] = None
+
+
 class CommingMessage(BaseModel):
     """
     外来消息

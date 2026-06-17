@@ -94,7 +94,6 @@ class AgentTokensEventsTest(unittest.IsolatedAsyncioTestCase):
             stop_streaming=AsyncMock(return_value=(False, ""))
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         async def create_agent(_streaming=False, streaming=False):
             """模拟创建 Agent 时完成供应商选择和用量统计。"""

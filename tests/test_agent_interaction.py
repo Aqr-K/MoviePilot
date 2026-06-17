@@ -204,8 +204,8 @@ class TestAgentInteraction(unittest.TestCase):
         self.assertEqual(kwargs["channel"], MessageChannel.Telegram.value)
         self.assertEqual(kwargs["source"], "telegram-test")
         self.assertNotIn("processing_status", kwargs)
-        message_put.assert_called_once()
-        message_add.assert_called_once()
+        message_put.assert_not_called()
+        message_add.assert_not_called()
 
     def test_legacy_agent_choice_callback_still_supported(self):
         chain = MessageChain()
