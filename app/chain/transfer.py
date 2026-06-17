@@ -1604,75 +1604,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     return False, f"{task.fileitem.name} 已在整理队列中"
 
             # 获取集数据
-            if task.mediainfo.type == MediaType.TV and not task.episodes_info:
-                # 判断注意season为0的情况
-                season_num = task.mediainfo.season
-                if season_num is None and task.meta.season_seq:
-                    if task.meta.season_seq.isdigit():
-                        season_num = int(task.meta.season_seq)
-                # 默认值1
-                if season_num is None:
-                    season_num = 1
-                task.episodes_info = TmdbChain().tmdb_episodes(
-                    tmdbid=task.mediainfo.tmdb_id,
-                    season=season_num,
-                    episode_group=task.mediainfo.episode_group,
-                )
+            self._resolve_episodes_info(task)
 
-            # 查询整理目标目录
-            if not task.target_directory:
-                if task.target_path:
-                    # 指定目标路径，`手动整理`场景下使用，忽略源目录匹配，使用指定目录匹配
-                    task.target_directory = DirectoryHelper().get_dir(
-                        media=task.mediainfo,
-                        dest_path=task.target_path,
-                        target_storage=task.target_storage,
-                    )
-                else:
-                    # 启用源目录匹配时，根据源目录匹配下载目录，否则按源目录同盘优先原则，如无源目录，则根据媒体信息获取目标目录
-                    task.target_directory = DirectoryHelper().get_dir(
-                        media=task.mediainfo,
-                        storage=task.fileitem.storage,
-                        src_path=Path(task.fileitem.path),
-                        target_storage=task.target_storage,
-                    )
-            if not task.target_storage and task.target_directory:
-                task.target_storage = task.target_directory.library_storage
+            # 查询整理目标目录与目标存储
+            self._resolve_target_directory(task)
 
-            # 正在处理
-            self.jobview.running_task(task)
-
-            # 广播事件，请示额外的源存储支持
-            source_oper = None
-            source_event_data = StorageOperSelectionEventData(
-                storage=task.fileitem.storage,
-            )
-            source_event = eventmanager.send_event(
-                ChainEventType.StorageOperSelection, source_event_data
-            )
-            # 使用事件返回的上下文数据
-            if source_event and source_event.event_data:
-                source_event_data: StorageOperSelectionEventData = (
-                    source_event.event_data
-                )
-                if source_event_data.storage_oper:
-                    source_oper = source_event_data.storage_oper
-
-            # 广播事件，请示额外的目标存储支持
-            target_oper = None
-            target_event_data = StorageOperSelectionEventData(
-                storage=task.target_storage,
-            )
-            target_event = eventmanager.send_event(
-                ChainEventType.StorageOperSelection, target_event_data
-            )
-            # 使用事件返回的上下文数据
-            if target_event and target_event.event_data:
-                target_event_data: StorageOperSelectionEventData = (
-                    target_event.event_data
-                )
-                if target_event_data.storage_oper:
-                    target_oper = target_event_data.storage_oper
+            # 标记运行中，并广播事件请示额外的源/目标存储操作器
+            source_oper, target_oper = self._select_storage_opers(task)
 
             # 执行整理
             transferinfo: TransferInfo = self.transfer(
@@ -1705,6 +1643,93 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 移除已完成的任务
             self.jobview.try_remove_job(task)
             self.__finish_scrape_batch_task(task)
+
+    def _resolve_episodes_info(self, task: TransferTask) -> None:
+        """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。
+
+        S8a：自 __handle_transfer 抽出的无早返回子块，行为字节级不变。
+        """
+        if task.mediainfo.type == MediaType.TV and not task.episodes_info:
+            # 判断注意season为0的情况
+            season_num = task.mediainfo.season
+            if season_num is None and task.meta.season_seq:
+                if task.meta.season_seq.isdigit():
+                    season_num = int(task.meta.season_seq)
+            # 默认值1
+            if season_num is None:
+                season_num = 1
+            task.episodes_info = TmdbChain().tmdb_episodes(
+                tmdbid=task.mediainfo.tmdb_id,
+                season=season_num,
+                episode_group=task.mediainfo.episode_group,
+            )
+
+    def _resolve_target_directory(self, task: TransferTask) -> None:
+        """查询整理目标目录与目标存储。
+
+        S8a：自 __handle_transfer 抽出的无早返回子块，行为字节级不变。
+        """
+        if not task.target_directory:
+            if task.target_path:
+                # 指定目标路径，`手动整理`场景下使用，忽略源目录匹配，使用指定目录匹配
+                task.target_directory = DirectoryHelper().get_dir(
+                    media=task.mediainfo,
+                    dest_path=task.target_path,
+                    target_storage=task.target_storage,
+                )
+            else:
+                # 启用源目录匹配时，根据源目录匹配下载目录，否则按源目录同盘优先原则，如无源目录，则根据媒体信息获取目标目录
+                task.target_directory = DirectoryHelper().get_dir(
+                    media=task.mediainfo,
+                    storage=task.fileitem.storage,
+                    src_path=Path(task.fileitem.path),
+                    target_storage=task.target_storage,
+                )
+        if not task.target_storage and task.target_directory:
+            task.target_storage = task.target_directory.library_storage
+
+    def _select_storage_opers(self, task: TransferTask) -> Tuple[Any, Any]:
+        """标记任务运行中，并广播事件请示额外的源/目标存储操作器。
+
+        S8a：自 __handle_transfer 抽出的无早返回子块，行为字节级不变；
+        返回 (source_oper, target_oper) 供 __handle_transfer 传入 transfer()。
+        """
+        # 正在处理
+        self.jobview.running_task(task)
+
+        # 广播事件，请示额外的源存储支持
+        source_oper = None
+        source_event_data = StorageOperSelectionEventData(
+            storage=task.fileitem.storage,
+        )
+        source_event = eventmanager.send_event(
+            ChainEventType.StorageOperSelection, source_event_data
+        )
+        # 使用事件返回的上下文数据
+        if source_event and source_event.event_data:
+            source_event_data: StorageOperSelectionEventData = (
+                source_event.event_data
+            )
+            if source_event_data.storage_oper:
+                source_oper = source_event_data.storage_oper
+
+        # 广播事件，请示额外的目标存储支持
+        target_oper = None
+        target_event_data = StorageOperSelectionEventData(
+            storage=task.target_storage,
+        )
+        target_event = eventmanager.send_event(
+            ChainEventType.StorageOperSelection, target_event_data
+        )
+        # 使用事件返回的上下文数据
+        if target_event and target_event.event_data:
+            target_event_data: StorageOperSelectionEventData = (
+                target_event.event_data
+            )
+            if target_event_data.storage_oper:
+                target_oper = target_event_data.storage_oper
+
+        return source_oper, target_oper
 
     def get_queue_tasks(self) -> List[TransferJob]:
         """
