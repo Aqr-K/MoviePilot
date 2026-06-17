@@ -468,7 +468,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     pid=plugin_dir_name,
                     package_version=package_version,
                     repo_path=local_repo_path,
-                    strict_compat=False
+                    strict_compat=False,
+                    strict_system_version=not settings.DEV
                 )
                 if candidate:
                     return candidate
@@ -489,6 +490,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         candidate = candidate or get_plugin_source().get_local_plugin_candidate(pid)
         if not candidate:
+            return False
+        if candidate.get("compatible") is False:
+            logger.info(f"本地插件 {pid} 不满足同步条件，跳过自动同步：{candidate.get('skip_reason')}")
             return False
 
         source_dir = Path(candidate.get("path"))
