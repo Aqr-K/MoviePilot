@@ -20,6 +20,7 @@ from app.chain.system import SystemChain
 from app.core.auth_level import set_auth_level_provider
 from app.core.config import global_vars, settings
 from app.core.meta.config_source import set_meta_config_provider
+from app.core.plugin_reporter import set_plugin_install_reporter
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.server import MoviePilotServerHelper
 from app.helper.sites import SitesHelper
@@ -71,6 +72,8 @@ async def lifespan(app: FastAPI):
     set_meta_config_provider(lambda key: SystemConfigOper().get(key))
     # 注入站点认证等级提供者（解耦 core -> helper.sites）
     set_auth_level_provider(lambda: SitesHelper().auth_level)
+    # 注入插件安装上报器（解耦 core/plugin -> helper.server）
+    set_plugin_install_reporter(MoviePilotServerHelper.install_plugin_reg)
     # 初始化路由
     init_routers(app)
     # 初始化模块
