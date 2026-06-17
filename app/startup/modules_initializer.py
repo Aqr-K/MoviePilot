@@ -16,7 +16,7 @@ from app.log import logger
 from app.core.config import settings
 from app.core.module import ModuleManager
 from app.core.event import EventManager
-from app.helper.thread import ThreadHelper
+from app.core.thread import ThreadHelper
 from app.helper.display import DisplayHelper
 from app.helper.doh import DohHelper
 from app.helper.resource import ResourceHelper
