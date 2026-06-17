@@ -3270,9 +3270,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             if not torrent_files:
                 return False
 
-            if not isinstance(torrent_files, list):
-                torrent_files = torrent_files.data
-
             # 检查是否有媒体文件未被屏蔽且存在
             save_path = torrents[0].path.parent
             for file in torrent_files:

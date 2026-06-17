@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
 from fastapi.concurrency import run_in_threadpool
-from qbittorrentapi import TorrentFilesList
-from transmission_rpc import File
 
 from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
@@ -30,6 +28,7 @@ from app.schemas import (
     TransferInfo,
     ExistMediaInfo,
     DownloaderTorrent,
+    DownloaderFile,
     CommingMessage,
     Notification,
     WebhookEventInfo,
@@ -1410,7 +1409,7 @@ class ChainBase(metaclass=ABCMeta):
 
     def torrent_files(
             self, tid: str, downloader: Optional[str] = None
-    ) -> Optional[Union[TorrentFilesList, List[File]]]:
+    ) -> Optional[List[DownloaderFile]]:
         """
         获取种子文件
         :param tid:  种子Hash
