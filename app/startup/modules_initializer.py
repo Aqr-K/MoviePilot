@@ -1,6 +1,6 @@
 import sys
 
-from app.helper.redis import RedisHelper, AsyncRedisHelper
+from app.core.redis import RedisHelper, AsyncRedisHelper
 
 # SitesHelper涉及资源包拉取，提前引入并容错提示
 try:
