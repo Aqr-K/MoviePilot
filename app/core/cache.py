@@ -17,7 +17,7 @@ from cachetools import TTLCache as MemoryTTLCache
 from cachetools.keys import hashkey
 
 from app.core.config import settings
-from app.helper.redis import RedisHelper, AsyncRedisHelper
+from app.core.redis import RedisHelper, AsyncRedisHelper
 from app.log import logger
 
 # 默认缓存区
