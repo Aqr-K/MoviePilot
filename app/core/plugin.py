@@ -25,9 +25,9 @@ from app.core.cache import fresh, async_fresh
 from app.core.config import settings
 from app.core.event import eventmanager
 from app.core.plugin_reporter import report_plugin_install
+from app.core.plugin_source import get_plugin_source
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.plugin import PluginHelper
 from app.log import logger
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
@@ -317,7 +317,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         # 监视插件目录
         plugin_paths = [str(settings.ROOT_PATH / "app" / "plugins")]
-        for local_repo_path in PluginHelper.get_local_repo_paths():
+        for local_repo_path in get_plugin_source().get_local_repo_paths():
             if local_repo_path.exists() and local_repo_path.is_dir():
                 plugin_paths.append(str(local_repo_path))
         logger.info(">>> 监控线程已启动，准备进入watch循环...")
@@ -445,7 +445,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         try:
             event_path = event_path.resolve()
-            for local_repo_path in PluginHelper.get_local_repo_paths():
+            for local_repo_path in get_plugin_source().get_local_repo_paths():
                 if not local_repo_path.exists() or not local_repo_path.is_dir():
                     continue
                 if not event_path.is_relative_to(local_repo_path):
@@ -463,7 +463,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 else:
                     continue
                 plugin_dir_name = relative_parts[1]
-                candidate = PluginHelper().get_local_plugin_candidate(
+                candidate = get_plugin_source().get_local_plugin_candidate(
                     pid=plugin_dir_name,
                     package_version=package_version,
                     repo_path=local_repo_path,
@@ -486,7 +486,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             logger.info(f"本地插件 {pid} 尚未安装，跳过自动同步和热重载")
             return False
 
-        candidate = candidate or PluginHelper().get_local_plugin_candidate(pid)
+        candidate = candidate or get_plugin_source().get_local_plugin_candidate(pid)
         if not candidate:
             return False
 
@@ -589,7 +589,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         def install_plugin(plugin):
             start_time = time.time()
-            state, msg = PluginHelper().install(pid=plugin.id, repo_url=plugin.repo_url, force_install=True)
+            state, msg = get_plugin_source().install(pid=plugin.id, repo_url=plugin.repo_url, force_install=True)
             elapsed_time = time.time() - start_time
             if state:
                 report_plugin_install(plugin_id=plugin.id, repo_url=plugin.repo_url)
@@ -651,7 +651,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         安装插件中缺失或不兼容的依赖项
         """
-        pluginhelper = PluginHelper()
+        pluginhelper = get_plugin_source()
         # 第一步：获取需要安装的依赖项列表
         missing_dependencies = pluginhelper.find_missing_dependencies()
         if not missing_dependencies:
@@ -1312,7 +1312,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         plugins = []
         installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
-        local_candidates = PluginHelper().get_local_plugin_candidates()
+        local_candidates = get_plugin_source().get_local_plugin_candidates()
         if not local_candidates:
             return []
         for pid, plugin_info in local_candidates.items():
@@ -1386,7 +1386,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
         # 获取在线插件
         with fresh(force):
-            online_plugins = PluginHelper().get_plugins(market, package_version)
+            online_plugins = get_plugin_source().get_plugins(market, package_version)
         if online_plugins is None:
             logger.warning(
                 f"获取{package_version if package_version else ''}插件库失败：{market}，请检查 GitHub 网络连接")
@@ -1468,7 +1468,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if not isinstance(plugin_info, dict):
             return None
 
-        plugin_info = PluginHelper.annotate_plugin_system_version(plugin_info.copy())
+        plugin_info = get_plugin_source().annotate_plugin_system_version(plugin_info.copy())
         # 如 package_version 为空，则需要判断插件是否兼容当前版本
         if not package_version:
             if plugin_info.get(settings.VERSION_FLAG) is not True:
@@ -1624,7 +1624,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
         # 获取在线插件
         async with async_fresh(force):
-            online_plugins = await PluginHelper().async_get_plugins(market, package_version)
+            online_plugins = await get_plugin_source().async_get_plugins(market, package_version)
         if online_plugins is None:
             logger.warning(
                 f"获取{package_version if package_version else ''}插件库失败：{market}，请检查 GitHub 网络连接")
