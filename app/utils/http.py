@@ -16,7 +16,6 @@ from requests import Response, Session
 from urllib3.exceptions import InsecureRequestWarning
 from urllib.parse import unquote, quote
 
-from app.core.config import settings
 from app.log import logger
 
 urllib3.disable_warnings(InsecureRequestWarning)
@@ -290,6 +289,7 @@ class RequestUtils:
         if headers:
             self._headers = headers
         else:
+            from app.core.config import settings
             if ua and ua == settings.USER_AGENT:
                 caller_name = get_caller()
                 if caller_name:
@@ -868,6 +868,7 @@ class AsyncRequestUtils:
             # 过滤掉None值的headers
             self._headers = {k: v for k, v in headers.items() if v is not None}
         else:
+            from app.core.config import settings
             if ua and ua == settings.USER_AGENT:
                 caller_name = get_caller()
                 if caller_name:
