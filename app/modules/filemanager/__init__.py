@@ -8,7 +8,7 @@ from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.helper.directory import DirectoryHelper
 from app.helper.message import MessageHelper
-from app.helper.module import ModuleHelper
+from app.core.module_loader import ModuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
 from app.modules.filemanager.storages import StorageBase
