@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Set, Tuple, Optional, Union, List, Dict
 
-from qbittorrentapi import TorrentFilesList
 from torrentool.torrent import Torrent
 
 from app import schemas
@@ -578,14 +577,26 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             return None
         return server.stop_torrents(ids=hashs)
 
-    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> Optional[TorrentFilesList]:
+    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> "Optional[List[schemas.DownloaderFile]]":
         """
-        获取种子文件列表
+        获取种子文件列表（归一化为 DownloaderFile，不再泄漏 qbittorrentapi 的 SDK 类型）
         """
         server: Qbittorrent = self.get_instance(downloader)
         if not server:
             return None
-        return server.get_files(tid=tid)
+        files = server.get_files(tid=tid)
+        if files is None:
+            return None
+        return [
+            schemas.DownloaderFile(
+                name=getattr(f, "name", None),
+                size=getattr(f, "size", None),
+                progress=getattr(f, "progress", None),
+                priority=getattr(f, "priority", None),
+                index=getattr(f, "index", idx),
+            )
+            for idx, f in enumerate(files)
+        ]
 
     def downloader_info(self, downloader: Optional[str] = None) -> Optional[List[schemas.DownloaderInfo]]:
         """

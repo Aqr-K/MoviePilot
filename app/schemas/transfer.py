@@ -41,6 +41,22 @@ class DownloaderTorrent(BaseModel):
     left_time: Optional[str] = None
 
 
+class DownloaderFile(BaseModel):
+    """
+    下载器种子文件信息（归一化，屏蔽 qBittorrent / Transmission 等下载器 SDK 的文件对象差异）
+    """
+    # 文件在种子内的相对路径/名称（qB、tr 一致）
+    name: Optional[str] = None
+    # 文件大小（字节）
+    size: Optional[int] = None
+    # 下载进度 0~1（qB 原生 progress；tr 由 completed/size 计算）
+    progress: Optional[float] = 0.0
+    # 文件优先级（下载器原生取值，语义随下载器；0 通常表示不下载）
+    priority: Optional[int] = None
+    # 文件在种子中的索引/ID（qB 为 index，tr 为 id；用于设置文件优先级等）
+    index: Optional[int] = None
+
+
 class TransferTorrent(DownloaderTorrent):
     """
     待转移任务信息
