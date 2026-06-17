@@ -661,18 +661,39 @@ class WorkflowExecutor:
         declared_outputs = self.get_action_output_declarations(action)
         if isinstance(declared_outputs, list):
             normalized_outputs = {}
+            missing = object()
             for item in declared_outputs:
                 key = item.get("name") if isinstance(item, dict) else item
-                if key and outputs.get(key) not in (None, "", [], {}):
-                    normalized_outputs[key] = outputs.get(key)
+                if not key:
+                    continue
+                value = outputs.get(key, missing)
+                if value is missing and key in result_context.__class__.model_fields:
+                    value = getattr(result_context, key, missing)
+                if value is not missing and self.should_keep_output_value(action, key, value):
+                    normalized_outputs[key] = value
             return normalized_outputs or outputs
         if isinstance(declared_outputs, dict):
-            return {
-                key: outputs.get(key)
-                for key in declared_outputs
-                if outputs.get(key) not in (None, "", [], {})
-            } or outputs
+            normalized_outputs = {}
+            missing = object()
+            for key in declared_outputs:
+                value = outputs.get(key, missing)
+                if value is missing and key in result_context.__class__.model_fields:
+                    value = getattr(result_context, key, missing)
+                if value is not missing and self.should_keep_output_value(action, key, value):
+                    normalized_outputs[key] = value
+            return normalized_outputs or outputs
         return outputs
+
+    def should_keep_output_value(self, action: Action, key: str, value: Any) -> bool:
+        """
+        判断输出值是否应参与后续合并。
+        """
+        if value not in (None, "", [], {}):
+            return True
+        output_config = self.get_action_output_config(action, key)
+        target_key = output_config.get("target") or key
+        merge_policy = output_config.get("merge") or self.get_default_merge_policy(action, target_key, value)
+        return merge_policy == "replace"
 
     def record_node_outputs(self, action_id: str, outputs: dict) -> None:
         """
@@ -699,11 +720,11 @@ class WorkflowExecutor:
         按声明式合并策略写入全局上下文和 artifacts 分区。
         """
         for key, value in outputs.items():
-            if value in (None, "", [], {}):
-                continue
             output_config = self.get_action_output_config(action, key)
             target_key = output_config.get("target") or key
             merge_policy = output_config.get("merge") or self.get_default_merge_policy(action, target_key, value)
+            if value in (None, "", [], {}) and merge_policy != "replace":
+                continue
             identity = output_config.get("identity")
             self.merge_output_value(target_key, value, merge_policy, identity)
 

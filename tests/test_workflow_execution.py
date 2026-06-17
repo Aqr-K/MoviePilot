@@ -679,6 +679,58 @@ def test_workflow_executor_filter_action_replaces_artifact_outputs(monkeypatch):
     assert executor.context.artifacts["torrents"] == ["keep"]
 
 
+def test_workflow_executor_filter_action_replaces_with_empty_outputs(monkeypatch):
+    """过滤节点结果为空时也应清空上游资源，避免后续继续下载。"""
+    calls = []
+    stale_torrents = ["old", "drop"]
+    filtered_torrents = []
+
+    def run_fetch(action, context):
+        """模拟上游搜索节点产出资源池。"""
+        context.torrents = stale_torrents.copy()
+        return ActionResult(
+            success=True,
+            message=f"{action.name}完成",
+            context=context,
+            outputs={"torrents": stale_torrents.copy()}
+        )
+
+    def run_filter(action, context):
+        """模拟过滤节点把资源全部过滤掉。"""
+        context.torrents = filtered_torrents.copy()
+        return ActionResult(
+            success=True,
+            message=f"{action.name}完成",
+            context=context,
+            outputs={"torrents": filtered_torrents.copy()}
+        )
+
+    fake_manager = _FakeWorkflowManager(
+        calls,
+        results={
+            "A": run_fetch,
+            "B": run_filter,
+        }
+    )
+    workflow = _build_workflow(
+        actions=[
+            {"id": "A", "type": "FetchTorrentsAction", "name": "搜索站点资源", "data": {}},
+            {"id": "B", "type": "FilterTorrentsAction", "name": "过滤资源", "data": {}},
+        ],
+    )
+
+    monkeypatch.setattr(workflow_module, "WorkFlowManager", lambda: fake_manager)
+    monkeypatch.setattr(workflow_module.global_vars, "workflow_resume", lambda workflow_id: None)
+    monkeypatch.setattr(workflow_module.global_vars, "is_workflow_stopped", lambda workflow_id: False)
+
+    executor = workflow_module.WorkflowExecutor(workflow)
+    executor.execute()
+
+    assert executor.context.torrents == filtered_torrents
+    assert executor.context.artifacts["torrents"] == filtered_torrents
+    assert executor.context.node_outputs["B"]["torrents"] == filtered_torrents
+
+
 def test_workflow_executor_stop_is_not_success(monkeypatch):
     """停止信号不应被执行器汇报为成功完成。"""
     calls = []
