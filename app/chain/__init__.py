@@ -205,6 +205,13 @@ class ChainBase(metaclass=ABCMeta):
         )
         return dispatch_message
 
+    @staticmethod
+    def _build_notice_message_data(message: Notification) -> dict:
+        """
+        构造消息通知事件数据。
+        """
+        return {**message.model_dump(exclude={"save_history"}), "type": message.mtype}
+
     async def async_remove_cache(self, filename: str) -> None:
         """
         异步删除缓存，同时删除Redis和本地缓存
@@ -1540,7 +1547,7 @@ class ChainBase(metaclass=ABCMeta):
                     # 按设定发送
                     self.eventmanager.send_event(
                         etype=EventType.NoticeMessage,
-                        data={**send_message.model_dump(), "type": send_message.mtype},
+                        data=self._build_notice_message_data(send_message),
                     )
                     self.messagequeue.send_message(
                         "post_message", message=send_message, **kwargs
@@ -1550,7 +1557,7 @@ class ChainBase(metaclass=ABCMeta):
         # 发送消息事件
         self.eventmanager.send_event(
             etype=EventType.NoticeMessage,
-            data={**dispatch_message.model_dump(), "type": dispatch_message.mtype},
+            data=self._build_notice_message_data(dispatch_message),
         )
         # 按原消息发送
         self.messagequeue.send_message(
@@ -1656,7 +1663,7 @@ class ChainBase(metaclass=ABCMeta):
                     # 按设定发送
                     await self.eventmanager.async_send_event(
                         etype=EventType.NoticeMessage,
-                        data={**send_message.model_dump(), "type": send_message.mtype},
+                        data=self._build_notice_message_data(send_message),
                     )
                     await self.messagequeue.async_send_message(
                         "post_message", message=send_message, **kwargs
@@ -1666,7 +1673,7 @@ class ChainBase(metaclass=ABCMeta):
         # 发送消息事件
         await self.eventmanager.async_send_event(
             etype=EventType.NoticeMessage,
-            data={**dispatch_message.model_dump(), "type": dispatch_message.mtype},
+            data=self._build_notice_message_data(dispatch_message),
         )
         # 按原消息发送
         await self.messagequeue.async_send_message(
