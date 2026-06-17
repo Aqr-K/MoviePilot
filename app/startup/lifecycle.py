@@ -18,6 +18,8 @@ except Exception:
 
 from app.chain.system import SystemChain
 from app.core.config import global_vars, settings
+from app.core.meta.config_source import set_meta_config_provider
+from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.server import MoviePilotServerHelper
 from app.helper.system import SystemHelper
 from app.startup.command_initializer import init_command, stop_command, restart_command
@@ -63,6 +65,8 @@ async def lifespan(app: FastAPI):
     print("Starting up...")
     # 存储当前循环
     global_vars.set_loop(asyncio.get_event_loop())
+    # 将 core/meta 的用户自定义识别配置接到持久化存储（core/meta 本身不依赖 app.db）
+    set_meta_config_provider(lambda key: SystemConfigOper().get(key))
     # 初始化路由
     init_routers(app)
     # 初始化模块
