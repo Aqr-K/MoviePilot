@@ -1,6 +1,5 @@
 from typing import List, Optional
 
-from app.core.config import settings
 from app.log import logger
 
 try:
@@ -23,6 +22,7 @@ def is_config_enabled() -> bool:
     """
     判断系统配置是否允许使用 Rust 加速。
     """
+    from app.core.config import settings
     return bool(settings.RUST_ACCEL)
 
 
