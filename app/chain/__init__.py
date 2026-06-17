@@ -1478,8 +1478,6 @@ class ChainBase(metaclass=ABCMeta):
         if not message:
             logger.warning("消息为空，跳过发送")
             return
-        # 保存消息
-        self.messagehelper.put(message, role="user", title=message.title)
         self.messageoper.add(**message.model_dump())
         dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
@@ -1595,8 +1593,6 @@ class ChainBase(metaclass=ABCMeta):
         if not message:
             logger.warning("消息为空，跳过发送")
             return
-        # 保存消息
-        self.messagehelper.put(message, role="user", title=message.title)
         await self.messageoper.async_add(**message.model_dump())
         dispatch_message = self._normalize_notification_for_dispatch(message)
         # 发送消息按设置隔离
@@ -1688,9 +1684,6 @@ class ChainBase(metaclass=ABCMeta):
         :return: 成功或失败
         """
         note_list = [media.to_dict() for media in medias]
-        self.messagehelper.put(
-            message, role="user", note=note_list, title=message.title
-        )
         self.messageoper.add(**message.model_dump(), note=note_list)
         dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(
@@ -1710,9 +1703,6 @@ class ChainBase(metaclass=ABCMeta):
         :return: 成功或失败
         """
         note_list = [torrent.torrent_info.to_dict() for torrent in torrents]
-        self.messagehelper.put(
-            message, role="user", note=note_list, title=message.title
-        )
         self.messageoper.add(**message.model_dump(), note=note_list)
         dispatch_message = self._normalize_notification_for_dispatch(message)
         return self.messagequeue.send_message(

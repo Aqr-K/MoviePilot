@@ -569,8 +569,8 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertEqual(payload.image_url, "https://example.com/poster.png")
 
-    def test_send_message_tool_uses_agent_notification_type(self):
-        """发送消息工具应固定使用智能体消息类型。"""
+    def test_send_message_tool_uses_regular_notification_type(self):
+        """发送消息工具应按普通通知消息登记。"""
 
         async def _run():
             tool = SendMessageTool(session_id="session-1", user_id="10001")
@@ -595,7 +595,7 @@ class AgentImageSupportTest(unittest.TestCase):
         notification = async_post_message.await_args.args[0]
 
         self.assertEqual(result, "消息已发送")
-        self.assertEqual(notification.mtype, NotificationType.Agent)
+        self.assertEqual(notification.mtype, NotificationType.Other)
         self.assertEqual(notification.channel, MessageChannel.Telegram)
         self.assertEqual(notification.source, "telegram-test")
         self.assertEqual(notification.title, "智能体通知")

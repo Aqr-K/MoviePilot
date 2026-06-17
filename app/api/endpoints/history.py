@@ -136,7 +136,6 @@ def _start_ai_redo_task(history_id: int, prompt: str, progress_key: str):
                 session_prefix=f"__agent_manual_redo_{history_id}",
                 output_callback=update_output,
                 reply_mode=ReplyMode.CAPTURE_ONLY,
-                persist_output_message=False,
                 allow_message_tools=False,
             )
             progress.update(
@@ -182,7 +181,6 @@ def _start_batch_ai_redo_task(
                 session_prefix="__agent_manual_redo_batch",
                 output_callback=update_output,
                 reply_mode=ReplyMode.CAPTURE_ONLY,
-                persist_output_message=False,
                 allow_message_tools=False,
             )
             progress.update(

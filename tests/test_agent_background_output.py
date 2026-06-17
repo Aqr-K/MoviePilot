@@ -66,7 +66,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         agent.channel = None
         agent.source = None
         agent.reply_mode = ReplyMode.CAPTURE_ONLY
-        agent.persist_output_message = True
         agent._tool_context = {"user_reply_sent": False}
         agent._streamed_output = ""
         agent.stream_handler = SimpleNamespace(
@@ -77,15 +76,11 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             return_value=_FakeAgent([AIMessage(content="后台结果")])
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         with patch.object(memory_manager, "save_agent_messages") as save_messages:
             await agent._execute_agent([])
 
         agent.send_agent_message.assert_not_awaited()
-        agent._save_agent_message_to_db.assert_awaited_once_with(
-            "后台结果", title="MoviePilot助手"
-        )
         save_messages.assert_called_once()
         self.assertEqual("后台结果", agent._streamed_output)
 
@@ -105,7 +100,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         result, _ = await agent._execute_agent(
             [
@@ -122,7 +116,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         agent.send_agent_message.assert_awaited_once_with(
             UNSUPPORTED_IMAGE_INPUT_MESSAGE, title=""
         )
-        agent._save_agent_message_to_db.assert_not_awaited()
         self.assertEqual(UNSUPPORTED_IMAGE_INPUT_MESSAGE, agent._streamed_output)
 
     async def test_streaming_image_unsupported_error_sends_friendly_notice(self):
@@ -144,7 +137,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         result, _ = await agent._execute_agent(
             [
@@ -161,7 +153,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         agent.send_agent_message.assert_awaited_once_with(
             UNSUPPORTED_IMAGE_INPUT_MESSAGE, title=""
         )
-        agent._save_agent_message_to_db.assert_not_awaited()
 
     async def test_streaming_model_chunk_timeout_sends_friendly_notice(self):
         """流式模型分块超时时应只把主错误信息发给用户。"""
@@ -186,7 +177,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             return_value=_FakeStreamingFailingAgent(raw_error)
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         result, _ = await agent._execute_agent([HumanMessage(content="测试超时")])
 
@@ -200,14 +190,12 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No streaming chunk received for 120.0s", sent_message)
         self.assertNotIn("Tune or disable", sent_message)
         self.assertEqual(expected, agent._streamed_output)
-        agent._save_agent_message_to_db.assert_not_awaited()
 
     async def test_background_non_streaming_sends_when_reply_mode_dispatch(self):
         agent = MoviePilotAgent(session_id="bg-test", user_id="system")
         agent.channel = None
         agent.source = None
         agent.reply_mode = ReplyMode.DISPATCH
-        agent.persist_output_message = False
         agent._tool_context = {"user_reply_sent": False}
         agent._streamed_output = ""
         agent.stream_handler = SimpleNamespace(
@@ -218,7 +206,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             return_value=_FakeAgent([AIMessage(content="后台结果")])
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         with patch.object(memory_manager, "save_agent_messages") as save_messages:
             await agent._execute_agent([])
@@ -226,16 +213,14 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         agent.send_agent_message.assert_awaited_once_with(
             "后台结果", title="MoviePilot助手"
         )
-        agent._save_agent_message_to_db.assert_not_awaited()
         save_messages.assert_called_once()
         self.assertEqual("后台结果", agent._streamed_output)
 
-    async def test_background_non_streaming_persists_without_sending_when_capture_only(self):
+    async def test_background_non_streaming_captures_without_sending_when_capture_only(self):
         agent = MoviePilotAgent(session_id="bg-test", user_id="system")
         agent.channel = None
         agent.source = None
         agent.reply_mode = ReplyMode.CAPTURE_ONLY
-        agent.persist_output_message = True
         agent._tool_context = {"user_reply_sent": False}
         agent._streamed_output = ""
         agent.stream_handler = SimpleNamespace(
@@ -246,15 +231,11 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             return_value=_FakeAgent([AIMessage(content="后台结果")])
         )
         agent.send_agent_message = AsyncMock()
-        agent._save_agent_message_to_db = AsyncMock()
 
         with patch.object(memory_manager, "save_agent_messages") as save_messages:
             await agent._execute_agent([])
 
         agent.send_agent_message.assert_not_awaited()
-        agent._save_agent_message_to_db.assert_awaited_once_with(
-            "后台结果", title="MoviePilot助手"
-        )
         save_messages.assert_called_once()
         self.assertEqual("后台结果", agent._streamed_output)
 
@@ -279,7 +260,6 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         process_message.assert_awaited_once()
         kwargs = process_message.await_args.kwargs
         self.assertEqual(ReplyMode.CAPTURE_ONLY, kwargs["reply_mode"])
-        self.assertFalse(kwargs["persist_output_message"])
         self.assertTrue(kwargs["allow_message_tools"])
 
     async def test_heartbeat_check_jobs_skips_when_no_active_jobs(self):

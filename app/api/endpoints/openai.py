@@ -52,9 +52,6 @@ class _CollectingMoviePilotAgent(MoviePilotAgent):
             if self.stream_mode:
                 self.stream_handler.emit(text)
 
-    async def _save_agent_message_to_db(self, message: str, title: str = ""):
-        return None
-
 
 class _OpenAIStreamingHandler(StreamingHandler):
     """

@@ -197,7 +197,15 @@ class MessageChain(ChainBase):
                     )
                     return
 
-            if not text.startswith("CALLBACK:"):
+            is_agent_message = self._is_agent_message(
+                userid=userid,
+                text=text,
+                images=images,
+                files=files,
+                has_audio_input=has_audio_input,
+            )
+
+            if not text.startswith("CALLBACK:") and not is_agent_message:
                 self._record_user_message(
                     channel=channel,
                     source=source,
@@ -206,14 +214,7 @@ class MessageChain(ChainBase):
                     text=text,
                 )
 
-            if not self._is_agent_message(
-                    channel=channel,
-                    userid=userid,
-                    text=text,
-                    images=images,
-                    files=files,
-                    has_audio_input=has_audio_input,
-            ):
+            if not is_agent_message:
                 processing_status = self._mark_message_processing_started(
                     channel=channel,
                     source=source,
@@ -430,7 +431,6 @@ class MessageChain(ChainBase):
 
     def _is_agent_message(
             self,
-            channel: MessageChannel,
             userid: Union[str, int],
             text: str,
             images: Optional[List[CommingMessage.MessageImage]] = None,
@@ -766,13 +766,6 @@ class MessageChain(ChainBase):
             selected_label=option.label,
         )
         self._bind_session_id(userid, request.session_id)
-        self._record_user_message(
-            channel=channel,
-            source=source,
-            userid=userid,
-            username=username,
-            text=selected_text,
-        )
         return self._handle_ai_message(
             text=selected_text,
             channel=channel,
@@ -954,7 +947,6 @@ class MessageChain(ChainBase):
                     session_prefix=f"__agent_manual_redo_{history_id}",
                     output_callback=_capture_output,
                     reply_mode=ReplyMode.CAPTURE_ONLY,
-                    persist_output_message=False,
                     allow_message_tools=False,
                 )
                 await self.async_post_message(

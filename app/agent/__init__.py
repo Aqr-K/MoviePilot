@@ -246,7 +246,6 @@ class MoviePilotAgent:
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
             replay_mode: ReplyMode = ReplyMode.DISPATCH,
-            persist_output_message: bool = True,
             allow_message_tools: bool = True,
             output_callback: Optional[Callable[[str], None]] = None,
     ):
@@ -258,7 +257,6 @@ class MoviePilotAgent:
         self.original_message_id = original_message_id
         self.original_chat_id = original_chat_id
         self.reply_mode = replay_mode
-        self.persist_output_message = persist_output_message
         self.allow_message_tools = allow_message_tools
         self.output_callback = output_callback
         self._tool_context: Dict[str, object] = {}
@@ -782,8 +780,6 @@ class MoviePilotAgent:
         title = "MoviePilot助手" if self.is_background else ""
         if self.should_dispatch_reply:
             await self.send_agent_message(message, title=title)
-        elif self.persist_output_message:
-            await self._save_agent_message_to_db(message, title=title)
 
     def _emit_output(self, text: str):
         """
@@ -1126,19 +1122,6 @@ class MoviePilotAgent:
                             and not self._tool_context.get("user_reply_sent")
                     ):
                         await self.send_agent_message(remaining_text)
-                    elif (
-                            remaining_text
-                            and self.persist_output_message
-                            and not self._tool_context.get("user_reply_sent")
-                    ):
-                        title = "MoviePilot助手" if self.is_background else ""
-                        await self._save_agent_message_to_db(
-                            remaining_text,
-                            title=title,
-                        )
-                elif streamed_text and self.persist_output_message:
-                    # 流式输出已发送全部内容，但未记录到数据库，补充保存消息记录
-                    await self._save_agent_message_to_db(streamed_text)
 
             else:
                 # 非流式模式：后台任务或渠道不支持消息编辑
@@ -1180,13 +1163,6 @@ class MoviePilotAgent:
                     else:
                         # 非流式渠道：发送最终回复
                         await self.send_agent_message(final_text)
-                elif (
-                        final_text
-                        and self.persist_output_message
-                        and not self._tool_context.get("user_reply_sent")
-                ):
-                    title = "MoviePilot助手" if self.is_background else ""
-                    await self._save_agent_message_to_db(final_text, title=title)
 
             # 保存消息
             memory_manager.save_agent_messages(
@@ -1238,26 +1214,6 @@ class MoviePilotAgent:
             )
         )
 
-    async def _save_agent_message_to_db(self, message: str, title: str = ""):
-        """
-        仅保存Agent回复消息到数据库和SSE队列（不重新发送到渠道）
-        用于流式输出场景：消息已通过 send_direct_message/edit_message 发送给用户，
-        但未记录到数据库中，此方法补充保存消息历史记录。
-        """
-        chain = AgentChain()
-        notification = Notification(
-            channel=self.channel,
-            source=self.source,
-            userid=self.user_id,
-            username=self.username,
-            title=title,
-            text=message,
-        )
-        # 保存到SSE消息队列（供前端展示）
-        chain.messagehelper.put(notification, role="user", title=title)
-        # 保存到数据库
-        await chain.messageoper.async_add(**notification.model_dump())
-
     async def cleanup(self):
         """
         清理智能体资源
@@ -1284,7 +1240,6 @@ class _MessageTask:
     original_chat_id: Optional[str] = None
     processing_status: Optional[dict] = None
     reply_mode: ReplyMode = ReplyMode.DISPATCH
-    persist_output_message: bool = True
     allow_message_tools: bool = True
 
 
@@ -1430,7 +1385,6 @@ class AgentManager:
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
-            persist_output_message: bool = True,
             allow_message_tools: bool = True,
     ) -> str:
         """
@@ -1450,7 +1404,6 @@ class AgentManager:
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
             reply_mode=reply_mode,
-            persist_output_message=persist_output_message,
             allow_message_tools=allow_message_tools,
         )
         self._record_session_activity(session_id, user_id)
@@ -1561,7 +1514,6 @@ class AgentManager:
                 original_message_id=task.original_message_id,
                 original_chat_id=task.original_chat_id,
                 replay_mode=task.reply_mode,
-                persist_output_message=task.persist_output_message,
                 allow_message_tools=task.allow_message_tools,
             )
             self.active_agents[session_id] = agent
@@ -1577,7 +1529,6 @@ class AgentManager:
             agent.original_message_id = task.original_message_id
             agent.original_chat_id = task.original_chat_id
             agent.reply_mode = task.reply_mode
-            agent.persist_output_message = task.persist_output_message
             agent.allow_message_tools = task.allow_message_tools
 
         process_kwargs = {
@@ -1656,7 +1607,6 @@ class AgentManager:
             session_prefix: str = "__agent_background",
             output_callback: Optional[Callable[[str], None]] = None,
             reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
-            persist_output_message: bool = True,
             allow_message_tools: Optional[bool] = None,
     ) -> None:
         """
@@ -1677,7 +1627,6 @@ class AgentManager:
             source=None,
             username=settings.SUPERUSER,
             replay_mode=reply_mode,
-            persist_output_message=persist_output_message,
             output_callback=output_callback,
             allow_message_tools=allow_message_tools,
         )
@@ -1723,7 +1672,6 @@ class AgentManager:
                 source=None,
                 username=settings.SUPERUSER,
                 reply_mode=ReplyMode.CAPTURE_ONLY,
-                persist_output_message=False,
                 allow_message_tools=True,
             )
 
