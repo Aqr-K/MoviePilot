@@ -220,14 +220,15 @@ class EnqueueCharacterizationTest(unittest.TestCase):
         self.assertTrue(chain._service._queue.empty())
 
     def test_put_to_queue_lands_task_with_default_callback(self):
-        """有效任务：入队一个 TransferQueue(task, callback=__default_callback)，并登记进 jobview。"""
+        """有效任务：入队一个 TransferQueue(task, callback=_result_processor.handle)，并登记进 jobview。"""
         chain = make_queue_chain()
         task = make_task(1)
         self.assertTrue(chain.put_to_queue(task))
         self.assertEqual(1, chain._service._queue.qsize())
         item = chain._service._queue.get_nowait()
         self.assertIs(task, item.task)
-        self.assertEqual(chain._TransferChain__default_callback, item.callback)
+        # 回调已从 __default_callback 抽到 TransferResultProcessor.handle（同一处理器实例，bound 方法相等）
+        self.assertEqual(chain._result_processor.handle, item.callback)
         self.assertEqual(1, len(chain.jobview.list_jobs()))
 
     def test_put_to_queue_dedupes_same_task(self):
