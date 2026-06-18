@@ -7,6 +7,18 @@ from app import schemas
 from app.agent.tools.manager import moviepilot_tool_manager
 from app.core.security import verify_apikey
 from app.log import logger
+from app.service.mcp import (
+    MCP_HIDDEN_TOOLS,
+    MCP_PROTOCOL_VERSIONS,
+    build_initialize_result,
+    create_jsonrpc_error,
+    create_jsonrpc_response,
+    filter_exposed_tools,
+    is_valid_jsonrpc_request,
+    negotiate_protocol_version,
+    tool_to_mcp_dict,
+    tools_to_mcp_format,
+)
 
 # 导入版本号
 try:
@@ -16,53 +28,12 @@ except ImportError:
 
 router = APIRouter()
 
-# MCP 协议版本
-MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"]
-MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSIONS[0]  # 默认使用最新版本
-MCP_HIDDEN_TOOLS = {
-    "execute_command",
-    "search_web",
-    "edit_file",
-    "write_file",
-    "read_file",
-}
-
 
 def list_exposed_tools():
     """
     获取 MCP 可见工具列表
     """
-    return [
-        tool
-        for tool in moviepilot_tool_manager.list_tools()
-        if tool.name not in MCP_HIDDEN_TOOLS
-    ]
-
-
-def create_jsonrpc_response(
-    request_id: Union[str, int, None], result: Any
-) -> Dict[str, Any]:
-    """
-    创建 JSON-RPC 成功响应
-    """
-    response = {"jsonrpc": "2.0", "id": request_id, "result": result}
-    return response
-
-
-def create_jsonrpc_error(
-    request_id: Union[str, int, None], code: int, message: str, data: Any = None
-) -> Dict[str, Any]:
-    """
-    创建 JSON-RPC 错误响应
-    """
-    error = {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": code, "message": message},
-    }
-    if data is not None:
-        error["error"]["data"] = data
-    return error
+    return filter_exposed_tools(moviepilot_tool_manager.list_tools())
 
 
 @router.post("", summary="MCP JSON-RPC 端点", response_model=None)
@@ -84,7 +55,7 @@ async def mcp_jsonrpc(
         )
 
     # 验证 JSON-RPC 格式
-    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+    if not is_valid_jsonrpc_request(body):
         return JSONResponse(
             status_code=400,
             content=create_jsonrpc_error(body.get("id"), -32600, "Invalid Request"),
@@ -161,51 +132,22 @@ async def handle_initialize(params: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     # 版本协商：选择客户端和服务器都支持的版本
-    negotiated_version = MCP_PROTOCOL_VERSION
+    negotiated_version = negotiate_protocol_version(protocol_version)
     if protocol_version in MCP_PROTOCOL_VERSIONS:
-        # 客户端版本在支持列表中，使用客户端版本
-        negotiated_version = protocol_version
         logger.info(f"使用客户端协议版本: {negotiated_version}")
     else:
-        # 客户端版本不支持，使用服务器默认版本
         logger.warning(
             f"协议版本不匹配: 客户端={protocol_version}, 使用服务器版本={negotiated_version}"
         )
 
-    return {
-        "protocolVersion": negotiated_version,
-        "capabilities": {
-            "tools": {
-                "listChanged": False  # 暂不支持工具列表变更通知
-            },
-            "logging": {},
-        },
-        "serverInfo": {
-            "name": "MoviePilot",
-            "version": APP_VERSION,
-            "description": "MoviePilot MCP Server - 电影自动化管理工具",
-        },
-        "instructions": "MoviePilot MCP 服务器，提供媒体管理、订阅、下载等工具。",
-    }
+    return build_initialize_result(negotiated_version, APP_VERSION)
 
 
 async def handle_tools_list() -> Dict[str, Any]:
     """
     处理工具列表请求
     """
-    tools = list_exposed_tools()
-
-    # 转换为 MCP 工具格式
-    mcp_tools = []
-    for tool in tools:
-        mcp_tool = {
-            "name": tool.name,
-            "description": tool.description,
-            "inputSchema": tool.input_schema,
-        }
-        mcp_tools.append(mcp_tool)
-
-    return {"tools": mcp_tools}
+    return {"tools": tools_to_mcp_format(list_exposed_tools())}
 
 
 async def handle_tools_call(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,20 +196,8 @@ async def list_tools(_: Annotated[str, Depends(verify_apikey)]) -> Any:
     返回每个工具的名称、描述和参数定义
     """
     try:
-        # 获取所有工具定义
-        tools = list_exposed_tools()
-
-        # 转换为字典格式
-        tools_list = []
-        for tool in tools:
-            tool_dict = {
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
-            }
-            tools_list.append(tool_dict)
-
-        return tools_list
+        # 获取所有工具定义并转换为字典格式
+        return tools_to_mcp_format(list_exposed_tools())
     except Exception as e:
         logger.error(f"获取工具列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取工具列表失败: {str(e)}")
@@ -314,11 +244,7 @@ async def get_tool_info(
         # 查找指定工具
         for tool in tools:
             if tool.name == tool_name:
-                return {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "inputSchema": tool.input_schema,
-                }
+                return tool_to_mcp_dict(tool)
 
         raise HTTPException(status_code=404, detail=f"工具 '{tool_name}' 未找到")
     except HTTPException:
