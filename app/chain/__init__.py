@@ -56,18 +56,34 @@ class ChainBase(metaclass=ABCMeta):
     处理链基类
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        modulemanager=None,
+        eventmanager=None,
+        messageoper=None,
+        messagehelper=None,
+        messagequeue=None,
+        pluginmanager=None,
+        filecache=None,
+        async_filecache=None,
+    ):
         """
         公共初始化
+
+        S6 DI：8 个公共依赖均可经关键字参数注入，默认回退各自全局单例。不传参（现有所有
+        SomeChain() 调用点、子类 super().__init__()、市场插件如 p115 的 PluginChian(ChainBase)）
+        = 取全局单例，行为不变；测试可注入 fake 而无需 mock.patch 全局。参数为 keyword-only，
+        杜绝位置传参歧义（原 __init__(self) 不接受位置参，无调用方受影响）。
         """
-        self.modulemanager = ModuleManager()
-        self.eventmanager = EventManager()
-        self.messageoper = MessageOper()
-        self.messagehelper = MessageHelper()
-        self.messagequeue = MessageQueueManager(send_callback=self.run_module)
-        self.pluginmanager = PluginManager()
-        self.filecache = FileCache()
-        self.async_filecache = AsyncFileCache()
+        self.modulemanager = modulemanager or ModuleManager()
+        self.eventmanager = eventmanager or EventManager()
+        self.messageoper = messageoper or MessageOper()
+        self.messagehelper = messagehelper or MessageHelper()
+        self.messagequeue = messagequeue or MessageQueueManager(send_callback=self.run_module)
+        self.pluginmanager = pluginmanager or PluginManager()
+        self.filecache = filecache or FileCache()
+        self.async_filecache = async_filecache or AsyncFileCache()
 
     def load_cache(self, filename: str) -> Any:
         """
