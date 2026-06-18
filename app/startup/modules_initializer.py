@@ -28,6 +28,7 @@ from app.command import CommandChain
 from app.schemas import Notification, NotificationType
 from app.schemas.types import SystemConfigKey
 from app.startup.agent_initializer import init_agent, stop_agent
+from app.startup.service_registry import service_registry
 
 
 def start_frontend():
@@ -113,12 +114,15 @@ async def stop_modules():
     """
     # 停止AI智能体
     await stop_agent()
-    # 停止模块
-    ModuleManager().stop()
+    # 停止模块（从组合根注册表取所拥有的实例，不再重新 X() 取单例）
+    if (module_manager := service_registry.get("module_manager")) is not None:
+        module_manager.stop()
     # 停止事件消费
-    EventManager().stop()
+    if (event_manager := service_registry.get("event_manager")) is not None:
+        event_manager.stop()
     # 停止虚拟显示
-    DisplayHelper().stop()
+    if (display := service_registry.get("display")) is not None:
+        display.stop()
     # 停止线程池
     ThreadHelper().shutdown()
     # 停止消息服务
@@ -138,20 +142,22 @@ def init_modules():
     """
     启动模块
     """
-    # 虚拟显示
-    DisplayHelper()
-    # DoH
+    # 重置组合根注册表（单进程内 init_modules 仅调用一次；防御性清空，避免假想的二次 init 残留旧实例）
+    service_registry.clear()
+    # 虚拟显示（生命周期服务：登记到注册表，stop_modules 取回关闭）
+    service_registry.register("display", DisplayHelper())
+    # DoH（仅构造副作用，无 stop()，不纳入注册表）
     DohHelper()
-    # 站点管理
+    # 站点管理（同上）
     SitesHelper()
-    # 资源包检测
+    # 资源包检测（同上）
     ResourceHelper()
     # 用户认证
     user_auth()
     # 加载模块
-    ModuleManager()
-    # 启动事件消费
-    EventManager().start()
+    service_registry.register("module_manager", ModuleManager())
+    # 启动事件消费（登记后启动同一实例）
+    service_registry.register("event_manager", EventManager()).start()
     # 初始化共享服务端状态
     MoviePilotServerHelper.init_plugin_report()
     MoviePilotServerHelper.init_subscribe_report()
