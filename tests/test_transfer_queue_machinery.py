@@ -7,6 +7,7 @@ __start_transfer worker loop / 生命周期 / 入队的特征化测试奠基；�
 import queue
 import threading
 import unittest
+from unittest.mock import patch
 
 from app.core.config import global_vars
 from app.chain.transfer import JobManager
@@ -153,6 +154,78 @@ class WorkerLoopCharacterizationTest(unittest.TestCase):
         t = _drain_worker(chain, items)
         self.assertFalse(t.is_alive())
         self.assertEqual(1, len(handle_calls))
+
+
+class LifecycleCharacterizationTest(unittest.TestCase):
+    """特征化守护线程生命周期 __init/__stop/on_config_changed（在 make_queue_chain 实例上手动驱动，
+    不构造真实 TransferChain()——避 Singleton 跨测试泄漏；空队列下线程仅 0.01s 自旋，__stop 快速 join）。
+    """
+
+    def setUp(self):
+        global_vars.resume_system()  # 确保线程进入 loop（is_system_stopped False）
+
+    def test_init_spawns_daemon_threads_then_stop_joins(self):
+        """__init 起 TRANSFER_THREADS 个具名守护线程并置 _queue_active；__stop 翻标志、join、清空。"""
+        chain = make_queue_chain()
+        with patch("app.chain.transfer.settings.TRANSFER_THREADS", 2):
+            chain._TransferChain__init()
+        try:
+            self.assertTrue(chain._queue_active)
+            self.assertEqual(2, len(chain._threads))
+            for i, th in enumerate(chain._threads):
+                self.assertTrue(th.is_alive())
+                self.assertTrue(th.daemon)
+                self.assertEqual(f"transfer-{i}", th.name)
+        finally:
+            chain._TransferChain__stop()
+        self.assertFalse(chain._queue_active)
+        self.assertEqual([], chain._threads)
+
+    def test_on_config_changed_restarts_threads(self):
+        """on_config_changed = __stop + __init：旧线程被 join 退出，换上等量新线程。"""
+        chain = make_queue_chain()
+        with patch("app.chain.transfer.settings.TRANSFER_THREADS", 1):
+            chain._TransferChain__init()
+            first = list(chain._threads)
+            chain.on_config_changed()
+            second = list(chain._threads)
+            try:
+                self.assertEqual(1, len(second))
+                self.assertIsNot(first[0], second[0])
+                self.assertFalse(first[0].is_alive())
+                self.assertTrue(second[0].is_alive())
+            finally:
+                chain._TransferChain__stop()
+        self.assertEqual([], chain._threads)
+
+
+class EnqueueCharacterizationTest(unittest.TestCase):
+    """特征化入队 put_to_queue（落队 + 默认回调 + 经 jobview.add_task 去重）。"""
+
+    def test_put_to_queue_none_returns_false(self):
+        """空任务：返回 False，不入队。"""
+        chain = make_queue_chain()
+        self.assertFalse(chain.put_to_queue(None))
+        self.assertTrue(chain._queue.empty())
+
+    def test_put_to_queue_lands_task_with_default_callback(self):
+        """有效任务：入队一个 TransferQueue(task, callback=__default_callback)，并登记进 jobview。"""
+        chain = make_queue_chain()
+        task = make_task(1)
+        self.assertTrue(chain.put_to_queue(task))
+        self.assertEqual(1, chain._queue.qsize())
+        item = chain._queue.get_nowait()
+        self.assertIs(task, item.task)
+        self.assertEqual(chain._TransferChain__default_callback, item.callback)
+        self.assertEqual(1, len(chain.jobview.list_jobs()))
+
+    def test_put_to_queue_dedupes_same_task(self):
+        """同一 fileitem 再次入队：jobview.add_task 报重复 → 返回 False，不重复入队。"""
+        chain = make_queue_chain()
+        task = make_task(1)
+        self.assertTrue(chain.put_to_queue(task))
+        self.assertFalse(chain.put_to_queue(task))
+        self.assertEqual(1, chain._queue.qsize())
 
 
 if __name__ == "__main__":
