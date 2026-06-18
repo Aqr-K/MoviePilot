@@ -1587,13 +1587,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 mediainfo_changed = True
 
             # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
-            if not settings.SCRAP_FOLLOW_TMDB:
-                transfer_history = transferhis.get_by_type_tmdbid(
-                    tmdbid=mediainfo.tmdb_id, mtype=mediainfo.type.value
-                )
-                if transfer_history and mediainfo.title != transfer_history.title:
-                    mediainfo.title = transfer_history.title
-                    mediainfo_changed = True
+            mediainfo_changed = self._apply_scrap_follow_tmdb(
+                mediainfo, mediainfo_changed, transferhis
+            )
 
             if mediainfo_changed:
                 # 更新任务信息
@@ -1643,6 +1639,27 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 移除已完成的任务
             self.jobview.try_remove_job(task)
             self.__finish_scrape_batch_task(task)
+
+    def _apply_scrap_follow_tmdb(
+        self,
+        mediainfo: MediaInfo,
+        mediainfo_changed: bool,
+        transferhis: TransferHistoryOper,
+    ) -> bool:
+        """
+        S8b：自 __handle_transfer 抽出的无早返回子块，行为字节级不变。
+        未开启「新增已入库媒体跟随 TMDB 信息变化」时，按 tmdbid 查历史 title，
+        若与当前不同则就地覆盖 mediainfo.title 并置 mediainfo_changed=True；
+        返回（可能更新的）mediainfo_changed。
+        """
+        if not settings.SCRAP_FOLLOW_TMDB:
+            transfer_history = transferhis.get_by_type_tmdbid(
+                tmdbid=mediainfo.tmdb_id, mtype=mediainfo.type.value
+            )
+            if transfer_history and mediainfo.title != transfer_history.title:
+                mediainfo.title = transfer_history.title
+                mediainfo_changed = True
+        return mediainfo_changed
 
     def _resolve_episodes_info(self, task: TransferTask) -> None:
         """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。
