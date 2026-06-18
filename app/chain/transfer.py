@@ -1591,13 +1591,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 mediainfo, mediainfo_changed, transferhis
             )
 
-            if mediainfo_changed:
-                # 更新任务信息
-                task.mediainfo = mediainfo
-                # 更新队列任务
-                if not self.jobview.migrate_task(task):
-                    logger.info(f"{task.fileitem.name} 已存在整理任务，跳过重复处理")
-                    return False, f"{task.fileitem.name} 已在整理队列中"
+            # 更新队列任务（mediainfo 变更时回写并去重），命中重复则提前返回
+            result = self._migrate_or_skip(task, mediainfo, mediainfo_changed)
+            if result is not None:
+                return result
 
             # 获取集数据
             self._resolve_episodes_info(task)
@@ -1660,6 +1657,28 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 mediainfo.title = transfer_history.title
                 mediainfo_changed = True
         return mediainfo_changed
+
+    def _migrate_or_skip(
+        self,
+        task: TransferTask,
+        mediainfo: MediaInfo,
+        mediainfo_changed: bool,
+    ) -> Optional[Tuple[bool, str]]:
+        """
+        S8b：自 __handle_transfer 抽出的早返回子块，经哨兵协议保持行为字节级不变。
+
+        mediainfo 变更时把（可能重识别后的）mediainfo 回写到 task 并在 jobview 重新登记；
+        若 migrate_task 报告任务已存在，则记录日志并返回 (False, ...) 哨兵，由调用方提前返回；
+        否则返回 None 表示继续。未变更时不回写、不去重，直接返回 None。
+        """
+        if mediainfo_changed:
+            # 更新任务信息
+            task.mediainfo = mediainfo
+            # 更新队列任务
+            if not self.jobview.migrate_task(task):
+                logger.info(f"{task.fileitem.name} 已存在整理任务，跳过重复处理")
+                return False, f"{task.fileitem.name} 已在整理队列中"
+        return None
 
     def _resolve_episodes_info(self, task: TransferTask) -> None:
         """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。
