@@ -826,9 +826,6 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         if not settings.PLUGIN_MARKET:
             return []
-        if force:
-            from app.helper.plugin import PluginHelper
-            PluginHelper().get_plugin_release_versions.cache_clear()
 
         # 用于存储高于 v1 版本的插件（如 v2, v3 等）
         higher_version_plugins = []
@@ -938,6 +935,20 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 根据加载排序重新排序
         plugins.sort(key=lambda x: x.plugin_order if hasattr(x, "plugin_order") else 0)
         return plugins
+
+    def get_local_plugin_version(self, pid: str) -> Optional[str]:
+        """
+        获取指定已安装插件的本地版本，不触发全部插件的状态、页面和权限计算。
+
+        插件类由运行期动态加载，旧插件可能未声明版本属性，因此缺失时返回 None。
+        """
+        installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+        if pid not in installed_apps:
+            return None
+        plugin_class = self._plugins.get(pid)
+        if not plugin_class:
+            return None
+        return getattr(plugin_class, "plugin_version", None)
 
     def get_local_repo_plugins(self) -> List[schemas.Plugin]:
         """
@@ -1154,9 +1165,6 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         if not settings.PLUGIN_MARKET:
             return []
-        if force:
-            from app.helper.plugin import PluginHelper
-            await PluginHelper().async_get_plugin_release_versions.cache_clear()
 
         # 用于存储高于 v1 版本的插件（如 v2, v3 等）
         higher_version_plugins = []
