@@ -826,6 +826,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         if not settings.PLUGIN_MARKET:
             return []
+        if force:
+            from app.helper.plugin import PluginHelper
+            PluginHelper().get_plugin_release_versions.cache_clear()
 
         # 用于存储高于 v1 版本的插件（如 v2, v3 等）
         higher_version_plugins = []
@@ -1133,6 +1136,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 更新历史
         if plugin_info.get("history"):
             plugin.history = plugin_info.get("history")
+        # Release 能力位来自插件市场索引，用于前端展示和后端安装入口双重校验。
+        plugin.release = bool(plugin_info.get("release"))
         # 仓库链接
         plugin.repo_url = market
         # 本地标志
@@ -1149,6 +1154,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         if not settings.PLUGIN_MARKET:
             return []
+        if force:
+            from app.helper.plugin import PluginHelper
+            await PluginHelper().async_get_plugin_release_versions.cache_clear()
 
         # 用于存储高于 v1 版本的插件（如 v2, v3 等）
         higher_version_plugins = []
