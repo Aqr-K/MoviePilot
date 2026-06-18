@@ -4,15 +4,17 @@ from fastapi import APIRouter, Depends, Body
 
 from app import schemas
 from app.chain.download import DownloadChain
-from app.chain.media import MediaChain
-from app.core.context import MediaInfo, Context, SubtitleInfo, TorrentInfo
-from app.core.metainfo import MetaInfo
+from app.core.context import SubtitleInfo
 from app.core.security import verify_token
 from app.db.models.user import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user
 from app.helper.directory import DirectoryHelper
 from app.schemas.types import SystemConfigKey
+from app.service.download import (
+    add_download_with_media as _add_download_with_media,
+    recognize_and_download as _recognize_and_download,
+)
 
 router = APIRouter()
 
@@ -38,25 +40,12 @@ def download(
     """
     添加下载任务（含媒体信息）
     """
-    # 元数据
-    metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
-    # 媒体信息
-    mediainfo = MediaInfo()
-    mediainfo.from_dict(media_in.model_dump())
-    # 种子信息
-    torrentinfo = TorrentInfo()
-    torrentinfo.from_dict(torrent_in.model_dump())
-    # 手动下载始终使用选择的下载器
-    torrentinfo.site_downloader = downloader
-    # 上下文
-    context = Context(
-        meta_info=metainfo, media_info=mediainfo, torrent_info=torrentinfo
-    )
-    did = DownloadChain().download_single(
-        context=context,
-        username=current_user.name,
+    did = _add_download_with_media(
+        media_in=media_in,
+        torrent_in=torrent_in,
+        downloader=downloader,
         save_path=save_path,
-        source="Manual",
+        username=current_user.name,
     )
     if not did:
         return schemas.Response(success=False, message="任务添加失败")
@@ -78,37 +67,16 @@ def add(
     """
     添加下载任务（不含媒体信息）
     """
-    # 元数据
-    metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
-    # 媒体信息
-    if tmdbid or doubanid:
-        mediainfo = MediaChain().recognize_media(
-            meta=metainfo,
-            tmdbid=tmdbid,
-            doubanid=doubanid,
-        )
-    else:
-        mediainfo = MediaChain().recognize_by_meta(
-            metainfo,
-            obtain_images=False,
-        )
-    if not mediainfo:
-        return schemas.Response(success=False, message="无法识别媒体信息")
-    # 种子信息
-    torrentinfo = TorrentInfo()
-    torrentinfo.from_dict(torrent_in.model_dump())
-    # 上下文
-    context = Context(
-        meta_info=metainfo, media_info=mediainfo, torrent_info=torrentinfo
-    )
-
-    did = DownloadChain().download_single(
-        context=context,
-        username=current_user.name,
+    recognized, did = _recognize_and_download(
+        torrent_in=torrent_in,
+        tmdbid=tmdbid,
+        doubanid=doubanid,
         downloader=downloader,
         save_path=save_path,
-        source="Manual",
+        username=current_user.name,
     )
+    if not recognized:
+        return schemas.Response(success=False, message="无法识别媒体信息")
     if not did:
         return schemas.Response(success=False, message="任务添加失败")
     return schemas.Response(success=True, data={"download_id": did})
