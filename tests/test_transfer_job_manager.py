@@ -932,7 +932,7 @@ class TransferJobManagerTest(unittest.TestCase):
             ],
             event_data["file_list"],
         )
-        self.assertEqual({}, chain._scrape_batches)
+        self.assertEqual({}, chain._scrape_coordinator._batches)
 
     def test_scrape_event_keeps_immediate_behavior_without_transfer_batch(self):
         chain = make_transfer_chain()

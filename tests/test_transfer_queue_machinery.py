@@ -60,10 +60,10 @@ class MakeQueueChainContractTest(unittest.TestCase):
         self.assertEqual(0, svc._total_num)
         # service read-through 回单例
         self.assertIs(chain, svc._chain)
-        # 契约态仍在 TransferChain（jobview/_success_target_files/_scrape_batches）
+        # 契约态仍在 TransferChain（jobview/_success_target_files）；刮削批次已抽到协调器
         self.assertIsInstance(chain.jobview, JobManager)
         self.assertEqual({}, chain._success_target_files)
-        self.assertEqual({}, chain._scrape_batches)
+        self.assertEqual({}, chain._scrape_coordinator._batches)
 
     def test_queue_put_get_roundtrip(self):
         """种入的 service._queue 是可用的 queue.Queue（put/get 往返）。"""
