@@ -185,7 +185,7 @@ class TransferJobManagerTest(unittest.TestCase):
             "app.chain.transfer.TransferHistoryOper",
             return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
         ):
-            state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
+            state, errmsg = chain._result_processor.handle(task, transferinfo)
 
         self.assertTrue(state)
         self.assertEqual("", errmsg)
@@ -914,7 +914,7 @@ class TransferJobManagerTest(unittest.TestCase):
         ) as storage_chain_cls:
             storage_chain_cls.return_value.is_bluray_folder.return_value = False
             for task, transferinfo in zip(tasks, transferinfos):
-                chain._TransferChain__default_callback(task, transferinfo)
+                chain._result_processor.handle(task, transferinfo)
                 chain._TransferChain__finish_scrape_batch_task(task)
 
         metadata_calls = [
@@ -977,7 +977,7 @@ class TransferJobManagerTest(unittest.TestCase):
             "app.chain.transfer.StorageChain"
         ) as storage_chain_cls:
             storage_chain_cls.return_value.is_bluray_folder.return_value = False
-            chain._TransferChain__default_callback(task, transferinfo)
+            chain._result_processor.handle(task, transferinfo)
 
         metadata_calls = [
             call

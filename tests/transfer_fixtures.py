@@ -16,6 +16,7 @@ from app.chain.transfer import (
     JobManager,
     ScrapeBatchCoordinator,
     TransferChain,
+    TransferResultProcessor,
     TransferService,
 )
 from app.schemas import FileItem, TransferTask
@@ -126,6 +127,7 @@ def make_transfer_chain() -> TransferChain:
     )
     chain._success_target_files = {}
     chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
+    chain._result_processor = TransferResultProcessor(chain=chain)
     return chain
 
 
