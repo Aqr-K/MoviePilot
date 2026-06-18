@@ -35,7 +35,7 @@ def test_handle_transfer_signature_stable():
 
 def test_extracted_helpers_present():
     """3 个抽出的无早返回 helper 必须就位（单下划线、非 name-mangled）。"""
-    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers"):
+    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb"):
         assert hasattr(TransferChain, h), f"抽出的 helper 缺失: {h}"
 
 
@@ -44,6 +44,63 @@ def test_handle_transfer_keeps_finally_cleanup():
     src = inspect.getsource(getattr(TransferChain, MANGLED))
     assert "finally:" in src, "__handle_transfer 丢失 finally"
     assert "try_remove_job" in src and "__finish_scrape_batch_task" in src, "finally 清理动作被改动"
-    # 入口编排仍按序调用 3 个 helper
-    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers"):
+    # 入口编排仍按序调用 4 个 helper
+    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb"):
         assert h in src, f"入口未调用 helper: {h}"
+
+
+# ---------- S8b：_apply_scrap_follow_tmdb 行为单测（mock 历史 Oper，无需 DB） ----------
+import types  # noqa: E402
+
+from app.core.config import settings  # noqa: E402
+
+
+def _mediainfo(title="New Title", tmdb_id=1, type_value="电影"):
+    return types.SimpleNamespace(
+        title=title, tmdb_id=tmdb_id, type=types.SimpleNamespace(value=type_value)
+    )
+
+
+def _transferhis(history):
+    return types.SimpleNamespace(get_by_type_tmdbid=lambda tmdbid, mtype: history)
+
+
+def _apply(mediainfo, changed, transferhis):
+    # 该 helper 不使用 self，unbound 调用传 None
+    return TransferChain._apply_scrap_follow_tmdb(None, mediainfo, changed, transferhis)
+
+
+def test_scrap_follow_enabled_skips(monkeypatch):
+    """开启跟随 TMDB 时整块跳过：title 不动，mediainfo_changed 原样返回。"""
+    monkeypatch.setattr(settings, "SCRAP_FOLLOW_TMDB", True, raising=False)
+    mi = _mediainfo(title="New Title")
+    out = _apply(mi, False, _transferhis(types.SimpleNamespace(title="Old Title")))
+    assert out is False
+    assert mi.title == "New Title"
+
+
+def test_scrap_follow_disabled_overwrites_title(monkeypatch):
+    """未开启 + 历史 title 不同：就地覆盖 mediainfo.title，返回 True。"""
+    monkeypatch.setattr(settings, "SCRAP_FOLLOW_TMDB", False, raising=False)
+    mi = _mediainfo(title="New Title")
+    out = _apply(mi, False, _transferhis(types.SimpleNamespace(title="Old Title")))
+    assert out is True
+    assert mi.title == "Old Title"
+
+
+def test_scrap_follow_disabled_same_title_no_change(monkeypatch):
+    """未开启 + 历史 title 相同：不覆盖，mediainfo_changed 原样。"""
+    monkeypatch.setattr(settings, "SCRAP_FOLLOW_TMDB", False, raising=False)
+    mi = _mediainfo(title="Same")
+    out = _apply(mi, False, _transferhis(types.SimpleNamespace(title="Same")))
+    assert out is False
+    assert mi.title == "Same"
+
+
+def test_scrap_follow_disabled_no_history_keeps_input(monkeypatch):
+    """未开启 + 无历史：不覆盖，输入的 mediainfo_changed 透传。"""
+    monkeypatch.setattr(settings, "SCRAP_FOLLOW_TMDB", False, raising=False)
+    mi = _mediainfo(title="New Title")
+    out = _apply(mi, True, _transferhis(None))
+    assert out is True
+    assert mi.title == "New Title"
