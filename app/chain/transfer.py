@@ -897,6 +897,149 @@ class TransferService:
                 logger.error(f"整理队列处理出现错误：{e} - {traceback.format_exc()}")
 
 
+class ScrapeBatchCoordinator:
+    """批次级刮削事件协调器（从 TransferChain 抽出，组合于其单例上 ``chain._scrape_coordinator``）。
+
+    职责：把同一整理批次（``transfer_batch_id``）内多文件的刮削目标聚合，待批次关闭且批内任务
+    全部结束后统一发送一次 ``MetadataScrape`` 事件——避免逐文件重复触发目录刮削。状态 ``_batches``
+    原 ``TransferChain._scrape_batches``，**非 p115 触达点**，可安全移出；仍用模块级 ``job_lock``
+    守护，并经 ``self._chain`` read-through 读取 ``eventmanager`` 与 ``__is_media_file``（留在单例）。
+    """
+
+    def __init__(self, chain: "TransferChain"):
+        self._chain = chain
+        # batch_id -> {"pending": set[path], "targets": {(storage,path): {...}}, "closed": bool}
+        self._batches: Dict[str, Dict[str, Any]] = {}
+
+    def register(self, task: TransferTask):
+        """
+        登记批次任务。刮削事件只在批次关闭且任务全部完成后统一发送。
+        """
+        if not task or not task.transfer_batch_id:
+            return
+        with job_lock:
+            batch = self._batches.setdefault(
+                task.transfer_batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            batch["pending"].add(task.fileitem.path)
+
+    def close(self, batch_id: Optional[str]):
+        """
+        标记批次不再接收新任务，并尝试发送已聚合的刮削事件。
+        """
+        if not batch_id:
+            return
+        with job_lock:
+            batch = self._batches.setdefault(
+                batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            batch["closed"] = True
+        self._flush_if_ready(batch_id)
+
+    def record_target(self, task: TransferTask, transferinfo: TransferInfo):
+        """
+        记录批次内需要刮削的目标文件，按目标媒体根目录聚合。
+        """
+        if (
+                not task
+                or not task.transfer_batch_id
+                or not transferinfo
+                or not transferinfo.need_scrape
+                or not self._chain._TransferChain__is_media_file(task.fileitem)
+        ):
+            return
+
+        target_diritem = transferinfo.target_diritem
+        if not target_diritem:
+            return
+
+        target_files = transferinfo.file_list_new or []
+        target_key = (target_diritem.storage, target_diritem.path)
+        with job_lock:
+            batch = self._batches.setdefault(
+                task.transfer_batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            target = batch["targets"].setdefault(
+                target_key,
+                {
+                    "fileitem": target_diritem,
+                    "meta": task.meta,
+                    "mediainfo": task.mediainfo,
+                    "files": [],
+                    "overwrite": False,
+                },
+            )
+            if not target.get("meta"):
+                target["meta"] = task.meta
+            if not target.get("mediainfo"):
+                target["mediainfo"] = task.mediainfo
+            for target_file in target_files:
+                if target_file and target_file not in target["files"]:
+                    target["files"].append(target_file)
+
+    def finish(self, task: TransferTask):
+        """
+        标记批次内单个任务已结束。
+        """
+        if not task or not task.transfer_batch_id:
+            return
+        with job_lock:
+            batch = self._batches.get(task.transfer_batch_id)
+            if not batch:
+                return
+            batch["pending"].discard(task.fileitem.path)
+        self._flush_if_ready(task.transfer_batch_id)
+
+    def _flush_if_ready(self, batch_id: Optional[str]):
+        """
+        批次任务全部结束后发送聚合后的刮削事件。
+        """
+        if not batch_id:
+            return
+
+        with job_lock:
+            batch = self._batches.get(batch_id)
+            if (
+                    not batch
+                    or not batch.get("closed")
+                    or batch.get("pending")
+            ):
+                return
+            targets = list(batch.get("targets", {}).values())
+            self._batches.pop(batch_id, None)
+
+        for target in targets:
+            fileitem = target.get("fileitem")
+            if not fileitem:
+                continue
+            file_list = list(dict.fromkeys(target.get("files") or []))
+            self._chain.eventmanager.send_event(
+                EventType.MetadataScrape,
+                {
+                    "meta": target.get("meta"),
+                    "mediainfo": target.get("mediainfo"),
+                    "fileitem": fileitem,
+                    "file_list": file_list,
+                    "overwrite": target.get("overwrite", False),
+                },
+            )
+
+
 class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     """
     文件整理处理链
@@ -922,8 +1065,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.retry_scheduler = FailedRetryScheduler()
         # 转移成功的文件清单
         self._success_target_files: Dict[str, List[str]] = {}
-        # 批次级刮削缓冲，避免同一批多文件入库重复触发目录刮削
-        self._scrape_batches: Dict[str, Dict[str, Any]] = {}
+        # 批次级刮削协调器（避免同一批多文件入库重复触发目录刮削；状态已移出本单例到协调器）
+        self._scrape_coordinator = ScrapeBatchCoordinator(chain=self)
         # 文件整理队列服务（队列 / 守护线程 / 计数器机器；契约态仍 read-through 本单例）
         self._service = TransferService(chain=self)
         # 启动整理线程
@@ -1366,132 +1509,20 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         )
 
     def __register_scrape_batch_task(self, task: TransferTask):
-        """
-        登记批次任务。刮削事件只在批次关闭且任务全部完成后统一发送。
-        """
-        if not task or not task.transfer_batch_id:
-            return
-        with job_lock:
-            batch = self._scrape_batches.setdefault(
-                task.transfer_batch_id,
-                {
-                    "pending": set(),
-                    "targets": {},
-                    "closed": False,
-                },
-            )
-            batch["pending"].add(task.fileitem.path)
+        """登记批次任务（委派刮削批次协调器）。"""
+        self._scrape_coordinator.register(task)
 
     def __close_scrape_batch(self, batch_id: Optional[str]):
-        """
-        标记批次不再接收新任务，并尝试发送已聚合的刮削事件。
-        """
-        if not batch_id:
-            return
-        with job_lock:
-            batch = self._scrape_batches.setdefault(
-                batch_id,
-                {
-                    "pending": set(),
-                    "targets": {},
-                    "closed": False,
-                },
-            )
-            batch["closed"] = True
-        self.__flush_scrape_batch_if_ready(batch_id)
+        """标记批次不再接收新任务（委派刮削批次协调器）。"""
+        self._scrape_coordinator.close(batch_id)
 
     def __record_scrape_target(self, task: TransferTask, transferinfo: TransferInfo):
-        """
-        记录批次内需要刮削的目标文件，按目标媒体根目录聚合。
-        """
-        if (
-                not task
-                or not task.transfer_batch_id
-                or not transferinfo
-                or not transferinfo.need_scrape
-                or not self.__is_media_file(task.fileitem)
-        ):
-            return
-
-        target_diritem = transferinfo.target_diritem
-        if not target_diritem:
-            return
-
-        target_files = transferinfo.file_list_new or []
-        target_key = (target_diritem.storage, target_diritem.path)
-        with job_lock:
-            batch = self._scrape_batches.setdefault(
-                task.transfer_batch_id,
-                {
-                    "pending": set(),
-                    "targets": {},
-                    "closed": False,
-                },
-            )
-            target = batch["targets"].setdefault(
-                target_key,
-                {
-                    "fileitem": target_diritem,
-                    "meta": task.meta,
-                    "mediainfo": task.mediainfo,
-                    "files": [],
-                    "overwrite": False,
-                },
-            )
-            if not target.get("meta"):
-                target["meta"] = task.meta
-            if not target.get("mediainfo"):
-                target["mediainfo"] = task.mediainfo
-            for target_file in target_files:
-                if target_file and target_file not in target["files"]:
-                    target["files"].append(target_file)
+        """记录批次内需刮削的目标文件（委派刮削批次协调器）。"""
+        self._scrape_coordinator.record_target(task, transferinfo)
 
     def __finish_scrape_batch_task(self, task: TransferTask):
-        """
-        标记批次内单个任务已结束。
-        """
-        if not task or not task.transfer_batch_id:
-            return
-        with job_lock:
-            batch = self._scrape_batches.get(task.transfer_batch_id)
-            if not batch:
-                return
-            batch["pending"].discard(task.fileitem.path)
-        self.__flush_scrape_batch_if_ready(task.transfer_batch_id)
-
-    def __flush_scrape_batch_if_ready(self, batch_id: Optional[str]):
-        """
-        批次任务全部结束后发送聚合后的刮削事件。
-        """
-        if not batch_id:
-            return
-
-        with job_lock:
-            batch = self._scrape_batches.get(batch_id)
-            if (
-                    not batch
-                    or not batch.get("closed")
-                    or batch.get("pending")
-            ):
-                return
-            targets = list(batch.get("targets", {}).values())
-            self._scrape_batches.pop(batch_id, None)
-
-        for target in targets:
-            fileitem = target.get("fileitem")
-            if not fileitem:
-                continue
-            file_list = list(dict.fromkeys(target.get("files") or []))
-            self.eventmanager.send_event(
-                EventType.MetadataScrape,
-                {
-                    "meta": target.get("meta"),
-                    "mediainfo": target.get("mediainfo"),
-                    "fileitem": fileitem,
-                    "file_list": file_list,
-                    "overwrite": target.get("overwrite", False),
-                },
-            )
+        """标记批次内单个任务已结束（委派刮削批次协调器）。"""
+        self._scrape_coordinator.finish(task)
 
     def remove_from_queue(self, fileitem: FileItem):
         """

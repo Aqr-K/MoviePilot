@@ -12,7 +12,12 @@ from unittest.mock import Mock
 
 from app.core.config import settings
 from app.core.context import MediaInfo
-from app.chain.transfer import JobManager, TransferChain, TransferService
+from app.chain.transfer import (
+    JobManager,
+    ScrapeBatchCoordinator,
+    TransferChain,
+    TransferService,
+)
 from app.schemas import FileItem, TransferTask
 from app.schemas.types import MediaType
 
@@ -120,7 +125,7 @@ def make_transfer_chain() -> TransferChain:
         chain._media_exts + chain._audio_exts + chain._subtitle_exts
     )
     chain._success_target_files = {}
-    chain._scrape_batches = {}
+    chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
     return chain
 
 
