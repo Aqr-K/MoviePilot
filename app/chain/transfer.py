@@ -1605,32 +1605,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 标记运行中，并广播事件请示额外的源/目标存储操作器
             source_oper, target_oper = self._select_storage_opers(task)
 
-            # 执行整理
-            transferinfo: TransferInfo = self.transfer(
-                fileitem=task.fileitem,
-                meta=task.meta,
-                mediainfo=task.mediainfo,
-                target_directory=task.target_directory,
-                target_storage=task.target_storage,
-                target_path=task.target_path,
-                transfer_type=task.transfer_type,
-                episodes_info=task.episodes_info,
-                scrape=task.scrape,
-                library_type_folder=task.library_type_folder,
-                library_category_folder=task.library_category_folder,
-                source_oper=source_oper,
-                target_oper=target_oper,
-                preview=task.preview,
+            # 执行整理并按回调/默认方式分发结果（block-7：tail 抽取，每条分支均 return）
+            return self._run_transfer_and_dispatch(
+                task, source_oper, target_oper, callback
             )
-            if not transferinfo:
-                logger.error("文件整理模块运行失败")
-                return False, "文件整理模块运行失败"
-
-            # 回调，位置传参：任务、整理结果
-            if callback:
-                return callback(task, transferinfo)
-
-            return transferinfo.success, transferinfo.message
 
         finally:
             # 移除已完成的任务
@@ -1766,6 +1744,47 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 target_oper = target_event_data.storage_oper
 
         return source_oper, target_oper
+
+    def _run_transfer_and_dispatch(
+        self,
+        task: TransferTask,
+        source_oper: Any,
+        target_oper: Any,
+        callback: Optional[Callable],
+    ) -> Optional[Tuple[bool, str]]:
+        """执行整理并分发结果。
+
+        S8b：自 __handle_transfer 抽出的**终末块**（原 try 末尾、finally 之前，每条分支均
+        return），调用方以 `return self._run_transfer_and_dispatch(...)` 等价替换，行为字节级
+        不变。transfer 失败返回模块错误；有 callback 则委派 (task, transferinfo) 并返回其结果；
+        否则返回 (transferinfo.success, transferinfo.message)。
+        """
+        # 执行整理
+        transferinfo: TransferInfo = self.transfer(
+            fileitem=task.fileitem,
+            meta=task.meta,
+            mediainfo=task.mediainfo,
+            target_directory=task.target_directory,
+            target_storage=task.target_storage,
+            target_path=task.target_path,
+            transfer_type=task.transfer_type,
+            episodes_info=task.episodes_info,
+            scrape=task.scrape,
+            library_type_folder=task.library_type_folder,
+            library_category_folder=task.library_category_folder,
+            source_oper=source_oper,
+            target_oper=target_oper,
+            preview=task.preview,
+        )
+        if not transferinfo:
+            logger.error("文件整理模块运行失败")
+            return False, "文件整理模块运行失败"
+
+        # 回调，位置传参：任务、整理结果
+        if callback:
+            return callback(task, transferinfo)
+
+        return transferinfo.success, transferinfo.message
 
     def get_queue_tasks(self) -> List[TransferJob]:
         """

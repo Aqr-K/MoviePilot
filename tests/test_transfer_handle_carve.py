@@ -1,7 +1,8 @@
 """
-S8a 契约守护：__handle_transfer 的 7 块中 3 个无早返回子块被抽成私有 helper
-（_resolve_episodes_info / _resolve_target_directory / _select_storage_opers），
-入口方法保持薄编排 + 同序调用 + 原 try/finally。
+S8a/S8b 契约守护：__handle_transfer 的 7 块中已抽出 6 个为私有 helper
+（无早返回块 _resolve_episodes_info/_resolve_target_directory/_select_storage_opers/
+_apply_scrap_follow_tmdb；哨兵块 _migrate_or_skip；终末 tail 块 _run_transfer_and_dispatch），
+入口方法保持薄编排 + 同序调用 + 原 try/finally；仅识别块 block-1 未抽。
 
 本测试守护 P5 CRITICAL 的 monkey-patch 契约：p115strmhelper 通过 name-mangled
 类属性 `TransferChain._TransferChain__handle_transfer` 存/换/复原补丁（patch/transfer_chain.py
@@ -34,8 +35,8 @@ def test_handle_transfer_signature_stable():
 
 
 def test_extracted_helpers_present():
-    """3 个抽出的无早返回 helper 必须就位（单下划线、非 name-mangled）。"""
-    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip"):
+    """6 个抽出的 helper 必须就位（单下划线、非 name-mangled）。"""
+    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip", "_run_transfer_and_dispatch"):
         assert hasattr(TransferChain, h), f"抽出的 helper 缺失: {h}"
 
 
@@ -44,18 +45,19 @@ def test_handle_transfer_keeps_finally_cleanup():
     src = inspect.getsource(getattr(TransferChain, MANGLED))
     assert "finally:" in src, "__handle_transfer 丢失 finally"
     assert "try_remove_job" in src and "__finish_scrape_batch_task" in src, "finally 清理动作被改动"
-    # 入口编排仍按序调用 5 个 helper
-    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip"):
+    # 入口编排仍按序调用 6 个 helper
+    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip", "_run_transfer_and_dispatch"):
         assert h in src, f"入口未调用 helper: {h}"
 
 
-# 入口编排里 5 个 helper 的调用先后顺序（与 __handle_transfer 源码出现次序一致）
+# 入口编排里 6 个 helper 的调用先后顺序（与 __handle_transfer 源码出现次序一致）
 _HELPER_CALL_ORDER = (
     "_apply_scrap_follow_tmdb",
     "_migrate_or_skip",
     "_resolve_episodes_info",
     "_resolve_target_directory",
     "_select_storage_opers",
+    "_run_transfer_and_dispatch",
 )
 
 
