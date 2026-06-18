@@ -1142,236 +1142,25 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             self, task: TransferTask, transferinfo: TransferInfo, /
     ) -> Tuple[bool, str]:
         """
-        整理完成后处理
+        整理完成后处理（薄编排：分派成功/失败分支 → 批次完成通知 → 种子标记 → 移动模式清理）。
+
+        S8 ⑦a：原 god-method 就地分解为单下划线私有 helper（失败/成功分支、结果事件派发、
+        完成通知、移动清理），行为字节等价；``_success_target_files``/``jobview`` 等 p115 触点
+        与 mangled ``__is_*_file`` 等仍直接留在本类（零 read-through）。
         """
-        # 状态
-        ret_status = True
-        # 错误信息
-        ret_message = ""
-
-        def __notify():
-            """
-            完成时发送消息、移除任务等
-            """
-            # 更新文件数量
-            transferinfo.file_count = (
-                    self.jobview.count(task.mediainfo, task.meta.begin_season) or 1
-            )
-            # 更新文件大小
-            transferinfo.total_size = (
-                    self.jobview.size(task.mediainfo, task.meta.begin_season)
-                    or task.fileitem.size
-            )
-            # 发送通知，实时手动整理时不发
-            if transferinfo.need_notify and (task.background or not task.manual):
-                se_str = None
-                if task.mediainfo.type == MediaType.TV:
-                    season_episodes = self.jobview.season_episodes(
-                        task.mediainfo, task.meta.begin_season
-                    )
-                    if season_episodes:
-                        se_str = f"{task.meta.season} {StringUtils.format_ep(season_episodes)}"
-                    else:
-                        se_str = f"{task.meta.season}"
-                # 发送入库成功消息
-                self.send_transfer_message(
-                    meta=task.meta,
-                    mediainfo=task.mediainfo,
-                    transferinfo=transferinfo,
-                    season_episode=se_str,
-                    username=task.username,
-                )
-
         transferhis = TransferHistoryOper()
         target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
 
-        # 转移失败
+        # 分派成功/失败分支
         if not transferinfo.success:
-            logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
-
-            # 新增转移失败历史记录
-            history = transferhis.add_fail(
-                fileitem=task.fileitem,
-                mode=transferinfo.transfer_type if transferinfo else "",
-                downloader=task.downloader,
-                download_hash=task.download_hash,
-                meta=task.meta,
-                mediainfo=task.mediainfo,
-                transferinfo=transferinfo,
+            ret_status, ret_message = self._handle_transfer_failure(
+                task, transferinfo, transferhis
             )
-
-            # 整理失败事件
-            if self.__is_media_file(task.fileitem):
-                # 主要媒体文件整理失败事件
-                self.eventmanager.send_event(
-                    EventType.TransferFailed,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-            elif self.__is_subtitle_file(task.fileitem):
-                # 字幕整理失败事件
-                self.eventmanager.send_event(
-                    EventType.SubtitleTransferFailed,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-            elif self.__is_audio_file(task.fileitem):
-                # 音频文件整理失败事件
-                self.eventmanager.send_event(
-                    EventType.AudioTransferFailed,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-
-            # 发送失败消息
-            self.post_message(
-                Notification(
-                    mtype=NotificationType.Manual,
-                    title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
-                    text="\n".join(
-                        [
-                            f"原因：{transferinfo.message or '未知'}",
-                            (
-                                f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
-                                if history
-                                else ""
-                            ),
-                        ]
-                    ).strip(),
-                    image=task.mediainfo.get_message_image(),
-                    username=task.username,
-                    link=settings.MP_DOMAIN("#/history"),
-                    buttons=self.build_failed_transfer_buttons(
-                        history.id if history else None
-                    ),
-                )
-            )
-
-            # 设置任务失败
-            self.jobview.fail_task(task)
-
-            # AI智能体自动重试整理
-            if (
-                    history
-                    and settings.AI_AGENT_ENABLE
-                    and settings.AI_AGENT_RETRY_TRANSFER
-            ):
-                try:
-                    # 使用 download_hash 或源文件父目录作为分组键，
-                    # 同一批次（如同一个种子）的失败记录会被合并为一次agent调用
-                    group_key = (
-                        task.download_hash or str(task.fileitem.path).rsplit("/", 1)[0]
-                        if task.fileitem
-                        else ""
-                    )
-                    asyncio.run_coroutine_threadsafe(
-                        self.retry_scheduler.schedule_retry(
-                            history.id, group_key=group_key
-                        ),
-                        global_vars.loop,
-                    )
-                    logger.info(f"已触发AI智能体重试整理历史记录 #{history.id}")
-                except Exception as e:
-                    logger.error(f"触发AI智能体重试整理失败: {e}")
-
-            # 返回失败
-            ret_status = False
-            ret_message = transferinfo.message
-
         else:
-            # 转移成功
-            logger.info(f"{task.fileitem.name} 入库成功：{target_dir_path or ''}")
-
-            # 新增task转移成功历史记录
-            history = transferhis.add_success(
-                fileitem=task.fileitem,
-                mode=transferinfo.transfer_type if transferinfo else "",
-                downloader=task.downloader,
-                download_hash=task.download_hash,
-                meta=task.meta,
-                mediainfo=task.mediainfo,
-                transferinfo=transferinfo,
+            self._handle_transfer_success(
+                task, transferinfo, transferhis, target_dir_path
             )
-
-            # task整理完成事件
-            if self.__is_media_file(task.fileitem):
-                # 主要媒体文件整理完成事件
-                self.eventmanager.send_event(
-                    EventType.TransferComplete,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-            elif self.__is_subtitle_file(task.fileitem):
-                # 字幕整理完成事件
-                self.eventmanager.send_event(
-                    EventType.SubtitleTransferComplete,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-            elif self.__is_audio_file(task.fileitem):
-                # 音频文件整理完成事件
-                self.eventmanager.send_event(
-                    EventType.AudioTransferComplete,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-
-            # task登记转移成功文件清单
-            target_files = transferinfo.file_list_new
-            if target_dir_path:
-                with job_lock:
-                    if self._success_target_files.get(target_dir_path):
-                        self._success_target_files[target_dir_path].extend(target_files)
-                    else:
-                        self._success_target_files[target_dir_path] = target_files
-
-            # 设置任务成功
-            self.jobview.finish_task(task)
-
-            # 登记批次级刮削目标
-            self.__record_scrape_target(task, transferinfo)
+            ret_status, ret_message = True, ""
 
         # 全部整理完成且有成功的任务时，发送消息和事件
         if self.jobview.is_finished(task):
@@ -1383,7 +1172,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     )
                 else:
                     transferinfo.file_list_new = transferinfo.file_list_new or []
-            __notify()
+            self._notify_transfer_complete(task, transferinfo)
             if not task.transfer_batch_id:
                 self.__send_metadata_scrape_event(task, transferinfo)
 
@@ -1392,37 +1181,238 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
         # 移动模式，全部成功时删除空目录和种子文件
         if transferinfo.transfer_type in ["move"]:
-            # 全部整理成功时
-            if self.jobview.is_success(task):
-                # 所有成功的业务
-                tasks = self.jobview.success_tasks(
-                    task.mediainfo, task.meta.begin_season
-                )
-                # 获取整理屏蔽词
-                transfer_exclude_words = SystemConfigOper().get(
-                    SystemConfigKey.TransferExcludeWords
-                )
-                processed_hashes = set()
-                for t in tasks:
-                    if t.download_hash and t.download_hash not in processed_hashes:
-                        # 检查该种子的所有任务（跨作业）是否都已成功
-                        if self.jobview.is_torrent_success(t.download_hash):
-                            processed_hashes.add(t.download_hash)
-                            if self._can_delete_torrent(
-                                    t.download_hash, t.downloader, transfer_exclude_words
-                            ):
-                                # 移除种子及文件
-                                if self.remove_torrents(
-                                        t.download_hash, downloader=t.downloader
-                                ):
-                                    logger.info(
-                                        f"移动模式删除种子成功：{t.download_hash}"
-                                    )
-                    if not t.download_hash and t.fileitem:
-                        # 删除剩余空目录
-                        StorageChain().delete_media_file(t.fileitem, delete_self=False)
+            self._cleanup_torrents_move_mode(task)
 
         return ret_status, ret_message
+
+    def _dispatch_transfer_result_event(
+            self,
+            task: TransferTask,
+            transferinfo: TransferInfo,
+            history,
+            *,
+            success: bool,
+    ):
+        """按文件类型（媒体/字幕/音频）派发整理完成或失败事件，载荷对外保持兼容。"""
+        if success:
+            media_evt, subtitle_evt, audio_evt = (
+                EventType.TransferComplete,
+                EventType.SubtitleTransferComplete,
+                EventType.AudioTransferComplete,
+            )
+        else:
+            media_evt, subtitle_evt, audio_evt = (
+                EventType.TransferFailed,
+                EventType.SubtitleTransferFailed,
+                EventType.AudioTransferFailed,
+            )
+
+        if self.__is_media_file(task.fileitem):
+            event_type = media_evt
+        elif self.__is_subtitle_file(task.fileitem):
+            event_type = subtitle_evt
+        elif self.__is_audio_file(task.fileitem):
+            event_type = audio_evt
+        else:
+            return
+
+        self.eventmanager.send_event(
+            event_type,
+            {
+                "fileitem": task.fileitem,
+                "meta": task.meta,
+                "mediainfo": task.mediainfo,
+                "transferinfo": transferinfo,
+                "downloader": task.downloader,
+                "download_hash": task.download_hash,
+                "transfer_history_id": history.id if history else None,
+            },
+        )
+
+    def _handle_transfer_failure(
+            self,
+            task: TransferTask,
+            transferinfo: TransferInfo,
+            transferhis: TransferHistoryOper,
+    ) -> Tuple[bool, str]:
+        """整理失败分支：记失败历史、派发失败事件、发失败消息、置任务失败、按需触发 AI 重试。"""
+        logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
+
+        # 新增转移失败历史记录
+        history = transferhis.add_fail(
+            fileitem=task.fileitem,
+            mode=transferinfo.transfer_type if transferinfo else "",
+            downloader=task.downloader,
+            download_hash=task.download_hash,
+            meta=task.meta,
+            mediainfo=task.mediainfo,
+            transferinfo=transferinfo,
+        )
+
+        # 整理失败事件
+        self._dispatch_transfer_result_event(
+            task, transferinfo, history, success=False
+        )
+
+        # 发送失败消息
+        self.post_message(
+            Notification(
+                mtype=NotificationType.Manual,
+                title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
+                text="\n".join(
+                    [
+                        f"原因：{transferinfo.message or '未知'}",
+                        (
+                            f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
+                            if history
+                            else ""
+                        ),
+                    ]
+                ).strip(),
+                image=task.mediainfo.get_message_image(),
+                username=task.username,
+                link=settings.MP_DOMAIN("#/history"),
+                buttons=self.build_failed_transfer_buttons(
+                    history.id if history else None
+                ),
+            )
+        )
+
+        # 设置任务失败
+        self.jobview.fail_task(task)
+
+        # AI智能体自动重试整理
+        if (
+                history
+                and settings.AI_AGENT_ENABLE
+                and settings.AI_AGENT_RETRY_TRANSFER
+        ):
+            try:
+                # 使用 download_hash 或源文件父目录作为分组键，
+                # 同一批次（如同一个种子）的失败记录会被合并为一次agent调用
+                group_key = (
+                    task.download_hash or str(task.fileitem.path).rsplit("/", 1)[0]
+                    if task.fileitem
+                    else ""
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self.retry_scheduler.schedule_retry(
+                        history.id, group_key=group_key
+                    ),
+                    global_vars.loop,
+                )
+                logger.info(f"已触发AI智能体重试整理历史记录 #{history.id}")
+            except Exception as e:
+                logger.error(f"触发AI智能体重试整理失败: {e}")
+
+        # 返回失败
+        return False, transferinfo.message
+
+    def _handle_transfer_success(
+            self,
+            task: TransferTask,
+            transferinfo: TransferInfo,
+            transferhis: TransferHistoryOper,
+            target_dir_path: Optional[str],
+    ):
+        """整理成功分支：记成功历史、派发完成事件、登记成功文件清单、置任务成功、登记刮削目标。"""
+        logger.info(f"{task.fileitem.name} 入库成功：{target_dir_path or ''}")
+
+        # 新增task转移成功历史记录
+        history = transferhis.add_success(
+            fileitem=task.fileitem,
+            mode=transferinfo.transfer_type if transferinfo else "",
+            downloader=task.downloader,
+            download_hash=task.download_hash,
+            meta=task.meta,
+            mediainfo=task.mediainfo,
+            transferinfo=transferinfo,
+        )
+
+        # task整理完成事件
+        self._dispatch_transfer_result_event(
+            task, transferinfo, history, success=True
+        )
+
+        # task登记转移成功文件清单
+        target_files = transferinfo.file_list_new
+        if target_dir_path:
+            with job_lock:
+                if self._success_target_files.get(target_dir_path):
+                    self._success_target_files[target_dir_path].extend(target_files)
+                else:
+                    self._success_target_files[target_dir_path] = target_files
+
+        # 设置任务成功
+        self.jobview.finish_task(task)
+
+        # 登记批次级刮削目标
+        self.__record_scrape_target(task, transferinfo)
+
+    def _notify_transfer_complete(
+            self, task: TransferTask, transferinfo: TransferInfo
+    ):
+        """批次全部整理完成时：更新文件数量/大小，并按需发送入库成功通知。"""
+        # 更新文件数量
+        transferinfo.file_count = (
+                self.jobview.count(task.mediainfo, task.meta.begin_season) or 1
+        )
+        # 更新文件大小
+        transferinfo.total_size = (
+                self.jobview.size(task.mediainfo, task.meta.begin_season)
+                or task.fileitem.size
+        )
+        # 发送通知，实时手动整理时不发
+        if transferinfo.need_notify and (task.background or not task.manual):
+            se_str = None
+            if task.mediainfo.type == MediaType.TV:
+                season_episodes = self.jobview.season_episodes(
+                    task.mediainfo, task.meta.begin_season
+                )
+                if season_episodes:
+                    se_str = f"{task.meta.season} {StringUtils.format_ep(season_episodes)}"
+                else:
+                    se_str = f"{task.meta.season}"
+            # 发送入库成功消息
+            self.send_transfer_message(
+                meta=task.meta,
+                mediainfo=task.mediainfo,
+                transferinfo=transferinfo,
+                season_episode=se_str,
+                username=task.username,
+            )
+
+    def _cleanup_torrents_move_mode(self, task: TransferTask):
+        """移动模式且全部整理成功时，删除已整理种子文件与剩余空目录。"""
+        if not self.jobview.is_success(task):
+            return
+        # 所有成功的业务
+        tasks = self.jobview.success_tasks(
+            task.mediainfo, task.meta.begin_season
+        )
+        # 获取整理屏蔽词
+        transfer_exclude_words = SystemConfigOper().get(
+            SystemConfigKey.TransferExcludeWords
+        )
+        processed_hashes = set()
+        for t in tasks:
+            if t.download_hash and t.download_hash not in processed_hashes:
+                # 检查该种子的所有任务（跨作业）是否都已成功
+                if self.jobview.is_torrent_success(t.download_hash):
+                    processed_hashes.add(t.download_hash)
+                    if self._can_delete_torrent(
+                            t.download_hash, t.downloader, transfer_exclude_words
+                    ):
+                        # 移除种子及文件
+                        if self.remove_torrents(
+                                t.download_hash, downloader=t.downloader
+                        ):
+                            logger.info(
+                                f"移动模式删除种子成功：{t.download_hash}"
+                            )
+            if not t.download_hash and t.fileitem:
+                # 删除剩余空目录
+                StorageChain().delete_media_file(t.fileitem, delete_self=False)
 
     def __get_transfer_target_dir_path(
             self, transferinfo: Optional[TransferInfo]
