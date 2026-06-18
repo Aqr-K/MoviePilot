@@ -26,11 +26,13 @@ class BaseAction(ABC):
     # 动作输入输出契约，由具体动作按需覆盖
     contract = {}
 
-    def __init__(self, action_id: str):
+    def __init__(self, action_id: str, *, systemconfigoper=None):
         self._action_id = action_id
         self._done_flag = False
         self._message = ""
-        self.systemconfigoper = SystemConfigOper()
+        # S6 DI：SystemConfigOper 可注入，默认回退全局单例（测试注入 fake、不碰全局单例）。
+        # keyword-only：15 个子类均 super().__init__(action_id) 位置传参，不受影响。
+        self.systemconfigoper = systemconfigoper or SystemConfigOper()
 
     @classmethod
     @property
