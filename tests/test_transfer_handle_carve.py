@@ -35,7 +35,7 @@ def test_handle_transfer_signature_stable():
 
 def test_extracted_helpers_present():
     """3 个抽出的无早返回 helper 必须就位（单下划线、非 name-mangled）。"""
-    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb"):
+    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip"):
         assert hasattr(TransferChain, h), f"抽出的 helper 缺失: {h}"
 
 
@@ -44,9 +44,28 @@ def test_handle_transfer_keeps_finally_cleanup():
     src = inspect.getsource(getattr(TransferChain, MANGLED))
     assert "finally:" in src, "__handle_transfer 丢失 finally"
     assert "try_remove_job" in src and "__finish_scrape_batch_task" in src, "finally 清理动作被改动"
-    # 入口编排仍按序调用 4 个 helper
-    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb"):
+    # 入口编排仍按序调用 5 个 helper
+    for h in ("_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip"):
         assert h in src, f"入口未调用 helper: {h}"
+
+
+# 入口编排里 5 个 helper 的调用先后顺序（与 __handle_transfer 源码出现次序一致）
+_HELPER_CALL_ORDER = (
+    "_apply_scrap_follow_tmdb",
+    "_migrate_or_skip",
+    "_resolve_episodes_info",
+    "_resolve_target_directory",
+    "_select_storage_opers",
+)
+
+
+def test_handle_transfer_helper_call_order():
+    """守卫调用顺序：未来重排 helper 调用次序会立即失败（补审查 LOW 项）。"""
+    src = inspect.getsource(getattr(TransferChain, MANGLED))
+    positions = [src.index(h) for h in _HELPER_CALL_ORDER]
+    assert positions == sorted(positions), (
+        f"helper 调用顺序被改动，期望 {_HELPER_CALL_ORDER}，实际源码次序错位"
+    )
 
 
 # ---------- S8b：_apply_scrap_follow_tmdb 行为单测（mock 历史 Oper，无需 DB） ----------
@@ -104,3 +123,57 @@ def test_scrap_follow_disabled_no_history_keeps_input(monkeypatch):
     out = _apply(mi, True, _transferhis(None))
     assert out is True
     assert mi.title == "New Title"
+
+
+# ---------- S8b：_migrate_or_skip 行为单测（哨兵协议，mock jobview，无需 DB） ----------
+
+
+def _fake_self(migrate_result, calls):
+    """伪 self：仅需 jobview.migrate_task；记录被传入的 task 以验证调用。"""
+    return types.SimpleNamespace(
+        jobview=types.SimpleNamespace(
+            migrate_task=lambda t: (calls.append(t) or migrate_result)
+        )
+    )
+
+
+def _task(name="file.mkv"):
+    return types.SimpleNamespace(
+        mediainfo="ORIGINAL", fileitem=types.SimpleNamespace(name=name)
+    )
+
+
+def test_migrate_skip_not_changed_returns_none_no_migrate():
+    """mediainfo_changed=False：返回 None（继续），不调用 migrate，不回写 task.mediainfo。"""
+    calls = []
+    s = _fake_self(True, calls)
+    task = _task()
+    mi = object()
+    out = TransferChain._migrate_or_skip(s, task, mi, False)
+    assert out is None
+    assert calls == []
+    assert task.mediainfo == "ORIGINAL"
+
+
+def test_migrate_changed_success_returns_none_sets_mediainfo():
+    """变更 + migrate 成功：回写 task.mediainfo，migrate 调用一次，返回 None（继续）。"""
+    calls = []
+    s = _fake_self(True, calls)
+    task = _task()
+    mi = object()
+    out = TransferChain._migrate_or_skip(s, task, mi, True)
+    assert out is None
+    assert task.mediainfo is mi
+    assert calls == [task]
+
+
+def test_migrate_changed_duplicate_returns_bail_tuple():
+    """变更 + migrate 报重复：先回写 mediainfo，再返回精确 (False, '...已在整理队列中') 哨兵。"""
+    calls = []
+    s = _fake_self(False, calls)
+    task = _task(name="movie.mkv")
+    mi = object()
+    out = TransferChain._migrate_or_skip(s, task, mi, True)
+    assert out == (False, "movie.mkv 已在整理队列中")
+    assert task.mediainfo is mi
+    assert calls == [task]
