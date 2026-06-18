@@ -41,6 +41,13 @@ class DownloadChain(ChainBase):
         ".rar": "rar",
     }
 
+    def __init__(self, thread_helper: ThreadHelper = None):
+        super().__init__()
+        # S6 DI 试点：线程池依赖可注入，默认回退全局共享单例 ThreadHelper。
+        # 不传参（现有调用点与插件）= 取全局单例，行为不变；测试可注入同步 fake，
+        # 确定性驱动后台提交（_submit_download_added_task），无需 mock.patch 全局。
+        self._thread_helper = thread_helper or ThreadHelper()
+
     @staticmethod
     def _safe_subtitle_file_name(file_name: str, fallback_name: str) -> str:
         """
@@ -353,7 +360,7 @@ class DownloadChain(ChainBase):
                 logger.error(f"执行下载成功后处理失败：{str(e)}")
 
         try:
-            ThreadHelper().submit(_run_download_added)
+            self._thread_helper.submit(_run_download_added)
         except Exception as err:
             logger.error(f"提交下载成功后处理后台任务失败：{str(err)}")
 
