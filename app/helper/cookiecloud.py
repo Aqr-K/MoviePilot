@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, Tuple, Optional
 
-from app.core.config import settings
+from app.core.config import settings as _global_settings
 from app.log import logger
 from app.utils.crypto import CryptoJsUtils, HashUtils
 from app.utils.http import RequestUtils
@@ -12,18 +12,21 @@ from app.utils.url import UrlUtils
 class CookieCloudHelper:
     _ignore_cookies: list = ["CookieAutoDeleteBrowsingDataCleanup", "CookieAutoDeleteCleaningDiscarded"]
 
-    def __init__(self):
+    def __init__(self, settings=None):
+        # S6 DI：settings 可注入，默认回退全局单例（测试可注入 fake 配置，不改全局 settings）。
+        # 注：形参 settings 遮蔽模块级 settings，故全局以别名 _global_settings 导入。
+        self._settings = settings or _global_settings
         self.__sync_setting()
 
     def __sync_setting(self):
         """
         同步CookieCloud配置项
         """
-        self._server = UrlUtils.standardize_base_url(settings.COOKIECLOUD_HOST)
-        self._key = StringUtils.safe_strip(settings.COOKIECLOUD_KEY)
-        self._password = StringUtils.safe_strip(settings.COOKIECLOUD_PASSWORD)
-        self._enable_local = settings.COOKIECLOUD_ENABLE_LOCAL
-        self._local_path = settings.COOKIE_PATH
+        self._server = UrlUtils.standardize_base_url(self._settings.COOKIECLOUD_HOST)
+        self._key = StringUtils.safe_strip(self._settings.COOKIECLOUD_KEY)
+        self._password = StringUtils.safe_strip(self._settings.COOKIECLOUD_PASSWORD)
+        self._enable_local = self._settings.COOKIECLOUD_ENABLE_LOCAL
+        self._local_path = self._settings.COOKIE_PATH
 
     def download(self) -> Tuple[Optional[dict], str]:
         """
