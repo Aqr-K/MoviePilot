@@ -1489,102 +1489,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         处理整理任务
         """
         try:
-            # 识别
+            # 识别（block-1：双早返回 + 多值回流，抽出后以三元组带出 early/mediainfo/changed）
             transferhis = TransferHistoryOper()
-            mediainfo = task.mediainfo
-            mediainfo_changed = False
-            need_obtain_images = False
-            if not mediainfo:
-                download_history = task.download_history
-                # 下载用户
-                if download_history:
-                    task.username = download_history.username
-                    # 识别媒体信息
-                    if download_history.tmdbid or download_history.doubanid:
-                        # 下载记录中已存在识别信息
-                        mediainfo: Optional[MediaInfo] = self.recognize_media(
-                            mtype=MediaType(download_history.type),
-                            tmdbid=download_history.tmdbid,
-                            doubanid=download_history.doubanid,
-                            episode_group=download_history.episode_group,
-                        )
-                        need_obtain_images = True
-                        if mediainfo:
-                            # 更新自定义媒体类别
-                            if download_history.media_category:
-                                mediainfo.category = download_history.media_category
-                else:
-                    # 识别媒体信息
-                    mediainfo = MediaChain().recognize_by_meta(
-                        task.meta,
-                        obtain_images=True,
-                    )
-
-                # 按名称识别时已在识别链路补图，这里只补齐显式ID识别的场景。
-                if mediainfo and need_obtain_images:
-                    self.obtain_images(mediainfo=mediainfo)
-
-                if not mediainfo:
-                    if task.preview:
-                        return False, "未识别到媒体信息"
-                    # 新增整理失败历史记录
-                    his = transferhis.add_fail(
-                        fileitem=task.fileitem,
-                        mode=task.transfer_type,
-                        meta=task.meta,
-                        downloader=task.downloader,
-                        download_hash=task.download_hash,
-                    )
-                    self.post_message(
-                        Notification(
-                            mtype=NotificationType.Manual,
-                            title=f"{task.fileitem.name} 未识别到媒体信息，无法入库！",
-                            text=(
-                                "原因：未识别到媒体信息\n"
-                                "如果按钮不可用，可回复：\n"
-                                f"```\n/redo {his.id}\n/redo {his.id} [tmdbid]|[类型]\n```\n"
-                                "自动重试或手动识别整理。"
-                            ),
-                            username=task.username,
-                            link=settings.MP_DOMAIN("#/history"),
-                            buttons=self.build_failed_transfer_buttons(
-                                his.id if his else None
-                            ),
-                        )
-                    )
-                    # 任务失败，直接移除task
-                    self.jobview.remove_task(task.fileitem)
-                    self.__mark_torrent_completed_if_done(
-                        task.download_hash, task.downloader
-                    )
-
-                    # AI智能体自动重试整理
-                    if (
-                            his
-                            and settings.AI_AGENT_ENABLE
-                            and settings.AI_AGENT_RETRY_TRANSFER
-                    ):
-                        try:
-                            # 使用 download_hash 或源文件父目录作为分组键
-                            group_key = (
-                                task.download_hash
-                                or str(task.fileitem.path).rsplit("/", 1)[0]
-                                if task.fileitem
-                                else ""
-                            )
-                            asyncio.run_coroutine_threadsafe(
-                                self.retry_scheduler.schedule_retry(
-                                    his.id, group_key=group_key
-                                ),
-                                global_vars.loop,
-                            )
-                            logger.info(f"已触发AI智能体重试整理历史记录 #{his.id}")
-                        except Exception as e:
-                            logger.error(f"触发AI智能体重试整理失败: {e}")
-
-                    return False, "未识别到媒体信息"
-
-                mediainfo_changed = True
+            early, mediainfo, mediainfo_changed = self._recognize_for_transfer(
+                task, transferhis
+            )
+            if early is not None:
+                return early
 
             # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
             mediainfo_changed = self._apply_scrap_follow_tmdb(
@@ -1614,6 +1525,114 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             # 移除已完成的任务
             self.jobview.try_remove_job(task)
             self.__finish_scrape_batch_task(task)
+
+    def _recognize_for_transfer(
+        self, task: TransferTask, transferhis: TransferHistoryOper
+    ) -> Tuple[Optional[Tuple[bool, str]], Optional[MediaInfo], bool]:
+        """识别媒体信息（block-1：__handle_transfer 的识别块，含双早返回与多值回流）。
+
+        S8b：自 __handle_transfer 抽出，返回三元组 (early, mediainfo, mediainfo_changed)：
+        early 非 None 时调用方须 `return early`（preview 短路 / 识别失败两条原早返回，值均为
+        (False, "未识别到媒体信息")）；early 为 None 时带出识别得到的 mediainfo 与
+        mediainfo_changed 供后续块使用。识别失败分支的副作用（add_fail / 通知 / 移除任务 /
+        标记下载完成 / AI 重试）逐字保留，行为字节级不变。
+        """
+        mediainfo = task.mediainfo
+        mediainfo_changed = False
+        need_obtain_images = False
+        if not mediainfo:
+            download_history = task.download_history
+            # 下载用户
+            if download_history:
+                task.username = download_history.username
+                # 识别媒体信息
+                if download_history.tmdbid or download_history.doubanid:
+                    # 下载记录中已存在识别信息
+                    mediainfo: Optional[MediaInfo] = self.recognize_media(
+                        mtype=MediaType(download_history.type),
+                        tmdbid=download_history.tmdbid,
+                        doubanid=download_history.doubanid,
+                        episode_group=download_history.episode_group,
+                    )
+                    need_obtain_images = True
+                    if mediainfo:
+                        # 更新自定义媒体类别
+                        if download_history.media_category:
+                            mediainfo.category = download_history.media_category
+            else:
+                # 识别媒体信息
+                mediainfo = MediaChain().recognize_by_meta(
+                    task.meta,
+                    obtain_images=True,
+                )
+
+            # 按名称识别时已在识别链路补图，这里只补齐显式ID识别的场景。
+            if mediainfo and need_obtain_images:
+                self.obtain_images(mediainfo=mediainfo)
+
+            if not mediainfo:
+                if task.preview:
+                    return (False, "未识别到媒体信息"), None, False
+                # 新增整理失败历史记录
+                his = transferhis.add_fail(
+                    fileitem=task.fileitem,
+                    mode=task.transfer_type,
+                    meta=task.meta,
+                    downloader=task.downloader,
+                    download_hash=task.download_hash,
+                )
+                self.post_message(
+                    Notification(
+                        mtype=NotificationType.Manual,
+                        title=f"{task.fileitem.name} 未识别到媒体信息，无法入库！",
+                        text=(
+                            "原因：未识别到媒体信息\n"
+                            "如果按钮不可用，可回复：\n"
+                            f"```\n/redo {his.id}\n/redo {his.id} [tmdbid]|[类型]\n```\n"
+                            "自动重试或手动识别整理。"
+                        ),
+                        username=task.username,
+                        link=settings.MP_DOMAIN("#/history"),
+                        buttons=self.build_failed_transfer_buttons(
+                            his.id if his else None
+                        ),
+                    )
+                )
+                # 任务失败，直接移除task
+                self.jobview.remove_task(task.fileitem)
+                self.__mark_torrent_completed_if_done(
+                    task.download_hash, task.downloader
+                )
+
+                # AI智能体自动重试整理
+                if (
+                        his
+                        and settings.AI_AGENT_ENABLE
+                        and settings.AI_AGENT_RETRY_TRANSFER
+                ):
+                    try:
+                        # 使用 download_hash 或源文件父目录作为分组键
+                        group_key = (
+                            task.download_hash
+                            or str(task.fileitem.path).rsplit("/", 1)[0]
+                            if task.fileitem
+                            else ""
+                        )
+                        asyncio.run_coroutine_threadsafe(
+                            self.retry_scheduler.schedule_retry(
+                                his.id, group_key=group_key
+                            ),
+                            global_vars.loop,
+                        )
+                        logger.info(f"已触发AI智能体重试整理历史记录 #{his.id}")
+                    except Exception as e:
+                        logger.error(f"触发AI智能体重试整理失败: {e}")
+
+                return (False, "未识别到媒体信息"), None, False
+
+            mediainfo_changed = True
+
+        return None, mediainfo, mediainfo_changed
 
     def _apply_scrap_follow_tmdb(
         self,
