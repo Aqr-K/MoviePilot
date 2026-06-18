@@ -160,6 +160,10 @@ class ConfigModel(BaseModel):
     CACHE_BACKEND_URL: Optional[str] = "redis://localhost:6379"
     # Redis 缓存最大内存限制，未配置时，如开启大内存模式时为 "1024mb"，未开启时为 "256mb"
     CACHE_REDIS_MAXMEMORY: Optional[str] = None
+    # Redis 连接池最大连接数
+    CACHE_REDIS_MAX_CONNECTIONS: int = 256
+    # Redis 连接池耗尽时等待可用连接的时间（秒）
+    CACHE_REDIS_POOL_TIMEOUT: int = 3
     # 全局图片缓存，将媒体图片缓存到本地
     GLOBAL_IMAGE_CACHE: bool = False
     # 全局图片缓存保留天数

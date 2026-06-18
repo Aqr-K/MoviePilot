@@ -336,8 +336,8 @@ class TestPluginHelper:
         clear_calls = []
         fake_release_method = SimpleNamespace(cache_clear=lambda: clear_calls.append("clear"))
         fake_helper = SimpleNamespace(get_plugin_release_versions=fake_release_method)
-        monkeypatch.setattr("app.core.plugin.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
-        monkeypatch.setattr("app.core.plugin.PluginHelper", lambda: fake_helper)
+        monkeypatch.setattr("app.helper.plugin_manager.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
+        monkeypatch.setattr("app.helper.plugin.PluginHelper", lambda: fake_helper)
         monkeypatch.setattr(PluginManager, "get_plugins_from_market", lambda *_args, **_kwargs: [])
 
         PluginManager().get_online_plugins(force=True)
