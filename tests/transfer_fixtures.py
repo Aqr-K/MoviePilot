@@ -8,12 +8,11 @@ S8-step2：新增 make_queue_chain()——在 make_transfer_chain 基础上额�
 机器属性（不起线程），使 worker loop (__start_transfer) 可在 venv 内被受控驱动，作为后续
 抽取 TransferService 前的特征化测试安全网的基础。
 """
-import queue
 from unittest.mock import Mock
 
 from app.core.config import settings
 from app.core.context import MediaInfo
-from app.chain.transfer import JobManager, TransferChain
+from app.chain.transfer import JobManager, TransferChain, TransferService
 from app.schemas import FileItem, TransferTask
 from app.schemas.types import MediaType
 
@@ -150,22 +149,20 @@ def migrate_to_media_job(jobview: JobManager, task: TransferTask):
 
 
 def make_queue_chain() -> TransferChain:
-    """make_transfer_chain + 队列/守护/计数器机器属性（不起线程）。
+    """make_transfer_chain + 组合一个未起线程的 TransferService（队列/守护/计数器机器）。
 
-    S8-step2：让 worker loop (__start_transfer) 在 venv 内可被受控驱动而无需真实
-    daemon 线程（真实 TransferChain() 会起线程并阻塞在 _queue.get(timeout=15s)）。
-    种入的属性对齐 TransferChain.__init__ 中机器部分，但 _transfer_interval 取极小、
-    _progress 用 Mock、不 spawn 任何线程。
+    S8-step2 ⑤：队列机器已从 TransferChain 抽到 TransferService（组合于 ``chain._service``）。
+    本工厂构造一个不 spawn 线程的 service（_transfer_interval 取极小、_progress 用 Mock），
+    使 worker loop (run_worker) / 生命周期 (start/stop) 在 venv 内可被受控驱动，而无需真实
+    daemon 线程（真实 TransferChain() 会经 service.start() 起线程并阻塞在 _queue.get(15s)）。
+
+    注意：返回的 service 处于「已构造未 start」态（``_queue_active=False``、``_threads=[]``）。
+    直接驱动 worker 前须先翻 ``svc._queue_active = True``（``_drain_worker`` 已代为处理），
+    否则 ``run_worker`` 的 ``while ... and self._queue_active`` 会在首轮即退出。
     """
     chain = make_transfer_chain()
-    chain._queue = queue.Queue()
-    chain._transfer_threads = []
-    chain._threads = []
-    chain._transfer_interval = 0.01
-    chain._queue_active = True
-    chain._active_tasks = 0
-    chain._processed_num = 0
-    chain._fail_num = 0
-    chain._total_num = 0
-    chain._progress = Mock()
+    service = TransferService(chain=chain)
+    service._transfer_interval = 0.01
+    service._progress = Mock()
+    chain._service = service
     return chain
