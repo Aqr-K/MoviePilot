@@ -730,6 +730,173 @@ class FailedRetryScheduler:
             )
 
 
+class TransferService:
+    """
+    文件整理队列服务（队列 / 守护线程 / 计数器机器）。
+
+    从 TransferChain 抽出，组合于其单例上（``chain._service``）。仅持有与队列调度相关的
+    机器态；契约固定的状态（``jobview`` / ``_success_target_files`` / 刮削批次 /
+    ``__handle_transfer`` / ``__default_callback`` / 模块级 ``task_lock``）仍在 TransferChain，
+    本服务通过 ``self._chain`` read-through 回调单例——p115strmhelper 的 monkey-patch 与
+    私有态深入访问因此不受影响（worker 仍调用单例的 ``_TransferChain__handle_transfer``）。
+    """
+
+    def __init__(self, chain: "TransferChain"):
+        # 所属整理链单例（契约态 read-through 回调点）
+        self._chain = chain
+        # 待整理任务队列
+        self._queue = queue.Queue()
+        # 文件整理线程
+        self._transfer_threads = []
+        # 队列间隔时间（秒）
+        self._transfer_interval = 15
+        # 整理进度
+        self._progress = ProgressHelper(ProgressKey.FileTransfer)
+        # 队列相关状态
+        self._threads = []
+        self._queue_active = False
+        self._active_tasks = 0
+        self._processed_num = 0
+        self._fail_num = 0
+        self._total_num = 0
+
+    def start(self):
+        """
+        启动文件整理线程
+        """
+        self._queue_active = True
+        for i in range(settings.TRANSFER_THREADS):
+            logger.info(f"启动文件整理线程 {i + 1} ...")
+            thread = threading.Thread(
+                target=self.run_worker, name=f"transfer-{i}", daemon=True
+            )
+            self._threads.append(thread)
+            thread.start()
+
+    def stop(self):
+        """
+        停止文件整理进程
+        """
+        self._queue_active = False
+        for thread in self._threads:
+            thread.join()
+        self._threads = []
+        logger.info("文件整理线程已停止")
+
+    def on_config_changed(self):
+        self.stop()
+        self.start()
+
+    def enqueue(self, task: TransferTask, callback):
+        """
+        把任务放入待整理队列（生产者；去重 / 刮削批次登记由 TransferChain.put_to_queue 负责）
+        """
+        self._queue.put(TransferQueue(task=task, callback=callback))
+
+    def run_worker(self):
+        """
+        处理队列（守护线程主循环）
+        """
+        while not global_vars.is_system_stopped and self._queue_active:
+            try:
+                item: TransferQueue = self._queue.get(
+                    block=True, timeout=self._transfer_interval
+                )
+                if not item:
+                    continue
+
+                task = item.task
+                if not task:
+                    self._queue.task_done()
+                    continue
+
+                # 文件信息
+                fileitem = task.fileitem
+
+                with task_lock:
+                    # 获取当前最新总数
+                    current_total = self._chain.jobview.total()
+                    # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
+                    self._total_num = max(self._total_num, current_total)
+
+                    # 如果当前没有在运行的任务且处理数为0，说明是一个新序列的开始
+                    if self._active_tasks == 0 and self._processed_num == 0:
+                        logger.info("开始整理队列处理...")
+                        # 启动进度
+                        self._progress.start()
+                        # 重置计数
+                        self._processed_num = 0
+                        self._fail_num = 0
+                        __process_msg = (
+                            f"开始整理队列处理，当前共 {self._total_num} 个文件 ..."
+                        )
+                        logger.info(__process_msg)
+                        self._progress.update(value=0, text=__process_msg)
+                    # 增加运行中的任务数
+                    self._active_tasks += 1
+
+                try:
+                    # 更新进度
+                    __process_msg = f"正在整理 {fileitem.name} ..."
+                    logger.info(__process_msg)
+                    with task_lock:
+                        self._progress.update(
+                            value=(self._processed_num / self._total_num * 100)
+                            if self._total_num
+                            else 0,
+                            text=__process_msg,
+                        )
+                    # 整理
+                    state, err_msg = self._chain._TransferChain__handle_transfer(
+                        task=task, callback=item.callback
+                    )
+
+                    with task_lock:
+                        if not state:
+                            # 任务失败
+                            self._fail_num += 1
+                        # 更新进度
+                        self._processed_num += 1
+                        __process_msg = f"{fileitem.name} 整理完成"
+                        logger.info(__process_msg)
+                        self._progress.update(
+                            value=(self._processed_num / self._total_num * 100)
+                            if self._total_num
+                            else 100,
+                            text=__process_msg,
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"{fileitem.name} 整理任务处理出现错误：{e} - {traceback.format_exc()}"
+                    )
+                    self._chain._TransferChain__fail_transfer_task(task)
+                    with task_lock:
+                        self._processed_num += 1
+                        self._fail_num += 1
+                finally:
+                    self._queue.task_done()
+                    with task_lock:
+                        # 减少运行中的任务数
+                        self._active_tasks -= 1
+                        # 检查是否所有任务都已完成且队列为空
+                        if self._active_tasks == 0 and self._queue.empty():
+                            # 结束进度
+                            __end_msg = f"整理队列处理完成，共整理 {self._processed_num} 个文件，失败 {self._fail_num} 个"
+                            logger.info(__end_msg)
+                            self._progress.update(value=100, text=__end_msg)
+                            self._progress.end()
+                            # 重置计数
+                            self._processed_num = 0
+                            self._fail_num = 0
+
+            except queue.Empty:
+                # 即使队列空了，如果还有任务在运行，也不应该结束进度
+                # 这部分逻辑已经在 finally 的 active_tasks == 0 中处理了
+                continue
+            except Exception as e:
+                logger.error(f"整理队列处理出现错误：{e} - {traceback.format_exc()}")
+
+
 class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     """
     文件整理处理链
@@ -749,12 +916,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self._audio_exts = settings.RMT_AUDIOEXT
         # 可处理的文件后缀（视频文件、字幕、音频文件）
         self._allowed_exts = self._media_exts + self._audio_exts + self._subtitle_exts
-        # 待整理任务队列
-        self._queue = queue.Queue()
-        # 文件整理线程
-        self._transfer_threads = []
-        # 队列间隔时间（秒）
-        self._transfer_interval = 15
         # 事件管理器
         self.jobview = JobManager()
         # Agent重试管理器
@@ -763,44 +924,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self._success_target_files: Dict[str, List[str]] = {}
         # 批次级刮削缓冲，避免同一批多文件入库重复触发目录刮削
         self._scrape_batches: Dict[str, Dict[str, Any]] = {}
-        # 整理进度进度
-        self._progress = ProgressHelper(ProgressKey.FileTransfer)
-        # 队列相关状态
-        self._threads = []
-        self._queue_active = False
-        self._active_tasks = 0
-        self._processed_num = 0
-        self._fail_num = 0
-        self._total_num = 0
-        # 启动整理任务
-        self.__init()
-
-    def __init(self):
-        """
-        启动文件整理线程
-        """
-        self._queue_active = True
-        for i in range(settings.TRANSFER_THREADS):
-            logger.info(f"启动文件整理线程 {i + 1} ...")
-            thread = threading.Thread(
-                target=self.__start_transfer, name=f"transfer-{i}", daemon=True
-            )
-            self._threads.append(thread)
-            thread.start()
-
-    def __stop(self):
-        """
-        停止文件整理进程
-        """
-        self._queue_active = False
-        for thread in self._threads:
-            thread.join()
-        self._threads = []
-        logger.info("文件整理线程已停止")
+        # 文件整理队列服务（队列 / 守护线程 / 计数器机器；契约态仍 read-through 本单例）
+        self._service = TransferService(chain=self)
+        # 启动整理线程
+        self._service.start()
 
     def on_config_changed(self):
-        self.__stop()
-        self.__init()
+        self._service.on_config_changed()
 
     def __is_subtitle_file(self, fileitem: FileItem) -> bool:
         """
@@ -1179,8 +1309,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if not self.__put_to_jobview(task):
             return False
         self.__register_scrape_batch_task(task)
-        # 添加到队列
-        self._queue.put(TransferQueue(task=task, callback=self.__default_callback))
+        # 添加到队列（队列机器已抽到 TransferService，回调仍为本单例的 __default_callback）
+        self._service.enqueue(task=task, callback=self.__default_callback)
         return True
 
     def __put_to_jobview(self, task: TransferTask) -> bool:
@@ -1378,109 +1508,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.jobview.fail_unfinished_task(task)
         self.jobview.try_remove_job(task)
         self.__finish_scrape_batch_task(task)
-
-    def __start_transfer(self):
-        """
-        处理队列
-        """
-        while not global_vars.is_system_stopped and self._queue_active:
-            try:
-                item: TransferQueue = self._queue.get(
-                    block=True, timeout=self._transfer_interval
-                )
-                if not item:
-                    continue
-
-                task = item.task
-                if not task:
-                    self._queue.task_done()
-                    continue
-
-                # 文件信息
-                fileitem = task.fileitem
-
-                with task_lock:
-                    # 获取当前最新总数
-                    current_total = self.jobview.total()
-                    # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
-                    self._total_num = max(self._total_num, current_total)
-
-                    # 如果当前没有在运行的任务且处理数为0，说明是一个新序列的开始
-                    if self._active_tasks == 0 and self._processed_num == 0:
-                        logger.info("开始整理队列处理...")
-                        # 启动进度
-                        self._progress.start()
-                        # 重置计数
-                        self._processed_num = 0
-                        self._fail_num = 0
-                        __process_msg = (
-                            f"开始整理队列处理，当前共 {self._total_num} 个文件 ..."
-                        )
-                        logger.info(__process_msg)
-                        self._progress.update(value=0, text=__process_msg)
-                    # 增加运行中的任务数
-                    self._active_tasks += 1
-
-                try:
-                    # 更新进度
-                    __process_msg = f"正在整理 {fileitem.name} ..."
-                    logger.info(__process_msg)
-                    with task_lock:
-                        self._progress.update(
-                            value=(self._processed_num / self._total_num * 100)
-                            if self._total_num
-                            else 0,
-                            text=__process_msg,
-                        )
-                    # 整理
-                    state, err_msg = self.__handle_transfer(
-                        task=task, callback=item.callback
-                    )
-
-                    with task_lock:
-                        if not state:
-                            # 任务失败
-                            self._fail_num += 1
-                        # 更新进度
-                        self._processed_num += 1
-                        __process_msg = f"{fileitem.name} 整理完成"
-                        logger.info(__process_msg)
-                        self._progress.update(
-                            value=(self._processed_num / self._total_num * 100)
-                            if self._total_num
-                            else 100,
-                            text=__process_msg,
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"{fileitem.name} 整理任务处理出现错误：{e} - {traceback.format_exc()}"
-                    )
-                    self.__fail_transfer_task(task)
-                    with task_lock:
-                        self._processed_num += 1
-                        self._fail_num += 1
-                finally:
-                    self._queue.task_done()
-                    with task_lock:
-                        # 减少运行中的任务数
-                        self._active_tasks -= 1
-                        # 检查是否所有任务都已完成且队列为空
-                        if self._active_tasks == 0 and self._queue.empty():
-                            # 结束进度
-                            __end_msg = f"整理队列处理完成，共整理 {self._processed_num} 个文件，失败 {self._fail_num} 个"
-                            logger.info(__end_msg)
-                            self._progress.update(value=100, text=__end_msg)
-                            self._progress.end()
-                            # 重置计数
-                            self._processed_num = 0
-                            self._fail_num = 0
-
-            except queue.Empty:
-                # 即使队列空了，如果还有任务在运行，也不应该结束进度
-                # 这部分逻辑已经在 finally 的 active_tasks == 0 中处理了
-                continue
-            except Exception as e:
-                logger.error(f"整理队列处理出现错误：{e} - {traceback.format_exc()}")
 
     def __handle_transfer(
             self, task: TransferTask, callback: Optional[Callable] = None
