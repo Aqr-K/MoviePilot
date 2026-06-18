@@ -1,5 +1,4 @@
-from pathlib import Path
-from typing import List, Any, Union, Annotated, Optional
+from typing import List, Any, Annotated, Optional
 
 from fastapi import APIRouter, Depends
 
@@ -16,6 +15,10 @@ from app.db.user_oper import get_current_active_user, get_current_active_superus
 from app.schemas import MediaType, MediaRecognizeConvertEventData
 from app.schemas.category import CategoryConfig
 from app.schemas.types import ChainEventType
+from app.service.media import (
+    scrape_path as _scrape_path,
+    search_media as _search_media,
+)
 
 router = APIRouter()
 
@@ -98,37 +101,7 @@ async def search(
     """
     模糊搜索媒体/人物信息列表 media：媒体信息，person：人物信息
     """
-
-    def __get_source(obj: Union[schemas.MediaInfo, schemas.MediaPerson, dict]):
-        """
-        获取对象属性
-        """
-        if isinstance(obj, dict):
-            return obj.get("source")
-        return obj.source
-
-    media_chain = MediaChain()
-    if type == "media":
-        _, medias = await media_chain.async_search(title=title)
-        result = [media.to_dict() for media in medias] if medias else []
-    elif type == "collection":
-        collections = await media_chain.async_search_collections(name=title)
-        result = (
-            [collection.to_dict() for collection in collections] if collections else []
-        )
-    else:  # person
-        persons = await media_chain.async_search_persons(name=title)
-        result = [person.model_dump() for person in persons] if persons else []
-
-    if not result:
-        return []
-
-    # 排序和分页
-    setting_order = settings.SEARCH_SOURCE.split(",") if settings.SEARCH_SOURCE else []
-    sort_order = {source: index for index, source in enumerate(setting_order)}
-
-    sorted_result = sorted(result, key=lambda x: sort_order.get(__get_source(x), 4))
-    return sorted_result[(page - 1) * count : page * count]
+    return await _search_media(title=title, type=type, page=page, count=count)
 
 
 @router.post(
@@ -142,24 +115,8 @@ def scrape(
     """
     刮削媒体信息
     """
-    if not fileitem or not fileitem.path:
-        return schemas.Response(success=False, message="刮削路径无效")
-    chain = MediaChain()
-    # 识别媒体信息
-    context = chain.recognize_by_path(fileitem.path, obtain_images=True)
-    if not context or not context.media_info:
-        return schemas.Response(success=False, message="刮削失败，无法识别媒体信息")
-    if storage == "local":
-        if not Path(fileitem.path).exists():
-            return schemas.Response(success=False, message="刮削路径不存在")
-    # 手动刮削 (暂时使用同步版本，可以后续优化为异步)
-    chain.scrape_metadata(
-        fileitem=fileitem,
-        meta=context.meta_info,
-        mediainfo=context.media_info,
-        overwrite=True,
-    )
-    return schemas.Response(success=True, message=f"{fileitem.path} 刮削完成")
+    success, message = _scrape_path(fileitem, storage)
+    return schemas.Response(success=success, message=message)
 
 
 @router.get(
