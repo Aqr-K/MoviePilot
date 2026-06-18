@@ -8,6 +8,8 @@ from app.agent import ReplyMode
 from app.api.endpoints.agent import (
     _WebAgentMoviePilotAgent,
     _WEB_AGENT_FILE_REGISTRY,
+    _apply_web_agent_display_event,
+    _build_web_agent_input_attachments,
     _build_web_agent_notification_events,
     _build_web_agent_session_id,
     _prepare_web_agent_audio_attachment_path,
@@ -16,6 +18,7 @@ from app.api.endpoints.agent import (
     _resolve_web_agent_choice_payload,
     _split_web_agent_output,
 )
+from app.db.agentchat_oper import AgentChatOper
 from app.helper.interaction import AgentInteractionOption, agent_interaction_manager
 from app.schemas.message import ChannelCapability, ChannelCapabilityManager
 from app.schemas.types import MessageChannel, NotificationType
@@ -72,6 +75,73 @@ def test_build_web_agent_session_id_is_stable_per_user_and_seed():
     assert first == second
     assert first != other
     assert first.startswith("web-agent:")
+
+
+def test_build_web_agent_session_id_reuses_accessible_history():
+    """传入已有历史会话 ID 时应直接复用，避免跨渠道继续对话丢上下文。"""
+    user = SimpleNamespace(id=1, name="admin", is_superuser=True)
+    AgentChatOper().save_display_messages(
+        session_id="telegram-session",
+        user_id="telegram-user",
+        username="tester",
+        channel=MessageChannel.Telegram.value,
+        source="telegram-main",
+        messages=[],
+        title="Telegram 会话",
+    )
+
+    assert _build_web_agent_session_id(user, "telegram-session") == "telegram-session"
+
+
+def test_apply_web_agent_display_event_updates_snapshot():
+    """WebAgent SSE 事件应可聚合为服务端展示快照。"""
+    message = {
+        "id": "assistant-1",
+        "role": "assistant",
+        "content": "",
+        "createdAt": 1,
+        "status": "streaming",
+        "tools": [],
+        "attachments": [],
+        "choices": [],
+    }
+
+    _apply_web_agent_display_event({"type": "delta", "content": "你好"}, message)
+    _apply_web_agent_display_event({"type": "tool", "message": "查询订阅"}, message)
+    _apply_web_agent_display_event(
+        {
+            "type": "attachment",
+            "attachment": {"kind": "file", "url": "message/agent/file/a"},
+        },
+        message,
+    )
+    _apply_web_agent_display_event({"type": "done"}, message)
+
+    assert message["content"] == "你好"
+    assert message["status"] == "done"
+    assert len(message["tools"]) == 1
+    assert message["tools"][0]["message"] == "查询订阅"
+    assert message["tools"][0]["status"] == "done"
+    assert message["attachments"] == [{"kind": "file", "url": "message/agent/file/a"}]
+
+
+def test_build_web_agent_input_attachments_marks_kinds():
+    """WebAgent 用户输入附件应转换为可展示的附件记录。"""
+    attachments = _build_web_agent_input_attachments(
+        images=["data:image/png;base64,abc"],
+        files=[
+            {
+                "ref": "message/agent/file/file-1",
+                "name": "report.txt",
+                "mime_type": "text/plain",
+                "size": 5,
+            }
+        ],
+        audio_refs=["message/agent/file/audio-1"],
+    )
+
+    assert [item["kind"] for item in attachments] == ["image", "file", "audio"]
+    assert attachments[1]["name"] == "report.txt"
 
 
 def test_web_agent_admin_context_uses_current_user_id():
