@@ -19,33 +19,14 @@ from app.api.openai_utils import (
 from app.core.config import settings
 from app.core.security import anthropic_api_key_header
 from app.schemas.types import MessageChannel
+from app.service.anthropic import (
+    anthropic_error_response as _anthropic_error_response,
+    check_auth as _check_auth,
+)
 
 router = APIRouter()
 
 SESSION_PREFIX = "anthropic:"
-
-
-def _anthropic_error_response(
-    message: str,
-    status_code: int,
-    error_type: str = "invalid_request_error",
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content=schemas.AnthropicErrorResponse(
-            error=schemas.AnthropicErrorDetail(type=error_type, message=message)
-        ).model_dump(),
-    )
-
-
-def _check_auth(api_key: Optional[str]) -> Optional[JSONResponse]:
-    if not api_key or api_key != settings.API_TOKEN:
-        return _anthropic_error_response(
-            "invalid x-api-key",
-            401,
-            error_type="authentication_error",
-        )
-    return None
 
 
 async def _stream_anthropic_response(
