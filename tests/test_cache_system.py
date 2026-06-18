@@ -1,7 +1,8 @@
 import asyncio
 
 from app.core.cache import AsyncFileBackend, FileBackend, MemoryBackend
-from app.helper.redis import RedisHelper
+from app.core.config import settings
+from app.helper.redis import AsyncRedisHelper, RedisHelper
 
 
 def test_file_backend_items_keep_relative_keys_and_bytes(tmp_path):
@@ -47,6 +48,122 @@ def test_redis_original_key_decodes_quoted_key():
     redis_key = b"region:DEFAULT:key:nested/poster%20one.jpg"
 
     assert RedisHelper._RedisHelper__get_original_key(redis_key) == "nested/poster one.jpg"
+
+
+def test_redis_helper_uses_blocking_pool_settings(monkeypatch):
+    """
+    Redis 同步客户端应使用阻塞连接池，避免并发峰值直接耗尽 Redis 连接数。
+    """
+    calls = {}
+
+    class FakeClient:
+        """模拟同步 Redis 客户端。"""
+
+        def __init__(self, connection_pool):
+            self.connection_pool = connection_pool
+            self.config_calls = []
+            self.closed = False
+
+        def ping(self):
+            """模拟 Redis ping。"""
+            calls["ping"] = True
+
+        def config_set(self, key, value):
+            """记录 Redis 配置写入。"""
+            self.config_calls.append((key, value))
+
+        def close(self):
+            """标记客户端已关闭。"""
+            self.closed = True
+
+    def fake_from_url(url, **kwargs):
+        """记录连接池构造参数。"""
+        calls["pool"] = {"url": url, **kwargs}
+        return "pool"
+
+    monkeypatch.setattr(settings, "CACHE_BACKEND_URL", "redis://cache:6379/2")
+    monkeypatch.setattr(settings, "CACHE_REDIS_MAX_CONNECTIONS", 7)
+    monkeypatch.setattr(settings, "CACHE_REDIS_POOL_TIMEOUT", 3)
+    monkeypatch.setattr("app.helper.redis.redis.BlockingConnectionPool.from_url", fake_from_url)
+    monkeypatch.setattr("app.helper.redis.redis.Redis", FakeClient)
+
+    helper = RedisHelper()
+    helper.close()
+    helper._connect()
+
+    assert calls["pool"]["url"] == "redis://cache:6379/2"
+    assert calls["pool"]["max_connections"] == 7
+    assert calls["pool"]["timeout"] == 3
+    assert calls["pool"]["decode_responses"] is False
+    assert calls["ping"] is True
+    assert ("maxmemory-policy", "allkeys-lru") in helper.client.config_calls
+
+    helper.close()
+
+
+def test_async_redis_helper_uses_blocking_pool_settings(monkeypatch):
+    """
+    Redis 异步客户端应使用阻塞连接池，避免高并发缓存读取立刻抛出连接耗尽错误。
+    """
+    calls = {}
+
+    class FakeAsyncClient:
+        """模拟异步 Redis 客户端。"""
+
+        def __init__(self, connection_pool):
+            self.connection_pool = connection_pool
+            self.config_calls = []
+            self.closed = False
+
+        async def ping(self):
+            """模拟 Redis ping。"""
+            calls["ping"] = True
+
+        async def config_set(self, key, value):
+            """记录 Redis 配置写入。"""
+            self.config_calls.append((key, value))
+
+        async def close(self):
+            """标记客户端已关闭。"""
+            self.closed = True
+
+    def fake_from_url(url, **kwargs):
+        """记录连接池构造参数。"""
+        calls["pool"] = {"url": url, **kwargs}
+        return "async_pool"
+
+    async def run_connect():
+        helper = AsyncRedisHelper()
+        await helper.close()
+        await helper._connect()
+        config_calls = list(helper.client.config_calls)
+        await helper.close()
+        return config_calls
+
+    monkeypatch.setattr(settings, "CACHE_BACKEND_URL", "redis://cache:6379/3")
+    monkeypatch.setattr(settings, "CACHE_REDIS_MAX_CONNECTIONS", 9)
+    monkeypatch.setattr(settings, "CACHE_REDIS_POOL_TIMEOUT", 4)
+    monkeypatch.setattr("app.helper.redis.AsyncBlockingConnectionPool.from_url", fake_from_url)
+    monkeypatch.setattr("app.helper.redis.Redis", FakeAsyncClient)
+
+    config_calls = asyncio.run(run_connect())
+
+    assert calls["pool"]["url"] == "redis://cache:6379/3"
+    assert calls["pool"]["max_connections"] == 9
+    assert calls["pool"]["timeout"] == 4
+    assert calls["pool"]["decode_responses"] is False
+    assert calls["ping"] is True
+    assert ("maxmemory-policy", "allkeys-lru") in config_calls
+
+
+def test_redis_helpers_watch_pool_settings():
+    """
+    Redis 连接池配置变化应触发客户端重建。
+    """
+    assert "CACHE_REDIS_MAX_CONNECTIONS" in RedisHelper.CONFIG_WATCH
+    assert "CACHE_REDIS_POOL_TIMEOUT" in RedisHelper.CONFIG_WATCH
+    assert "CACHE_REDIS_MAX_CONNECTIONS" in AsyncRedisHelper.CONFIG_WATCH
+    assert "CACHE_REDIS_POOL_TIMEOUT" in AsyncRedisHelper.CONFIG_WATCH
 
 
 def test_async_file_backend_missing_region_has_no_items(tmp_path):

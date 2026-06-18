@@ -1,10 +1,12 @@
 import asyncio
 import json
 import pickle
+import threading
 from typing import Any, Optional, Generator, Tuple, AsyncGenerator, Union
 from urllib.parse import quote, unquote
 
 import redis
+from redis.asyncio import BlockingConnectionPool as AsyncBlockingConnectionPool
 from redis.asyncio import Redis
 
 from app.core.config import settings
@@ -83,7 +85,13 @@ class RedisHelper(ConfigReloadMixin, metaclass=Singleton):
     - 支持内存限制和淘汰策略设置
     - 提供键名生成和区域管理功能
     """
-    CONFIG_WATCH = {"CACHE_BACKEND_TYPE", "CACHE_BACKEND_URL", "CACHE_REDIS_MAXMEMORY"}
+    CONFIG_WATCH = {
+        "CACHE_BACKEND_TYPE",
+        "CACHE_BACKEND_URL",
+        "CACHE_REDIS_MAXMEMORY",
+        "CACHE_REDIS_MAX_CONNECTIONS",
+        "CACHE_REDIS_POOL_TIMEOUT",
+    }
 
     def __init__(self):
         """
@@ -91,31 +99,46 @@ class RedisHelper(ConfigReloadMixin, metaclass=Singleton):
         """
         self.redis_url = settings.CACHE_BACKEND_URL
         self.client = None
+        self._connect_lock = threading.RLock()
 
     def _connect(self):
         """
         建立Redis连接
         """
+        if self.client is not None:
+            return
+        client = None
         try:
-            if self.client is None:
-                self.client = redis.Redis.from_url(
+            with self._connect_lock:
+                if self.client is not None:
+                    return
+                self.redis_url = settings.CACHE_BACKEND_URL
+                connection_pool = redis.BlockingConnectionPool.from_url(
                     self.redis_url,
                     decode_responses=False,
                     socket_timeout=_socket_timeout,
                     socket_connect_timeout=_socket_connect_timeout,
                     health_check_interval=_health_check_interval,
+                    max_connections=settings.CACHE_REDIS_MAX_CONNECTIONS,
+                    timeout=settings.CACHE_REDIS_POOL_TIMEOUT,
                 )
+                client = redis.Redis(connection_pool=connection_pool)
                 # 测试连接，确保Redis可用
-                self.client.ping()
+                client.ping()
+                self.client = client
                 logger.info(f"Successfully connected to Redis：{self.redis_url}")
                 self.set_memory_limit()
         except Exception as e:
+            if client:
+                client.close()
             logger.error(f"Failed to connect to Redis: {e}")
             self.client = None
             raise RuntimeError("Redis connection failed") from e
 
     def on_config_changed(self):
-        self.close()
+        with self._connect_lock:
+            self.redis_url = settings.CACHE_BACKEND_URL
+            self.close()
         self._connect()
 
     def get_reload_name(self):
@@ -296,10 +319,11 @@ class RedisHelper(ConfigReloadMixin, metaclass=Singleton):
         """
         关闭Redis客户端的连接池
         """
-        if self.client:
-            self.client.close()
-            self.client = None
-            logger.debug("Redis connection closed")
+        with self._connect_lock:
+            if self.client:
+                self.client.close()
+                self.client = None
+                logger.debug("Redis connection closed")
 
 
 class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
@@ -313,7 +337,13 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
     - 提供键名生成和区域管理功能
     - 所有操作都是异步的
     """
-    CONFIG_WATCH = {"CACHE_BACKEND_TYPE", "CACHE_BACKEND_URL", "CACHE_REDIS_MAXMEMORY"}
+    CONFIG_WATCH = {
+        "CACHE_BACKEND_TYPE",
+        "CACHE_BACKEND_URL",
+        "CACHE_REDIS_MAXMEMORY",
+        "CACHE_REDIS_MAX_CONNECTIONS",
+        "CACHE_REDIS_POOL_TIMEOUT",
+    }
 
     def __init__(self):
         """
@@ -322,31 +352,53 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
         self.redis_url = settings.CACHE_BACKEND_URL
         self.client: Optional[Redis] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._connect_lock: Optional[asyncio.Lock] = None
+        self._connect_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_connect_lock(self, current_loop: asyncio.AbstractEventLoop) -> asyncio.Lock:
+        """
+        获取当前事件循环对应的异步连接锁
+        """
+        if self._connect_lock is None or self._connect_lock_loop is not current_loop:
+            self._connect_lock = asyncio.Lock()
+            self._connect_lock_loop = current_loop
+        return self._connect_lock
 
     async def _connect(self):
         """
         建立异步Redis连接
         """
+        current_loop = asyncio.get_running_loop()
+        connect_lock = self._get_connect_lock(current_loop)
+        client = None
         try:
-            current_loop = asyncio.get_running_loop()
-            # 检测事件循环是否发生变化，如果变化则重新连接
-            if self.client is not None and self._loop is not current_loop:
-                logger.debug("Event loop changed, reconnecting Redis (async)")
-                await self._close_client()
-            if self.client is None:
-                self.client = Redis.from_url(
+            async with connect_lock:
+                # 检测事件循环是否发生变化，如果变化则重新连接
+                if self.client is not None and self._loop is not current_loop:
+                    logger.debug("Event loop changed, reconnecting Redis (async)")
+                    await self._close_client()
+                if self.client is not None:
+                    return
+                self.redis_url = settings.CACHE_BACKEND_URL
+                connection_pool = AsyncBlockingConnectionPool.from_url(
                     self.redis_url,
                     decode_responses=False,
                     socket_timeout=_socket_timeout,
                     socket_connect_timeout=_socket_connect_timeout,
                     health_check_interval=_health_check_interval,
+                    max_connections=settings.CACHE_REDIS_MAX_CONNECTIONS,
+                    timeout=settings.CACHE_REDIS_POOL_TIMEOUT,
                 )
+                client = Redis(connection_pool=connection_pool)
                 self._loop = current_loop
                 # 测试连接，确保Redis可用
-                await self.client.ping()
+                await client.ping()
+                self.client = client
                 logger.info(f"Successfully connected to Redis (async)：{self.redis_url}")
                 await self.set_memory_limit()
         except Exception as e:
+            if client:
+                await client.close()
             logger.error(f"Failed to connect to Redis (async): {e}")
             self.client = None
             self._loop = None
@@ -365,6 +417,7 @@ class AsyncRedisHelper(ConfigReloadMixin, metaclass=Singleton):
             self._loop = None
 
     async def on_config_changed(self):
+        self.redis_url = settings.CACHE_BACKEND_URL
         await self._close_client()
         await self._connect()
 
