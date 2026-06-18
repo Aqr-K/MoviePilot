@@ -19,105 +19,14 @@ mock 边界（3 patch + 1 实例方法替换）：
 真实运行：JobManager（内存）、_apply_scrap_follow_tmdb/_migrate_or_skip/_resolve_target_directory/
 _select_storage_opers 编排、try/finally 清理（try_remove_job + __finish_scrape_batch_task 空态返回）。
 
-工厂函数（make_transfer_chain/make_task/make_media_info/FakeMeta）就地内联自
-test_transfer_job_manager 的同名实现——本仓库 pytest 导入模式不把 tests/ 暴露为顶层包，
-同级测试模块不可直接 import，故复制必要工厂（测试夹具，受控重复）。
+工厂函数（make_transfer_chain/make_task/make_media_info）来自共享模块
+tests/transfer_fixtures.py（tests 为包，`from tests.transfer_fixtures import ...`）。
 """
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.core.config import settings
-from app.core.context import MediaInfo
-from app.chain.transfer import JobManager, TransferChain
-from app.schemas import FileItem, TransferTask
-from app.schemas.types import MediaType
-
-
-class FakeMeta:
-    """TV 元数据（复制自 test_transfer_job_manager.FakeMeta，含 add_task 所需的 to_dict）。"""
-
-    def __init__(self, episode: int, season: int = 1):
-        self.name = "Test Show"
-        self.title = f"Test Show S{season:02d}E{episode:02d}"
-        self.year = "2026"
-        self.type = MediaType.TV
-        self.begin_season = season
-        self.end_season = None
-        self.total_season = 1
-        self.begin_episode = episode
-        self.end_episode = None
-        self.total_episode = 1
-        self.episode_list = [episode]
-        self.season_episode = f"S01E{episode:02d}"
-        self.part = None
-
-    @property
-    def season(self):
-        return f"S{self.begin_season:02d}"
-
-    @property
-    def episode(self):
-        return f"E{self.begin_episode:02d}"
-
-    def to_dict(self):
-        return {
-            "title": self.title,
-            "name": self.name,
-            "year": self.year,
-            "type": self.type.value,
-            "begin_season": self.begin_season,
-            "end_season": self.end_season,
-            "total_season": self.total_season,
-            "begin_episode": self.begin_episode,
-            "end_episode": self.end_episode,
-            "total_episode": self.total_episode,
-            "season_episode": self.season_episode,
-            "episode_list": self.episode_list,
-            "part": self.part,
-        }
-
-
-def make_media_info() -> MediaInfo:
-    media = MediaInfo()
-    media.type = MediaType.TV
-    media.title = "Test Show"
-    media.title_year = "Test Show (2026)"
-    media.year = "2026"
-    media.tmdb_id = 12345
-    media.category = ""
-    media.actors = []
-    media.season_years = {}
-    media.vote_average = 0
-    return media
-
-
-def make_task(episode: int, season: int = 1) -> TransferTask:
-    name = f"Test.Show.S{season:02d}E{episode:02d}.mkv"
-    return TransferTask(
-        fileitem=FileItem(
-            storage="local",
-            path=f"/downloads/Test Show/{name}",
-            type="file",
-            name=name,
-            basename=name.removesuffix(".mkv"),
-            extension="mkv",
-            size=1024,
-        ),
-        meta=FakeMeta(episode, season),
-    )
-
-
-def make_transfer_chain() -> TransferChain:
-    chain = object.__new__(TransferChain)
-    chain.jobview = JobManager()
-    chain._media_exts = settings.RMT_MEDIAEXT
-    chain._subtitle_exts = settings.RMT_SUBEXT
-    chain._audio_exts = settings.RMT_AUDIOEXT
-    chain._allowed_exts = chain._media_exts + chain._audio_exts + chain._subtitle_exts
-    chain._success_target_files = {}
-    chain._scrape_batches = {}
-    return chain
+from tests.transfer_fixtures import make_media_info, make_task, make_transfer_chain
 
 
 def _prepare_recognized_task():
