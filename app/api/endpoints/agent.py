@@ -10,13 +10,18 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.agent import MoviePilotAgent, ReplyMode, StreamingHandler
 from app.agent.llm.capability import AgentCapabilityManager
 from app.core.config import global_vars, settings
+from app.db import get_async_db
+from app.db.agentchat_oper import AgentChatOper
 from app.db.models import User
+from app.db.models.agentchat import AgentChat
 from app.db.user_oper import UserOper, get_current_active_user
 from app.helper.interaction import agent_interaction_manager
 from app.log import logger
@@ -152,9 +157,120 @@ def _build_web_agent_session_id(user: User, session_id: Optional[str]) -> str:
     :return: 可用于 Agent 记忆隔离的服务端会话 ID
     """
     seed = str(session_id or "").strip() or uuid.uuid4().hex
+    if seed.startswith(WEB_AGENT_SESSION_PREFIX):
+        return seed
+    try:
+        existing_chat = AgentChatOper().get(session_id=seed)
+        if existing_chat and _can_access_agent_chat(existing_chat, user):
+            return seed
+    except Exception as e:
+        logger.debug(f"读取WebAgent历史会话失败: {e}")
     user_part = user.name or str(user.id)
     digest = hashlib.sha256(f"{user_part}:{seed}".encode("utf-8")).hexdigest()
     return f"{WEB_AGENT_SESSION_PREFIX}{digest[:32]}"
+
+
+def _can_access_agent_chat(chat: AgentChat, user: User) -> bool:
+    """
+    判断当前登录用户是否可以访问指定 Agent 会话。
+
+    超级用户可查看所有渠道历史；普通用户仅能查看 user_id 或 username 匹配自己的会话。
+    """
+    if not chat or not user:
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    user_id = str(user.id)
+    username = str(user.name or "")
+    return chat.user_id == user_id or (bool(username) and chat.username == username)
+
+
+async def _get_accessible_agent_chat(
+    oper: AgentChatOper, session_id: str, user: User
+) -> Optional[AgentChat]:
+    """
+    读取当前用户可访问的 Agent 会话。
+    """
+    chat = await oper.async_get(session_id=session_id)
+    if not chat or not _can_access_agent_chat(chat, user):
+        return None
+    return chat
+
+
+def _apply_web_agent_display_event(event: dict, assistant_message: dict) -> None:
+    """
+    将 WebAgent SSE 事件同步应用到服务端展示消息快照。
+    """
+    event_type = event.get("type")
+    if event_type == "delta":
+        assistant_message["content"] += event.get("content") or ""
+    elif event_type == "tool":
+        for tool in assistant_message["tools"]:
+            tool["status"] = "done"
+        assistant_message["tools"].append(
+            {
+                "id": f"tool-{uuid.uuid4().hex}",
+                "message": str(event.get("message") or "").replace("=>", "", 1).strip(),
+                "status": "running",
+            }
+        )
+    elif event_type == "attachment" and event.get("attachment"):
+        assistant_message["attachments"].append(event["attachment"])
+    elif event_type == "choice" and event.get("choice"):
+        assistant_message["choices"].append({**event["choice"], "status": "pending"})
+    elif event_type == "error":
+        assistant_message["status"] = "error"
+        assistant_message["content"] = (
+            assistant_message["content"]
+            or event.get("message")
+            or "智能助手响应失败"
+        )
+        for tool in assistant_message["tools"]:
+            tool["status"] = "done"
+    elif event_type == "done":
+        if assistant_message.get("status") != "error":
+            assistant_message["status"] = "done"
+        for tool in assistant_message["tools"]:
+            tool["status"] = "done"
+
+
+def _save_web_agent_display_snapshot(
+    *,
+    session_id: str,
+    current_user: User,
+    messages: list[dict],
+    client_session_id: Optional[str] = None,
+) -> None:
+    """
+    保存 WebAgent 当前展示消息快照。
+    """
+    try:
+        oper = AgentChatOper()
+        existing_chat = oper.get(session_id=session_id)
+        AgentChatOper().save_display_messages(
+            session_id=session_id,
+            user_id=(existing_chat.user_id if existing_chat else str(current_user.id)),
+            username=(existing_chat.username if existing_chat else current_user.name),
+            channel=(
+                existing_chat.channel
+                if existing_chat and existing_chat.channel
+                else MessageChannel.WebAgent
+            ),
+            source=(
+                existing_chat.source
+                if existing_chat and existing_chat.source
+                else WEB_AGENT_SOURCE
+            ),
+            original_chat_id=existing_chat.original_chat_id if existing_chat else None,
+            client_session_id=(
+                existing_chat.client_session_id
+                if existing_chat and existing_chat.client_session_id
+                else client_session_id
+            ),
+            messages=messages,
+        )
+    except Exception as e:
+        logger.debug(f"保存WebAgent展示历史失败: {e}")
 
 
 def _build_web_agent_sse(event_type: str, data: Optional[dict] = None) -> str:
@@ -297,6 +413,52 @@ def _build_web_agent_url_attachment(
         "name": name,
         "mime_type": mime_type,
     }
+
+
+def _build_web_agent_input_attachments(
+    images: list[str],
+    files: list[dict],
+    audio_refs: list[str],
+) -> list[dict]:
+    """
+    构造 WebAgent 用户输入附件展示记录。
+    """
+    attachments = []
+    for index, image in enumerate(images or [], start=1):
+        attachments.append(
+            {
+                "kind": "image",
+                "url": image,
+                "download_url": image,
+                "name": f"image-{index}",
+                "mime_type": "image/*",
+            }
+        )
+    for index, file in enumerate(files or [], start=1):
+        ref = file.get("ref") or file.get("url") or file.get("local_path") or ""
+        mime_type = file.get("mime_type")
+        attachments.append(
+            {
+                "kind": _guess_web_agent_attachment_kind(mime_type),
+                "url": ref,
+                "download_url": ref,
+                "name": file.get("name") or f"attachment-{index}",
+                "mime_type": mime_type,
+                "size": file.get("size"),
+                "local_path": file.get("local_path"),
+            }
+        )
+    for index, audio_ref in enumerate(audio_refs or [], start=1):
+        attachments.append(
+            {
+                "kind": "audio",
+                "url": audio_ref,
+                "download_url": audio_ref,
+                "name": f"voice-{index}",
+                "mime_type": "audio/*",
+            }
+        )
+    return attachments
 
 
 def _register_web_agent_file(
@@ -790,6 +952,116 @@ async def web_agent_callback(
     return schemas.Response(success=True, data=result)
 
 
+@router.get("/sessions", summary="获取 Agent 历史会话", response_model=schemas.Response)
+async def list_agent_chat_sessions(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
+    page: Optional[int] = 1,
+    count: Optional[int] = 30,
+) -> schemas.Response:
+    """
+    获取当前用户可访问的 Agent 历史会话列表。
+
+    :param current_user: 当前登录用户
+    :param db: 异步数据库会话
+    :param page: 页码
+    :param count: 每页数量
+    :return: 会话摘要列表
+    """
+    user_id = None if current_user.is_superuser else str(current_user.id)
+    username = None if current_user.is_superuser else current_user.name
+    chats = await AgentChatOper(db).async_list_by_page(
+        page=page,
+        count=count,
+        user_id=user_id,
+        username=username,
+    )
+    return schemas.Response(
+        success=True,
+        data=[AgentChatOper.to_summary(chat) for chat in chats],
+    )
+
+
+@router.get("/sessions/{session_id}", summary="获取 Agent 历史会话详情", response_model=schemas.Response)
+async def get_agent_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> schemas.Response:
+    """
+    获取一条 Agent 历史会话详情。
+
+    :param session_id: Agent 会话 ID
+    :param current_user: 当前登录用户
+    :param db: 异步数据库会话
+    :return: 会话详情
+    """
+    chat = await _get_accessible_agent_chat(AgentChatOper(db), session_id, current_user)
+    if not chat:
+        return schemas.Response(success=False, message="会话不存在或无权访问")
+    return schemas.Response(success=True, data=AgentChatOper.to_detail(chat))
+
+
+@router.put("/sessions/{session_id}/display", summary="保存 Agent 展示会话", response_model=schemas.Response)
+async def save_agent_chat_display(
+    session_id: str,
+    payload: schemas.AgentChatDisplaySaveRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> schemas.Response:
+    """
+    保存前端聚合后的 Agent 展示消息。
+
+    :param session_id: Agent 会话 ID
+    :param payload: 展示消息保存请求
+    :param current_user: 当前登录用户
+    :param db: 异步数据库会话
+    :return: 保存后的会话摘要
+    """
+    oper = AgentChatOper(db)
+    existing_chat = await oper.async_get(session_id=session_id)
+    if existing_chat and not _can_access_agent_chat(existing_chat, current_user):
+        return schemas.Response(success=False, message="会话不存在或无权访问")
+
+    messages = [
+        message.model_dump(exclude_none=True)
+        for message in payload.messages
+    ]
+    await run_in_threadpool(
+        _save_web_agent_display_snapshot,
+        session_id=session_id,
+        current_user=current_user,
+        messages=messages,
+        client_session_id=existing_chat.client_session_id if existing_chat else session_id,
+    )
+    chat = await oper.async_get(session_id=session_id)
+    if not chat:
+        return schemas.Response(success=False, message="会话保存失败")
+    return schemas.Response(success=True, data=AgentChatOper.to_summary(chat))
+
+
+@router.delete("/sessions/{session_id}", summary="删除 Agent 历史会话", response_model=schemas.Response)
+async def delete_agent_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> schemas.Response:
+    """
+    删除一条 Agent 历史会话。
+
+    :param session_id: Agent 会话 ID
+    :param current_user: 当前登录用户
+    :param db: 异步数据库会话
+    :return: 删除结果
+    """
+    oper = AgentChatOper(db)
+    chat = await _get_accessible_agent_chat(oper, session_id, current_user)
+    if not chat:
+        return schemas.Response(success=False, message="会话不存在或无权访问")
+    deleted = await oper.async_delete(session_id=session_id)
+    return schemas.Response(success=deleted, message="删除成功" if deleted else "删除失败")
+
+
 @router.post("/stream", summary="Web智能助手流式对话")
 async def web_agent_stream(
     payload: schemas.AgentWebChatRequest,
@@ -843,6 +1115,28 @@ async def web_agent_stream(
     session_id = _build_web_agent_session_id(current_user, payload.session_id)
     event_queue: asyncio.Queue = asyncio.Queue()
     last_output = ""
+    user_attachments = _build_web_agent_input_attachments(
+        images=payload.images or [],
+        files=[
+            file.model_dump(exclude_none=True)
+            for file in (payload.files or [])
+        ],
+        audio_refs=payload.audio_refs or [],
+    )
+    display_messages = []
+    if payload.echo_user:
+        display_messages.append(
+            MoviePilotAgent.build_display_message(
+                role="user",
+                content=prompt,
+                attachments=user_attachments,
+            )
+        )
+    assistant_display_message = MoviePilotAgent.build_display_message(
+        role="assistant",
+        status="streaming",
+    )
+    display_messages.append(assistant_display_message)
 
     def output_callback(output: str) -> None:
         """
@@ -852,6 +1146,7 @@ async def web_agent_stream(
         delta = output[len(last_output):] if output.startswith(last_output) else output
         last_output = output
         for item in _split_web_agent_output(delta):
+            _apply_web_agent_display_event(item, assistant_display_message)
             event_queue.put_nowait(item)
 
     def notification_callback(notification: schemas.Notification) -> None:
@@ -859,6 +1154,7 @@ async def web_agent_stream(
         接收 Agent 工具主动发送的 Web 通知。
         """
         for item in _build_web_agent_notification_events(notification):
+            _apply_web_agent_display_event(item, assistant_display_message)
             event_queue.put_nowait(item)
 
     async def event_generator() -> AsyncIterator[str]:
@@ -897,17 +1193,29 @@ async def web_agent_stream(
                 )
             except Exception as err:
                 logger.error(f"Web智能助手执行失败: {str(err)}")
-                await event_queue.put(
-                    {"type": "error", "message": f"智能助手执行失败: {str(err)}"}
-                )
+                error_event = {
+                    "type": "error",
+                    "message": f"智能助手执行失败: {str(err)}",
+                }
+                _apply_web_agent_display_event(error_event, assistant_display_message)
+                await event_queue.put(error_event)
             finally:
-                await event_queue.put({"type": "done"})
+                done_event = {"type": "done"}
+                _apply_web_agent_display_event(done_event, assistant_display_message)
+                await run_in_threadpool(
+                    _save_web_agent_display_snapshot,
+                    session_id=session_id,
+                    current_user=current_user,
+                    messages=display_messages,
+                    client_session_id=payload.session_id or session_id,
+                )
+                await event_queue.put(done_event)
 
         task = asyncio.create_task(run_agent())
         try:
             yield _build_web_agent_sse(
                 "start",
-                {"session_id": payload.session_id or session_id},
+                {"session_id": session_id},
             )
             while not global_vars.is_system_stopped:
                 if await request.is_disconnected():

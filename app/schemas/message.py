@@ -310,6 +310,8 @@ class AgentWebChatRequest(BaseModel):
     audio_refs: Optional[List[str]] = Field(default_factory=list)
     # 文件附件列表
     files: Optional[List[AgentWebChatFile]] = Field(default_factory=list)
+    # 是否在展示历史中记录本轮用户消息
+    echo_user: bool = Field(default=True)
 
 
 class AgentWebChoiceRequest(BaseModel):
