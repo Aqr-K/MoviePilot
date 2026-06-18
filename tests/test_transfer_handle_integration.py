@@ -207,5 +207,86 @@ class TransferHandleHappyPathTest(unittest.TestCase):
         self.assertEqual((False, "文件整理模块运行失败"), result)
 
 
+class TransferHandleRecognitionPathTest(unittest.TestCase):
+    """覆盖 block-1（识别块）的两条此前未覆盖路径，作为后续安全抽取 block-1 的安全网。
+
+    （识别失败的完整 add_fail/notify/downloader-hash-completed 路径已由
+    test_transfer_job_manager.py:583/612 覆盖。）
+    """
+
+    def test_unrecognized_then_recognized_via_history_continues_to_transfer(self):
+        """识别成功（经 download_history.tmdbid）：设置 username、回写 mediainfo、
+        mediainfo_changed=True 经 _migrate_or_skip 落到 task，流程续走至 self.transfer。"""
+        chain = make_transfer_chain()
+        task = make_task(1)  # 不预置 mediainfo → 进入 block-1 识别分支
+        task.downloader = "qbittorrent"
+        task.download_hash = "h1"
+        task.download_history = SimpleNamespace(
+            username="alice",
+            tmdbid=12345,
+            doubanid=None,
+            type="电视剧",
+            episode_group=None,
+            media_category=None,
+        )
+        # 预置非空 episodes_info → 识别后 _resolve_episodes_info 跳过 TMDB 集数查询
+        task.episodes_info = [SimpleNamespace(episode_number=1)]
+        self.assertTrue(chain.jobview.add_task(task))
+
+        recognized = make_media_info()
+        chain.recognize_media = lambda **kw: recognized
+        chain.obtain_images = lambda **kw: None
+        transferinfo = SimpleNamespace(success=True, message="整理完成")
+        chain.transfer = lambda **kw: transferinfo
+
+        with patch(
+            "app.chain.transfer.TransferHistoryOper",
+            return_value=SimpleNamespace(
+                add_fail=lambda **kw: SimpleNamespace(id=1),
+                get_by_type_tmdbid=lambda **kw: None,
+            ),
+        ), patch(
+            "app.chain.transfer.DirectoryHelper",
+            return_value=SimpleNamespace(
+                get_dir=lambda **kw: SimpleNamespace(library_storage="local")
+            ),
+        ), patch(
+            "app.chain.transfer.eventmanager.send_event", return_value=None
+        ):
+            result = chain._TransferChain__handle_transfer(task)
+
+        self.assertEqual((True, "整理完成"), result)
+        # 识别结果经 _migrate_or_skip 回写到 task（多值回流契约）
+        self.assertIs(recognized, task.mediainfo)
+        # block-1 从 download_history 取下载用户
+        self.assertEqual("alice", task.username)
+
+    def test_unrecognized_preview_short_circuits_without_side_effects(self):
+        """preview 模式识别失败：在 add_fail/post_message 之前短路返回，二者均不触发。"""
+        chain = make_transfer_chain()
+        task = make_task(1)
+        task.preview = True
+        task.download_history = None  # → 走 MediaChain().recognize_by_meta 分支
+        add_fail_called = []
+        post_called = []
+        chain.post_message = lambda *a, **k: post_called.append(1)
+        self.assertTrue(chain.jobview.add_task(task))
+
+        with patch(
+            "app.chain.transfer.TransferHistoryOper",
+            return_value=SimpleNamespace(
+                add_fail=lambda **kw: (add_fail_called.append(1) or SimpleNamespace(id=1)),
+                get_by_type_tmdbid=lambda **kw: None,
+            ),
+        ), patch("app.chain.transfer.MediaChain") as media_chain_cls:
+            media_chain_cls.return_value.recognize_by_meta.return_value = None
+            result = chain._TransferChain__handle_transfer(task)
+
+        self.assertEqual((False, "未识别到媒体信息"), result)
+        # preview 短路必须发生在副作用之前
+        self.assertEqual([], add_fail_called)
+        self.assertEqual([], post_called)
+
+
 if __name__ == "__main__":
     unittest.main()
