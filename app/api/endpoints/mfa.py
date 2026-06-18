@@ -21,28 +21,15 @@ from app.db.user_oper import get_current_active_user, get_current_active_user_as
 from app.helper.passkey import PassKeyHelper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
+from app.service.mfa import (
+    build_credential_list as _build_credential_list,
+    build_passkey_list as _build_passkey_list,
+)
 from app.utils.otp import OtpUtils
 
 router = APIRouter()
 
 # ==================== 辅助函数 ====================
-
-
-def _build_credential_list(passkeys: list[PassKey]) -> list[dict[str, Any]]:
-    """
-    构建凭证列表
-
-    :param passkeys: PassKey 列表
-    :return: 凭证字典列表
-    """
-    return (
-        [
-            {"credential_id": pk.credential_id, "transports": pk.transports}
-            for pk in passkeys
-        ]
-        if passkeys
-        else []
-    )
 
 
 def _extract_and_standardize_credential_id(credential: dict) -> str:
@@ -444,23 +431,7 @@ def passkey_list(
     try:
         passkeys = PassKey.get_by_user_id(db=None, user_id=current_user.id)
 
-        key_list = (
-            [
-                {
-                    "id": pk.id,
-                    "name": pk.name,
-                    "created_at": pk.created_at.isoformat() if pk.created_at else None,
-                    "last_used_at": pk.last_used_at.isoformat()
-                    if pk.last_used_at
-                    else None,
-                    "aaguid": pk.aaguid,
-                    "transports": pk.transports,
-                }
-                for pk in passkeys
-            ]
-            if passkeys
-            else []
-        )
+        key_list = _build_passkey_list(passkeys)
 
         return schemas.Response(success=True, data=key_list)
     except Exception as e:
