@@ -1,5 +1,6 @@
 import threading
 import traceback
+from enum import Enum
 from typing import Generator, Optional, Tuple, Any, Union, List, Dict
 
 from app.core.config import settings
@@ -17,8 +18,8 @@ class ModuleManager(metaclass=Singleton):
     模块管理器
     """
 
-    # 子模块类型集合
-    SubType = Union[DownloaderType, MediaServerType, MessageChannel, StorageSchema, OtherModulesType]
+    # 子模块类型集合（兼容传入纯字符串子类型标识）
+    SubType = Union[DownloaderType, MediaServerType, MessageChannel, StorageSchema, OtherModulesType, str]
 
     def __init__(self):
         # 模块列表
@@ -147,15 +148,37 @@ class ModuleManager(metaclass=Singleton):
                     and module.get_type() == module_type:
                 yield module
 
+    @staticmethod
+    def _coerce_subtype(value) -> Optional[str]:
+        """
+        将子类型（Enum 或字符串）归一化为字符串标识，None 原样返回 None。
+        使内建 Enum 子类型与插件纯字符串子类型可统一比较。
+        """
+        if value is None:
+            return None
+        if isinstance(value, Enum):
+            return str(value.value)
+        return str(value)
+
     def get_running_subtype_module(self, module_subtype: SubType) -> Generator:
         """
-        获取指定子类型的模块
+        获取指定子类型的模块。按字符串标识相等匹配，同时兼容 Enum 与纯字符串子类型：
+        查询参数与模块的 get_subtype_id() 均归一化为字符串后比较，使插件无需扩展封闭枚举
+        即可新增子类型。
         """
         if not self._running_modules:
             return
+        target = self._coerce_subtype(module_subtype)
+        if target is None:
+            return
         for _, module in list(self._running_modules.items()):
-            if hasattr(module, 'get_subtype') \
-                    and module.get_subtype() == module_subtype:
+            getter = getattr(module, 'get_subtype_id', None)
+            if getter is not None:
+                value = self._coerce_subtype(getter())
+            else:
+                legacy = getattr(module, 'get_subtype', None)
+                value = self._coerce_subtype(legacy()) if legacy else None
+            if value is not None and value == target:
                 yield module
 
     def get_module(self, module_id: str) -> Any:
