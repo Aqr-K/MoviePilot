@@ -82,6 +82,35 @@ def test_ocr_helper_extracts_data_url_base64_without_downloading_image():
     }
 
 
+def test_ocr_helper_normalizes_data_url_base64_padding():
+    """data:image 地址缺少 padding 时应补齐后提交给 OCR 服务。"""
+    image_url = "data:image/jpeg;base64,YWJjZA"
+
+    with patch("app.helper.ocr.RequestUtils") as request_utils:
+        request_utils.return_value.post_res.return_value = _FakeResponse(
+            payload={"result": "z9k2"}
+        )
+
+        result = OcrHelper().get_captcha_text(image_url=image_url)
+
+    assert result == "z9k2"
+    request_utils.return_value.get_res.assert_not_called()
+    assert request_utils.return_value.post_res.call_args.kwargs["json"] == {
+        "base64_img": "YWJjZA=="
+    }
+
+
+def test_recognize_captcha_tool_formats_data_url_for_log():
+    """验证码工具日志应隐藏 data:image 的完整图片内容。"""
+    image_b64 = base64.b64encode(b"captcha-image").decode()
+    image_url = f"data:image/jpeg;base64,{image_b64}"
+
+    result = RecognizeCaptchaTool._format_image_url_for_log(image_url)
+
+    assert result == f"data:image/jpeg;base64,<base64:{len(image_b64)} chars>"
+    assert image_b64 not in result
+
+
 def test_recognize_captcha_tool_returns_captcha_text_from_ocr_helper():
     """验证码工具应返回结构化识别结果，便于 Agent 继续填写表单。"""
     tool = RecognizeCaptchaTool(session_id="captcha-session", user_id="10001")

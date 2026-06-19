@@ -52,6 +52,7 @@ class RecognizeCaptchaTool(MoviePilotTool):
     tags: list[str] = [
         ToolTag.Read,
         ToolTag.Web,
+        ToolTag.Site,
     ]
     description: str = (
         "Recognize a graphic captcha image and return the captcha text. "
@@ -69,6 +70,21 @@ class RecognizeCaptchaTool(MoviePilotTool):
         if image_url.lower().startswith("data:image/"):
             return "识别图形验证码: data image"
         return f"识别图形验证码: {image_url}"
+
+    @staticmethod
+    def _format_image_url_for_log(image_url: str) -> str:
+        """生成验证码图片地址的安全日志摘要，避免 data URL 图片刷屏。"""
+        clean_url = (image_url or "").strip()
+        if not clean_url:
+            return ""
+        if clean_url.lower().startswith("data:image/"):
+            metadata, separator, data = clean_url.partition(",")
+            if separator:
+                return f"{metadata},<base64:{len(data)} chars>"
+            return f"data:image,<invalid:{len(clean_url)} chars>"
+        if len(clean_url) > 300:
+            return f"{clean_url[:300]}...(已截断，总长度: {len(clean_url)})"
+        return clean_url
 
     @staticmethod
     def _recognize_captcha_sync(
@@ -117,7 +133,10 @@ class RecognizeCaptchaTool(MoviePilotTool):
         :param allow_private_network: 是否允许访问本机或私网地址
         :return: JSON 格式的识别结果
         """
-        logger.info(f"执行工具: {self.name}, 参数: image_url={image_url}")
+        logger.info(
+            f"执行工具: {self.name}, "
+            f"参数: image_url={self._format_image_url_for_log(image_url)}"
+        )
 
         try:
             captcha_text = await self.run_blocking(

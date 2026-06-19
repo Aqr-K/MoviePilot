@@ -47,11 +47,6 @@ MAX_LOG_FILE_SIZE = 256 * 1024
 # 提取本轮对话上下文的最大字符数（避免过长的对话消耗太多 token）
 MAX_CONTEXT_FOR_SUMMARY = 4000
 
-TRIVIAL_USER_TEXT_PATTERN = re.compile(
-    r"^\s*(你好|您好|hi|hello|hey|谢谢|谢了|多谢|ok|好的|收到|嗯|嗯嗯|是的|对|可以|行|好)\s*[。.!！]?\s*$",
-    re.IGNORECASE,
-)
-
 SUMMARY_SKIP_MARKER = "SKIP"
 
 # LLM 总结的提示词
@@ -343,15 +338,7 @@ def _should_skip_activity_summary(round_messages: list) -> bool:
     if has_tool_activity:
         return False
 
-    user_text_parts = []
-    for msg in round_messages:
-        if not isinstance(msg, HumanMessage):
-            continue
-        content = msg.content if isinstance(msg.content, str) else str(msg.content)
-        if content:
-            user_text_parts.append(content)
-    user_text = " ".join(user_text_parts).strip()
-    return bool(user_text and TRIVIAL_USER_TEXT_PATTERN.match(user_text))
+    return True
 
 
 async def _summarize_with_llm(conversation_text: str) -> Optional[str]:
