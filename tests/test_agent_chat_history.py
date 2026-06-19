@@ -1,11 +1,12 @@
 import asyncio
 from types import SimpleNamespace
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
-from app.agent import MoviePilotAgent
+from app.agent import HEARTBEAT_SESSION_PREFIX, MoviePilotAgent
 from app.agent.memory import memory_manager
 from app.db.agentchat_oper import AgentChatOper
+from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
 def test_agent_chat_oper_saves_display_messages_with_channel():
@@ -108,6 +109,99 @@ def test_agent_prepare_chat_title_generates_title(monkeypatch):
     assert chat.title == "下载器状态排查"
     assert chat.channel == "WebAgent"
     assert chat.source == "web-agent"
+
+
+def test_agent_prepare_chat_title_skips_internal_background_sessions(monkeypatch):
+    """内部后台任务和心跳会话不应生成标题或创建历史会话。"""
+
+    async def fake_initialize_llm(self, streaming=False):
+        """后台会话不应初始化标题模型。"""
+        raise AssertionError("background title generation should be skipped")
+
+    monkeypatch.setattr(MoviePilotAgent, "_initialize_llm", fake_initialize_llm)
+
+    for session_id in (
+        "__agent_background_title__",
+        f"{HEARTBEAT_SESSION_PREFIX}title__",
+    ):
+        agent = MoviePilotAgent(
+            session_id=session_id,
+            user_id=SYSTEM_INTERNAL_USER_ID,
+            username="admin",
+        )
+        asyncio.run(agent.prepare_chat_title("后台任务"))
+
+        assert AgentChatOper().get(
+            session_id=session_id,
+            user_id=SYSTEM_INTERNAL_USER_ID,
+        ) is None
+
+
+def test_agent_prepare_chat_title_keeps_user_cli_sessions(monkeypatch):
+    """用户显式 CLI 会话即使没有渠道来源也应保留标题生成。"""
+
+    class FakeTitleModel:
+        """测试用 CLI 标题模型。"""
+
+        async def ainvoke(self, messages):
+            """返回固定 CLI 标题。"""
+            return SimpleNamespace(content="CLI 会话排查")
+
+    async def fake_initialize_llm(self, streaming=False):
+        """返回测试 CLI 标题模型。"""
+        return FakeTitleModel()
+
+    monkeypatch.setattr(MoviePilotAgent, "_initialize_llm", fake_initialize_llm)
+    agent = MoviePilotAgent(
+        session_id="cli-title-session",
+        user_id="cli",
+        username="admin",
+    )
+
+    asyncio.run(agent.prepare_chat_title("帮我检查配置"))
+    chat = AgentChatOper().get(session_id="cli-title-session", user_id="cli")
+
+    assert chat.title == "CLI 会话排查"
+
+
+def test_internal_background_agent_execution_does_not_persist_chat_history(monkeypatch):
+    """内部后台任务执行完成后不应写入 Agent 会话历史表。"""
+    session_id = "__agent_background_skip_persist__"
+    user_id = SYSTEM_INTERNAL_USER_ID
+    memory_manager.clear_memory(session_id, user_id)
+
+    class FakeGraphState:
+        """测试用 LangGraph 状态。"""
+
+        def __init__(self, messages):
+            self.values = {"messages": messages}
+
+    class FakeAgent:
+        """测试用 LangGraph Agent。"""
+
+        async def ainvoke(self, _payload, config=None):
+            """模拟非流式 Agent 执行。"""
+            return None
+
+        def get_state(self, _config):
+            """返回包含最终回复的状态。"""
+            return FakeGraphState([AIMessage(content="后台结果")])
+
+    async def fake_create_agent(self, streaming=False):
+        """返回测试 Agent，避免真实初始化模型。"""
+        return FakeAgent()
+
+    monkeypatch.setattr(MoviePilotAgent, "_create_agent", fake_create_agent)
+    agent = MoviePilotAgent(
+        session_id=session_id,
+        user_id=user_id,
+        username="admin",
+    )
+
+    asyncio.run(agent._execute_agent([]))
+
+    assert AgentChatOper().get(session_id=session_id, user_id=user_id) is None
+    assert memory_manager.get_memory(session_id, user_id) is None
 
 
 def test_memory_manager_restores_agent_messages_from_database():

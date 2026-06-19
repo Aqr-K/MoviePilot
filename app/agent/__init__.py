@@ -57,7 +57,7 @@ from app.log import logger
 from app.schemas import AgentLLMProviderEventData, AgentTokensUsageEventData, Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
 from app.schemas.types import ChainEventType, EventType, MessageChannel
-from app.utils.identity import SYSTEM_INTERNAL_USER_ID
+from app.utils.identity import SYSTEM_INTERNAL_USER_ID, is_internal_user_id
 
 
 class AgentChain(ChainBase):
@@ -227,6 +227,7 @@ class ReplyMode(str, Enum):
     CAPTURE_ONLY = "capture_only"
 
 
+INTERNAL_AGENT_SESSION_PREFIX = "__agent_"
 HEARTBEAT_SESSION_PREFIX = "__agent_heartbeat_"
 UNSUPPORTED_IMAGE_INPUT_MESSAGE = "当前模型不支持图片输入，请更换支持图片输入的模型，或在系统设置中关闭图片输入支持后重试。"
 AGENT_EXECUTION_ERROR_PREFIX = "智能助手执行失败"
@@ -313,6 +314,17 @@ class MoviePilotAgent:
             and self.channel not in AGENT_DISPLAY_HISTORY_SKIP_CHANNELS
         )
 
+    def _should_persist_agent_chat(self) -> bool:
+        """
+        判断当前 Agent 是否需要写入会话历史表。
+        """
+        if self.is_heartbeat_session:
+            return False
+        return not (
+            is_internal_user_id(self.user_id)
+            and self.session_id.startswith(INTERNAL_AGENT_SESSION_PREFIX)
+        )
+
     def _save_display_history_messages(self, messages: List[dict]) -> None:
         """
         将一组可见消息追加到 Agent 会话历史表。
@@ -372,6 +384,8 @@ class MoviePilotAgent:
         """
         首次对话时生成并保存会话标题。
         """
+        if not self._should_persist_agent_chat():
+            return
         if self._tool_context.get("chat_title_prepared"):
             return
         self._tool_context["chat_title_prepared"] = True
@@ -1373,12 +1387,12 @@ class MoviePilotAgent:
                         break
             self._save_assistant_display_message_once(display_text)
 
-            # 保存消息
-            memory_manager.save_agent_messages(
-                session_id=self.session_id,
-                user_id=self.user_id,
-                messages=agent.get_state(agent_config).values.get("messages", []),
-            )
+            if self._should_persist_agent_chat():
+                memory_manager.save_agent_messages(
+                    session_id=self.session_id,
+                    user_id=self.user_id,
+                    messages=agent.get_state(agent_config).values.get("messages", []),
+                )
             execution_success = True
 
         except asyncio.CancelledError:
