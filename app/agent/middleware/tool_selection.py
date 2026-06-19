@@ -1,5 +1,6 @@
 """MoviePilot 自定义工具筛选中间件。"""
 
+from dataclasses import replace
 import json
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, NotRequired
@@ -19,136 +20,38 @@ from langchain.agents.middleware.tool_selection import (
     LLMToolSelectorMiddleware,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict  # noqa
 
+from app.agent.tools.tags import ToolTag
 from app.log import logger
 
 MIN_SELECTED_TOOL_COUNT = 4
+RECENT_SELECTION_CONTEXT_MESSAGE_LIMIT = 6
+RECENT_SELECTION_CONTEXT_MAX_CHARS = 6000
+RECENT_SELECTION_CONTEXT_TRUNCATION_PREFIX = "..."
+TOOL_GROUP_EXCLUDED_TAGS = frozenset(
+    {
+        ToolTag.AgentTool.value,
+        ToolTag.Read.value,
+        ToolTag.Write.value,
+        ToolTag.Admin.value,
+        ToolTag.Message.value,
+        ToolTag.UserInteraction.value,
+        ToolTag.TerminalResponse.value,
+    }
+)
 
 MOVIEPILOT_TOOL_SELECTION_HINT = """
 
 MoviePilot tool-chain hints:
-- For media search and download tasks, keep related steps together when relevant:
-  search_media, search_torrents, get_search_results, add_download_tasks, query_download_tasks.
-- For file organization and library transfer tasks, keep related steps together when relevant:
-  list_directory, query_directory_settings, recognize_media, query_library_exists, transfer_file, query_transfer_history, scrape_metadata.
-- For subscription tasks, keep related steps together when relevant:
-  search_subscribe, add_subscribe, query_subscribes, update_subscribe, query_subscribe_history, query_popular_subscribes.
-- For download management tasks, keep related steps together when relevant:
-  query_download_tasks, update_download_tasks, delete_download_tasks, query_downloaders.
-- For site diagnostics or maintenance tasks, keep related steps together when relevant:
-  query_sites, query_site_userdata, test_site, update_site, update_site_cookie.
-- For scheduler and workflow tasks, keep related steps together when relevant:
-  query_schedulers, run_scheduler, query_workflows, run_workflow, query_episode_schedule.
-- For plugin tasks, keep related steps together when relevant:
-  query_installed_plugins, query_market_plugins, query_plugin_capabilities, query_plugin_config, update_plugin_config, query_plugin_data, install_plugin, uninstall_plugin, reload_plugin.
-- For rule, identifier, or system setting tasks, keep related steps together when relevant:
-  query_rule_groups, query_builtin_filter_rules, query_custom_filter_rules, add_custom_filter_rule, update_custom_filter_rule, delete_custom_filter_rule, add_rule_group, update_rule_group, delete_rule_group, query_custom_identifiers, update_custom_identifiers, query_system_settings, update_system_settings.
-- Prefer including the likely next-step tools in the same workflow instead of selecting only the first tool.
+- Tools with the same capability tag belong to the same functional group.
+- For multi-step MoviePilot tasks, keep same-tag tools together when relevant.
+- Prefer selecting likely next-step tools in the same capability group instead of selecting only the first tool.
 """
-
-TOOL_CHAIN_GROUPS = (
-    (
-        "media_download",
-        (
-            "search_media",
-            "search_torrents",
-            "get_search_results",
-            "add_download_tasks",
-            "query_download_tasks",
-            "query_downloaders",
-        ),
-    ),
-    (
-        "library_transfer",
-        (
-            "list_directory",
-            "query_directory_settings",
-            "recognize_media",
-            "query_library_exists",
-            "transfer_file",
-            "query_transfer_history",
-            "scrape_metadata",
-        ),
-    ),
-    (
-        "subscription",
-        (
-            "search_subscribe",
-            "add_subscribe",
-            "query_subscribes",
-            "update_subscribe",
-            "delete_subscribe",
-            "query_subscribe_history",
-            "query_popular_subscribes",
-            "query_subscribe_shares",
-        ),
-    ),
-    (
-        "download_management",
-        (
-            "query_download_tasks",
-            "update_download_tasks",
-            "delete_download_tasks",
-            "query_downloaders",
-        ),
-    ),
-    (
-        "site_management",
-        (
-            "query_sites",
-            "query_site_userdata",
-            "test_site",
-            "update_site",
-            "update_site_cookie",
-        ),
-    ),
-    (
-        "workflow_scheduler",
-        (
-            "query_schedulers",
-            "run_scheduler",
-            "query_workflows",
-            "run_workflow",
-            "query_episode_schedule",
-        ),
-    ),
-    (
-        "plugin_management",
-        (
-            "query_installed_plugins",
-            "query_market_plugins",
-            "query_plugin_capabilities",
-            "query_plugin_config",
-            "update_plugin_config",
-            "query_plugin_data",
-            "install_plugin",
-            "uninstall_plugin",
-            "reload_plugin",
-        ),
-    ),
-    (
-        "rule_settings",
-        (
-            "query_rule_groups",
-            "query_builtin_filter_rules",
-            "query_custom_filter_rules",
-            "add_custom_filter_rule",
-            "update_custom_filter_rule",
-            "delete_custom_filter_rule",
-            "add_rule_group",
-            "update_rule_group",
-            "delete_rule_group",
-            "query_custom_identifiers",
-            "update_custom_identifiers",
-            "query_system_settings",
-            "update_system_settings",
-        ),
-    ),
-)
 
 
 class ToolSelectionState(AgentState):
@@ -203,6 +106,73 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         )
         self.selection_tools = selection_tools or []
 
+    @classmethod
+    def _render_recent_conversation_context(
+            cls,
+            messages: list[Any],
+    ) -> tuple[str, int]:
+        """渲染最近对话上下文，供工具筛选模型理解多轮追问。"""
+        rendered_messages = []
+        for message in messages:
+            if isinstance(message, HumanMessage):
+                role = "User"
+            elif isinstance(message, AIMessage):
+                role = "Assistant"
+            else:
+                continue
+
+            content = cls._extract_text_content(message.content).strip()
+            if not content:
+                continue
+            rendered_messages.append(f"{role}: {content}")
+
+        recent_messages = rendered_messages[-RECENT_SELECTION_CONTEXT_MESSAGE_LIMIT:]
+        context = "\n\n".join(recent_messages)
+        if len(context) > RECENT_SELECTION_CONTEXT_MAX_CHARS:
+            context = (
+                f"{RECENT_SELECTION_CONTEXT_TRUNCATION_PREFIX}"
+                f"{context[-RECENT_SELECTION_CONTEXT_MAX_CHARS:]}"
+            )
+        return context, len(recent_messages)
+
+    @classmethod
+    def _build_contextual_user_message(
+            cls,
+            messages: list[Any],
+            last_user_message: HumanMessage,
+    ) -> HumanMessage:
+        """根据最近对话构造工具筛选专用用户消息。"""
+        context, message_count = cls._render_recent_conversation_context(messages)
+        if message_count <= 1:
+            return last_user_message
+
+        return HumanMessage(
+            content=(
+                "Recent conversation context for tool selection:\n"
+                f"{context}\n\n"
+                "Select tools for the latest user instruction. Use prior assistant "
+                "messages and earlier user requests when the latest user message "
+                "depends on previous context."
+            )
+        )
+
+    def _prepare_selection_request(
+            self,
+            request: ModelRequest[ContextT],
+    ) -> Any | None:
+        """准备带最近对话上下文的工具筛选请求。"""
+        selection_request = super()._prepare_selection_request(request)
+        if selection_request is None:
+            return None
+
+        contextual_user_message = self._build_contextual_user_message(
+            messages=request.messages,
+            last_user_message=selection_request.last_user_message,
+        )
+        if contextual_user_message is selection_request.last_user_message:
+            return selection_request
+        return replace(selection_request, last_user_message=contextual_user_message)
+
     @staticmethod
     def _append_tool_selection_hint(system_prompt: str) -> str:
         """追加 MoviePilot 工具组选择提示，避免复杂链路只选中首个工具。"""
@@ -216,34 +186,123 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             return min(self.max_tools, len(valid_tool_names))
         return len(valid_tool_names)
 
+    @staticmethod
+    def _normalize_tool_tags(tool: BaseTool) -> list[str]:
+        """读取工具的业务标签，过滤掉无法表达工具组的通用标签。"""
+        tags = getattr(tool, "tags", None) or []
+        if isinstance(tags, str):
+            tags = [tags]
+
+        normalized_tags = []
+        for tag in tags:
+            tag_value = getattr(tag, "value", tag)
+            if not tag_value:
+                continue
+            tag_name = str(tag_value)
+            if tag_name in TOOL_GROUP_EXCLUDED_TAGS or tag_name in normalized_tags:
+                continue
+            normalized_tags.append(tag_name)
+        return normalized_tags
+
+    @classmethod
+    def _build_tool_groups(
+            cls,
+            available_tools: list[BaseTool],
+            valid_tool_names: list[str],
+    ) -> list[tuple[str, list[str]]]:
+        """根据工具标签构造能力组，保留当前工具列表中的稳定顺序。"""
+        valid_tool_set = set(valid_tool_names)
+        tool_groups: dict[str, list[str]] = {}
+        for tool in available_tools:
+            tool_name = getattr(tool, "name", None)
+            if not tool_name or tool_name not in valid_tool_set:
+                continue
+            for tag in cls._normalize_tool_tags(tool):
+                group_tool_names = tool_groups.setdefault(tag, [])
+                if tool_name not in group_tool_names:
+                    group_tool_names.append(tool_name)
+
+        return [
+            (tag, tool_names)
+            for tag, tool_names in tool_groups.items()
+            if len(tool_names) > 1
+        ]
+
+    @classmethod
+    def _get_matched_tool_groups(
+            cls,
+            selected_names: list[str],
+            available_tools: list[BaseTool],
+            valid_tool_names: list[str],
+    ) -> list[tuple[str, list[str]]]:
+        """返回已选工具命中的标签能力组。"""
+        groups_by_tag = {
+            tag: tool_names
+            for tag, tool_names in cls._build_tool_groups(
+                available_tools=available_tools,
+                valid_tool_names=valid_tool_names,
+            )
+        }
+        tools_by_name = {
+            tool.name: tool
+            for tool in available_tools
+            if getattr(tool, "name", None)
+        }
+        matched_groups: list[tuple[str, list[str]]] = []
+        seen_tags = set()
+        for tool_name in selected_names:
+            tool = tools_by_name.get(tool_name)
+            if not tool:
+                continue
+            for tag in cls._normalize_tool_tags(tool):
+                if tag in seen_tags or tag not in groups_by_tag:
+                    continue
+                matched_groups.append((tag, groups_by_tag[tag]))
+                seen_tags.add(tag)
+        return matched_groups
+
     def _complete_low_count_selection(
             self,
             selected_tool_names: list[str],
             valid_tool_names: list[str],
+            available_tools: list[BaseTool],
     ) -> list[str]:
         """
-        当模型只选出极少工具时，按 MoviePilot 常见工具链补齐相邻工具。
+        当模型只选出极少工具时，按工具标签补齐同组工具。
 
-        这只补齐已经命中的工具组，不会把所有工具组都展开，因此能降低
-        “选了搜索工具但漏了结果/下载工具”这类链式任务失败概率。
+        工具标签是工具自身声明的能力归属。这里只补齐已经命中的标签组，
+        不会把所有工具组都展开。
         """
         limit = self._get_tool_selection_limit(valid_tool_names)
-        target_count = min(MIN_SELECTED_TOOL_COUNT, limit)
         selected_names = [
             tool_name
             for tool_name in selected_tool_names
             if tool_name in valid_tool_names
         ]
-        if len(selected_names) >= target_count:
-            return selected_names[:limit]
-
         selected_set = set(selected_names)
         valid_tool_set = set(valid_tool_names)
         completed_names = list(selected_names)
+        matched_groups = self._get_matched_tool_groups(
+            selected_names=selected_names,
+            available_tools=available_tools,
+            valid_tool_names=valid_tool_names,
+        )
+        if not matched_groups:
+            return completed_names[:limit]
 
-        for _, group_tool_names in TOOL_CHAIN_GROUPS:
-            if not selected_set.intersection(group_tool_names):
-                continue
+        matched_group_tool_names = {
+            tool_name
+            for _, group_tool_names in matched_groups
+            for tool_name in group_tool_names
+        }
+        target_count = min(
+            max(MIN_SELECTED_TOOL_COUNT, len(matched_group_tool_names)),
+            limit,
+        )
+        if len(selected_names) >= target_count:
+            return selected_names[:limit]
+
+        for _, group_tool_names in matched_groups:
             for tool_name in group_tool_names:
                 if tool_name in selected_set or tool_name not in valid_tool_set:
                     continue
@@ -285,6 +344,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
                 if isinstance(tool_name, str)
             ],
             valid_tool_names=valid_tool_names,
+            available_tools=available_tools,
         )
         return super()._process_selection_response(
             response,
@@ -382,12 +442,35 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             raise ValueError("工具筛选 JSON 顶层必须是对象")
         return payload
 
-    @staticmethod
-    def _render_tool_list(available_tools: list[Any]) -> str:
+    @classmethod
+    def _render_tool_list(cls, available_tools: list[Any]) -> str:
         """把工具名和描述渲染成稳定的文本列表。"""
-        return "\n".join(
-            f"- {tool.name}: {tool.description}" for tool in available_tools
+        lines = []
+        for tool in available_tools:
+            tags = cls._normalize_tool_tags(tool)
+            tag_text = f" [group tags: {', '.join(tags)}]" if tags else ""
+            lines.append(f"- {tool.name}{tag_text}: {tool.description}")
+        return "\n".join(lines)
+
+    @classmethod
+    def _render_tool_groups(cls, available_tools: list[BaseTool]) -> str:
+        """把当前可用工具按标签渲染成能力组提示。"""
+        valid_tool_names = [
+            tool.name
+            for tool in available_tools
+            if getattr(tool, "name", None)
+        ]
+        groups = cls._build_tool_groups(
+            available_tools=available_tools,
+            valid_tool_names=valid_tool_names,
         )
+        if not groups:
+            return ""
+        rendered_groups = "\n".join(
+            f"- {tag}: {', '.join(tool_names)}"
+            for tag, tool_names in groups
+        )
+        return f"Capability groups from tool tags:\n{rendered_groups}\n\n"
 
     def _build_deepseek_selection_prompt(self, selection_request: Any) -> str:
         """
@@ -408,8 +491,10 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             "- The `tools` field must be a JSON array of strings.\n"
             "- Only use tool names from the allowed list below.\n"
             "- Order tools by relevance, with the most relevant first.\n"
+            "- Tools sharing the same capability tag are in the same group; include same-group tools together when relevant.\n"
             f"{limit_instruction}\n"
             "- Do not add explanations, markdown, or extra keys.\n\n"
+            f"{self._render_tool_groups(selection_request.available_tools)}"
             "Allowed tools:\n"
             f"{self._render_tool_list(selection_request.available_tools)}"
         )
