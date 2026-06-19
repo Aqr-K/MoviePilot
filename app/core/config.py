@@ -552,6 +552,8 @@ class ConfigModel(BaseModel):
     AI_AGENT_ENABLE: bool = False
     # 合局AI智能体
     AI_AGENT_GLOBAL: bool = False
+    # 是否隐藏前端全局智能体入口
+    AI_AGENT_HIDE_ENTRY: bool = False
     # LLM提供商（支持内置 provider，以及从 models.dev 动态补充的平台）
     LLM_PROVIDER: str = "deepseek"
     # LLM模型名称

@@ -688,6 +688,7 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
     info = settings.model_dump(
         include={
             "AI_AGENT_ENABLE",
+            "AI_AGENT_HIDE_ENTRY",
             "LLM_SUPPORT_AUDIO_INPUT",
             "LLM_SUPPORT_AUDIO_OUTPUT",
             "RECOGNIZE_SOURCE",
