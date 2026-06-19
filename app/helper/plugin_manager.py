@@ -24,6 +24,7 @@ from app.core.auth_level import get_auth_level
 from app.core.cache import fresh, async_fresh
 from app.core.config import settings
 from app.core.event import eventmanager
+from app.core.module import ModuleManager
 from app.core.plugin_reporter import report_plugin_install
 from app.core.plugin_source import get_plugin_source
 from app.helper import plugin_market, plugin_metadata
@@ -114,6 +115,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     eventmanager.disable_event_handler(plugin)
             except Exception as err:
                 logger.error(f"加载插件 {plugin_id} 出错：{str(err)} - {traceback.format_exc()}")
+        # 注册插件经 provides_modules 声明新增的系统模块到模块层（运行期动态上线）
+        self._register_plugin_modules(pid)
 
     def init_plugin(self, plugin_id: str, conf: dict):
         """
@@ -133,6 +136,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         else:
             # 禁用插件类的事件处理器
             eventmanager.disable_event_handler(type(plugin))
+        # 运行期重同步该插件注册到模块层的系统模块（启用/禁用/配置变更后幂等上下线）
+        self._unregister_plugin_modules([plugin_id])
+        self._register_plugin_modules(plugin_id)
 
     def stop(self, pid: Optional[str] = None):
         """
@@ -156,6 +162,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         for plugin_id, plugin in plugins.items():
             eventmanager.disable_event_handler(type(plugin))
             self.__stop_plugin(plugin)
+        # 卸载这些插件注册到模块层的系统模块（运行期动态下线，无僵尸）。
+        # 即便指定插件未进入运行态，也按 owner=pid 兜底卸载其可能残留的模块。
+        stopped_ids = list(plugins.keys())
+        if pid and pid not in stopped_ids:
+            stopped_ids.append(pid)
+        self._unregister_plugin_modules(stopped_ids)
         # 清空对象
         if pid:
             # 清空指定插件
@@ -582,6 +594,30 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 logger.info(f"插件 {plugin_id} 共清除 {len(modules_to_remove)} 个模块缓存：{modules_to_remove}")
             else:
                 logger.debug(f"插件 {plugin_id} 没有找到需要清除的模块缓存")
+
+    def _register_plugin_modules(self, pid: Optional[str] = None):
+        """
+        将运行态插件经 provides_modules() 声明的系统模块注册到 ModuleManager（owner=plugin_id），
+        随即进入 chain 分发。仅注册已启用插件（聚合器按 get_state 过滤）。pid 为空时处理全部插件。
+        """
+        provided = plugin_metadata.get_plugin_provided_modules(self._running_plugins, pid)
+        for plugin_id, module_classes in provided.items():
+            for module_cls in module_classes:
+                try:
+                    ModuleManager().register_module(module_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 模块 "
+                                 f"{getattr(module_cls, '__name__', module_cls)} 出错：{str(err)}")
+
+    def _unregister_plugin_modules(self, plugin_ids: List[str]):
+        """
+        卸载指定插件注册到 ModuleManager 的系统模块，停止其运行实例，无僵尸残留。
+        """
+        for plugin_id in plugin_ids:
+            try:
+                ModuleManager().unregister_modules(owner=plugin_id)
+            except Exception as err:
+                logger.error(f"卸载插件 {plugin_id} 模块出错：{str(err)}")
 
     def sync(self) -> List[str]:
         """
