@@ -608,16 +608,32 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} 模块 "
                                  f"{getattr(module_cls, '__name__', module_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_storages 声明新增的存储器到文件整理层
+        provided_storages = plugin_metadata.get_plugin_provided_storages(self._running_plugins, pid)
+        if provided_storages:
+            from app.modules.filemanager import FileManagerModule
+            for plugin_id, storage_classes in provided_storages.items():
+                for storage_cls in storage_classes:
+                    try:
+                        FileManagerModule.register_storage(storage_cls, owner=plugin_id)
+                    except Exception as err:
+                        logger.error(f"注册插件 {plugin_id} 存储器 "
+                                     f"{getattr(storage_cls, '__name__', storage_cls)} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
         卸载指定插件注册到 ModuleManager 的系统模块，停止其运行实例，无僵尸残留。
         """
+        from app.modules.filemanager import FileManagerModule
         for plugin_id in plugin_ids:
             try:
                 ModuleManager().unregister_modules(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 模块出错：{str(err)}")
+            try:
+                FileManagerModule.unregister_storages(owner=plugin_id)
+            except Exception as err:
+                logger.error(f"卸载插件 {plugin_id} 存储器出错：{str(err)}")
 
     def sync(self) -> List[str]:
         """
