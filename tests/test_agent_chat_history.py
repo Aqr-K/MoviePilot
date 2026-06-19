@@ -111,63 +111,72 @@ def test_agent_prepare_chat_title_generates_title(monkeypatch):
     assert chat.source == "web-agent"
 
 
-def test_agent_prepare_chat_title_skips_internal_background_sessions(monkeypatch):
-    """内部后台任务和心跳会话不应生成标题或创建历史会话。"""
+def test_agent_prepare_chat_title_skips_sessions_without_channel(monkeypatch):
+    """没有渠道来源的 Agent 会话不应生成标题或创建历史会话。"""
 
     async def fake_initialize_llm(self, streaming=False):
-        """后台会话不应初始化标题模型。"""
-        raise AssertionError("background title generation should be skipped")
+        """无渠道会话不应初始化标题模型。"""
+        raise AssertionError("no-channel title generation should be skipped")
 
     monkeypatch.setattr(MoviePilotAgent, "_initialize_llm", fake_initialize_llm)
 
-    for session_id in (
-        "__agent_background_title__",
-        f"{HEARTBEAT_SESSION_PREFIX}title__",
+    for session_id, user_id in (
+        ("__agent_background_title__", SYSTEM_INTERNAL_USER_ID),
+        (f"{HEARTBEAT_SESSION_PREFIX}title__", SYSTEM_INTERNAL_USER_ID),
+        ("mcp-title-session", "mcp"),
+        ("cli-title-session", "cli"),
     ):
         agent = MoviePilotAgent(
             session_id=session_id,
-            user_id=SYSTEM_INTERNAL_USER_ID,
+            user_id=user_id,
             username="admin",
         )
         asyncio.run(agent.prepare_chat_title("后台任务"))
 
         assert AgentChatOper().get(
             session_id=session_id,
-            user_id=SYSTEM_INTERNAL_USER_ID,
+            user_id=user_id,
         ) is None
 
 
-def test_agent_prepare_chat_title_keeps_user_cli_sessions(monkeypatch):
-    """用户显式 CLI 会话即使没有渠道来源也应保留标题生成。"""
+def test_agent_prepare_chat_title_keeps_message_channel_sessions(monkeypatch):
+    """带渠道来源的消息会话应保留标题生成。"""
 
     class FakeTitleModel:
-        """测试用 CLI 标题模型。"""
+        """测试用消息渠道标题模型。"""
 
         async def ainvoke(self, messages):
-            """返回固定 CLI 标题。"""
-            return SimpleNamespace(content="CLI 会话排查")
+            """返回固定消息渠道标题。"""
+            return SimpleNamespace(content="Telegram 会话排查")
 
     async def fake_initialize_llm(self, streaming=False):
-        """返回测试 CLI 标题模型。"""
+        """返回测试消息渠道标题模型。"""
         return FakeTitleModel()
 
     monkeypatch.setattr(MoviePilotAgent, "_initialize_llm", fake_initialize_llm)
     agent = MoviePilotAgent(
-        session_id="cli-title-session",
-        user_id="cli",
+        session_id="telegram-title-session",
+        user_id="telegram-user",
+        channel="Telegram",
+        source="telegram-main",
         username="admin",
     )
 
     asyncio.run(agent.prepare_chat_title("帮我检查配置"))
-    chat = AgentChatOper().get(session_id="cli-title-session", user_id="cli")
+    chat = AgentChatOper().get(
+        session_id="telegram-title-session",
+        user_id="telegram-user",
+    )
 
-    assert chat.title == "CLI 会话排查"
+    assert chat.title == "Telegram 会话排查"
+    assert chat.channel == "Telegram"
+    assert chat.source == "telegram-main"
 
 
-def test_internal_background_agent_execution_does_not_persist_chat_history(monkeypatch):
-    """内部后台任务执行完成后不应写入 Agent 会话历史表。"""
-    session_id = "__agent_background_skip_persist__"
-    user_id = SYSTEM_INTERNAL_USER_ID
+def test_agent_execution_without_channel_does_not_persist_chat_history(monkeypatch):
+    """没有渠道来源的 Agent 执行完成后不应写入会话历史表。"""
+    session_id = "mcp-skip-persist"
+    user_id = "mcp"
     memory_manager.clear_memory(session_id, user_id)
 
     class FakeGraphState:

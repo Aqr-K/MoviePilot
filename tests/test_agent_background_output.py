@@ -81,7 +81,7 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             await agent._execute_agent([])
 
         agent.send_agent_message.assert_not_awaited()
-        save_messages.assert_called_once()
+        save_messages.assert_not_called()
         self.assertEqual("后台结果", agent._streamed_output)
 
     async def test_non_streaming_image_unsupported_error_sends_friendly_notice(self):
@@ -213,7 +213,7 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         agent.send_agent_message.assert_awaited_once_with(
             "后台结果", title="MoviePilot助手"
         )
-        save_messages.assert_called_once()
+        save_messages.assert_not_called()
         self.assertEqual("后台结果", agent._streamed_output)
 
     async def test_background_non_streaming_captures_without_sending_when_capture_only(self):
@@ -236,7 +236,7 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             await agent._execute_agent([])
 
         agent.send_agent_message.assert_not_awaited()
-        save_messages.assert_called_once()
+        save_messages.assert_not_called()
         self.assertEqual("后台结果", agent._streamed_output)
 
     async def test_heartbeat_check_jobs_captures_final_reply_and_keeps_message_tools(self):

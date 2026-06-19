@@ -56,7 +56,7 @@ from app.log import logger
 from app.schemas import AgentLLMProviderEventData, AgentTokensUsageEventData, Notification, NotificationType
 from app.schemas.message import ChannelCapabilityManager, ChannelCapability
 from app.schemas.types import ChainEventType, EventType, MessageChannel, ReplyMode
-from app.utils.identity import SYSTEM_INTERNAL_USER_ID, is_internal_user_id
+from app.utils.identity import SYSTEM_INTERNAL_USER_ID
 
 
 class AgentChain(ChainBase):
@@ -220,7 +220,6 @@ class _ThinkTagStripper:
 # ReplyMode 已迁移至 app.schemas.types(打断 chain↔agent 循环 S4),此处经 import 顶层 re-export 保持 `from app.agent import ReplyMode` 向后兼容
 
 
-INTERNAL_AGENT_SESSION_PREFIX = "__agent_"
 HEARTBEAT_SESSION_PREFIX = "__agent_heartbeat_"
 UNSUPPORTED_IMAGE_INPUT_MESSAGE = "当前模型不支持图片输入，请更换支持图片输入的模型，或在系统设置中关闭图片输入支持后重试。"
 AGENT_EXECUTION_ERROR_PREFIX = "智能助手执行失败"
@@ -311,12 +310,7 @@ class MoviePilotAgent:
         """
         判断当前 Agent 是否需要写入会话历史表。
         """
-        if self.is_heartbeat_session:
-            return False
-        return not (
-            is_internal_user_id(self.user_id)
-            and self.session_id.startswith(INTERNAL_AGENT_SESSION_PREFIX)
-        )
+        return bool(self.channel and self.source)
 
     def _save_display_history_messages(self, messages: List[dict]) -> None:
         """
