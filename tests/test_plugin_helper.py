@@ -495,6 +495,39 @@ class TestPluginHelper:
         assert [item["version"] for item in cached] == ["1.2.3"]
         assert responses == []
 
+    def test_get_plugins_from_market_normalizes_list_labels(self, monkeypatch) -> None:
+        """
+        插件市场 labels 为列表时应转换为字符串，避免响应模型序列化异常。
+        """
+        try:
+            from app.core.plugin import PluginManager
+            from app.helper.plugin import PluginHelper
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"missing dependency: {exc}")
+
+        market_plugins = {
+            "DemoPlugin": {
+                "name": "Demo Plugin",
+                "description": "Demo",
+                "version": "1.0.0",
+                "labels": ["站点", "通知", ""],
+                "v2": True,
+            }
+        }
+        plugin_manager = PluginManager()
+        monkeypatch.setattr(plugin_manager, "_plugins", {})
+        monkeypatch.setattr(plugin_manager, "_running_plugins", {})
+        monkeypatch.setattr("app.core.plugin.settings", SimpleNamespace(VERSION_FLAG="v2"))
+        monkeypatch.setattr("app.core.plugin.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
+        monkeypatch.setattr("app.core.plugin.SitesHelper", lambda: SimpleNamespace(auth_level=1))
+        monkeypatch.setattr(PluginHelper, "get_plugins", lambda _self, *_args: market_plugins)
+
+        plugins = plugin_manager.get_plugins_from_market(REPO_URL)
+
+        assert len(plugins) == 1
+        assert plugins[0].plugin_label == "站点 通知"
+        assert plugins[0].model_dump()["plugin_label"] == "站点 通知"
+
     def test_get_online_plugins_force_keeps_release_cache_scoped(self, monkeypatch):
         """
         全市场刷新不清理 Release 缓存，Release 接口按请求仓库协调刷新两类数据。

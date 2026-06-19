@@ -1552,8 +1552,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if plugin_info.get("icon"):
             plugin.plugin_icon = plugin_info.get("icon")
         # 标签
-        if plugin_info.get("labels"):
-            plugin.plugin_label = plugin_info.get("labels")
+        plugin.plugin_label = self._normalize_plugin_label(plugin_info.get("labels"))
         # 作者
         if plugin_info.get("author"):
             plugin.plugin_author = plugin_info.get("author")
@@ -1570,6 +1569,22 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         plugin.add_time = add_time
 
         return plugin
+
+    @staticmethod
+    def _normalize_plugin_label(labels: Any) -> Optional[str]:
+        """
+        规整插件市场标签字段，兼容旧字符串和新列表格式。
+
+        :param labels: 插件市场 package 中的 labels 字段
+        :return: 用空格拼接后的标签字符串，无法识别或为空时返回 None
+        """
+        if isinstance(labels, str):
+            label = labels.strip()
+            return label or None
+        if isinstance(labels, list):
+            normalized_labels = [str(item).strip() for item in labels if str(item).strip()]
+            return " ".join(normalized_labels) or None
+        return None
 
     async def async_get_online_plugins(self, force: bool = False) -> List[schemas.Plugin]:
         """
