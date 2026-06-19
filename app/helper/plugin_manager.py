@@ -57,6 +57,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         self._stop_monitor_event = threading.Event()
         # 本地插件同步写入运行目录后的短时忽略窗口
         self._recent_local_sync: Dict[str, float] = {}
+        # 插件智能体工具注册表缓存，插件启停或配置生效时主动失效。
+        self._plugin_agent_tools_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._plugin_agent_tools_cache_lock = threading.Lock()
         # 开发者模式监测插件修改
         if settings.DEV or settings.PLUGIN_AUTO_RELOAD:
             self.__start_monitor()
@@ -114,6 +117,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     eventmanager.disable_event_handler(plugin)
             except Exception as err:
                 logger.error(f"加载插件 {plugin_id} 出错：{str(err)} - {traceback.format_exc()}")
+        self.clear_plugin_agent_tools_cache()
 
     def init_plugin(self, plugin_id: str, conf: dict):
         """
@@ -133,6 +137,14 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         else:
             # 禁用插件类的事件处理器
             eventmanager.disable_event_handler(type(plugin))
+        self.clear_plugin_agent_tools_cache()
+
+    def clear_plugin_agent_tools_cache(self) -> None:
+        """
+        清空插件智能体工具注册表缓存。
+        """
+        with self._plugin_agent_tools_cache_lock:
+            self._plugin_agent_tools_cache.clear()
 
     def stop(self, pid: Optional[str] = None):
         """
@@ -169,6 +181,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             self._running_plugins = {}
             # 清除所有插件模块缓存
             self._clear_plugin_modules()
+        self.clear_plugin_agent_tools_cache()
         logger.info("插件停止完成")
 
     @staticmethod
@@ -739,8 +752,41 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_actions(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
         return plugin_metadata.get_plugin_actions(self._running_plugins, pid)
 
+    @staticmethod
+    def _copy_plugin_agent_tools(
+        tools_info: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        复制插件智能体工具注册信息，避免调用方修改缓存内容。
+        """
+        return [
+            {
+                **plugin_info,
+                "tools": list(plugin_info.get("tools", [])),
+            }
+            for plugin_info in tools_info
+        ]
+
     def get_plugin_agent_tools(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
-        return plugin_metadata.get_plugin_agent_tools(self._running_plugins, pid)
+        """
+        获取插件智能体工具
+        [{
+            "plugin_id": "插件ID",
+            "plugin_name": "插件名称",
+            "tools": [ToolClass1, ToolClass2, ...]
+        }]
+        """
+        cache_key = pid or "__all__"
+        with self._plugin_agent_tools_cache_lock:
+            cached_tools = self._plugin_agent_tools_cache.get(cache_key)
+        if cached_tools is not None:
+            return self._copy_plugin_agent_tools(cached_tools)
+
+        # 工具收集逻辑（S9）已下沉至 app.helper.plugin_metadata，此处仅在其上叠加注册表缓存层
+        ret_tools = plugin_metadata.get_plugin_agent_tools(self._running_plugins, pid)
+        with self._plugin_agent_tools_cache_lock:
+            self._plugin_agent_tools_cache[cache_key] = self._copy_plugin_agent_tools(ret_tools)
+        return ret_tools
 
     @staticmethod
     def get_plugin_remote_entry(plugin_id: str, dist_path: str) -> str:
