@@ -103,6 +103,7 @@ class ToolSelectorMiddlewareTest(unittest.TestCase):
         self.assertIn("Return the answer in JSON only.", prompt)
         self.assertIn('- search: Search for information', prompt)
         self.assertIn('- calendar: Manage events', prompt)
+        self.assertIn("MoviePilot tool-chain hints:", prompt)
         self.assertEqual(len(handled_requests), 1)
 
     def test_awrap_model_call_reuses_first_selection_for_later_model_rounds(self):
@@ -221,3 +222,112 @@ class ToolSelectorMiddlewareTest(unittest.TestCase):
         normalized = middleware._normalize_selection_response(response)
 
         self.assertEqual(normalized, {"tools": ["search"]})
+
+    def test_process_selection_response_completes_low_count_tool_chain(self):
+        """筛选结果过少时应按已命中的工具链补齐相邻工具。"""
+        tools = [
+            SimpleNamespace(name="search_media", description="Search media"),
+            SimpleNamespace(name="search_torrents", description="Search torrents"),
+            SimpleNamespace(name="get_search_results", description="Get results"),
+            SimpleNamespace(name="add_download_tasks", description="Add downloads"),
+            SimpleNamespace(name="query_download_tasks", description="Query downloads"),
+        ]
+        middleware = tool_selector_module.ToolSelectorMiddleware(
+            max_tools=4,
+            selection_tools=tools,
+        )
+        request = _FakeRequest(
+            tools=tools,
+            messages=[HumanMessage(content="帮我下载流浪地球")],
+            model=_FakeModel(),
+        )
+
+        result = middleware._process_selection_response(
+            {"tools": ["search_media"]},
+            available_tools=tools,
+            valid_tool_names=[tool.name for tool in tools],
+            request=request,
+        )
+
+        self.assertEqual(
+            [tool.name for tool in result.tools],
+            [
+                "search_media",
+                "search_torrents",
+                "get_search_results",
+                "add_download_tasks",
+            ],
+        )
+
+    def test_process_selection_response_keeps_high_count_selection(self):
+        """筛选结果数量足够时不应额外补齐工具。"""
+        tools = [
+            SimpleNamespace(name="search_media", description="Search media"),
+            SimpleNamespace(name="search_torrents", description="Search torrents"),
+            SimpleNamespace(name="get_search_results", description="Get results"),
+            SimpleNamespace(name="query_sites", description="Query sites"),
+        ]
+        middleware = tool_selector_module.ToolSelectorMiddleware(
+            max_tools=4,
+            selection_tools=tools,
+        )
+        request = _FakeRequest(
+            tools=tools,
+            messages=[HumanMessage(content="帮我下载流浪地球")],
+            model=_FakeModel(),
+        )
+
+        result = middleware._process_selection_response(
+            {
+                "tools": [
+                    "search_media",
+                    "search_torrents",
+                    "get_search_results",
+                    "query_sites",
+                ]
+            },
+            available_tools=tools,
+            valid_tool_names=[tool.name for tool in tools],
+            request=request,
+        )
+
+        self.assertEqual(
+            [tool.name for tool in result.tools],
+            [
+                "search_media",
+                "search_torrents",
+                "get_search_results",
+                "query_sites",
+            ],
+        )
+
+    def test_process_selection_response_respects_max_tools_when_completing(self):
+        """工具链补齐不应突破 max_tools 上限。"""
+        tools = [
+            SimpleNamespace(name="list_directory", description="List directory"),
+            SimpleNamespace(name="query_directory_settings", description="Query settings"),
+            SimpleNamespace(name="recognize_media", description="Recognize media"),
+            SimpleNamespace(name="transfer_file", description="Transfer file"),
+        ]
+        middleware = tool_selector_module.ToolSelectorMiddleware(
+            max_tools=2,
+            selection_tools=tools,
+        )
+        request = _FakeRequest(
+            tools=tools,
+            messages=[HumanMessage(content="帮我整理这个目录")],
+            model=_FakeModel(),
+        )
+
+        result = middleware._process_selection_response(
+            {"tools": ["transfer_file"]},
+            available_tools=tools,
+            valid_tool_names=[tool.name for tool in tools],
+            request=request,
+        )
+
+        self.assertEqual(len(result.tools), 2)
+        self.assertEqual(
+            {tool.name for tool in result.tools},
+            {"transfer_file", "list_directory"},
+        )

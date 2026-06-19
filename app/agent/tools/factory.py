@@ -75,6 +75,7 @@ from app.agent.tools.impl.uninstall_plugin import UninstallPluginTool
 from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
 from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
 from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
+from app.agent.tools.impl.query_activity_log import QueryActivityLogTool
 from app.agent.tools.impl.query_doctor_report import QueryDoctorReportTool
 from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
@@ -93,7 +94,7 @@ class MoviePilotToolFactory:
     """
 
     # 这些通用工具需要始终保留，避免大工具集裁剪后让 Agent 丢失基础的
-    # 文件系统、命令执行、主动消息发送或交互确认能力。AskUserChoiceTool 仅在支持按钮
+    # 文件系统、命令执行、历史检索或交互确认能力。AskUserChoiceTool 仅在支持按钮
     # 的渠道中才会实际注入，因此后续会再按已加载工具做一次求交集。
     TOOL_SELECTOR_ALWAYS_INCLUDE_NAMES = (
         "list_directory",
@@ -101,8 +102,7 @@ class MoviePilotToolFactory:
         "read_file",
         "edit_file",
         "execute_command",
-        "query_doctor_report",
-        "send_message",
+        "query_activity_log",
         "ask_user_choice",
     )
 
@@ -224,6 +224,7 @@ class MoviePilotToolFactory:
             UninstallPluginTool,
             RunSlashCommandTool,
             ListSlashCommandsTool,
+            QueryActivityLogTool,
             QueryDoctorReportTool,
             QueryCustomIdentifiersTool,
             UpdateCustomIdentifiersTool,

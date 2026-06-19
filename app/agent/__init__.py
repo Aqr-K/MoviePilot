@@ -534,7 +534,7 @@ class MoviePilotAgent:
     @property
     def is_background(self) -> bool:
         """
-        是否为后台任务模式（无渠道信息，如定时唤醒）
+        是否为无需回传捕获内容的后台任务模式。
         """
         return (not self.channel or not self.source) and not callable(self.output_callback)
 
@@ -554,6 +554,13 @@ class MoviePilotAgent:
         否则会让这类高频后台调用持续带入无关动态上下文，影响缓存命中率。
         """
         return self.session_id.startswith(HEARTBEAT_SESSION_PREFIX)
+
+    @property
+    def has_message_context(self) -> bool:
+        """
+        是否具备真实消息渠道上下文。
+        """
+        return bool(self.channel and self.source)
 
     async def _is_system_admin_context(self) -> bool:
         """
@@ -1042,7 +1049,7 @@ class MoviePilotAgent:
                 UsageMiddleware(on_usage=self._record_usage),
             ]
 
-            if not self.is_heartbeat_session:
+            if self.has_message_context:
                 middlewares.insert(
                     4,
                     ActivityLogMiddleware(

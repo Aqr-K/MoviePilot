@@ -330,14 +330,62 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             created["middleware"],
         )
 
-    def test_send_message_tool_is_always_included_by_tool_selector(self):
+    async def test_create_agent_excludes_activity_log_without_message_context(self):
+        """无渠道信息的后台捕获任务不应注入活动日志。"""
+        agent = MoviePilotAgent(
+            session_id="background-capture-session",
+            user_id="system",
+            output_callback=lambda _text: None,
+        )
+        agent._initialize_tools = lambda: []
+        agent._initialize_subagent_tools = lambda: []
+
+        with (
+            patch.object(settings, "LLM_MAX_TOOLS", 0),
+            patch.object(agent, "_initialize_llm", new=AsyncMock(return_value=object())),
+            patch("app.agent.prompt_manager.get_agent_prompt", return_value="PROMPT"),
+            patch("app.agent.create_subagent_middlewares", return_value=([], [])),
+            patch(
+                "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
+                return_value=[],
+            ),
+            patch("app.agent.SkillsMiddleware", side_effect=lambda *args, **kwargs: "skills"),
+            patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
+            patch("app.agent.RuntimeConfigMiddleware", side_effect=lambda *args, **kwargs: "runtime"),
+            patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
+            patch("app.agent.ActivityLogMiddleware", side_effect=lambda *args, **kwargs: "activity"),
+            patch("app.agent.SummarizationMiddleware", side_effect=lambda *args, **kwargs: "summary"),
+            patch("app.agent.PatchToolCallsMiddleware", side_effect=lambda *args, **kwargs: "patch"),
+            patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
+            patch("app.agent.InMemorySaver", return_value="checkpointer"),
+            patch("app.agent.create_agent", side_effect=lambda **kwargs: kwargs),
+        ):
+            created = await agent._create_agent(streaming=False)
+
+        self.assertEqual(
+            ["skills", "jobs", "runtime", "memory", "summary", "patch", "usage"],
+            created["middleware"],
+        )
+
+    def test_message_tool_is_not_always_included_by_tool_selector(self):
+        """消息发送工具不应绕过工具筛选。"""
         send_message_tool = SimpleNamespace(name="send_message")
 
         always_include = MoviePilotToolFactory.get_tool_selector_always_include_names(
             [send_message_tool]
         )
 
-        self.assertIn("send_message", always_include)
+        self.assertNotIn("send_message", always_include)
+
+    def test_activity_log_tool_is_always_included_by_tool_selector(self):
+        """活动日志查询工具应绕过工具筛选。"""
+        activity_log_tool = SimpleNamespace(name="query_activity_log")
+
+        always_include = MoviePilotToolFactory.get_tool_selector_always_include_names(
+            [activity_log_tool]
+        )
+
+        self.assertIn("query_activity_log", always_include)
 
     async def test_create_agent_always_includes_subagent_tools(self):
         """工具筛选开启时应保留同步和异步子代理入口。"""
@@ -386,7 +434,12 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(SUBAGENT_CONTROL_TOOL_NAME, captured["always_include"])
 
     async def test_create_agent_keeps_activity_log_for_normal_session(self):
-        agent = MoviePilotAgent(session_id="normal-session", user_id="system")
+        agent = MoviePilotAgent(
+            session_id="normal-session",
+            user_id="system",
+            channel="Web",
+            source="openai",
+        )
         agent._initialize_tools = lambda: []
         agent._initialize_subagent_tools = lambda: []
 
