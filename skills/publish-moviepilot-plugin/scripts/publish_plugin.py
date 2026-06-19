@@ -22,6 +22,7 @@ DEFAULT_BRANCH = "main"
 DEFAULT_TIMEOUT = 60
 GITHUB_API_BASE = "https://api.github.com"
 USER_AGENT = "MoviePilot-Plugin-Publisher"
+COMMANDS_REQUIRE_LOCAL_PLUGIN = {"preview", "push", "pull"}
 PACKAGE_BY_VERSION = {
     "legacy": ("package.json", "plugins"),
     "v1": ("package.json", "plugins"),
@@ -330,6 +331,39 @@ class GitHubClient:
             f"/repos/{self.repo}/contents/{quote_path(path)}",
             payload=payload,
         )
+
+    def repo_exists(self) -> bool:
+        """
+        检查目标仓库是否存在或当前 token 是否可访问。
+
+        :return: 仓库存在或可访问时返回 True
+        """
+        try:
+            self.request("GET", f"/repos/{self.repo}")
+            return True
+        except GitHubError as err:
+            if err.status == 404:
+                return False
+            raise
+
+    def create_repo(self, private: bool = False) -> Any:
+        """
+        创建目标 GitHub 仓库。
+
+        :param private: 是否创建私有仓库，默认创建公开仓库
+        :return: GitHub API 响应
+        """
+        owner, repo_name = self.repo.split("/", 1)
+        payload = {
+            "name": repo_name,
+            "private": private,
+            "auto_init": True,
+        }
+        user_data = self.request("GET", "/user")
+        login = user_data.get("login") if isinstance(user_data, dict) else ""
+        if login and str(login).lower() == owner.lower():
+            return self.request("POST", "/user/repos", payload=payload)
+        return self.request("POST", f"/orgs/{quote(owner)}/repos", payload=payload)
 
 
 def normalize_repo(repo: str) -> str:
@@ -872,6 +906,33 @@ def compare_package(
     return remote_package, merged_content, change_type
 
 
+def load_remote_files_for_push(
+    context: dict[str, Any],
+    args: argparse.Namespace,
+) -> tuple[dict[str, FileState], Optional[FileState], bool]:
+    """
+    读取推送所需的远端文件，允许显式自动建仓时把缺失仓库视为空仓库。
+
+    :param context: 运行上下文
+    :param args: 命令行参数
+    :return: 远端插件文件、远端 package 文件、仓库是否已存在
+    """
+    client: GitHubClient = context["client"]
+    repo_exists = client.repo_exists()
+    if not repo_exists and not args.create_repo_if_missing:
+        raise GitHubError(
+            404,
+            "目标仓库不存在。请先创建仓库，或在用户明确同意后使用 --create-repo-if-missing。",
+        )
+    if not repo_exists:
+        return {}, None, False
+    return (
+        client.list_files(context["remote_prefix"]),
+        client.get_file(context["layout"].package_file),
+        True,
+    )
+
+
 def preview(args: argparse.Namespace) -> dict[str, Any]:
     """
     预览本地插件与远端仓库的差异。
@@ -916,20 +977,28 @@ def push(args: argparse.Namespace) -> dict[str, Any]:
         context["excludes"],
         context["includes"],
     )
-    remote_files = client.list_files(context["remote_prefix"])
     entry = read_package_entry(context["local_repo"], context["layout"], context["plugin_id"])
-    remote_package, package_content, package_change = compare_package(
-        client,
-        context["layout"],
+    remote_files, remote_package, repo_existed = load_remote_files_for_push(context, args)
+    package_content = merge_package_content(
+        remote_package.content if remote_package else None,
         context["plugin_id"],
         entry,
     )
+    if remote_package is None:
+        package_change = "create"
+    elif hashlib.sha256(package_content).hexdigest() != remote_package.sha256:
+        package_change = "update"
+    else:
+        package_change = "same"
     changes = build_push_changes(local_files, remote_files, rejected, args.delete_remote)
     payload = result_payload(context, changes, package_change=package_change)
+    payload["repo_existed"] = repo_existed
     if args.dry_run:
         payload["dry_run"] = True
         return payload
 
+    if not repo_existed:
+        client.create_repo(private=args.private)
     message = args.message or f"Publish {context['plugin_id']}"
     applied: dict[str, list[str]] = {"create": [], "update": [], "delete": []}
     if package_change in {"create", "update"}:
@@ -954,6 +1023,43 @@ def push(args: argparse.Namespace) -> dict[str, Any]:
     payload["applied"] = applied
     payload["message"] = "插件已推送到 GitHub 仓库。"
     return payload
+
+
+def create_repo(args: argparse.Namespace) -> dict[str, Any]:
+    """
+    创建 GitHub 仓库，默认创建公开仓库。
+
+    :param args: 命令行参数
+    :return: 创建结果
+    """
+    context = build_context(args, require_token=not args.dry_run)
+    client: GitHubClient = context["client"]
+    if args.dry_run:
+        return {
+            "success": True,
+            "repo": context["repo"],
+            "created": False,
+            "private": args.private,
+            "dry_run": True,
+            "message": "dry-run 未访问 GitHub，未创建仓库。",
+        }
+    if client.repo_exists():
+        return {
+            "success": True,
+            "repo": context["repo"],
+            "created": False,
+            "private": args.private,
+            "message": "目标 GitHub 仓库已存在。",
+        }
+    data = client.create_repo(private=args.private)
+    return {
+        "success": True,
+        "repo": context["repo"],
+        "created": True,
+        "private": bool(data.get("private")) if isinstance(data, dict) else args.private,
+        "url": data.get("html_url") if isinstance(data, dict) else None,
+        "message": "目标 GitHub 仓库已创建。",
+    }
 
 
 def pull(args: argparse.Namespace) -> dict[str, Any]:
@@ -1080,8 +1186,14 @@ def build_context(args: argparse.Namespace, require_token: bool = False) -> dict
     :return: 运行上下文
     """
     repo = normalize_repo(args.repo)
-    local_repo = resolve_local_repo(args.local_repo, args.plugin_id, args.package_version)
-    layout = resolve_layout(args.package_version, local_repo, args.plugin_id)
+    plugin_id = getattr(args, "plugin_id", "") or ""
+    package_version = getattr(args, "package_version", "auto") or "auto"
+    if args.command in COMMANDS_REQUIRE_LOCAL_PLUGIN:
+        local_repo = resolve_local_repo(args.local_repo, plugin_id, package_version)
+        layout = resolve_layout(package_version, local_repo, plugin_id)
+    else:
+        local_repo = Path.cwd()
+        layout = Layout(package_file="package.v2.json", plugin_root="plugins.v2")
     token = resolve_token(repo, args.token)
     if require_token and not token:
         raise ValueError("未配置 GitHub token，无法写入仓库")
@@ -1101,8 +1213,8 @@ def build_context(args: argparse.Namespace, require_token: bool = False) -> dict
         "branch": branch,
         "local_repo": local_repo,
         "layout": layout,
-        "plugin_id": args.plugin_id,
-        "remote_prefix": remote_plugin_prefix(layout, args.plugin_id),
+        "plugin_id": plugin_id,
+        "remote_prefix": remote_plugin_prefix(layout, plugin_id) if plugin_id else "",
         "client": client,
         "excludes": excludes,
         "includes": includes,
@@ -1127,9 +1239,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="发布和同步 MoviePilot 本地插件到 GitHub 仓库",
     )
-    parser.add_argument("command", choices=("preview", "push", "pull"))
+    parser.add_argument("command", choices=("create-repo", "preview", "push", "pull"))
     parser.add_argument("--repo", required=True, help="GitHub 仓库，格式 owner/repo")
-    parser.add_argument("--plugin-id", required=True, help="插件类名 ID")
+    parser.add_argument("--plugin-id", default="", help="插件类名 ID")
     parser.add_argument("--local-repo", default="", help="本地插件仓库目录")
     parser.add_argument("--package-version", default="auto", help="auto、v2 或 legacy")
     parser.add_argument("--branch", default=DEFAULT_BRANCH, help="目标分支")
@@ -1141,6 +1253,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include", action="append", default=[], help="强制包含 glob")
     parser.add_argument("--exclude", action="append", default=[], help="额外排除 glob")
     parser.add_argument("--delete-remote", action="store_true", help="推送时删除远端多余文件")
+    parser.add_argument(
+        "--create-repo-if-missing",
+        action="store_true",
+        help="推送时在目标仓库不存在的情况下自动创建公开仓库",
+    )
+    parser.add_argument("--private", action="store_true", help="创建仓库时使用私有可见性")
     parser.add_argument("--force", action="store_true", help="拉取时允许覆盖本地冲突")
     parser.add_argument("--dry-run", action="store_true", help="只输出计划，不写入")
     return parser
@@ -1154,8 +1272,13 @@ def main() -> int:
     """
     parser = build_parser()
     args = parser.parse_args()
+    if args.command in COMMANDS_REQUIRE_LOCAL_PLUGIN and not args.plugin_id:
+        print_json({"success": False, "message": "preview、push、pull 必须提供 --plugin-id"})
+        return 1
     try:
-        if args.command == "preview":
+        if args.command == "create-repo":
+            payload = create_repo(args)
+        elif args.command == "preview":
             payload = preview(args)
         elif args.command == "push":
             payload = push(args)
@@ -1164,7 +1287,8 @@ def main() -> int:
     except (GitHubError, OSError, ValueError, json.JSONDecodeError) as err:
         print_json({"success": False, "message": str(err)})
         return 1
-    payload["success"] = not payload.get("changes", {}).get("conflicts")
+    if "success" not in payload:
+        payload["success"] = not payload.get("changes", {}).get("conflicts")
     print_json(payload)
     return 0 if payload["success"] else 1
 

@@ -8,6 +8,8 @@ description: >-
   repositories, package.json/package.v2.json metadata, plugins/plugins.v2
   layouts, safe file exclusion, diff preview before publishing, incremental
   GitHub Contents API updates, and syncing local plugin changes back from GitHub.
+  Includes asking whether to use an existing repository or create a new public
+  repository when no target repository is available.
   Also use for Chinese requests mentioning 插件发布, 插件维护, 推送插件到 GitHub,
   从 GitHub 拉取插件, 同步本地插件仓库, 增量发布插件, 插件仓库维护.
 allowed-tools: list_directory read_file write_file edit_file execute_command query_system_settings update_system_settings
@@ -25,6 +27,8 @@ through GitHub while protecting local secrets and unrelated plugins.
 - Merge only that plugin's entry into `package.v2.json` or `package.json`.
 - Preview local/remote differences before writing.
 - Pull remote plugin files back to the local plugin source.
+- Create the target GitHub repository when the user explicitly chooses automatic
+  creation; repositories are public by default unless the user asks for private.
 - Reuse MoviePilot settings `GITHUB_TOKEN`, `REPO_GITHUB_TOKEN`,
   and `PLUGIN_LOCAL_REPO_PATHS` when available.
 
@@ -49,7 +53,12 @@ through GitHub while protecting local secrets and unrelated plugins.
 2. Identify the GitHub repository as `owner/repo`.
    - Use the user's explicit repository first.
    - If omitted, infer only when the local source has an obvious Git remote.
-   - If neither is available, ask for the target repository.
+   - If neither is available, ask whether to use an existing repository or
+     automatically create a new public repository.
+   - If the user chooses an existing repository, ask for `owner/repo`.
+   - If the user chooses automatic creation, ask for the target `owner/repo`
+     and state that the repository will be public by default.
+   - Do not create a private repository unless the user explicitly asks for it.
 3. Select the package version layout.
    - Prefer `v2` when `package.v2.json` or `plugins.v2/<plugin_id_lower>/`
      exists.
@@ -83,13 +92,20 @@ python skills/publish-moviepilot-plugin/scripts/publish_plugin.py pull \
   --plugin-id MyPlugin \
   --local-repo /path/to/MoviePilot-Plugins \
   --package-version v2
+
+python skills/publish-moviepilot-plugin/scripts/publish_plugin.py create-repo \
+  --repo owner/repo
 ```
 
 Options:
 
+- `create-repo`: create the target GitHub repository. Default visibility is
+  public; use `--private` only when the user explicitly asked for private.
 - `preview`: compare local filtered files with remote files and print JSON.
 - `push`: upload changed files and merge the plugin package entry.
 - `pull`: write remote plugin files and package entry into local source.
+- `--create-repo-if-missing`: on push, create the target public repository when
+  GitHub reports that it does not exist.
 - `--delete-remote`: on push, delete remote plugin files that no longer exist
   locally after exclusions.
 - `--force`: on pull, allow overwriting local files that differ from remote.
@@ -102,6 +118,10 @@ Options:
 
 - Always run `preview` before `push` unless the user explicitly asks for a
   direct push and already reviewed the diff.
+- When no repository is known, ask the user to choose:
+  `使用已有 GitHub 仓库` or `自动创建 GitHub 仓库（默认 public）`.
+- Only run `create-repo` or `push --create-repo-if-missing` after the user has
+  explicitly chosen automatic creation.
 - Never upload these files unless explicitly included:
   `.env`, `.env.*`, `config/`, `data/`, `cache/`, `logs/`, `tmp/`,
   `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`,
@@ -122,9 +142,16 @@ Options:
 User asks: `把本地 MyPlugin 发布到我的 GitHub 插件仓库`
 
 1. Find `MyPlugin` under configured `PLUGIN_LOCAL_REPO_PATHS`.
-2. Ask for `owner/repo` if it cannot be inferred.
+2. Ask whether to use an existing repository or create a new public repository
+   if `owner/repo` cannot be inferred.
 3. Run `preview` and summarize the diff.
 4. Run `push` only after the user confirms or requested immediate publish.
+
+User asks: `发布插件，没有 GitHub 仓库`
+
+1. Ask for the target `owner/repo` and confirm automatic creation.
+2. Run `create-repo` or use `push --create-repo-if-missing`.
+3. Continue with `preview` and `push` after repository creation succeeds.
 
 User asks: `同步 GitHub 上 MyPlugin 的最新代码到本地`
 
