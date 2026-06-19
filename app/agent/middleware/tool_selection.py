@@ -26,6 +26,130 @@ from typing_extensions import TypedDict  # noqa
 
 from app.log import logger
 
+MIN_SELECTED_TOOL_COUNT = 4
+
+MOVIEPILOT_TOOL_SELECTION_HINT = """
+
+MoviePilot tool-chain hints:
+- For media search and download tasks, keep related steps together when relevant:
+  search_media, search_torrents, get_search_results, add_download_tasks, query_download_tasks.
+- For file organization and library transfer tasks, keep related steps together when relevant:
+  list_directory, query_directory_settings, recognize_media, query_library_exists, transfer_file, query_transfer_history, scrape_metadata.
+- For subscription tasks, keep related steps together when relevant:
+  search_subscribe, add_subscribe, query_subscribes, update_subscribe, query_subscribe_history, query_popular_subscribes.
+- For download management tasks, keep related steps together when relevant:
+  query_download_tasks, update_download_tasks, delete_download_tasks, query_downloaders.
+- For site diagnostics or maintenance tasks, keep related steps together when relevant:
+  query_sites, query_site_userdata, test_site, update_site, update_site_cookie.
+- For scheduler and workflow tasks, keep related steps together when relevant:
+  query_schedulers, run_scheduler, query_workflows, run_workflow, query_episode_schedule.
+- For plugin tasks, keep related steps together when relevant:
+  query_installed_plugins, query_market_plugins, query_plugin_capabilities, query_plugin_config, update_plugin_config, query_plugin_data, install_plugin, uninstall_plugin, reload_plugin.
+- For rule, identifier, or system setting tasks, keep related steps together when relevant:
+  query_rule_groups, query_builtin_filter_rules, query_custom_filter_rules, add_custom_filter_rule, update_custom_filter_rule, delete_custom_filter_rule, add_rule_group, update_rule_group, delete_rule_group, query_custom_identifiers, update_custom_identifiers, query_system_settings, update_system_settings.
+- Prefer including the likely next-step tools in the same workflow instead of selecting only the first tool.
+"""
+
+TOOL_CHAIN_GROUPS = (
+    (
+        "media_download",
+        (
+            "search_media",
+            "search_torrents",
+            "get_search_results",
+            "add_download_tasks",
+            "query_download_tasks",
+            "query_downloaders",
+        ),
+    ),
+    (
+        "library_transfer",
+        (
+            "list_directory",
+            "query_directory_settings",
+            "recognize_media",
+            "query_library_exists",
+            "transfer_file",
+            "query_transfer_history",
+            "scrape_metadata",
+        ),
+    ),
+    (
+        "subscription",
+        (
+            "search_subscribe",
+            "add_subscribe",
+            "query_subscribes",
+            "update_subscribe",
+            "delete_subscribe",
+            "query_subscribe_history",
+            "query_popular_subscribes",
+            "query_subscribe_shares",
+        ),
+    ),
+    (
+        "download_management",
+        (
+            "query_download_tasks",
+            "update_download_tasks",
+            "delete_download_tasks",
+            "query_downloaders",
+        ),
+    ),
+    (
+        "site_management",
+        (
+            "query_sites",
+            "query_site_userdata",
+            "test_site",
+            "update_site",
+            "update_site_cookie",
+        ),
+    ),
+    (
+        "workflow_scheduler",
+        (
+            "query_schedulers",
+            "run_scheduler",
+            "query_workflows",
+            "run_workflow",
+            "query_episode_schedule",
+        ),
+    ),
+    (
+        "plugin_management",
+        (
+            "query_installed_plugins",
+            "query_market_plugins",
+            "query_plugin_capabilities",
+            "query_plugin_config",
+            "update_plugin_config",
+            "query_plugin_data",
+            "install_plugin",
+            "uninstall_plugin",
+            "reload_plugin",
+        ),
+    ),
+    (
+        "rule_settings",
+        (
+            "query_rule_groups",
+            "query_builtin_filter_rules",
+            "query_custom_filter_rules",
+            "add_custom_filter_rule",
+            "update_custom_filter_rule",
+            "delete_custom_filter_rule",
+            "add_rule_group",
+            "update_rule_group",
+            "delete_rule_group",
+            "query_custom_identifiers",
+            "update_custom_identifiers",
+            "query_system_settings",
+            "update_system_settings",
+        ),
+    ),
+)
+
 
 class ToolSelectionState(AgentState):
     """工具筛选中间件私有状态。"""
@@ -73,11 +197,62 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
     ) -> None:
         super().__init__(
             model=model,
-            system_prompt=system_prompt,
+            system_prompt=self._append_tool_selection_hint(system_prompt),
             max_tools=max_tools,
             always_include=always_include,
         )
         self.selection_tools = selection_tools or []
+
+    @staticmethod
+    def _append_tool_selection_hint(system_prompt: str) -> str:
+        """追加 MoviePilot 工具组选择提示，避免复杂链路只选中首个工具。"""
+        if "MoviePilot tool-chain hints:" in system_prompt:
+            return system_prompt
+        return f"{system_prompt.rstrip()}{MOVIEPILOT_TOOL_SELECTION_HINT}"
+
+    def _get_tool_selection_limit(self, valid_tool_names: list[str]) -> int:
+        """计算补齐筛选结果时允许使用的工具数量上限。"""
+        if self.max_tools:
+            return min(self.max_tools, len(valid_tool_names))
+        return len(valid_tool_names)
+
+    def _complete_low_count_selection(
+            self,
+            selected_tool_names: list[str],
+            valid_tool_names: list[str],
+    ) -> list[str]:
+        """
+        当模型只选出极少工具时，按 MoviePilot 常见工具链补齐相邻工具。
+
+        这只补齐已经命中的工具组，不会把所有工具组都展开，因此能降低
+        “选了搜索工具但漏了结果/下载工具”这类链式任务失败概率。
+        """
+        limit = self._get_tool_selection_limit(valid_tool_names)
+        target_count = min(MIN_SELECTED_TOOL_COUNT, limit)
+        selected_names = [
+            tool_name
+            for tool_name in selected_tool_names
+            if tool_name in valid_tool_names
+        ]
+        if len(selected_names) >= target_count:
+            return selected_names[:limit]
+
+        selected_set = set(selected_names)
+        valid_tool_set = set(valid_tool_names)
+        completed_names = list(selected_names)
+
+        for _, group_tool_names in TOOL_CHAIN_GROUPS:
+            if not selected_set.intersection(group_tool_names):
+                continue
+            for tool_name in group_tool_names:
+                if tool_name in selected_set or tool_name not in valid_tool_set:
+                    continue
+                completed_names.append(tool_name)
+                selected_set.add(tool_name)
+                if len(completed_names) >= target_count:
+                    return completed_names[:limit]
+
+        return completed_names[:limit]
 
     def _process_selection_response(
             self,
@@ -103,6 +278,14 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
                 tools=[*available_tools, *always_included_tools, *provider_tools]
             )
 
+        response["tools"] = self._complete_low_count_selection(
+            selected_tool_names=[
+                tool_name
+                for tool_name in response.get("tools", [])
+                if isinstance(tool_name, str)
+            ],
+            valid_tool_names=valid_tool_names,
+        )
         return super()._process_selection_response(
             response,
             available_tools,

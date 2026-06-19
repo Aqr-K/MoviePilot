@@ -3,13 +3,14 @@
 
 按日期存储在 CONFIG_PATH/agent/activity/YYYY-MM-DD.md 中，
 每次 Agent 执行完毕后自动调用 LLM 对本轮对话生成简洁的活动摘要，
-并在每次 Agent 启动时加载近几天的活动日志注入系统提示词。
+并在每次 Agent 启动时注入轻量索引，完整日志由工具按需查询。
 """
 
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Annotated, Any, NotRequired, TypedDict
+from pathlib import Path
+from typing import Annotated, Any, NotRequired, Optional, TypedDict
 
 from anyio import Path as AsyncPath
 from langchain.agents.middleware.types import (
@@ -30,8 +31,15 @@ from app.log import logger
 # 活动日志保留天数
 DEFAULT_RETENTION_DAYS = 7
 
-# 注入系统提示词时加载的天数
+# 注入系统提示词时索引的天数
 PROMPT_LOAD_DAYS = 3
+
+# 工具默认查询的天数
+DEFAULT_QUERY_DAYS = 7
+
+# 工具单次返回的最大条数
+DEFAULT_QUERY_LIMIT = 20
+MAX_QUERY_LIMIT = 50
 
 # 每日日志文件最大大小 (256KB)
 MAX_LOG_FILE_SIZE = 256 * 1024
@@ -39,20 +47,194 @@ MAX_LOG_FILE_SIZE = 256 * 1024
 # 提取本轮对话上下文的最大字符数（避免过长的对话消耗太多 token）
 MAX_CONTEXT_FOR_SUMMARY = 4000
 
+TRIVIAL_USER_TEXT_PATTERN = re.compile(
+    r"^\s*(你好|您好|hi|hello|hey|谢谢|谢了|多谢|ok|好的|收到|嗯|嗯嗯|是的|对|可以|行|好)\s*[。.!！]?\s*$",
+    re.IGNORECASE,
+)
+
+SUMMARY_SKIP_MARKER = "SKIP"
+
 # LLM 总结的提示词
-SUMMARY_PROMPT = """请根据以下 AI 助手与用户的对话记录，生成一条简洁的活动摘要（中文，一句话，不超过80字）。
-摘要应包含：用户的需求是什么、助手做了什么、结果如何。
-只输出摘要内容，不要加任何前缀、标点序号或解释。
+SUMMARY_PROMPT = """请判断以下 AI 助手与用户的对话是否值得写入 MoviePilot 活动日志。
+
+如果本轮只是问候、寒暄、感谢、确认、闲聊、没有实际任务、没有工具动作、任务没有推进、纯粹的格式纠正或无意义空转，请只输出：SKIP
+
+如果值得记录，请输出一条中文单行活动摘要，要求：
+- 40 到 160 个汉字左右，信息密度高，不要写成泛泛一句话。
+- 只输出摘要正文，不要标题、编号、Markdown、JSON 或解释。
+- 尽量包含：用户目标、关键对象（影片/剧集/站点/路径/任务/设置）、助手采取的关键动作或工具、结果状态、失败原因或下一步。
+- 如果有明确 ID、路径、站点名、任务状态、成功/失败数量，请保留关键值。
+- 不要记录 API Key、Cookie、Token、密码等敏感信息；如出现请写成“敏感信息已省略”。
+
+推荐格式示例：
+用户要求整理 `/downloads/Show`，助手识别为《示例剧》TMDB 12345，并提交 transfer_file 整理，结果成功。
+用户排查下载失败，助手查询 qBittorrent 任务和站点状态，发现 tracker 超时，建议更换站点或重试。
 
 对话记录：
 {conversation}"""
+
+ACTIVITY_ENTRY_PATTERN = re.compile(r"^-\s+\*\*(?P<time>\d{2}:\d{2})\*\*\s+(?P<summary>.+)$")
+
+
+def _coerce_query_limit(limit: Optional[int]) -> int:
+    """规范化活动日志查询条数。"""
+    if limit is None:
+        return DEFAULT_QUERY_LIMIT
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        return DEFAULT_QUERY_LIMIT
+    return min(max(value, 1), MAX_QUERY_LIMIT)
+
+
+def _build_log_path(activity_dir: str, date_str: str) -> Path:
+    """构建指定日期的活动日志路径。"""
+    return Path(activity_dir) / f"{date_str}.md"
+
+
+def _iter_recent_dates(days: int) -> list[str]:
+    """返回从今天开始向前的日期字符串列表。"""
+    normalized_days = max(1, int(days or 1))
+    today = datetime.now().date()
+    return [
+        (today - timedelta(days=index)).strftime("%Y-%m-%d")
+        for index in range(normalized_days)
+    ]
+
+
+def _parse_activity_entries(date_str: str, content: str) -> list[dict[str, str]]:
+    """从单日活动日志 Markdown 中解析活动条目。"""
+    entries: list[dict[str, str]] = []
+    for line in content.splitlines():
+        match = ACTIVITY_ENTRY_PATTERN.match(line.strip())
+        if not match:
+            continue
+        entries.append(
+            {
+                "date": date_str,
+                "time": match.group("time"),
+                "summary": match.group("summary").strip(),
+            }
+        )
+    return entries
+
+
+def _activity_summary_matches_keyword(
+    summary: str,
+    keyword: str,
+    regex_pattern: Optional[re.Pattern[str]],
+) -> bool:
+    """判断活动摘要是否命中普通关键词或正则表达式。"""
+    if regex_pattern:
+        return bool(regex_pattern.search(summary))
+    return keyword.lower() in summary.lower()
+
+
+def load_activity_log_index(activity_dir: str, days: int = PROMPT_LOAD_DAYS) -> dict[str, str]:
+    """加载近期活动日志索引，不返回完整日志正文。"""
+    index: dict[str, str] = {}
+    for date_str in _iter_recent_dates(days):
+        log_path = _build_log_path(activity_dir, date_str)
+        if not log_path.is_file():
+            continue
+        try:
+            content = log_path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"读取活动日志索引失败 {log_path}: {e}")
+            continue
+        entry_count = len(_parse_activity_entries(date_str, content))
+        if entry_count:
+            index[date_str] = f"{entry_count} 条活动记录"
+    return index
+
+
+def query_activity_logs(
+    activity_dir: str,
+    *,
+    keyword: Optional[str] = None,
+    use_regex: bool = False,
+    date: Optional[str] = None,
+    days: int = DEFAULT_QUERY_DAYS,
+    limit: Optional[int] = DEFAULT_QUERY_LIMIT,
+) -> dict[str, Any]:
+    """
+    查询活动日志条目。
+
+    :param activity_dir: 活动日志目录
+    :param keyword: 可选关键词，按摘要文本过滤
+    :param use_regex: 是否将关键词按正则表达式匹配
+    :param date: 可选日期，格式为 ``YYYY-MM-DD``
+    :param days: 未指定日期时向前查询的天数
+    :param limit: 返回条数上限
+    :return: 查询结果载荷
+    """
+    normalized_limit = _coerce_query_limit(limit)
+    normalized_keyword = str(keyword or "").strip()
+    normalized_use_regex = bool(use_regex)
+    regex_pattern: Optional[re.Pattern[str]] = None
+    if normalized_keyword and normalized_use_regex:
+        try:
+            regex_pattern = re.compile(normalized_keyword, re.IGNORECASE)
+        except re.error as err:
+            return {
+                "success": False,
+                "message": f"无效的活动日志正则表达式: {err}",
+                "activity_dir": activity_dir,
+                "keyword": normalized_keyword,
+                "use_regex": normalized_use_regex,
+                "date": date,
+                "days": days if not date else None,
+                "searched_dates": [],
+                "total_count": 0,
+                "returned_count": 0,
+                "truncated": False,
+                "entries": [],
+            }
+    date_candidates = [date] if date else _iter_recent_dates(days)
+    entries: list[dict[str, str]] = []
+    searched_dates: list[str] = []
+
+    for date_str in date_candidates:
+        if not date_str:
+            continue
+        searched_dates.append(date_str)
+        log_path = _build_log_path(activity_dir, date_str)
+        if not log_path.is_file():
+            continue
+        try:
+            content = log_path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"读取活动日志失败 {log_path}: {e}")
+            continue
+        for entry in _parse_activity_entries(date_str, content):
+            if normalized_keyword and not _activity_summary_matches_keyword(
+                entry["summary"], normalized_keyword, regex_pattern
+            ):
+                continue
+            entries.append(entry)
+
+    entries.sort(key=lambda item: (item["date"], item["time"]), reverse=True)
+    total_count = len(entries)
+    return {
+        "success": True,
+        "activity_dir": activity_dir,
+        "keyword": normalized_keyword or None,
+        "use_regex": normalized_use_regex,
+        "date": date,
+        "days": days if not date else None,
+        "searched_dates": searched_dates,
+        "total_count": total_count,
+        "returned_count": min(total_count, normalized_limit),
+        "truncated": total_count > normalized_limit,
+        "entries": entries[:normalized_limit],
+    }
 
 
 class ActivityLogState(AgentState):
     """ActivityLogMiddleware 的状态模型。"""
 
     activity_log_contents: NotRequired[Annotated[dict[str, str], PrivateStateAttr]]
-    """将日期字符串映射到日志内容的字典。标记为私有，不包含在最终代理状态中。"""
+    """将日期字符串映射到日志索引摘要的字典。标记为私有，不包含在最终代理状态中。"""
 
 
 class ActivityLogStateUpdate(TypedDict):
@@ -61,7 +243,7 @@ class ActivityLogStateUpdate(TypedDict):
     activity_log_contents: dict[str, str]
 
 
-def _extract_last_round(messages: list) -> list | None:
+def _extract_last_round(messages: list) -> Optional[list]:
     """从完整消息列表中提取最后一轮交互。
 
     从最后一条 HumanMessage 到消息末尾即为本轮交互。
@@ -148,7 +330,31 @@ def _format_conversation_for_summary(round_messages: list) -> str:
     return "\n".join(lines)
 
 
-async def _summarize_with_llm(conversation_text: str) -> str | None:
+def _should_skip_activity_summary(round_messages: list) -> bool:
+    """判断本轮交互是否无需生成活动日志。"""
+    if not round_messages:
+        return True
+
+    has_tool_activity = any(
+        isinstance(msg, ToolMessage)
+        or (isinstance(msg, AIMessage) and bool(getattr(msg, "tool_calls", None)))
+        for msg in round_messages
+    )
+    if has_tool_activity:
+        return False
+
+    user_text_parts = []
+    for msg in round_messages:
+        if not isinstance(msg, HumanMessage):
+            continue
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        if content:
+            user_text_parts.append(content)
+    user_text = " ".join(user_text_parts).strip()
+    return bool(user_text and TRIVIAL_USER_TEXT_PATTERN.match(user_text))
+
+
+async def _summarize_with_llm(conversation_text: str) -> Optional[str]:
     """调用 LLM 对对话文本生成活动摘要。
 
     参数：
@@ -166,50 +372,47 @@ async def _summarize_with_llm(conversation_text: str) -> str | None:
         summary = response.content.strip()
         # 清理模型可能输出的前缀（如 "摘要：" "总结："）
         summary = re.sub(r"^(摘要|总结|活动记录)[：:]\s*", "", summary)
+        if summary.strip().upper() == SUMMARY_SKIP_MARKER:
+            return None
         return summary if summary else None
     except Exception as e:
-        logger.debug("LLM summarization failed: %s", e)
+        logger.debug(f"LLM 活动摘要生成失败: {e}")
         return None
 
 
 ACTIVITY_LOG_SYSTEM_PROMPT = """<activity_log>
-{activity_log}
-</activity_log>
+<activity_log_index>
+{activity_log_index}
+</activity_log_index>
 
 <activity_log_guidelines>
-    The above <activity_log> contains a record of your recent interactions with the user, automatically maintained by the system.
-    
+    Activity logs are automatically maintained by the system and are available for continuity, but full log contents are not injected into context by default.
+
     **How to use this information:**
-    - Reference past activities when relevant to provide continuity (e.g., "之前帮你订阅了《XXX》，现在有更新了")
-    - Use activity history to understand ongoing tasks and user patterns
-    - When the user asks "你之前帮我做了什么" or similar questions, refer to this log
-    - Activity logs are automatically recorded after each interaction - you do NOT need to manually update them
-    
-    **What is automatically logged:**
-    - Each user interaction: what was asked, which tools were used, and the outcome
-    - Timestamps for all activities
-    - The log is organized by date for easy reference
-    
-    **Important:**
-    - Activity logs are READ-ONLY from your perspective - the system manages them automatically
-    - Do not attempt to edit or write to activity log files
-    - For long-term preferences and knowledge, continue to use MEMORY.md
-    - Activity logs are retained for {retention_days} days and then automatically cleaned up
+    - The <activity_log_index> above only lists which recent dates have activity records and how many entries exist.
+    - Use `query_activity_log` when the user asks about previous work, asks to continue a prior task, or when recent activity is clearly relevant to the current request.
+    - To find related logs, start with a broad search: use the exact date if known; otherwise query recent days with a short keyword, or omit `keyword` and inspect the latest entries. If there are no matches, retry with a larger `days` value or a shorter object/path fragment.
+    - `query_activity_log.keyword` is a plain substring by default. Set `use_regex=true` only when matching alternatives or patterns such as multiple titles, paths, or task IDs.
+    - Do not query activity logs for routine standalone tasks such as file organization, media recognition, downloads, subscriptions, or diagnostics unless the user explicitly references prior activity.
+    - Activity logs are read-only from your perspective. Do not attempt to edit or write to activity log files.
+    - For long-term preferences and knowledge, continue to use MEMORY.md.
+    - Activity logs are retained for {retention_days} days and then automatically cleaned up.
 </activity_log_guidelines>
+</activity_log>
 """
 
 
 class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, ResponseT]):  # noqa
-    """自动记录和加载 Agent 活动日志的中间件。
+    """自动记录 Agent 活动日志并注入轻量索引的中间件。
 
-    - abefore_agent: 加载近几天的活动日志
-    - awrap_model_call: 将活动日志注入系统提示词
+    - abefore_agent: 加载近几天的活动日志索引
+    - awrap_model_call: 将活动日志索引和检索规则注入系统提示词
     - aafter_agent: 从本次对话中提取摘要并追加到当日日志文件
 
     参数：
         activity_dir: 活动日志存储目录路径。
         retention_days: 日志保留天数（默认 7 天）。
-        prompt_load_days: 注入系统提示词时加载的天数（默认 3 天）。
+        prompt_load_days: 注入系统提示词时索引的天数（默认 3 天）。
     """
 
     state_schema = ActivityLogState
@@ -230,10 +433,10 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
         return AsyncPath(self.activity_dir) / f"{date_str}.md"
 
     def _format_activity_log(self, contents: dict[str, str]) -> str:
-        """格式化活动日志用于系统提示词注入。"""
+        """格式化活动日志索引用于系统提示词注入。"""
         if not contents:
             return ACTIVITY_LOG_SYSTEM_PROMPT.format(
-                activity_log="(暂无活动记录)",
+                activity_log_index="(近期暂无活动日志索引。需要历史上下文时可调用 query_activity_log。)",
                 retention_days=self.retention_days,
             )
 
@@ -247,35 +450,22 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
 
         if not sections:
             return ACTIVITY_LOG_SYSTEM_PROMPT.format(
-                activity_log="(暂无活动记录)",
+                activity_log_index="(近期暂无活动日志索引。需要历史上下文时可调用 query_activity_log。)",
                 retention_days=self.retention_days,
             )
 
-        log_body = "\n\n".join(sections)
+        log_body = "\n".join(sections)
         return ACTIVITY_LOG_SYSTEM_PROMPT.format(
-            activity_log=log_body,
+            activity_log_index=log_body,
             retention_days=self.retention_days,
         )
 
     async def _load_recent_logs(self) -> dict[str, str]:
-        """加载近几天的活动日志。"""
-        contents: dict[str, str] = {}
-        today = datetime.now().date()
-
-        for i in range(self.prompt_load_days):
-            date = today - timedelta(days=i)
-            date_str = date.strftime("%Y-%m-%d")
-            log_path = self._get_log_path(date_str)
-
-            if await log_path.exists():
-                try:
-                    content = await log_path.read_text(encoding="utf-8")
-                    contents[date_str] = content
-                    logger.debug("Loaded activity log for %s", date_str)
-                except Exception as e:
-                    logger.warning("Failed to load activity log %s: %s", date_str, e)
-
-        return contents
+        """加载近几天的活动日志索引。"""
+        return load_activity_log_index(
+            activity_dir=self.activity_dir,
+            days=self.prompt_load_days,
+        )
 
     async def _append_activity(self, summary: str) -> None:
         """将一条活动记录追加到当日日志文件。"""
@@ -340,7 +530,7 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
 
     async def abefore_agent(
         self, state: ActivityLogState, runtime: Runtime
-    ) -> ActivityLogStateUpdate | None:
+    ) -> Optional[ActivityLogStateUpdate]:
         """在 Agent 执行前加载近期活动日志。"""
         # 如果已经加载则跳过
         if "activity_log_contents" in state:
@@ -376,7 +566,7 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
 
     async def aafter_agent(
         self, state: ActivityLogState, runtime: Runtime
-    ) -> dict[str, Any] | None:
+    ) -> Optional[dict[str, Any]]:
         """Agent 执行完毕后，调用 LLM 对本轮对话生成摘要并追加到当日活动日志。"""
         try:
             messages = state.get("messages", [])
@@ -386,6 +576,8 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
             # 提取本轮交互
             round_messages = _extract_last_round(messages)
             if not round_messages:
+                return None
+            if _should_skip_activity_summary(round_messages):
                 return None
 
             # 格式化对话文本
@@ -403,4 +595,8 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
         return None
 
 
-__all__ = ["ActivityLogMiddleware"]
+__all__ = [
+    "ActivityLogMiddleware",
+    "load_activity_log_index",
+    "query_activity_logs",
+]
