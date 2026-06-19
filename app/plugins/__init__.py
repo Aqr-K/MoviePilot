@@ -223,6 +223,17 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_channel_capabilities(self) -> List[Any]:
+        """
+        声明本插件新增的消息渠道的能力矩阵（配合 provides_modules 新增消息渠道模块使用）。
+        返回 ChannelCapabilities 实例列表，每个实例的 channel 字段为该渠道的字符串 id
+        （无需扩展封闭 MessageChannel 枚举）。由框架注册到 ChannelCapabilityManager，
+        使插件渠道获得正确的按钮/Markdown/分段等能力声明（不声明则走降级默认）。默认不新增。
+
+        [ChannelCapabilities(channel="mychannel", capabilities={...}), ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作

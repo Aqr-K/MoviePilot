@@ -182,6 +182,32 @@ def get_plugin_provided_storages(running_plugins, pid: Optional[str] = None) -> 
                 logger.error(f"获取插件 {plugin_id} 注册存储器出错：{str(e)}")
     return ret_storages
 
+def get_plugin_provided_channel_capabilities(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """
+    聚合插件经 provides_channel_capabilities() 声明【新增】的消息渠道能力矩阵，
+    按 plugin_id(owner) 归集。供 PluginManager 启停时统一向 ChannelCapabilityManager
+    注册/卸载（owner=plugin_id）。
+    {
+        plugin_id: [ChannelCapabilities, ...]
+    }
+    """
+    ret_caps: Dict[str, List[Any]] = {}
+    running_plugins_snapshot = dict(running_plugins)
+    for plugin_id, plugin in running_plugins_snapshot.items():
+        if pid and pid != plugin_id:
+            continue
+        if hasattr(plugin, "provides_channel_capabilities") \
+                and ObjectUtils.check_method(plugin.provides_channel_capabilities):
+            try:
+                if not plugin.get_state():
+                    continue
+                caps = plugin.provides_channel_capabilities() or []
+                if caps:
+                    ret_caps[plugin_id] = list(caps)
+            except Exception as e:
+                logger.error(f"获取插件 {plugin_id} 注册渠道能力出错：{str(e)}")
+    return ret_caps
+
 def get_plugin_actions(running_plugins, pid: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取插件动作

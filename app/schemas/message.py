@@ -515,12 +515,53 @@ class ChannelCapabilityManager:
         ),
     }
 
+    # 外部(插件)注册的渠道能力，按字符串 channel id 归集（避免扩展封闭 MessageChannel 枚举）
+    _external_capabilities: Dict[str, ChannelCapabilities] = {}
+    # 外部能力的来源记账：owner -> [channel_key, ...]，供按来源精确卸载
+    _external_owners: Dict[str, List[str]] = {}
+
+    @staticmethod
+    def _coerce_channel(channel) -> Optional[str]:
+        """将渠道（MessageChannel 枚举或字符串）归一化为字符串 id，None 原样返回 None。"""
+        if channel is None:
+            return None
+        if isinstance(channel, Enum):
+            return str(channel.value)
+        return str(channel)
+
     @classmethod
     def get_capabilities(cls, channel: MessageChannel) -> Optional[ChannelCapabilities]:
         """
-        获取渠道能力
+        获取渠道能力。先查内建（按 MessageChannel 枚举），未命中再查外部(插件)注册
+        （按字符串 channel id 容错匹配），使插件新增渠道也能声明能力矩阵。
         """
-        return cls._capabilities.get(channel)
+        caps = cls._capabilities.get(channel)
+        if caps is not None:
+            return caps
+        return cls._external_capabilities.get(cls._coerce_channel(channel))
+
+    @classmethod
+    def register_capabilities(cls, channel, capabilities: ChannelCapabilities, owner: str) -> bool:
+        """
+        注册一个外部(插件)渠道的能力矩阵，按 owner 记账以便精确卸载。
+        channel 可为字符串或 MessageChannel；按字符串 id 存储与匹配，无需扩展封闭枚举。
+        """
+        key = cls._coerce_channel(channel)
+        if not key or not owner or capabilities is None:
+            return False
+        cls._external_capabilities[key] = capabilities
+        cls._external_owners.setdefault(owner, [])
+        if key not in cls._external_owners[owner]:
+            cls._external_owners[owner].append(key)
+        return True
+
+    @classmethod
+    def unregister_capabilities(cls, owner: str) -> None:
+        """卸载某来源(owner)注册的全部外部渠道能力。"""
+        if not owner:
+            return
+        for key in cls._external_owners.pop(owner, []):
+            cls._external_capabilities.pop(key, None)
 
     @classmethod
     def supports_capability(
