@@ -82,7 +82,7 @@ class TestAgentSessionStatus(unittest.TestCase):
 
         with (
             patch(
-                "app.chain.message.agent_manager.get_session_status",
+                "app.agent.agent_manager.get_session_status",
                 return_value=status,
             ),
             patch.object(chain, "post_message") as post_message,
