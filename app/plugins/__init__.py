@@ -263,6 +263,54 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_notifications(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的消息渠道（Notification 域）类，如新的 IM/推送渠道。
+        provides_modules 的语法糖 + 消息渠道契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.Notification，并实现 post_message（其余 post_medias /
+        post_torrents / delete_message / register_commands 等由 run_module 按方法名分发、按需实现）。
+        子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭 MessageChannel 枚举）；
+        渠道的按钮/Markdown/分段等能力矩阵另经 provides_channel_capabilities() 声明。默认不新增。
+
+        [MyNotificationClass, ...]
+        """
+        return []
+
+    def provides_mediaservers(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的媒体服务器（MediaServer 域）类，如新的影音库服务端。
+        provides_modules 的语法糖 + 媒体服务器契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.MediaServer。能力方法（mediaserver_librarys /
+        media_statistic / mediaserver_playing / mediaserver_items 等）由 run_module 按方法名
+        分发、按需实现（实现哪个就参与哪个媒体库流水线）。子类型用 get_subtype_id() 返回字符串 id
+        （无需扩展封闭 MediaServerType 枚举）。默认不新增。
+
+        [MyMediaServerClass, ...]
+        """
+        return []
+
+    def provides_discover_sources(self) -> List[Any]:
+        """
+        声明本插件向探索页【新增】的数据源（Discover 域，声明式注册，与现有
+        ChainEventType.DiscoverSource 事件扩展并存、由框架去重合并）。返回 DiscoverMediaSource
+        实例列表，每个含 name / mediaid_prefix / api_path（指向本插件自有 API）/ filter_params /
+        filter_ui 等；由 /api/v1/discover/source 端点聚合后供前端枚举。默认不新增。
+
+        [DiscoverMediaSource(name=..., mediaid_prefix=..., api_path=...), ...]
+        """
+        return []
+
+    def provides_recommend_sources(self) -> List[Any]:
+        """
+        声明本插件向推荐页【新增】的数据源（Recommend 域，声明式注册，与现有
+        ChainEventType.RecommendSource 事件扩展并存、由框架去重合并）。返回 RecommendMediaSource
+        实例列表，每个含 name / api_path（指向本插件自有 API）/ type；由 /api/v1/recommend/source
+        端点聚合后供前端枚举。默认不新增。
+
+        [RecommendMediaSource(name=..., api_path=..., type=...), ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作

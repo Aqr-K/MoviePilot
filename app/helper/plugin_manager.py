@@ -681,6 +681,38 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} 下载器 "
                                  f"{getattr(downloader_cls, '__name__', downloader_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_notifications 声明新增的消息渠道（Notification 域），
+        # 经消息渠道契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 post_message 消息分发。
+        provided_notifications = plugin_metadata.get_plugin_provided_notifications(self._running_plugins, pid)
+        for plugin_id, notification_classes in provided_notifications.items():
+            for notification_cls in notification_classes:
+                _nf_ok, _nf_reasons = ModuleManager.verify_notification_contract(notification_cls)
+                if not _nf_ok:
+                    logger.warning(f"插件 {plugin_id} 消息渠道 "
+                                   f"{getattr(notification_cls, '__name__', notification_cls)} 未通过消息渠道契约校验，拒绝注册："
+                                   f"{'；'.join(_nf_reasons)}")
+                    continue
+                try:
+                    ModuleManager().register_module(notification_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 消息渠道 "
+                                 f"{getattr(notification_cls, '__name__', notification_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_mediaservers 声明新增的媒体服务器（MediaServer 域），
+        # 经媒体服务器契约校验通过后注册到 ModuleManager（owner=plugin_id），参与媒体库分发。
+        provided_mediaservers = plugin_metadata.get_plugin_provided_mediaservers(self._running_plugins, pid)
+        for plugin_id, mediaserver_classes in provided_mediaservers.items():
+            for mediaserver_cls in mediaserver_classes:
+                _ms_ok, _ms_reasons = ModuleManager.verify_mediaserver_contract(mediaserver_cls)
+                if not _ms_ok:
+                    logger.warning(f"插件 {plugin_id} 媒体服务器 "
+                                   f"{getattr(mediaserver_cls, '__name__', mediaserver_cls)} 未通过媒体服务器契约校验，拒绝注册："
+                                   f"{'；'.join(_ms_reasons)}")
+                    continue
+                try:
+                    ModuleManager().register_module(mediaserver_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 媒体服务器 "
+                                 f"{getattr(mediaserver_cls, '__name__', mediaserver_cls)} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
@@ -853,6 +885,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
     def get_plugin_actions(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
         return plugin_metadata.get_plugin_actions(self._running_plugins, pid)
+
+    def get_plugin_provided_discover_sources(self, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+        return plugin_metadata.get_plugin_provided_discover_sources(self._running_plugins, pid)
+
+    def get_plugin_provided_recommend_sources(self, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+        return plugin_metadata.get_plugin_provided_recommend_sources(self._running_plugins, pid)
 
     @staticmethod
     def _copy_plugin_agent_tools(
