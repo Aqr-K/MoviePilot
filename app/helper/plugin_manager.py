@@ -886,6 +886,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_actions(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
         return plugin_metadata.get_plugin_actions(self._running_plugins, pid)
 
+    def get_plugin_provided_discover_sources(self, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+        return plugin_metadata.get_plugin_provided_discover_sources(self._running_plugins, pid)
+
+    def get_plugin_provided_recommend_sources(self, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+        return plugin_metadata.get_plugin_provided_recommend_sources(self._running_plugins, pid)
+
     @staticmethod
     def _copy_plugin_agent_tools(
         tools_info: List[Dict[str, Any]]

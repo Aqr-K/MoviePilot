@@ -289,6 +289,28 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_discover_sources(self) -> List[Any]:
+        """
+        声明本插件向探索页【新增】的数据源（Discover 域，声明式注册，与现有
+        ChainEventType.DiscoverSource 事件扩展并存、由框架去重合并）。返回 DiscoverMediaSource
+        实例列表，每个含 name / mediaid_prefix / api_path（指向本插件自有 API）/ filter_params /
+        filter_ui 等；由 /api/v1/discover/source 端点聚合后供前端枚举。默认不新增。
+
+        [DiscoverMediaSource(name=..., mediaid_prefix=..., api_path=...), ...]
+        """
+        return []
+
+    def provides_recommend_sources(self) -> List[Any]:
+        """
+        声明本插件向推荐页【新增】的数据源（Recommend 域，声明式注册，与现有
+        ChainEventType.RecommendSource 事件扩展并存、由框架去重合并）。返回 RecommendMediaSource
+        实例列表，每个含 name / api_path（指向本插件自有 API）/ type；由 /api/v1/recommend/source
+        端点聚合后供前端枚举。默认不新增。
+
+        [RecommendMediaSource(name=..., api_path=..., type=...), ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作

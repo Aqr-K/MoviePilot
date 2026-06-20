@@ -8,6 +8,7 @@ from app.chain.douban import DoubanChain
 from app.chain.tmdb import TmdbChain
 from app.core.event import eventmanager
 from app.core.security import verify_token
+from app.helper.plugin_manager import PluginManager
 from app.schemas import DiscoverSourceEventData
 from app.schemas.types import ChainEventType, MediaType
 
@@ -21,17 +22,30 @@ router = APIRouter()
 )
 def source(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
-    获取探索数据源
+    获取探索数据源：合并插件声明式注册（provides_discover_sources）与事件扩展
+    （ChainEventType.DiscoverSource），按 api_path 去重。
     """
-    # 广播事件，请示额外的探索数据源支持
+    sources: List[schemas.DiscoverMediaSource] = []
+    seen_paths = set()
+
+    def _collect(items):
+        for src in items or []:
+            api_path = getattr(src, "api_path", None)
+            if not src or api_path in seen_paths:
+                continue
+            seen_paths.add(api_path)
+            sources.append(src)
+
+    # 1) 插件声明式注册的探索数据源
+    for plugin_sources in PluginManager().get_plugin_provided_discover_sources().values():
+        _collect(plugin_sources)
+    # 2) 广播事件，请示额外的探索数据源支持（向后兼容既有事件扩展）
     event_data = DiscoverSourceEventData()
     event = eventmanager.send_event(ChainEventType.DiscoverSource, event_data)
-    # 使用事件返回的上下文数据
     if event and event.event_data:
         event_data: DiscoverSourceEventData = event.event_data
-        if event_data.extra_sources:
-            return event_data.extra_sources
-    return []
+        _collect(event_data.extra_sources)
+    return sources
 
 
 @router.get("/bangumi", summary="探索Bangumi", response_model=List[schemas.MediaInfo])
