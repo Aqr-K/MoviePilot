@@ -44,6 +44,26 @@ def _build_context(title: str = "星际穿越") -> Context:
     )
 
 
+def _build_tv_context(title: str = "葬送的芙莉莲") -> Context:
+    """构造可用于媒体交互下载测试的电视剧上下文。"""
+    return Context(
+        meta_info=_build_meta(title),
+        media_info=MediaInfo(
+            type=MediaType.TV,
+            title=title,
+            year="2023",
+            tmdb_id=2,
+            category="动漫",
+        ),
+        torrent_info=TorrentInfo(
+            title=f"{title}.S01.1080p",
+            site_name="TestSite",
+            enclosure="https://example.com/demo-tv.torrent",
+            seeders=10,
+        ),
+    )
+
+
 def _build_download_dirs() -> list[TransferDirectoryConf]:
     """构造消息交互可选择的下载目录配置。"""
     return [
@@ -52,12 +72,15 @@ def _build_download_dirs() -> list[TransferDirectoryConf]:
             storage="local",
             download_path="/downloads/movies",
             priority=1,
+            media_type=MediaType.MOVIE.value,
         ),
         TransferDirectoryConf(
             name="动画下载",
             storage="rclone",
             download_path="/media/anime",
             priority=2,
+            media_type=MediaType.TV.value,
+            media_category="动漫",
         ),
     ]
 
@@ -309,7 +332,9 @@ def test_torrent_selection_prompts_download_dir_buttons_before_download():
     notification = post_message.call_args.args[0]
     assert notification.save_history is False
     assert "请选择下载目录" in notification.title
-    assert "电影下载 (/downloads/movies)" in notification.text
+    assert "1. 自动匹配目录" in notification.text
+    assert "2. 电影下载 (/downloads/movies)" in notification.text
+    assert "动画下载" not in notification.text
     assert notification.buttons[0][0]["callback_data"] == f"media:{request.request_id}:download-dir:1"
 
 
@@ -347,7 +372,51 @@ def test_torrent_selection_prompts_text_download_dir_for_plain_channel():
     assert notification.save_history is False
     assert "请回复对应数字" in notification.title
     assert notification.buttons is None
-    assert "2. 动画下载 (rclone:/media/anime)" in notification.text
+    assert "1. 自动匹配目录" in notification.text
+    assert "2. 电影下载 (/downloads/movies)" in notification.text
+    assert "动画下载" not in notification.text
+
+
+def test_download_dir_callback_runs_pending_single_download_without_save_path_for_auto():
+    """下载目录选择自动匹配时，应不传 save_path 继续执行挂起的单资源下载。"""
+    chain = MediaInteractionChain()
+    context = _build_context()
+    request = media_interaction_manager.create_or_replace(
+        user_id="10001",
+        channel=MessageChannel.Telegram,
+        source="telegram-test",
+        username="tester",
+        action="Search",
+        keyword="星际穿越",
+        title="星际穿越",
+        meta=_build_meta("星际穿越"),
+        items=[context],
+    )
+    request.phase = "download-dir"
+    request.pending_download_mode = "single"
+    request.pending_download_context = context
+
+    with patch(
+        "app.chain.message.DirectoryHelper.get_download_dirs",
+        return_value=_build_download_dirs(),
+    ), patch(
+        "app.chain.message.DownloadChain.download_single",
+        return_value="hash",
+    ) as download_single:
+        request.download_dirs = chain._get_download_dirs(context.media_info)
+        handled = chain.handle_callback_interaction(
+            callback_data=f"media:{request.request_id}:download-dir:1",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            userid="10001",
+            username="tester",
+        )
+
+    assert handled
+    assert request.phase == "torrent"
+    download_single.assert_called_once()
+    assert download_single.call_args.args[0] is context
+    assert download_single.call_args.kwargs["save_path"] is None
 
 
 def test_download_dir_callback_runs_pending_single_download_with_save_path():
@@ -376,7 +445,7 @@ def test_download_dir_callback_runs_pending_single_download_with_save_path():
         "app.chain.message.DownloadChain.download_single",
         return_value="hash",
     ) as download_single:
-        request.download_dirs = chain._get_download_dirs()
+        request.download_dirs = chain._get_download_dirs(context.media_info)
         handled = chain.handle_callback_interaction(
             callback_data=f"media:{request.request_id}:download-dir:2",
             channel=MessageChannel.Telegram,
@@ -389,11 +458,11 @@ def test_download_dir_callback_runs_pending_single_download_with_save_path():
     assert request.phase == "torrent"
     download_single.assert_called_once()
     assert download_single.call_args.args[0] is context
-    assert download_single.call_args.kwargs["save_path"] == "rclone:/media/anime"
+    assert download_single.call_args.kwargs["save_path"] == "/downloads/movies"
 
 
-def test_download_dir_text_reply_runs_pending_single_download_with_save_path():
-    """下载目录文本回复应使用所选 save_path 继续执行挂起的单资源下载。"""
+def test_download_dir_text_reply_runs_pending_single_download_without_save_path():
+    """下载目录文本回复选择自动匹配时应不传 save_path。"""
     chain = MediaInteractionChain()
     context = _build_context()
     request = media_interaction_manager.create_or_replace(
@@ -431,4 +500,22 @@ def test_download_dir_text_reply_runs_pending_single_download_with_save_path():
     assert request.phase == "torrent"
     download_single.assert_called_once()
     assert download_single.call_args.args[0] is context
-    assert download_single.call_args.kwargs["save_path"] == "/downloads/movies"
+    assert download_single.call_args.kwargs["save_path"] is None
+
+
+def test_get_download_dirs_keeps_matching_tv_category_dir():
+    """目录列表应保留匹配当前电视剧类别的下载目录。"""
+    chain = MediaInteractionChain()
+    context = _build_tv_context()
+
+    with patch(
+        "app.chain.message.DirectoryHelper.get_download_dirs",
+        return_value=_build_download_dirs(),
+    ):
+        download_dirs = chain._get_download_dirs(context.media_info)
+
+    assert [download_dir.name for download_dir in download_dirs] == [
+        "自动匹配目录",
+        "动画下载",
+    ]
+    assert download_dirs[1].save_path == "rclone:/media/anime"
