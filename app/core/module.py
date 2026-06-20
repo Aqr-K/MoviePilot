@@ -274,6 +274,31 @@ class ModuleManager(metaclass=Singleton):
                 reasons.append(f"get_type 调用失败：{err}")
         return (not reasons), reasons
 
+    @staticmethod
+    def verify_downloader_contract(module_cls: type) -> Tuple[bool, List[str]]:
+        """
+        校验下载器（Downloader 域）契约：在 _ModuleBase 基类契约之上，要求
+        get_type()==ModuleType.Downloader 且实现下载器核心操作（download/list_torrents/
+        remove_torrents）。完整 IDownloader 操作面（start/stop/torrent_files/downloader_info 等）
+        由 run_module 按方法名分发、按需实现。供 provides_downloaders() 注册前严格校验。
+        返回 (是否通过, 失败原因列表)。
+        """
+        ok, reasons = ModuleManager.verify_module_contract(module_cls)
+        reasons = list(reasons)
+        _get_type = getattr(module_cls, "get_type", None)
+        if not callable(_get_type):
+            reasons.append("缺少 get_type")
+        else:
+            try:
+                if _get_type() != ModuleType.Downloader:
+                    reasons.append(f"get_type 须为 ModuleType.Downloader（实际 {_get_type()}）")
+            except Exception as err:
+                reasons.append(f"get_type 调用失败：{err}")
+        for _name in ("download", "list_torrents", "remove_torrents"):
+            if not callable(getattr(module_cls, _name, None)):
+                reasons.append(f"缺少下载器方法：{_name}")
+        return (not reasons), reasons
+
     def register_module(self, module_cls: type, owner: str) -> bool:
         """
         注册一个外部(插件)模块类。复用内建加载流程(check_setting/init_setting/init_module)，

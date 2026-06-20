@@ -251,6 +251,18 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_downloaders(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的下载器（Downloader 域）类，如新的 BT/PT 下载器。
+        provides_modules 的语法糖 + 下载器契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.Downloader，并实现 download / list_torrents / remove_torrents
+        等下载器操作（完整 IDownloader 操作面由 run_module 按方法名分发、按需实现）。
+        子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭 DownloaderType 枚举）。默认不新增。
+
+        [MyDownloaderClass, ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作
