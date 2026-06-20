@@ -42,13 +42,48 @@ class FileManagerModule(_ModuleBase):
         # 获取存储类型
         self._support_storages = [storage.schema.value for storage in self._storage_schemas if storage.schema]
 
+    @staticmethod
+    def verify_storage_contract(storage_class: type) -> Tuple[bool, List[str]]:
+        """
+        校验外部(插件)存储器类是否满足 StorageBase 契约，作为「验证注册」核心判定，
+        对齐 ModuleManager.register_module 的严格注册（其余各域均有 verify_*_contract）。
+        宽松内省策略（不抛异常），返回 (是否通过, 失败原因列表)：
+          1) 须为类对象；
+          2) 须继承 StorageBase（真存储器 vs 任意注入类的核心区分）；
+          3) 抽象方法须全部落地（StorageBase 系 ABCMeta，未实现则不可实例化）；
+          4) 须声明非空 schema 且 schema.value 非空（存储类型身份；__get_storage_oper
+             按 schema.value 路由，缺失则无法被命中、init_module 亦会静默过滤掉）。
+        """
+        if not isinstance(storage_class, type):
+            return False, ["不是类对象"]
+        reasons: List[str] = []
+        if not issubclass(storage_class, StorageBase):
+            reasons.append("未继承 app.modules.filemanager.storages.StorageBase")
+        abstracts = getattr(storage_class, "__abstractmethods__", frozenset())
+        if abstracts:
+            reasons.append(f"抽象方法未实现：{sorted(abstracts)}")
+        schema = getattr(storage_class, "schema", None)
+        if not schema:
+            reasons.append("缺少存储类型标识 schema（须为非空 StorageSchema）")
+        elif not getattr(schema, "value", None):
+            reasons.append("schema.value 为空，无法按存储类型路由")
+        return (not reasons), reasons
+
     @classmethod
     def register_storage(cls, storage_class: type, owner: str) -> bool:
         """
-        注册一个外部(插件)存储器类（StorageBase 子类）。记账到 reload-stable 的 storage_registry
-        并刷新运行实例。存储器无需扩展 StorageSchema 封闭枚举：__get_storage_oper 按 schema.value
-        字符串匹配，插件存储类只要 .schema.value 为其字符串 id 即可被命中。
+        注册一个外部(插件)存储器类（StorageBase 子类）。先经 StorageBase 契约严格校验，
+        通过后记账到 reload-stable 的 storage_registry 并刷新运行实例。存储器无需扩展
+        StorageSchema 封闭枚举：__get_storage_oper 按 schema.value 字符串匹配，插件存储类
+        只要 .schema.value 为其字符串 id 即可被命中。
         """
+        # 验证注册：不通过直接拒绝（对齐 register_module 严格注册，避免畸形类静默入表后实例化炸裂）
+        ok, reasons = cls.verify_storage_contract(storage_class)
+        if not ok:
+            logger.warning(
+                f"存储器 {getattr(storage_class, '__name__', storage_class)}(owner={owner}) "
+                f"未通过 StorageBase 契约校验，拒绝注册：{'；'.join(reasons)}")
+            return False
         if not storage_registry.register(storage_class, owner):
             return False
         cls._refresh_running_instance()
