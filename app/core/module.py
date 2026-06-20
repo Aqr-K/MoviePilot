@@ -253,98 +253,68 @@ class ModuleManager(metaclass=Singleton):
         return (not reasons), reasons
 
     @staticmethod
-    def verify_data_source_contract(module_cls: type) -> Tuple[bool, List[str]]:
+    def _verify_typed_contract(module_cls: type, expected_type: ModuleType,
+                               required_methods: Tuple[str, ...] = (),
+                               method_label: str = "") -> Tuple[bool, List[str]]:
         """
-        校验数据源（媒体识别/信息源，MediaRecognize 域）契约：在 _ModuleBase 基类契约之上，
-        要求 get_type()==ModuleType.MediaRecognize。识别能力方法（recognize_media /
-        search_medias / obtain_images 等）由框架按方法名分发、按需实现，故不在此强制
-        （避免误拒 thetvdb 这类仅实现部分/其它方法的真实源）。返回 (是否通过, 失败原因列表)。
+        域契约通用校验（各 verify_*_contract 的共用实现）：在 _ModuleBase 基类契约之上，要求
+        get_type()==expected_type，并要求 required_methods 全部可调用。能力方法按需实现的域
+        传空 required_methods 即可。返回 (是否通过, 失败原因列表)。
         """
         ok, reasons = ModuleManager.verify_module_contract(module_cls)
         reasons = list(reasons)
-        # 数据源须声明为 MediaRecognize 类型
         _get_type = getattr(module_cls, "get_type", None)
         if not callable(_get_type):
             reasons.append("缺少 get_type")
         else:
             try:
-                if _get_type() != ModuleType.MediaRecognize:
-                    reasons.append(f"get_type 须为 ModuleType.MediaRecognize（实际 {_get_type()}）")
+                if _get_type() != expected_type:
+                    reasons.append(f"get_type 须为 {expected_type}（实际 {_get_type()}）")
             except Exception as err:
                 reasons.append(f"get_type 调用失败：{err}")
+        for _name in required_methods:
+            if not callable(getattr(module_cls, _name, None)):
+                reasons.append(f"缺少{method_label}方法：{_name}")
         return (not reasons), reasons
+
+    @staticmethod
+    def verify_data_source_contract(module_cls: type) -> Tuple[bool, List[str]]:
+        """
+        校验数据源（媒体识别/信息源，MediaRecognize 域）契约：基类契约 + get_type==MediaRecognize。
+        识别能力方法（recognize_media/search_medias/obtain_images 等）按方法名分发、按需实现，
+        故不强制（避免误拒 thetvdb 这类仅实现部分/其它方法的真实源）。
+        """
+        return ModuleManager._verify_typed_contract(module_cls, ModuleType.MediaRecognize)
 
     @staticmethod
     def verify_downloader_contract(module_cls: type) -> Tuple[bool, List[str]]:
         """
-        校验下载器（Downloader 域）契约：在 _ModuleBase 基类契约之上，要求
-        get_type()==ModuleType.Downloader 且实现下载器核心操作（download/list_torrents/
-        remove_torrents）。完整 IDownloader 操作面（start/stop/torrent_files/downloader_info 等）
-        由 run_module 按方法名分发、按需实现。供 provides_downloaders() 注册前严格校验。
-        返回 (是否通过, 失败原因列表)。
+        校验下载器（Downloader 域）契约：基类契约 + get_type==Downloader + 核心操作
+        download/list_torrents/remove_torrents。完整 IDownloader 面（start/stop/torrent_files 等）
+        按方法名分发、按需实现。供 provides_downloaders() 注册前严格校验。
         """
-        ok, reasons = ModuleManager.verify_module_contract(module_cls)
-        reasons = list(reasons)
-        _get_type = getattr(module_cls, "get_type", None)
-        if not callable(_get_type):
-            reasons.append("缺少 get_type")
-        else:
-            try:
-                if _get_type() != ModuleType.Downloader:
-                    reasons.append(f"get_type 须为 ModuleType.Downloader（实际 {_get_type()}）")
-            except Exception as err:
-                reasons.append(f"get_type 调用失败：{err}")
-        for _name in ("download", "list_torrents", "remove_torrents"):
-            if not callable(getattr(module_cls, _name, None)):
-                reasons.append(f"缺少下载器方法：{_name}")
-        return (not reasons), reasons
+        return ModuleManager._verify_typed_contract(
+            module_cls, ModuleType.Downloader,
+            ("download", "list_torrents", "remove_torrents"), "下载器")
 
     @staticmethod
     def verify_notification_contract(module_cls: type) -> Tuple[bool, List[str]]:
         """
-        校验消息渠道（Notification 域）契约：在 _ModuleBase 基类契约之上，要求
-        get_type()==ModuleType.Notification 且实现消息发送核心方法 post_message。
-        其余消息能力方法（post_medias/post_torrents/delete_message/register_commands 等）
-        由 run_module 按方法名分发、按需实现。供 provides_notifications() 注册前严格校验。
-        返回 (是否通过, 失败原因列表)。
+        校验消息渠道（Notification 域）契约：基类契约 + get_type==Notification + 核心方法 post_message。
+        其余消息能力方法（post_medias/post_torrents/delete_message 等）按方法名分发、按需实现。
+        供 provides_notifications() 注册前严格校验。
         """
-        ok, reasons = ModuleManager.verify_module_contract(module_cls)
-        reasons = list(reasons)
-        _get_type = getattr(module_cls, "get_type", None)
-        if not callable(_get_type):
-            reasons.append("缺少 get_type")
-        else:
-            try:
-                if _get_type() != ModuleType.Notification:
-                    reasons.append(f"get_type 须为 ModuleType.Notification（实际 {_get_type()}）")
-            except Exception as err:
-                reasons.append(f"get_type 调用失败：{err}")
-        if not callable(getattr(module_cls, "post_message", None)):
-            reasons.append("缺少消息渠道方法：post_message")
-        return (not reasons), reasons
+        return ModuleManager._verify_typed_contract(
+            module_cls, ModuleType.Notification, ("post_message",), "消息渠道")
 
     @staticmethod
     def verify_mediaserver_contract(module_cls: type) -> Tuple[bool, List[str]]:
         """
-        校验媒体服务器（MediaServer 域）契约：在 _ModuleBase 基类契约之上，要求
-        get_type()==ModuleType.MediaServer。媒体服务器能力方法（mediaserver_librarys /
-        media_statistic / mediaserver_playing / mediaserver_items 等）由 run_module 按方法名
-        分发、按需实现，各后端（emby/jellyfin/plex/trimemedia/ugreen/zspace）实现的子集不同，
-        故不在此强制（避免误拒仅实现部分方法的真实媒体服务器）。供 provides_mediaservers()
-        注册前严格校验。返回 (是否通过, 失败原因列表)。
+        校验媒体服务器（MediaServer 域）契约：基类契约 + get_type==MediaServer。能力方法
+        （mediaserver_librarys/media_statistic 等）各后端实现子集不同，按方法名分发、按需实现，
+        故不强制。供 provides_mediaservers() 注册前严格校验。
         """
-        ok, reasons = ModuleManager.verify_module_contract(module_cls)
-        reasons = list(reasons)
-        _get_type = getattr(module_cls, "get_type", None)
-        if not callable(_get_type):
-            reasons.append("缺少 get_type")
-        else:
-            try:
-                if _get_type() != ModuleType.MediaServer:
-                    reasons.append(f"get_type 须为 ModuleType.MediaServer（实际 {_get_type()}）")
-            except Exception as err:
-                reasons.append(f"get_type 调用失败：{err}")
-        return (not reasons), reasons
+        return ModuleManager._verify_typed_contract(module_cls, ModuleType.MediaServer)
 
     def register_module(self, module_cls: type, owner: str) -> bool:
         """

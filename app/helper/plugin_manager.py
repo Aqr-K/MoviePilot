@@ -649,70 +649,33 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                             getattr(caps, "channel", None), caps, owner=plugin_id)
                     except Exception as err:
                         logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
-        # 注册插件经 provides_data_sources 声明新增的数据源（媒体识别/信息源，MediaRecognize 域），
-        # 经数据源契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 recognize_media 识别流水线。
-        provided_data_sources = plugin_metadata.get_plugin_provided_data_sources(self._running_plugins, pid)
-        for plugin_id, source_classes in provided_data_sources.items():
-            for source_cls in source_classes:
-                _ds_ok, _ds_reasons = ModuleManager.verify_data_source_contract(source_cls)
-                if not _ds_ok:
-                    logger.warning(f"插件 {plugin_id} 数据源 "
-                                   f"{getattr(source_cls, '__name__', source_cls)} 未通过数据源契约校验，拒绝注册："
-                                   f"{'；'.join(_ds_reasons)}")
+        # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/消息渠道/媒体服务器）：
+        # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
+        for _get_provided, _verify, _label in (
+            (plugin_metadata.get_plugin_provided_data_sources, ModuleManager.verify_data_source_contract, "数据源"),
+            (plugin_metadata.get_plugin_provided_downloaders, ModuleManager.verify_downloader_contract, "下载器"),
+            (plugin_metadata.get_plugin_provided_notifications, ModuleManager.verify_notification_contract, "消息渠道"),
+            (plugin_metadata.get_plugin_provided_mediaservers, ModuleManager.verify_mediaserver_contract, "媒体服务器"),
+        ):
+            self._register_contract_domain(pid, _get_provided, _verify, _label)
+
+    def _register_contract_domain(self, pid, get_provided, verify_contract, label: str):
+        """
+        注册某契约域插件类的共用实现（数据源/下载器/消息渠道/媒体服务器）：聚合插件声明的类 →
+        经域契约校验（不通过仅警告拒绝、不影响其它）→ register_module(owner=plugin_id)。
+        """
+        for plugin_id, classes in get_provided(self._running_plugins, pid).items():
+            for cls in classes:
+                _name = getattr(cls, "__name__", cls)
+                ok, reasons = verify_contract(cls)
+                if not ok:
+                    logger.warning(f"插件 {plugin_id} {label} {_name} 未通过{label}契约校验，拒绝注册："
+                                   f"{'；'.join(reasons)}")
                     continue
                 try:
-                    ModuleManager().register_module(source_cls, owner=plugin_id)
+                    ModuleManager().register_module(cls, owner=plugin_id)
                 except Exception as err:
-                    logger.error(f"注册插件 {plugin_id} 数据源 "
-                                 f"{getattr(source_cls, '__name__', source_cls)} 出错：{str(err)}")
-        # 注册插件经 provides_downloaders 声明新增的下载器（Downloader 域），
-        # 经下载器契约校验通过后注册到 ModuleManager（owner=plugin_id），参与下载器分发。
-        provided_downloaders = plugin_metadata.get_plugin_provided_downloaders(self._running_plugins, pid)
-        for plugin_id, downloader_classes in provided_downloaders.items():
-            for downloader_cls in downloader_classes:
-                _dl_ok, _dl_reasons = ModuleManager.verify_downloader_contract(downloader_cls)
-                if not _dl_ok:
-                    logger.warning(f"插件 {plugin_id} 下载器 "
-                                   f"{getattr(downloader_cls, '__name__', downloader_cls)} 未通过下载器契约校验，拒绝注册："
-                                   f"{'；'.join(_dl_reasons)}")
-                    continue
-                try:
-                    ModuleManager().register_module(downloader_cls, owner=plugin_id)
-                except Exception as err:
-                    logger.error(f"注册插件 {plugin_id} 下载器 "
-                                 f"{getattr(downloader_cls, '__name__', downloader_cls)} 出错：{str(err)}")
-        # 注册插件经 provides_notifications 声明新增的消息渠道（Notification 域），
-        # 经消息渠道契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 post_message 消息分发。
-        provided_notifications = plugin_metadata.get_plugin_provided_notifications(self._running_plugins, pid)
-        for plugin_id, notification_classes in provided_notifications.items():
-            for notification_cls in notification_classes:
-                _nf_ok, _nf_reasons = ModuleManager.verify_notification_contract(notification_cls)
-                if not _nf_ok:
-                    logger.warning(f"插件 {plugin_id} 消息渠道 "
-                                   f"{getattr(notification_cls, '__name__', notification_cls)} 未通过消息渠道契约校验，拒绝注册："
-                                   f"{'；'.join(_nf_reasons)}")
-                    continue
-                try:
-                    ModuleManager().register_module(notification_cls, owner=plugin_id)
-                except Exception as err:
-                    logger.error(f"注册插件 {plugin_id} 消息渠道 "
-                                 f"{getattr(notification_cls, '__name__', notification_cls)} 出错：{str(err)}")
-        # 注册插件经 provides_mediaservers 声明新增的媒体服务器（MediaServer 域），
-        # 经媒体服务器契约校验通过后注册到 ModuleManager（owner=plugin_id），参与媒体库分发。
-        provided_mediaservers = plugin_metadata.get_plugin_provided_mediaservers(self._running_plugins, pid)
-        for plugin_id, mediaserver_classes in provided_mediaservers.items():
-            for mediaserver_cls in mediaserver_classes:
-                _ms_ok, _ms_reasons = ModuleManager.verify_mediaserver_contract(mediaserver_cls)
-                if not _ms_ok:
-                    logger.warning(f"插件 {plugin_id} 媒体服务器 "
-                                   f"{getattr(mediaserver_cls, '__name__', mediaserver_cls)} 未通过媒体服务器契约校验，拒绝注册："
-                                   f"{'；'.join(_ms_reasons)}")
-                    continue
-                try:
-                    ModuleManager().register_module(mediaserver_cls, owner=plugin_id)
-                except Exception as err:
-                    logger.error(f"注册插件 {plugin_id} 媒体服务器 "
-                                 f"{getattr(mediaserver_cls, '__name__', mediaserver_cls)} 出错：{str(err)}")
+                    logger.error(f"注册插件 {plugin_id} {label} {_name} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
