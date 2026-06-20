@@ -681,6 +681,22 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} 下载器 "
                                  f"{getattr(downloader_cls, '__name__', downloader_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_notifications 声明新增的消息渠道（Notification 域），
+        # 经消息渠道契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 post_message 消息分发。
+        provided_notifications = plugin_metadata.get_plugin_provided_notifications(self._running_plugins, pid)
+        for plugin_id, notification_classes in provided_notifications.items():
+            for notification_cls in notification_classes:
+                _nf_ok, _nf_reasons = ModuleManager.verify_notification_contract(notification_cls)
+                if not _nf_ok:
+                    logger.warning(f"插件 {plugin_id} 消息渠道 "
+                                   f"{getattr(notification_cls, '__name__', notification_cls)} 未通过消息渠道契约校验，拒绝注册："
+                                   f"{'；'.join(_nf_reasons)}")
+                    continue
+                try:
+                    ModuleManager().register_module(notification_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 消息渠道 "
+                                 f"{getattr(notification_cls, '__name__', notification_cls)} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
