@@ -276,6 +276,19 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_mediaservers(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的媒体服务器（MediaServer 域）类，如新的影音库服务端。
+        provides_modules 的语法糖 + 媒体服务器契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.MediaServer。能力方法（mediaserver_librarys /
+        media_statistic / mediaserver_playing / mediaserver_items 等）由 run_module 按方法名
+        分发、按需实现（实现哪个就参与哪个媒体库流水线）。子类型用 get_subtype_id() 返回字符串 id
+        （无需扩展封闭 MediaServerType 枚举）。默认不新增。
+
+        [MyMediaServerClass, ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作

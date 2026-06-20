@@ -323,6 +323,29 @@ class ModuleManager(metaclass=Singleton):
             reasons.append("缺少消息渠道方法：post_message")
         return (not reasons), reasons
 
+    @staticmethod
+    def verify_mediaserver_contract(module_cls: type) -> Tuple[bool, List[str]]:
+        """
+        校验媒体服务器（MediaServer 域）契约：在 _ModuleBase 基类契约之上，要求
+        get_type()==ModuleType.MediaServer。媒体服务器能力方法（mediaserver_librarys /
+        media_statistic / mediaserver_playing / mediaserver_items 等）由 run_module 按方法名
+        分发、按需实现，各后端（emby/jellyfin/plex/trimemedia/ugreen/zspace）实现的子集不同，
+        故不在此强制（避免误拒仅实现部分方法的真实媒体服务器）。供 provides_mediaservers()
+        注册前严格校验。返回 (是否通过, 失败原因列表)。
+        """
+        ok, reasons = ModuleManager.verify_module_contract(module_cls)
+        reasons = list(reasons)
+        _get_type = getattr(module_cls, "get_type", None)
+        if not callable(_get_type):
+            reasons.append("缺少 get_type")
+        else:
+            try:
+                if _get_type() != ModuleType.MediaServer:
+                    reasons.append(f"get_type 须为 ModuleType.MediaServer（实际 {_get_type()}）")
+            except Exception as err:
+                reasons.append(f"get_type 调用失败：{err}")
+        return (not reasons), reasons
+
     def register_module(self, module_cls: type, owner: str) -> bool:
         """
         注册一个外部(插件)模块类。复用内建加载流程(check_setting/init_setting/init_module)，

@@ -697,6 +697,22 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} 消息渠道 "
                                  f"{getattr(notification_cls, '__name__', notification_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_mediaservers 声明新增的媒体服务器（MediaServer 域），
+        # 经媒体服务器契约校验通过后注册到 ModuleManager（owner=plugin_id），参与媒体库分发。
+        provided_mediaservers = plugin_metadata.get_plugin_provided_mediaservers(self._running_plugins, pid)
+        for plugin_id, mediaserver_classes in provided_mediaservers.items():
+            for mediaserver_cls in mediaserver_classes:
+                _ms_ok, _ms_reasons = ModuleManager.verify_mediaserver_contract(mediaserver_cls)
+                if not _ms_ok:
+                    logger.warning(f"插件 {plugin_id} 媒体服务器 "
+                                   f"{getattr(mediaserver_cls, '__name__', mediaserver_cls)} 未通过媒体服务器契约校验，拒绝注册："
+                                   f"{'；'.join(_ms_reasons)}")
+                    continue
+                try:
+                    ModuleManager().register_module(mediaserver_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 媒体服务器 "
+                                 f"{getattr(mediaserver_cls, '__name__', mediaserver_cls)} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
