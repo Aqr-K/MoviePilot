@@ -1,7 +1,7 @@
 from abc import abstractmethod, ABCMeta
 from enum import Enum
 from typing import Generic, Tuple, Union, TypeVar, Type, Dict, List, Set, Optional, Callable, \
-    Protocol, runtime_checkable, TYPE_CHECKING
+    Generator, Protocol, runtime_checkable, TYPE_CHECKING
 from pathlib import Path
 
 from app.helper.service import ServiceConfigHelper
@@ -12,7 +12,10 @@ from app.utils.mixins import ConfigReloadMixin
 
 if TYPE_CHECKING:
     # 仅用于类型注解，避免在早期导入的 app.modules 顶层引入 schemas 重负载/潜在环。
-    from app.schemas import DownloaderTorrent, DownloaderFile, DownloaderInfo
+    from app.core.context import MediaInfo
+    from app.schemas import DownloaderTorrent, DownloaderFile, DownloaderInfo, \
+        MediaServerLibrary, MediaServerItem, MediaServerSeasonInfo, MediaServerPlayItem, \
+        ExistMediaInfo, Statistic
     from app.schemas.types import TorrentStatus
 
 
@@ -497,3 +500,60 @@ class _MediaServerBase(ServiceBase[TService, MediaServerConf]):
         if not self._service_name:
             return {}
         return {conf.name: conf for conf in configs if conf.type == self._service_name and conf.enabled}
+
+
+@runtime_checkable
+class IMediaServer(Protocol):
+    """
+    媒体服务器（MediaServer 域）行为接口契约。
+
+    对照下载器域的 IDownloader / 存储域的 StorageBase：声明门面
+    app.helper.mediaserver_manager.MediaServerManager 统一对外暴露、并按方法名分发到各后端的
+    媒体服务器操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
+    契约，无需显式继承，避免与 _ModuleBase(ABCMeta)/ServiceBase(Generic) 的元类冲突，对既有
+    Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 模块零改动即结构兼容。
+
+    约定（与 ChainBase/MediaServerChain 媒服包装方法签名一致）：
+    - 多实例路由：server 参数为具体媒体服务器配置名（config_name）；为 None 时由后端广播到其
+      全部启用实例，门面再按"列表 extend / 非列表取首个非 None"跨后端合并。
+    - 签名漂移收敛：各后端 server 必填性 / username 形参 / **kwargs 存在差异（见各模块），门面在此
+      统一为最宽松 canonical 签名（server: Optional[str]）；后端要么声明该形参、要么有 **kwargs
+      吸收（不致 TypeError），故按 kwarg 分发对全部后端兼容、与 run_module 行为完全一致。注意：以
+      **kwargs 吸收某形参的后端（如 Plex/TrimeMedia/Ugreen 对 username）会静默忽略该值——此为既有
+      run_module 行为，门面如实保留、不引入差异。
+    - mediaserver_image_cookies 仅部分后端实现（TrimeMedia/Ugreen），按方法名分发自然只命中实现者
+      （类比下载器域 rtorrent 早期缺方法），未实现者不参与。
+    """
+
+    def media_exists(self, mediainfo: "MediaInfo", itemid: Optional[str] = None,
+                     server: Optional[str] = None) -> "Optional[ExistMediaInfo]": ...
+
+    def media_statistic(self, server: Optional[str] = None) -> "Optional[List[Statistic]]": ...
+
+    def mediaserver_librarys(self, server: Optional[str] = None, username: Optional[str] = None,
+                             hidden: Optional[bool] = False) -> "Optional[List[MediaServerLibrary]]": ...
+
+    def mediaserver_items(self, server: Optional[str] = None, library_id: Union[str, int] = None,
+                          start_index: Optional[int] = 0, limit: Optional[int] = -1) -> Optional[Generator]: ...
+
+    def mediaserver_iteminfo(self, server: Optional[str] = None,
+                             item_id: Union[str, int] = None) -> "Optional[MediaServerItem]": ...
+
+    def mediaserver_tv_episodes(self, server: Optional[str] = None,
+                                item_id: Union[str, int] = None) -> "Optional[List[MediaServerSeasonInfo]]": ...
+
+    def mediaserver_playing(self, server: Optional[str] = None, count: Optional[int] = 20,
+                            username: Optional[str] = None) -> "List[MediaServerPlayItem]": ...
+
+    def mediaserver_play_url(self, server: Optional[str] = None,
+                             item_id: Union[str, int] = None) -> Optional[str]: ...
+
+    def mediaserver_latest(self, server: Optional[str] = None, count: Optional[int] = 20,
+                           username: Optional[str] = None) -> "List[MediaServerPlayItem]": ...
+
+    def mediaserver_latest_images(self, server: Optional[str] = None, count: Optional[int] = 10,
+                                  username: Optional[str] = None,
+                                  remote: Optional[bool] = False) -> List[str]: ...
+
+    def mediaserver_image_cookies(self, server: Optional[str] = None,
+                                  image_url: Optional[str] = None) -> Optional[Union[str, dict]]: ...

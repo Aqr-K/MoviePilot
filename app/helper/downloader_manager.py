@@ -7,6 +7,7 @@ from app.core.module import ModuleManager
 from app.helper.message import MessageHelper
 from app.log import logger
 from app.schemas import DownloaderTorrent, DownloaderFile, DownloaderInfo
+from app.schemas.exception import RateLimitExceededException
 from app.schemas.types import EventType, TorrentStatus
 from app.utils.object import ObjectUtils
 from app.utils.singleton import Singleton
@@ -74,6 +75,17 @@ class DownloaderManager(metaclass=Singleton):
             },
         )
 
+    @staticmethod
+    def _handle_rate_limit_error(err: RateLimitExceededException, module_id: str,
+                                 method: str, raise_exception: bool) -> None:
+        """
+        本地限流跳过（复刻 ChainBase.__handle_rate_limit_error）：raise_exception 为真则抛出；
+        否则仅 INFO 记录、不进系统错误告警（预期的限流状态不应触发 SystemError 事件/消息）。
+        """
+        if raise_exception:
+            raise err
+        logger.info(f"模块 {module_id}.{method} 已限流，跳过执行：{str(err)}")
+
     def _dispatch(self, method: str, *args, **kwargs) -> Any:
         """
         将下载器方法按方法名分发到所有 Downloader 后端模块并合并结果。
@@ -111,6 +123,9 @@ class DownloaderManager(metaclass=Singleton):
                         result.extend(temp)
                 else:
                     break
+            except RateLimitExceededException as err:
+                # 限流先于通用异常处理（与 __execute_system_modules 一致）：安静跳过、不告警。
+                self._handle_rate_limit_error(err, module_id, method, raise_exception)
             except Exception as err:
                 self._handle_error(err, module_id, module_name, method, raise_exception)
         return result

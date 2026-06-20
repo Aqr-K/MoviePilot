@@ -12,7 +12,7 @@ class DashboardChain(ChainBase):
         """
         媒体数量统计
         """
-        return self.run_module("media_statistic", server=server)
+        return self.mediaservermanager.media_statistic(server=server)
 
     def downloader_info(self, downloader: Optional[str] = None) -> Optional[List[schemas.DownloaderInfo]]:
         """
