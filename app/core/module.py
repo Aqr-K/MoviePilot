@@ -1,7 +1,6 @@
 import inspect
 import threading
 import traceback
-import warnings
 from enum import Enum
 from typing import Generator, Optional, Tuple, Any, Union, List, Dict
 
@@ -266,18 +265,14 @@ class ModuleManager(metaclass=Singleton):
         if not owner or not isinstance(module_cls, type):
             return False
         module_id = module_cls.__name__
-        # 验证注册：校验 _ModuleBase 基类契约。不通过仅发废弃提醒（软废弃），不阻断注册——
-        # 旧「注入」式（未达契约即接受）路径将废弃，引导插件实现完整契约走「验证注册」。
+        # 验证注册：校验 _ModuleBase 基类契约，不通过直接拒绝（严格注册）。
+        # register_module 系 v3-python 新增且未发布，无外部插件依赖宽松行为，故不保留注入兼容路径。
         _ok, _reasons = self.verify_module_contract(module_cls)
         if not _ok:
-            _msg = (f"模块 {module_id}(owner={owner}) 未通过 _ModuleBase 契约校验："
-                    f"{'；'.join(_reasons)}。当前按兼容『注入』路径接受，该路径将废弃，"
-                    f"请使其继承 app.modules._ModuleBase 并实现完整契约以走『验证注册』。")
-            logger.warning(f"[DEPRECATED] {_msg}")
-            try:
-                warnings.warn(_msg, DeprecationWarning, stacklevel=2)
-            except Exception:
-                pass  # 即便告警被升格为异常(-W error)也不得阻断注册（零破坏铁律）
+            logger.warning(
+                f"模块 {module_id}(owner={owner}) 未通过 _ModuleBase 契约校验，拒绝注册："
+                f"{'；'.join(_reasons)}。请使其继承 app.modules._ModuleBase 并实现完整契约。")
+            return False
         with self._lock:
             # 命名冲突：已存在且不归属本 owner(内建或他插件) → 拒绝，避免遮蔽
             existing_owner = self._find_owner(module_id)

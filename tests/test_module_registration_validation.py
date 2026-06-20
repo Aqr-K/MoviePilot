@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-验证注册机制回归：register_module 从「注入」升级为「_ModuleBase 基类契约验证」（软废弃）。
+验证注册机制回归：register_module 从「注入」升级为「_ModuleBase 基类契约严格验证注册」。
 
 验证：
   1. verify_module_contract 对合法 _ModuleBase 子类通过（无原因）；
   2. 对未继承 _ModuleBase / 缺契约方法 / 签名不兼容 / 非类对象 判定失败并给出原因；
-  3. register_module 对不合规类发 DeprecationWarning 但仍兼容接受（软废弃，零插件破坏）；
-  4. register_module 对合规类不发 DeprecationWarning。
+  3. register_module 对不合规类直接拒绝（return False、不进注册表，不保留注入兼容路径）；
+  4. register_module 对合规类正常注册。
 """
-import warnings
 from unittest import TestCase
 
 from app.core.module import ModuleManager
@@ -135,7 +134,7 @@ class TestVerifyModuleContract(TestCase):
         self.assertTrue(reasons)
 
 
-class TestRegisterModuleSoftDeprecation(TestCase):
+class TestRegisterModuleStrictValidation(TestCase):
     def setUp(self):
         self.mgr = ModuleManager()
         self.owner = "test_validation_owner"
@@ -143,27 +142,14 @@ class TestRegisterModuleSoftDeprecation(TestCase):
     def tearDown(self):
         self.mgr.unregister_modules(self.owner)
 
-    def test_injected_class_warns_but_accepted(self):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            accepted = self.mgr.register_module(_InjectedModule, self.owner)
-        # 软废弃：仍接受进注册表（零插件破坏）
-        self.assertTrue(accepted)
-        self.assertIn(_InjectedModule.__name__, self.mgr.get_external_module_ids(self.owner))
-        # 但发出废弃提醒
-        self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
+    def test_invalid_class_rejected(self):
+        """未过 _ModuleBase 契约校验的类被严格拒绝，不进注册表（不保留注入兼容路径）。"""
+        accepted = self.mgr.register_module(_InjectedModule, self.owner)
+        self.assertFalse(accepted)
+        self.assertNotIn(_InjectedModule.__name__, self.mgr.get_external_module_ids(self.owner))
 
-    def test_valid_class_no_deprecation(self):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            accepted = self.mgr.register_module(_ValidModule, self.owner)
+    def test_valid_class_accepted(self):
+        """合法 _ModuleBase 子类正常注册。"""
+        accepted = self.mgr.register_module(_ValidModule, self.owner)
         self.assertTrue(accepted)
-        self.assertFalse(any(issubclass(w.category, DeprecationWarning) for w in caught))
-
-    def test_injected_class_accepted_even_when_warnings_are_errors(self):
-        """-W error::DeprecationWarning 下告警升格为异常，也不得阻断注册（零破坏铁律）。"""
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-            accepted = self.mgr.register_module(_InjectedModule, self.owner)
-        self.assertTrue(accepted)
-        self.assertIn(_InjectedModule.__name__, self.mgr.get_external_module_ids(self.owner))
+        self.assertIn(_ValidModule.__name__, self.mgr.get_external_module_ids(self.owner))
