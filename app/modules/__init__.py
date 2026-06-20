@@ -1,4 +1,5 @@
 from abc import abstractmethod, ABCMeta
+from enum import Enum
 from typing import Generic, Tuple, Union, TypeVar, Type, Dict, Optional, Callable
 from pathlib import Path
 
@@ -51,11 +52,22 @@ class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
         pass
 
     @staticmethod
-    def get_subtype() -> Union[DownloaderType, MediaServerType, MessageChannel, StorageSchema, OtherModulesType]:
+    def get_subtype() -> Union[DownloaderType, MediaServerType, MessageChannel, StorageSchema, OtherModulesType, str]:
         """
         获取模块子类型（下载器、媒体服务器、消息通道、存储类型、其他杂项模块类型）
         """
         pass
+
+    def get_subtype_id(self) -> str:
+        """
+        获取模块子类型的字符串标识。默认取 get_subtype().value，使内建模块零改动即具备字符串标识；
+        插件可重写此方法返回封闭枚举之外的任意字符串（如 "aria2"）以新增子类型，
+        无需改动 schemas/types.py 中的封闭枚举。get_subtype() 返回 None 时回退为空串。
+        """
+        subtype = self.get_subtype()
+        if subtype is None:
+            return ""
+        return str(subtype.value) if isinstance(subtype, Enum) else str(subtype)
 
     @staticmethod
     def get_priority() -> int:
