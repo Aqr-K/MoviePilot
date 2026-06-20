@@ -22,6 +22,24 @@ from app.utils.string import StringUtils
 
 
 class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
+    """
+    Rtorrent 下载器模块（app.modules.IDownloader 后端）。
+
+    作为 Downloader 域后端，由门面 app.helper.downloader_manager.DownloaderManager 统一分发调用。
+
+    .. deprecated::
+        经 ChainBase.run_module("download"/"list_torrents"/…) 的字符串 ABI 分发为 v2 兼容路径，
+        仍可用但计划在后续版本废弃；新代码请改用 DownloaderManager 门面的类型化方法。
+
+    TODO(IDownloader 归一化): 本模块 torrent_files() 当前返回 List[Dict]，而 qbittorrent/transmission
+        已归一化为 List[schemas.DownloaderFile]。IDownloader 契约声明统一返回 List[DownloaderFile]，
+        rtorrent 的归一化属独立的 P0.5 后端修复项（需 Rtorrent.get_files() 字段映射 + 真实 rtorrent
+        集成验证），本次门面改造不动其行为，留待后续单独修复。
+
+    已知能力缺口: 本模块为部分后端，未实现 get_torrent_trackers（qb/tr 已实现）。下载器方法按名分发，
+        门面/run_module 仅把实现了该方法的后端纳入调用，故缺该方法不影响其它操作；如需补齐另行处理。
+    """
+
     def init_module(self) -> None:
         """
         初始化模块

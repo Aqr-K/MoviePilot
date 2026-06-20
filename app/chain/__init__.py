@@ -16,6 +16,7 @@ from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
+from app.helper.downloader_manager import DownloaderManager
 from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
@@ -60,6 +61,7 @@ class ChainBase(metaclass=ABCMeta):
         self,
         *,
         modulemanager=None,
+        downloadermanager=None,
         eventmanager=None,
         messageoper=None,
         messagehelper=None,
@@ -77,6 +79,8 @@ class ChainBase(metaclass=ABCMeta):
         杜绝位置传参歧义（原 __init__(self) 不接受位置参，无调用方受影响）。
         """
         self.modulemanager = modulemanager or ModuleManager()
+        # 下载器（Downloader 域）门面：下载器相关包装方法经此分发，取代 run_module 字符串 ABI。
+        self.downloadermanager = downloadermanager or DownloaderManager()
         self.eventmanager = eventmanager or EventManager()
         self.messageoper = messageoper or MessageOper()
         self.messagehelper = messagehelper or MessageHelper()
@@ -1206,8 +1210,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: 下载器名称、种子Hash、种子文件布局、错误原因
         """
-        return self.run_module(
-            "download",
+        return self.downloadermanager.download(
             content=content,
             download_dir=download_dir,
             cookie=cookie,
@@ -1252,8 +1255,7 @@ class ChainBase(metaclass=ABCMeta):
         :param include_all_tags:  是否包含未打内置标签的下载任务
         :return: 下载器中符合状态的种子列表
         """
-        return self.run_module(
-            "list_torrents",
+        return self.downloadermanager.list_torrents(
             status=status,
             hashs=hashs,
             downloader=downloader,
@@ -1319,7 +1321,7 @@ class ChainBase(metaclass=ABCMeta):
         :param hashs:  种子Hash
         :param downloader:  下载器
         """
-        return self.run_module("transfer_completed", hashs=hashs, downloader=downloader)
+        return self.downloadermanager.transfer_completed(hashs=hashs, downloader=downloader)
 
     def remove_torrents(
             self,
@@ -1334,8 +1336,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module(
-            "remove_torrents",
+        return self.downloadermanager.remove_torrents(
             hashs=hashs,
             delete_file=delete_file,
             downloader=downloader,
@@ -1350,7 +1351,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("start_torrents", hashs=hashs, downloader=downloader)
+        return self.downloadermanager.start_torrents(hashs=hashs, downloader=downloader)
 
     def stop_torrents(
             self, hashs: Union[list, str], downloader: Optional[str] = None
@@ -1361,7 +1362,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("stop_torrents", hashs=hashs, downloader=downloader)
+        return self.downloadermanager.stop_torrents(hashs=hashs, downloader=downloader)
 
     def set_torrents_tag(
             self, hashs: Union[list, str], tags: list, downloader: Optional[str] = None
@@ -1373,7 +1374,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("set_torrents_tag", hashs=hashs, tags=tags, downloader=downloader)
+        return self.downloadermanager.set_torrents_tag(hashs=hashs, tags=tags, downloader=downloader)
 
     def update_torrent(
             self,
@@ -1400,8 +1401,7 @@ class ChainBase(metaclass=ABCMeta):
         :param seeding_time_limit: 做种时间限制，单位分钟
         :return: 各项修改结果
         """
-        return self.run_module(
-            "update_torrent",
+        return self.downloadermanager.update_torrent(
             hash_string=hash_string,
             downloader=downloader,
             download_limit=download_limit,
@@ -1424,8 +1424,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader: 下载器
         :return: 下载器名称到Tracker列表的映射
         """
-        return self.run_module(
-            "get_torrent_trackers",
+        return self.downloadermanager.get_torrent_trackers(
             hash_string=hash_string,
             downloader=downloader,
         )
@@ -1439,7 +1438,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: 种子文件
         """
-        return self.run_module("torrent_files", tid=tid, downloader=downloader)
+        return self.downloadermanager.torrent_files(tid=tid, downloader=downloader)
 
     def media_exists(
             self,

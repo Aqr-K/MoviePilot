@@ -1,6 +1,7 @@
 from abc import abstractmethod, ABCMeta
 from enum import Enum
-from typing import Generic, Tuple, Union, TypeVar, Type, Dict, Optional, Callable
+from typing import Generic, Tuple, Union, TypeVar, Type, Dict, List, Set, Optional, Callable, \
+    Protocol, runtime_checkable, TYPE_CHECKING
 from pathlib import Path
 
 from app.helper.service import ServiceConfigHelper
@@ -8,6 +9,11 @@ from app.schemas import Notification, NotificationConf, MediaServerConf, Downloa
 from app.schemas.types import ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
     OtherModulesType, SystemConfigKey
 from app.utils.mixins import ConfigReloadMixin
+
+if TYPE_CHECKING:
+    # 仅用于类型注解，避免在早期导入的 app.modules 顶层引入 schemas 重负载/潜在环。
+    from app.schemas import DownloaderTorrent, DownloaderFile, DownloaderInfo
+    from app.schemas.types import TorrentStatus
 
 
 class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
@@ -239,6 +245,109 @@ class _MessageBase(ServiceBase[TService, NotificationConf]):
                 if message.mtype.value not in switchs:
                     return False
         return True
+
+
+@runtime_checkable
+class IDownloader(Protocol):
+    """
+    下载器（Downloader 域）行为接口契约。
+
+    这是下载器领域的稳定行为接口（对照存储域的 StorageBase）：声明门面
+    app.helper.downloader.DownloaderManager 统一对外暴露、并按方法名分发到各后端的
+    下载器操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
+    契约，无需显式继承，避免与 _ModuleBase(ABCMeta)/ServiceBase(Generic) 的元类冲突，
+    亦保证对既有 Qbittorrent/Transmission/Rtorrent 模块零改动即结构兼容。
+
+    `@runtime_checkable` 使 isinstance(obj, IDownloader) 可在运行期校验"是否实现了这些方法名"
+    （注意 Protocol 的 isinstance 只校验方法存在性，不校验签名）。
+
+    约定（与 ChainBase 下载器包装方法签名一致）：
+    - 多实例路由：downloader 参数为具体下载器配置名（config_name）；为 None 时由后端广播到其
+      全部启用实例，门面再跨后端按"列表 extend / 非列表取首个非 None"合并。
+    - torrent_files 统一返回 List[DownloaderFile]（rtorrent 当前仍返回 List[Dict]，属待归一化的
+      P0.5 后端修复项，见 app/modules/rtorrent/__init__.py 的 TODO，本接口声明目标类型）。
+    """
+
+    def download(
+            self,
+            content: "Union[Path, str, bytes]",
+            download_dir: Path,
+            cookie: str,
+            episodes: "Set[int]" = None,
+            category: Optional[str] = None,
+            label: Optional[str] = None,
+            downloader: Optional[str] = None,
+    ) -> "Optional[Tuple[Optional[str], Optional[str], Optional[str], str]]":
+        """添加下载任务，返回 (下载器名, 种子Hash, 种子文件布局, 错误原因)。"""
+        ...
+
+    def list_torrents(
+            self,
+            status: "TorrentStatus" = None,
+            hashs: "Union[list, str]" = None,
+            downloader: Optional[str] = None,
+            include_all_tags: bool = False,
+    ) -> "Optional[List[DownloaderTorrent]]":
+        """获取下载器种子列表。"""
+        ...
+
+    def remove_torrents(
+            self,
+            hashs: "Union[str, list]",
+            delete_file: bool = True,
+            downloader: Optional[str] = None,
+    ) -> Optional[bool]:
+        """删除下载器种子。"""
+        ...
+
+    def start_torrents(self, hashs: "Union[list, str]", downloader: Optional[str] = None) -> Optional[bool]:
+        """开始下载。"""
+        ...
+
+    def stop_torrents(self, hashs: "Union[list, str]", downloader: Optional[str] = None) -> Optional[bool]:
+        """停止下载。"""
+        ...
+
+    def set_torrents_tag(
+            self, hashs: "Union[list, str]", tags: list, downloader: Optional[str] = None
+    ) -> Optional[bool]:
+        """设置种子标签。"""
+        ...
+
+    def update_torrent(
+            self,
+            hash_string: str,
+            downloader: Optional[str] = None,
+            download_limit: Optional[float] = None,
+            upload_limit: Optional[float] = None,
+            tracker_list: Optional[list] = None,
+            save_path: Optional[str] = None,
+            category: Optional[str] = None,
+            ratio_limit: Optional[float] = None,
+            seeding_time_limit: Optional[int] = None,
+    ) -> "Optional[Dict[str, bool]]":
+        """修改下载任务属性。"""
+        ...
+
+    def get_torrent_trackers(
+            self, hash_string: str, downloader: Optional[str] = None
+    ) -> "Optional[Dict[str, List[str]]]":
+        """查询下载任务 Tracker 列表。"""
+        ...
+
+    def torrent_files(
+            self, tid: str, downloader: Optional[str] = None
+    ) -> "Optional[List[DownloaderFile]]":
+        """获取种子文件列表。"""
+        ...
+
+    def downloader_info(self, downloader: Optional[str] = None) -> "Optional[List[DownloaderInfo]]":
+        """获取下载器统计信息。"""
+        ...
+
+    def transfer_completed(self, hashs: str, downloader: Optional[str] = None) -> None:
+        """下载器转移完成后的处理。"""
+        ...
 
 
 class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
