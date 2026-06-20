@@ -649,6 +649,22 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                             getattr(caps, "channel", None), caps, owner=plugin_id)
                     except Exception as err:
                         logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
+        # 注册插件经 provides_data_sources 声明新增的数据源（媒体识别/信息源，MediaRecognize 域），
+        # 经数据源契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 recognize_media 识别流水线。
+        provided_data_sources = plugin_metadata.get_plugin_provided_data_sources(self._running_plugins, pid)
+        for plugin_id, source_classes in provided_data_sources.items():
+            for source_cls in source_classes:
+                _ds_ok, _ds_reasons = ModuleManager.verify_data_source_contract(source_cls)
+                if not _ds_ok:
+                    logger.warning(f"插件 {plugin_id} 数据源 "
+                                   f"{getattr(source_cls, '__name__', source_cls)} 未通过数据源契约校验，拒绝注册："
+                                   f"{'；'.join(_ds_reasons)}")
+                    continue
+                try:
+                    ModuleManager().register_module(source_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 数据源 "
+                                 f"{getattr(source_cls, '__name__', source_cls)} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
