@@ -619,12 +619,24 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     except Exception as err:
                         logger.error(f"注册插件 {plugin_id} 存储器 "
                                      f"{getattr(storage_cls, '__name__', storage_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_channel_capabilities 声明的消息渠道能力矩阵
+        provided_caps = plugin_metadata.get_plugin_provided_channel_capabilities(self._running_plugins, pid)
+        if provided_caps:
+            from app.schemas.message import ChannelCapabilityManager
+            for plugin_id, caps_list in provided_caps.items():
+                for caps in caps_list:
+                    try:
+                        ChannelCapabilityManager.register_capabilities(
+                            getattr(caps, "channel", None), caps, owner=plugin_id)
+                    except Exception as err:
+                        logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
         卸载指定插件注册到 ModuleManager 的系统模块，停止其运行实例，无僵尸残留。
         """
         from app.modules.filemanager import FileManagerModule
+        from app.schemas.message import ChannelCapabilityManager
         for plugin_id in plugin_ids:
             try:
                 ModuleManager().unregister_modules(owner=plugin_id)
@@ -634,6 +646,10 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 FileManagerModule.unregister_storages(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 存储器出错：{str(err)}")
+            try:
+                ChannelCapabilityManager.unregister_capabilities(owner=plugin_id)
+            except Exception as err:
+                logger.error(f"卸载插件 {plugin_id} 渠道能力出错：{str(err)}")
 
     def sync(self) -> List[str]:
         """
