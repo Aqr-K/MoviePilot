@@ -1,5 +1,6 @@
+import threading
 import traceback
-from typing import Generator, Optional, Tuple, Any, Union, List
+from typing import Generator, Optional, Tuple, Any, Union, List, Dict
 
 from app.core.config import settings
 from app.core.event import eventmanager
@@ -24,40 +25,48 @@ class ModuleManager(metaclass=Singleton):
         self._modules: dict = {}
         # 运行态模块列表
         self._running_modules: dict = {}
+        # 外部(插件)注册的模块类，按 owner 记账：{owner: [module_cls, ...]}
+        # 作为与静态扫描并列的二级源，存类对象以便 reload 全量重扫后重放，挺过重扫不丢失。
+        self._external_classes: Dict[str, List[type]] = {}
+        # 保护 _modules/_running_modules/_external_classes 运行期并发读写的可重入锁
+        self._lock = threading.RLock()
         self.load_modules()
 
     def load_modules(self):
         """
         加载所有模块
         """
-        # 扫描模块目录
-        modules = ModuleHelper.load(
-            "app.modules",
-            filter_func=lambda _, obj: hasattr(obj, 'init_module') and hasattr(obj, 'init_setting')
-        )
-        self._running_modules = {}
-        self._modules = {}
-        for module in modules:
-            module_id = module.__name__
-            self._modules[module_id] = module
-            try:
-                # 生成实例
-                _module = module()
-                # 初始化模块
-                if self.check_setting(_module.init_setting()):
-                    # 通过模板开关控制加载
-                    _module.init_module()
-                    self._running_modules[module_id] = _module
-                    logger.debug(f"Moudle Loaded：{module_id}")
-            except Exception as err:
-                logger.error(f"Load Moudle Error：{module_id}，{str(err)} - {traceback.format_exc()}", exc_info=True)
+        with self._lock:
+            # 扫描模块目录
+            modules = ModuleHelper.load(
+                "app.modules",
+                filter_func=lambda _, obj: hasattr(obj, 'init_module') and hasattr(obj, 'init_setting')
+            )
+            self._running_modules = {}
+            self._modules = {}
+            for module in modules:
+                module_id = module.__name__
+                self._modules[module_id] = module
+                try:
+                    # 生成实例
+                    _module = module()
+                    # 初始化模块
+                    if self.check_setting(_module.init_setting()):
+                        # 通过模板开关控制加载
+                        _module.init_module()
+                        self._running_modules[module_id] = _module
+                        logger.debug(f"Moudle Loaded：{module_id}")
+                except Exception as err:
+                    logger.error(f"Load Moudle Error：{module_id}，{str(err)} - {traceback.format_exc()}", exc_info=True)
+            # 重放外部(插件)注册的模块，使其挺过 reload 的全量重扫
+            self._replay_external_modules()
 
     def stop(self):
         """
         停止所有模块
         """
         logger.info("正在停止所有模块...")
-        for module_id, module in self._running_modules.items():
+        for module_id, module in list(self._running_modules.items()):
             if hasattr(module, "stop"):
                 try:
                     module.stop()
@@ -122,7 +131,7 @@ class ModuleManager(metaclass=Singleton):
         """
         if not self._running_modules:
             return
-        for _, module in self._running_modules.items():
+        for _, module in list(self._running_modules.items()):
             if hasattr(module, method) \
                     and ObjectUtils.check_method(getattr(module, method)):
                 yield module
@@ -133,7 +142,7 @@ class ModuleManager(metaclass=Singleton):
         """
         if not self._running_modules:
             return
-        for _, module in self._running_modules.items():
+        for _, module in list(self._running_modules.items()):
             if hasattr(module, 'get_type') \
                     and module.get_type() == module_type:
                 yield module
@@ -144,7 +153,7 @@ class ModuleManager(metaclass=Singleton):
         """
         if not self._running_modules:
             return
-        for _, module in self._running_modules.items():
+        for _, module in list(self._running_modules.items()):
             if hasattr(module, 'get_subtype') \
                     and module.get_subtype() == module_subtype:
                 yield module
@@ -170,3 +179,112 @@ class ModuleManager(metaclass=Singleton):
         获取模块id列表
         """
         return list(self._modules.keys())
+
+    # ---------------------------------------------------------------------
+    # 外部(插件)模块二级注册：与静态扫描并列的来源。外部模块经 register 进入
+    # _running_modules 后，被 chain 分发层(仅按 method 名 + get_priority 取模块)
+    # 无差别接管，无需改动分发链。运行期线程安全，支持热插拔。
+    # ---------------------------------------------------------------------
+
+    def register_module(self, module_cls: type, owner: str) -> bool:
+        """
+        注册一个外部(插件)模块类。复用内建加载流程(check_setting/init_setting/init_module)，
+        成功后进入 _running_modules 即可被分发。owner 用于按来源精确回收(unregister)。
+
+        :param module_cls: 模块类，需实现 _ModuleBase 契约(init_module/init_setting/stop/test 等)
+        :param owner: 注册来源标识(通常为 plugin_id)，用于精确卸载
+        :return: 是否被接受进注册表(命名冲突或非法入参返回 False；
+                 被接受但因开关关闭/初始化异常未上线仍返回 True，运行态另由分发查询体现)
+        """
+        if not owner or not isinstance(module_cls, type):
+            return False
+        module_id = module_cls.__name__
+        with self._lock:
+            # 命名冲突：已存在且不归属本 owner(内建或他插件) → 拒绝，避免遮蔽
+            existing_owner = self._find_owner(module_id)
+            if module_id in self._modules and existing_owner != owner:
+                logger.warning(
+                    f"模块注册冲突：{module_id} 已存在(owner={existing_owner or 'builtin'})，"
+                    f"拒绝来自 {owner} 的注册")
+                return False
+            # 记账(幂等：同 owner 重复注册不产生重复记录)
+            owner_classes = self._external_classes.setdefault(owner, [])
+            if module_cls not in owner_classes:
+                owner_classes.append(module_cls)
+            # 激活(进入 _modules/_running_modules)
+            self._activate_module(module_cls, owner)
+            return True
+
+    def unregister_modules(self, owner: str) -> List[str]:
+        """
+        卸载某来源(owner)注册的全部外部模块，停止其运行实例并从注册表移除，无僵尸残留。
+
+        :param owner: 注册来源标识
+        :return: 被移除的 module_id 列表
+        """
+        if not owner:
+            return []
+        removed: List[str] = []
+        with self._lock:
+            classes = self._external_classes.pop(owner, [])
+            for module_cls in classes:
+                module_id = module_cls.__name__
+                running = self._running_modules.pop(module_id, None)
+                if running is not None and hasattr(running, "stop"):
+                    try:
+                        running.stop()
+                    except Exception as err:
+                        logger.error(f"Stop Module Error：{module_id}，{str(err)} - {traceback.format_exc()}",
+                                     exc_info=True)
+                self._modules.pop(module_id, None)
+                removed.append(module_id)
+        return removed
+
+    def get_external_module_ids(self, owner: Optional[str] = None) -> List[str]:
+        """
+        获取外部(插件)注册的模块id列表。owner 为空时返回全部来源。
+        """
+        with self._lock:
+            if owner is not None:
+                return [cls.__name__ for cls in self._external_classes.get(owner, [])]
+            return [cls.__name__
+                    for classes in self._external_classes.values()
+                    for cls in classes]
+
+    def _activate_module(self, module_cls: type, owner: Optional[str] = None) -> bool:
+        """
+        实例化并初始化一个模块类，写入 _modules，开关通过则写入 _running_modules。
+        异常被捕获并隔离，不影响其它模块。调用方需持有 self._lock。
+
+        :return: 是否成功进入运行态
+        """
+        module_id = module_cls.__name__
+        self._modules[module_id] = module_cls
+        try:
+            _module = module_cls()
+            if self.check_setting(_module.init_setting()):
+                _module.init_module()
+                self._running_modules[module_id] = _module
+                logger.debug(f"Module Loaded：{module_id}" + (f"（owner={owner}）" if owner else ""))
+                return True
+            return False
+        except Exception as err:
+            logger.error(f"Load Module Error：{module_id}，{str(err)} - {traceback.format_exc()}", exc_info=True)
+            return False
+
+    def _replay_external_modules(self):
+        """
+        重放外部注册的模块类(reload 全量重扫后调用)。调用方需持有 self._lock。
+        """
+        for owner, classes in list(self._external_classes.items()):
+            for module_cls in classes:
+                self._activate_module(module_cls, owner)
+
+    def _find_owner(self, module_id: str) -> Optional[str]:
+        """
+        查找某 module_id 归属的外部 owner，未注册或为内建模块返回 None。调用方需持有 self._lock。
+        """
+        for owner, classes in self._external_classes.items():
+            if any(cls.__name__ == module_id for cls in classes):
+                return owner
+        return None
