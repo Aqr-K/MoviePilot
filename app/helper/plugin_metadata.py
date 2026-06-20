@@ -9,6 +9,7 @@
 """
 import inspect
 import posixpath
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -128,6 +129,15 @@ def get_plugin_modules(running_plugins, pid: Optional[str] = None) -> Dict[tuple
                 if not plugin.get_state():
                     continue
                 plugin_module = plugin.get_module() or []
+                if plugin_module and not getattr(plugin, "_get_module_deprecation_warned", False):
+                    setattr(plugin, "_get_module_deprecation_warned", True)
+                    _dep_msg = (f"插件 {plugin_id} 使用 get_module() 方法胁持（无契约校验，已废弃），"
+                                f"请改用 provides_modules() 走验证注册。")
+                    logger.warning(f"[DEPRECATED] {_dep_msg}")
+                    try:
+                        warnings.warn(_dep_msg, DeprecationWarning, stacklevel=2)
+                    except Exception:
+                        pass  # 告警升格(-W error)不得影响模块聚合
                 ret_modules[(plugin_id, plugin.get_name())] = plugin_module
             except Exception as e:
                 logger.error(f"获取插件 {plugin_id} 模块出错：{str(e)}")

@@ -1,5 +1,7 @@
+import inspect
 import threading
 import traceback
+import warnings
 from enum import Enum
 from typing import Generator, Optional, Tuple, Any, Union, List, Dict
 
@@ -209,6 +211,48 @@ class ModuleManager(metaclass=Singleton):
     # 无差别接管，无需改动分发链。运行期线程安全，支持热插拔。
     # ---------------------------------------------------------------------
 
+    @staticmethod
+    def verify_module_contract(module_cls: type) -> Tuple[bool, List[str]]:
+        """
+        校验外部模块类是否满足 _ModuleBase 基类契约，作为「验证注册」的核心判定。
+
+        宽松策略（缺注解/不可内省时降级跳过、不抛异常），返回 (是否通过, 失败原因列表)。
+        供 register_module 把旧「注入」式注册升级为「验证后注册」——不通过仅作废弃提醒、
+        不强制拒绝，保证零插件破坏。
+        """
+        if not isinstance(module_cls, type):
+            return False, ["不是类对象"]
+        reasons: List[str] = []
+        # 1) 应继承 _ModuleBase（真模块 vs 任意注入类的核心区分）；lazy import 避免 import-time 环
+        try:
+            from app.modules import _ModuleBase
+            if not issubclass(module_cls, _ModuleBase):
+                reasons.append("未继承 app.modules._ModuleBase")
+        except ImportError:
+            pass  # app.modules 依赖未就绪时仅降级跳过该项；其它异常照常上报
+        # 2) 抽象方法须全部落地，否则不可实例化
+        abstracts = getattr(module_cls, "__abstractmethods__", frozenset())
+        if abstracts:
+            reasons.append(f"抽象方法未实现：{sorted(abstracts)}")
+        # 3) 契约方法存在且可调用 + 签名宽松兼容（生命周期/声明方法不应要求额外必填位置参）
+        for _name in ("init_module", "init_setting", "stop", "test", "get_type", "get_subtype"):
+            _fn = getattr(module_cls, _name, None)
+            if not callable(_fn):
+                reasons.append(f"缺少契约方法：{_name}")
+                continue
+            try:
+                _extra = [
+                    p.name for p in inspect.signature(_fn).parameters.values()
+                    if p.name not in ("self", "cls")
+                    and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+                    and p.default is p.empty
+                ]
+                if _extra:
+                    reasons.append(f"{_name} 签名不兼容：要求额外必填参 {_extra}")
+            except (ValueError, TypeError):
+                pass  # 无法内省 → 降级跳过
+        return (not reasons), reasons
+
     def register_module(self, module_cls: type, owner: str) -> bool:
         """
         注册一个外部(插件)模块类。复用内建加载流程(check_setting/init_setting/init_module)，
@@ -222,6 +266,18 @@ class ModuleManager(metaclass=Singleton):
         if not owner or not isinstance(module_cls, type):
             return False
         module_id = module_cls.__name__
+        # 验证注册：校验 _ModuleBase 基类契约。不通过仅发废弃提醒（软废弃），不阻断注册——
+        # 旧「注入」式（未达契约即接受）路径将废弃，引导插件实现完整契约走「验证注册」。
+        _ok, _reasons = self.verify_module_contract(module_cls)
+        if not _ok:
+            _msg = (f"模块 {module_id}(owner={owner}) 未通过 _ModuleBase 契约校验："
+                    f"{'；'.join(_reasons)}。当前按兼容『注入』路径接受，该路径将废弃，"
+                    f"请使其继承 app.modules._ModuleBase 并实现完整契约以走『验证注册』。")
+            logger.warning(f"[DEPRECATED] {_msg}")
+            try:
+                warnings.warn(_msg, DeprecationWarning, stacklevel=2)
+            except Exception:
+                pass  # 即便告警被升格为异常(-W error)也不得阻断注册（零破坏铁律）
         with self._lock:
             # 命名冲突：已存在且不归属本 owner(内建或他插件) → 拒绝，避免遮蔽
             existing_owner = self._find_owner(module_id)

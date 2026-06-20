@@ -191,7 +191,11 @@ class _PluginBase(metaclass=ABCMeta):
 
     def get_module(self) -> Dict[str, Any]:
         """
-        获取插件模块声明，用于胁持系统模块实现（方法名：方法实现）
+        【已废弃，将移除】获取插件模块声明，用于胁持系统模块实现（方法名：方法实现）。
+
+        本「方法胁持/注入」路径无契约校验、易与内建实现冲突，已废弃；
+        请改用 provides_modules() 走「验证注册」——框架统一注册到 ModuleManager
+        并参与 chain 分发，无需 monkey-patch app.modules。
         {
             "id1": self.xxx1,
             "id2": self.xxx2,
