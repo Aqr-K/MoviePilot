@@ -28,8 +28,9 @@ def source(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
 
     def _collect(items):
         for src in items or []:
-            api_path = getattr(src, "api_path", None)
-            if not src or api_path in seen_paths:
+            api_path = getattr(src, "api_path", None) if src else None
+            # 跳过畸形源（无 api_path），逐个忽略而非把 None 塞进去重集吞掉后续源
+            if api_path is None or api_path in seen_paths:
                 continue
             seen_paths.add(api_path)
             sources.append(src)

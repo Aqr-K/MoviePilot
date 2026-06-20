@@ -122,3 +122,27 @@ class TestRecommendSourceEndpointMerge(TestCase):
         self.assertEqual([s.api_path for s in result],
                          ["/plugin/p/recommend", "/plugin/e/recommend"])
         self.assertEqual([s.name for s in result], ["plug", "evt"])
+
+
+class TestDiscoverSourceEndpointSkipsMalformed(TestCase):
+    def test_sources_without_api_path_are_skipped_not_collapsed(self):
+        # 畸形源（无 api_path）应逐个跳过，而非把 None 塞进去重集吞掉后续合法源
+        from types import SimpleNamespace
+
+        from app.api.endpoints import discover as discover_ep
+
+        good = _disc("good", "/plugin/p/discover")
+        bad1 = SimpleNamespace(name="bad1")  # 无 api_path
+        bad2 = SimpleNamespace(name="bad2")  # 无 api_path
+
+        pm = MagicMock()
+        pm.get_plugin_provided_discover_sources.return_value = {"p": [bad1, good, bad2]}
+        event = MagicMock()
+        event.event_data = MagicMock()
+        event.event_data.extra_sources = []
+
+        with patch.object(discover_ep, "PluginManager", return_value=pm), \
+                patch.object(discover_ep.eventmanager, "send_event", return_value=event):
+            result = discover_ep.source()
+
+        self.assertEqual([s.name for s in result], ["good"])
