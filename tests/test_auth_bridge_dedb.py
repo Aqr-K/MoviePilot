@@ -49,3 +49,27 @@ def test_ticket_roundtrip_and_one_time():
     data = ab.consume_plugin_auth_ticket(ticket)
     assert data and data["user_id"] == 7 and data["provider_id"] == "probe"
     assert ab.consume_plugin_auth_ticket(ticket) is None  # 一次性票据
+
+
+def test_ticket_expired_and_unknown_rejected():
+    """SSO 现有面防回归：过期 / 未知 / 空票据一律拒绝。"""
+    import time
+    import app.core.auth_bridge as ab
+
+    assert ab.consume_plugin_auth_ticket("nope") is None
+    assert ab.consume_plugin_auth_ticket("") is None
+    assert ab.consume_plugin_auth_ticket(None) is None
+    ticket = ab.create_plugin_auth_ticket(user_id=3, provider_id="probe")
+    store = ab.AuthTicketStore()
+    # 把签发时间推到远超 TTL 之前，验证过期分支
+    store._tickets[ticket]["created_at"] = time.time() - (store._ttl_seconds + 100)
+    assert ab.consume_plugin_auth_ticket(ticket) is None
+
+
+def test_ticket_user_id_coerced_to_int():
+    """SSO 现有面防回归：user_id 入库归一化为 int（前端拿到稳定类型）。"""
+    import app.core.auth_bridge as ab
+
+    ticket = ab.create_plugin_auth_ticket(user_id="11", provider_id="probe")
+    data = ab.consume_plugin_auth_ticket(ticket)
+    assert data["user_id"] == 11 and isinstance(data["user_id"], int)
