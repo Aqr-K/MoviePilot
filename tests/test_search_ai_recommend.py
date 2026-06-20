@@ -122,7 +122,6 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("[0, 2]", result)
         self.assertEqual(ReplyMode.CAPTURE_ONLY, captured["reply_mode"])
-        self.assertFalse(captured["persist_output_message"])
         self.assertFalse(captured["allow_message_tools"])
 
     def test_search_by_title_clears_previous_recommend_state_when_caching(self):

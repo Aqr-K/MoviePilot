@@ -395,7 +395,6 @@ class SearchChain(ChainBase):
             session_prefix="__agent_search_recommend",
             output_callback=on_output,
             reply_mode=ReplyMode.CAPTURE_ONLY,
-            persist_output_message=False,
             allow_message_tools=False,
         )
         return full_output[0].strip()

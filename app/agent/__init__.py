@@ -15,6 +15,7 @@ from langchain.agents.middleware import (
 from langchain_core.messages import (  # noqa: F401
     HumanMessage,
     BaseMessage,
+    SystemMessage,
 )
 
 import warnings
@@ -49,6 +50,7 @@ from app.agent.tools.factory import MoviePilotToolFactory
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.event import eventmanager
+from app.db.agentchat_oper import AgentChatOper
 from app.db.user_oper import UserOper
 from app.log import logger
 from app.schemas import AgentLLMProviderEventData, AgentTokensUsageEventData, Notification, NotificationType
@@ -222,6 +224,11 @@ HEARTBEAT_SESSION_PREFIX = "__agent_heartbeat_"
 UNSUPPORTED_IMAGE_INPUT_MESSAGE = "当前模型不支持图片输入，请更换支持图片输入的模型，或在系统设置中关闭图片输入支持后重试。"
 AGENT_EXECUTION_ERROR_PREFIX = "智能助手执行失败"
 AGENT_EXECUTION_ERROR_MESSAGE = "智能助手执行失败，请稍后重试。"
+AGENT_DISPLAY_HISTORY_SKIP_CHANNELS = {MessageChannel.WebAgent.value}
+AGENT_CHAT_TITLE_PROMPT = (
+    "你是 MoviePilot 智能助手的会话标题生成器。请根据用户的第一条消息生成一个简洁中文标题，"
+    "不超过 18 个汉字或 36 个英文字符，只输出标题本身，不要引号、编号或解释。"
+)
 
 
 class MoviePilotAgent:
@@ -239,7 +246,6 @@ class MoviePilotAgent:
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
             replay_mode: ReplyMode = ReplyMode.DISPATCH,
-            persist_output_message: bool = True,
             allow_message_tools: bool = True,
             output_callback: Optional[Callable[[str], None]] = None,
     ):
@@ -251,7 +257,6 @@ class MoviePilotAgent:
         self.original_message_id = original_message_id
         self.original_chat_id = original_chat_id
         self.reply_mode = replay_mode
-        self.persist_output_message = persist_output_message
         self.allow_message_tools = allow_message_tools
         self.output_callback = output_callback
         self._tool_context: Dict[str, object] = {}
@@ -263,6 +268,137 @@ class MoviePilotAgent:
 
         # 流式token管理
         self.stream_handler = StreamingHandler()
+
+    @staticmethod
+    def _current_timestamp_ms() -> int:
+        """返回当前毫秒时间戳。"""
+        return int(datetime.now().timestamp() * 1000)
+
+    @classmethod
+    def build_display_message(
+            cls,
+            role: str,
+            content: str = "",
+            attachments: Optional[List[dict]] = None,
+            status: str = "done",
+    ) -> dict[str, Any]:
+        """
+        构造可展示的 Agent 会话消息。
+        """
+        return {
+            "id": f"{role}-{uuid.uuid4().hex}",
+            "role": role,
+            "content": content or "",
+            "createdAt": cls._current_timestamp_ms(),
+            "status": status,
+            "tools": [],
+            "attachments": attachments or [],
+            "choices": [],
+        }
+
+    def _should_save_display_history(self) -> bool:
+        """
+        判断当前 Agent 是否由通用渠道保存展示历史。
+        """
+        return bool(
+            self.channel
+            and self.source
+            and self.channel not in AGENT_DISPLAY_HISTORY_SKIP_CHANNELS
+        )
+
+    def _should_persist_agent_chat(self) -> bool:
+        """
+        判断当前 Agent 是否需要写入会话历史表。
+        """
+        return bool(self.channel and self.source)
+
+    def _save_display_history_messages(self, messages: List[dict]) -> None:
+        """
+        将一组可见消息追加到 Agent 会话历史表。
+        """
+        if not messages or not self._should_save_display_history():
+            return
+        try:
+            AgentChatOper().append_display_messages(
+                session_id=self.session_id,
+                user_id=self.user_id,
+                username=self.username,
+                channel=self.channel,
+                source=self.source,
+                original_chat_id=self.original_chat_id,
+                messages=messages,
+            )
+        except Exception as e:
+            logger.debug(f"写入Agent展示历史失败: {e}")
+
+    def _save_assistant_display_message_once(self, message: str) -> None:
+        """
+        保存一条助手回复展示记录，并标记本轮已写入。
+        """
+        if not message or self._tool_context.get("assistant_display_saved"):
+            return
+        self._save_display_history_messages(
+            [self.build_display_message(role="assistant", content=message)]
+        )
+        self._tool_context["assistant_display_saved"] = True
+
+    @staticmethod
+    def _sanitize_chat_title(value: str) -> str:
+        """清理模型返回的会话标题。"""
+        title = str(value or "").strip()
+        title = re.sub(r"^[#\-*\d.、\s]+", "", title)
+        title = title.strip("「」『』“”\"'` \n\t")
+        title = re.sub(r"\s+", " ", title)
+        return title[:120]
+
+    async def _generate_chat_title(self, message: str) -> str:
+        """
+        使用当前 Agent 模型生成会话标题。
+        """
+        if not str(message or "").strip():
+            return ""
+        model = await self._initialize_llm(streaming=False)
+        response = await model.ainvoke(
+            [
+                SystemMessage(content=AGENT_CHAT_TITLE_PROMPT),
+                HumanMessage(content=str(message).strip()[:1000]),
+            ]
+        )
+        content = LLMHelper._extract_text_content(getattr(response, "content", response))
+        return self._sanitize_chat_title(content)
+
+    async def prepare_chat_title(self, message: str) -> None:
+        """
+        首次对话时生成并保存会话标题。
+        """
+        if not self._should_persist_agent_chat():
+            return
+        if self._tool_context.get("chat_title_prepared"):
+            return
+        self._tool_context["chat_title_prepared"] = True
+        try:
+            chat = await run_in_threadpool(
+                AgentChatOper().get,
+                session_id=self.session_id,
+                user_id=self.user_id,
+            )
+            if chat and AgentChatOper.has_custom_title(chat.title):
+                return
+            title = await self._generate_chat_title(message)
+            if not title:
+                return
+            await run_in_threadpool(
+                AgentChatOper().update_title_if_empty,
+                session_id=self.session_id,
+                user_id=self.user_id,
+                title=title,
+                username=self.username,
+                channel=self.channel,
+                source=self.source,
+                original_chat_id=self.original_chat_id,
+            )
+        except Exception as e:
+            logger.debug(f"生成Agent会话标题失败: {e}")
 
     @staticmethod
     def _coerce_int(value: Any) -> Optional[int]:
@@ -391,7 +527,7 @@ class MoviePilotAgent:
     @property
     def is_background(self) -> bool:
         """
-        是否为后台任务模式（无渠道信息，如定时唤醒）
+        是否为无需回传捕获内容的后台任务模式。
         """
         return (not self.channel or not self.source) and not callable(self.output_callback)
 
@@ -411,6 +547,13 @@ class MoviePilotAgent:
         否则会让这类高频后台调用持续带入无关动态上下文，影响缓存命中率。
         """
         return self.session_id.startswith(HEARTBEAT_SESSION_PREFIX)
+
+    @property
+    def has_message_context(self) -> bool:
+        """
+        是否具备真实消息渠道上下文。
+        """
+        return bool(self.channel and self.source)
 
     async def _is_system_admin_context(self) -> bool:
         """
@@ -775,8 +918,6 @@ class MoviePilotAgent:
         title = "MoviePilot助手" if self.is_background else ""
         if self.should_dispatch_reply:
             await self.send_agent_message(message, title=title)
-        elif self.persist_output_message:
-            await self._save_agent_message_to_db(message, title=title)
 
     def _emit_output(self, text: str):
         """
@@ -901,7 +1042,7 @@ class MoviePilotAgent:
                 UsageMiddleware(on_usage=self._record_usage),
             ]
 
-            if not self.is_heartbeat_session:
+            if self.has_message_context:
                 middlewares.insert(
                     4,
                     ActivityLogMiddleware(
@@ -941,6 +1082,7 @@ class MoviePilotAgent:
         """
         处理用户消息，流式推理并返回 Agent 回复
         """
+        user_display_saved = False
         try:
             logger.info(
                 f"Agent推理: session_id={self.session_id}, input={message}, "
@@ -979,6 +1121,21 @@ class MoviePilotAgent:
             for img in images or []:
                 content.append({"type": "image_url", "image_url": {"url": img}})
             messages.append(HumanMessage(content=content))
+            await self.prepare_chat_title(message)
+            self._save_display_history_messages(
+                [
+                    self.build_display_message(
+                        role="user",
+                        content=message,
+                        attachments=self._build_input_display_attachments(
+                            images=images,
+                            files=files,
+                            has_audio_input=has_audio_input,
+                        ),
+                    )
+                ]
+            )
+            user_display_saved = True
 
             # 执行推理
             result = await self._execute_agent(messages)
@@ -989,10 +1146,62 @@ class MoviePilotAgent:
         except Exception as e:
             error_message = f"处理消息时发生错误: {str(e)}"
             logger.error(error_message)
+            if not user_display_saved:
+                self._save_display_history_messages(
+                    [self.build_display_message(role="user", content=message)]
+                )
             if not self.should_dispatch_reply:
                 raise
             await self.send_agent_message(error_message)
             return error_message
+
+    @staticmethod
+    def _guess_file_attachment_kind(mime_type: Optional[str], fallback: str = "file") -> str:
+        """
+        根据 MIME 类型推断展示附件类型。
+        """
+        if mime_type and mime_type.startswith("image/"):
+            return "image"
+        if mime_type and mime_type.startswith("audio/"):
+            return "audio"
+        return fallback
+
+    def _build_input_display_attachments(
+            self,
+            images: Optional[List[str]] = None,
+            files: Optional[List[dict]] = None,
+            has_audio_input: bool = False,
+    ) -> List[dict]:
+        """
+        构造用户输入附件的展示记录。
+        """
+        attachments: List[dict] = []
+        for index, image in enumerate(images or [], start=1):
+            attachments.append(
+                {
+                    "kind": "image",
+                    "url": image,
+                    "download_url": image,
+                    "name": f"image-{index}",
+                    "mime_type": "image/*",
+                }
+            )
+        for index, file in enumerate(files or [], start=1):
+            ref = file.get("ref") or file.get("local_path") or ""
+            mime_type = file.get("mime_type")
+            fallback = "audio" if has_audio_input and mime_type == "audio/*" else "file"
+            attachments.append(
+                {
+                    "kind": self._guess_file_attachment_kind(mime_type, fallback=fallback),
+                    "url": ref,
+                    "download_url": ref,
+                    "name": file.get("name") or f"attachment-{index}",
+                    "mime_type": mime_type,
+                    "size": file.get("size"),
+                    "local_path": file.get("local_path"),
+                }
+            )
+        return attachments
 
     async def _stream_agent_tokens(
             self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
@@ -1119,19 +1328,6 @@ class MoviePilotAgent:
                             and not self._tool_context.get("user_reply_sent")
                     ):
                         await self.send_agent_message(remaining_text)
-                    elif (
-                            remaining_text
-                            and self.persist_output_message
-                            and not self._tool_context.get("user_reply_sent")
-                    ):
-                        title = "MoviePilot助手" if self.is_background else ""
-                        await self._save_agent_message_to_db(
-                            remaining_text,
-                            title=title,
-                        )
-                elif streamed_text and self.persist_output_message:
-                    # 流式输出已发送全部内容，但未记录到数据库，补充保存消息记录
-                    await self._save_agent_message_to_db(streamed_text)
 
             else:
                 # 非流式模式：后台任务或渠道不支持消息编辑
@@ -1173,20 +1369,24 @@ class MoviePilotAgent:
                     else:
                         # 非流式渠道：发送最终回复
                         await self.send_agent_message(final_text)
-                elif (
-                        final_text
-                        and self.persist_output_message
-                        and not self._tool_context.get("user_reply_sent")
-                ):
-                    title = "MoviePilot助手" if self.is_background else ""
-                    await self._save_agent_message_to_db(final_text, title=title)
 
-            # 保存消息
-            memory_manager.save_agent_messages(
-                session_id=self.session_id,
-                user_id=self.user_id,
-                messages=agent.get_state(agent_config).values.get("messages", []),
-            )
+            display_text = self._streamed_output
+            if not display_text:
+                final_messages = agent.get_state(agent_config).values.get(
+                    "messages", []
+                )
+                for msg in reversed(final_messages):
+                    if hasattr(msg, "type") and msg.type == "ai" and msg.content:
+                        display_text = self._extract_text_content(msg.content).strip()
+                        break
+            self._save_assistant_display_message_once(display_text)
+
+            if self._should_persist_agent_chat():
+                memory_manager.save_agent_messages(
+                    session_id=self.session_id,
+                    user_id=self.user_id,
+                    messages=agent.get_state(agent_config).values.get("messages", []),
+                )
             execution_success = True
 
         except asyncio.CancelledError:
@@ -1217,6 +1417,7 @@ class MoviePilotAgent:
         """
         通过原渠道发送消息给用户
         """
+        self._save_assistant_display_message_once(message)
         await AgentChain().async_post_message(
             Notification(
                 channel=self.channel,
@@ -1230,26 +1431,6 @@ class MoviePilotAgent:
                 text=message,
             )
         )
-
-    async def _save_agent_message_to_db(self, message: str, title: str = ""):
-        """
-        仅保存Agent回复消息到数据库和SSE队列（不重新发送到渠道）
-        用于流式输出场景：消息已通过 send_direct_message/edit_message 发送给用户，
-        但未记录到数据库中，此方法补充保存消息历史记录。
-        """
-        chain = AgentChain()
-        notification = Notification(
-            channel=self.channel,
-            source=self.source,
-            userid=self.user_id,
-            username=self.username,
-            title=title,
-            text=message,
-        )
-        # 保存到SSE消息队列（供前端展示）
-        chain.messagehelper.put(notification, role="user", title=title)
-        # 保存到数据库
-        await chain.messageoper.async_add(**notification.model_dump())
 
     async def cleanup(self):
         """
@@ -1277,7 +1458,6 @@ class _MessageTask:
     original_chat_id: Optional[str] = None
     processing_status: Optional[dict] = None
     reply_mode: ReplyMode = ReplyMode.DISPATCH
-    persist_output_message: bool = True
     allow_message_tools: bool = True
 
 
@@ -1423,7 +1603,6 @@ class AgentManager:
             original_message_id: Optional[str] = None,
             original_chat_id: Optional[str] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
-            persist_output_message: bool = True,
             allow_message_tools: bool = True,
     ) -> str:
         """
@@ -1443,7 +1622,6 @@ class AgentManager:
             original_message_id=original_message_id,
             original_chat_id=original_chat_id,
             reply_mode=reply_mode,
-            persist_output_message=persist_output_message,
             allow_message_tools=allow_message_tools,
         )
         self._record_session_activity(session_id, user_id)
@@ -1554,7 +1732,6 @@ class AgentManager:
                 original_message_id=task.original_message_id,
                 original_chat_id=task.original_chat_id,
                 replay_mode=task.reply_mode,
-                persist_output_message=task.persist_output_message,
                 allow_message_tools=task.allow_message_tools,
             )
             self.active_agents[session_id] = agent
@@ -1570,7 +1747,6 @@ class AgentManager:
             agent.original_message_id = task.original_message_id
             agent.original_chat_id = task.original_chat_id
             agent.reply_mode = task.reply_mode
-            agent.persist_output_message = task.persist_output_message
             agent.allow_message_tools = task.allow_message_tools
 
         process_kwargs = {
@@ -1649,7 +1825,6 @@ class AgentManager:
             session_prefix: str = "__agent_background",
             output_callback: Optional[Callable[[str], None]] = None,
             reply_mode: ReplyMode = ReplyMode.CAPTURE_ONLY,
-            persist_output_message: bool = True,
             allow_message_tools: Optional[bool] = None,
     ) -> None:
         """
@@ -1670,7 +1845,6 @@ class AgentManager:
             source=None,
             username=settings.SUPERUSER,
             replay_mode=reply_mode,
-            persist_output_message=persist_output_message,
             output_callback=output_callback,
             allow_message_tools=allow_message_tools,
         )
@@ -1716,7 +1890,6 @@ class AgentManager:
                 source=None,
                 username=settings.SUPERUSER,
                 reply_mode=ReplyMode.CAPTURE_ONLY,
-                persist_output_message=False,
                 allow_message_tools=True,
             )
 

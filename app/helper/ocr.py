@@ -31,7 +31,7 @@ class OcrHelper:
         if image_url:
             data_url_b64 = self._extract_data_url_base64(image_url)
             if data_url_b64:
-                image_b64 = data_url_b64
+                image_b64 = self._normalize_image_base64(data_url_b64)
             else:
                 ret = RequestUtils(ua=ua,
                                    cookies=cookie).get_res(image_url)
@@ -54,7 +54,14 @@ class OcrHelper:
         """规范化外部传入的图片 base64 内容。"""
         if not image_b64:
             return ""
-        return OcrHelper._extract_data_url_base64(image_b64) or image_b64.strip()
+        clean_image_b64 = OcrHelper._extract_data_url_base64(image_b64) or image_b64
+        clean_image_b64 = "".join(clean_image_b64.split())
+        if not clean_image_b64:
+            return ""
+        padding_size = len(clean_image_b64) % 4
+        if padding_size:
+            clean_image_b64 = f"{clean_image_b64}{'=' * (4 - padding_size)}"
+        return clean_image_b64
 
     @staticmethod
     def _extract_data_url_base64(image_url: Optional[str]) -> str:

@@ -66,6 +66,19 @@ class TransferFileTool(MoviePilotTool):
     args_schema: Type[BaseModel] = TransferFileInput
     require_admin: bool = True
 
+    @staticmethod
+    def _get_fileitem_type(file_path: str, storage: Optional[str] = "local") -> str:
+        """
+        判断待整理路径的文件类型。
+
+        :param file_path: 已规范化的源文件或目录路径
+        :param storage: 源存储类型
+        :return: ``dir`` 或 ``file``
+        """
+        if (storage or "local") == "local" and Path(file_path).is_dir():
+            return "dir"
+        return "dir" if file_path.endswith("/") else "file"
+
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据整理参数生成友好的提示消息"""
         file_path = kwargs.get("file_path", "")
@@ -119,7 +132,7 @@ class TransferFileTool(MoviePilotTool):
         fileitem = FileItem(
             storage=storage or "local",
             path=file_path,
-            type="dir" if file_path.endswith("/") else "file",
+            type=TransferFileTool._get_fileitem_type(file_path, storage),
         )
         target_path_obj = Path(target_path) if target_path else None
 

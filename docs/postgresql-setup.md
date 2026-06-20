@@ -75,13 +75,6 @@ DB_POSTGRESQL_USERNAME=your-username
 DB_POSTGRESQL_PASSWORD=your-password
 ```
 
-使用 Redis Unix Socket 时，可直接设置 `CACHE_BACKEND_URL`，例如：
-
-```bash
-CACHE_BACKEND_TYPE=redis
-CACHE_BACKEND_URL=unix:///var/run/redis/redis.sock?db=0
-```
-
 ## 数据迁移
 
 ### 从 SQLite 迁移到 PostgreSQL
