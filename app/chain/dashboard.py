@@ -18,4 +18,4 @@ class DashboardChain(ChainBase):
         """
         下载器信息
         """
-        return self.run_module("downloader_info", downloader=downloader)
+        return self.downloadermanager.downloader_info(downloader=downloader)

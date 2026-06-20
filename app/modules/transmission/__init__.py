@@ -30,6 +30,15 @@ _TRANSMISSION_PAUSED_STATES = {
 
 
 class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
+    """
+    Transmission 下载器模块（app.modules.IDownloader 后端）。
+
+    作为 Downloader 域后端，由门面 app.helper.downloader_manager.DownloaderManager 统一分发调用。
+
+    .. deprecated::
+        经 ChainBase.run_module("download"/"list_torrents"/…) 的字符串 ABI 分发为 v2 兼容路径，
+        仍可用但计划在后续版本废弃；新代码请改用 DownloaderManager 门面的类型化方法。
+    """
 
     def init_module(self) -> None:
         """
