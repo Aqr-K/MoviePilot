@@ -193,6 +193,31 @@ def get_plugin_provided_data_sources(running_plugins, pid: Optional[str] = None)
                 logger.error(f"获取插件 {plugin_id} 注册数据源出错：{str(e)}")
     return ret_sources
 
+def get_plugin_provided_downloaders(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
+    """
+    聚合插件经 provides_downloaders() 声明【新增】的下载器（Downloader 域）类，
+    按 plugin_id(owner) 归集。供 PluginManager 启停时经 ModuleManager 注册/卸载（owner=plugin_id）。
+    {
+        plugin_id: [downloader_cls, ...]
+    }
+    """
+    ret_downloaders: Dict[str, List[type]] = {}
+    # 创建字典快照避免并发修改
+    running_plugins_snapshot = dict(running_plugins)
+    for plugin_id, plugin in running_plugins_snapshot.items():
+        if pid and pid != plugin_id:
+            continue
+        if hasattr(plugin, "provides_downloaders") and ObjectUtils.check_method(plugin.provides_downloaders):
+            try:
+                if not plugin.get_state():
+                    continue
+                downloaders = plugin.provides_downloaders() or []
+                if downloaders:
+                    ret_downloaders[plugin_id] = list(downloaders)
+            except Exception as e:
+                logger.error(f"获取插件 {plugin_id} 注册下载器出错：{str(e)}")
+    return ret_downloaders
+
 def get_plugin_provided_storages(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
     """
     聚合插件经 provides_storages() 声明【新增】的存储器类，按 plugin_id(owner) 归集。

@@ -665,6 +665,22 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} 数据源 "
                                  f"{getattr(source_cls, '__name__', source_cls)} 出错：{str(err)}")
+        # 注册插件经 provides_downloaders 声明新增的下载器（Downloader 域），
+        # 经下载器契约校验通过后注册到 ModuleManager（owner=plugin_id），参与下载器分发。
+        provided_downloaders = plugin_metadata.get_plugin_provided_downloaders(self._running_plugins, pid)
+        for plugin_id, downloader_classes in provided_downloaders.items():
+            for downloader_cls in downloader_classes:
+                _dl_ok, _dl_reasons = ModuleManager.verify_downloader_contract(downloader_cls)
+                if not _dl_ok:
+                    logger.warning(f"插件 {plugin_id} 下载器 "
+                                   f"{getattr(downloader_cls, '__name__', downloader_cls)} 未通过下载器契约校验，拒绝注册："
+                                   f"{'；'.join(_dl_reasons)}")
+                    continue
+                try:
+                    ModuleManager().register_module(downloader_cls, owner=plugin_id)
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 下载器 "
+                                 f"{getattr(downloader_cls, '__name__', downloader_cls)} 出错：{str(err)}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
