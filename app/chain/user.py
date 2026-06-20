@@ -1,5 +1,5 @@
 import secrets
-from typing import Optional, Tuple, Union
+from typing import NamedTuple, Optional, Tuple, Union
 
 from app.chain import ChainBase
 from app.core.config import settings
@@ -12,6 +12,13 @@ from app.schemas.types import ChainEventType
 from app.utils.otp import OtpUtils
 
 PASSWORD_INVALID_CREDENTIALS_MESSAGE = "用户名或密码或二次校验码不正确"
+
+
+class _AuthOutcome(NamedTuple):
+    """user_authenticate 内部编排结果：user 非空表示已认证成功；apply_mfa 指明是否需走 MFA。"""
+    user: Optional[User]
+    error: Optional[str]
+    apply_mfa: bool
 
 
 class UserChain(ChainBase):
@@ -47,49 +54,52 @@ class UserChain(ChainBase):
             grant_type=grant_type
         )
         logger.debug(f"认证类型：{grant_type}，开始准备对用户 {username} 进行身份校验")
-        if credentials.grant_type == "password":
-            # Password 认证
+        # 1) 按 grant_type 解析出已认证用户（本地密码 → 辅助认证），并指明是否需走 MFA
+        outcome = self._resolve_user(credentials)
+        # 用 is None 而非真值判断：成功与否由 user 是否为 None 决定，避免未来 User 真值被覆写时误判
+        if outcome.user is None:
+            return False, outcome.error
+        # 2) MFA 二次验证：仅 password grant 校验（authorization_code 等不校验，保持原行为）
+        if outcome.apply_mfa:
+            mfa_result = self._verify_mfa(outcome.user, credentials.mfa_code)
+            if mfa_result == "MFA_REQUIRED":
+                return False, "MFA_REQUIRED"
+            if not mfa_result:
+                return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
+        logger.info(f"用户 {username} 认证成功")
+        return True, outcome.user
+
+    def _resolve_user(self, credentials: AuthCredentials) -> _AuthOutcome:
+        """
+        按 grant_type 解析出已认证用户（不含 MFA），是 user_authenticate 的编排子步骤：
+        - "password"：先本地密码，失败再辅助认证（若启用）；两条路得到的用户都需后续 MFA。
+        - "authorization_code"：仅辅助认证（若启用），不走 MFA。
+        - 其它：不支持。
+        返回 _AuthOutcome(user, error, apply_mfa)：user 非空表示成功，否则 error 为失败信息。
+        """
+        grant_type = credentials.grant_type
+        if grant_type == "password":
             success, user_or_message = self.password_authenticate(credentials=credentials)
             if success:
-                # 如果用户启用了二次验证码，则进一步验证
-                mfa_result = self._verify_mfa(user_or_message, credentials.mfa_code)
-                if mfa_result == "MFA_REQUIRED":
-                    return False, "MFA_REQUIRED"
-                elif not mfa_result:
-                    return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-                logger.info(f"用户 {username} 通过密码认证成功")
-                return True, user_or_message
-            else:
-                # 用户不存在或密码错误，考虑辅助认证
-                if settings.AUXILIARY_AUTH_ENABLE:
-                    logger.warning("密码认证失败，尝试通过外部服务进行辅助认证 ...")
-                    aux_success, aux_user_or_message = self.auxiliary_authenticate(credentials=credentials)
-                    if aux_success:
-                        # 辅助认证成功后再验证二次验证码
-                        mfa_result = self._verify_mfa(aux_user_or_message, credentials.mfa_code)
-                        if mfa_result == "MFA_REQUIRED":
-                            return False, "MFA_REQUIRED"
-                        elif not mfa_result:
-                            return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-                        return True, aux_user_or_message
-                    else:
-                        return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-                else:
-                    logger.debug(f"辅助认证未启用，用户 {username} 认证失败")
-                    return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-        elif credentials.grant_type == "authorization_code":
-            # 处理其他认证类型的分支
-            if settings.AUXILIARY_AUTH_ENABLE:
-                aux_success, aux_user_or_message = self.auxiliary_authenticate(credentials=credentials)
-                if aux_success:
-                    return True, aux_user_or_message
-                else:
-                    return False, "认证失败"
-            else:
-                return False, "认证失败"
-        else:
-            logger.debug(f"辅助认证未启用，认证类型 {grant_type} 未实现")
-            return False, "不支持的认证类型"
+                return _AuthOutcome(user_or_message, None, apply_mfa=True)
+            # 用户不存在或密码错误 → 辅助认证兜底
+            if not settings.AUXILIARY_AUTH_ENABLE:
+                logger.debug(f"辅助认证未启用，用户 {credentials.username} 认证失败")
+                return _AuthOutcome(None, PASSWORD_INVALID_CREDENTIALS_MESSAGE, apply_mfa=False)
+            logger.warning("密码认证失败，尝试通过外部服务进行辅助认证 ...")
+            aux_success, aux_user_or_message = self.auxiliary_authenticate(credentials=credentials)
+            if aux_success:
+                return _AuthOutcome(aux_user_or_message, None, apply_mfa=True)
+            return _AuthOutcome(None, PASSWORD_INVALID_CREDENTIALS_MESSAGE, apply_mfa=False)
+        if grant_type == "authorization_code":
+            if not settings.AUXILIARY_AUTH_ENABLE:
+                return _AuthOutcome(None, "认证失败", apply_mfa=False)
+            aux_success, aux_user_or_message = self.auxiliary_authenticate(credentials=credentials)
+            if aux_success:
+                return _AuthOutcome(aux_user_or_message, None, apply_mfa=False)
+            return _AuthOutcome(None, "认证失败", apply_mfa=False)
+        logger.debug(f"不支持的认证类型：{grant_type}")
+        return _AuthOutcome(None, "不支持的认证类型", apply_mfa=False)
 
     @staticmethod
     def password_authenticate(credentials: AuthCredentials) -> Tuple[bool, Union[User, str]]:
