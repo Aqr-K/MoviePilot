@@ -143,232 +143,69 @@ def get_plugin_modules(running_plugins, pid: Optional[str] = None) -> Dict[tuple
                 logger.error(f"获取插件 {plugin_id} 模块出错：{str(e)}")
     return ret_modules
 
-def get_plugin_provided_modules(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
+def _get_plugin_provided(running_plugins, hook_name: str, err_label: str,
+                         pid: Optional[str] = None) -> Dict[str, List[Any]]:
     """
-    聚合插件经 provides_modules() 声明【新增】的系统模块类，按 plugin_id(owner) 归集。
-    供 PluginManager 启停时统一向 ModuleManager 注册/卸载（owner=plugin_id）。
+    聚合插件经某 provides_* 钩子声明【新增】的对象（模块类或数据对象），按 plugin_id(owner) 归集。
+    各 get_plugin_provided_* 的共用实现：快照运行态插件、按 pid 过滤、仅取已启用(get_state)插件、
+    调用钩子收集非空结果。hook_name 为钩子方法名，err_label 用于异常日志。
     {
-        plugin_id: [module_cls, ...]
+        plugin_id: [item, ...]
     }
     """
-    ret_modules: Dict[str, List[type]] = {}
+    ret: Dict[str, List[Any]] = {}
     # 创建字典快照避免并发修改
     running_plugins_snapshot = dict(running_plugins)
     for plugin_id, plugin in running_plugins_snapshot.items():
         if pid and pid != plugin_id:
             continue
-        if hasattr(plugin, "provides_modules") and ObjectUtils.check_method(plugin.provides_modules):
+        hook = getattr(plugin, hook_name, None)
+        if hook is not None and ObjectUtils.check_method(hook):
             try:
                 if not plugin.get_state():
                     continue
-                modules = plugin.provides_modules() or []
-                if modules:
-                    ret_modules[plugin_id] = list(modules)
+                items = hook() or []
+                if items:
+                    ret[plugin_id] = list(items)
             except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册模块出错：{str(e)}")
-    return ret_modules
+                logger.error(f"获取插件 {plugin_id} {err_label}出错：{str(e)}")
+    return ret
+
+def get_plugin_provided_modules(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
+    """聚合插件经 provides_modules() 声明【新增】的系统模块类，按 plugin_id 归集（供 ModuleManager 注册/卸载）。"""
+    return _get_plugin_provided(running_plugins, "provides_modules", "注册模块", pid)
 
 def get_plugin_provided_data_sources(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
-    """
-    聚合插件经 provides_data_sources() 声明【新增】的数据源（MediaRecognize 域）类，
-    按 plugin_id(owner) 归集。供 PluginManager 启停时经 ModuleManager 注册/卸载（owner=plugin_id）。
-    {
-        plugin_id: [source_cls, ...]
-    }
-    """
-    ret_sources: Dict[str, List[type]] = {}
-    # 创建字典快照避免并发修改
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_data_sources") and ObjectUtils.check_method(plugin.provides_data_sources):
-            try:
-                if not plugin.get_state():
-                    continue
-                sources = plugin.provides_data_sources() or []
-                if sources:
-                    ret_sources[plugin_id] = list(sources)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册数据源出错：{str(e)}")
-    return ret_sources
+    """聚合插件经 provides_data_sources() 声明【新增】的数据源（MediaRecognize 域）类，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_data_sources", "注册数据源", pid)
 
 def get_plugin_provided_downloaders(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
-    """
-    聚合插件经 provides_downloaders() 声明【新增】的下载器（Downloader 域）类，
-    按 plugin_id(owner) 归集。供 PluginManager 启停时经 ModuleManager 注册/卸载（owner=plugin_id）。
-    {
-        plugin_id: [downloader_cls, ...]
-    }
-    """
-    ret_downloaders: Dict[str, List[type]] = {}
-    # 创建字典快照避免并发修改
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_downloaders") and ObjectUtils.check_method(plugin.provides_downloaders):
-            try:
-                if not plugin.get_state():
-                    continue
-                downloaders = plugin.provides_downloaders() or []
-                if downloaders:
-                    ret_downloaders[plugin_id] = list(downloaders)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册下载器出错：{str(e)}")
-    return ret_downloaders
+    """聚合插件经 provides_downloaders() 声明【新增】的下载器（Downloader 域）类，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_downloaders", "注册下载器", pid)
 
 def get_plugin_provided_notifications(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
-    """
-    聚合插件经 provides_notifications() 声明【新增】的消息渠道（Notification 域）类，
-    按 plugin_id(owner) 归集。供 PluginManager 启停时经 ModuleManager 注册/卸载（owner=plugin_id）。
-    {
-        plugin_id: [notification_cls, ...]
-    }
-    """
-    ret_notifications: Dict[str, List[type]] = {}
-    # 创建字典快照避免并发修改
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_notifications") and ObjectUtils.check_method(plugin.provides_notifications):
-            try:
-                if not plugin.get_state():
-                    continue
-                notifications = plugin.provides_notifications() or []
-                if notifications:
-                    ret_notifications[plugin_id] = list(notifications)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册消息渠道出错：{str(e)}")
-    return ret_notifications
+    """聚合插件经 provides_notifications() 声明【新增】的消息渠道（Notification 域）类，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_notifications", "注册消息渠道", pid)
 
 def get_plugin_provided_mediaservers(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
-    """
-    聚合插件经 provides_mediaservers() 声明【新增】的媒体服务器（MediaServer 域）类，
-    按 plugin_id(owner) 归集。供 PluginManager 启停时经 ModuleManager 注册/卸载（owner=plugin_id）。
-    {
-        plugin_id: [mediaserver_cls, ...]
-    }
-    """
-    ret_mediaservers: Dict[str, List[type]] = {}
-    # 创建字典快照避免并发修改
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_mediaservers") and ObjectUtils.check_method(plugin.provides_mediaservers):
-            try:
-                if not plugin.get_state():
-                    continue
-                mediaservers = plugin.provides_mediaservers() or []
-                if mediaservers:
-                    ret_mediaservers[plugin_id] = list(mediaservers)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册媒体服务器出错：{str(e)}")
-    return ret_mediaservers
+    """聚合插件经 provides_mediaservers() 声明【新增】的媒体服务器（MediaServer 域）类，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_mediaservers", "注册媒体服务器", pid)
 
 def get_plugin_provided_discover_sources(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
-    """
-    聚合插件经 provides_discover_sources() 声明【新增】的探索数据源（DiscoverMediaSource 数据对象），
-    按 plugin_id 归集。供 /api/discover/source 端点与事件扩展去重合并后供前端枚举。
-    {
-        plugin_id: [DiscoverMediaSource, ...]
-    }
-    """
-    ret_sources: Dict[str, List[Any]] = {}
-    # 创建字典快照避免并发修改
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_discover_sources") \
-                and ObjectUtils.check_method(plugin.provides_discover_sources):
-            try:
-                if not plugin.get_state():
-                    continue
-                sources = plugin.provides_discover_sources() or []
-                if sources:
-                    ret_sources[plugin_id] = list(sources)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册探索数据源出错：{str(e)}")
-    return ret_sources
+    """聚合插件经 provides_discover_sources() 声明【新增】的探索数据源（DiscoverMediaSource），按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_discover_sources", "注册探索数据源", pid)
 
 def get_plugin_provided_recommend_sources(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
-    """
-    聚合插件经 provides_recommend_sources() 声明【新增】的推荐数据源（RecommendMediaSource 数据对象），
-    按 plugin_id 归集。供 /api/recommend/source 端点与事件扩展去重合并后供前端枚举。
-    {
-        plugin_id: [RecommendMediaSource, ...]
-    }
-    """
-    ret_sources: Dict[str, List[Any]] = {}
-    # 创建字典快照避免并发修改
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_recommend_sources") \
-                and ObjectUtils.check_method(plugin.provides_recommend_sources):
-            try:
-                if not plugin.get_state():
-                    continue
-                sources = plugin.provides_recommend_sources() or []
-                if sources:
-                    ret_sources[plugin_id] = list(sources)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册推荐数据源出错：{str(e)}")
-    return ret_sources
+    """聚合插件经 provides_recommend_sources() 声明【新增】的推荐数据源（RecommendMediaSource），按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_recommend_sources", "注册推荐数据源", pid)
 
 def get_plugin_provided_storages(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
-    """
-    聚合插件经 provides_storages() 声明【新增】的存储器类，按 plugin_id(owner) 归集。
-    供 PluginManager 启停时统一向 FileManager 注册/卸载（owner=plugin_id）。
-    {
-        plugin_id: [storage_cls, ...]
-    }
-    """
-    ret_storages: Dict[str, List[type]] = {}
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_storages") and ObjectUtils.check_method(plugin.provides_storages):
-            try:
-                if not plugin.get_state():
-                    continue
-                storages = plugin.provides_storages() or []
-                if storages:
-                    ret_storages[plugin_id] = list(storages)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册存储器出错：{str(e)}")
-    return ret_storages
+    """聚合插件经 provides_storages() 声明【新增】的存储器类，按 plugin_id 归集（供 FileManager 注册/卸载）。"""
+    return _get_plugin_provided(running_plugins, "provides_storages", "注册存储器", pid)
 
 def get_plugin_provided_channel_capabilities(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
-    """
-    聚合插件经 provides_channel_capabilities() 声明【新增】的消息渠道能力矩阵，
-    按 plugin_id(owner) 归集。供 PluginManager 启停时统一向 ChannelCapabilityManager
-    注册/卸载（owner=plugin_id）。
-    {
-        plugin_id: [ChannelCapabilities, ...]
-    }
-    """
-    ret_caps: Dict[str, List[Any]] = {}
-    running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if pid and pid != plugin_id:
-            continue
-        if hasattr(plugin, "provides_channel_capabilities") \
-                and ObjectUtils.check_method(plugin.provides_channel_capabilities):
-            try:
-                if not plugin.get_state():
-                    continue
-                caps = plugin.provides_channel_capabilities() or []
-                if caps:
-                    ret_caps[plugin_id] = list(caps)
-            except Exception as e:
-                logger.error(f"获取插件 {plugin_id} 注册渠道能力出错：{str(e)}")
-    return ret_caps
+    """聚合插件经 provides_channel_capabilities() 声明【新增】的消息渠道能力矩阵，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_channel_capabilities", "注册渠道能力", pid)
 
 def get_plugin_actions(running_plugins, pid: Optional[str] = None) -> List[Dict[str, Any]]:
     """
