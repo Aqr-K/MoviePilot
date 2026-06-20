@@ -218,6 +218,7 @@ def update_or_post_message(
             title=title,
             text=text,
             buttons=buttons,
+            save_history=False,
         )
     )
 
@@ -271,6 +272,11 @@ class PendingMediaInteraction:
     meta: Optional[MetaBase] = None
     current_media: Optional[MediaInfo] = None
     items: List[Any] = field(default_factory=list)
+    download_dirs: List[Any] = field(default_factory=list)
+    pending_download_mode: Optional[str] = None
+    pending_download_context: Optional[Any] = None
+    pending_no_exists: Optional[Dict[Any, Any]] = None
+    pending_torrent_page: int = 0
     created_at: datetime = field(default_factory=datetime.now)
 
 
