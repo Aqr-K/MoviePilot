@@ -238,6 +238,19 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_data_sources(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的数据源（媒体识别/信息源，MediaRecognize 域）类，
+        如新的 TMDB / IMDB / 豆瓣式来源。provides_modules 的语法糖 + 数据源契约校验：
+        返回的【类】（非实例）须实现 _ModuleBase 契约且 get_type()==ModuleType.MediaRecognize。
+        识别能力方法（recognize_media / search_medias / obtain_images 等）按需实现——
+        框架经 ModuleManager 注册（owner=plugin_id）后按方法名分发，实现哪个就参与哪个
+        识别/搜索/取图流水线；子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭枚举）。默认不新增。
+
+        [TmdbLikeSourceClass, ImdbLikeSourceClass, ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作
