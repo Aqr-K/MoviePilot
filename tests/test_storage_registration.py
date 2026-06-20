@@ -59,6 +59,11 @@ class _DupLocalStorage(LocalStorage):
     pass
 
 
+class _RegGateStorage(LocalStorage):
+    """TestRegisterStorageGate 专用、独立 schema.value，避免与碰撞测试争用同一索引键。"""
+    schema = _FakeSchema("reggate")
+
+
 class TestVerifyStorageContract(TestCase):
     def test_valid_storage_passes(self):
         ok, reasons = FileManagerModule.verify_storage_contract(LocalStorage)
@@ -94,10 +99,10 @@ class TestRegisterStorageGate(TestCase):
         FileManagerModule.unregister_storages(self.owner)
 
     def test_valid_storage_registers(self):
-        # 用非内建 schema.value 的插件存储（直接注册内建 LocalStorage 会被碰撞检测正确拒绝）
-        accepted = FileManagerModule.register_storage(_PluginCloudStorage, self.owner)
+        # 用非内建、且专属本类的 schema.value 插件存储（避免与碰撞测试争用 'testcloud' 键）
+        accepted = FileManagerModule.register_storage(_RegGateStorage, self.owner)
         self.assertTrue(accepted)
-        self.assertIn(_PluginCloudStorage, storage_registry.all_storages())
+        self.assertIn(_RegGateStorage, storage_registry.all_storages())
 
     def test_invalid_storage_rejected_not_in_registry(self):
         accepted = FileManagerModule.register_storage(_IncompleteStorage, self.owner)
