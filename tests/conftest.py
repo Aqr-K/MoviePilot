@@ -12,3 +12,14 @@ prepare_backend()
 
 # 复用共享 autouse 网络守卫；同一实现亦供各插件仓 conftest import 复用，避免逐仓维护
 from app.testing.network_guard import block_real_network  # noqa: E402,F401
+
+# 已安装的真实下载器 SDK 须先于测试桩进入 sys.modules：部分测试以
+# ``sys.modules.setdefault("qbittorrentapi", ...)`` 注入仅含 TorrentFilesList 的假模块供无该包的 CI 用；
+# 若假桩在真包导入前先落位，会令 test_downloader_file_normalization 的
+# ``from qbittorrentapi import TorrentDictionary`` 失败。已装环境下此处优先导入真包使桩 setdefault no-op，
+# 未装环境走 except 由桩兜底。
+for _downloader_sdk in ("qbittorrentapi", "transmission_rpc"):
+    try:
+        __import__(_downloader_sdk)
+    except ImportError:
+        pass
