@@ -133,6 +133,55 @@ def get_plugin_modules(running_plugins, pid: Optional[str] = None) -> Dict[tuple
                 logger.error(f"获取插件 {plugin_id} 模块出错：{str(e)}")
     return ret_modules
 
+def get_plugin_provided_modules(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
+    """
+    聚合插件经 provides_modules() 声明【新增】的系统模块类，按 plugin_id(owner) 归集。
+    供 PluginManager 启停时统一向 ModuleManager 注册/卸载（owner=plugin_id）。
+    {
+        plugin_id: [module_cls, ...]
+    }
+    """
+    ret_modules: Dict[str, List[type]] = {}
+    # 创建字典快照避免并发修改
+    running_plugins_snapshot = dict(running_plugins)
+    for plugin_id, plugin in running_plugins_snapshot.items():
+        if pid and pid != plugin_id:
+            continue
+        if hasattr(plugin, "provides_modules") and ObjectUtils.check_method(plugin.provides_modules):
+            try:
+                if not plugin.get_state():
+                    continue
+                modules = plugin.provides_modules() or []
+                if modules:
+                    ret_modules[plugin_id] = list(modules)
+            except Exception as e:
+                logger.error(f"获取插件 {plugin_id} 注册模块出错：{str(e)}")
+    return ret_modules
+
+def get_plugin_provided_storages(running_plugins, pid: Optional[str] = None) -> Dict[str, List[type]]:
+    """
+    聚合插件经 provides_storages() 声明【新增】的存储器类，按 plugin_id(owner) 归集。
+    供 PluginManager 启停时统一向 FileManager 注册/卸载（owner=plugin_id）。
+    {
+        plugin_id: [storage_cls, ...]
+    }
+    """
+    ret_storages: Dict[str, List[type]] = {}
+    running_plugins_snapshot = dict(running_plugins)
+    for plugin_id, plugin in running_plugins_snapshot.items():
+        if pid and pid != plugin_id:
+            continue
+        if hasattr(plugin, "provides_storages") and ObjectUtils.check_method(plugin.provides_storages):
+            try:
+                if not plugin.get_state():
+                    continue
+                storages = plugin.provides_storages() or []
+                if storages:
+                    ret_storages[plugin_id] = list(storages)
+            except Exception as e:
+                logger.error(f"获取插件 {plugin_id} 注册存储器出错：{str(e)}")
+    return ret_storages
+
 def get_plugin_actions(running_plugins, pid: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取插件动作

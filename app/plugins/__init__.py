@@ -199,6 +199,30 @@ class _PluginBase(metaclass=ABCMeta):
         """
         pass
 
+    def provides_modules(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的系统模块类（区别于 get_module 的方法胁持：
+        get_module 改既有方法，本钩子新增一个完整模块，如新的下载器/媒体服务器/消息渠道）。
+
+        返回模块【类】列表（非实例），每个类需实现 _ModuleBase 契约：
+        init_module / init_setting / stop / test，以及 get_type / get_subtype（或
+        get_subtype_id 返回枚举外字符串如 "aria2"）/ get_priority。
+        由框架（PluginManager 启停）统一注册到 ModuleManager 并参与 chain 分发，
+        无需插件自行 monkey-patch app.modules。默认不新增任何模块。
+
+        [DownloaderModuleClass, MediaServerModuleClass, ...]
+        """
+        return []
+
+    def provides_storages(self) -> List[Type]:
+        """
+        声明本插件向文件整理层【新增】的存储器类（provides_modules 的语法糖，
+        内部经 FileManager 注册）。返回 StorageBase 子类列表（非实例）。默认不新增。
+
+        [StorageClass1, StorageClass2, ...]
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作
