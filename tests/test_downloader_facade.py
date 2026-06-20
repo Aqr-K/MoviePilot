@@ -280,21 +280,16 @@ class TestIDownloaderContract(TestCase):
                 self.assertTrue(callable(getattr(cls, name, None)),
                                 f"{cls.__name__} 缺少下载器核心方法 {name}")
 
-    def test_qb_tr_satisfy_full_contract(self):
+    def test_all_builtins_satisfy_full_contract(self):
+        # rtorrent 的 get_torrent_trackers + torrent_files 归一化已补齐，三后端均完整满足 IDownloader。
         from app.modules.qbittorrent import QbittorrentModule
         from app.modules.transmission import TransmissionModule
-        for cls in (QbittorrentModule, TransmissionModule):
-            for name in self._FULL:
-                self.assertTrue(callable(getattr(cls, name, None)),
-                                f"{cls.__name__} 缺少 IDownloader 方法 {name}")
+        from app.modules.rtorrent import RtorrentModule
+        for cls in (QbittorrentModule, TransmissionModule, RtorrentModule):
+            missing = [name for name in self._FULL if not callable(getattr(cls, name, None))]
+            self.assertEqual(missing, [], f"{cls.__name__} 缺少 IDownloader 方法 {missing}")
             # runtime_checkable Protocol：方法齐全的类应被识别为 IDownloader 子类
             self.assertTrue(issubclass(cls, IDownloader), f"{cls.__name__} 未结构化满足 IDownloader")
-
-    def test_rtorrent_is_partial_backend(self):
-        # 锁定已知缺口：rtorrent 实现完整面减去 get_torrent_trackers。若后续补齐应同步放宽此断言。
-        from app.modules.rtorrent import RtorrentModule
-        missing = [name for name in self._FULL if not callable(getattr(RtorrentModule, name, None))]
-        self.assertEqual(missing, ["get_torrent_trackers"])
 
     def test_facade_exposes_full_contract(self):
         for name in self._FULL:

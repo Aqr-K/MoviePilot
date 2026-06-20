@@ -16,6 +16,7 @@ from unittest import TestCase
 from app import schemas
 from app.modules.qbittorrent import QbittorrentModule
 from app.modules.transmission import TransmissionModule
+from app.modules.rtorrent import RtorrentModule
 
 
 class _FakeQbFile:
@@ -44,6 +45,19 @@ class _FakeServer:
 
     def get_files(self, tid):
         return self._files
+
+
+class _FakeRtServer:
+    """模拟 Rtorrent 客户端：get_files 返回 List[Dict]（progress 为 0~100），get_trackers 返回 url 列表。"""
+    def __init__(self, files=None, trackers=None):
+        self._files = files if files is not None else []
+        self._trackers = trackers
+
+    def get_files(self, tid):
+        return self._files
+
+    def get_trackers(self, tid):
+        return self._trackers
 
 
 class DownloaderFileNormalizationTest(TestCase):
@@ -84,6 +98,39 @@ class DownloaderFileNormalizationTest(TestCase):
         self.assertEqual(files[0].size, 200)
         self.assertEqual(files[0].progress, 0.5)  # completed/size = 100/200
         self.assertEqual(files[0].index, 3)  # 取自 id
+
+    def test_rtorrent_torrent_files_normalized(self):
+        # rtorrent get_files 返回裸 Dict（progress 0~100），模块须归一化为 DownloaderFile（progress 0~1）
+        mod = RtorrentModule.__new__(RtorrentModule)
+        mod.get_instance = lambda downloader=None: _FakeRtServer(
+            files=[{"id": 2, "name": "v/e.mkv", "size": 300, "priority": 1, "progress": 50}]
+        )
+        files = RtorrentModule.torrent_files(mod, tid="hash")
+        self.assertIsInstance(files, list)
+        self.assertIsInstance(files[0], schemas.DownloaderFile)
+        self.assertEqual(files[0].name, "v/e.mkv")
+        self.assertEqual(files[0].size, 300)
+        self.assertEqual(files[0].progress, 0.5)  # 50/100 归一到 0~1，与 qb/tr 对齐
+        self.assertEqual(files[0].priority, 1)
+        self.assertEqual(files[0].index, 2)  # 取自 dict 的 id
+
+    def test_rtorrent_torrent_files_none_when_no_server(self):
+        mod = RtorrentModule.__new__(RtorrentModule)
+        mod.get_instance = lambda downloader=None: None
+        self.assertIsNone(RtorrentModule.torrent_files(mod, tid="hash"))
+
+    def test_rtorrent_get_torrent_trackers_named(self):
+        mod = RtorrentModule.__new__(RtorrentModule)
+        mod.get_instance = lambda downloader=None: _FakeRtServer(trackers=["http://t1", "http://t2"])
+        ret = RtorrentModule.get_torrent_trackers(mod, hash_string="H", downloader="rt1")
+        self.assertEqual(ret, {"rt1": ["http://t1", "http://t2"]})
+
+    def test_rtorrent_get_torrent_trackers_broadcast(self):
+        # downloader 为 None 时广播到全部实例
+        mod = RtorrentModule.__new__(RtorrentModule)
+        mod.get_instances = lambda: {"rt1": _FakeRtServer(trackers=["http://t1"])}
+        ret = RtorrentModule.get_torrent_trackers(mod, hash_string="H")
+        self.assertEqual(ret, {"rt1": ["http://t1"]})
 
     def test_contract_no_sdk_leak(self):
         import app.chain as chain_pkg
