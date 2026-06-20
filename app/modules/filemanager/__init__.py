@@ -84,10 +84,42 @@ class FileManagerModule(_ModuleBase):
                 f"存储器 {getattr(storage_class, '__name__', storage_class)}(owner={owner}) "
                 f"未通过 StorageBase 契约校验，拒绝注册：{'；'.join(reasons)}")
             return False
+        # schema.value 碰撞检测（schema.value 是存储路由身份，__get_storage_oper 按它选后端，
+        # 重复会导致路由歧义）。对齐 register_module 的命名冲突：与内建或【其它】owner 冲突即拒，
+        # 同 owner 重复注册（幂等）放行。
+        schema_value = storage_class.schema.value  # verify 已保证 schema/schema.value 非空
+        if schema_value in cls._builtin_storage_values():
+            logger.warning(
+                f"存储器 {storage_class.__name__}(owner={owner}) 的 schema.value='{schema_value}' "
+                f"与内建存储冲突，拒绝注册（避免遮蔽内建路由）")
+            return False
+        conflict_owner = storage_registry.schema_owner(schema_value, exclude_owner=owner)
+        if conflict_owner is not None:
+            logger.warning(
+                f"存储器 {storage_class.__name__}(owner={owner}) 的 schema.value='{schema_value}' "
+                f"已被 owner={conflict_owner} 注册，拒绝注册")
+            return False
         if not storage_registry.register(storage_class, owner):
             return False
         cls._refresh_running_instance()
         return True
+
+    @classmethod
+    def _builtin_storage_values(cls) -> set:
+        """
+        内建存储器的 schema.value 集合（用于注册碰撞检测，不含外部注册）。优先复用运行实例已扫描的
+        _storage_schemas（避免重复 import），并剔除外部注册类得到纯内建；实例未就绪时回退扫描内建包。
+        """
+        from app.core.module import ModuleManager
+        external = set(storage_registry.all_storages())
+        inst = ModuleManager().get_running_module(cls.__name__)
+        schemas = list(getattr(inst, "_storage_schemas", None) or [])
+        if not schemas:
+            schemas = list(ModuleHelper.load(
+                'app.modules.filemanager.storages',
+                filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema))
+        return {s.schema.value for s in schemas
+                if s not in external and getattr(getattr(s, 'schema', None), 'value', None)}
 
     @classmethod
     def unregister_storages(cls, owner: str) -> None:

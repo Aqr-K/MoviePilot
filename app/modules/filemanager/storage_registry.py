@@ -9,7 +9,7 @@
 同时规避 reload 造成的 FileManagerModule 类对象分叉：注册状态不挂在（可能被重建的）类上，
 而由本稳定模块持有，FileManagerModule.init_module 始终从这里读取外部存储器。
 """
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # {owner: [storage_class, ...]}
 _EXTERNAL_STORAGES: Dict[str, List[type]] = {}
@@ -35,3 +35,17 @@ def unregister(owner: str) -> bool:
 def all_storages() -> List[type]:
     """返回所有外部存储器类（跨 owner 展平）。"""
     return [cls for classes in _EXTERNAL_STORAGES.values() for cls in classes]
+
+
+def schema_owner(schema_value: str, exclude_owner: Optional[str] = None) -> Optional[str]:
+    """
+    返回声明了该 schema.value（存储路由身份）的外部 owner；无则 None。
+    exclude_owner 用于排除某来源（如注册自检时排除自身 owner，避免幂等重注册误判冲突）。
+    """
+    for owner, classes in _EXTERNAL_STORAGES.items():
+        if exclude_owner is not None and owner == exclude_owner:
+            continue
+        for cls in classes:
+            if getattr(getattr(cls, "schema", None), "value", None) == schema_value:
+                return owner
+    return None

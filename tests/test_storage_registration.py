@@ -34,6 +34,31 @@ class _NoSchemaStorage(LocalStorage):
     schema = None
 
 
+class _FakeSchema:
+    """模拟插件自定义存储类型身份（schema.value 为枚举外字符串 id）。"""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __bool__(self):
+        return True
+
+
+class _PluginCloudStorage(LocalStorage):
+    """合法插件存储器：继承完整实现，schema.value 为新字符串（非内建）。"""
+    schema = _FakeSchema("testcloud")
+
+
+class _PluginCloudStorage2(LocalStorage):
+    """与 _PluginCloudStorage 同 schema.value，用于跨 owner 碰撞验证。"""
+    schema = _FakeSchema("testcloud")
+
+
+class _DupLocalStorage(LocalStorage):
+    """继承 schema=StorageSchema.Local → 与内建 'local' 碰撞。"""
+    pass
+
+
 class TestVerifyStorageContract(TestCase):
     def test_valid_storage_passes(self):
         ok, reasons = FileManagerModule.verify_storage_contract(LocalStorage)
@@ -69,11 +94,38 @@ class TestRegisterStorageGate(TestCase):
         FileManagerModule.unregister_storages(self.owner)
 
     def test_valid_storage_registers(self):
-        accepted = FileManagerModule.register_storage(LocalStorage, self.owner)
+        # 用非内建 schema.value 的插件存储（直接注册内建 LocalStorage 会被碰撞检测正确拒绝）
+        accepted = FileManagerModule.register_storage(_PluginCloudStorage, self.owner)
         self.assertTrue(accepted)
-        self.assertIn(LocalStorage, storage_registry.all_storages())
+        self.assertIn(_PluginCloudStorage, storage_registry.all_storages())
 
     def test_invalid_storage_rejected_not_in_registry(self):
         accepted = FileManagerModule.register_storage(_IncompleteStorage, self.owner)
         self.assertFalse(accepted)
         self.assertNotIn(_IncompleteStorage, storage_registry.all_storages())
+
+
+class TestStorageSchemaCollision(TestCase):
+    """schema.value 碰撞检测：与内建/他 owner 冲突即拒，同 owner 幂等放行。"""
+
+    def tearDown(self):
+        for o in ("own_a", "own_b", "own_dup"):
+            FileManagerModule.unregister_storages(o)
+
+    def test_builtin_schema_collision_rejected(self):
+        # 插件存储 schema.value 撞内建 'local' → 拒绝，避免遮蔽内建路由
+        accepted = FileManagerModule.register_storage(_DupLocalStorage, "own_dup")
+        self.assertFalse(accepted)
+        self.assertNotIn(_DupLocalStorage, storage_registry.all_storages())
+
+    def test_cross_owner_schema_collision_rejected(self):
+        self.assertTrue(FileManagerModule.register_storage(_PluginCloudStorage, "own_a"))
+        # 另一 owner 用相同 schema.value 注册 → 拒绝
+        self.assertFalse(FileManagerModule.register_storage(_PluginCloudStorage2, "own_b"))
+        self.assertNotIn(_PluginCloudStorage2, storage_registry.all_storages())
+
+    def test_same_owner_reregister_idempotent(self):
+        self.assertTrue(FileManagerModule.register_storage(_PluginCloudStorage, "own_a"))
+        # 同 owner 再次注册同类 → 幂等放行（不误判为冲突）
+        self.assertTrue(FileManagerModule.register_storage(_PluginCloudStorage, "own_a"))
+        self.assertIn(_PluginCloudStorage, storage_registry.all_storages())
