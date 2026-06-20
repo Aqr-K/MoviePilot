@@ -10,10 +10,17 @@ class MediaServerImageSigningTest(unittest.TestCase):
     @staticmethod
     def _build_chain(result):
         """
-        构造只带 run_module 的 MediaServerChain，避免单测初始化真实模块管理器。
+        构造只带媒服门面的 MediaServerChain，避免单测初始化真实模块管理器。
+        门面化后 MediaServerChain 经 self.mediaservermanager.mediaserver_* 分发（取代 run_module），
+        故此处 mock 门面的各媒服方法统一返回 result。
         """
         chain = MediaServerChain.__new__(MediaServerChain)
-        chain.run_module = Mock(return_value=result)
+        manager = Mock()
+        for name in ("mediaserver_librarys", "mediaserver_latest", "mediaserver_latest_images",
+                     "mediaserver_playing", "mediaserver_items", "mediaserver_iteminfo",
+                     "mediaserver_tv_episodes", "mediaserver_play_url", "mediaserver_image_cookies"):
+            getattr(manager, name).return_value = result
+        chain.mediaservermanager = manager
         return chain
 
     def test_librarys_signs_image_fields(self):

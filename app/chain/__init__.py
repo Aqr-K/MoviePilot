@@ -17,6 +17,7 @@ from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
 from app.helper.downloader_manager import DownloaderManager
+from app.helper.mediaserver_manager import MediaServerManager
 from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
@@ -62,6 +63,7 @@ class ChainBase(metaclass=ABCMeta):
         *,
         modulemanager=None,
         downloadermanager=None,
+        mediaservermanager=None,
         eventmanager=None,
         messageoper=None,
         messagehelper=None,
@@ -81,6 +83,8 @@ class ChainBase(metaclass=ABCMeta):
         self.modulemanager = modulemanager or ModuleManager()
         # 下载器（Downloader 域）门面：下载器相关包装方法经此分发，取代 run_module 字符串 ABI。
         self.downloadermanager = downloadermanager or DownloaderManager()
+        # 媒体服务器（MediaServer 域）门面：媒服相关包装方法经此分发，取代 run_module 字符串 ABI。
+        self.mediaservermanager = mediaservermanager or MediaServerManager()
         self.eventmanager = eventmanager or EventManager()
         self.messageoper = messageoper or MessageOper()
         self.messagehelper = messagehelper or MessageHelper()
@@ -1453,8 +1457,8 @@ class ChainBase(metaclass=ABCMeta):
         :param server:  媒体服务器
         :return: 如不存在返回None，存在时返回信息，包括每季已存在所有集{type: movie/tv, seasons: {season: [episodes]}}
         """
-        return self.run_module(
-            "media_exists", mediainfo=mediainfo, itemid=itemid, server=server
+        return self.mediaservermanager.media_exists(
+            mediainfo=mediainfo, itemid=itemid, server=server
         )
 
     def media_files(self, mediainfo: MediaInfo) -> Optional[List[FileItem]]:
