@@ -1205,9 +1205,14 @@ class TestFeishu(unittest.TestCase):
         future = MagicMock()
         future.result.return_value = None
 
+        def _run_threadsafe(coro, loop):
+            """模拟线程安全调度并关闭测试协程，避免产生未等待告警。"""
+            coro.close()
+            return future
+
         with patch(
             "app.modules.feishu.feishu.asyncio.run_coroutine_threadsafe",
-            return_value=future,
+            side_effect=_run_threadsafe,
         ) as runner:
             client.stop()
 
