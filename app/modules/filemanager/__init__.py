@@ -11,6 +11,7 @@ from app.helper.message import MessageHelper
 from app.core.module_loader import ModuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
+from app.modules.filemanager import storage_registry
 from app.modules.filemanager.storages import StorageBase
 from app.modules.filemanager.transhandler import TransHandler
 from app.schemas import TransferInfo, ExistMediaInfo, TmdbEpisode, TransferDirectoryConf, FileItem, StorageUsage
@@ -32,11 +33,43 @@ class FileManagerModule(_ModuleBase):
         self.messagehelper = MessageHelper()
 
     def init_module(self) -> None:
-        # 加载模块
-        self._storage_schemas = ModuleHelper.load('app.modules.filemanager.storages',
-                                                  filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
+        # 扫描内建存储器
+        scanned = ModuleHelper.load('app.modules.filemanager.storages',
+                                    filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
+        # 合并外部(插件)注册的存储器（merge 非 replace；外部记账存于 reload-stable 的
+        # storage_registry，使运行期注册的存储挺过 ModuleManager.reload()）
+        self._storage_schemas = list(scanned) + storage_registry.all_storages()
         # 获取存储类型
         self._support_storages = [storage.schema.value for storage in self._storage_schemas if storage.schema]
+
+    @classmethod
+    def register_storage(cls, storage_class: type, owner: str) -> bool:
+        """
+        注册一个外部(插件)存储器类（StorageBase 子类）。记账到 reload-stable 的 storage_registry
+        并刷新运行实例。存储器无需扩展 StorageSchema 封闭枚举：__get_storage_oper 按 schema.value
+        字符串匹配，插件存储类只要 .schema.value 为其字符串 id 即可被命中。
+        """
+        if not storage_registry.register(storage_class, owner):
+            return False
+        cls._refresh_running_instance()
+        return True
+
+    @classmethod
+    def unregister_storages(cls, owner: str) -> None:
+        """卸载某来源(owner)注册的外部存储器并刷新运行实例。"""
+        if storage_registry.unregister(owner):
+            cls._refresh_running_instance()
+
+    @classmethod
+    def _refresh_running_instance(cls) -> None:
+        """
+        刷新运行态 FileManagerModule 实例的存储器列表（重跑 init_module 合并内建+外部）。
+        若实例尚未加载则跳过——记账仍在 storage_registry 保留，待 init_module 首次运行时自动合并。
+        """
+        from app.core.module import ModuleManager
+        inst = ModuleManager().get_running_module(cls.__name__)
+        if inst is not None:
+            inst.init_module()
 
     @staticmethod
     def get_name() -> str:
