@@ -30,6 +30,7 @@ from app.log import logger
 from app.schemas import CommingMessage, Notification
 from app.schemas.message import ChannelCapabilityManager
 from app.schemas.types import EventType, MessageChannel
+from app.service.history import build_manual_redo_template_context
 from app.utils.http import RequestUtils
 
 # MediaInteractionChain 实现已拆至 app.chain.media_interaction；此处再导出以维持
@@ -873,31 +874,10 @@ class MessageChain(ChainBase):
         def __build_manual_redo_prompt(his: TransferHistory) -> str:
             """构建手动 AI 整理提示词。"""
 
-            src_fileitem = his.src_fileitem or {}
-            source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
-            source_path = source_path or his.src or ""
-            season_episode = f"{his.seasons or ''}{his.episodes or ''}".strip()
             # 键名必须与 System Tasks.yaml 中 manual_transfer_redo 模板的占位符一致
-            template_context = {
-                "history_id": his.id,
-                "current_status": "success" if his.status else "failed",
-                "recognized_title": his.title or "unknown",
-                "media_type": his.type or "unknown",
-                "category": his.category or "unknown",
-                "year": his.year or "unknown",
-                "season_episode": season_episode or "unknown",
-                "source_path": source_path or "unknown",
-                "source_storage": his.src_storage or "local",
-                "destination_path": his.dest or "unknown",
-                "destination_storage": his.dest_storage or "unknown",
-                "transfer_mode": his.mode or "unknown",
-                "tmdbid": his.tmdbid or "none",
-                "doubanid": his.doubanid or "none",
-                "error_message": his.errmsg or "none",
-            }
             return get_prompt_manager().render_system_task_message(
                 "manual_transfer_redo",
-                template_context=template_context,
+                template_context=build_manual_redo_template_context(his),
             )
 
         if not settings.AI_AGENT_ENABLE:
