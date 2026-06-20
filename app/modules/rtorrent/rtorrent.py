@@ -408,6 +408,22 @@ class Rtorrent:
             logger.error(f"获取种子文件列表出错：{str(err)}")
             return None
 
+    def get_trackers(self, tid: str) -> Optional[List[str]]:
+        """
+        获取种子 Tracker URL 列表。
+        :param tid: 种子Hash
+        :return: Tracker URL 列表（出错或未连接返回 None）
+        """
+        if not self._proxy or not tid:
+            return None
+        try:
+            # t.multicall 取每个 tracker 的 url；单字段时每行形如 [url]
+            results = self._proxy.t.multicall(tid, "", "t.url=")
+            return [row[0] for row in results if row and row[0]]
+        except Exception as err:
+            logger.error(f"获取tracker出错：{str(err)}")
+            return None
+
     def set_files(
         self, torrent_hash: str = None, file_ids: list = None, priority: int = 0
     ) -> bool:
