@@ -68,11 +68,11 @@ async def lifespan(app: FastAPI):
     print("Starting up...")
     # 存储当前循环
     global_vars.set_loop(asyncio.get_event_loop())
-    # 将 core/meta 的用户自定义识别配置接到持久化存储（core/meta 本身不依赖 app.db）
+    # 将 core/meta 的用户自定义识别配置接到持久化存储
     set_meta_config_provider(lambda key: SystemConfigOper().get(key))
-    # 注入站点认证等级提供者（解耦 core -> helper.sites）
+    # 注入站点认证等级提供者
     set_auth_level_provider(lambda: SitesHelper().auth_level)
-    # 注入插件安装上报器（解耦 core/plugin -> helper.server）
+    # 注入插件安装上报器
     set_plugin_install_reporter(MoviePilotServerHelper.install_plugin_reg)
     # 初始化路由
     init_routers(app)

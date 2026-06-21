@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-模块契约校验家族（从 ModuleManager 抽出为独立模块）。
+模块契约校验家族。
 
-与 manager/loader 解耦：仅依赖标准库 inspect 与 ModuleType 枚举，_ModuleBase 走 lazy import 防环。
+仅依赖标准库 inspect 与 ModuleType 枚举，_ModuleBase 走 lazy import 避免循环依赖。
 verify_module_contract 为 _ModuleBase 基类契约的核心判定；各域 verify_*_contract 在其上叠加
-get_type 与核心方法要求，共用 _verify_typed_contract。ModuleManager 仍以静态方法别名再导出全部函数，
+get_type 与核心方法要求，共用 _verify_typed_contract。ModuleManager 以静态方法别名再导出全部函数，
 故 ModuleManager.verify_*_contract 调用方零改动。
 """
 import inspect

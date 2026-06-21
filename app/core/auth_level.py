@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-站点认证等级注入式 seam：解耦 core -> helper.sites。
+站点认证等级提供者（provider）：供 core 层（security / auth_bridge）读取站点认证等级。
 
-SitesHelper 是资源包拉取的编译模块（app/helper/sites.*.so），属于 helper 层。
-core 层（security / auth_bridge）原先直接 import SitesHelper 仅为读取 `auth_level`，
-形成 core -> helper 的反向依赖。此 seam 把"读取站点认证等级"抽象为可注入的 provider：
+具体实现（SitesHelper，编译模块 app/helper/sites.*.so）由组合根在启动时注入，core 自身不直接依赖 helper：
 
   - 由组合根（app/startup/lifecycle.py）注入 `lambda: SitesHelper().auth_level`；
   - 未注册时返回未认证默认等级（least privilege），与全新 SitesHelper().auth_level 一致；
-  - 本模块零外部依赖（仅 typing），不反向依赖 helper。
-
-与 app/core/meta/config_source.py（S1）同属注入式 seam 技术。
+  - 本模块仅依赖 typing。
 """
 from typing import Callable, Optional
 
