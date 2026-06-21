@@ -1177,8 +1177,9 @@ class MoviePilotAgent:
             )
         return attachments
 
+    @staticmethod
     async def _stream_agent_tokens(
-            self, agent, messages: dict, config: dict, on_token: Callable[[str], None]
+            agent, messages: dict, config: dict, on_token: Callable[[str], None]
     ):
         """
         流式运行智能体，过滤工具调用token和思考内容，将模型生成的内容通过回调输出。
