@@ -1594,13 +1594,12 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     def _recognize_for_transfer(
         self, task: TransferTask, transferhis: TransferHistoryOper
     ) -> Tuple[Optional[Tuple[bool, str]], Optional[MediaInfo], bool]:
-        """识别媒体信息（block-1：__handle_transfer 的识别块，含双早返回与多值回流）。
+        """识别媒体信息（整理流程的识别步骤，含双早返回与多值回流）。
 
-        S8b：自 __handle_transfer 抽出，返回三元组 (early, mediainfo, mediainfo_changed)：
-        early 非 None 时调用方须 `return early`（preview 短路 / 识别失败两条原早返回，值均为
-        (False, "未识别到媒体信息")）；early 为 None 时带出识别得到的 mediainfo 与
-        mediainfo_changed 供后续块使用。识别失败分支的副作用（add_fail / 通知 / 移除任务 /
-        标记下载完成 / AI 重试）逐字保留，行为字节级不变。
+        返回三元组 (early, mediainfo, mediainfo_changed)：early 非 None 时调用方须 `return early`
+        （preview 短路 / 识别失败两条早返回，值均为 (False, "未识别到媒体信息")）；early 为 None 时
+        带出识别得到的 mediainfo 与 mediainfo_changed 供后续步骤使用。识别失败分支保留 add_fail /
+        通知 / 移除任务 / 标记下载完成 / AI 重试等副作用。
         """
         mediainfo = task.mediainfo
         mediainfo_changed = False
@@ -1706,7 +1705,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         transferhis: TransferHistoryOper,
     ) -> bool:
         """
-        S8b：自 __handle_transfer 抽出的无早返回子块，行为字节级不变。
         未开启「新增已入库媒体跟随 TMDB 信息变化」时，按 tmdbid 查历史 title，
         若与当前不同则就地覆盖 mediainfo.title 并置 mediainfo_changed=True；
         返回（可能更新的）mediainfo_changed。
@@ -1727,10 +1725,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         mediainfo_changed: bool,
     ) -> Optional[Tuple[bool, str]]:
         """
-        S8b：自 __handle_transfer 抽出的早返回子块，经哨兵协议保持行为字节级不变。
-
-        mediainfo 变更时把（可能重识别后的）mediainfo 回写到 task 并在 jobview 重新登记；
-        若 migrate_task 报告任务已存在，则记录日志并返回 (False, ...) 哨兵，由调用方提前返回；
+        早返回子块（哨兵协议）：mediainfo 变更时把（可能重识别后的）mediainfo 回写到 task 并在 jobview
+        重新登记；若 migrate_task 报告任务已存在，则记录日志并返回 (False, ...) 哨兵，由调用方提前返回；
         否则返回 None 表示继续。未变更时不回写、不去重，直接返回 None。
         """
         if mediainfo_changed:
@@ -1743,10 +1739,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return None
 
     def _resolve_episodes_info(self, task: TransferTask) -> None:
-        """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。
-
-        S8a：自 __handle_transfer 抽出的无早返回子块，行为字节级不变。
-        """
+        """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。"""
         if task.mediainfo.type == MediaType.TV and not task.episodes_info:
             # 判断注意season为0的情况
             season_num = task.mediainfo.season
@@ -1763,10 +1756,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
 
     def _resolve_target_directory(self, task: TransferTask) -> None:
-        """查询整理目标目录与目标存储。
-
-        S8a：自 __handle_transfer 抽出的无早返回子块，行为字节级不变。
-        """
+        """查询整理目标目录与目标存储。"""
         if not task.target_directory:
             if task.target_path:
                 # 指定目标路径，`手动整理`场景下使用，忽略源目录匹配，使用指定目录匹配
@@ -1789,8 +1779,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     def _select_storage_opers(self, task: TransferTask) -> Tuple[Any, Any]:
         """标记任务运行中，并广播事件请示额外的源/目标存储操作器。
 
-        S8a：自 __handle_transfer 抽出的无早返回子块，行为字节级不变；
-        返回 (source_oper, target_oper) 供 __handle_transfer 传入 transfer()。
+        返回 (source_oper, target_oper) 供整理时传入 transfer()。
         """
         # 正在处理
         self.jobview.running_task(task)
@@ -1838,9 +1827,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     ) -> Optional[Tuple[bool, str]]:
         """执行整理并分发结果。
 
-        S8b：自 __handle_transfer 抽出的**终末块**（原 try 末尾、finally 之前，每条分支均
-        return），调用方以 `return self._run_transfer_and_dispatch(...)` 等价替换，行为字节级
-        不变。transfer 失败返回模块错误；有 callback 则委派 (task, transferinfo) 并返回其结果；
+        transfer 失败返回模块错误；有 callback 则委派 (task, transferinfo) 并返回其结果；
         否则返回 (transferinfo.success, transferinfo.message)。
         """
         # 执行整理

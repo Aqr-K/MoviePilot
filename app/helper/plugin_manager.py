@@ -901,7 +901,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if cached_tools is not None:
             return self._copy_plugin_agent_tools(cached_tools)
 
-        # 工具收集逻辑（S9）已下沉至 app.helper.plugin_metadata，此处仅在其上叠加注册表缓存层
+        # 工具收集逻辑在 app.helper.plugin_metadata，此处仅在其上叠加注册表缓存层
         ret_tools = plugin_metadata.get_plugin_agent_tools(self._running_plugins, pid)
         with self._plugin_agent_tools_cache_lock:
             self._plugin_agent_tools_cache[cache_key] = self._copy_plugin_agent_tools(ret_tools)
