@@ -299,18 +299,14 @@ class PromptManager:
         api_port = settings.PORT
         api_path = settings.API_V1_STR
 
-        # API令牌
-        api_token = settings.API_TOKEN or "未设置"
-
-        # 数据库信息
+        # 数据库信息只保留非敏感连接摘要，凭据由内部工具自行读取。
         db_type = settings.DB_TYPE
         if db_type == "sqlite":
-            db_info = f"SQLite ({settings.CONFIG_PATH / 'db' / 'moviepilot.db'})"
+            db_info = "SQLite（本地配置目录数据库，路径由内部工具读取）"
         else:
-            db_password = settings.DB_POSTGRESQL_PASSWORD or ""
             db_info = (
-                f"PostgreSQL ({settings.DB_POSTGRESQL_USERNAME}:{db_password}@"
-                f"{settings.DB_POSTGRESQL_TARGET}/{settings.DB_POSTGRESQL_DATABASE})"
+                f"PostgreSQL（{settings.DB_POSTGRESQL_TARGET}/"
+                f"{settings.DB_POSTGRESQL_DATABASE}，凭据由内部工具读取）"
             )
 
         # 保留日期用于提供“今天是哪天”的稳定上下文，但不再注入秒级时间，
@@ -322,7 +318,7 @@ class PromptManager:
             f"- IP地址: {ip_address}",
             f"- API端口: {api_port}",
             f"- API路径: {api_path}",
-            f"- API令牌: {api_token}",
+            "- API认证: 由内部工具自动处理，不在提示词中暴露令牌",
             f"- 外网域名: {settings.APP_DOMAIN or '未设置'}",
             f"- 数据库类型: {db_type}",
             f"- 数据库: {db_info}",

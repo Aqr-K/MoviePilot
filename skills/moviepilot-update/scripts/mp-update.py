@@ -12,12 +12,14 @@ API_SCRIPT = SCRIPT_DIR.parents[1] / "moviepilot-api" / "scripts" / "mp-api.py"
 
 
 def run_api_call(args: list[str]) -> int:
+    """调用 MoviePilot REST API 客户端执行更新相关接口。"""
     command = [sys.executable, str(API_SCRIPT), *args]
     return_code = __import__("subprocess").run(command, check=False).returncode
     return return_code
 
 
 def print_usage() -> None:
+    """输出更新脚本的命令行用法。"""
     print(
         "Usage:\n"
         f"  python {Path(sys.argv[0]).name} versions\n"
@@ -27,6 +29,7 @@ def print_usage() -> None:
 
 
 def main() -> int:
+    """执行 MoviePilot 更新脚本入口。"""
     argv = sys.argv[1:]
     if not argv or argv[0] in {"-h", "--help", "help"}:
         print_usage()

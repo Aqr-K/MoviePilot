@@ -1,20 +1,49 @@
 ---
 name: moviepilot-cli
-version: 1
-description: Use this skill for any request involving movies, TV shows, or anime, including searching, downloads, subscriptions, library management. Also use this skill whenever the user explicitly mentions MoviePilot.
+version: 3
+description: >-
+  Use this skill when the user asks to operate MoviePilot through the local
+  `moviepilot tool` MCP CLI for normal product workflows: media search, torrent
+  search, downloads, subscriptions, downloader tasks, library checks, sites,
+  schedulers, workflows, and messages. Prefer dedicated skills for slash command
+  dispatch, manual file organization or failed transfer retry, direct REST API
+  calls, direct database SQL, browser operations, and restart/upgrade.
 ---
 
 # MoviePilot CLI
 
 > All script paths are relative to this skill file.
 
-Use `scripts/mp-cli.js` to interact with the MoviePilot backend.
+Use local `moviepilot tool ...` commands to interact with MoviePilot MCP tools.
+The command reads the local MoviePilot configuration; do not ask the user for
+`API_TOKEN`, database passwords, or a backend DSN during normal local use.
+
+## Scope And Boundaries
+
+This skill is for normal MoviePilot product operations exposed as MCP tools.
+Choose other skills first when they match more precisely:
+
+| Request | Preferred skill |
+|---|---|
+| Slash commands or plugin/system command dispatch | `command-dispatch` |
+| Manual file organization | `organize-files` |
+| Retry failed transfer history records | `transfer-failed-retry` |
+| Direct REST endpoint not exposed by MCP tools | `moviepilot-api` |
+| Direct SQL query or database update | `database-operation` |
+| Restart, version check, or upgrade | `moviepilot-update` |
+| Browser-only state, site login pages, screenshots, cookies | `browser-use` |
+
+Use `moviepilot-api` only after `moviepilot tool list` and
+`moviepilot tool show <command>` confirm that no MCP tool covers the required
+operation. Use `database-operation` only when the task explicitly requires SQL
+inspection or mutation, or when product tools/API cannot answer the data
+question.
 
 ## Discover Commands
 
-List all available commands: `node scripts/mp-cli.js list`
+List all available commands: `moviepilot tool list`
 
-Show parameters and usage for a specific command: `node scripts/mp-cli.js show <command>`
+Show parameters and usage for a specific command: `moviepilot tool show <command>`
 
 Always run `show <command>` before calling a command — parameter names are not inferable, do not guess.
 
@@ -38,7 +67,7 @@ Always run `show <command>` before calling a command — parameter names are not
 #### 1. Search TMDB
 
 Search for a movie or TV show by title: 
-`node scripts/mp-cli.js search_media title="..." media_type="movie"`
+`moviepilot tool run search_media title="..." media_type="movie"`
 
 If the user specifies a TV season, run Season Validation step first — the season number provided by the user may not match TMDB.
 
@@ -47,13 +76,13 @@ If the user specifies a TV season, run Season Validation step first — the seas
 Prefer `tmdb_id`; use `douban_id` only when `tmdb_id` is unavailable.
 
 Omitting `sites=` uses the user's default sites. If the user specifies sites, first retrieve site IDs:
-`node scripts/mp-cli.js query_sites`
+`moviepilot tool run query_sites`
 
 Search torrents using default sites:
-`node scripts/mp-cli.js search_torrents tmdb_id=791373 media_type="movie"`
+`moviepilot tool run search_torrents tmdb_id=791373 media_type="movie"`
 
 Search torrents using user-specified sites (pass site IDs from `query_sites`):
-`node scripts/mp-cli.js search_torrents tmdb_id=791373 media_type="movie" sites='1,3'`
+`moviepilot tool run search_torrents tmdb_id=791373 media_type="movie" sites='1,3'`
 
 When `search_torrents` returns:
 1. **Stop** — do not call `get_search_results` yet.
@@ -63,12 +92,12 @@ When `search_torrents` returns:
 
 #### 3. Get filtered results (only after user has responded to filter_options)
 
-Run `node scripts/mp-cli.js show get_search_results` to check available parameters. Filter logic: OR within a field, AND across fields.
+Run `moviepilot tool show get_search_results` to check available parameters. Filter logic: OR within a field, AND across fields.
 
 Filter values must come from the `filter_options` returned by `search_torrents` — do not invent, translate, normalize, or use values from any other source. Note: `filter_options` keys are camelCase (e.g., `freeState`), but `get_search_results` params are snake_case (e.g., `free_state`).
 
 Fetch results with selected filters:
-`node scripts/mp-cli.js get_search_results resolution='1080p,2160p' free_state='免费,50%'`
+`moviepilot tool run get_search_results resolution='1080p,2160p' free_state='免费,50%'`
 
 If empty, tell the user which filter to relax and ask before retrying.
 
@@ -95,7 +124,7 @@ If the media already exists in the library or is already subscribed, **stop** an
 #### 6. Add download
 
 Download one or more torrents (`torrent_url` comes from `get_search_results` output):
-`node scripts/mp-cli.js add_download_tasks torrent_url="abc1234:1,def5678:2"`
+`moviepilot tool run add_download_tasks torrent_url="abc1234:1,def5678:2"`
 
 #### Error handling
 
@@ -113,59 +142,59 @@ Download one or more torrents (`torrent_url` comes from `get_search_results` out
 3. If the user specifies a TV season, run Season Validation step first.
 
 Subscribe to a movie or TV show:
-`node scripts/mp-cli.js add_subscribe title="..." year="2011" media_type="tv" tmdb_id=42009`
+`moviepilot tool run add_subscribe title="..." year="2011" media_type="tv" tmdb_id=42009`
 
 Subscribe to a specific season:
-`node scripts/mp-cli.js add_subscribe title="..." year="2011" media_type="tv" tmdb_id=42009 season=4`
+`moviepilot tool run add_subscribe title="..." year="2011" media_type="tv" tmdb_id=42009 season=4`
 
 Subscribe starting from a specific episode:
-`node scripts/mp-cli.js add_subscribe title="..." year="2024" media_type="tv" tmdb_id=12345 season=1 start_episode=13`
+`moviepilot tool run add_subscribe title="..." year="2024" media_type="tv" tmdb_id=12345 season=1 start_episode=13`
 
 ### Manage Downloads
 
 List download tasks and get hash for further operations:
-`node scripts/mp-cli.js query_download_tasks status=downloading`
+`moviepilot tool run query_download_tasks status=downloading`
 
 Use `status=completed` for tasks that are neither downloading nor paused in the downloader; use `status=all` to include every MoviePilot-tagged downloader task. Add `include_all_tags=true` when diagnosing tasks that do not have the MoviePilot built-in tag. Add `include_trackers=true` or query by `hash` when tracker URLs are needed.
 
 Update a download task (supports start/stop, tags, speed limits, trackers, save path, category, ratio, and seeding time where the downloader supports them):
-`node scripts/mp-cli.js update_download_tasks hash=<hash> action=stop upload_limit=512 download_limit=2048`
+`moviepilot tool run update_download_tasks hash=<hash> action=stop upload_limit=512 download_limit=2048`
 
 Add trackers to a download task:
-`node scripts/mp-cli.js update_download_tasks hash=<hash> trackers='https://tracker.example/announce,udp://tracker.example:80/announce'`
+`moviepilot tool run update_download_tasks hash=<hash> trackers='https://tracker.example/announce,udp://tracker.example:80/announce'`
 
 Delete a download task (confirm with user first — irreversible):
-`node scripts/mp-cli.js delete_download_tasks hash=<hash>`
+`moviepilot tool run delete_download_tasks hash=<hash>`
 
 Delete a download task and also remove its files (confirm with user first — irreversible):
-`node scripts/mp-cli.js delete_download_tasks hash=<hash> delete_files=true`
+`moviepilot tool run delete_download_tasks hash=<hash> delete_files=true`
 
 ### Manage Subscriptions
 
 List active subscriptions:
-`node scripts/mp-cli.js query_subscribes status=R`
+`moviepilot tool run query_subscribes status=R`
 
 Update subscription filters:
-`node scripts/mp-cli.js update_subscribe subscribe_id=123 resolution="1080p"`
+`moviepilot tool run update_subscribe subscribe_id=123 resolution="1080p"`
 
 Only download full-season packs for a TV best-version subscription:
-`node scripts/mp-cli.js update_subscribe subscribe_id=123 best_version=1 best_version_full=1`
+`moviepilot tool run update_subscribe subscribe_id=123 best_version=1 best_version_full=1`
 
 Trigger a search for missing episodes (confirm with user first):
-`node scripts/mp-cli.js search_subscribe subscribe_id=123`
+`moviepilot tool run search_subscribe subscribe_id=123`
 
 Remove a subscription (confirm with user first):
-`node scripts/mp-cli.js delete_subscribe subscribe_id=123`
+`moviepilot tool run delete_subscribe subscribe_id=123`
 
 ### Check Library and Subscriptions
 
 Run before any download or subscription to avoid duplicates.
 
 Check if the media already exists in the library:
-`node scripts/mp-cli.js query_library_exists tmdb_id=123456 media_type="movie"`
+`moviepilot tool run query_library_exists tmdb_id=123456 media_type="movie"`
 
 Check if the media is already subscribed:
-`node scripts/mp-cli.js query_subscribes tmdb_id=123456`
+`moviepilot tool run query_subscribes tmdb_id=123456`
 
 ### Season Validation
 
@@ -174,7 +203,7 @@ Mandatory when user specifies a season. Productions sometimes release a show in 
 #### 1. Verify season exists
 
 Fetch media detail to check available seasons:
-`node scripts/mp-cli.js query_media_detail tmdb_id=<id> media_type="tv"`
+`moviepilot tool run query_media_detail tmdb_id=<id> media_type="tv"`
 
 Compare `season_info` with the user's requested season:
 1. If the season exists in `season_info` → use that season number directly and return to the calling workflow.
@@ -183,11 +212,12 @@ Compare `season_info` with the user's requested season:
 #### 2. Identify the correct episode range
 
 Fetch episode schedule for the latest season from `season_info`:
-`node scripts/mp-cli.js query_episode_schedule tmdb_id=<id> season=<latest_season_number>`
+`moviepilot tool run query_episode_schedule tmdb_id=<id> season=<latest_season_number>`
 
 Use `air_date` to find a block of recently-aired episodes that likely corresponds to what the user calls the missing season. Look for a gap in `air_date` between episodes — the gap indicates a part break, and the episodes after the gap are what the user likely refers to as the next "season". For example, if TMDB Season 1 has episodes 1–24 and there is a multi-month gap between episode 12 and 13, then episodes 13–24 correspond to the user's "Season 2". If no such gap exists, tell user content is unavailable. Otherwise confirm the episode range with user.
 
 ## Error handling
 
-Missing configuration: Ask the user for the backend host and API key. Once provided, save the config persistently — subsequent commands will use it automatically:
-`node scripts/mp-cli.js -h <HOST> -k <KEY>`
+Missing configuration or authentication failure: run `moviepilot doctor` to
+verify the local MoviePilot installation and settings. Do not ask the user to
+paste the API key into the prompt for local CLI usage.
