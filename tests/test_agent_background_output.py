@@ -13,6 +13,8 @@ from app.agent import (
     _MessageTask,
 )
 from app.agent.memory import memory_manager
+from app.agent.middleware.activity_log import QUERY_ACTIVITY_LOG_TOOL_NAME
+from app.agent.middleware.skills import SKILL_TOOL_NAME
 from app.agent.middleware.subagents import (
     SUBAGENT_CONTROL_TOOL_NAME,
     SUBAGENT_TASK_TOOL_NAME,
@@ -65,6 +67,16 @@ class _FakeStreamingAgent(_FakeAgent):
 
 class StreamChunkTimeoutError(RuntimeError):
     """模拟 langchain_openai 的流式分块超时异常。"""
+
+
+def _fake_skills_middleware(tool=None):
+    """构造带 tools 属性的 SkillsMiddleware 测试替身。"""
+    return SimpleNamespace(name="skills", tools=[] if tool is None else [tool])
+
+
+def _fake_activity_log_middleware(tool=None):
+    """构造带 tools 属性的 ActivityLogMiddleware 测试替身。"""
+    return SimpleNamespace(name="activity", tools=[] if tool is None else [tool])
 
 
 class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
@@ -394,11 +406,17 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
                 "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
                 return_value=[],
             ),
-            patch("app.agent.SkillsMiddleware", side_effect=lambda *args, **kwargs: "skills"),
+            patch(
+                "app.agent.SkillsMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_skills_middleware(),
+            ),
             patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
             patch("app.agent.RuntimeConfigMiddleware", side_effect=lambda *args, **kwargs: "runtime"),
             patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
-            patch("app.agent.ActivityLogMiddleware", side_effect=lambda *args, **kwargs: "activity"),
+            patch(
+                "app.agent.ActivityLogMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_activity_log_middleware(),
+            ),
             patch("app.agent.SummarizationMiddleware", side_effect=lambda *args, **kwargs: "summary"),
             patch("app.agent.PatchToolCallsMiddleware", side_effect=lambda *args, **kwargs: "patch"),
             patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
@@ -408,9 +426,72 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             created = await agent._create_agent(streaming=False)
 
         self.assertEqual(
-            ["skills", "jobs", "runtime", "memory", "summary", "patch", "usage"],
-            created["middleware"],
+            [
+                "skills",
+                "jobs",
+                "runtime",
+                "memory",
+                "summary",
+                "patch",
+                "usage",
+            ],
+            [getattr(item, "name", item) for item in created["middleware"]],
         )
+
+    async def test_create_agent_registers_skill_tool_from_middleware(self):
+        """SkillsMiddleware 暴露的 skill 工具应进入 Agent 工具和筛选候选。"""
+        captured = {}
+        skill_tool = SimpleNamespace(name=SKILL_TOOL_NAME)
+        agent = MoviePilotAgent(session_id="normal-session", user_id="system")
+        agent._initialize_tools = lambda: []
+        agent._initialize_subagent_tools = lambda: []
+
+        def _tool_selector(**kwargs):
+            captured["selection_tools"] = kwargs["selection_tools"]
+            captured["always_include"] = kwargs["always_include"]
+            return "selector"
+
+        with (
+            patch.object(settings, "LLM_MAX_TOOLS", 5),
+            patch.object(agent, "_initialize_llm", new=AsyncMock(return_value=object())),
+            patch("app.agent.prompt_manager.get_agent_prompt", return_value="PROMPT"),
+            patch("app.agent.create_subagent_middlewares", return_value=([], [])),
+            patch(
+                "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
+                return_value=[],
+            ),
+            patch(
+                "app.agent.SkillsMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_skills_middleware(skill_tool),
+            ),
+            patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
+            patch(
+                "app.agent.RuntimeConfigMiddleware",
+                side_effect=lambda *args, **kwargs: "runtime",
+            ),
+            patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
+            patch(
+                "app.agent.ActivityLogMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_activity_log_middleware(),
+            ),
+            patch(
+                "app.agent.SummarizationMiddleware",
+                side_effect=lambda *args, **kwargs: "summary",
+            ),
+            patch(
+                "app.agent.PatchToolCallsMiddleware",
+                side_effect=lambda *args, **kwargs: "patch",
+            ),
+            patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
+            patch("app.agent.ToolSelectorMiddleware", side_effect=_tool_selector),
+            patch("app.agent.InMemorySaver", return_value="checkpointer"),
+            patch("app.agent.create_agent", side_effect=lambda **kwargs: kwargs),
+        ):
+            created = await agent._create_agent(streaming=False)
+
+        self.assertIn(skill_tool, created["tools"])
+        self.assertIn(skill_tool, captured["selection_tools"])
+        self.assertIn(SKILL_TOOL_NAME, captured["always_include"])
 
     async def test_create_agent_excludes_activity_log_without_message_context(self):
         """无渠道信息的后台捕获任务不应注入活动日志。"""
@@ -431,13 +512,28 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
                 "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
                 return_value=[],
             ),
-            patch("app.agent.SkillsMiddleware", side_effect=lambda *args, **kwargs: "skills"),
+            patch(
+                "app.agent.SkillsMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_skills_middleware(),
+            ),
             patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
-            patch("app.agent.RuntimeConfigMiddleware", side_effect=lambda *args, **kwargs: "runtime"),
+            patch(
+                "app.agent.RuntimeConfigMiddleware",
+                side_effect=lambda *args, **kwargs: "runtime",
+            ),
             patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
-            patch("app.agent.ActivityLogMiddleware", side_effect=lambda *args, **kwargs: "activity"),
-            patch("app.agent.SummarizationMiddleware", side_effect=lambda *args, **kwargs: "summary"),
-            patch("app.agent.PatchToolCallsMiddleware", side_effect=lambda *args, **kwargs: "patch"),
+            patch(
+                "app.agent.ActivityLogMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_activity_log_middleware(),
+            ),
+            patch(
+                "app.agent.SummarizationMiddleware",
+                side_effect=lambda *args, **kwargs: "summary",
+            ),
+            patch(
+                "app.agent.PatchToolCallsMiddleware",
+                side_effect=lambda *args, **kwargs: "patch",
+            ),
             patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
             patch("app.agent.InMemorySaver", return_value="checkpointer"),
             patch("app.agent.create_agent", side_effect=lambda **kwargs: kwargs),
@@ -445,8 +541,16 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             created = await agent._create_agent(streaming=False)
 
         self.assertEqual(
-            ["skills", "jobs", "runtime", "memory", "summary", "patch", "usage"],
-            created["middleware"],
+            [
+                "skills",
+                "jobs",
+                "runtime",
+                "memory",
+                "summary",
+                "patch",
+                "usage",
+            ],
+            [getattr(item, "name", item) for item in created["middleware"]],
         )
 
     def test_message_tool_is_not_always_included_by_tool_selector(self):
@@ -459,15 +563,77 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("send_message", always_include)
 
-    def test_activity_log_tool_is_always_included_by_tool_selector(self):
-        """活动日志查询工具应绕过工具筛选。"""
-        activity_log_tool = SimpleNamespace(name="query_activity_log")
+    def test_activity_log_tool_is_not_registered_by_tool_factory(self):
+        """活动日志查询工具不应再由全局工具工厂保留。"""
+        activity_log_tool = SimpleNamespace(name=QUERY_ACTIVITY_LOG_TOOL_NAME)
 
         always_include = MoviePilotToolFactory.get_tool_selector_always_include_names(
             [activity_log_tool]
         )
 
-        self.assertIn("query_activity_log", always_include)
+        self.assertNotIn(QUERY_ACTIVITY_LOG_TOOL_NAME, always_include)
+
+    async def test_create_agent_registers_activity_log_tool_from_middleware(self):
+        """ActivityLogMiddleware 暴露的工具应进入 Agent 工具和筛选候选。"""
+        captured = {}
+        activity_tool = SimpleNamespace(name=QUERY_ACTIVITY_LOG_TOOL_NAME)
+        agent = MoviePilotAgent(
+            session_id="normal-session",
+            user_id="system",
+            channel="Web",
+            source="openai",
+        )
+        agent._initialize_tools = lambda: []
+        agent._initialize_subagent_tools = lambda: []
+
+        def _tool_selector(**kwargs):
+            captured["selection_tools"] = kwargs["selection_tools"]
+            captured["always_include"] = kwargs["always_include"]
+            return "selector"
+
+        with (
+            patch.object(settings, "LLM_MAX_TOOLS", 5),
+            patch.object(agent, "_initialize_llm", new=AsyncMock(return_value=object())),
+            patch("app.agent.prompt_manager.get_agent_prompt", return_value="PROMPT"),
+            patch("app.agent.create_subagent_middlewares", return_value=([], [])),
+            patch(
+                "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
+                return_value=[],
+            ),
+            patch(
+                "app.agent.SkillsMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_skills_middleware(),
+            ),
+            patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
+            patch(
+                "app.agent.RuntimeConfigMiddleware",
+                side_effect=lambda *args, **kwargs: "runtime",
+            ),
+            patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
+            patch(
+                "app.agent.ActivityLogMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_activity_log_middleware(
+                    activity_tool
+                ),
+            ),
+            patch(
+                "app.agent.SummarizationMiddleware",
+                side_effect=lambda *args, **kwargs: "summary",
+            ),
+            patch(
+                "app.agent.PatchToolCallsMiddleware",
+                side_effect=lambda *args, **kwargs: "patch",
+            ),
+            patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
+            patch("app.agent.ToolSelectorMiddleware", side_effect=_tool_selector),
+            patch("app.agent.InMemorySaver", return_value="checkpointer"),
+            patch("app.agent.create_agent", side_effect=lambda **kwargs: kwargs),
+        ):
+            created = await agent._create_agent(streaming=False)
+
+        self.assertIn(activity_tool, created["tools"])
+        self.assertIn(activity_tool, captured["selection_tools"])
+        self.assertIn(QUERY_ACTIVITY_LOG_TOOL_NAME, captured["always_include"])
 
     async def test_create_agent_always_includes_subagent_tools(self):
         """工具筛选开启时应保留同步和异步子代理入口。"""
@@ -498,13 +664,28 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
                 "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
                 return_value=[],
             ),
-            patch("app.agent.SkillsMiddleware", side_effect=lambda *args, **kwargs: "skills"),
+            patch(
+                "app.agent.SkillsMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_skills_middleware(),
+            ),
             patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
-            patch("app.agent.RuntimeConfigMiddleware", side_effect=lambda *args, **kwargs: "runtime"),
+            patch(
+                "app.agent.RuntimeConfigMiddleware",
+                side_effect=lambda *args, **kwargs: "runtime",
+            ),
             patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
-            patch("app.agent.ActivityLogMiddleware", side_effect=lambda *args, **kwargs: "activity"),
-            patch("app.agent.SummarizationMiddleware", side_effect=lambda *args, **kwargs: "summary"),
-            patch("app.agent.PatchToolCallsMiddleware", side_effect=lambda *args, **kwargs: "patch"),
+            patch(
+                "app.agent.ActivityLogMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_activity_log_middleware(),
+            ),
+            patch(
+                "app.agent.SummarizationMiddleware",
+                side_effect=lambda *args, **kwargs: "summary",
+            ),
+            patch(
+                "app.agent.PatchToolCallsMiddleware",
+                side_effect=lambda *args, **kwargs: "patch",
+            ),
             patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
             patch("app.agent.ToolSelectorMiddleware", side_effect=_tool_selector),
             patch("app.agent.InMemorySaver", return_value="checkpointer"),
@@ -534,13 +715,28 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
                 "app.agent.MoviePilotToolFactory.get_tool_selector_always_include_names",
                 return_value=[],
             ),
-            patch("app.agent.SkillsMiddleware", side_effect=lambda *args, **kwargs: "skills"),
+            patch(
+                "app.agent.SkillsMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_skills_middleware(),
+            ),
             patch("app.agent.JobsMiddleware", side_effect=lambda *args, **kwargs: "jobs"),
-            patch("app.agent.RuntimeConfigMiddleware", side_effect=lambda *args, **kwargs: "runtime"),
+            patch(
+                "app.agent.RuntimeConfigMiddleware",
+                side_effect=lambda *args, **kwargs: "runtime",
+            ),
             patch("app.agent.MemoryMiddleware", side_effect=lambda *args, **kwargs: "memory"),
-            patch("app.agent.ActivityLogMiddleware", side_effect=lambda *args, **kwargs: "activity"),
-            patch("app.agent.SummarizationMiddleware", side_effect=lambda *args, **kwargs: "summary"),
-            patch("app.agent.PatchToolCallsMiddleware", side_effect=lambda *args, **kwargs: "patch"),
+            patch(
+                "app.agent.ActivityLogMiddleware",
+                side_effect=lambda *args, **kwargs: _fake_activity_log_middleware(),
+            ),
+            patch(
+                "app.agent.SummarizationMiddleware",
+                side_effect=lambda *args, **kwargs: "summary",
+            ),
+            patch(
+                "app.agent.PatchToolCallsMiddleware",
+                side_effect=lambda *args, **kwargs: "patch",
+            ),
             patch("app.agent.UsageMiddleware", side_effect=lambda *args, **kwargs: "usage"),
             patch("app.agent.InMemorySaver", return_value="checkpointer"),
             patch("app.agent.create_agent", side_effect=lambda **kwargs: kwargs),
@@ -548,8 +744,17 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
             created = await agent._create_agent(streaming=False)
 
         self.assertEqual(
-            ["skills", "jobs", "runtime", "memory", "activity", "summary", "patch", "usage"],
-            created["middleware"],
+            [
+                "skills",
+                "jobs",
+                "runtime",
+                "memory",
+                "activity",
+                "summary",
+                "patch",
+                "usage",
+            ],
+            [getattr(item, "name", item) for item in created["middleware"]],
         )
 
     async def test_run_background_prompt_forces_disable_message_tools_when_capture_only(self):

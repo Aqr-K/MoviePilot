@@ -166,21 +166,11 @@ class AgentRuntimeConfig:
 
     def render_prompt_sections(self) -> str:
         """渲染进入系统提示词的运行时片段。"""
-        sections: list[str] = [
-            "<agent_runtime_config>",
-            f"- Active persona: `{self.active_persona}`",
-            f"- Active persona source: `{self.persona.path}`",
-        ]
-        if self.available_personas:
-            sections.append("- Available personas:")
-            sections.extend(f"  - {persona.summary_line()}" for persona in self.available_personas)
-        if self.available_subagents:
-            sections.append("- Available subagents:")
-            sections.extend(
-                f"  - {subagent.summary_line()}"
-                for subagent in self.available_subagents
-            )
-        sections.append("</agent_runtime_config>")
+        sections: list[str] = ["<agent_runtime_config>", f"- Active persona: `{self.active_persona}`",
+                               f"- Active persona file: `personas/{self.persona.persona_id}/{PERSONA_FILE}`",
+                               "- Use `query_personas` before switching persona when the requested speaking style is unclear.",
+                               "- Subagent availability is exposed by the subagent task tools; do not rely on this runtime section as a catalog.",
+                               "</agent_runtime_config>"]
 
         if self.warnings:
             sections.extend(

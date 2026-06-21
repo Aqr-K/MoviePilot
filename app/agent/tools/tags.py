@@ -34,6 +34,7 @@ class ToolTag(str, Enum):
     SlashCommand = "slash_command"
     Recommendation = "recommendation"
     Metadata = "metadata"
+    Skill = "skill"
 
 
 __all__ = ["ToolTag"]

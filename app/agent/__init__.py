@@ -27,7 +27,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.agent.callback import StreamingHandler
 from app.agent.llm import LLMHelper
 from app.agent.memory import memory_manager
-from app.agent.middleware.activity_log import ActivityLogMiddleware
+from app.agent.middleware.activity_log import (
+    ActivityLogMiddleware,
+    QUERY_ACTIVITY_LOG_TOOL_NAME,
+)
 from app.agent.middleware.jobs import (
     JobsMiddleware,
     filter_active_jobs,
@@ -36,7 +39,7 @@ from app.agent.middleware.jobs import (
 from app.agent.middleware.memory import MemoryMiddleware
 from app.agent.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from app.agent.middleware.runtime_config import RuntimeConfigMiddleware
-from app.agent.middleware.skills import SkillsMiddleware
+from app.agent.middleware.skills import SKILL_TOOL_NAME, SkillsMiddleware
 from app.agent.middleware.subagents import (
     SUBAGENT_CONTROL_TOOL_NAME,
     SUBAGENT_TASK_TOOL_NAME,
@@ -972,6 +975,20 @@ class MoviePilotAgent:
 
             # 工具列表
             tools = self._initialize_tools()
+            skills_middleware = SkillsMiddleware(
+                sources=[str(agent_runtime_manager.skills_dir)],
+                bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
+            )
+            skill_tools = list(getattr(skills_middleware, "tools", []) or [])
+            activity_log_middleware = None
+            activity_log_tools = []
+            if self.has_message_context:
+                activity_log_middleware = ActivityLogMiddleware(
+                    activity_dir=str(agent_runtime_manager.activity_dir),
+                )
+                activity_log_tools = list(
+                    getattr(activity_log_middleware, "tools", []) or []
+                )
             subagent_middlewares, subagent_task_tools = create_subagent_middlewares(
                 model=non_streaming_model,
                 tools=self._initialize_subagent_tools(),
@@ -988,14 +1005,23 @@ class MoviePilotAgent:
                     if getattr(tool, "name", None)
                     in {SUBAGENT_TASK_TOOL_NAME, SUBAGENT_CONTROL_TOOL_NAME}
                 )
+            if skill_tools:
+                always_include_tools.extend(
+                    tool.name
+                    for tool in skill_tools
+                    if getattr(tool, "name", None) == SKILL_TOOL_NAME
+                )
+            if activity_log_tools:
+                always_include_tools.extend(
+                    tool.name
+                    for tool in activity_log_tools
+                    if getattr(tool, "name", None) == QUERY_ACTIVITY_LOG_TOOL_NAME
+                )
 
             # 中间件
             middlewares = [
                 # Skills
-                SkillsMiddleware(
-                    sources=[str(agent_runtime_manager.skills_dir)],
-                    bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
-                ),
+                skills_middleware,
                 # Jobs 任务管理
                 JobsMiddleware(
                     sources=[str(agent_runtime_manager.jobs_dir)],
@@ -1019,9 +1045,7 @@ class MoviePilotAgent:
             if self.has_message_context:
                 middlewares.insert(
                     4,
-                    ActivityLogMiddleware(
-                        activity_dir=str(agent_runtime_manager.activity_dir),
-                    ),
+                    activity_log_middleware,
                 )
 
             # 工具选择
@@ -1029,7 +1053,12 @@ class MoviePilotAgent:
                 middlewares.append(
                     ToolSelectorMiddleware(
                         model=non_streaming_model,
-                        selection_tools=[*tools, *subagent_task_tools],
+                        selection_tools=[
+                            *tools,
+                            *skill_tools,
+                            *activity_log_tools,
+                            *subagent_task_tools,
+                        ],
                         max_tools=max_tools,
                         always_include=always_include_tools,
                     )
@@ -1037,7 +1066,7 @@ class MoviePilotAgent:
 
             return create_agent(
                 model=agent_model,
-                tools=tools,
+                tools=[*tools, *skill_tools, *activity_log_tools],
                 system_prompt=system_prompt,
                 middleware=middlewares,
                 checkpointer=InMemorySaver(),

@@ -8,13 +8,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.agent.middleware.activity_log import (
     ActivityLogMiddleware,
+    QUERY_ACTIVITY_LOG_TOOL_NAME,
     _summarize_with_llm,
     load_activity_log_index,
     query_activity_logs,
 )
 from app.agent.tools.factory import MoviePilotToolFactory
-from app.agent.tools.impl.query_activity_log import QueryActivityLogTool
-from app.agent.tools.manager import MoviePilotToolsManager
+from app.agent.tools.tags import ToolTag
 
 
 def _write_activity_log(activity_dir, date_str: str, lines: list[str]) -> None:
@@ -230,22 +230,29 @@ def test_query_activity_logs_reports_invalid_regex(tmp_path):
     assert payload["entries"] == []
 
 
-def test_query_activity_log_tool_returns_json_payload(tmp_path):
-    """query_activity_log 工具应返回结构化 JSON 查询结果。"""
+def test_activity_log_middleware_exposes_query_tool(tmp_path):
+    """ActivityLogMiddleware 应以中间件工具形式暴露活动日志查询。"""
+    middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
+
+    assert [tool.name for tool in middleware.tools] == [QUERY_ACTIVITY_LOG_TOOL_NAME]
+    assert ToolTag.Read in middleware.tools[0].tags
+    assert ToolTag.System in middleware.tools[0].tags
+    assert "recent MoviePilot Agent activity logs" in middleware.tools[0].description
+
+
+def test_activity_log_middleware_query_tool_returns_json_payload(tmp_path):
+    """query_activity_log 中间件工具应返回结构化 JSON 查询结果。"""
     _write_activity_log(
         tmp_path,
         "2026-06-18",
         ["- **10:00** 帮用户整理了电影 A"],
     )
-    tool = QueryActivityLogTool(session_id="activity-session", user_id="10001")
+    middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
+    tool = middleware.tools[0]
 
-    with patch(
-        "app.agent.tools.impl.query_activity_log.agent_runtime_manager.activity_dir",
-        tmp_path,
-    ):
-        result = asyncio.run(
-            tool.run(keyword="整理", date="2026-06-18", limit=5)
-        )
+    result = asyncio.run(
+        tool.ainvoke({"keyword": "整理", "date": "2026-06-18", "limit": 5})
+    )
 
     payload = json.loads(result)
     assert payload["success"] is True
@@ -253,8 +260,8 @@ def test_query_activity_log_tool_returns_json_payload(tmp_path):
     assert payload["entries"][0]["summary"] == "帮用户整理了电影 A"
 
 
-def test_factory_registers_activity_log_tool():
-    """工具工厂应注册活动日志查询工具。"""
+def test_factory_does_not_register_activity_log_tool():
+    """活动日志查询工具应由中间件注册，不应进入全局工具工厂。"""
     with patch(
         "app.agent.tools.factory.PluginManager.get_plugin_agent_tools",
         return_value=[],
@@ -265,22 +272,4 @@ def test_factory_registers_activity_log_tool():
         )
 
     tool_names = {tool.name for tool in tools}
-    assert "query_activity_log" in tool_names
-
-
-def test_mcp_tool_manager_exposes_activity_log_tool():
-    """MCP 工具管理器应暴露活动日志查询工具。"""
-    tool = QueryActivityLogTool(session_id="activity-session", user_id="10001")
-
-    with patch(
-        "app.agent.tools.manager.MoviePilotToolFactory.create_tools",
-        return_value=[tool],
-    ):
-        manager = MoviePilotToolsManager(is_admin=True)
-
-    tool_definitions = manager.list_tools()
-    assert [item.name for item in tool_definitions] == ["query_activity_log"]
-    schema = tool_definitions[0].input_schema
-    assert "keyword" in schema["properties"]
-    assert "use_regex" in schema["properties"]
-    assert "date" in schema["properties"]
+    assert QUERY_ACTIVITY_LOG_TOOL_NAME not in tool_names

@@ -124,9 +124,10 @@ class TestAgentRuntimeConfig(unittest.TestCase):
 
         self.assertIn("<agent_persona>", sections)
         self.assertIn("Active persona: `default`", sections)
-        self.assertIn("`guide`", sections)
-        self.assertIn("Available subagents:", sections)
-        self.assertIn("`media-researcher`", sections)
+        self.assertIn("query_personas", sections)
+        self.assertNotIn("Available personas:", sections)
+        self.assertNotIn("Available subagents:", sections)
+        self.assertNotIn("`media-researcher`", sections)
 
     def test_set_active_persona_supports_id_and_alias(self):
         manager = self._manager()
