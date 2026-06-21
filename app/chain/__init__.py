@@ -19,6 +19,7 @@ from app.core.module import ModuleManager
 from app.helper.downloader_manager import DownloaderManager
 from app.helper.mediaserver_manager import MediaServerManager
 from app.helper.notification_manager import NotificationManager
+from app.helper.mediarecognize_manager import MediaRecognizeManager
 from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
@@ -66,6 +67,7 @@ class ChainBase(metaclass=ABCMeta):
         downloadermanager=None,
         mediaservermanager=None,
         notificationmanager=None,
+        mediarecognizemanager=None,
         eventmanager=None,
         messageoper=None,
         messagehelper=None,
@@ -88,6 +90,8 @@ class ChainBase(metaclass=ABCMeta):
         # 媒体服务器（MediaServer 域）门面：媒服相关包装方法经此分发，取代 run_module 字符串 ABI。
         self.mediaservermanager = mediaservermanager or MediaServerManager()
         self.notificationmanager = notificationmanager or NotificationManager()
+        # 媒体识别/数据源（MediaRecognize 域）门面：识别相关包装方法经此分发，取代 run_module 字符串 ABI。
+        self.mediarecognizemanager = mediarecognizemanager or MediaRecognizeManager()
         self.eventmanager = eventmanager or EventManager()
         self.messageoper = messageoper or MessageOper()
         self.messagehelper = messagehelper or MessageHelper()
@@ -852,7 +856,8 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :return: 更新后的媒体信息
         """
-        return self.run_module("obtain_images", mediainfo=mediainfo)
+        # 走识别域门面（MediaRecognizeManager），等价于 v2 run_module("obtain_images")（保留可用、标废弃）
+        return self.mediarecognizemanager.obtain_images(mediainfo=mediainfo)
 
     async def async_obtain_images(self, mediainfo: MediaInfo) -> Optional[MediaInfo]:
         """
@@ -860,7 +865,7 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :return: 更新后的媒体信息
         """
-        return await self.async_run_module("async_obtain_images", mediainfo=mediainfo)
+        return await self.mediarecognizemanager.async_obtain_images(mediainfo=mediainfo)
 
     def obtain_specific_image(
             self,
@@ -1016,7 +1021,7 @@ class ChainBase(metaclass=ABCMeta):
         :param meta:  识别的元数据
         :reutrn: 媒体信息列表
         """
-        return self.run_module("search_medias", meta=meta)
+        return self.mediarecognizemanager.search_medias(meta=meta)
 
     async def async_search_medias(self, meta: MetaBase) -> Optional[List[MediaInfo]]:
         """
@@ -1024,35 +1029,35 @@ class ChainBase(metaclass=ABCMeta):
         :param meta:  识别的元数据
         :reutrn: 媒体信息列表
         """
-        return await self.async_run_module("async_search_medias", meta=meta)
+        return await self.mediarecognizemanager.async_search_medias(meta=meta)
 
     def search_persons(self, name: str) -> Optional[List[MediaPerson]]:
         """
         搜索人物信息
         :param name:  人物名称
         """
-        return self.run_module("search_persons", name=name)
+        return self.mediarecognizemanager.search_persons(name=name)
 
     async def async_search_persons(self, name: str) -> Optional[List[MediaPerson]]:
         """
         搜索人物信息（异步版本）
         :param name:  人物名称
         """
-        return await self.async_run_module("async_search_persons", name=name)
+        return await self.mediarecognizemanager.async_search_persons(name=name)
 
     def search_collections(self, name: str) -> Optional[List[MediaInfo]]:
         """
         搜索集合信息
         :param name:  集合名称
         """
-        return self.run_module("search_collections", name=name)
+        return self.mediarecognizemanager.search_collections(name=name)
 
     async def async_search_collections(self, name: str) -> Optional[List[MediaInfo]]:
         """
         搜索集合信息（异步版本）
         :param name:  集合名称
         """
-        return await self.async_run_module("async_search_collections", name=name)
+        return await self.mediarecognizemanager.async_search_collections(name=name)
 
     def get_search_page_size(
             self,
