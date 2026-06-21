@@ -20,6 +20,7 @@ from app.helper.downloader_manager import DownloaderManager
 from app.helper.mediaserver_manager import MediaServerManager
 from app.helper.notification_manager import NotificationManager
 from app.helper.mediarecognize_manager import MediaRecognizeManager
+from app.helper.storage_manager import StorageManager
 from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
@@ -68,6 +69,7 @@ class ChainBase(metaclass=ABCMeta):
         mediaservermanager=None,
         notificationmanager=None,
         mediarecognizemanager=None,
+        storagemanager=None,
         eventmanager=None,
         messageoper=None,
         messagehelper=None,
@@ -92,6 +94,8 @@ class ChainBase(metaclass=ABCMeta):
         self.notificationmanager = notificationmanager or NotificationManager()
         # 媒体识别/数据源（MediaRecognize 域）门面：识别相关包装方法经此分发，取代 run_module 字符串 ABI。
         self.mediarecognizemanager = mediarecognizemanager or MediaRecognizeManager()
+        # 存储（Storage 域）门面：储存相关包装方法经此分发，取代 run_module → 唯一 FileManagerModule 的双层派发。
+        self.storagemanager = storagemanager or StorageManager()
         self.eventmanager = eventmanager or EventManager()
         self.messageoper = messageoper or MessageOper()
         self.messagehelper = messagehelper or MessageHelper()
