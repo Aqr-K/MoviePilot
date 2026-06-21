@@ -2,8 +2,9 @@ from datetime import datetime
 from builtins import list as builtin_list
 from typing import Optional
 
-from sqlalchemy import Column, Integer, JSON, String, Index, and_, or_, select
+from sqlalchemy import Integer, JSON, String, Index, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, db_query, get_id_column, db_update, async_db_query, async_db_update
 
@@ -13,41 +14,41 @@ class Workflow(Base):
     工作流表
     """
     # ID
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 名称
-    name = Column(String, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, index=True, nullable=False)
     # 描述
-    description = Column(String)
+    description: Mapped[Optional[str]] = mapped_column(String)
     # 定时器
-    timer = Column(String)
+    timer: Mapped[Optional[str]] = mapped_column(String)
     # 触发类型：timer-定时触发 event-事件触发 manual-手动触发
-    trigger_type = Column(String, default='timer')
+    trigger_type: Mapped[Optional[str]] = mapped_column(String, default='timer')
     # 事件类型（当trigger_type为event时使用）
-    event_type = Column(String)
+    event_type: Mapped[Optional[str]] = mapped_column(String)
     # 事件条件（JSON格式，用于过滤事件）
-    event_conditions = Column(JSON, default=dict)
+    event_conditions: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     # 状态：W-等待 R-运行中 P-暂停 S-成功 F-失败
-    state = Column(String, nullable=False, index=True, default='W')
+    state: Mapped[str] = mapped_column(String, nullable=False, index=True, default='W')
     # 已执行动作（,分隔）
-    current_action = Column(String)
+    current_action: Mapped[Optional[str]] = mapped_column(String)
     # 任务执行结果
-    result = Column(String)
+    result: Mapped[Optional[str]] = mapped_column(String)
     # 已执行次数
-    run_count = Column(Integer, default=0)
+    run_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 任务列表
-    actions = Column(JSON, default=builtin_list)
+    actions: Mapped[Optional[list]] = mapped_column(JSON, default=builtin_list)
     # 任务流
-    flows = Column(JSON, default=builtin_list)
+    flows: Mapped[Optional[list]] = mapped_column(JSON, default=builtin_list)
     # 执行上下文
-    context = Column(JSON, default=dict)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     # 执行配置
-    execution_config = Column(JSON, default=dict)
+    execution_config: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     # 结构化执行状态
-    execution_state = Column(JSON, default=dict)
+    execution_state: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     # 创建时间
-    add_time = Column(String, default=lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    add_time: Mapped[Optional[str]] = mapped_column(String, default=lambda: datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     # 最后执行时间
-    last_time = Column(String)
+    last_time: Mapped[Optional[str]] = mapped_column(String)
 
     __table_args__ = (
         Index('ix_workflow_trigger_type_state', 'trigger_type', 'state'),
