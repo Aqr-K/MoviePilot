@@ -1,7 +1,8 @@
-from typing import List, Optional
+import logging
+from typing import List, Optional, Tuple
 
 from app.core.config import settings
-from app.log import logger
+from app.log import logger, log_settings
 
 try:
     import moviepilot_rust as _moviepilot_rust
@@ -71,24 +72,37 @@ def filter_torrents(
         rule_set: dict,
         mediainfo=None,
         metainfo_options: Optional[dict] = None,
-) -> Optional[list]:
+) -> Optional[Tuple[list, list]]:
     """
-    使用 Rust 执行完整种子过滤入口，返回原列表下标和优先级。
+    使用 Rust 执行完整种子过滤入口，返回原列表下标、优先级和可选调试日志。
     """
     if not is_enabled():
         return None
     try:
-        return _moviepilot_rust.filter_torrents_fast(
+        args = (
             groups,
             torrent_list,
             rule_set,
             mediainfo,
             metainfo_options or {},
         )
+        if is_debug_log_enabled() and hasattr(_moviepilot_rust, "filter_torrents_with_trace_fast"):
+            matched_orders, traces = _moviepilot_rust.filter_torrents_with_trace_fast(*args)
+            return matched_orders, traces
+        return _moviepilot_rust.filter_torrents_fast(*args), []
     except BaseException as err:
         _raise_non_rust_panic(err)
         logger.debug(f"Rust 种子过滤失败，回退 Python：{err}")
         return None
+
+
+def is_debug_log_enabled() -> bool:
+    """
+    判断当前日志配置是否会实际输出 debug 日志。
+    """
+    if log_settings.DEBUG:
+        return True
+    return getattr(logging, log_settings.LOG_LEVEL.upper(), logging.INFO) <= logging.DEBUG
 
 def parse_indexer_torrents(
         html_text: str,
