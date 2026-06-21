@@ -198,6 +198,7 @@ class AskUserChoiceTool(MoviePilotTool):
                 title=title,
                 text=message.strip(),
                 buttons=buttons,
+                save_history=False,
             )
         )
 

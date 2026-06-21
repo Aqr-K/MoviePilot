@@ -1,9 +1,24 @@
+import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
+from app.agent.tools.impl.ask_user_choice import (
+    AskUserChoiceTool,
+    UserChoiceOptionInput,
+)
 from app.chain.message import MessageChain
 from app.core.config import settings
+from app.db import SessionFactory
+from app.db.message_oper import MessageOper
+from app.db.models.message import Message
 from app.helper.interaction import AgentInteractionOption, agent_interaction_manager, media_interaction_manager
 from app.schemas.types import MessageChannel
+
+
+def _clear_messages() -> None:
+    """清空消息表，隔离 Agent 消息路由测试数据。"""
+    with SessionFactory() as db:
+        db.query(Message).delete()
+        db.commit()
 
 
 def test_explicit_ai_message_bypasses_pending_media_interaction():
@@ -64,6 +79,45 @@ def test_explicit_ai_message_is_not_recorded_to_message_history():
 
     record_user_message.assert_not_called()
     process_message.assert_called_once()
+
+
+def test_ask_user_choice_message_is_not_recorded_to_message_history():
+    """Agent 询问用户意图工具发送的按钮消息不登记到消息表。"""
+    _clear_messages()
+    tool = AskUserChoiceTool(session_id="session-choice", user_id="10001")
+    tool.set_message_attr(
+        channel=MessageChannel.Telegram.value,
+        source="telegram-test",
+        username="tester",
+    )
+    tool.set_agent_context(agent_context={})
+
+    try:
+        with patch(
+            "app.core.event.EventManager.async_send_event",
+            new_callable=AsyncMock,
+        ) as async_send_event, patch(
+            "app.helper.message.MessageQueueManager.async_send_message",
+            new_callable=AsyncMock,
+        ) as async_send_message:
+            result = asyncio.run(
+                tool.run(
+                    message="请选择要执行的操作",
+                    options=[
+                        UserChoiceOptionInput(label="继续下载", value="继续下载"),
+                        UserChoiceOptionInput(label="先看详情", value="先看详情"),
+                    ],
+                    title="需要你的选择",
+                )
+            )
+    finally:
+        agent_interaction_manager.clear()
+
+    assert "等待用户选择" in result
+    assert tool._agent_context.get("user_reply_sent") is True
+    assert MessageOper().list_by_page(page=1, count=10) == []
+    async_send_event.assert_awaited_once()
+    async_send_message.assert_awaited_once()
 
 
 def test_agent_choice_callback_is_not_recorded_to_message_history():
