@@ -223,6 +223,8 @@ class Notification(BaseModel):
     original_chat_id: Optional[str] = None
     # 是否禁用链接预览（仅Telegram支持）
     disable_web_page_preview: Optional[bool] = None
+    # Telegram 消息格式类型，默认 MarkdownV2，可传 HTML
+    parse_mode: Optional[str] = None
     # 是否写入消息历史
     save_history: bool = True
 
