@@ -317,8 +317,6 @@ class MoviePilotAgent:
         """
         判断当前 Agent 是否需要写入会话历史表。
         """
-        if self._tool_context.get("user_reply_sent"):
-            return False
         return bool(self.channel and self.source)
 
     def _save_display_history_messages(self, messages: List[dict]) -> None:
