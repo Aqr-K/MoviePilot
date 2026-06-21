@@ -84,14 +84,14 @@ class ChainBase(metaclass=ABCMeta):
         杜绝位置传参歧义（原 __init__(self) 不接受位置参，无调用方受影响）。
         """
         self.modulemanager = modulemanager or ModuleManager()
-        # 下载器（Downloader 域）门面：下载器相关包装方法经此分发，取代 run_module 字符串 ABI。
+        # 下载器（Downloader 域）门面：下载器相关包装方法经此分发到各下载器后端。
         self.downloadermanager = downloadermanager or DownloaderManager()
-        # 媒体服务器（MediaServer 域）门面：媒服相关包装方法经此分发，取代 run_module 字符串 ABI。
+        # 媒体服务器（MediaServer 域）门面：媒服相关包装方法经此分发到各媒体服务器后端。
         self.mediaservermanager = mediaservermanager or MediaServerManager()
         self.notificationmanager = notificationmanager or NotificationManager()
-        # 媒体识别/数据源（MediaRecognize 域）门面：识别相关包装方法经此分发，取代 run_module 字符串 ABI。
+        # 媒体识别/数据源（MediaRecognize 域）门面：识别相关包装方法经此分发到各数据源后端。
         self.mediarecognizemanager = mediarecognizemanager or MediaRecognizeManager()
-        # 存储（Storage 域）门面：储存相关包装方法经此分发，取代 run_module → 唯一 FileManagerModule 的双层派发。
+        # 存储（Storage 域）门面：储存相关包装方法经此分发到存储后端。
         self.storagemanager = storagemanager or StorageManager()
         self.eventmanager = eventmanager or EventManager()
         self.messageoper = messageoper or MessageOper()

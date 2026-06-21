@@ -2,14 +2,14 @@
 """
 app.core.module 包：模块管理（manager）/ 动态加载（loader）/ 契约校验（contract）。
 
-稳定公共 API（保持 from app.core.module import X 零改动；历史上为单文件 app/core/module.py）：
+稳定公共 API（保持 from app.core.module import X 零改动）：
   - ModuleManager        模块管理器（注册/生命周期），见 .manager
   - ModuleType           模块类型枚举（再导出自 app.schemas.types）
   - verify_*_contract     契约校验家族（module/data_source/downloader/notification/mediaserver），见 .contract
 
 公共名按需懒加载（PEP 562 __getattr__）。关键不变量：``import app.core.module.loader`` 不应触发
 manager 的重依赖（config/event/singleton…）——动态加载工具 ModuleHelper 被 filemanager/indexer/
-workflow 等在 import 期使用，必须可单独 import 而不拖入模块管理器依赖图（S3 解耦成果）。故此 __init__
+workflow 等在 import 期使用，必须可单独 import 而不拖入模块管理器依赖图。故此 __init__
 不在模块顶层 import 任何子模块，仅在属性首次访问时按需解析。
 """
 from typing import TYPE_CHECKING

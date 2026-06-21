@@ -30,8 +30,8 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
     get_torrent_trackers() 已实现（经 xmlrpc t.multicall 取 tracker url），与 qb/tr 对齐无能力缺口。
 
     .. deprecated::
-        经 ChainBase.run_module("download"/"list_torrents"/…) 的字符串 ABI 分发为 v2 兼容路径，
-        仍可用但计划在后续版本废弃；新代码请改用 DownloaderManager 门面的类型化方法。
+        经 ChainBase.run_module("download"/"list_torrents"/…) 的旧路径仍可用但计划在后续版本废弃；
+        新代码请改用 DownloaderManager 门面的类型化方法。
     """
 
     def init_module(self) -> None:

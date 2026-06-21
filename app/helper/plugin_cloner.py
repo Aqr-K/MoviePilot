@@ -1,11 +1,8 @@
-"""插件分身的纯文件/AST 改写工具（S9b：自 PluginManager god-object 抽出）。
+"""插件分身的纯文件/AST 改写工具。
 
-PluginManager.clone_plugin 仍是有状态编排器（读 _plugins/_running_plugins、写
-SystemConfigOper、reload_plugin），但其中**无状态**的文件改写逻辑——改写 __init__.py
-的类名/插件元信息、改写联邦插件前端 JS/CSS、重命名联邦资源——是纯文件 + 正则操作，
-与 PluginManager 实例状态零耦合，故抽到本独立模块为模块级函数。clone_plugin 负责解析
-原类名（_plugins 读取留在 PluginManager）并把 original_class_name/clone_class_name 作为
-参数传入。函数体逐字自原 PluginManager._modify_* 方法迁出，行为字节级不变。
+无状态的文件改写逻辑——改写 __init__.py 的类名/插件元信息、改写联邦插件前端 JS/CSS、重命名联邦资源——
+为纯文件 + 正则操作，均为模块级函数。由 PluginManager.clone_plugin 解析原类名后，把
+original_class_name/clone_class_name 作为参数传入。
 """
 import re
 from pathlib import Path

@@ -255,20 +255,14 @@ class IDownloader(Protocol):
     """
     下载器（Downloader 域）行为接口契约。
 
-    这是下载器领域的稳定行为接口（对照存储域的 StorageBase）：声明门面
-    app.helper.downloader.DownloaderManager 统一对外暴露、并按方法名分发到各后端的
-    下载器操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
-    契约，无需显式继承，避免与 _ModuleBase(ABCMeta)/ServiceBase(Generic) 的元类冲突，
-    亦保证对既有 Qbittorrent/Transmission/Rtorrent 模块零改动即结构兼容。
+    声明下载器后端需实现的操作面，由 app.managers.downloader.DownloaderManager 统一对外暴露并按方法名
+    分发到各后端。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，无需显式继承（亦避免与
+    _ModuleBase/ServiceBase 的元类冲突），对既有 Qbittorrent/Transmission/Rtorrent 模块零改动即兼容。
+    `@runtime_checkable` 允许用 isinstance 在运行期校验方法是否存在（不校验签名）。
 
-    `@runtime_checkable` 使 isinstance(obj, IDownloader) 可在运行期校验"是否实现了这些方法名"
-    （注意 Protocol 的 isinstance 只校验方法存在性，不校验签名）。
-
-    约定（与 ChainBase 下载器包装方法签名一致）：
-    - 多实例路由：downloader 参数为具体下载器配置名（config_name）；为 None 时由后端广播到其
-      全部启用实例，门面再跨后端按"列表 extend / 非列表取首个非 None"合并。
-    - torrent_files 统一返回 List[DownloaderFile]（rtorrent 当前仍返回 List[Dict]，属待归一化的
-      P0.5 后端修复项，见 app/modules/rtorrent/__init__.py 的 TODO，本接口声明目标类型）。
+    约定：
+    - downloader 参数为具体下载器配置名，None 表示后端面向其全部启用实例，再跨后端按列表合并 / 取首个非空汇总。
+    - torrent_files 统一返回 List[DownloaderFile]。
     """
 
     def download(
@@ -507,22 +501,15 @@ class IMediaServer(Protocol):
     """
     媒体服务器（MediaServer 域）行为接口契约。
 
-    对照下载器域的 IDownloader / 存储域的 StorageBase：声明门面
-    app.managers.mediaserver.MediaServerManager 统一对外暴露、并按方法名分发到各后端的
-    媒体服务器操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
-    契约，无需显式继承，避免与 _ModuleBase(ABCMeta)/ServiceBase(Generic) 的元类冲突，对既有
-    Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 模块零改动即结构兼容。
+    声明媒体服务器后端需实现的操作面，由 app.managers.mediaserver.MediaServerManager 统一对外暴露并按
+    方法名分发到各后端。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，无需显式继承，对既有
+    Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 模块零改动即兼容。
 
-    约定（与 ChainBase/MediaServerChain 媒服包装方法签名一致）：
-    - 多实例路由：server 参数为具体媒体服务器配置名（config_name）；为 None 时由后端广播到其
-      全部启用实例，门面再按"列表 extend / 非列表取首个非 None"跨后端合并。
-    - 签名漂移收敛：各后端 server 必填性 / username 形参 / **kwargs 存在差异（见各模块），门面在此
-      统一为最宽松 canonical 签名（server: Optional[str]）；后端要么声明该形参、要么有 **kwargs
-      吸收（不致 TypeError），故按 kwarg 分发对全部后端兼容、与 run_module 行为完全一致。注意：以
-      **kwargs 吸收某形参的后端（如 Plex/TrimeMedia/Ugreen 对 username）会静默忽略该值——此为既有
-      run_module 行为，门面如实保留、不引入差异。
-    - mediaserver_image_cookies 仅部分后端实现（TrimeMedia/Ugreen），按方法名分发自然只命中实现者
-      （类比下载器域 rtorrent 早期缺方法），未实现者不参与。
+    约定：
+    - server 参数为具体媒体服务器配置名，None 表示后端面向其全部启用实例，再跨后端按列表合并 / 取首个非空汇总。
+    - 各后端 server 必填性 / username 形参不一，接口统一为最宽松签名（server: Optional[str]）；部分后端
+      （如 Plex/TrimeMedia/Ugreen 对 username）以 **kwargs 吸收并静默忽略该形参。
+    - mediaserver_image_cookies 仅部分后端（TrimeMedia/Ugreen）实现，未实现者不参与分发。
     """
 
     def media_exists(self, mediainfo: "MediaInfo", itemid: Optional[str] = None,
@@ -564,16 +551,14 @@ class INotification(Protocol):
     """
     消息通知（Notification 域）行为接口契约。
 
-    对照下载器域的 IDownloader / 媒服域的 IMediaServer / 存储域的 StorageBase：声明门面
-    app.managers.notification.NotificationManager 统一对外暴露、并按方法名分发到各通知后端
-    （内建 Telegram/WeChat/Slack/Discord/VoceChat/... 及插件经 provides_notifications() 注册的
-    渠道）的消息操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
-    契约，无需显式继承，对既有通知模块零改动即结构兼容。
+    声明通知后端需实现的消息操作面，由 app.managers.notification.NotificationManager 统一对外暴露并按
+    方法名分发到各通知渠道（内建 Telegram/WeChat/Slack/Discord/VoceChat/... 及插件经
+    provides_notifications() 注册的渠道）。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，
+    无需显式继承。
 
-    派发语义（与 run_module 完全一致）：通知是**广播域**——post_* 类方法对所有启用渠道广播（返回
-    None、不短路合并），各渠道方法内部经 check_message 自行按渠道/来源/类型过滤是否处理；
-    delete_message/edit_message 返回非空值（bool/响应字典），按"取首个非空"语义短路。后端按需实现
-    子集（如部分渠道不支持编辑/删除），按方法名分发自然只命中实现者。
+    通知为广播域：post_* 方法返回 None、不短路，对所有启用渠道广播（各渠道内部经 check_message 自行按
+    渠道/来源/类型过滤）；delete_message/edit_message 返回非空值（bool/响应字典），按取首个非空短路。
+    后端按需实现子集，按方法名分发只命中实现者。
     """
 
     def post_message(self, message: "Notification", **kwargs) -> None: ...
@@ -603,15 +588,13 @@ class IMediaRecognize(Protocol):
     """
     媒体识别 / 数据源（MediaRecognize 域）行为接口契约。
 
-    对照下载器 IDownloader / 媒服 IMediaServer / 通知 INotification / 存储 StorageBase：声明门面
-    app.managers.mediarecognize.MediaRecognizeManager 统一对外暴露、并按方法名分发到各数据源后端
-    （内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经 provides_data_sources() 注册的源）的识别操作面。
-    采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足契约，无需显式继承。
+    声明数据源后端需实现的识别操作面，由 app.managers.mediarecognize.MediaRecognizeManager 统一对外暴露
+    并按方法名分发到各数据源（内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经 provides_data_sources()
+    注册的源）。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，无需显式继承。
 
-    派发语义——**管道（pipeline）**：recognize_media 等方法的返回值在源之间流转、逐源精化；search_* 列表
-    方法跨源 extend 合并；首个非空非列表结果短路。后端按需实现子集（如 Bangumi 缺 obtain_images、
-    TheTvDb 仅实现 tvdb_info），按方法名分发自然只命中实现者——故下列方法均非强制实现。
-    异步变体（async_*）与同步同义，门面经 async_dispatch 分发。
+    识别为管道域：recognize_media 等方法的结果在数据源之间流转、逐源精化；search_* 列表方法跨源合并；
+    首个非空非列表结果短路。后端按需实现子集（如 Bangumi 缺 obtain_images、TheTvDb 仅实现 tvdb_info），
+    按方法名分发只命中实现者，故下列方法均非强制实现；异步变体（async_*）与同步同义。
     """
 
     def recognize_media(self, meta: "MetaBase" = None, mtype: "MediaType" = None,

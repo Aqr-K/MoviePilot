@@ -1,11 +1,9 @@
-"""插件元数据只读聚合访问器（S9c：自 PluginManager god-object 抽出）。
+"""插件元数据只读聚合访问器。
 
-这些访问器只读地遍历运行态插件字典（running_plugins）、调用各插件实例的 get_xxx 钩子
-方法并聚合结果，对 PluginManager 实例状态的唯一耦合就是 running_plugins 这一个字典。
-故抽到本独立模块为模块级函数（首参 running_plugins）；PluginManager 保留一行委托门面，
-使 api/agent/command/scheduler/chain 等大量调用方 PluginManager().get_plugin_xxx() 零改动。
-函数体逐字自原 PluginManager.get_plugin_* 方法迁出（仅 self._running_plugins → running_plugins），
-内部 dict() 快照语义不变，行为字节级一致。
+只读地遍历运行态插件字典（running_plugins）、调用各插件实例的 get_xxx 钩子方法并聚合结果，
+对 PluginManager 实例状态的唯一耦合是 running_plugins 这一个字典。均为模块级函数（首参 running_plugins）；
+PluginManager 保留委托门面，使 api/agent/command/scheduler/chain 等调用方 PluginManager().get_plugin_xxx()
+调用方式不变。
 """
 import inspect
 import posixpath
