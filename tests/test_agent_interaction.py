@@ -8,6 +8,7 @@ from app.agent.tools.impl.ask_user_choice import (
     AskUserChoiceTool,
     UserChoiceOptionInput,
 )
+from app.agent.tools.impl.send_message import SendMessageTool
 from app.helper.interaction import (
     AgentInteractionOption,
     agent_interaction_manager,
@@ -88,6 +89,13 @@ class TestAgentInteraction(unittest.TestCase):
 
         self.assertTrue(tool.return_direct)
         self.assertIn("terminal interaction tool", tool.description)
+
+    def test_send_message_tool_returns_direct_after_sending_message(self):
+        """发送消息工具发出用户可见消息后应结束当前 Agent 轮次。"""
+        tool = SendMessageTool(session_id="session-1", user_id="10001")
+
+        self.assertTrue(tool.return_direct)
+        self.assertIn("terminal response tool", tool.description)
 
     def test_choice_tool_sends_buttons_and_registers_pending_request(self):
         tool = AskUserChoiceTool(session_id="session-1", user_id="10001")
