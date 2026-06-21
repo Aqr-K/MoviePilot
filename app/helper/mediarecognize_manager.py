@@ -113,8 +113,8 @@ class MediaRecognizeManager(metaclass=Singleton):
             func = module_dict[method]
             if not func:
                 continue
-            logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
             try:
+                logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
                 if self._is_valid_empty(result):
                     result = func(*args, **plugin_kwargs)
                 elif isinstance(result, list):
@@ -188,8 +188,8 @@ class MediaRecognizeManager(metaclass=Singleton):
             func = module_dict[method]
             if not func:
                 continue
-            logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
             try:
+                logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
                 if self._is_valid_empty(result):
                     if inspect.iscoroutinefunction(func):
                         result = await func(*args, **plugin_kwargs)
