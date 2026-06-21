@@ -1,6 +1,8 @@
-from sqlalchemy import Column, String, select
+from typing import Optional
+
+from sqlalchemy import String, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import db_query, Base, get_id_column, async_db_query
 
@@ -9,15 +11,15 @@ class SiteIcon(Base):
     """
     站点图标表
     """
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 站点名称
-    name = Column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
     # 域名Key
-    domain = Column(String, index=True)
+    domain: Mapped[Optional[str]] = mapped_column(String, index=True)
     # 图标地址
-    url = Column(String, nullable=False)
+    url: Mapped[str] = mapped_column(String, nullable=False)
     # 图标Base64
-    base64 = Column(String)
+    base64: Mapped[Optional[str]] = mapped_column(String)
 
     @classmethod
     @db_query
