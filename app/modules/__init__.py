@@ -596,3 +596,39 @@ class INotification(Protocol):
     def send_direct_message(self, message: "Notification") -> "Optional[MessageResponse]": ...
 
     def finalize_message(self, response: "MessageResponse") -> Optional[bool]: ...
+
+
+@runtime_checkable
+class IMediaRecognize(Protocol):
+    """
+    媒体识别 / 数据源（MediaRecognize 域）行为接口契约。
+
+    对照下载器 IDownloader / 媒服 IMediaServer / 通知 INotification / 存储 StorageBase：声明门面
+    app.helper.mediarecognize_manager.MediaRecognizeManager 统一对外暴露、并按方法名分发到各数据源后端
+    （内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经 provides_data_sources() 注册的源）的识别操作面。
+    采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足契约，无需显式继承。
+
+    派发语义——**管道（pipeline）**：recognize_media 等方法的返回值在源之间流转、逐源精化；search_* 列表
+    方法跨源 extend 合并；首个非空非列表结果短路。后端按需实现子集（如 Bangumi 缺 obtain_images、
+    TheTvDb 仅实现 tvdb_info），按方法名分发自然只命中实现者——故下列方法均非强制实现。
+    异步变体（async_*）与同步同义，门面经 async_dispatch 分发。
+    """
+
+    def recognize_media(self, meta: "MetaBase" = None, mtype: "MediaType" = None,
+                        tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
+                        bangumiid: Optional[int] = None, **kwargs) -> "Optional[MediaInfo]": ...
+
+    def search_medias(self, meta: "MetaBase") -> "Optional[List[MediaInfo]]": ...
+
+    def search_persons(self, name: str) -> "Optional[List[MediaPerson]]": ...
+
+    def search_collections(self, name: str) -> "Optional[List[MediaInfo]]": ...
+
+    def obtain_images(self, mediainfo: "MediaInfo") -> "Optional[MediaInfo]": ...
+
+    def obtain_specific_image(self, mediaid: Union[str, int], mtype: "MediaType",
+                              **kwargs) -> Optional[str]: ...
+
+    def metadata_nfo(self, meta: "MetaBase", mediainfo: "MediaInfo", **kwargs) -> Optional[str]: ...
+
+    def media_category(self) -> Optional[Dict[str, list]]: ...
