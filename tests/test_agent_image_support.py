@@ -569,6 +569,15 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertEqual(payload.image_url, "https://example.com/poster.png")
 
+    def test_send_message_input_normalizes_html_parse_mode(self):
+        payload = SendMessageInput(
+            explanation="send html notice",
+            message="<b>处理完成</b>",
+            parse_mode="html",
+        )
+
+        self.assertEqual(payload.parse_mode, "HTML")
+
     def test_send_message_tool_uses_regular_notification_type(self):
         """发送消息工具应按普通通知消息登记。"""
 
@@ -588,6 +597,7 @@ class AgentImageSupportTest(unittest.TestCase):
                     message="处理完成",
                     title="智能体通知",
                     image_url="https://example.com/poster.png",
+                    parse_mode="HTML",
                 )
             return result, async_post_message
 
@@ -601,6 +611,33 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(notification.title, "智能体通知")
         self.assertEqual(notification.text, "处理完成")
         self.assertEqual(notification.image, "https://example.com/poster.png")
+        self.assertEqual(notification.parse_mode, "HTML")
+
+    def test_send_message_tool_rejects_invalid_parse_mode(self):
+        """发送消息工具应拒绝不支持的格式类型。"""
+
+        async def _run():
+            tool = SendMessageTool(session_id="session-1", user_id="10001")
+            tool.set_message_attr(
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                username="tester",
+            )
+
+            with patch(
+                "app.agent.tools.base.ToolChain.async_post_message",
+                new_callable=AsyncMock,
+            ) as async_post_message:
+                result = await tool.run(
+                    message="处理完成",
+                    parse_mode="Markdown",
+                )
+            return result, async_post_message
+
+        result, async_post_message = asyncio.run(_run())
+
+        self.assertIn("parse_mode 仅支持 MarkdownV2 或 HTML", result)
+        async_post_message.assert_not_awaited()
 
     def test_send_local_file_input_accepts_file_payload(self):
         payload = SendLocalFileInput(

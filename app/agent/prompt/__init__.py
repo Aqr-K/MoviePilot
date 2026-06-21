@@ -141,6 +141,9 @@ class PromptManager:
             if caps:
                 markdown_spec = self._generate_formatting_instructions(caps)
         button_choice_spec = self._generate_button_choice_instructions(msg_channel)
+        send_message_format_spec = self._generate_send_message_format_instructions(
+            msg_channel
+        )
 
         # 啰嗦模式
         verbose_spec = ""
@@ -166,6 +169,7 @@ class PromptManager:
             moviepilot_info=moviepilot_info,
             voice_reply_spec=voice_reply_spec,
             button_choice_spec=button_choice_spec,
+            send_message_format_spec=send_message_format_spec,
         )
 
         return base_prompt
@@ -398,6 +402,27 @@ class PromptManager:
             "write a final text reply after it, and do not repeat the same content "
             "as plain text. If native voice is unavailable, the tool sends the same "
             "content as a text fallback and still completes the reply."
+        )
+
+    @staticmethod
+    def _generate_send_message_format_instructions(
+        channel: MessageChannel = None,
+    ) -> str:
+        """
+        根据渠道生成 send_message 工具的格式参数提示。
+        """
+        if channel != MessageChannel.Telegram:
+            return ""
+        return (
+            "- Telegram message formatting: `send_message` supports an optional "
+            "`parse_mode` argument. Leave it empty for default MarkdownV2. When a "
+            "structured Telegram notice would be clearer in HTML, set "
+            "`parse_mode=\"HTML\"` and write the `message` using only Telegram-supported "
+            "HTML tags such as `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, "
+            "`<blockquote>`, and `<a href=\"...\">`. Keep `title` as plain text; "
+            "the Telegram module renders it as a bold heading automatically. Escape "
+            "user-provided or dynamic values before embedding them in HTML. Do "
+            "not mix Markdown syntax into an HTML-formatted message."
         )
 
     @staticmethod
