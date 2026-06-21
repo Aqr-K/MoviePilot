@@ -9,7 +9,7 @@ get_module 劫持 post_message 的现存插件。本测试覆盖：广播（post
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from app.helper.notification_manager import NotificationManager
+from app.managers.notification_manager import NotificationManager
 from app.schemas.exception import RateLimitExceededException
 
 

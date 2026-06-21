@@ -11,7 +11,7 @@ from unittest import TestCase
 
 from app.chain import ChainBase
 from app.core.module import ModuleManager
-from app.helper.mediaserver_manager import MediaServerManager
+from app.managers.mediaserver_manager import MediaServerManager
 from app.modules import IMediaServer, _ModuleBase
 from app.schemas.exception import RateLimitExceededException
 from app.schemas.types import ModuleType

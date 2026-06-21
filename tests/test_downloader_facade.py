@@ -12,7 +12,7 @@ from unittest import TestCase
 
 from app.chain import ChainBase
 from app.core.module import ModuleManager
-from app.helper.downloader_manager import DownloaderManager
+from app.managers.downloader_manager import DownloaderManager
 from app.modules import IDownloader, _ModuleBase
 from app.schemas.types import ModuleType
 
