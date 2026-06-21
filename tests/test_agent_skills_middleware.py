@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from anyio import Path as AsyncPath
@@ -111,3 +112,45 @@ def test_modify_request_instructs_model_to_use_skill_tool_without_paths(tmp_path
     assert "moviepilot-cli" in system_content
     assert "Read `" not in system_content
     assert str(tmp_path) not in system_content
+
+
+@pytest.mark.anyio
+async def test_skill_tool_call_records_streaming_summary(tmp_path):
+    """skill 工具执行时应记录流式聚合摘要。"""
+    _write_skill(tmp_path, "moviepilot-cli")
+    calls = []
+    stream_handler = SimpleNamespace(
+        is_streaming=True,
+        record_tool_call=lambda **kwargs: calls.append(kwargs),
+    )
+    middleware = SkillsMiddleware(
+        sources=[str(tmp_path)],
+        stream_handler=stream_handler,
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name=SKILL_TOOL_NAME),
+        tool_call={
+            "args": {
+                "name": "moviepilot-cli",
+                "explanation": "测试加载技能",
+            }
+        },
+    )
+
+    async def _fake_handler(_request):
+        """返回模拟工具结果。"""
+        return "ok"
+
+    result = await middleware.awrap_tool_call(request, _fake_handler)
+
+    assert result == "ok"
+    assert calls == [
+        {
+            "tool_name": SKILL_TOOL_NAME,
+            "tool_message": "Skill loaded",
+            "tool_kwargs": {
+                "name": "moviepilot-cli",
+                "explanation": "测试加载技能",
+            },
+        }
+    ]

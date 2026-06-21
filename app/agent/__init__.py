@@ -1023,6 +1023,7 @@ class MoviePilotAgent:
             skills_middleware = SkillsMiddleware(
                 sources=[str(agent_runtime_manager.skills_dir)],
                 bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
+                stream_handler=self.stream_handler,
             )
             skill_tools = list(getattr(skills_middleware, "tools", []) or [])
             activity_log_middleware = None
@@ -1030,6 +1031,7 @@ class MoviePilotAgent:
             if self.has_message_context:
                 activity_log_middleware = ActivityLogMiddleware(
                     activity_dir=str(agent_runtime_manager.activity_dir),
+                    stream_handler=self.stream_handler,
                 )
                 activity_log_tools = list(
                     getattr(activity_log_middleware, "tools", []) or []
