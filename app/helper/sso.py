@@ -13,13 +13,17 @@ from typing import Optional, Tuple
 from app.core import sso as sso_core
 from app.core.auth_bridge import create_plugin_auth_ticket
 from app.core.security import get_password_hash
+from app.db.models.ssoidentity import SsoIdentity
+from app.db.models.user import User
 from app.db.user_oper import UserOper
 from app.log import logger
 
 # 授权码合法字符集（边界输入校验，防注入下游/日志）
 _CODE_RE = re.compile(r"^[A-Za-z0-9_\-]{1,256}$")
-# 外部用户名合法字符集（保守集合：字母数字与 . _ -，最长 64）
-_USERNAME_RE = re.compile(r"^[A-Za-z0-9._\-]{1,64}$")
+# subject 合法字符集（用户名安全集合：字母数字与 . _ -，最长 64）。subject 是身份主键，
+# 同时用于派生本地用户名 sso_{provider_id}_{subject}；provider_id 不含分隔符（核心契约保证）
+# 故 (provider_id, subject) → 用户名 单射，无撞名。插件须返回此集合内的稳定 subject。
+_SUBJECT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._\-]{0,62}[A-Za-z0-9])?$")
 # 本地 SSO 用户名前缀（与本地账号命名空间隔离）
 _USERNAME_PREFIX = "sso_"
 
@@ -70,32 +74,70 @@ def complete_login(provider, code: Optional[str], state: Optional[str], redirect
 
 def _resolve_user(provider_id: str, identity, auto_create: bool):
     """
-    将外部身份映射为本地用户。
+    按稳定 subject 将外部身份映射到本地用户（改名安全）。
 
-    安全：用户名 = ``sso_{provider_id}_{外部用户名}``，按提供方+前缀双重命名空间隔离，杜绝与本地账号
-    或跨提供方撞名劫持；首次登录是否建号由 auto_create 门控（默认关），自动建号一律非管理员、随机密码。
+    解析以 SsoIdentity 绑定表 (provider_id, subject) 为权威：命中即返回绑定的本地用户；
+    未绑定且开启 auto_create 时新建用户并落绑定，否则拒绝。外部用户名（可变）只作快照，不参与解析。
+
+    安全：subject 经 _SUBJECT_RE 校验；本地用户名 ``sso_{provider_id}_{subject}`` 由稳定主键派生，
+    provider_id 不含分隔符（核心契约保证）故映射单射、无跨提供方撞名；建号一律非管理员、随机密码。
     """
-    raw = getattr(identity, "username", "") or ""
-    if not _USERNAME_RE.match(raw):
-        logger.warning(f"SSO 提供方 {provider_id} 返回非法格式的用户名，已拒绝")
+    subject = (getattr(identity, "subject", "") or "").strip()
+    if not _SUBJECT_RE.match(subject):
+        logger.warning(f"SSO 提供方 {provider_id} 返回非法格式的 subject，已拒绝")
         return None
-    username = f"{_USERNAME_PREFIX}{provider_id}_{raw}"
-    useroper = UserOper()
-    user = useroper.get_by_name(name=username)
-    if user:
-        if not user.is_active:
-            logger.warning(f"SSO 用户 {username} 已被禁用，拒绝登录")
+    # 1) 权威解析：按 (provider_id, subject) 查绑定
+    binding = SsoIdentity.get_by_subject(db=None, provider_id=provider_id, subject=subject)
+    if binding:
+        user = User.get(db=None, rid=binding.user_id)
+        if not user or not user.is_active:
+            logger.warning(f"SSO 绑定用户 {binding.user_id}（{provider_id}:{subject}）不存在或已禁用，拒绝登录")
             return None
         return user
+    # 2) 未绑定：按 auto_create 门控建号
     if not auto_create:
-        logger.info(f"SSO 用户 {username} 不存在且未开启自动建号，拒绝登录")
+        logger.info(f"SSO 身份 {provider_id}:{subject} 未绑定且未开启自动建号，拒绝登录")
         return None
-    useroper.add(
-        name=username,
-        avatar=getattr(identity, "avatar", None),
-        is_active=True,
-        is_superuser=False,
-        hashed_password=get_password_hash(secrets.token_urlsafe(16)),
-    )
-    logger.info(f"SSO 首次登录，已创建本地用户：{username}")
-    return useroper.get_by_name(name=username)
+    username = f"{_USERNAME_PREFIX}{provider_id}_{subject}"
+    useroper = UserOper()
+    # 用户名由稳定 subject 派生。同名用户已存在时，仅当其确为 SSO 托管账号（有任意身份绑定）且未禁用才复用，
+    # 否则拒绝——避免接管管理员手建的同名非 SSO 账号（C-1），以及绕过对同名残留账号的封禁（B-4）。
+    user = useroper.get_by_name(name=username)
+    if user is not None:
+        if not user.is_active:
+            logger.warning(f"SSO 同名残留用户 {username} 已禁用，拒绝复用")
+            return None
+        if not SsoIdentity.list_by_user(db=None, user_id=user.id):
+            logger.warning(f"SSO 派生用户名 {username} 被非 SSO 账号占用，拒绝接管")
+            return None
+    else:
+        useroper.add(
+            name=username,
+            avatar=getattr(identity, "avatar", None),
+            is_active=True,
+            is_superuser=False,
+            hashed_password=get_password_hash(secrets.token_urlsafe(16)),
+        )
+        user = useroper.get_by_name(name=username)
+    if not user:
+        logger.error(f"SSO 新建本地用户 {username} 失败")
+        return None
+    # 3) 落绑定（subject 为权威主键，外部用户名仅作快照）；并发首登致唯一键冲突时改用已存在绑定
+    try:
+        SsoIdentity(
+            provider_id=provider_id,
+            subject=subject,
+            user_id=user.id,
+            username=(getattr(identity, "username", None) or None),
+        ).create(db=None)
+    except Exception as e:
+        existing = SsoIdentity.get_by_subject(db=None, provider_id=provider_id, subject=subject)
+        if existing:
+            bound = User.get(db=None, rid=existing.user_id)
+            if bound and bound.is_active:
+                logger.info(f"SSO 身份 {provider_id}:{subject} 已被并发绑定，复用绑定用户")
+                return bound
+        logger.error(f"SSO 绑定 {provider_id}:{subject} 失败：{str(e)}")
+        return None
+    logger.info(f"SSO 首次登录，已创建本地用户 {username} 并绑定 {provider_id}:{subject}")
+    return user

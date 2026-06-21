@@ -8,6 +8,7 @@ from .site import Site
 from .siteicon import SiteIcon
 from .sitestatistic import SiteStatistic
 from .siteuserdata import SiteUserData
+from .ssoidentity import SsoIdentity
 from .subscribe import Subscribe
 from .subscribehistory import SubscribeHistory
 from .systemconfig import SystemConfig
