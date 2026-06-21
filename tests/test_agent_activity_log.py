@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.agent.middleware.activity_log import (
     ActivityLogMiddleware,
+    QUERY_ACTIVITY_LOG_TOOL_DESCRIPTION,
     QUERY_ACTIVITY_LOG_TOOL_NAME,
     _summarize_with_llm,
     load_activity_log_index,
@@ -258,6 +259,51 @@ def test_activity_log_middleware_query_tool_returns_json_payload(tmp_path):
     assert payload["success"] is True
     assert payload["returned_count"] == 1
     assert payload["entries"][0]["summary"] == "帮用户整理了电影 A"
+
+
+def test_activity_log_tool_call_records_streaming_summary(tmp_path):
+    """query_activity_log 工具执行时应记录流式聚合摘要。"""
+
+    async def _run_test():
+        calls = []
+        stream_handler = SimpleNamespace(
+            is_streaming=True,
+            record_tool_call=lambda **kwargs: calls.append(kwargs),
+        )
+        middleware = ActivityLogMiddleware(
+            activity_dir=str(tmp_path),
+            stream_handler=stream_handler,
+        )
+        request = SimpleNamespace(
+            tool=SimpleNamespace(name=QUERY_ACTIVITY_LOG_TOOL_NAME),
+            tool_call={
+                "args": {
+                    "keyword": "整理",
+                    "date": "2026-06-18",
+                }
+            },
+        )
+
+        async def _fake_handler(_request):
+            """返回模拟工具结果。"""
+            return "ok"
+
+        result = await middleware.awrap_tool_call(request, _fake_handler)
+        return result, calls
+
+    result, calls = asyncio.run(_run_test())
+
+    assert result == "ok"
+    assert calls == [
+        {
+            "tool_name": QUERY_ACTIVITY_LOG_TOOL_NAME,
+            "tool_message": QUERY_ACTIVITY_LOG_TOOL_DESCRIPTION,
+            "tool_kwargs": {
+                "keyword": "整理",
+                "date": "2026-06-18",
+            },
+        }
+    ]
 
 
 def test_factory_does_not_register_activity_log_tool():

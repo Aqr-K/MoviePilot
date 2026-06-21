@@ -22,6 +22,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
     PrivateStateAttr,  # noqa
     ResponseT,
+    ToolCallRequest,
 )
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
@@ -495,10 +496,13 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
         activity_dir: str,
         retention_days: int = DEFAULT_RETENTION_DAYS,
         prompt_load_days: int = PROMPT_LOAD_DAYS,
+        stream_handler: Optional[Any] = None,
     ) -> None:
+        """初始化活动日志中间件。"""
         self.activity_dir = activity_dir
         self.retention_days = retention_days
         self.prompt_load_days = prompt_load_days
+        self.stream_handler = stream_handler
         self._tool_provider = _ActivityLogToolProvider(activity_dir=activity_dir)
         self.tools = [
             StructuredTool.from_function(
@@ -645,6 +649,39 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
         """异步包装模型调用，注入活动日志到系统提示词。"""
         modified_request = self.modify_request(request)
         return await handler(modified_request)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[Any]],
+    ) -> Any:
+        """在活动日志查询工具执行时记录聚合摘要。"""
+        tool = request.tool
+        tool_name = getattr(tool, "name", None)
+        if tool_name != QUERY_ACTIVITY_LOG_TOOL_NAME:
+            return await handler(request)
+
+        tool_call = request.tool_call or {}
+        tool_args = tool_call.get("args") or {}
+        if not isinstance(tool_args, dict):
+            tool_args = {}
+        logger.info(
+            f"开始执行活动日志查询工具: keyword={tool_args.get('keyword') or '-'}, "
+            f"date={tool_args.get('date') or '-'}"
+        )
+        if self.stream_handler and getattr(self.stream_handler, "is_streaming", False):
+            self.stream_handler.record_tool_call(
+                tool_name=QUERY_ACTIVITY_LOG_TOOL_NAME,
+                tool_message=QUERY_ACTIVITY_LOG_TOOL_DESCRIPTION,
+                tool_kwargs=tool_args,
+            )
+        try:
+            result = await handler(request)
+        except Exception as err:
+            logger.error(f"活动日志查询工具执行失败: error={err}")
+            raise
+        logger.info("活动日志查询工具执行完成")
+        return result
 
     async def aafter_agent(
         self, state: ActivityLogState, runtime: Runtime
