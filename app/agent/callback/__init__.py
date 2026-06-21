@@ -261,6 +261,12 @@ class StreamingHandler:
             tool_message=tool_message,
             tool_kwargs=tool_kwargs or {},
         )
+        target_values = []
+        if isinstance(target, (list, tuple, set)):
+            target_values = [item for item in target if item]
+        elif target:
+            target_values = [target]
+
         with self._lock:
             bucket = self._pending_tool_stats.setdefault(
                 category,
@@ -269,9 +275,30 @@ class StreamingHandler:
                     "targets": set(),
                 },
             )
-            bucket["count"] += 1
-            if target:
-                bucket["targets"].add(str(target))
+            if category == "subagent" and target_values:
+                bucket["count"] += len(target_values)
+            else:
+                bucket["count"] += 1
+            for target_value in target_values:
+                bucket["targets"].add(str(target_value))
+
+    @staticmethod
+    def _extract_subagent_targets(tool_kwargs: dict[str, Any]) -> list[str]:
+        """提取子代理工具请求中的目标子代理类型。"""
+        tasks = tool_kwargs.get("tasks")
+        if not isinstance(tasks, list):
+            subagent_type = tool_kwargs.get("subagent_type")
+            return [str(subagent_type)] if subagent_type else []
+
+        targets = []
+        for task in tasks:
+            if isinstance(task, dict):
+                subagent_type = task.get("subagent_type")
+            else:
+                subagent_type = getattr(task, "subagent_type", None)
+            if subagent_type:
+                targets.append(str(subagent_type))
+        return targets
 
     def flush_pending_tool_summary(self) -> str:
         """
@@ -288,11 +315,17 @@ class StreamingHandler:
         tool_name: str,
         tool_message: Optional[str],
         tool_kwargs: dict[str, Any],
-    ) -> tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[Any]]:
         tool_name = (tool_name or "").strip().lower()
         tool_message = (tool_message or "").strip()
         tool_message_lower = tool_message.lower()
 
+        if tool_name == "skill":
+            return "skill", tool_kwargs.get("name")
+        if tool_name == "query_activity_log":
+            return "activity_log", tool_kwargs.get("keyword") or tool_kwargs.get("date")
+        if tool_name == "subagent_task":
+            return "subagent", StreamingHandler._extract_subagent_targets(tool_kwargs)
         if tool_name == "task":
             return "subagent", tool_kwargs.get("subagent_type")
         if tool_name == "read_file":
@@ -369,7 +402,7 @@ class StreamingHandler:
         parts = []
         for category, bucket in self._pending_tool_stats.items():
             value = bucket["count"]
-            if category in {"file_read", "file_write", "directory", "web_browse"} and bucket["targets"]:
+            if category in {"file_read", "file_write", "directory", "web_browse", "skill"} and bucket["targets"]:
                 value = len(bucket["targets"])
             part = self._format_tool_stat(category, value)
             if part:
@@ -406,6 +439,10 @@ class StreamingHandler:
             return f"执行了 {count} 条命令"
         if category == "data_query":
             return f"查询了 {count} 次数据"
+        if category == "skill":
+            return f"查询了 {count} 个技能说明"
+        if category == "activity_log":
+            return f"查询了 {count} 次活动日志"
         if category == "action":
             return f"执行了 {count} 次操作"
         if category == "interaction":

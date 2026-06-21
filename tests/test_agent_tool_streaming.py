@@ -141,6 +141,56 @@ class TestAgentToolStreaming:
 
         assert buffered_message == "处理中：\n\n（已调用 2 个子代理）\n\n"
 
+    def test_non_verbose_tool_summary_describes_skill_lookup(self):
+        """校验非详细模式单独描述 Skill 说明查询。"""
+        async def _run():
+            handler = StreamingHandler()
+            await handler.start_streaming()
+            handler.emit("处理中：")
+            handler.record_tool_call(
+                tool_name="skill",
+                tool_message="Loads the full instructions for a MoviePilot skill",
+                tool_kwargs={"name": "moviepilot-cli"},
+            )
+            handler.record_tool_call(
+                tool_name="skill",
+                tool_message="Loads the full instructions for a MoviePilot skill",
+                tool_kwargs={"name": "moviepilot-cli"},
+            )
+            handler.record_tool_call(
+                tool_name="query_activity_log",
+                tool_message="Query recent MoviePilot Agent activity logs",
+                tool_kwargs={"keyword": "整理"},
+            )
+            return await handler.take()
+
+        buffered_message = asyncio.run(_run())
+
+        assert buffered_message == "处理中：\n\n（查询了 1 个技能说明，查询了 1 次活动日志）\n\n"
+
+    def test_non_verbose_tool_summary_counts_subagent_batch_tasks(self):
+        """校验批量子代理控制工具按子任务数统计。"""
+        async def _run():
+            handler = StreamingHandler()
+            await handler.start_streaming()
+            handler.emit("处理中：")
+            handler.record_tool_call(
+                tool_name="subagent_task",
+                tool_message="Start and manage multiple MoviePilot subagent tasks",
+                tool_kwargs={
+                    "action": "start",
+                    "tasks": [
+                        {"subagent_type": "media-researcher"},
+                        {"subagent_type": "download-diagnostician"},
+                    ],
+                },
+            )
+            return await handler.take()
+
+        buffered_message = asyncio.run(_run())
+
+        assert buffered_message == "处理中：\n\n（已调用 2 个子代理）\n\n"
+
     def test_subagent_stream_metadata_is_suppressed(self):
         """校验子代理流式元数据会被识别并抑制。"""
         assert is_subagent_stream_metadata(
