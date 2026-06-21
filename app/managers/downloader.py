@@ -15,29 +15,13 @@ from app.utils.singleton import Singleton
 
 class DownloaderManager(metaclass=Singleton):
     """
-    下载器（Downloader 域）门面。
+    下载器（Downloader 域）统一入口（单例）。
 
-    对照存储域的 FileManager：把"下载器"领域升级为"门面 + 后端"模式——对外提供一组
-    类型化、可发现的统一方法（实现 app.modules.IDownloader 契约的对外面），对内按方法名分发
-    到所有 ModuleType.Downloader 后端模块（内建 Qbittorrent/Transmission/Rtorrent 以及插件经
-    provides_downloaders() 注册的下载器），并按与 ChainBase.run_module 完全一致的合并语义
-    （列表 extend / 非列表取首个非 None）汇总结果。
+    对外提供一组类型化的下载器操作方法（契约见 app.modules.IDownloader），按方法名分发到所有已启用的
+    下载器后端模块（内建 Qbittorrent/Transmission/Rtorrent 及插件经 provides_downloaders() 注册的下载器），
+    并合并各后端结果。每次分发实时查询当前运行的后端，自动纳入运行期注册/卸载的插件下载器，无需维护清单。
 
-    设计要点：
-    - **行为等价**：_dispatch 忠实复刻 ChainBase.__execute_system_modules 的分发与合并（含
-      check_signature 分支、异常逐后端续跑、SystemError 事件与消息上报），调用的是与 run_module
-      同一批后端模块方法（后端方法体零改动），故对真实下载器客户端的行为不变；唯一被收敛的是
-      "字符串 ABI 分发"这一隐式面，被显式、类型化的门面取代。tests/test_downloader_facade.py
-      以等价性测试证明门面与 run_module 在各返回形态下结果全等。
-    - **v2 兼容路径保留**：内建下载器仍作为 _ModuleBase 模块注册，ChainBase.run_module("download")
-      等字符串分发仍可用（标记为 v2 兼容路径、计划后续废弃，见各下载器模块类 docstring）。门面
-      不替换该路径，只作为新代码的首选入口叠加其上。
-    - **后端发现**：每次分发实时查询 ModuleManager().get_running_modules(method)，自动纳入运行期
-      注册/卸载的插件下载器，无需门面侧维护后端清单。
-
-    注意：门面只复刻 run_module 的"系统模块"分发面；run_module 另有 get_module 劫持的"插件模块"
-    面（__execute_plugin_modules），实测下载器域无任何插件经该面劫持（劫持集中在存储/整理域），
-    故门面覆盖完整；如需该面的极端兼容场景，run_module 仍在。
+    约定：凡接受 downloader 形参的方法，传 None 时面向全部下载器，传具体名称时只作用于该下载器。
     """
 
     def __init__(self):
@@ -46,9 +30,7 @@ class DownloaderManager(metaclass=Singleton):
 
     @staticmethod
     def _is_valid_empty(ret: Any) -> bool:
-        """
-        判断结果是否为空（与 ChainBase.__is_valid_empty 同义）：元组要求全 None，否则判 is None。
-        """
+        """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
         if isinstance(ret, tuple):
             return all(value is None for value in ret)
         return ret is None
@@ -56,8 +38,13 @@ class DownloaderManager(metaclass=Singleton):
     def _handle_error(self, err: Exception, module_id: str, module_name: str,
                       method: str, raise_exception: bool) -> None:
         """
-        后端方法执行出错处理（复刻 ChainBase.__handle_system_error 的对外可见行为）：
-        raise_exception 为真则抛出；否则记录日志 + 推送系统错误消息 + 发送 SystemError 事件后续跑。
+        后端方法执行出错的处理。
+
+        :param err: 捕获到的异常
+        :param module_id: 后端类名
+        :param module_name: 后端显示名
+        :param method: 出错的方法名
+        :param raise_exception: 为真时直接抛出；否则记录错误日志、推送系统错误消息、广播 SystemError 事件后继续下一个后端
         """
         if raise_exception:
             raise err
@@ -79,8 +66,8 @@ class DownloaderManager(metaclass=Singleton):
     def _handle_rate_limit_error(err: RateLimitExceededException, module_id: str,
                                  method: str, raise_exception: bool) -> None:
         """
-        本地限流跳过（复刻 ChainBase.__handle_rate_limit_error）：raise_exception 为真则抛出；
-        否则仅 INFO 记录、不进系统错误告警（预期的限流状态不应触发 SystemError 事件/消息）。
+        后端触发限流时的处理：raise_exception 为真时直接抛出；否则仅记录 INFO 并跳过该后端
+        （限流为预期状态，不作系统告警）。
         """
         if raise_exception:
             raise err
@@ -88,17 +75,20 @@ class DownloaderManager(metaclass=Singleton):
 
     def _dispatch(self, method: str, *args, **kwargs) -> Any:
         """
-        将下载器方法按方法名分发到所有 Downloader 后端模块并合并结果。
+        按方法名分发到所有下载器后端模块并合并结果。
 
-        合并语义与 ChainBase.__execute_system_modules 严格一致：按 get_priority() 升序遍历后端，
-        - 结果为空（None/全 None 元组）→ 取该后端返回值；
-        - 结果与方法签名一致（check_signature，下载器方法因参数数 ≠1 恒为 False）→ 透传；
-        - 结果为列表 → 合并后续后端的列表结果；
-        - 否则（非空非列表，如 bool/tuple/dict）→ 短路停止。
-        单后端异常逐个捕获续跑，不影响其它后端；raise_exception=True 时透传首个异常。
+        按优先级（get_priority 升序）遍历后端：
+        - 当前结果为空（None / 全 None 元组）→ 取该后端返回值；
+        - 当前结果可作为下一后端的入参（check_signature，下载器方法因参数数 ≠1 恒为否）→ 透传；
+        - 当前结果为列表 → 合并各后端的列表结果；
+        - 当前结果为非空标量（bool/tuple/dict 等）→ 短路停止。
+        单个后端异常被隔离后继续其余后端；raise_exception=True 时透传首个异常。
+
+        :param method: 要分发的下载器方法名
+        :param raise_exception: 出错时是否抛出（分发控制位，不透传给后端方法）
+        :return: 各后端合并后的结果
         """
-        # pop 而非 get：raise_exception 是分发器控制位，不应透传给不接受该参数的后端 func
-        # （下载器后端方法无 raise_exception 形参，透传会触发 TypeError）。
+        # raise_exception 为分发控制位，pop 出后不随调用透传给后端方法（后端方法无此形参，透传会 TypeError）。
         raise_exception = bool(kwargs.pop("raise_exception", False))
         result: Any = None
         for module in sorted(
@@ -124,14 +114,14 @@ class DownloaderManager(metaclass=Singleton):
                 else:
                     break
             except RateLimitExceededException as err:
-                # 限流先于通用异常处理（与 __execute_system_modules 一致）：安静跳过、不告警。
+                # 限流先于通用异常捕获：安静跳过、不告警。
                 self._handle_rate_limit_error(err, module_id, method, raise_exception)
             except Exception as err:
                 self._handle_error(err, module_id, module_name, method, raise_exception)
         return result
 
     # ------------------------------------------------------------------ #
-    # IDownloader 对外面：签名与 ChainBase 下载器包装方法一致，便于调用方平滑切换。
+    # IDownloader 对外面：按方法名转发到 _dispatch。
     # ------------------------------------------------------------------ #
 
     def download(
@@ -146,7 +136,15 @@ class DownloaderManager(metaclass=Singleton):
     ) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], str]]:
         """
         添加下载任务。
-        :return: 下载器名称、种子Hash、种子文件布局、错误原因
+
+        :param content: 种子文件路径 / 种子链接 / 种子内容
+        :param download_dir: 下载保存目录
+        :param cookie: 站点 Cookie（私有种子下载用）
+        :param episodes: 需要下载的集数集合（为空表示全部）
+        :param category: 下载分类
+        :param label: 附加标签
+        :param downloader: 指定下载器名称，None 表示使用默认下载器
+        :return: (下载器名称, 种子 Hash, 种子文件布局, 错误原因)
         """
         return self._dispatch(
             "download",
@@ -168,6 +166,12 @@ class DownloaderManager(metaclass=Singleton):
     ) -> Optional[List[DownloaderTorrent]]:
         """
         获取下载器种子列表。
+
+        :param status: 按种子状态过滤
+        :param hashs: 按种子 Hash（单个或列表）过滤
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :param include_all_tags: 是否包含全部标签的种子
+        :return: 种子信息列表
         """
         return self._dispatch(
             "list_torrents",
@@ -185,6 +189,11 @@ class DownloaderManager(metaclass=Singleton):
     ) -> Optional[bool]:
         """
         删除下载器种子。
+
+        :param hashs: 要删除的种子 Hash（单个或列表）
+        :param delete_file: 是否同时删除文件
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: 是否删除成功
         """
         return self._dispatch(
             "remove_torrents",
@@ -195,13 +204,21 @@ class DownloaderManager(metaclass=Singleton):
 
     def start_torrents(self, hashs: Union[list, str], downloader: Optional[str] = None) -> Optional[bool]:
         """
-        开始下载。
+        开始下载（恢复）指定种子。
+
+        :param hashs: 种子 Hash（单个或列表）
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: 是否操作成功
         """
         return self._dispatch("start_torrents", hashs=hashs, downloader=downloader)
 
     def stop_torrents(self, hashs: Union[list, str], downloader: Optional[str] = None) -> Optional[bool]:
         """
-        停止下载。
+        停止（暂停）指定种子。
+
+        :param hashs: 种子 Hash（单个或列表）
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: 是否操作成功
         """
         return self._dispatch("stop_torrents", hashs=hashs, downloader=downloader)
 
@@ -210,6 +227,11 @@ class DownloaderManager(metaclass=Singleton):
     ) -> Optional[bool]:
         """
         设置种子标签。
+
+        :param hashs: 种子 Hash（单个或列表）
+        :param tags: 要设置的标签列表
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: 是否操作成功
         """
         return self._dispatch("set_torrents_tag", hashs=hashs, tags=tags, downloader=downloader)
 
@@ -226,7 +248,18 @@ class DownloaderManager(metaclass=Singleton):
             seeding_time_limit: Optional[int] = None,
     ) -> Optional[Dict[str, bool]]:
         """
-        修改下载任务属性。
+        修改下载任务属性（仅传入的字段生效）。
+
+        :param hash_string: 种子 Hash
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :param download_limit: 下载限速
+        :param upload_limit: 上传限速
+        :param tracker_list: Tracker 列表
+        :param save_path: 保存路径
+        :param category: 分类
+        :param ratio_limit: 分享率限制
+        :param seeding_time_limit: 做种时间限制
+        :return: 各项修改是否成功
         """
         return self._dispatch(
             "update_torrent",
@@ -245,24 +278,38 @@ class DownloaderManager(metaclass=Singleton):
             self, hash_string: str, downloader: Optional[str] = None
     ) -> Optional[Dict[str, List[str]]]:
         """
-        查询下载任务 Tracker 列表。
+        查询下载任务的 Tracker 列表。
+
+        :param hash_string: 种子 Hash
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: Tracker 信息（按下载任务归类）
         """
         return self._dispatch("get_torrent_trackers", hash_string=hash_string, downloader=downloader)
 
     def torrent_files(self, tid: str, downloader: Optional[str] = None) -> Optional[List[DownloaderFile]]:
         """
-        获取种子文件列表。
+        获取种子的文件列表。
+
+        :param tid: 种子 Hash
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: 种子文件列表
         """
         return self._dispatch("torrent_files", tid=tid, downloader=downloader)
 
     def downloader_info(self, downloader: Optional[str] = None) -> Optional[List[DownloaderInfo]]:
         """
-        获取下载器统计信息。
+        获取下载器实时统计信息（速率、连接等）。
+
+        :param downloader: 指定下载器名称，None 表示全部下载器
+        :return: 下载器统计信息列表
         """
         return self._dispatch("downloader_info", downloader=downloader)
 
     def transfer_completed(self, hashs: str, downloader: Optional[str] = None) -> None:
         """
-        下载器转移完成后的处理。
+        整理完成后对种子执行的收尾处理（如打标签）。
+
+        :param hashs: 种子 Hash
+        :param downloader: 指定下载器名称，None 表示全部下载器
         """
         return self._dispatch("transfer_completed", hashs=hashs, downloader=downloader)

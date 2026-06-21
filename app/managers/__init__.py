@@ -7,8 +7,8 @@
 - 契约接口（Protocol / 抽象基类）在 app/modules：INotification / IDownloader / IMediaServer /
   IMediaRecognize、StorageBase；
 - 注册工厂在 app/core/module + 各域 provides_* 钩子 / verify_*_contract；
-- **门面管理器集中在本包**：忠实复刻 ChainBase.run_module 的派发语义（插件劫持面 + 系统面），
-  被 ChainBase 直接调用，取代「ChainBase.run_module(字符串) → 模块」的字符串 ABI 双层派发。
+- **门面管理器集中在本包**：按方法名把领域操作分发到各后端模块（插件钩子面 + 系统后端面），
+  被 ChainBase 直接调用，取代散落在 ChainBase 中按字符串分发到模块的写法。
 
 分层（迁移目的）：
 

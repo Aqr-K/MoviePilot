@@ -13,26 +13,17 @@ from app.utils.singleton import Singleton
 
 class NotificationManager(metaclass=Singleton):
     """
-    消息通知（Notification 域）门面。
+    消息通知（Notification 域）统一入口（单例）。
 
-    对照下载器门面 DownloaderManager / 媒服门面 MediaServerManager：把"通知"领域升级为"门面 + 后端"
-    模式——对外提供实现 app.modules.INotification 契约的类型化统一方法，对内按方法名分发到所有通知
-    后端（内建 Telegram/WeChat/Slack/Discord/... 及插件经 provides_notifications() 注册的渠道）。
+    对外提供一组通知操作方法（契约见 app.modules.INotification），按方法名分两步分发：先经各已启用插件
+    注册的同名方法，再到系统通知后端模块（内建 Telegram/WeChat/Slack/Discord/VoceChat/... 及插件经
+    provides_notifications() 注册的渠道）。每次分发实时查询当前运行的后端，自动纳入运行期注册/卸载的渠道。
 
-    **与下载器/媒服门面的关键差异——复刻完整 run_module（插件劫持面 + 系统面）**：
-    通知域历史上存在 v2 插件经 get_module() 劫持 post_message 等方法槽的用法（自定义渠道插件常见）。
-    为"兼容 v2 现存插件"，本门面 dispatch 不像下载器/媒服门面那样只复刻系统模块面，而是**完整复刻
-    ChainBase.run_module = __execute_plugin_modules（插件劫持面）+ __execute_system_modules（系统面）**：
-    先跑插件劫持面、其返回非空且非列表则短路，否则继续系统模块面。由此门面成为 run_module 的
-    byte-equivalent drop-in，可安全取代 ChainBase 中通知方法的直接 run_module 调用，零破坏 v2 劫持插件。
+    通知为广播域：post_* 类方法返回 None、不短路，对所有启用渠道广播（各渠道内部自行按渠道/来源/类型过滤
+    是否处理）；delete_message/edit_message 等返回非空值，按取首个非空短路。后端按需实现子集，按方法名分发
+    自然只命中实现者。
 
-    **v2 兼容路径保留**：内建通知模块仍作为 _ModuleBase 模块注册，ChainBase.run_module("post_message")
-    等字符串分发仍可用（标记 v2 兼容、计划后续废弃，见各通知模块类 docstring）。门面不替换该路径，
-    只作为新代码的首选类型化入口叠加其上。
-
-    注：通知是**广播域**——post_* 方法返回 None 不短路，对所有启用渠道广播（各渠道内部经 check_message
-    自行过滤）；delete_message/edit_message 返回非空值，按"取首个非空"短路。后端按需实现子集，按方法名
-    分发自然只命中实现者。
+    对外方法的参数原样转发到后端（各方法的参数见下方说明及 app.modules.INotification）。
     """
 
     def __init__(self):
@@ -40,19 +31,22 @@ class NotificationManager(metaclass=Singleton):
         self._messagehelper = MessageHelper()
 
     # ------------------------------------------------------------------ #
-    # 分发内核：忠实复刻 ChainBase.run_module（插件劫持面 + 系统模块面）
+    # 分发内核：插件钩子面 + 系统后端面
     # ------------------------------------------------------------------ #
 
     @staticmethod
     def _is_valid_empty(ret: Any) -> bool:
-        """与 ChainBase.__is_valid_empty 同义：元组要求全 None，否则判 is None。"""
+        """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
         if isinstance(ret, tuple):
             return all(value is None for value in ret)
         return ret is None
 
     def _handle_system_error(self, err: Exception, module_id: str, module_name: str,
                              method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_system_error：raise 或 记录+系统错误消息+SystemError 事件后续跑。"""
+        """
+        系统后端方法出错的处理：raise_exception 为真时直接抛出；否则记录错误日志、推送系统错误消息
+        （role=system）、广播 SystemError 事件后继续下一个后端。
+        """
         if raise_exception:
             raise err
         logger.error(f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}")
@@ -71,7 +65,10 @@ class NotificationManager(metaclass=Singleton):
 
     def _handle_plugin_error(self, err: Exception, plugin_id: str, plugin_name: str,
                             method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_plugin_error：raise 或 记录+插件错误消息(role=plugin)+SystemError 事件。"""
+        """
+        插件方法出错的处理：raise_exception 为真时直接抛出；否则记录错误日志、推送插件错误消息
+        （role=plugin）、广播 SystemError 事件后继续下一个插件。
+        """
         if raise_exception:
             raise err
         logger.error(f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}")
@@ -91,18 +88,27 @@ class NotificationManager(metaclass=Singleton):
     @staticmethod
     def _handle_rate_limit_error(err: RateLimitExceededException, owner: str, ident: str,
                                  method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_rate_limit_error：raise 或 仅 INFO（限流是预期态，不触发系统告警）。"""
+        """
+        触发限流时的处理：raise_exception 为真时直接抛出；否则仅记录 INFO 并跳过
+        （限流为预期状态，不作系统告警）。
+        """
         if raise_exception:
             raise err
         logger.info(f"{owner} {ident}.{method} 已限流，跳过执行：{str(err)}")
 
     def _dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
-        """复刻 ChainBase.__execute_plugin_modules：跑插件经 get_module 劫持的同名方法槽。"""
-        # lazy import 防 import 期环（plugin_manager 依赖较重）；插件面与系统面共用 result 累积语义。
+        """
+        依次调用各已启用插件注册的同名方法，按合并规则累积结果。
+
+        :param method: 方法名
+        :param result: 已累积的结果，用于判定空值合并 / 列表合并 / 短路
+        :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法
+        :return: 累积后的结果
+        """
+        # 延迟导入，避免包初始化期的循环依赖。
         from app.helper.plugin_manager import PluginManager
-        # 插件劫持面与 run_module 一致：raise_exception 透传给插件 func（插件可能据此决定内部异常是否上抛）。
-        # 系统模块面沿用下载器/媒服门面的 pop 语义（系统后端方法可能无 raise_exception 形参，透传会 TypeError）。
+        # raise_exception 随调用透传给插件方法（插件可据此决定内部异常是否上抛）；系统后端面则不透传。
         plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
         for plugin, module_dict in PluginManager().get_plugin_modules().items():
             plugin_id, plugin_name = plugin
@@ -129,7 +135,14 @@ class NotificationManager(metaclass=Singleton):
 
     def _dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
-        """复刻 ChainBase.__execute_system_modules：按 get_priority 升序跑系统通知模块、合并结果。"""
+        """
+        按优先级（get_priority 升序）依次调用各系统后端模块的同名方法，按合并规则累积结果。
+
+        :param method: 方法名
+        :param result: 已累积的结果
+        :param raise_exception: 出错时是否抛出
+        :return: 累积后的结果
+        """
         logger.debug(f"请求系统模块执行：{method} ...")
         for module in sorted(
                 self._modulemanager.get_running_modules(method),
@@ -162,8 +175,14 @@ class NotificationManager(metaclass=Singleton):
 
     def dispatch(self, method: str, *args, **kwargs) -> Any:
         """
-        通知方法分发（run_module 的 byte-equivalent drop-in）：先插件劫持面，其返回非空且非列表即短路，
-        否则继续系统模块面。raise_exception 为分发器控制位（pop 不透传给后端 func，与下载器门面一致）。
+        按方法名分发：先经插件注册的同名方法，得到非空且非列表的结果即返回，否则继续系统后端模块。
+
+        合并规则（两面一致）：当前结果为空时取后端返回值；为列表时合并各后端列表；为非空标量时短路返回。
+        通知为广播域——post_* 返回 None 不短路，对所有启用渠道广播。
+
+        :param method: 要分发的方法名
+        :param raise_exception: 出错时是否抛出（默认 False）
+        :return: 各后端合并后的结果
         """
         raise_exception = bool(kwargs.pop("raise_exception", False))
         result: Any = None
@@ -173,37 +192,85 @@ class NotificationManager(metaclass=Singleton):
         return self._dispatch_system_modules(method, result, raise_exception, *args, **kwargs)
 
     # ------------------------------------------------------------------ #
-    # INotification 对外面：按方法名转发到 dispatch，便于调用方平滑切换。
+    # INotification 对外面：按方法名转发到 dispatch。
     # ------------------------------------------------------------------ #
 
     def post_message(self, *args, **kwargs) -> None:
-        """发送消息（广播到所有启用渠道）。"""
+        """
+        发送通知消息，广播到所有启用的通知渠道（各渠道内部自行过滤是否处理）。
+
+        :param message: 通知内容（Notification）
+        """
         return self.dispatch("post_message", *args, **kwargs)
 
     def post_medias_message(self, *args, **kwargs) -> None:
-        """发送媒体信息选择列表。"""
+        """
+        发送媒体信息选择列表，广播到所有启用渠道。
+
+        :param message: 通知内容（Notification）
+        :param medias: 媒体信息列表（List[MediaInfo]）
+        """
         return self.dispatch("post_medias_message", *args, **kwargs)
 
     def post_torrents_message(self, *args, **kwargs) -> None:
-        """发送种子信息选择列表。"""
+        """
+        发送种子信息选择列表，广播到所有启用渠道。
+
+        :param message: 通知内容（Notification）
+        :param torrents: 种子上下文列表（List[Context]）
+        """
         return self.dispatch("post_torrents_message", *args, **kwargs)
 
     def delete_message(self, *args, **kwargs) -> Optional[bool]:
-        """删除消息（取首个非空结果）。"""
+        """
+        删除已发送的消息（取首个非空结果）。
+
+        :param channel: 消息渠道
+        :param source: 渠道来源标识
+        :param message_id: 消息 ID
+        :param chat_id: 会话 ID
+        :return: 是否删除成功
+        """
         return self.dispatch("delete_message", *args, **kwargs)
 
     def edit_message(self, *args, **kwargs) -> Any:
-        """编辑消息（取首个非空结果）。"""
+        """
+        编辑已发送的消息（取首个非空结果）。
+
+        :param channel: 消息渠道
+        :param source: 渠道来源标识
+        :param message_id: 消息 ID
+        :param chat_id: 会话 ID
+        :param text: 新正文
+        :param title: 新标题
+        :param buttons: 按钮列表
+        :param metadata: 附加元数据
+        :return: 是否编辑成功
+        """
         return self.dispatch("edit_message", *args, **kwargs)
 
     def send_direct_message(self, *args, **kwargs) -> Any:
-        """直接发送消息并返回响应（取首个非空，不经消息队列/历史）。"""
+        """
+        直接发送消息并返回渠道响应（取首个非空，不入消息队列/历史）。
+
+        :param message: 通知内容（Notification）
+        :return: 渠道响应（MessageResponse）
+        """
         return self.dispatch("send_direct_message", *args, **kwargs)
 
     def finalize_message(self, *args, **kwargs) -> Optional[bool]:
-        """对已发送消息执行渠道收尾动作（取首个非空）。"""
+        """
+        对已发送消息执行渠道收尾动作（取首个非空）。
+
+        :param response: 发送阶段返回的渠道响应（MessageResponse）
+        :return: 是否处理成功
+        """
         return self.dispatch("finalize_message", *args, **kwargs)
 
     def register_commands(self, commands: Dict[str, dict]) -> None:
-        """向所有渠道注册菜单命令（广播）。"""
+        """
+        向所有启用渠道注册菜单命令（广播）。
+
+        :param commands: 命令定义（命令名 -> 命令配置）
+        """
         return self.dispatch("register_commands", commands=commands)

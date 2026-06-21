@@ -13,40 +13,39 @@ from app.utils.singleton import Singleton
 
 class StorageManager(metaclass=Singleton):
     """
-    存储（Storage 域）门面。
+    存储（Storage 域）统一入口（单例）。
 
-    补齐储存域的「三层」末层：储存域的**契约层已是 StorageBase**（16 abstractmethod，全仓最成熟范式）、
-    **注册层已是 storage_registry**（按 schema.value 单索引），但其「门面」角色历史上被**揉进了
-    FileManagerModule 这个 _ModuleBase 模块**里——FileManagerModule 既是被 ModuleManager 扫描的模块、
-    又承担按 schema 路由到 storages/ 后端的聚合。本门面把「门面」从模块中**显式抽出**，与下载器
-    DownloaderManager / 媒服 MediaServerManager / 通知 NotificationManager / 识别 MediaRecognizeManager
-    对齐：StorageChain 直接调本门面，取代 `StorageChain.run_module(...) → 唯一 FileManagerModule` 这层
-    **仪式性的字符串 ABI 双层派发**。
+    对外提供一组存储操作方法，按方法名分两步分发：先经各已启用插件注册的同名方法，再到系统存储后端
+    （FileManagerModule，内部按存储类型 schema 路由到本地/115/U115/阿里云盘/Rclone 等具体存储后端，
+    后端契约见 app.modules.filemanager.storages.StorageBase）。插件可经同名方法接入自定义存储。
 
-    派发结构：储存域只有一个系统模块 FileManagerModule（schema 路由在其内部完成），故本门面按方法名
-    分发自然命中它；**复刻完整 run_module（插件劫持面 + 系统面）** ——储存/整理域是 v2 插件经 get_module()
-    劫持方法槽的重灾区（如 p115 接入 115 储存），唯有完整复刻才能在改接后零破坏这些劫持插件。dispatch
-    成为 run_module 的 byte-equivalent drop-in。
+    分发结果取首个非空 / 列表合并 / 非空标量短路。存储方法按 storage 名称或 fileitem 所属存储路由到对应
+    后端，故各方法天然作用于单个存储。
 
-    **v2 兼容路径保留**：FileManagerModule 仍作为 _ModuleBase 模块注册，StorageChain/ChainBase 的
-    run_module 字符串分发仍可用（标 v2 兼容、计划后续废弃）；schema 路由、storage_registry、StorageBase
-    后端零改动。门面只取代外层字符串派发、不动内层 schema 路由。
+    对外方法的参数原样转发到后端（各方法的参数见下方说明）。
     """
 
     def __init__(self):
         self._modulemanager = ModuleManager()
         self._messagehelper = MessageHelper()
 
+    # ------------------------------------------------------------------ #
+    # 分发内核：插件钩子面 + 系统后端面
+    # ------------------------------------------------------------------ #
+
     @staticmethod
     def _is_valid_empty(ret: Any) -> bool:
-        """与 ChainBase.__is_valid_empty 同义：元组要求全 None，否则判 is None。"""
+        """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
         if isinstance(ret, tuple):
             return all(value is None for value in ret)
         return ret is None
 
     def _handle_system_error(self, err: Exception, module_id: str, module_name: str,
                              method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_system_error。"""
+        """
+        系统后端方法出错的处理：raise_exception 为真时直接抛出；否则记录错误日志、推送系统错误消息
+        （role=system）、广播 SystemError 事件后继续下一个后端。
+        """
         if raise_exception:
             raise err
         logger.error(f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}")
@@ -65,7 +64,10 @@ class StorageManager(metaclass=Singleton):
 
     def _handle_plugin_error(self, err: Exception, plugin_id: str, plugin_name: str,
                             method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_plugin_error。"""
+        """
+        插件方法出错的处理：raise_exception 为真时直接抛出；否则记录错误日志、推送插件错误消息
+        （role=plugin）、广播 SystemError 事件后继续下一个插件。
+        """
         if raise_exception:
             raise err
         logger.error(f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}")
@@ -85,16 +87,27 @@ class StorageManager(metaclass=Singleton):
     @staticmethod
     def _handle_rate_limit_error(err: RateLimitExceededException, owner: str, ident: str,
                                  method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_rate_limit_error：raise 或 仅 INFO。"""
+        """
+        触发限流时的处理：raise_exception 为真时直接抛出；否则仅记录 INFO 并跳过
+        （限流为预期状态，不作系统告警）。
+        """
         if raise_exception:
             raise err
         logger.info(f"{owner} {ident}.{method} 已限流，跳过执行：{str(err)}")
 
     def _dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
-        """复刻 ChainBase.__execute_plugin_modules（储存/整理域 get_module 劫持重灾区）。"""
+        """
+        依次调用各已启用插件注册的同名方法，按合并规则累积结果。
+
+        :param method: 方法名
+        :param result: 已累积的结果，用于判定空值合并 / 列表合并 / 短路
+        :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法
+        :return: 累积后的结果
+        """
+        # 延迟导入，避免包初始化期的循环依赖。
         from app.helper.plugin_manager import PluginManager
-        # 插件劫持面与 run_module 一致：raise_exception 透传给插件 func；系统面沿用 pop 语义。
+        # raise_exception 随调用透传给插件方法（插件可据此决定内部异常是否上抛）；系统后端面则不透传。
         plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
         for plugin, module_dict in PluginManager().get_plugin_modules().items():
             plugin_id, plugin_name = plugin
@@ -121,7 +134,14 @@ class StorageManager(metaclass=Singleton):
 
     def _dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
-        """复刻 ChainBase.__execute_system_modules（储存域系统模块=FileManagerModule，schema 路由在其内部）。"""
+        """
+        按优先级（get_priority 升序）依次调用各系统后端模块的同名方法，按合并规则累积结果。
+
+        :param method: 方法名
+        :param result: 已累积的结果
+        :param raise_exception: 出错时是否抛出
+        :return: 累积后的结果
+        """
         logger.debug(f"请求系统模块执行：{method} ...")
         for module in sorted(
                 self._modulemanager.get_running_modules(method),
@@ -153,7 +173,15 @@ class StorageManager(metaclass=Singleton):
         return result
 
     def dispatch(self, method: str, *args, **kwargs) -> Any:
-        """储存方法分发（run_module 的 byte-equivalent drop-in）：先插件劫持面、非空非列表短路、再系统面。"""
+        """
+        按方法名分发：先经插件注册的同名方法，得到非空且非列表的结果即返回，否则继续系统后端模块。
+
+        合并规则（两面一致）：当前结果为空时取后端返回值；为列表时合并各后端列表；为非空标量时短路返回。
+
+        :param method: 要分发的方法名
+        :param raise_exception: 出错时是否抛出（默认 False）
+        :return: 各后端合并后的结果
+        """
         raise_exception = bool(kwargs.pop("raise_exception", False))
         result: Any = None
         result = self._dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
@@ -162,77 +190,178 @@ class StorageManager(metaclass=Singleton):
         return self._dispatch_system_modules(method, result, raise_exception, *args, **kwargs)
 
     # ------------------------------------------------------------------ #
-    # 储存对外面：与 StorageChain 包装方法 / FileManagerModule 方法同名，按方法名转发到 dispatch。
+    # 存储对外面：按方法名转发到 dispatch。
     # ------------------------------------------------------------------ #
 
     def save_config(self, *args, **kwargs) -> Any:
-        """保存存储配置。"""
+        """
+        保存指定存储的配置。
+
+        :param storage: 存储类型标识（schema）
+        :param conf: 配置内容
+        """
         return self.dispatch("save_config", *args, **kwargs)
 
     def reset_config(self, *args, **kwargs) -> Any:
-        """重置存储配置。"""
+        """
+        重置指定存储的配置。
+
+        :param storage: 存储类型标识（schema）
+        """
         return self.dispatch("reset_config", *args, **kwargs)
 
     def generate_qrcode(self, *args, **kwargs) -> Optional[dict]:
-        """生成登录二维码。"""
+        """
+        生成存储登录二维码（仅支持扫码登录的存储）。
+
+        :param storage: 存储类型标识（schema）
+        :return: (二维码数据, 提示信息)
+        """
         return self.dispatch("generate_qrcode", *args, **kwargs)
 
     def generate_auth_url(self, *args, **kwargs) -> Optional[str]:
-        """生成授权链接。"""
+        """
+        生成 OAuth2 授权链接（仅支持 OAuth2 的存储）。
+
+        :param storage: 存储类型标识（schema）
+        :return: (授权参数, 授权链接)
+        """
         return self.dispatch("generate_auth_url", *args, **kwargs)
 
     def check_login(self, *args, **kwargs) -> Optional[dict]:
-        """检查登录状态。"""
+        """
+        查询存储登录状态（如扫码/授权是否完成）。
+
+        :param storage: 存储类型标识（schema）
+        :return: 登录状态信息
+        """
         return self.dispatch("check_login", *args, **kwargs)
 
     def list_files(self, *args, **kwargs) -> Any:
-        """浏览目录文件。"""
+        """
+        浏览目录下的文件与子目录。
+
+        :param fileitem: 目录项
+        :param recursion: 是否递归列出子目录
+        :return: 文件/目录项列表
+        """
         return self.dispatch("list_files", *args, **kwargs)
 
     def any_files(self, *args, **kwargs) -> Optional[bool]:
-        """判断目录下是否存在指定扩展名的文件。"""
+        """
+        判断目录下是否存在指定扩展名的文件。
+
+        :param fileitem: 目录项
+        :param extensions: 扩展名列表，None 表示任意文件
+        :return: 是否存在
+        """
         return self.dispatch("any_files", *args, **kwargs)
 
     def create_folder(self, *args, **kwargs) -> Any:
-        """创建目录。"""
+        """
+        在指定父目录下创建子目录。
+
+        :param fileitem: 父目录项
+        :param name: 新目录名
+        :return: 新建的目录项
+        """
         return self.dispatch("create_folder", *args, **kwargs)
 
     def get_folder(self, *args, **kwargs) -> Any:
-        """获取目录（不存在则创建）。"""
+        """
+        获取目录项，不存在则创建。
+
+        :param storage: 存储类型标识（schema）
+        :param path: 目录路径
+        :return: 目录项
+        """
         return self.dispatch("get_folder", *args, **kwargs)
 
     def download_file(self, *args, **kwargs) -> Any:
-        """下载文件。"""
+        """
+        下载文件到本地。
+
+        :param fileitem: 文件项
+        :param path: 本地保存路径，None 表示临时目录
+        :return: 本地文件路径
+        """
         return self.dispatch("download_file", *args, **kwargs)
 
     def upload_file(self, *args, **kwargs) -> Any:
-        """上传文件。"""
+        """
+        上传本地文件到指定目录。
+
+        :param fileitem: 上传目标目录项
+        :param path: 本地文件路径
+        :param new_name: 上传后的文件名，None 表示沿用原名
+        :return: 上传后的文件项
+        """
         return self.dispatch("upload_file", *args, **kwargs)
 
     def delete_file(self, *args, **kwargs) -> Optional[bool]:
-        """删除文件/目录。"""
+        """
+        删除文件或目录。
+
+        :param fileitem: 文件/目录项
+        :return: 是否删除成功
+        """
         return self.dispatch("delete_file", *args, **kwargs)
 
     def rename_file(self, *args, **kwargs) -> Optional[bool]:
-        """重命名文件/目录。"""
+        """
+        重命名文件或目录。
+
+        :param fileitem: 文件/目录项
+        :param name: 新名称
+        :return: 是否重命名成功
+        """
         return self.dispatch("rename_file", *args, **kwargs)
 
     def get_file_item(self, *args, **kwargs) -> Any:
-        """按路径获取文件项。"""
+        """
+        按路径获取文件或目录项。
+
+        :param storage: 存储类型标识（schema）
+        :param path: 文件/目录路径
+        :return: 文件/目录项
+        """
         return self.dispatch("get_file_item", *args, **kwargs)
 
     def get_parent_item(self, *args, **kwargs) -> Any:
-        """获取父目录项。"""
+        """
+        获取文件/目录的父目录项。
+
+        :param fileitem: 文件/目录项
+        :return: 父目录项
+        """
         return self.dispatch("get_parent_item", *args, **kwargs)
 
     def snapshot_storage(self, *args, **kwargs) -> Any:
-        """存储快照。"""
+        """
+        对存储目录做快照（输出各层级文件信息，用于变更比对）。
+
+        :param storage: 存储类型标识（schema）
+        :param path: 快照根路径
+        :param last_snapshot_time: 上次快照时间，用于增量快照
+        :param max_depth: 最大递归深度
+        :return: 路径 -> 文件信息 的快照字典
+        """
         return self.dispatch("snapshot_storage", *args, **kwargs)
 
     def storage_usage(self, *args, **kwargs) -> Any:
-        """存储使用情况。"""
+        """
+        获取存储空间使用情况。
+
+        :param storage: 存储类型标识（schema）
+        :return: 存储使用信息
+        """
         return self.dispatch("storage_usage", *args, **kwargs)
 
     def support_transtype(self, *args, **kwargs) -> Any:
-        """存储支持的整理方式。"""
+        """
+        获取存储支持的整理方式（移动/复制/硬链接等）。
+
+        :param storage: 存储类型标识（schema）
+        :return: 支持的整理方式
+        """
         return self.dispatch("support_transtype", *args, **kwargs)
