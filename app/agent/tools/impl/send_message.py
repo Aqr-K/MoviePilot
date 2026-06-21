@@ -10,12 +10,22 @@ from app.log import logger
 from app.schemas import Notification
 from app.schemas.types import NotificationType
 
+SEND_MESSAGE_PARSE_MODE_MARKDOWN = "MarkdownV2"
+SEND_MESSAGE_PARSE_MODE_HTML = "HTML"
+SEND_MESSAGE_PARSE_MODE_ALIASES = {
+    "markdownv2": SEND_MESSAGE_PARSE_MODE_MARKDOWN,
+    "mdv2": SEND_MESSAGE_PARSE_MODE_MARKDOWN,
+    "html": SEND_MESSAGE_PARSE_MODE_HTML,
+}
+
 
 class SendMessageInput(BaseModel):
     """发送消息工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
+    explanation: Optional[str] = Field(
+        None,
+        description="Clear explanation of why this tool is being used in the current context",
+    )
     message: Optional[str] = Field(
         None,
         description="The message content to send to the user (should be clear and informative)",
@@ -28,15 +38,26 @@ class SendMessageInput(BaseModel):
         None,
         description="Optional image URL to send together with the message on channels that support images (such as Telegram and Slack)",
     )
+    parse_mode: Optional[str] = Field(
+        None,
+        description=(
+            "Optional Telegram message body format. Supported values: HTML or MarkdownV2. "
+            "Leave empty for default."
+        ),
+    )
 
     @model_validator(mode="after")
-    def validate_payload(self):
+    def validate_payload(self) -> "SendMessageInput":
+        """校验消息内容和可选格式参数。"""
         if not self.message and not self.title and not self.image_url:
             raise ValueError("message、title、image_url 至少需要提供一个")
+        self.parse_mode = SendMessageTool.normalize_parse_mode(self.parse_mode)
         return self
 
 
 class SendMessageTool(MoviePilotTool):
+    """发送普通通知消息给当前用户。"""
+
     name: str = "send_message"
     tags: list[str] = [
         ToolTag.Write,
@@ -44,9 +65,26 @@ class SendMessageTool(MoviePilotTool):
         ToolTag.Admin,
     ]
     sends_message: bool = True
-    description: str = "Send notification message to the user through configured notification channels (Telegram, Slack, WeChat, etc.). Supports optional image_url on channels that can send images. Used to inform users about operation results, errors, important updates, or proactively send a relevant image."
+    description: str = (
+        "Send notification message to the user through configured notification channels "
+        "(Telegram, Slack, WeChat, etc.). Supports optional image_url on channels that can "
+        "send images. For Telegram, the optional parse_mode parameter controls message body "
+        "rendering. Supported values are HTML and MarkdownV2; leave it empty for default."
+    )
     args_schema: Type[BaseModel] = SendMessageInput
     require_admin: bool = True
+
+    @staticmethod
+    def normalize_parse_mode(parse_mode: Optional[str]) -> Optional[str]:
+        """
+        规范化 send_message 支持的 Telegram 格式参数。
+        """
+        if not parse_mode:
+            return None
+        normalized = SEND_MESSAGE_PARSE_MODE_ALIASES.get(str(parse_mode).strip().lower())
+        if not normalized:
+            raise ValueError("parse_mode 仅支持 MarkdownV2 或 HTML")
+        return normalized
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据消息参数生成友好的提示消息"""
@@ -71,12 +109,20 @@ class SendMessageTool(MoviePilotTool):
         message: Optional[str] = None,
         title: Optional[str] = None,
         image_url: Optional[str] = None,
+        parse_mode: Optional[str] = None,
         **kwargs,
     ) -> str:
+        """发送消息到当前会话渠道。"""
         title = title or ("图片" if image_url and not message else "")
         text = message or ""
+        try:
+            parse_mode = self.normalize_parse_mode(parse_mode)
+        except ValueError as e:
+            return str(e)
+
         logger.info(
-            f"执行工具: {self.name}, 参数: title={title}, message={text}, image_url={image_url}"
+            f"执行工具: {self.name}, 参数: title={title}, message={text}, "
+            f"image_url={image_url}, parse_mode={parse_mode}"
         )
         try:
             await self.send_notification_message(
@@ -89,6 +135,7 @@ class SendMessageTool(MoviePilotTool):
                     title=title,
                     text=text,
                     image=image_url,
+                    parse_mode=parse_mode,
                 )
             )
             return "消息已发送"
