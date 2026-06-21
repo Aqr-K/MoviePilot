@@ -26,13 +26,14 @@ helper / modules / core 均不回指 managers。由此消除两类问题：
 """
 from typing import TYPE_CHECKING
 
-# 公共门面名 -> 所在子模块。仅在按属性访问（from app.managers import X）时懒加载。
+# 公共门面名 -> (子模块全名, 属性名)。仅在按属性访问（from app.managers import X）时懒加载。
+# 用二元组而非裸模块名：与 app/core/module 范式对齐，解除「导出名必须等于类名」的隐式耦合。
 _LAZY_EXPORTS = {
-    "DownloaderManager": "app.managers.downloader_manager",
-    "MediaServerManager": "app.managers.mediaserver_manager",
-    "NotificationManager": "app.managers.notification_manager",
-    "MediaRecognizeManager": "app.managers.mediarecognize_manager",
-    "StorageManager": "app.managers.storage_manager",
+    "DownloaderManager": ("app.managers.downloader_manager", "DownloaderManager"),
+    "MediaServerManager": ("app.managers.mediaserver_manager", "MediaServerManager"),
+    "NotificationManager": ("app.managers.notification_manager", "NotificationManager"),
+    "MediaRecognizeManager": ("app.managers.mediarecognize_manager", "MediaRecognizeManager"),
+    "StorageManager": ("app.managers.storage_manager", "StorageManager"),
 }
 
 if TYPE_CHECKING:  # 仅供静态检查/IDE，运行期不执行，不引入急加载
@@ -46,11 +47,14 @@ __all__ = list(_LAZY_EXPORTS)
 
 
 def __getattr__(name: str):
-    """PEP 562 懒再导出：按需 import 子模块，避免包初始化期急加载全部门面。"""
+    """PEP 562 懒再导出：按需 import 子模块并取出属性，避免包初始化期急加载全部门面。"""
     target = _LAZY_EXPORTS.get(name)
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
 
-    module = importlib.import_module(target)
-    return getattr(module, name)
+    return getattr(importlib.import_module(target[0]), target[1])
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_EXPORTS))
