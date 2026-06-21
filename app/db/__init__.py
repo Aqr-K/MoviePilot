@@ -4,7 +4,7 @@ from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, 
 from sqlalchemy import NullPool, QueuePool, and_, create_engine, inspect, text, select, delete, Integer, \
     Sequence, Identity
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import Mapped, Session, as_declarative, declared_attr, mapped_column, scoped_session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, declared_attr, mapped_column, scoped_session, sessionmaker
 
 from app.core.config import settings
 
@@ -421,8 +421,8 @@ def async_db_query(func):
     return wrapper
 
 
-@as_declarative()
-class Base:
+class Base(DeclarativeBase):
+    __allow_unmapped__ = True
     id: Any
     __name__: str
 
@@ -439,7 +439,7 @@ class Base:
     @classmethod
     @db_query
     def get(cls, db: Session, rid: int) -> Self:
-        return db.query(cls).filter(and_(cls.id == rid)).first()
+        return db.execute(select(cls).where(and_(cls.id == rid))).scalars().first()
 
     @classmethod
     @async_db_query
@@ -464,7 +464,7 @@ class Base:
     @classmethod
     @db_update
     def delete(cls, db: Session, rid):
-        db.query(cls).filter(and_(cls.id == rid)).delete()
+        db.execute(delete(cls).where(and_(cls.id == rid)))
 
     @classmethod
     @async_db_update
@@ -477,7 +477,7 @@ class Base:
     @classmethod
     @db_update
     def truncate(cls, db: Session):
-        db.query(cls).delete()
+        db.execute(delete(cls))
 
     @classmethod
     @async_db_update
@@ -487,7 +487,7 @@ class Base:
     @classmethod
     @db_query
     def list(cls, db: Session) -> List[Self]:
-        return db.query(cls).all()
+        return db.execute(select(cls)).scalars().all()
 
     @classmethod
     @async_db_query
