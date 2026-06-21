@@ -15,24 +15,17 @@ from app.utils.singleton import Singleton
 
 class MediaRecognizeManager(metaclass=Singleton):
     """
-    媒体识别 / 数据源（MediaRecognize 域）门面。
+    媒体识别 / 数据源（MediaRecognize 域）统一入口（单例）。
 
-    对照下载器 DownloaderManager / 媒服 MediaServerManager / 通知 NotificationManager：把"识别/数据源"
-    领域升级为"门面 + 后端"模式——对外提供实现 app.modules.IMediaRecognize 契约的类型化统一方法，对内
-    按方法名分发到所有数据源后端（内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经 provides_data_sources()
-    注册的源）。
+    对外提供一组识别操作方法（契约见 app.modules.IMediaRecognize），按方法名分两步分发：先经各已启用
+    插件注册的同名方法，再到系统数据源后端模块（内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经
+    provides_data_sources() 注册的源）。每次分发实时查询当前运行的后端，自动纳入运行期注册/卸载的源。
 
-    **派发语义——管道（pipeline）**：识别是跨源管道域，`recognize_media` 等方法的返回值在源之间**流转**
-    （`check_signature` 分支：上一源的非空结果与下一源方法签名一致时作为入参传入，逐源精化）；search_*
-    等列表方法跨源 extend 合并；首个非空非列表结果短路。这与通知（广播）、下载器（取首个非空）不同，
-    但**统一由复刻 run_module 的 dispatch 内核表达**（is_valid_empty / check_signature / list extend / break
-    四分支正是管道语义的载体）。
+    识别为管道域：recognize_media 等方法的结果在数据源之间流转、逐源精化（结果可作为下一源入参时透传）；
+    search_* 列表方法跨源合并；首个非空非列表结果短路。后端按需实现子集，按方法名分发自然只命中实现者。
+    同步方法走 dispatch，异步方法（async_*）走 async_dispatch（同步后端经线程池执行，避免阻塞事件循环）。
 
-    **复刻完整 run_module（插件劫持面 + 系统面）以兼容 v2 现存插件**：识别域历史上存在 v2 插件经
-    get_module() 劫持 recognize_media 等方法槽以接入自定义识别源。为兼容这些插件，dispatch/async_dispatch
-    **完整复刻** ChainBase.run_module / async_run_module = 插件劫持面 + 系统面，成为其 byte-equivalent
-    drop-in。**v2 兼容路径保留**：内建数据源仍作为 _ModuleBase 模块注册，run_module 字符串分发仍可用
-    （标 v2 兼容、计划后续废弃）。门面只作为新代码的首选类型化入口叠加其上。
+    对外方法的参数原样转发到后端（各方法的参数见下方说明及 app.modules.IMediaRecognize）。
     """
 
     def __init__(self):
@@ -40,19 +33,22 @@ class MediaRecognizeManager(metaclass=Singleton):
         self._messagehelper = MessageHelper()
 
     # ------------------------------------------------------------------ #
-    # 错误/空值处理（与 ChainBase 对外可见行为一致）
+    # 错误/空值处理
     # ------------------------------------------------------------------ #
 
     @staticmethod
     def _is_valid_empty(ret: Any) -> bool:
-        """与 ChainBase.__is_valid_empty 同义：元组要求全 None，否则判 is None。"""
+        """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
         if isinstance(ret, tuple):
             return all(value is None for value in ret)
         return ret is None
 
     def _handle_system_error(self, err: Exception, module_id: str, module_name: str,
                              method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_system_error。"""
+        """
+        系统后端方法出错的处理：raise_exception 为真时直接抛出；否则记录错误日志、推送系统错误消息
+        （role=system）、广播 SystemError 事件后继续下一个后端。
+        """
         if raise_exception:
             raise err
         logger.error(f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}")
@@ -71,7 +67,10 @@ class MediaRecognizeManager(metaclass=Singleton):
 
     def _handle_plugin_error(self, err: Exception, plugin_id: str, plugin_name: str,
                             method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_plugin_error。"""
+        """
+        插件方法出错的处理：raise_exception 为真时直接抛出；否则记录错误日志、推送插件错误消息
+        （role=plugin）、广播 SystemError 事件后继续下一个插件。
+        """
         if raise_exception:
             raise err
         logger.error(f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}")
@@ -91,20 +90,30 @@ class MediaRecognizeManager(metaclass=Singleton):
     @staticmethod
     def _handle_rate_limit_error(err: RateLimitExceededException, owner: str, ident: str,
                                  method: str, raise_exception: bool) -> None:
-        """复刻 ChainBase.__handle_rate_limit_error：raise 或 仅 INFO。"""
+        """
+        触发限流时的处理：raise_exception 为真时直接抛出；否则仅记录 INFO 并跳过
+        （限流为预期状态，不作系统告警）。
+        """
         if raise_exception:
             raise err
         logger.info(f"{owner} {ident}.{method} 已限流，跳过执行：{str(err)}")
 
     # ------------------------------------------------------------------ #
-    # 同步分发内核：复刻 ChainBase.run_module（插件劫持面 + 系统面）
+    # 同步分发内核：插件钩子面 + 系统后端面
     # ------------------------------------------------------------------ #
 
     def _dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
-        """复刻 ChainBase.__execute_plugin_modules。"""
+        """
+        依次调用各已启用插件注册的同名方法，按合并规则累积结果。
+
+        :param method: 方法名
+        :param result: 已累积的结果，用于判定空值合并 / 列表合并 / 短路
+        :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法
+        :return: 累积后的结果
+        """
         from app.helper.plugin_manager import PluginManager
-        # 插件劫持面与 run_module 一致：raise_exception 透传给插件 func；系统面沿用 pop 语义。
+        # raise_exception 随调用透传给插件方法（插件可据此决定内部异常是否上抛）；系统后端面则不透传。
         plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
         for plugin, module_dict in PluginManager().get_plugin_modules().items():
             plugin_id, plugin_name = plugin
@@ -131,7 +140,15 @@ class MediaRecognizeManager(metaclass=Singleton):
 
     def _dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
-        """复刻 ChainBase.__execute_system_modules：管道语义的载体（check_signature 透传结果）。"""
+        """
+        按优先级（get_priority 升序）依次调用各系统后端模块的同名方法，按合并规则累积结果
+        （识别为管道域：当前结果可作为下一后端入参时经 check_signature 透传，逐源精化）。
+
+        :param method: 方法名
+        :param result: 已累积的结果
+        :param raise_exception: 出错时是否抛出
+        :return: 累积后的结果
+        """
         logger.debug(f"请求系统模块执行：{method} ...")
         for module in sorted(
                 self._modulemanager.get_running_modules(method),
@@ -163,7 +180,16 @@ class MediaRecognizeManager(metaclass=Singleton):
         return result
 
     def dispatch(self, method: str, *args, **kwargs) -> Any:
-        """识别方法分发（run_module 的 byte-equivalent drop-in）：先插件劫持面、非空非列表短路、再系统面。"""
+        """
+        按方法名分发：先经插件注册的同名方法，得到非空且非列表的结果即返回，否则继续系统后端模块。
+
+        合并规则：当前结果为空时取后端返回值；可作为下一后端入参时透传（管道精化）；为列表时合并各后端列表；
+        为非空标量时短路返回。
+
+        :param method: 要分发的方法名
+        :param raise_exception: 出错时是否抛出（默认 False）
+        :return: 各数据源合并/精化后的结果
+        """
         raise_exception = bool(kwargs.pop("raise_exception", False))
         result: Any = None
         result = self._dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
@@ -172,12 +198,19 @@ class MediaRecognizeManager(metaclass=Singleton):
         return self._dispatch_system_modules(method, result, raise_exception, *args, **kwargs)
 
     # ------------------------------------------------------------------ #
-    # 异步分发内核：复刻 ChainBase.async_run_module（异步插件面 + 异步系统面）
+    # 异步分发内核：异步插件钩子面 + 异步系统后端面
     # ------------------------------------------------------------------ #
 
     async def _async_dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
                                              *args, **kwargs) -> Any:
-        """复刻 ChainBase.__async_execute_plugin_modules（同步插件 func 经线程池避免阻塞事件循环）。"""
+        """
+        异步依次调用各已启用插件注册的同名方法（同步方法经线程池执行避免阻塞事件循环），按合并规则累积结果。
+
+        :param method: 方法名
+        :param result: 已累积的结果
+        :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法
+        :return: 累积后的结果
+        """
         import inspect
         from app.helper.plugin_manager import PluginManager
         plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
@@ -212,7 +245,15 @@ class MediaRecognizeManager(metaclass=Singleton):
 
     async def _async_dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
                                              *args, **kwargs) -> Any:
-        """复刻 ChainBase.__async_execute_system_modules（同步系统模块经线程池）。"""
+        """
+        异步按优先级（get_priority 升序）依次调用各系统后端模块的同名方法（同步方法经线程池执行），
+        按合并规则累积结果（识别为管道域：结果可作为下一后端入参时经 check_signature 透传，逐源精化）。
+
+        :param method: 方法名
+        :param result: 已累积的结果
+        :param raise_exception: 出错时是否抛出
+        :return: 累积后的结果
+        """
         import inspect
         logger.debug(f"请求系统模块执行：{method} ...")
         for module in sorted(
@@ -254,7 +295,13 @@ class MediaRecognizeManager(metaclass=Singleton):
         return result
 
     async def async_dispatch(self, method: str, *args, **kwargs) -> Any:
-        """识别方法异步分发（async_run_module 的 byte-equivalent drop-in）。"""
+        """
+        dispatch 的异步版本：同步的后端方法经线程池执行避免阻塞事件循环，分发与合并规则与 dispatch 一致。
+
+        :param method: 要分发的方法名
+        :param raise_exception: 出错时是否抛出（默认 False）
+        :return: 各数据源合并/精化后的结果
+        """
         raise_exception = bool(kwargs.pop("raise_exception", False))
         result: Any = None
         result = await self._async_dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
@@ -267,37 +314,86 @@ class MediaRecognizeManager(metaclass=Singleton):
     # ------------------------------------------------------------------ #
 
     def recognize_media(self, *args, **kwargs) -> Any:
-        """识别媒体信息（跨源管道，逐源精化）。"""
+        """
+        识别媒体信息（跨数据源管道，逐源精化结果）。
+
+        :param meta: 文件元数据
+        :param mtype: 媒体类型
+        :param tmdbid: TheMovieDb ID
+        :param doubanid: 豆瓣 ID
+        :param bangumiid: Bangumi ID
+        :return: 识别到的媒体信息
+        """
         return self.dispatch("recognize_media", *args, **kwargs)
 
     def search_medias(self, *args, **kwargs) -> Optional[List[Any]]:
-        """搜索媒体信息（跨源 extend 合并）。"""
+        """
+        按元数据搜索媒体信息（跨数据源合并结果）。
+
+        :param meta: 文件元数据
+        :return: 媒体信息列表
+        """
         return self.dispatch("search_medias", *args, **kwargs)
 
     async def async_search_medias(self, *args, **kwargs) -> Optional[List[Any]]:
-        """异步搜索媒体信息。"""
+        """
+        search_medias 的异步版本。
+
+        :param meta: 文件元数据
+        :return: 媒体信息列表
+        """
         return await self.async_dispatch("async_search_medias", *args, **kwargs)
 
     def search_persons(self, *args, **kwargs) -> Optional[List[Any]]:
-        """搜索人物。"""
+        """
+        按名称搜索人物（跨数据源合并结果）。
+
+        :param name: 人物名称
+        :return: 人物信息列表
+        """
         return self.dispatch("search_persons", *args, **kwargs)
 
     async def async_search_persons(self, *args, **kwargs) -> Optional[List[Any]]:
-        """异步搜索人物。"""
+        """
+        search_persons 的异步版本。
+
+        :param name: 人物名称
+        :return: 人物信息列表
+        """
         return await self.async_dispatch("async_search_persons", *args, **kwargs)
 
     def search_collections(self, *args, **kwargs) -> Optional[List[Any]]:
-        """搜索系列/合集。"""
+        """
+        按名称搜索系列/合集（跨数据源合并结果）。
+
+        :param name: 系列/合集名称
+        :return: 媒体信息列表
+        """
         return self.dispatch("search_collections", *args, **kwargs)
 
     async def async_search_collections(self, *args, **kwargs) -> Optional[List[Any]]:
-        """异步搜索系列/合集。"""
+        """
+        search_collections 的异步版本。
+
+        :param name: 系列/合集名称
+        :return: 媒体信息列表
+        """
         return await self.async_dispatch("async_search_collections", *args, **kwargs)
 
     def obtain_images(self, *args, **kwargs) -> Any:
-        """补充获取媒体图片（跨源精化）。"""
+        """
+        补充获取媒体图片（跨数据源精化）。
+
+        :param mediainfo: 媒体信息
+        :return: 补充图片后的媒体信息
+        """
         return self.dispatch("obtain_images", *args, **kwargs)
 
     async def async_obtain_images(self, *args, **kwargs) -> Any:
-        """异步补充获取媒体图片。"""
+        """
+        obtain_images 的异步版本。
+
+        :param mediainfo: 媒体信息
+        :return: 补充图片后的媒体信息
+        """
         return await self.async_dispatch("async_obtain_images", *args, **kwargs)

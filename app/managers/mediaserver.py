@@ -18,27 +18,14 @@ if TYPE_CHECKING:
 
 class MediaServerManager(metaclass=Singleton):
     """
-    媒体服务器（MediaServer 域）门面。
+    媒体服务器（MediaServer 域）统一入口（单例）。
 
-    对照下载器域的 DownloaderManager / 存储域的 FileManager：把"媒体服务器"领域升级为
-    "门面 + 后端"模式——对外提供一组类型化、可发现的统一方法（实现 app.modules.IMediaServer
-    契约的对外面），对内按方法名分发到所有 ModuleType.MediaServer 后端模块（内建 Emby/Jellyfin/
-    Plex/TrimeMedia/Ugreen/ZSpace 以及插件经 provides_mediaservers() 注册的媒体服务器），并按与
-    ChainBase.run_module 完全一致的合并语义（列表 extend / 非列表取首个非 None）汇总结果。
+    对外提供一组类型化的媒体服务器操作方法（契约见 app.modules.IMediaServer），按方法名分发到所有已启用的
+    媒体服务器后端模块（内建 Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 及插件经 provides_mediaservers()
+    注册的媒体服务器），并合并各后端结果。每次分发实时查询当前运行的后端，自动纳入运行期注册/卸载的插件。
 
-    设计要点：
-    - **行为等价**：_dispatch 忠实复刻 ChainBase.__execute_system_modules 的分发与合并（含
-      check_signature 分支、异常逐后端续跑、SystemError 事件与消息上报），调用的是与 run_module
-      同一批后端模块方法（后端方法体零改动），故对真实媒体服务器的行为不变；唯一被收敛的是
-      "字符串 ABI 分发"这一隐式面，被显式、类型化的门面取代。等价性测试见 tests/test_mediaserver_facade.py。
-    - **签名漂移收敛**：各后端 mediaserver_* 的 server 必填性 / username 形参 / **kwargs 存在差异；
-      门面统一为最宽松 canonical 签名并按 kwarg 分发——后端要么声明该形参、要么有 **kwargs 吸收，
-      故与 run_module 一样对全部后端兼容（详见 app.modules.IMediaServer）。
-    - **v2 兼容路径保留**：内建媒体服务器仍作为 _ModuleBase 模块注册，run_module("mediaserver_librarys")
-      等字符串分发仍可用（标记为 v2 兼容路径、计划后续废弃）。门面不替换该路径，只作为新代码的
-      首选入口叠加其上。
-    - **后端发现**：每次分发实时查询 ModuleManager().get_running_modules(method)，自动纳入运行期
-      注册/卸载的插件媒体服务器，无需门面侧维护后端清单。
+    约定：凡接受 server 形参的方法，传 None 时面向全部媒体服务器，传具体名称时只作用于该服务器。
+    各后端 server 必填性 / username 形参存在差异，对外统一为最宽松签名并按关键字分发，对全部后端兼容。
     """
 
     def __init__(self):
@@ -47,9 +34,7 @@ class MediaServerManager(metaclass=Singleton):
 
     @staticmethod
     def _is_valid_empty(ret: Any) -> bool:
-        """
-        判断结果是否为空（与 ChainBase.__is_valid_empty 同义）：元组要求全 None，否则判 is None。
-        """
+        """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
         if isinstance(ret, tuple):
             return all(value is None for value in ret)
         return ret is None
@@ -57,8 +42,13 @@ class MediaServerManager(metaclass=Singleton):
     def _handle_error(self, err: Exception, module_id: str, module_name: str,
                       method: str, raise_exception: bool) -> None:
         """
-        后端方法执行出错处理（复刻 ChainBase.__handle_system_error 的对外可见行为）：
-        raise_exception 为真则抛出；否则记录日志 + 推送系统错误消息 + 发送 SystemError 事件后续跑。
+        后端方法执行出错的处理。
+
+        :param err: 捕获到的异常
+        :param module_id: 后端类名
+        :param module_name: 后端显示名
+        :param method: 出错的方法名
+        :param raise_exception: 为真时直接抛出；否则记录错误日志、推送系统错误消息、广播 SystemError 事件后继续下一个后端
         """
         if raise_exception:
             raise err
@@ -80,8 +70,8 @@ class MediaServerManager(metaclass=Singleton):
     def _handle_rate_limit_error(err: RateLimitExceededException, module_id: str,
                                  method: str, raise_exception: bool) -> None:
         """
-        本地限流跳过（复刻 ChainBase.__handle_rate_limit_error）：raise_exception 为真则抛出；
-        否则仅 INFO 记录、不进系统错误告警（预期的限流状态不应触发 SystemError 事件/消息）。
+        后端触发限流时的处理：raise_exception 为真时直接抛出；否则仅记录 INFO 并跳过该后端
+        （限流为预期状态，不作系统告警）。
         """
         if raise_exception:
             raise err
@@ -89,16 +79,20 @@ class MediaServerManager(metaclass=Singleton):
 
     def _dispatch(self, method: str, *args, **kwargs) -> Any:
         """
-        将媒体服务器方法按方法名分发到所有 MediaServer 后端模块并合并结果。
+        按方法名分发到所有媒体服务器后端模块并合并结果。
 
-        合并语义与 ChainBase.__execute_system_modules 严格一致：按 get_priority() 升序遍历后端，
-        - 结果为空（None/全 None 元组）→ 取该后端返回值；
-        - 结果与方法签名一致（check_signature）→ 透传；
-        - 结果为列表 → 合并后续后端的列表结果；
-        - 否则（非空非列表，如 str/dict/生成器）→ 短路停止。
-        单后端异常逐个捕获续跑，不影响其它后端；raise_exception=True 时透传首个异常。
+        按优先级（get_priority 升序）遍历后端：
+        - 当前结果为空（None / 全 None 元组）→ 取该后端返回值；
+        - 当前结果可作为下一后端的入参（check_signature）→ 透传；
+        - 当前结果为列表 → 合并各后端的列表结果；
+        - 当前结果为非空标量（str/dict/生成器等）→ 短路停止。
+        单个后端异常被隔离后继续其余后端；raise_exception=True 时透传首个异常。
+
+        :param method: 要分发的媒体服务器方法名
+        :param raise_exception: 出错时是否抛出（分发控制位，不透传给后端方法）
+        :return: 各后端合并后的结果
         """
-        # pop 而非 get：raise_exception 是分发器控制位，不应透传给不接受该参数的后端 func。
+        # raise_exception 为分发控制位，pop 出后不随调用透传给后端方法。
         raise_exception = bool(kwargs.pop("raise_exception", False))
         result: Any = None
         for module in sorted(
@@ -124,40 +118,59 @@ class MediaServerManager(metaclass=Singleton):
                 else:
                     break
             except RateLimitExceededException as err:
-                # 限流先于通用异常处理（与 __execute_system_modules 一致）：安静跳过、不告警。
+                # 限流先于通用异常捕获：安静跳过、不告警。
                 self._handle_rate_limit_error(err, module_id, method, raise_exception)
             except Exception as err:
                 self._handle_error(err, module_id, module_name, method, raise_exception)
         return result
 
     # ------------------------------------------------------------------ #
-    # IMediaServer 对外面：签名与 ChainBase/MediaServerChain 媒服包装方法一致（收敛漂移后的 canonical 形）。
+    # IMediaServer 对外面：按方法名转发到 _dispatch。
     # ------------------------------------------------------------------ #
 
     def media_exists(self, mediainfo: "MediaInfo", itemid: Optional[str] = None,
                      server: Optional[str] = None) -> Optional[ExistMediaInfo]:
         """
-        判断媒体是否存在于媒体服务器。
+        判断媒体是否已存在于媒体服务器。
+
+        :param mediainfo: 媒体信息
+        :param itemid: 媒体服务器中的项目 ID（已知时可直接定位）
+        :param server: 指定媒体服务器名称，None 表示全部
+        :return: 已存在媒体的信息（不存在为 None）
         """
         return self._dispatch("media_exists", mediainfo=mediainfo, itemid=itemid, server=server)
 
     def media_statistic(self, server: Optional[str] = None) -> Optional[List[Statistic]]:
         """
-        媒体数量统计。
+        媒体数量统计（电影/剧集/用户数等）。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :return: 各媒体服务器的统计信息列表
         """
         return self._dispatch("media_statistic", server=server)
 
     def mediaserver_librarys(self, server: Optional[str] = None, username: Optional[str] = None,
                              hidden: Optional[bool] = False) -> Optional[List[MediaServerLibrary]]:
         """
-        获取媒体服务器所有媒体库。
+        获取媒体服务器的媒体库列表。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param username: 按用户名过滤可见媒体库
+        :param hidden: 是否包含隐藏媒体库
+        :return: 媒体库列表
         """
         return self._dispatch("mediaserver_librarys", server=server, username=username, hidden=hidden)
 
     def mediaserver_items(self, server: Optional[str] = None, library_id: Union[str, int] = None,
                           start_index: Optional[int] = 0, limit: Optional[int] = -1) -> Optional[Generator]:
         """
-        获取媒体服务器项目列表（生成器）。
+        获取媒体库内的项目（以生成器逐项产出）。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param library_id: 媒体库 ID
+        :param start_index: 起始位置
+        :param limit: 数量上限，-1 表示不限制
+        :return: 媒体项目生成器
         """
         return self._dispatch("mediaserver_items", server=server, library_id=library_id,
                               start_index=start_index, limit=limit)
@@ -165,35 +178,57 @@ class MediaServerManager(metaclass=Singleton):
     def mediaserver_iteminfo(self, server: Optional[str] = None,
                              item_id: Union[str, int] = None) -> Optional[MediaServerItem]:
         """
-        获取媒体服务器项目信息。
+        获取单个媒体项目的详细信息。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param item_id: 项目 ID
+        :return: 媒体项目信息
         """
         return self._dispatch("mediaserver_iteminfo", server=server, item_id=item_id)
 
     def mediaserver_tv_episodes(self, server: Optional[str] = None,
                                 item_id: Union[str, int] = None) -> Optional[List[MediaServerSeasonInfo]]:
         """
-        获取媒体服务器剧集信息。
+        获取剧集的季/集信息。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param item_id: 剧集项目 ID
+        :return: 各季的集信息列表
         """
         return self._dispatch("mediaserver_tv_episodes", server=server, item_id=item_id)
 
     def mediaserver_playing(self, server: Optional[str] = None, count: Optional[int] = 20,
                             username: Optional[str] = None) -> List[MediaServerPlayItem]:
         """
-        获取媒体服务器正在播放信息。
+        获取正在播放的项目。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param count: 返回数量上限
+        :param username: 按用户名过滤
+        :return: 正在播放的项目列表
         """
         return self._dispatch("mediaserver_playing", server=server, count=count, username=username)
 
     def mediaserver_play_url(self, server: Optional[str] = None,
                              item_id: Union[str, int] = None) -> Optional[str]:
         """
-        获取播放地址。
+        获取项目的播放地址。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param item_id: 项目 ID
+        :return: 播放地址
         """
         return self._dispatch("mediaserver_play_url", server=server, item_id=item_id)
 
     def mediaserver_latest(self, server: Optional[str] = None, count: Optional[int] = 20,
                            username: Optional[str] = None) -> List[MediaServerPlayItem]:
         """
-        获取媒体服务器最新入库条目。
+        获取最新入库的项目。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param count: 返回数量上限
+        :param username: 按用户名过滤
+        :return: 最新入库的项目列表
         """
         return self._dispatch("mediaserver_latest", server=server, count=count, username=username)
 
@@ -201,7 +236,13 @@ class MediaServerManager(metaclass=Singleton):
                                   username: Optional[str] = None,
                                   remote: Optional[bool] = False) -> List[str]:
         """
-        获取最新入库条目海报作为壁纸。
+        获取最新入库项目的海报图片地址（用作壁纸）。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param count: 返回数量上限
+        :param username: 按用户名过滤
+        :param remote: 是否返回可远程访问的地址
+        :return: 海报图片地址列表
         """
         return self._dispatch("mediaserver_latest_images", server=server, count=count,
                               username=username, remote=remote)
@@ -209,6 +250,10 @@ class MediaServerManager(metaclass=Singleton):
     def mediaserver_image_cookies(self, server: Optional[str] = None,
                                   image_url: Optional[str] = None) -> Optional[Union[str, dict]]:
         """
-        获取图片的 Cookies（仅部分后端实现，未实现者不参与分发）。
+        获取访问图片所需的 Cookies（仅部分后端实现，未实现者不参与分发）。
+
+        :param server: 指定媒体服务器名称，None 表示全部
+        :param image_url: 图片地址
+        :return: 访问该图片所需的 Cookies
         """
         return self._dispatch("mediaserver_image_cookies", server=server, image_url=image_url)
