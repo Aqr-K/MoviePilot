@@ -233,8 +233,8 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
 
         agent.stream_handler.stop_streaming.assert_awaited_once()
 
-    async def test_tool_sent_reply_does_not_persist_raw_agent_messages(self):
-        """工具已发送用户回复时不应把工具调用状态写入下一轮记忆。"""
+    async def test_tool_sent_reply_persists_raw_agent_messages(self):
+        """工具已发送用户回复时仍应保存可恢复的 Agent 原始消息。"""
         agent = MoviePilotAgent(session_id="tool-reply", user_id="user-1")
         agent.channel = "Telegram"
         agent.source = "telegram-test"
@@ -252,7 +252,11 @@ class AgentBackgroundOutputTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(memory_manager, "save_agent_messages") as save_messages:
             await agent._execute_agent([HumanMessage(content="测试")])
 
-        save_messages.assert_not_called()
+        save_messages.assert_called_once()
+        _, kwargs = save_messages.call_args
+        self.assertEqual("tool-reply", kwargs["session_id"])
+        self.assertEqual("user-1", kwargs["user_id"])
+        self.assertEqual("消息已发送", kwargs["messages"][0].content)
 
     async def test_process_does_not_mutate_cached_agent_messages(self):
         """处理新消息时不应直接修改记忆缓存中的历史消息列表。"""
