@@ -13,7 +13,7 @@ class SsoIdentity(Base):
     SSO 外部身份 ↔ 本地用户 绑定表。
 
     按稳定的 (provider_id, subject) 唯一映射到本地 user，使得：
-      - 外部用户改名（username 变）不丢号——解析以 subject 为主键，与可变用户名解耦；
+      - 外部用户改名（username 变）不丢号——身份解析以稳定的 subject 为准，不依赖可变的 username；
       - 支持账号关联（把一个外部身份绑定到已存在的本地用户）与多提供方并存。
     身份持久化属用户账号域（框架表），不随插件卸载而失，故不放插件 plugin_data。
     """
