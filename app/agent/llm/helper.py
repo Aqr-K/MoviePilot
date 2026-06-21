@@ -1014,9 +1014,13 @@ class LLMHelper:
         return model
 
     @staticmethod
-    def _extract_text_content(content) -> str:
+    def extract_text_content(content: Any, fallback_to_string: bool = False) -> str:
         """
         从响应内容中提取纯文本，仅保留真实文本块。
+
+        :param content: 模型响应内容，可能是字符串、字典或内容块列表
+        :param fallback_to_string: 未识别为文本内容时是否回退为字符串
+        :return: 提取后的纯文本内容
         """
         if content is None:
             return ""
@@ -1051,7 +1055,7 @@ class LLMHelper:
                 return content.get("text", "")
             if not content.get("type") and isinstance(content.get("text"), str):
                 return content.get("text", "")
-        return ""
+        return str(content) if fallback_to_string else ""
 
     @staticmethod
     async def test_current_settings(
@@ -1092,7 +1096,7 @@ class LLMHelper:
             duration_ms = round((time.perf_counter() - start) * 1000)
             raise LLMTestError(str(err), duration_ms=duration_ms) from err
 
-        reply_text = LLMHelper._extract_text_content(
+        reply_text = LLMHelper.extract_text_content(
             getattr(response, "content", response)
         ).strip()
         duration_ms = round((time.perf_counter() - start) * 1000)

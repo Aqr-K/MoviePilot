@@ -26,6 +26,7 @@ from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict  # noqa
 
+from app.agent.llm import LLMHelper
 from app.agent.tools.tags import ToolTag
 from app.log import logger
 
@@ -121,7 +122,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             else:
                 continue
 
-            content = cls._extract_text_content(message.content).strip()
+            content = LLMHelper.extract_text_content(message.content).strip()
             if not content:
                 continue
             rendered_messages.append(f"{role}: {content}")
@@ -381,39 +382,6 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         )
 
     @staticmethod
-    def _extract_text_content(content: Any) -> str:
-        """
-        从模型响应中提取纯文本。
-
-        这里不依赖上层 LLMHelper，避免中间件与 LLM 构造逻辑互相耦合。
-        """
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            text_parts: list[str] = []
-            for block in content:
-                if isinstance(block, str):
-                    text_parts.append(block)
-                    continue
-                if isinstance(block, dict):
-                    if block.get("type") == "text" and isinstance(
-                            block.get("text"), str
-                    ):
-                        text_parts.append(block["text"])
-                        continue
-                    if not block.get("type") and isinstance(block.get("text"), str):
-                        text_parts.append(block["text"])
-            return "".join(text_parts)
-        if isinstance(content, dict):
-            if content.get("type") == "text" and isinstance(content.get("text"), str):
-                return content["text"]
-            if not content.get("type") and isinstance(content.get("text"), str):
-                return content["text"]
-        return ""
-
-    @staticmethod
     def _parse_json_object(text: str) -> dict[str, Any]:
         """
         解析模型返回的 JSON。
@@ -504,7 +472,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         解析并标准化 DeepSeek JSON 模式的工具筛选结果。
         """
         content = getattr(response, "content", response)
-        text = self._extract_text_content(content)
+        text = LLMHelper.extract_text_content(content)
         logger.debug(f"工具筛选原始响应: {text}")
         payload = self._parse_json_object(text)
 

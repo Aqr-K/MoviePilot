@@ -23,6 +23,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
+from app.agent.llm import LLMHelper
 from app.agent.middleware.utils import append_to_system_message
 from app.agent.runtime import SubAgentDefinition, agent_runtime_manager
 from app.agent.tools.tags import ToolTag
@@ -281,34 +282,6 @@ def _format_subagent_catalog(profiles: tuple[_SubAgentProfile, ...]) -> str:
     )
 
 
-def _extract_text_content(content: Any) -> str:
-    """从模型消息内容中提取可读文本。"""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        text_parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                text_parts.append(block)
-                continue
-            if isinstance(block, dict):
-                if block.get("thought"):
-                    continue
-                if block.get("type") in {
-                    "thinking",
-                    "reasoning_content",
-                    "reasoning",
-                    "thought",
-                }:
-                    continue
-                if isinstance(block.get("text"), str):
-                    text_parts.append(block["text"])
-        return "".join(text_parts)
-    return str(content)
-
-
 def _extract_final_text(result: Any) -> str:
     """从子代理执行结果中提取最后一条 AI 文本。"""
     if isinstance(result, dict):
@@ -318,11 +291,11 @@ def _extract_final_text(result: Any) -> str:
 
     for message in reversed(messages):
         if isinstance(message, AIMessage) and message.content:
-            text = _extract_text_content(message.content).strip()
+            text = LLMHelper.extract_text_content(message.content).strip()
             if text:
                 return text
 
-    return _extract_text_content(result).strip()
+    return LLMHelper.extract_text_content(result, fallback_to_string=True).strip()
 
 
 def _clip_text(text: Any, max_chars: int) -> tuple[str, bool]:

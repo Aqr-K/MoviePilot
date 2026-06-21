@@ -214,7 +214,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
             {"type": "text", "text": "OK"},
         ]
 
-        result = llm_module.LLMHelper._extract_text_content(content)
+        result = llm_module.LLMHelper.extract_text_content(content)
 
         self.assertEqual(result, "OK")
 

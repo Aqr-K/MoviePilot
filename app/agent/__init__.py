@@ -373,7 +373,7 @@ class MoviePilotAgent:
                 HumanMessage(content=str(message).strip()[:1000]),
             ]
         )
-        content = LLMHelper._extract_text_content(getattr(response, "content", response))
+        content = LLMHelper.extract_text_content(getattr(response, "content", response))
         return self._sanitize_chat_title(content)
 
     async def prepare_chat_title(self, message: str) -> None:
@@ -737,39 +737,6 @@ class MoviePilotAgent:
         """
         runtime_config = await self._resolve_llm_runtime_config()
         return await LLMHelper.get_llm(streaming=streaming, **runtime_config)
-
-    @staticmethod
-    def _extract_text_content(content) -> str:
-        """
-        从消息内容中提取纯文本，过滤掉思考/推理类型的内容块。
-        :param content: 消息内容，可能是字符串或内容块列表
-        :return: 纯文本内容
-        """
-        if not content:
-            return ""
-        # 跳过思考/推理类型的内容块
-        if isinstance(content, list):
-            text_parts = []
-            for block in content:
-                if isinstance(block, str):
-                    text_parts.append(block)
-                elif isinstance(block, dict):
-                    # 优先检查 thought 标志（LangChain Google GenAI 方案）
-                    if block.get("thought"):
-                        continue
-                    if block.get("type") in (
-                            "thinking",
-                            "reasoning_content",
-                            "reasoning",
-                            "thought",
-                    ):
-                        continue
-                    if block.get("type") == "text":
-                        text_parts.append(block.get("text", ""))
-                    else:
-                        text_parts.append(str(block))
-            return "".join(text_parts)
-        return str(content)
 
     @classmethod
     def _has_image_input_content(cls, content: Any) -> bool:
@@ -1252,7 +1219,7 @@ class MoviePilotAgent:
 
                 if token.content:
                     # content 可能是字符串或内容块列表，过滤掉思考类型的块
-                    content = self._extract_text_content(token.content)
+                    content = LLMHelper.extract_text_content(token.content)
                     if content:
                         stripper.process(content, on_token)
 
@@ -1355,7 +1322,7 @@ class MoviePilotAgent:
                 for msg in reversed(final_messages):
                     if hasattr(msg, "type") and msg.type == "ai" and msg.content:
                         # 过滤掉思考/推理内容，只提取纯文本
-                        text = self._extract_text_content(msg.content)
+                        text = LLMHelper.extract_text_content(msg.content)
                         if text:
                             # 过滤掉包含在 <think> 标签中的内容
                             text = re.sub(
@@ -1388,7 +1355,7 @@ class MoviePilotAgent:
                 )
                 for msg in reversed(final_messages):
                     if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                        display_text = self._extract_text_content(msg.content).strip()
+                        display_text = LLMHelper.extract_text_content(msg.content).strip()
                         break
             self._save_assistant_display_message_once(display_text)
 
