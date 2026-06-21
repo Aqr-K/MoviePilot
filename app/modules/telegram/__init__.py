@@ -493,6 +493,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         text=message.text,
                         userid=userid,
                         original_chat_id=message.original_chat_id,
+                        parse_mode=message.parse_mode,
                     )
                 elif message.voice_path:
                     client.send_voice(
@@ -500,6 +501,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         userid=userid,
                         caption=message.voice_caption,
                         original_chat_id=message.original_chat_id,
+                        parse_mode=message.parse_mode,
                     )
                 else:
                     client.send_msg(
@@ -512,6 +514,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         original_message_id=message.original_message_id,
                         original_chat_id=message.original_chat_id,
                         disable_web_page_preview=message.disable_web_page_preview,
+                        parse_mode=message.parse_mode,
                     )
 
     def post_medias_message(
@@ -536,6 +539,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     buttons=message.buttons,
                     original_message_id=message.original_message_id,
                     original_chat_id=message.original_chat_id,
+                    parse_mode=message.parse_mode,
                 )
 
     def post_torrents_message(
@@ -560,6 +564,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     buttons=message.buttons,
                     original_message_id=message.original_message_id,
                     original_chat_id=message.original_chat_id,
+                    parse_mode=message.parse_mode,
                 )
 
     def delete_message(
@@ -600,6 +605,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         title: Optional[str] = None,
         buttons: Optional[List[List[dict]]] = None,
         metadata: Optional[dict] = None,
+        parse_mode: Optional[str] = None,
     ) -> Optional[bool]:
         """
         编辑消息
@@ -611,6 +617,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
         :param title: 消息标题
         :param buttons: 新的按钮列表
         :param metadata: 其他元信息
+        :param parse_mode: Telegram 消息格式类型，默认 MarkdownV2，可传 HTML
         :return: 编辑是否成功
         """
         if channel != self._channel:
@@ -626,6 +633,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                     text=text,
                     title=title,
                     buttons=buttons,
+                    parse_mode=parse_mode,
                 )
                 if result:
                     return True
@@ -713,6 +721,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         userid=userid,
                         caption=message.voice_caption,
                         original_chat_id=message.original_chat_id,
+                        parse_mode=message.parse_mode,
                     )
                 else:
                     result = client.send_msg(
@@ -722,6 +731,7 @@ class TelegramModule(_ModuleBase, _MessageBase[Telegram]):
                         userid=userid,
                         link=message.link,
                         disable_web_page_preview=message.disable_web_page_preview,
+                        parse_mode=message.parse_mode,
                     )
                 if result and result.get("success"):
                     return MessageResponse(

@@ -2,12 +2,17 @@
 """
 Telegram 模块单元测试（pytest 原生）。
 """
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from app.core.context import MediaInfo, Context, TorrentInfo
 from app.core.metainfo import MetaInfo
+from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
+from app.schemas import Notification
+from app.schemas.types import MessageChannel
 from app.schemas.types import MediaType
 
 
@@ -243,6 +248,56 @@ def test_send_msg_markdown_escaping(telegram):
 
     # 验证返回值：send_msg 失败时返回 {"success": False}（非空字典），故显式断言 success
     assert result and result.get("success")
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    assert send_kwargs["parse_mode"] == "MarkdownV2"
+    assert send_kwargs["text"].startswith("*测试标题*\n")
+
+
+def test_send_msg_with_html_parse_mode_keeps_html(telegram):
+    """HTML模式发送时应保留调用方传入的HTML内容"""
+    result = telegram.send_msg(
+        title="测试 <标题>",
+        text="<blockquote>第一行</blockquote><b>加粗</b>",
+        link="https://example.com/?a=1&b=2",
+        parse_mode="HTML",
+    )
+
+    assert result and result.get("success")
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    assert send_kwargs["parse_mode"] == "HTML"
+    assert send_kwargs["text"] == (
+        '<b>测试 &lt;标题&gt;</b>\n'
+        '<blockquote>第一行</blockquote><b>加粗</b>\n'
+        '<a href="https://example.com/?a=1&amp;b=2">查看详情</a>'
+    )
+
+
+def test_telegram_module_passes_parse_mode_to_client():
+    """模块发送通知时应透传消息指定的parse_mode"""
+    module = TelegramModule()
+    client = Mock()
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        module.post_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="HTML",
+                text="<b>正文</b>",
+                parse_mode="HTML",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    assert client.send_msg.call_args.kwargs["parse_mode"] == "HTML"
 
 
 def test_edit_msg_falls_back_to_caption_when_original_message_has_no_text(telegram):
@@ -272,6 +327,22 @@ def test_edit_msg_falls_back_to_caption_when_original_message_has_no_text(telegr
     assert caption_kwargs["message_id"] == 110502
     assert "请选择下载目录" in caption_kwargs["caption"]
     assert caption_kwargs["reply_markup"] is not None
+
+
+def test_edit_msg_with_html_parse_mode_keeps_html(telegram):
+    """HTML模式编辑消息时应保留HTML内容"""
+    result = telegram.edit_msg(
+        chat_id="1051253579",
+        message_id="110502",
+        title="标题",
+        text="<blockquote>请选择</blockquote>",
+        parse_mode="HTML",
+    )
+
+    assert result is True
+    edit_kwargs = telegram.bot.edit_message_text.call_args.kwargs
+    assert edit_kwargs["parse_mode"] == "HTML"
+    assert edit_kwargs["text"] == "<b>标题</b>\n<blockquote>请选择</blockquote>"
 
 
 def test_edit_msg_keeps_other_edit_errors_failed(telegram):
