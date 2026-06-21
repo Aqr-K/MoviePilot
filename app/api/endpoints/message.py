@@ -44,7 +44,7 @@ async def user_message(
     args = request.query_params
     source = args.get("source")
     content_type = request.headers.get("content-type", "")
-    body_text = body.decode("utf-8", errors="ignore")
+    body_text = body.decode("utf-8", errors="replace")
     image_markers = [
         marker
         for marker in (

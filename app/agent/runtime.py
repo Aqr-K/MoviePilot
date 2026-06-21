@@ -702,7 +702,7 @@ class AgentRuntimeManager:
         if not path.exists():
             raise AgentRuntimeConfigError(f"缺少配置文件: {path}")
         try:
-            content = path.read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8", errors="replace")
         except Exception as err:  # noqa: BLE001
             raise AgentRuntimeConfigError(f"读取配置文件失败 {path}: {err}") from err
 

@@ -66,7 +66,7 @@ def modify_python_file(file_path: Path, original_class_name: str, clone_class_na
     修改Python文件中的类名和插件信息
     """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
 
         # 替换类名
@@ -155,7 +155,7 @@ def modify_federation_files(dist_dir: Path, original_class_name: str,
             # 处理JS文件
             if file_path.suffix == '.js':
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                         content = f.read()
 
                     # 替换类名引用（精确匹配）
@@ -180,7 +180,7 @@ def modify_federation_files(dist_dir: Path, original_class_name: str,
             # 处理CSS文件
             elif file_path.suffix == '.css':
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                         content = f.read()
 
                     # 替换CSS中可能的类名引用

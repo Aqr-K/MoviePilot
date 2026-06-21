@@ -238,7 +238,7 @@ class MoviePilotServerHelper:
             version_file = Path(settings.FRONTEND_PATH) / "version.txt"
         if version_file.exists():
             try:
-                with open(version_file, "r") as file:
+                with open(version_file, "r", encoding="utf-8", errors="replace") as file:
                     version = str(file.read()).strip()
                 return version or FRONTEND_VERSION
             except Exception as err:

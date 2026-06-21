@@ -59,7 +59,7 @@ class EditFileTool(MoviePilotTool):
                 return f"错误：{resolved_path} 不是一个文件"
 
             if await path.exists():
-                content = await path.read_text(encoding="utf-8")
+                content = await path.read_text(encoding="utf-8", errors="replace")
                 if old_text not in content:
                     logger.warning(f"编辑文件 {resolved_path} 失败：未找到指定的旧文本块")
                     return f"错误：在文件 {resolved_path} 中未找到指定的旧文本。请确保包含所有的空格、缩进 and 换行符。"

@@ -533,7 +533,7 @@ class _TerminalSessionManager:
             if len(encoded) > remaining:
                 if remaining > 0:
                     output_parts.append(
-                        encoded[:remaining].decode("utf-8", errors="ignore")
+                        encoded[:remaining].decode("utf-8", errors="replace")
                     )
                 output_truncated = True
                 break

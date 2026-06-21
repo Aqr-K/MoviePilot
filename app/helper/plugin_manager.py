@@ -498,7 +498,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 return None
 
             # 读取 __init__.py 文件，查找插件主类名
-            with open(init_file, "r", encoding="utf-8") as f:
+            with open(init_file, "r", encoding="utf-8", errors="replace") as f:
                 source_code = f.read()
 
             tree = ast.parse(source_code)

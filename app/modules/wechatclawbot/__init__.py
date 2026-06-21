@@ -78,7 +78,7 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
         if isinstance(body, dict):
             payload = body
         elif isinstance(body, bytes):
-            payload = json.loads(body.decode("utf-8", errors="ignore"))
+            payload = json.loads(body.decode("utf-8", errors="replace"))
         else:
             payload = json.loads(body)
         while isinstance(payload, str):

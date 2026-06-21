@@ -70,7 +70,7 @@ async def update_cookie(req: schemas.CookieData):
     content = json.dumps({"encrypted": req.encrypted})
     async with aiofiles.open(file_path, encoding="utf-8", mode="w") as file:
         await file.write(content)
-    async with aiofiles.open(file_path, encoding="utf-8", mode="r") as file:
+    async with aiofiles.open(file_path, encoding="utf-8", errors="replace", mode="r") as file:
         read_content = await file.read()
     if read_content == content:
         return {"action": "done"}
@@ -89,7 +89,7 @@ async def load_encrypt_data(uuid: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Item not found")
 
     # 读取文件
-    async with aiofiles.open(file_path, encoding="utf-8", mode="r") as file:
+    async with aiofiles.open(file_path, encoding="utf-8", errors="replace", mode="r") as file:
         read_content = await file.read()
     data = json.loads(read_content.encode("utf-8"))
     return data

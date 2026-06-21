@@ -102,7 +102,7 @@ class PromptManager:
 
         prompt_file = self.prompts_dir / prompt_name
         try:
-            with open(prompt_file, "r", encoding="utf-8") as f:
+            with open(prompt_file, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read().strip()
             # 缓存提示词
             self.prompts_cache[prompt_name] = content
@@ -187,7 +187,7 @@ class PromptManager:
             return self._system_tasks_cache
 
         try:
-            content = system_tasks_path.read_text(encoding="utf-8")
+            content = system_tasks_path.read_text(encoding="utf-8", errors="replace")
         except Exception as err:  # noqa: BLE001
             logger.error(f"读取系统任务定义失败: {system_tasks_path}, 错误: {err}")
             raise PromptConfigError(

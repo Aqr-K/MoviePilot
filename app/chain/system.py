@@ -292,7 +292,7 @@ class SystemChain(ChainBase):
             version_file = Path(settings.FRONTEND_PATH) / "version.txt"
         if version_file.exists():
             try:
-                with open(version_file, 'r') as f:
+                with open(version_file, 'r', encoding='utf-8', errors='replace') as f:
                     version = str(f.read()).strip()
                 return version
             except Exception as err:

@@ -597,7 +597,7 @@ class Rclone(StorageBase):
         if not file_path or not Path(file_path).exists():
             return None
         # 读取rclone文件，检查是否有[MP]节点配置
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
             if not lines:
                 return None
