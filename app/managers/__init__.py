@@ -1,8 +1,7 @@
 """
 门面层（Managers / 派发门面）包。
 
-把 chain 与 modules 之间的「派发门面」从 app/helper（叶子工具层）抽出为**独立一层**，
-与三层目标架构对齐：
+chain 与 modules 之间的「派发门面」独立为一层，与三层架构对齐：
 
 - 契约接口（Protocol / 抽象基类）在 app/modules：INotification / IDownloader / IMediaServer /
   IMediaRecognize、StorageBase；
@@ -10,19 +9,16 @@
 - **门面管理器集中在本包**：按方法名把领域操作分发到各后端模块（插件钩子面 + 系统后端面），
   被 ChainBase 直接调用，取代散落在 ChainBase 中按字符串分发到模块的写法。
 
-分层（迁移目的）：
+分层：
 
     chain → managers → { core, helper, modules, schemas, utils }
 
-helper / modules / core 均不回指 managers。由此消除两类问题：
-1. **概念环**：门面原先落在 helper，形成「helper(门面) → modules(后端) → helper(工具)」的概念环；
-   抽出后变为 `managers → modules → helper` 的干净 DAG；
-2. **反向引用**：被编排的 app/modules/* 后端 docstring 原先反指 `app.helper.<x>_manager`（被编排者
-   点名编排者），迁移后改指 `app.managers.<x>_manager`，方向恢复自上而下。
+helper / modules / core 均不回指 managers，保持 `managers → modules → helper` 的干净 DAG（无概念环）；
+app/modules/* 后端 docstring 也只向上指向 `app.managers.<x>`。
 
 懒再导出（PEP 562 __getattr__）：沿用 app/core/module 的范式——`from app.managers import X` 才触发
 对应子模块加载；`from app.managers.<mod> import X` 直接 import 子模块时不会急加载其余门面，
-保持与迁移前一致的 import 足迹，避免引入新的 import 边。
+不引入额外的 import 边。
 """
 from typing import TYPE_CHECKING
 

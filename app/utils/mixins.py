@@ -20,7 +20,7 @@ class ConfigReloadMixin:
         if not config_watch:
             return
 
-        # 惰性导入，避免 utils→core.event 顶层反向依赖（打断 core↔utils import-time 环）
+        # 惰性导入，避免 utils→core.event 顶层反向依赖
         from app.core.event import eventmanager, Event
 
         # 检查 on_config_changed 方法是否为异步

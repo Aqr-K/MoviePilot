@@ -1,8 +1,8 @@
 from typing import List, Optional
 
-from sqlalchemy import Column, Integer, String, JSON, Index, select
+from sqlalchemy import Integer, String, JSON, Index, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import db_query, db_update, Base, get_id_column, async_db_query
 
@@ -11,29 +11,29 @@ class Message(Base):
     """
     消息表
     """
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 消息渠道
-    channel = Column(String)
+    channel: Mapped[Optional[str]] = mapped_column(String)
     # 消息来源
-    source = Column(String)
+    source: Mapped[Optional[str]] = mapped_column(String)
     # 消息类型
-    mtype = Column(String)
+    mtype: Mapped[Optional[str]] = mapped_column(String)
     # 标题
-    title = Column(String)
+    title: Mapped[Optional[str]] = mapped_column(String)
     # 文本内容
-    text = Column(String)
+    text: Mapped[Optional[str]] = mapped_column(String)
     # 图片
-    image = Column(String)
+    image: Mapped[Optional[str]] = mapped_column(String)
     # 链接
-    link = Column(String)
+    link: Mapped[Optional[str]] = mapped_column(String)
     # 用户ID
-    userid = Column(String)
+    userid: Mapped[Optional[str]] = mapped_column(String)
     # 登记时间
-    reg_time = Column(String)
+    reg_time: Mapped[Optional[str]] = mapped_column(String)
     # 消息方向：0-接收息，1-发送消息
-    action = Column(Integer)
+    action: Mapped[Optional[int]] = mapped_column(Integer)
     # 附件json
-    note = Column(JSON)
+    note: Mapped[Optional[dict]] = mapped_column(JSON)
 
     __table_args__ = (
         Index('ix_message_reg_time_id', 'reg_time', 'id'),
