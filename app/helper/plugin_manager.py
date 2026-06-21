@@ -649,6 +649,17 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                             getattr(caps, "channel", None), caps, owner=plugin_id)
                     except Exception as err:
                         logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
+        # 注册插件经 provides_auth_providers 声明的 SSO 登录提供方（按 provider_id 单索引、owner=plugin_id）：
+        # 与各契约域不同，登录提供方不进 ModuleManager/chain，而是注册到 app.core.sso 由 SSO 端点统一驱动。
+        provided_auth = plugin_metadata.get_plugin_provided_auth_providers(self._running_plugins, pid)
+        if provided_auth:
+            from app.core.sso import register_auth_provider
+            for plugin_id, providers in provided_auth.items():
+                for provider in providers:
+                    ok, reason = register_auth_provider(provider, owner=plugin_id)
+                    if not ok:
+                        logger.warning(f"注册插件 {plugin_id} 登录提供方 "
+                                       f"{getattr(provider, 'provider_id', provider)} 失败：{reason}")
         # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/消息渠道/媒体服务器）：
         # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
         for _get_provided, _verify, _label in (
@@ -696,6 +707,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 ChannelCapabilityManager.unregister_capabilities(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 渠道能力出错：{str(err)}")
+            try:
+                from app.core.sso import unregister_auth_providers
+                unregister_auth_providers(owner=plugin_id)
+            except Exception as err:
+                logger.error(f"卸载插件 {plugin_id} 登录提供方出错：{str(err)}")
 
     def sync(self) -> List[str]:
         """
