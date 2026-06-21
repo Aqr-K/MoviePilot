@@ -18,6 +18,7 @@ from app.core.meta import MetaBase
 from app.core.module import ModuleManager
 from app.helper.downloader_manager import DownloaderManager
 from app.helper.mediaserver_manager import MediaServerManager
+from app.helper.notification_manager import NotificationManager
 from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper
@@ -64,6 +65,7 @@ class ChainBase(metaclass=ABCMeta):
         modulemanager=None,
         downloadermanager=None,
         mediaservermanager=None,
+        notificationmanager=None,
         eventmanager=None,
         messageoper=None,
         messagehelper=None,
@@ -85,6 +87,7 @@ class ChainBase(metaclass=ABCMeta):
         self.downloadermanager = downloadermanager or DownloaderManager()
         # 媒体服务器（MediaServer 域）门面：媒服相关包装方法经此分发，取代 run_module 字符串 ABI。
         self.mediaservermanager = mediaservermanager or MediaServerManager()
+        self.notificationmanager = notificationmanager or NotificationManager()
         self.eventmanager = eventmanager or EventManager()
         self.messageoper = messageoper or MessageOper()
         self.messagehelper = messagehelper or MessageHelper()
@@ -1756,8 +1759,8 @@ class ChainBase(metaclass=ABCMeta):
         :param chat_id: 聊天ID（如群组ID）
         :return: 删除是否成功
         """
-        return self.run_module(
-            "delete_message",
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("delete_message")（保留可用、标废弃）
+        return self.notificationmanager.delete_message(
             channel=channel,
             source=source,
             message_id=message_id,
@@ -1787,8 +1790,8 @@ class ChainBase(metaclass=ABCMeta):
         :param metadata: 其他消息元数据
         :return: 编辑是否成功
         """
-        return self.run_module(
-            "edit_message",
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("edit_message")（保留可用、标废弃）
+        return self.notificationmanager.edit_message(
             channel=channel,
             source=source,
             message_id=message_id,
@@ -1806,8 +1809,8 @@ class ChainBase(metaclass=ABCMeta):
         :param message: 消息体
         :return: 消息响应（包含message_id, chat_id等）
         """
-        return self.run_module(
-            "send_direct_message",
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("send_direct_message")（保留可用、标废弃）
+        return self.notificationmanager.send_direct_message(
             message=self._normalize_notification_for_dispatch(message),
         )
 
@@ -1819,7 +1822,8 @@ class ChainBase(metaclass=ABCMeta):
         对已发送消息执行渠道收尾动作。
         例如关闭流式卡片状态；无特殊收尾的渠道直接返回 False。
         """
-        return self.run_module("finalize_message", response=response)
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("finalize_message")（保留可用、标废弃）
+        return self.notificationmanager.finalize_message(response=response)
 
     def metadata_img(
             self,
@@ -1860,7 +1864,8 @@ class ChainBase(metaclass=ABCMeta):
         """
         注册菜单命令
         """
-        self.run_module("register_commands", commands=commands)
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("register_commands")（保留可用、标废弃）
+        self.notificationmanager.register_commands(commands=commands)
 
     def scheduler_job(self) -> None:
         """

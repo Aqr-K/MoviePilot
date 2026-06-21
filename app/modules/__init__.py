@@ -557,3 +557,42 @@ class IMediaServer(Protocol):
 
     def mediaserver_image_cookies(self, server: Optional[str] = None,
                                   image_url: Optional[str] = None) -> Optional[Union[str, dict]]: ...
+
+
+@runtime_checkable
+class INotification(Protocol):
+    """
+    消息通知（Notification 域）行为接口契约。
+
+    对照下载器域的 IDownloader / 媒服域的 IMediaServer / 存储域的 StorageBase：声明门面
+    app.helper.notification_manager.NotificationManager 统一对外暴露、并按方法名分发到各通知后端
+    （内建 Telegram/WeChat/Slack/Discord/VoceChat/... 及插件经 provides_notifications() 注册的
+    渠道）的消息操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
+    契约，无需显式继承，对既有通知模块零改动即结构兼容。
+
+    派发语义（与 run_module 完全一致）：通知是**广播域**——post_* 类方法对所有启用渠道广播（返回
+    None、不短路合并），各渠道方法内部经 check_message 自行按渠道/来源/类型过滤是否处理；
+    delete_message/edit_message 返回非空值（bool/响应字典），按"取首个非空"语义短路。后端按需实现
+    子集（如部分渠道不支持编辑/删除），按方法名分发自然只命中实现者。
+    """
+
+    def post_message(self, message: "Notification", **kwargs) -> None: ...
+
+    def post_medias_message(self, message: "Notification", medias: "List[MediaInfo]") -> None: ...
+
+    def post_torrents_message(self, message: "Notification", torrents: "List[Context]") -> None: ...
+
+    def delete_message(self, channel: "MessageChannel", source: Optional[str] = None,
+                       message_id: Union[str, int] = None,
+                       chat_id: Optional[Union[str, int]] = None) -> Optional[bool]: ...
+
+    def register_commands(self, commands: Dict[str, dict]) -> None: ...
+
+    def edit_message(self, channel: "MessageChannel", source: Optional[str] = None,
+                     message_id: Union[str, int] = None, chat_id: Union[str, int] = None,
+                     text: Optional[str] = None, title: Optional[str] = None,
+                     buttons: Optional[list] = None, metadata: Optional[dict] = None) -> bool: ...
+
+    def send_direct_message(self, message: "Notification") -> "Optional[MessageResponse]": ...
+
+    def finalize_message(self, response: "MessageResponse") -> Optional[bool]: ...
