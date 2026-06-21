@@ -1,8 +1,6 @@
-from typing import Optional
-
-from sqlalchemy import Boolean, JSON, String, select
+from sqlalchemy import Boolean, Column, JSON, String, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm import Session
 
 from app.db import Base, db_query, db_update, async_db_query, async_db_update, get_id_column
 
@@ -12,27 +10,27 @@ class User(Base):
     用户表
     """
     # ID
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 用户名，唯一值
-    name: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    name = Column(String, index=True, nullable=False)
     # 邮箱
-    email: Mapped[Optional[str]] = mapped_column(String)
+    email = Column(String)
     # 加密后密码
-    hashed_password: Mapped[Optional[str]] = mapped_column(String)
+    hashed_password = Column(String)
     # 是否启用
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean(), default=True)
+    is_active = Column(Boolean(), default=True)
     # 是否管理员
-    is_superuser: Mapped[Optional[bool]] = mapped_column(Boolean(), default=False)
+    is_superuser = Column(Boolean(), default=False)
     # 头像
-    avatar: Mapped[Optional[str]] = mapped_column(String)
+    avatar = Column(String)
     # 是否启用otp二次验证
-    is_otp: Mapped[Optional[bool]] = mapped_column(Boolean(), default=False)
+    is_otp = Column(Boolean(), default=False)
     # otp秘钥
-    otp_secret: Mapped[Optional[str]] = mapped_column(String, default=None)
+    otp_secret = Column(String, default=None)
     # 用户权限 json
-    permissions: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    permissions = Column(JSON, default=dict)
     # 用户个性化设置 json
-    settings: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    settings = Column(JSON, default=dict)
 
     @classmethod
     @db_query

@@ -1,9 +1,9 @@
 import time
 from typing import Optional
 
-from sqlalchemy import Integer, String, Boolean, Index, func, or_, JSON, select
+from sqlalchemy import Column, Integer, String, Boolean, Index, func, or_, JSON, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, get_id_column, Base, async_db_query
 
@@ -12,53 +12,53 @@ class TransferHistory(Base):
     """
     整理记录
     """
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 源路径
-    src: Mapped[Optional[str]] = mapped_column(String, index=True)
+    src = Column(String, index=True)
     # 源存储
-    src_storage: Mapped[Optional[str]] = mapped_column(String)
+    src_storage = Column(String)
     # 源文件项
-    src_fileitem: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    src_fileitem = Column(JSON, default=dict)
     # 目标路径
-    dest: Mapped[Optional[str]] = mapped_column(String)
+    dest = Column(String)
     # 目标存储
-    dest_storage: Mapped[Optional[str]] = mapped_column(String)
+    dest_storage = Column(String)
     # 目标文件项
-    dest_fileitem: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    dest_fileitem = Column(JSON, default=dict)
     # 转移模式 move/copy/link...
-    mode: Mapped[Optional[str]] = mapped_column(String)
+    mode = Column(String)
     # 类型 电影/电视剧
-    type: Mapped[Optional[str]] = mapped_column(String)
+    type = Column(String)
     # 二级分类
-    category: Mapped[Optional[str]] = mapped_column(String)
+    category = Column(String)
     # 标题
-    title: Mapped[Optional[str]] = mapped_column(String, index=True)
+    title = Column(String, index=True)
     # 年份
-    year: Mapped[Optional[str]] = mapped_column(String)
-    tmdbid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
-    imdbid: Mapped[Optional[str]] = mapped_column(String)
-    tvdbid: Mapped[Optional[int]] = mapped_column(Integer)
-    doubanid: Mapped[Optional[str]] = mapped_column(String)
+    year = Column(String)
+    tmdbid = Column(Integer, index=True)
+    imdbid = Column(String)
+    tvdbid = Column(Integer)
+    doubanid = Column(String)
     # Sxx
-    seasons: Mapped[Optional[str]] = mapped_column(String)
+    seasons = Column(String)
     # Exx
-    episodes: Mapped[Optional[str]] = mapped_column(String)
+    episodes = Column(String)
     # 海报
-    image: Mapped[Optional[str]] = mapped_column(String)
+    image = Column(String)
     # 下载器
-    downloader: Mapped[Optional[str]] = mapped_column(String)
+    downloader = Column(String)
     # 下载器hash
-    download_hash: Mapped[Optional[str]] = mapped_column(String, index=True)
+    download_hash = Column(String, index=True)
     # 转移成功状态
-    status: Mapped[Optional[bool]] = mapped_column(Boolean(), default=True)
+    status = Column(Boolean(), default=True)
     # 转移失败信息
-    errmsg: Mapped[Optional[str]] = mapped_column(String)
+    errmsg = Column(String)
     # 时间
-    date: Mapped[Optional[str]] = mapped_column(String)
+    date = Column(String)
     # 文件清单，以JSON存储
-    files: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    files = Column(JSON, default=list)
     # 剧集组
-    episode_group: Mapped[Optional[str]] = mapped_column(String)
+    episode_group = Column(String)
 
     __table_args__ = (
         Index('ix_transferhistory_status_date', 'status', 'date'),

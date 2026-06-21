@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import Boolean, Integer, String, JSON, select, delete
+from sqlalchemy import Boolean, Column, Integer, String, JSON, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, Base, async_db_query, async_db_update, get_id_column
 
@@ -12,49 +11,49 @@ class Site(Base):
     """
     站点表
     """
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 站点名
-    name: Mapped[str] = mapped_column(String, nullable=False)
+    name = Column(String, nullable=False)
     # 域名Key
-    domain: Mapped[Optional[str]] = mapped_column(String, index=True)
+    domain = Column(String, index=True)
     # 站点地址
-    url: Mapped[str] = mapped_column(String, nullable=False)
+    url = Column(String, nullable=False)
     # 站点优先级
-    pri: Mapped[Optional[int]] = mapped_column(Integer, default=1)
+    pri = Column(Integer, default=1)
     # RSS地址，未启用
-    rss: Mapped[Optional[str]] = mapped_column(String)
+    rss = Column(String)
     # Cookie
-    cookie: Mapped[Optional[str]] = mapped_column(String)
+    cookie = Column(String)
     # User-Agent
-    ua: Mapped[Optional[str]] = mapped_column(String)
+    ua = Column(String)
     # ApiKey
-    apikey: Mapped[Optional[str]] = mapped_column(String)
+    apikey = Column(String)
     # Token
-    token: Mapped[Optional[str]] = mapped_column(String)
+    token = Column(String)
     # 是否使用代理 0-否，1-是
-    proxy: Mapped[Optional[int]] = mapped_column(Integer)
+    proxy = Column(Integer)
     # 过滤规则
-    filter: Mapped[Optional[str]] = mapped_column(String)
+    filter = Column(String)
     # 是否渲染
-    render: Mapped[Optional[int]] = mapped_column(Integer)
+    render = Column(Integer)
     # 是否公开站点
-    public: Mapped[Optional[int]] = mapped_column(Integer)
+    public = Column(Integer)
     # 附加信息
-    note: Mapped[Optional[dict]] = mapped_column(JSON)
+    note = Column(JSON)
     # 流控单位周期
-    limit_interval: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    limit_interval = Column(Integer, default=0)
     # 流控次数
-    limit_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    limit_count = Column(Integer, default=0)
     # 流控间隔
-    limit_seconds: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    limit_seconds = Column(Integer, default=0)
     # 超时时间
-    timeout: Mapped[Optional[int]] = mapped_column(Integer, default=15)
+    timeout = Column(Integer, default=15)
     # 是否启用
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean(), default=True)
+    is_active = Column(Boolean(), default=True)
     # 创建时间
-    lst_mod_date: Mapped[Optional[str]] = mapped_column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    lst_mod_date = Column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     # 下载器
-    downloader: Mapped[Optional[str]] = mapped_column(String)
+    downloader = Column(String)
 
     @classmethod
     @db_query

@@ -1,10 +1,10 @@
 import asyncio
 from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, Union
 
-from sqlalchemy import NullPool, QueuePool, and_, create_engine, inspect, text, select, delete, Integer, \
+from sqlalchemy import NullPool, QueuePool, and_, create_engine, inspect, text, select, delete, Column, Integer, \
     Sequence, Identity
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import Mapped, Session, as_declarative, declared_attr, mapped_column, scoped_session, sessionmaker
+from sqlalchemy.orm import Session, as_declarative, declared_attr, scoped_session, sessionmaker
 
 from app.core.config import settings
 
@@ -15,10 +15,10 @@ def get_id_column():
     """
     if settings.DB_TYPE.lower() == "postgresql":
         # PostgreSQL使用SERIAL类型，让数据库自动处理序列
-        return mapped_column(Integer, Identity(start=1, cycle=True), primary_key=True)
+        return Column(Integer, Identity(start=1, cycle=True), primary_key=True)
     else:
         # SQLite使用Sequence
-        return mapped_column(Integer, Sequence('id'), primary_key=True)
+        return Column(Integer, Sequence('id'), primary_key=True)
 
 
 def _get_database_engine(is_async: bool = False):

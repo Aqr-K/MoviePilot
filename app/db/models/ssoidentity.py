@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, select
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm import Session
 
 from app.db import Base, async_db_query, db_query, get_id_column
 
@@ -18,17 +17,17 @@ class SsoIdentity(Base):
     身份持久化属用户账号域（框架表），不随插件卸载而失，故不放插件 plugin_data。
     """
     # ID
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 提供方标识（如 github），与 app.core.sso 注册的 provider_id 一致
-    provider_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    provider_id = Column(String, nullable=False, index=True)
     # IdP 侧稳定用户标识（OIDC sub / GitHub 数字 id 等），绑定主键之一
-    subject: Mapped[str] = mapped_column(String, nullable=False)
+    subject = Column(String, nullable=False)
     # 本地用户 ID（用户删除时级联清理绑定，避免孤儿行；sqlite 需开启 FK 约束才生效）
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
     # 外部用户名快照（仅用于展示/审计，不参与身份解析）
-    username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    username = Column(String, nullable=True)
     # 创建时间
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
         UniqueConstraint('provider_id', 'subject', name='uq_ssoidentity_provider_subject'),

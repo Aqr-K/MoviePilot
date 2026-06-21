@@ -1,9 +1,9 @@
 import time
 from typing import List, Optional
 
-from sqlalchemy import Integer, String, JSON, Index, select, func
+from sqlalchemy import Column, Integer, String, JSON, Index, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, get_id_column, Base, async_db_query
 
@@ -13,51 +13,51 @@ class DownloadHistory(Base):
     下载历史记录
     """
 
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 保存路径
-    path: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    path = Column(String, nullable=False, index=True)
     # 类型 电影/电视剧
-    type: Mapped[str] = mapped_column(String, nullable=False)
+    type = Column(String, nullable=False)
     # 标题
-    title: Mapped[str] = mapped_column(String, nullable=False)
+    title = Column(String, nullable=False)
     # 年份
-    year: Mapped[Optional[str]] = mapped_column(String)
-    tmdbid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
-    imdbid: Mapped[Optional[str]] = mapped_column(String)
-    tvdbid: Mapped[Optional[int]] = mapped_column(Integer)
-    doubanid: Mapped[Optional[str]] = mapped_column(String)
+    year = Column(String)
+    tmdbid = Column(Integer, index=True)
+    imdbid = Column(String)
+    tvdbid = Column(Integer)
+    doubanid = Column(String)
     # Sxx
-    seasons: Mapped[Optional[str]] = mapped_column(String)
+    seasons = Column(String)
     # Exx
-    episodes: Mapped[Optional[str]] = mapped_column(String)
+    episodes = Column(String)
     # 海报
-    image: Mapped[Optional[str]] = mapped_column(String)
+    image = Column(String)
     # 下载器
-    downloader: Mapped[Optional[str]] = mapped_column(String)
+    downloader = Column(String)
     # 下载任务Hash
-    download_hash: Mapped[Optional[str]] = mapped_column(String)
+    download_hash = Column(String)
     # 种子名称
-    torrent_name: Mapped[Optional[str]] = mapped_column(String)
+    torrent_name = Column(String)
     # 种子描述
-    torrent_description: Mapped[Optional[str]] = mapped_column(String)
+    torrent_description = Column(String)
     # 种子站点
-    torrent_site: Mapped[Optional[str]] = mapped_column(String)
+    torrent_site = Column(String)
     # 下载用户
-    userid: Mapped[Optional[str]] = mapped_column(String)
+    userid = Column(String)
     # 下载用户名/插件名
-    username: Mapped[Optional[str]] = mapped_column(String)
+    username = Column(String)
     # 下载渠道
-    channel: Mapped[Optional[str]] = mapped_column(String)
+    channel = Column(String)
     # 创建时间
-    date: Mapped[Optional[str]] = mapped_column(String)
+    date = Column(String)
     # 附加信息
-    note: Mapped[Optional[dict]] = mapped_column(JSON)
+    note = Column(JSON)
     # 自定义媒体类别
-    media_category: Mapped[Optional[str]] = mapped_column(String)
+    media_category = Column(String)
     # 剧集组
-    episode_group: Mapped[Optional[str]] = mapped_column(String)
+    episode_group = Column(String)
     # 自定义识别词（用于整理时应用）
-    custom_words: Mapped[Optional[str]] = mapped_column(String)
+    custom_words = Column(String)
 
     __table_args__ = (
         Index('ix_downloadhistory_download_hash_date', 'download_hash', 'date'),
@@ -374,21 +374,21 @@ class DownloadFiles(Base):
     下载文件记录
     """
 
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 下载器
-    downloader: Mapped[Optional[str]] = mapped_column(String)
+    downloader = Column(String)
     # 下载任务Hash
-    download_hash: Mapped[Optional[str]] = mapped_column(String)
+    download_hash = Column(String)
     # 完整路径
-    fullpath: Mapped[Optional[str]] = mapped_column(String)
+    fullpath = Column(String)
     # 保存路径
-    savepath: Mapped[Optional[str]] = mapped_column(String, index=True)
+    savepath = Column(String, index=True)
     # 文件相对路径/名称
-    filepath: Mapped[Optional[str]] = mapped_column(String)
+    filepath = Column(String)
     # 种子名称
-    torrentname: Mapped[Optional[str]] = mapped_column(String)
+    torrentname = Column(String)
     # 状态 0-已删除 1-正常
-    state: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state = Column(Integer, nullable=False, default=1)
 
     __table_args__ = (
         Index('ix_downloadfiles_download_hash_state', 'download_hash', 'state'),

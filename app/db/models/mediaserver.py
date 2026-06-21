@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Optional, List
 
-from sqlalchemy import Integer, String, JSON, Index, or_
+from sqlalchemy import Column, Integer, String, JSON, Index, or_
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, get_id_column, async_db_query, Base
 
@@ -13,35 +13,35 @@ class MediaServerItem(Base):
     """
     媒体服务器媒体条目表
     """
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 服务器类型
-    server: Mapped[Optional[str]] = mapped_column(String)
+    server = Column(String)
     # 媒体库ID
-    library: Mapped[Optional[str]] = mapped_column(String)
+    library = Column(String)
     # ID
-    item_id: Mapped[Optional[str]] = mapped_column(String, index=True)
+    item_id = Column(String, index=True)
     # 类型
-    item_type: Mapped[Optional[str]] = mapped_column(String)
+    item_type = Column(String)
     # 标题
-    title: Mapped[Optional[str]] = mapped_column(String, index=True)
+    title = Column(String, index=True)
     # 原标题
-    original_title: Mapped[Optional[str]] = mapped_column(String)
+    original_title = Column(String)
     # 年份
-    year: Mapped[Optional[str]] = mapped_column(String)
+    year = Column(String)
     # TMDBID
-    tmdbid: Mapped[Optional[int]] = mapped_column(Integer)
+    tmdbid = Column(Integer)
     # IMDBID
-    imdbid: Mapped[Optional[str]] = mapped_column(String, index=True)
+    imdbid = Column(String, index=True)
     # TVDBID
-    tvdbid: Mapped[Optional[str]] = mapped_column(String, index=True)
+    tvdbid = Column(String, index=True)
     # 路径
-    path: Mapped[Optional[str]] = mapped_column(String)
+    path = Column(String)
     # 季集
-    seasoninfo: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    seasoninfo = Column(JSON, default=dict)
     # 备注
-    note: Mapped[Optional[dict]] = mapped_column(JSON)
+    note = Column(JSON)
     # 同步时间
-    lst_mod_date: Mapped[Optional[str]] = mapped_column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    lst_mod_date = Column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     __table_args__ = (
         Index('ux_mediaserveritem_server_item_id', 'server', 'item_id', unique=True),

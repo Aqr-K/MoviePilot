@@ -1,7 +1,5 @@
-from typing import Optional
-
-from sqlalchemy import String, UniqueConstraint, JSON
-from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy import Column, String, UniqueConstraint, JSON
+from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, get_id_column, Base
 
@@ -10,13 +8,13 @@ class UserConfig(Base):
     """
     用户配置表
     """
-    id: Mapped[int] = get_id_column()
+    id = get_id_column()
     # 用户名
-    username: Mapped[Optional[str]] = mapped_column(String)
+    username = Column(String)
     # 配置键
-    key: Mapped[Optional[str]] = mapped_column(String)
+    key = Column(String)
     # 值
-    value: Mapped[Optional[dict]] = mapped_column(JSON)
+    value = Column(JSON)
 
     __table_args__ = (
         # 用户名和配置键联合唯一
