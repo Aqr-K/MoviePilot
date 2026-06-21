@@ -317,6 +317,8 @@ class MoviePilotAgent:
         """
         判断当前 Agent 是否需要写入会话历史表。
         """
+        if self._tool_context.get("user_reply_sent"):
+            return False
         return bool(self.channel and self.source)
 
     def _save_display_history_messages(self, messages: List[dict]) -> None:
@@ -1102,9 +1104,9 @@ class MoviePilotAgent:
             self._streamed_output = ""
 
             # 获取历史消息
-            messages = memory_manager.get_agent_messages(
+            messages = list(memory_manager.get_agent_messages(
                 session_id=self.session_id, user_id=self.user_id
-            )
+            ))
 
             # 构建结构化用户消息内容
             request_payload = {
@@ -1269,6 +1271,7 @@ class MoviePilotAgent:
         self._agent_started_at = datetime.now()
         self._llm_runtime_config = None
         self._llm_provider_selection = {}
+        streaming_stopped = False
         try:
             # Agent运行配置
             agent_config = {
@@ -1316,6 +1319,7 @@ class MoviePilotAgent:
                     all_sent_via_stream,
                     streamed_text,
                 ) = await self.stream_handler.stop_streaming()
+                streaming_stopped = True
 
                 if not all_sent_via_stream:
                     # 流式输出未能发送全部内容（发送失败等）
@@ -1418,7 +1422,8 @@ class MoviePilotAgent:
                 error=execution_error,
             )
             # 确保停止流式输出
-            await self.stream_handler.stop_streaming()
+            if not streaming_stopped:
+                await self.stream_handler.stop_streaming()
 
     async def send_agent_message(self, message: str, title: str = ""):
         """

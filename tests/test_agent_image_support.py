@@ -569,37 +569,6 @@ class AgentImageSupportTest(unittest.TestCase):
 
         self.assertEqual(payload.image_url, "https://example.com/poster.png")
 
-    def test_send_message_input_normalizes_html_parse_mode(self):
-        payload = SendMessageInput(
-            explanation="send html notice",
-            message="<b>处理完成</b>",
-            parse_mode="html",
-        )
-
-        self.assertEqual(payload.parse_mode, "HTML")
-
-    def test_send_message_input_normalizes_common_html_tags(self):
-        payload = SendMessageInput(
-            explanation="send html notice",
-            message="<h1>标题</h1><p>第一行<br>第二行</p><ul><li>A</li></ul>",
-            parse_mode="HTML",
-        )
-
-        self.assertEqual(
-            payload.message,
-            "<b>标题</b>\n第一行\n第二行\n• A\n",
-        )
-
-    def test_send_message_input_rejects_unsupported_html_tags(self):
-        with self.assertRaises(ValueError) as error:
-            SendMessageInput(
-                explanation="send html notice",
-                message="<table><tr><td>A</td></tr></table>",
-                parse_mode="HTML",
-            )
-
-        self.assertIn("HTML 标签 <table> 不受 Telegram 支持", str(error.exception))
-
     def test_send_message_tool_uses_regular_notification_type(self):
         """发送消息工具应按普通通知消息登记。"""
 
@@ -619,7 +588,6 @@ class AgentImageSupportTest(unittest.TestCase):
                     message="处理完成",
                     title="智能体通知",
                     image_url="https://example.com/poster.png",
-                    parse_mode="HTML",
                 )
             return result, async_post_message
 
@@ -633,7 +601,35 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(notification.title, "智能体通知")
         self.assertEqual(notification.text, "处理完成")
         self.assertEqual(notification.image, "https://example.com/poster.png")
-        self.assertEqual(notification.parse_mode, "HTML")
+        self.assertIsNone(notification.parse_mode)
+
+    def test_send_message_tool_ignores_parse_mode_argument(self):
+        """发送消息工具不再支持由 Agent 指定 Telegram parse_mode。"""
+
+        async def _run():
+            tool = SendMessageTool(session_id="session-1", user_id="10001")
+            tool.set_message_attr(
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                username="tester",
+            )
+
+            with patch(
+                "app.agent.tools.base.ToolChain.async_post_message",
+                new_callable=AsyncMock,
+            ) as async_post_message:
+                result = await tool.run(
+                    message="<b>处理完成</b>",
+                    parse_mode="HTML",
+                )
+            return result, async_post_message
+
+        result, async_post_message = asyncio.run(_run())
+        notification = async_post_message.await_args.args[0]
+
+        self.assertEqual(result, "消息已发送")
+        self.assertEqual(notification.text, "<b>处理完成</b>")
+        self.assertIsNone(notification.parse_mode)
 
     def test_send_message_tool_marks_reply_sent_after_dispatch(self):
         """发送消息工具成功发送后应终止本轮回复。"""
@@ -652,7 +648,7 @@ class AgentImageSupportTest(unittest.TestCase):
                 "app.agent.tools.base.ToolChain.async_post_message",
                 new_callable=AsyncMock,
             ):
-                result = await tool.run(message="<b>处理完成</b>", parse_mode="HTML")
+                result = await tool.run(message="处理完成")
             return result, agent_context
 
         result, agent_context = asyncio.run(_run())
@@ -660,58 +656,6 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(result, "消息已发送")
         self.assertTrue(agent_context["user_reply_sent"])
         self.assertEqual(agent_context["reply_mode"], "send_message")
-
-    def test_send_message_tool_rejects_unsupported_html_before_dispatch(self):
-        """发送消息工具应在进入消息链路前拒绝不支持的 HTML。"""
-
-        async def _run():
-            tool = SendMessageTool(session_id="session-1", user_id="10001")
-            tool.set_message_attr(
-                channel=MessageChannel.Telegram.value,
-                source="telegram-test",
-                username="tester",
-            )
-
-            with patch(
-                "app.agent.tools.base.ToolChain.async_post_message",
-                new_callable=AsyncMock,
-            ) as async_post_message:
-                result = await tool.run(
-                    message="<table><tr><td>A</td></tr></table>",
-                    parse_mode="HTML",
-                )
-            return result, async_post_message
-
-        result, async_post_message = asyncio.run(_run())
-
-        self.assertIn("HTML 标签 <table> 不受 Telegram 支持", result)
-        async_post_message.assert_not_awaited()
-
-    def test_send_message_tool_rejects_invalid_parse_mode(self):
-        """发送消息工具应拒绝不支持的格式类型。"""
-
-        async def _run():
-            tool = SendMessageTool(session_id="session-1", user_id="10001")
-            tool.set_message_attr(
-                channel=MessageChannel.Telegram.value,
-                source="telegram-test",
-                username="tester",
-            )
-
-            with patch(
-                "app.agent.tools.base.ToolChain.async_post_message",
-                new_callable=AsyncMock,
-            ) as async_post_message:
-                result = await tool.run(
-                    message="处理完成",
-                    parse_mode="Markdown",
-                )
-            return result, async_post_message
-
-        result, async_post_message = asyncio.run(_run())
-
-        self.assertIn("parse_mode 仅支持 MarkdownV2 或 HTML", result)
-        async_post_message.assert_not_awaited()
 
     def test_send_local_file_input_accepts_file_payload(self):
         payload = SendLocalFileInput(

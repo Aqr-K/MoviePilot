@@ -39,7 +39,7 @@ class TestAgentInteraction(unittest.TestCase):
         self.assertIn("do not write a final text reply after it", telegram_prompt)
         self.assertNotIn("ask_user_choice", wechat_prompt)
 
-    def test_prompt_injects_send_message_html_hint_only_for_telegram(self):
+    def test_prompt_does_not_inject_send_message_html_hint(self):
         telegram_prompt = prompt_manager.get_agent_prompt(
             channel=MessageChannel.Telegram.value
         )
@@ -47,9 +47,8 @@ class TestAgentInteraction(unittest.TestCase):
             channel=MessageChannel.Wechat.value
         )
 
-        self.assertIn("parse_mode=\"HTML\"", telegram_prompt)
-        self.assertIn("Telegram-supported HTML tags", telegram_prompt)
-        self.assertIn("Do not mix Markdown syntax", telegram_prompt)
+        self.assertNotIn("parse_mode=\"HTML\"", telegram_prompt)
+        self.assertNotIn("Telegram-supported HTML tags", telegram_prompt)
         self.assertNotIn("parse_mode=\"HTML\"", wechat_prompt)
 
     def test_factory_injects_choice_tool_only_for_button_channels(self):
