@@ -29,19 +29,19 @@ from typing import TYPE_CHECKING
 # 公共门面名 -> (子模块全名, 属性名)。仅在按属性访问（from app.managers import X）时懒加载。
 # 用二元组而非裸模块名：与 app/core/module 范式对齐，解除「导出名必须等于类名」的隐式耦合。
 _LAZY_EXPORTS = {
-    "DownloaderManager": ("app.managers.downloader_manager", "DownloaderManager"),
-    "MediaServerManager": ("app.managers.mediaserver_manager", "MediaServerManager"),
-    "NotificationManager": ("app.managers.notification_manager", "NotificationManager"),
-    "MediaRecognizeManager": ("app.managers.mediarecognize_manager", "MediaRecognizeManager"),
-    "StorageManager": ("app.managers.storage_manager", "StorageManager"),
+    "DownloaderManager": ("app.managers.downloader", "DownloaderManager"),
+    "MediaServerManager": ("app.managers.mediaserver", "MediaServerManager"),
+    "NotificationManager": ("app.managers.notification", "NotificationManager"),
+    "MediaRecognizeManager": ("app.managers.mediarecognize", "MediaRecognizeManager"),
+    "StorageManager": ("app.managers.storage", "StorageManager"),
 }
 
 if TYPE_CHECKING:  # 仅供静态检查/IDE，运行期不执行，不引入急加载
-    from app.managers.downloader_manager import DownloaderManager
-    from app.managers.mediaserver_manager import MediaServerManager
-    from app.managers.notification_manager import NotificationManager
-    from app.managers.mediarecognize_manager import MediaRecognizeManager
-    from app.managers.storage_manager import StorageManager
+    from app.managers.downloader import DownloaderManager
+    from app.managers.mediaserver import MediaServerManager
+    from app.managers.notification import NotificationManager
+    from app.managers.mediarecognize import MediaRecognizeManager
+    from app.managers.storage import StorageManager
 
 __all__ = list(_LAZY_EXPORTS)
 

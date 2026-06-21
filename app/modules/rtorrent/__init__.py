@@ -25,7 +25,7 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
     """
     Rtorrent 下载器模块（app.modules.IDownloader 后端，已完整实现全部 11 个下载器方法）。
 
-    作为 Downloader 域后端，由门面 app.managers.downloader_manager.DownloaderManager 统一分发调用。
+    作为 Downloader 域后端，由门面 app.managers.downloader.DownloaderManager 统一分发调用。
     torrent_files() 已归一化为 List[schemas.DownloaderFile]（progress 由 0~100 归一到 0~1）、
     get_torrent_trackers() 已实现（经 xmlrpc t.multicall 取 tracker url），与 qb/tr 对齐无能力缺口。
 
