@@ -101,6 +101,9 @@ class NotificationManager(metaclass=Singleton):
         """复刻 ChainBase.__execute_plugin_modules：跑插件经 get_module 劫持的同名方法槽。"""
         # lazy import 防 import 期环（plugin_manager 依赖较重）；插件面与系统面共用 result 累积语义。
         from app.helper.plugin_manager import PluginManager
+        # 插件劫持面与 run_module 一致：raise_exception 透传给插件 func（插件可能据此决定内部异常是否上抛）。
+        # 系统模块面沿用下载器/媒服门面的 pop 语义（系统后端方法可能无 raise_exception 形参，透传会 TypeError）。
+        plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
         for plugin, module_dict in PluginManager().get_plugin_modules().items():
             plugin_id, plugin_name = plugin
             if method not in module_dict:
@@ -108,11 +111,12 @@ class NotificationManager(metaclass=Singleton):
             func = module_dict[method]
             if not func:
                 continue
+            logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
             try:
                 if self._is_valid_empty(result):
-                    result = func(*args, **kwargs)
+                    result = func(*args, **plugin_kwargs)
                 elif isinstance(result, list):
-                    temp = func(*args, **kwargs)
+                    temp = func(*args, **plugin_kwargs)
                     if isinstance(temp, list):
                         result.extend(temp)
                 else:
@@ -126,6 +130,7 @@ class NotificationManager(metaclass=Singleton):
     def _dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
                                  *args, **kwargs) -> Any:
         """复刻 ChainBase.__execute_system_modules：按 get_priority 升序跑系统通知模块、合并结果。"""
+        logger.debug(f"请求系统模块执行：{method} ...")
         for module in sorted(
                 self._modulemanager.get_running_modules(method),
                 key=lambda x: x.get_priority(),
@@ -151,6 +156,7 @@ class NotificationManager(metaclass=Singleton):
             except RateLimitExceededException as err:
                 self._handle_rate_limit_error(err, "模块", module_id, method, raise_exception)
             except Exception as err:
+                logger.error(traceback.format_exc())
                 self._handle_system_error(err, module_id, module_name, method, raise_exception)
         return result
 

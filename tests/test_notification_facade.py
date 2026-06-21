@@ -122,3 +122,12 @@ class NotificationFacadeTest(TestCase):
         with patch("app.helper.plugin_manager.PluginManager", pm):
             with self.assertRaises(RuntimeError):
                 mgr.post_message(message="m", raise_exception=True)
+
+    def test_plugin_func_receives_raise_exception(self):
+        # 与 run_module 一致：raise_exception 透传给插件劫持 func（插件可据此决定内部异常是否上抛）。
+        hijack = MagicMock(return_value=None)
+        plugins = {("pid", "PluginName"): {"post_message": hijack}}
+        mgr, pm = _mgr([_FakeModule("Sys")], plugins)
+        with patch("app.helper.plugin_manager.PluginManager", pm):
+            mgr.post_message(message="m", raise_exception=True)
+        self.assertTrue(hijack.call_args.kwargs.get("raise_exception"))
