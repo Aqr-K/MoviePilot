@@ -192,10 +192,11 @@ class _ThinkTagStripper:
                             self.buffer = self.buffer[-i:]
                             partial_match = True
                             break
-                    if not partial_match:
-                        on_output(self.buffer)
-                        emitted = True
-                        self.buffer = ""
+                    if partial_match:
+                        break
+                    on_output(self.buffer)
+                    emitted = True
+                    self.buffer = ""
             else:
                 end_idx = self.buffer.find("</think>")
                 if end_idx != -1:
