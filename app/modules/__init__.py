@@ -508,7 +508,7 @@ class IMediaServer(Protocol):
     媒体服务器（MediaServer 域）行为接口契约。
 
     对照下载器域的 IDownloader / 存储域的 StorageBase：声明门面
-    app.managers.mediaserver_manager.MediaServerManager 统一对外暴露、并按方法名分发到各后端的
+    app.managers.mediaserver.MediaServerManager 统一对外暴露、并按方法名分发到各后端的
     媒体服务器操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
     契约，无需显式继承，避免与 _ModuleBase(ABCMeta)/ServiceBase(Generic) 的元类冲突，对既有
     Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 模块零改动即结构兼容。
@@ -565,7 +565,7 @@ class INotification(Protocol):
     消息通知（Notification 域）行为接口契约。
 
     对照下载器域的 IDownloader / 媒服域的 IMediaServer / 存储域的 StorageBase：声明门面
-    app.managers.notification_manager.NotificationManager 统一对外暴露、并按方法名分发到各通知后端
+    app.managers.notification.NotificationManager 统一对外暴露、并按方法名分发到各通知后端
     （内建 Telegram/WeChat/Slack/Discord/VoceChat/... 及插件经 provides_notifications() 注册的
     渠道）的消息操作面。采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足
     契约，无需显式继承，对既有通知模块零改动即结构兼容。
@@ -604,7 +604,7 @@ class IMediaRecognize(Protocol):
     媒体识别 / 数据源（MediaRecognize 域）行为接口契约。
 
     对照下载器 IDownloader / 媒服 IMediaServer / 通知 INotification / 存储 StorageBase：声明门面
-    app.managers.mediarecognize_manager.MediaRecognizeManager 统一对外暴露、并按方法名分发到各数据源后端
+    app.managers.mediarecognize.MediaRecognizeManager 统一对外暴露、并按方法名分发到各数据源后端
     （内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经 provides_data_sources() 注册的源）的识别操作面。
     采用 **结构化类型（Protocol）** 而非 ABC——后端只要实现同名同义方法即满足契约，无需显式继承。
 
