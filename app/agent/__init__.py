@@ -1358,7 +1358,10 @@ class MoviePilotAgent:
                         break
             self._save_assistant_display_message_once(display_text)
 
-            if self._should_persist_agent_chat():
+            if (
+                    self._should_persist_agent_chat()
+                    and not self._tool_context.get("user_reply_sent")
+            ):
                 memory_manager.save_agent_messages(
                     session_id=self.session_id,
                     user_id=self.user_id,
