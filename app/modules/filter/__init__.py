@@ -161,6 +161,8 @@ class FilterModule(_ModuleBase):
                     torrent_list=torrent_list,
                     mediainfo=mediainfo
                 )
+            matched_orders, traces = self.__parse_rust_filter_result(matched_orders)
+            self.__log_rust_filter_traces(traces)
             ret_torrents = []
             for index, pri_order in matched_orders:
                 torrent = torrent_list[index]
@@ -168,6 +170,27 @@ class FilterModule(_ModuleBase):
                 ret_torrents.append(torrent)
             return ret_torrents
         return torrent_list
+
+    @staticmethod
+    def __parse_rust_filter_result(result) -> Tuple[list, list]:
+        """
+        兼容新旧 Rust 过滤返回值，统一拆出匹配结果和调试日志。
+        """
+        if (
+                isinstance(result, tuple)
+                and len(result) == 2
+                and isinstance(result[1], list)
+        ):
+            return result
+        return result, []
+
+    @staticmethod
+    def __log_rust_filter_traces(traces: list) -> None:
+        """
+        输出 Rust 过滤路径返回的规则级调试日志。
+        """
+        for trace in traces:
+            logger.debug(trace)
 
     def __filter_torrents_with_python(self, groups: List[dict],
                                       torrent_list: List[TorrentInfo],
