@@ -55,7 +55,7 @@ class ReadFileTool(MoviePilotTool):
             if not await path.is_file():
                 return f"错误：{resolved_path} 不是一个文件"
 
-            content = await path.read_text(encoding="utf-8")
+            content = await path.read_text(encoding="utf-8", errors="replace")
             truncated = False
 
             if start_line is not None or end_line is not None:
@@ -75,7 +75,7 @@ class ReadFileTool(MoviePilotTool):
             # 检查大小限制
             content_bytes = content.encode("utf-8")
             if len(content_bytes) > MAX_READ_SIZE:
-                content = content_bytes[:MAX_READ_SIZE].decode("utf-8", errors="ignore")
+                content = content_bytes[:MAX_READ_SIZE].decode("utf-8", errors="replace")
                 truncated = True
 
             if truncated:

@@ -58,7 +58,7 @@ class _CommandOutput:
         """按 UTF-8 字节数截断文本，避免截断后出现非法字符。"""
         if byte_limit <= 0:
             return ""
-        return text.encode("utf-8")[:byte_limit].decode("utf-8", errors="ignore")
+        return text.encode("utf-8")[:byte_limit].decode("utf-8", errors="replace")
 
     def _write_chunk(self, stream_name: str, text: str) -> None:
         """把输出分片按 stdout/stderr 分段写入临时文件。"""

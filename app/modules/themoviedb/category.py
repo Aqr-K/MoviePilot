@@ -44,7 +44,7 @@ class CategoryHelper(metaclass=WeakSingleton):
         try:
             if not self._category_path.exists():
                 shutil.copy(settings.INNER_CONFIG_PATH / "category.yaml", self._category_path)
-            with open(self._category_path, mode='r', encoding='utf-8') as f:
+            with open(self._category_path, mode='r', encoding='utf-8', errors='replace') as f:
                 try:
                     yaml_loader = ruamel.yaml.YAML()
                     self._categorys = yaml_loader.load(f)
@@ -67,7 +67,7 @@ class CategoryHelper(metaclass=WeakSingleton):
         if not self._category_path.exists():
             return config
         try:
-            with open(self._category_path, 'r', encoding='utf-8') as f:
+            with open(self._category_path, 'r', encoding='utf-8', errors='replace') as f:
                 yaml_loader = ruamel.yaml.YAML()
                 data = yaml_loader.load(f)
                 if data:

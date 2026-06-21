@@ -234,7 +234,7 @@ async def _alist_skills(source_path: AsyncPath) -> list[SkillMetadata]:
     for skill_path in skill_dirs:
         skill_md_path = skill_path / "SKILL.md"
 
-        skill_content = await skill_md_path.read_text(encoding="utf-8")
+        skill_content = await skill_md_path.read_text(encoding="utf-8", errors="replace")
 
         # 解析元数据
         skill_metadata = _parse_skill_metadata(
@@ -312,7 +312,7 @@ Remember: Skills make you more capable and consistent. When in doubt, check if a
 def _extract_version(skill_md: Path) -> int:
     """从 SKILL.md 文件中快速提取 version 字段，无法提取时返回 0。"""
     try:
-        content = skill_md.read_text(encoding="utf-8")
+        content = skill_md.read_text(encoding="utf-8", errors="replace")
     except Exception as err:
         print(err)
         return 0

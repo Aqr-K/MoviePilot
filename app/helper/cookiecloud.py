@@ -126,7 +126,7 @@ class CookieCloudHelper:
             return {}
 
         # 读取文件
-        with open(file_path, encoding="utf-8", mode="r") as file:
+        with open(file_path, encoding="utf-8", errors="replace", mode="r") as file:
             read_content = file.read()
         data = json.loads(read_content.encode("utf-8"))
         return data

@@ -491,14 +491,14 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             if system == 'Linux':
                 # 检查 inotify 限制
                 try:
-                    with open('/proc/sys/fs/inotify/max_user_watches', 'r') as f:
+                    with open('/proc/sys/fs/inotify/max_user_watches', 'r', encoding='utf-8', errors='replace') as f:
                         limits['max_user_watches'] = int(f.read().strip())
                 except Exception as e:
                     logger.debug(f"读取 inotify 限制失败: {e}")
                     limits['max_user_watches'] = 8192  # 默认值
 
                 try:
-                    with open('/proc/sys/fs/inotify/max_user_instances', 'r') as f:
+                    with open('/proc/sys/fs/inotify/max_user_instances', 'r', encoding='utf-8', errors='replace') as f:
                         limits['max_user_instances'] = int(f.read().strip())
                 except Exception as e:
                     logger.debug(f"读取 inotify 实例限制失败: {e}")

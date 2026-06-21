@@ -133,7 +133,7 @@ def load_activity_log_index(activity_dir: str, days: int = PROMPT_LOAD_DAYS) -> 
         if not log_path.is_file():
             continue
         try:
-            content = log_path.read_text(encoding="utf-8")
+            content = log_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             logger.warning(f"读取活动日志索引失败 {log_path}: {e}")
             continue
@@ -197,7 +197,7 @@ def query_activity_logs(
         if not log_path.is_file():
             continue
         try:
-            content = log_path.read_text(encoding="utf-8")
+            content = log_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             logger.warning(f"读取活动日志失败 {log_path}: {e}")
             continue
@@ -480,7 +480,7 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
         entry = f"- **{now_str}** {summary}\n"
         try:
             if await log_path.exists():
-                existing = await log_path.read_text(encoding="utf-8")
+                existing = await log_path.read_text(encoding="utf-8", errors="replace")
                 await log_path.write_text(existing + entry, encoding="utf-8")
             else:
                 header = f"# {today_str} 活动日志\n\n"

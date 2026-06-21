@@ -287,7 +287,7 @@ class Rtorrent:
             if isinstance(content, bytes):
                 # 检查是否为磁力链接（bytes形式）
                 if content.startswith(b"magnet:"):
-                    content = content.decode("utf-8", errors="ignore")
+                    content = content.decode("utf-8", errors="replace")
                 else:
                     # 种子文件内容，使用load.raw
                     raw = xmlrpc.client.Binary(content)

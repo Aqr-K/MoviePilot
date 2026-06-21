@@ -55,7 +55,7 @@ class SystemHelper(ConfigReloadMixin):
         if not path.exists():
             return None
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
@@ -149,7 +149,7 @@ class SystemHelper(ConfigReloadMixin):
             return None
 
         try:
-            raw_mode = path.read_text(encoding="utf-8")
+            raw_mode = path.read_text(encoding="utf-8", errors="replace")
         except OSError as err:
             logger.warning(f"读取一次性升级标记失败: {err}")
             raw_mode = ""
@@ -214,7 +214,7 @@ class SystemHelper(ConfigReloadMixin):
         """
         container_id = None
         try:
-            with open("/proc/self/mountinfo", "r") as f:
+            with open("/proc/self/mountinfo", "r", encoding="utf-8", errors="replace") as f:
                 data = f.read()
                 index_resolv_conf = data.find("resolv.conf")
                 if index_resolv_conf != -1:

@@ -428,7 +428,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 return None
 
             # 读取 __init__.py 文件，查找插件主类名
-            with open(init_file, "r", encoding="utf-8") as f:
+            with open(init_file, "r", encoding="utf-8", errors="replace") as f:
                 source_code = f.read()
 
             tree = ast.parse(source_code)
@@ -1928,7 +1928,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         修改Python文件中的类名和插件信息
         """
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
 
             # 替换类名
@@ -2017,7 +2017,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 # 处理JS文件
                 if file_path.suffix == '.js':
                     try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
+                        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                             content = f.read()
 
                         # 替换类名引用（精确匹配）
@@ -2042,7 +2042,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 # 处理CSS文件
                 elif file_path.suffix == '.css':
                     try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
+                        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                             content = f.read()
 
                         # 替换CSS中可能的类名引用

@@ -232,7 +232,7 @@ class PluginHelper(metaclass=WeakSingleton):
         if not package_file.exists():
             return {}
         try:
-            content = package_file.read_text(encoding="utf-8")
+            content = package_file.read_text(encoding="utf-8", errors="replace")
             payload = json.loads(content)
         except Exception as e:
             logger.warn(f"读取本地插件包 {package_file} 失败：{e}")
@@ -1087,7 +1087,7 @@ class PluginHelper(metaclass=WeakSingleton):
             return roots
 
         try:
-            with open(requirements_file, "r", encoding="utf-8") as f:
+            with open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line or line.startswith("#"):
@@ -1289,7 +1289,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         conflicts = []
         try:
-            with open(requirements_file, "r", encoding="utf-8") as f:
+            with open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line or line.startswith("#"):
@@ -1890,7 +1890,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         dependencies = {}
         try:
-            with open(requirements_file, "r", encoding="utf-8") as f:
+            with open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#'):
@@ -2440,7 +2440,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         dependencies = {}
         try:
-            async with aiofiles.open(requirements_file, "r", encoding="utf-8") as f:
+            async with aiofiles.open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 async for line in f:
                     line = str(line).strip()
                     if line and not line.startswith('#'):

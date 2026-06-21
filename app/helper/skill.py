@@ -343,7 +343,7 @@ class SkillHelper(metaclass=WeakSingleton):
         if not meta_path.exists():
             return {}
         try:
-            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            payload = json.loads(meta_path.read_text(encoding="utf-8", errors="replace"))
             return payload if isinstance(payload, dict) else {}
         except Exception as e:
             logger.warning("读取技能来源元数据失败：%s - %s", meta_path, e)
@@ -381,7 +381,7 @@ class SkillHelper(metaclass=WeakSingleton):
             if not skill_md.exists():
                 continue
             try:
-                content = skill_md.read_text(encoding="utf-8")
+                content = skill_md.read_text(encoding="utf-8", errors="replace")
             except Exception as e:
                 logger.warning("读取技能文件失败：%s - %s", skill_md, e)
                 continue
@@ -979,7 +979,7 @@ class SkillHelper(metaclass=WeakSingleton):
 
         content = getattr(response, "content", b"")
         if isinstance(content, bytes):
-            return content.decode("utf-8", errors="ignore")
+            return content.decode("utf-8", errors="replace")
         if isinstance(content, str):
             return content
         return ""

@@ -128,7 +128,7 @@ def _parse_job_metadata(
 async def _alist_jobs(source_path: AsyncPath) -> list[JobMetadata]:
     """异步列出指定路径下的所有任务。
 
-    扫描包含 JOB.md 的目录并解析其元数据。
+    扫描包含 JOB.md 的目录并解析其元数据，遇到非法 UTF-8 字节时以替换字符兜底。
     """
     jobs: list[JobMetadata] = []
 
@@ -151,7 +151,10 @@ async def _alist_jobs(source_path: AsyncPath) -> list[JobMetadata]:
     for job_path in job_dirs:
         job_md_path = job_path / "JOB.md"
 
-        job_content = await job_md_path.read_text(encoding="utf-8")
+        job_content = await job_md_path.read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
 
         # 解析元数据
         job_metadata = _parse_job_metadata(

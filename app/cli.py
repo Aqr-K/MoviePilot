@@ -53,7 +53,7 @@ def _read_json_file(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -158,7 +158,7 @@ def _http_request(
                 "text": raw,
             }
     except HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="ignore")
+        raw = exc.read().decode("utf-8", errors="replace")
         try:
             data = json.loads(raw) if raw else None
         except json.JSONDecodeError:
@@ -198,7 +198,7 @@ def _frontend_health(runtime: Optional[Dict[str, Any]] = None, timeout: float = 
     request = Request(url=url, headers={"Accept": "text/plain"}, method="GET")
     try:
         with urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8", errors="ignore").strip()
+            raw = response.read().decode("utf-8", errors="replace").strip()
             return response.status == 200, {"version": raw}
     except (HTTPError, URLError):
         return False, None
@@ -233,7 +233,7 @@ def _github_api_json(url: str, *, repo: str) -> Any:
         with opener.open(request, timeout=10.0) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
+        detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"访问 GitHub API 失败（HTTP {exc.code}）: {detail or url}") from exc
     except URLError as exc:
         raise RuntimeError(f"访问 GitHub API 失败：{exc.reason}") from exc
@@ -342,7 +342,7 @@ def _best_effort_auto_update() -> None:
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
-        errors="ignore",
+        errors="replace",
         check=False,
     )
     if result.returncode == 0:
@@ -451,7 +451,7 @@ def _annotation_name(annotation: Any) -> str:
 def _tail_lines(path: Path, count: int) -> list[str]:
     if not path.exists():
         raise click.ClickException(f"日志文件不存在：{path}")
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         return [line.rstrip("\n") for line in deque(handle, maxlen=count)]
 
 
@@ -459,7 +459,7 @@ def _follow_file(path: Path) -> None:
     if not path.exists():
         raise click.ClickException(f"日志文件不存在：{path}")
 
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         handle.seek(0, os.SEEK_END)
         while True:
             line = handle.readline()
@@ -826,7 +826,7 @@ def _installed_frontend_version() -> Optional[str]:
     if not FRONTEND_VERSION_FILE.exists():
         return None
     try:
-        return FRONTEND_VERSION_FILE.read_text(encoding="utf-8").strip() or None
+        return FRONTEND_VERSION_FILE.read_text(encoding="utf-8", errors="replace").strip() or None
     except OSError:
         return None
 

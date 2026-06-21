@@ -891,7 +891,7 @@ class LLMProviderManager(metaclass=Singleton):
             if not self._models_dev_cache_path.exists():
                 payload = None
             else:
-                payload = json.loads(self._models_dev_cache_path.read_text(encoding="utf-8"))
+                payload = json.loads(self._models_dev_cache_path.read_text(encoding="utf-8", errors="replace"))
         except Exception as err:
             logger.warning(f"读取 models.dev provider 缓存失败: {err}")
             payload = None
@@ -1424,7 +1424,7 @@ class LLMProviderManager(metaclass=Singleton):
             if not self._models_dev_cache_path.exists():
                 return None
             async with aiofiles.open(
-                    self._models_dev_cache_path, mode="r", encoding="utf-8"
+                    self._models_dev_cache_path, mode="r", encoding="utf-8", errors="replace"
             ) as stream:
                 return json.loads(await stream.read())
         except Exception as err:
@@ -1437,7 +1437,7 @@ class LLMProviderManager(metaclass=Singleton):
             if not self._MODELS_DEV_BUNDLED_PATH.exists():
                 return None
             payload = json.loads(
-                self._MODELS_DEV_BUNDLED_PATH.read_text(encoding="utf-8")
+                self._MODELS_DEV_BUNDLED_PATH.read_text(encoding="utf-8", errors="replace")
             )
         except Exception as err:
             logger.warning(f"读取本地 models.dev 离线文件失败: {err}")
