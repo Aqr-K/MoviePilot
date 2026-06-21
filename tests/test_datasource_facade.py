@@ -8,7 +8,7 @@ import asyncio
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from app.helper.mediarecognize_manager import MediaRecognizeManager
+from app.managers.mediarecognize_manager import MediaRecognizeManager
 from app.schemas.exception import RateLimitExceededException
 
 

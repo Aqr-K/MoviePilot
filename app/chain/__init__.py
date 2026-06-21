@@ -16,11 +16,11 @@ from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
-from app.helper.downloader_manager import DownloaderManager
-from app.helper.mediaserver_manager import MediaServerManager
-from app.helper.notification_manager import NotificationManager
-from app.helper.mediarecognize_manager import MediaRecognizeManager
-from app.helper.storage_manager import StorageManager
+from app.managers.downloader_manager import DownloaderManager
+from app.managers.mediaserver_manager import MediaServerManager
+from app.managers.notification_manager import NotificationManager
+from app.managers.mediarecognize_manager import MediaRecognizeManager
+from app.managers.storage_manager import StorageManager
 from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.user_oper import UserOper

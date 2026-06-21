@@ -7,7 +7,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from app.helper.storage_manager import StorageManager
+from app.managers.storage_manager import StorageManager
 from app.schemas.exception import RateLimitExceededException
 
 
