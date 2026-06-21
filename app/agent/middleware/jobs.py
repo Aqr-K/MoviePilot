@@ -195,7 +195,7 @@ async def load_jobs_metadata(source_paths: list[str]) -> list[JobMetadata]:
 
 JOBS_SYSTEM_PROMPT = """
 <jobs_system>
-You have a **scheduled jobs** system that allows you to track and execute long-running or recurring tasks.
+You have a scheduled jobs system for user-requested delayed or recurring work.
 
 **Jobs Location:** `{jobs_location}`
 
@@ -203,71 +203,11 @@ You have a **scheduled jobs** system that allows you to track and execute long-r
 
 {jobs_list}
 
-**Job File Format:**
-
-Each job is a directory containing a `JOB.md` file with YAML frontmatter followed by task details:
-
-```markdown
----
-name: 任务名称（简短中文描述）
-description: 任务的详细描述，说明要做什么
-schedule: once 或 recurring
-status: pending / in_progress / completed / cancelled
-last_run: "YYYY-MM-DD HH:MM"（上次执行时间，可选）
----
-# 任务详情
-
-## 目标
-详细描述这个任务要完成的目标。
-
-## 执行日志
-记录每次执行的情况和结果。
-
-- **2024-01-15 10:00** - 执行了XXX操作，结果：成功/失败
-- **2024-01-16 10:00** - 继续执行XXX...
-```
-
-**Job Lifecycle Rules:**
-
-1. **Creating a Job**: When a user asks you to do something periodically or at a later time:
-   - Create a new directory under the jobs location, directory name is the `job-id` (lowercase, hyphens, 1-64 chars)
-   - Write a `JOB.md` file with proper frontmatter and detailed task description
-   - Set `schedule: once` for one-time tasks, `schedule: recurring` for repeating tasks (e.g., daily sign-in, weekly checks)
-   - Set initial `status: pending`
-
-2. **Executing a Job**: When you work on a job:
-   - Update `status: in_progress` in the frontmatter
-   - Execute the required actions using your tools
-   - Log the execution result in the "执行日志" section with timestamp
-   - Update `last_run` in frontmatter to current time
-
-3. **Completing a Job**:
-   - For `schedule: once` tasks: set `status: completed` after successful execution
-   - For `schedule: recurring` tasks: keep `status: pending` after execution, only update `last_run` time. The job stays active for the next scheduled run.
-   - Set `status: cancelled` if the user explicitly asks to cancel/stop a task
-
-4. **Heartbeat Check**: You will be periodically woken up to check pending jobs. When woken up:
-   - Read the jobs directory to find all active jobs (status: pending or in_progress)
-   - Skip jobs with `status: completed` or `status: cancelled`
-   - For `schedule: recurring` jobs, check `last_run` to determine if it's time to run again
-   - Execute pending jobs and update their status/logs accordingly
-
-**Important Notes:**
-- Each job MUST have its own separate directory and JOB.md file to avoid conflicts
-- Always update the frontmatter fields (status, last_run) when executing a job
-- Keep execution logs concise but informative
-- For recurring jobs, maintain a rolling log (keep recent entries, you can summarize/remove old entries to keep the file manageable)
-- When creating jobs, make the description detailed enough that you can understand and execute the task in future sessions without additional context
-
-**When to Create Jobs:**
-- User says "每天帮我..." / "定期..." / "定时..." / "提醒我..." / "以后每次..."
-- User requests a task that should be done repeatedly
-- User asks for monitoring or periodic checking of something
-
-**When NOT to Create Jobs:**
-- User asks for an immediate one-time action (just do it now)
-- Simple questions or conversations
-- Tasks that are already handled by MoviePilot's built-in scheduler services
+Rules:
+- Create jobs only when the user asks for delayed, recurring, reminder, or monitoring behavior.
+- Do not create jobs for immediate one-time work or work already handled by MoviePilot schedulers.
+- Each job lives in its own directory with a `JOB.md`; read the listed file before executing or updating an active job.
+- During heartbeat checks, act only on `pending` or `in_progress` jobs, update status/last_run/logs, and leave recurring jobs `pending` after each run.
 </jobs_system>
 """
 

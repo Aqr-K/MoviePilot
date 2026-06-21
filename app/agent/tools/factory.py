@@ -75,7 +75,6 @@ from app.agent.tools.impl.uninstall_plugin import UninstallPluginTool
 from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
 from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
 from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
-from app.agent.tools.impl.query_activity_log import QueryActivityLogTool
 from app.agent.tools.impl.query_doctor_report import QueryDoctorReportTool
 from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
@@ -165,7 +164,6 @@ class MoviePilotToolFactory:
         UninstallPluginTool,
         RunSlashCommandTool,
         ListSlashCommandsTool,
-        QueryActivityLogTool,
         QueryDoctorReportTool,
         QueryCustomIdentifiersTool,
         UpdateCustomIdentifiersTool,
@@ -182,7 +180,6 @@ class MoviePilotToolFactory:
         "read_file",
         "edit_file",
         "execute_command",
-        "query_activity_log",
         "ask_user_choice",
     )
 
