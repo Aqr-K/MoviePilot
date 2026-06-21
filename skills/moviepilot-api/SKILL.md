@@ -1,7 +1,14 @@
 ---
 name: moviepilot-api
-version: 1
-description: Use this skill when you need to call MoviePilot REST API endpoints directly. Covers all 245 API endpoints across 27 categories including media search, downloads, subscriptions, library management, site management, system administration, plugins, workflows, and more. Use this skill whenever the user asks to interact with MoviePilot via its HTTP API, or when the moviepilot-cli skill cannot cover a specific operation.
+version: 2
+description: >-
+  Use this skill when you need to call MoviePilot REST API endpoints directly
+  with the bundled Python client. Covers MoviePilot HTTP endpoints across media
+  search, downloads, subscriptions, library management, site management, system
+  administration, plugins, workflows, and more. Prefer `moviepilot-cli` for
+  normal local MCP tool workflows; use this skill when the user explicitly asks
+  for HTTP API access, when an endpoint is not exposed as an MCP tool, or when
+  running in an environment where direct REST calls are the appropriate bridge.
 ---
 
 # MoviePilot REST API
@@ -10,15 +17,38 @@ description: Use this skill when you need to call MoviePilot REST API endpoints 
 
 Use `scripts/mp-api.py` to call any MoviePilot REST API endpoint directly.
 
+## Scope And Boundaries
+
+This skill is the REST API bridge. It is implemented as a Python script and is
+useful when the agent needs endpoint-level coverage beyond the local
+`moviepilot tool` MCP CLI.
+
+Choose other skills first when they match more precisely:
+
+| Request | Preferred skill |
+|---|---|
+| Normal local MoviePilot product operation exposed as an MCP tool | `moviepilot-cli` |
+| Direct SQL query or database update | `database-operation` |
+| Restart, version check, or upgrade | `moviepilot-update` |
+| Slash commands or plugin/system command dispatch | `command-dispatch` |
+| Browser-only state, site login pages, screenshots, cookies | `browser-use` |
+
+Do not use this skill just because MoviePilot is mentioned. Use it when the
+task specifically needs a REST endpoint, token-query endpoint, or API behavior
+that the CLI/MCP tools do not expose.
+
 ## Setup
 
-Configure the backend host and API key (persisted to `~/.config/moviepilot_api/config`):
+When the script runs inside the MoviePilot project, it imports `app.core.config.settings` and reads `settings.HOST`, `settings.PORT`, and `settings.API_TOKEN` directly. Do not ask the user for `API_TOKEN`, and do not copy API keys into the prompt.
 
-```
-python scripts/mp-api.py configure --host http://localhost:3000 --apikey <API_TOKEN>
-```
+Configuration priority:
 
-The API key is the `API_TOKEN` value from MoviePilot settings.
+1. CLI flags: `--host`, `--apikey`
+2. Environment variables: `MP_HOST`, `MP_API_KEY`
+3. Local MoviePilot settings
+4. Legacy config file: `~/.config/moviepilot_api/config`
+
+Use `configure` only as a legacy fallback outside the MoviePilot project, and avoid it in normal agent workflows because it persists a long-lived API key to disk.
 
 ## How to Call APIs
 
@@ -30,9 +60,10 @@ python scripts/mp-api.py <METHOD> <PATH> [key=value ...] [--json '<body>']
 
 ### Authentication
 
-- By default, the key is sent via the `X-API-KEY` header.
+- By default, the script auto-loads the local key and sends it via the `X-API-KEY` header.
 - For endpoints suffixed with `2` (e.g. `/api/v1/dashboard/statistic2`), use `--token-param` to send the key as `?token=`.
 - Both methods validate against the same `API_TOKEN` value.
+- Never print, summarize, or ask the user to paste the API key unless the script is being used outside the local project and no safer configuration source is available.
 
 ### Examples
 
@@ -564,9 +595,9 @@ python scripts/mp-api.py GET /api/v1/site/cookiecloud
 
 | Scenario | Action |
 |----------|--------|
-| HTTP 401 | API key is invalid or missing. Re-run `configure` with correct `--apikey`. |
+| HTTP 401 | API key is invalid or missing. Verify local settings with `moviepilot doctor`; only use `--apikey` as an external fallback. |
 | HTTP 403 | Insufficient permissions. The API key grants superuser access; check if the endpoint requires special auth. |
 | HTTP 404 | Endpoint or resource not found. Verify the path and path parameters. |
 | HTTP 422 | Validation error. Check required parameters and JSON body format. |
 | Connection error | Verify `--host` URL is reachable. Check if MoviePilot is running. |
-| Missing config | Run `python scripts/mp-api.py configure --host <HOST> --apikey <KEY>` first. |
+| Missing config | Run inside the MoviePilot project, or set `MP_HOST` and `MP_API_KEY` in the process environment. |

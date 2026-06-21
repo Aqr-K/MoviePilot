@@ -1,232 +1,217 @@
 ---
 name: database-operation
-version: 2
+version: 3
 description: >-
-  Use this skill when you need to execute SQL against the MoviePilot database.
-  This skill guides you through connecting to the database and executing SQL statements.
-  The database type (SQLite or PostgreSQL) and connection details are provided in the system prompt <system_info>.
-  Applicable scenarios include:
-  1) The user asks about data statistics, counts, or aggregations that existing tools don't cover;
-  2) The user wants to inspect, modify, or fix raw database records;
-  3) The user asks to clean up data, update records, or perform database maintenance;
-  4) The user asks questions like "how many downloads", "show me site stats", "delete old records", etc.
-allowed-tools: execute_command read_file
+  Use this skill when you need to inspect, query, maintain, or carefully modify
+  the MoviePilot database. This skill uses the bundled scripts/mp-db.py helper,
+  which reads MoviePilot local settings itself and never requires database
+  passwords or full PostgreSQL DSNs in the agent prompt. Applicable scenarios
+  include data statistics, counts, aggregations, inspecting or fixing records,
+  cleanup requests, and questions like "how many downloads", "show site stats",
+  "delete old records", or "why is this subscription stuck".
 ---
 
-# Database Query (数据库查询)
+# Database Operation
 
-This skill guides you through executing SQL against the MoviePilot database. Both read and write operations are supported.
+> All script paths are relative to this skill file.
 
-## Prerequisites
+Use `scripts/mp-db.py` for all database access. Do not extract database passwords, API tokens, or full PostgreSQL DSNs from the prompt. The script reads MoviePilot local settings and connects to SQLite or PostgreSQL internally.
 
-You need the following tools:
-- `execute_command` - Execute shell commands to run database queries. Use `action=run` when you need the query result immediately.
+## Scope And Boundaries
 
-## Getting Database Connection Info
+This skill is the direct SQL boundary. It is implemented as a Python script and
+is appropriate when the agent must inspect records, run data statistics, repair
+stuck state, or perform an explicitly requested database update.
 
-The system prompt `<system_info>` section already contains all the database connection details you need:
-- **数据库类型** — `sqlite` or `postgresql`
-- **数据库** — Full connection info:
-  - For SQLite: the database file path, e.g. `SQLite (/config/db/moviepilot.db)`
-  - For PostgreSQL: the connection string, e.g. `PostgreSQL (user:password@host:port/database)`
+Prefer safer product surfaces first:
 
-**Do NOT run any detection commands.** Extract the database type and connection details directly from `<system_info>`.
+| Request | Preferred skill |
+|---|---|
+| Normal local MoviePilot product operation exposed as an MCP tool | `moviepilot-cli` |
+| Direct REST endpoint call | `moviepilot-api` |
+| Slash commands or plugin/system command dispatch | `command-dispatch` |
+| Manual file organization | `organize-files` |
+| Retry failed transfer history records | `transfer-failed-retry` |
 
-## Executing Queries
+Use this skill as the final fallback for data access or mutation. It may run
+`SELECT`, `INSERT`, `UPDATE`, `DELETE`, and schema-changing statements through
+the bundled script, but broad or destructive writes still require explicit user
+authorization.
 
-### SQLite Mode
+## Commands
 
-Extract the database file path from `<system_info>` (the path inside the parentheses after `SQLite`).
-
-Use `execute_command` with `action=run` to run queries:
-
-```bash
-sqlite3 -header -column <DB_PATH> "YOUR SQL QUERY HERE;"
-```
-
-For JSON-formatted output (easier to parse):
+List tables:
 
 ```bash
-sqlite3 -json <DB_PATH> "YOUR SQL QUERY HERE;"
+python scripts/mp-db.py tables
 ```
 
-**List all tables:**
+Show table schema:
 
 ```bash
-sqlite3 -header -column <DB_PATH> "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+python scripts/mp-db.py schema downloadhistory
 ```
 
-**View table schema:**
+Run a read query:
 
 ```bash
-sqlite3 <DB_PATH> ".schema tablename"
+python scripts/mp-db.py query "SELECT COUNT(*) AS total FROM downloadhistory"
 ```
 
-### PostgreSQL Mode
-
-Extract the connection parameters from `<system_info>` (parse `user:password@host:port/database` from the parentheses after `PostgreSQL`).
-
-Use `execute_command` with `action=run` to run queries via `psql`:
+Read SQL from stdin or a file:
 
 ```bash
-PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "YOUR SQL QUERY HERE;"
+python scripts/mp-db.py query --file /path/to/query.sql
 ```
 
-**List all tables:**
+Run a write statement:
 
 ```bash
-PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;"
+python scripts/mp-db.py write "UPDATE subscribe SET state = 'S' WHERE id = 123"
 ```
 
-**View table schema:**
+`query --write` is also supported for compatibility, but prefer the `write` subcommand for `INSERT`, `UPDATE`, `DELETE`, and schema changes.
 
-```bash
-PGPASSWORD=<password> psql -h <host> -p <port> -U <user> -d <database> -c "\d tablename"
-```
+## Workflow
 
-## Interpret Results
+1. Prefer existing MoviePilot tools or APIs for normal product workflows.
+2. Use this skill for direct database inspection only when no existing tool covers the request.
+3. For unknown schema, run `tables` first, then `schema <table>`.
+4. For `SELECT` queries, execute directly with a narrow projection and an explicit `LIMIT` when reading rows.
+5. For `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, or `REPLACE`, use `write` and report the affected row count.
 
-After executing the query, analyze the results and present them in a clear, user-friendly format. Use aggregation, sorting, and filtering as needed.
+## Built-in Safety
 
-## Database Schema Reference
-
-MoviePilot uses the following core tables:
-
-### downloadhistory (下载历史)
-Key columns: `id`, `path`, `type`, `title`, `year`, `tmdbid`, `imdbid`, `doubanid`, `seasons`, `episodes`, `downloader`, `download_hash`, `torrent_name`, `torrent_site`, `userid`, `username`, `date`, `media_category`
-
-### downloadfiles (下载文件)
-Key columns: `id`, `downloader`, `download_hash`, `fullpath`, `savepath`, `filepath`, `torrentname`, `state`
-
-### transferhistory (整理历史)
-Key columns: `id`, `src`, `dest`, `mode`, `type`, `category`, `title`, `year`, `tmdbid`, `seasons`, `episodes`, `download_hash`, `status` (boolean: true=success, false=failed), `errmsg`, `date`
-
-### subscribe (订阅)
-Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `lack_episode`, `state` ('N'=new, 'R'=running, 'S'=paused), `filter`, `include`, `exclude`, `quality`, `resolution`, `sites`, `best_version`, `best_version_full`, `date`, `username`
-
-### subscribehistory (订阅历史)
-Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `date`, `username`
-
-### user (用户)
-Key columns: `id`, `name`, `email`, `is_active`, `is_superuser`, `permissions`, `settings`
-
-### site (站点)
-Key columns: `id`, `name`, `domain`, `url`, `pri` (priority), `cookie`, `proxy`, `is_active`, `downloader`, `limit_interval`, `limit_count`
-
-### siteuserdata (站点用户数据)
-Key columns: `id`, `domain`, `name`, `username`, `user_level`, `bonus`, `upload`, `download`, `ratio`, `seeding`, `leeching`, `seeding_size`, `updated_day`
-
-### sitestatistic (站点统计)
-Key columns: `id`, `domain`, `success`, `fail`, `seconds`, `lst_state`, `lst_mod_date`
-
-### mediaserveritem (媒体库条目)
-Key columns: `id`, `server`, `library`, `item_id`, `item_type`, `title`, `original_title`, `year`, `tmdbid`, `imdbid`, `tvdbid`, `path`
-
-### systemconfig (系统配置)
-Key columns: `id`, `key`, `value` (JSON)
-
-### userconfig (用户配置)
-Key columns: `id`, `username`, `key`, `value` (JSON)
-
-### plugindata (插件数据)
-Key columns: `id`, `plugin_id`, `key`, `value` (JSON)
-
-### message (消息)
-Key columns: `id`, `channel`, `source`, `mtype`, `title`, `text`, `image`, `link`, `userid`, `reg_time`
-
-### workflow (工作流)
-Key columns: `id`, `name`, `description`, `timer`, `trigger_type`, `event_type`, `state` ('W'=waiting, 'R'=running), `run_count`, `actions`, `flows`, `last_time`
-
-### passkey (通行密钥)
-Key columns: `id`, `user_id`, `credential_id`, `public_key`, `name`, `created_at`, `last_used_at`, `is_active`
-
-### siteicon (站点图标)
-Key columns: `id`, `name`, `domain`, `url`, `base64`
-
-## Common Query Examples
-
-### Count total downloads
-```sql
-SELECT COUNT(*) AS total FROM downloadhistory;
-```
-
-### Recent download history
-```sql
-SELECT title, year, type, torrent_site, date FROM downloadhistory ORDER BY id DESC LIMIT 10;
-```
-
-### Failed transfers
-```sql
-SELECT id, title, src, errmsg, date FROM transferhistory WHERE status = 0 ORDER BY id DESC LIMIT 10;
-```
-
-### Active subscriptions
-```sql
-SELECT name, year, type, season, state, lack_episode FROM subscribe WHERE state = 'R';
-```
-
-### Site upload/download statistics
-```sql
-SELECT name, domain, upload, download, ratio, bonus, seeding, user_level FROM siteuserdata ORDER BY upload DESC;
-```
-
-### Media library statistics
-```sql
-SELECT server, library, COUNT(*) AS count FROM mediaserveritem GROUP BY server, library;
-```
-
-### Site access success rate
-```sql
-SELECT domain, success, fail, ROUND(success * 100.0 / (success + fail), 1) AS success_rate FROM sitestatistic WHERE success + fail > 0 ORDER BY success_rate DESC;
-```
-
-### Plugin data inspection
-```sql
-SELECT plugin_id, key FROM plugindata ORDER BY plugin_id, key;
-```
-
-### Delete old download history (write operation)
-```sql
-DELETE FROM downloadhistory WHERE date < '2024-01-01';
-```
-
-### Update subscription state (write operation)
-```sql
-UPDATE subscribe SET state = 'S' WHERE id = 123;
-```
-
-### Clean up failed transfer records (write operation)
-```sql
-DELETE FROM transferhistory WHERE status = 0 AND date < '2024-06-01';
-```
+- `query` defaults to read-only mode.
+- `write` executes data updates and schema-changing statements directly.
+- `query --write` remains available as a compatibility alias for write statements.
+- Multiple SQL statements in one invocation are rejected.
+- Plain `SELECT` queries get a default `LIMIT 100` if no limit is present.
+- Query results are returned exactly as stored. The agent may use sensitive values internally when needed, but must not echo secrets in the final user-facing response unless the user explicitly asks to inspect that value.
 
 ## Safety Rules
 
-1. **Confirm before writing** — For any `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, or `TRUNCATE` operation, always describe what the statement will do and ask the user to confirm before executing. For `SELECT` queries, execute directly without confirmation
-2. **Back up before destructive operations** — Before executing `DELETE`, `DROP`, or `TRUNCATE` on important tables, suggest the user back up the data first (e.g., export with `.dump` for SQLite or `pg_dump` for PostgreSQL)
-3. **Use WHERE clauses** — Never run `UPDATE` or `DELETE` without a `WHERE` clause unless the user explicitly intends to affect all rows
-4. **Use LIMIT for queries** — When querying large tables with `SELECT`, add `LIMIT` to prevent excessive output
-5. **Sensitive data** — The `site` table contains `cookie`, `apikey`, and `token` fields. NEVER display these values to the user. Exclude them from SELECT or replace with `'***'`
-6. **Password data** — The `user` table contains `hashed_password` and `otp_secret` fields. NEVER display these values
-7. **Output limits** — If the query results are very long, summarize or truncate them
+1. Confirm before destructive or broad write operations when the user has not already clearly authorized the exact change.
+2. Suggest a backup before destructive operations such as `DELETE`, `DROP`, or `TRUNCATE`.
+3. Never run `UPDATE` or `DELETE` without a `WHERE` clause unless the user explicitly intends to affect all rows.
+4. Raw secrets, cookies, passkeys, hashed passwords, OTP secrets, API keys, or tokens may appear in tool output. Use them only for the requested operation and avoid repeating them in the final response unless explicitly requested.
+5. Keep output small. Summarize large results instead of dumping them.
 
-## SQL Dialect Differences
+## Core Tables
 
-When writing queries, be aware of differences between SQLite and PostgreSQL:
+### downloadhistory
+Key columns: `id`, `path`, `type`, `title`, `year`, `tmdbid`, `imdbid`, `doubanid`, `seasons`, `episodes`, `downloader`, `download_hash`, `torrent_name`, `torrent_site`, `userid`, `username`, `date`, `media_category`
+
+### downloadfiles
+Key columns: `id`, `downloader`, `download_hash`, `fullpath`, `savepath`, `filepath`, `torrentname`, `state`
+
+### transferhistory
+Key columns: `id`, `src`, `dest`, `mode`, `type`, `category`, `title`, `year`, `tmdbid`, `seasons`, `episodes`, `download_hash`, `status`, `errmsg`, `date`
+
+### subscribe
+Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `lack_episode`, `state`, `filter`, `include`, `exclude`, `quality`, `resolution`, `sites`, `best_version`, `best_version_full`, `date`, `username`
+
+### subscribehistory
+Key columns: `id`, `name`, `year`, `type`, `tmdbid`, `doubanid`, `season`, `total_episode`, `start_episode`, `date`, `username`
+
+### user
+Key columns: `id`, `name`, `email`, `is_active`, `is_superuser`, `permissions`, `settings`
+
+### site
+Key columns: `id`, `name`, `domain`, `url`, `pri`, `cookie`, `proxy`, `is_active`, `downloader`, `limit_interval`, `limit_count`
+
+### siteuserdata
+Key columns: `id`, `domain`, `name`, `username`, `user_level`, `bonus`, `upload`, `download`, `ratio`, `seeding`, `leeching`, `seeding_size`, `updated_day`
+
+### sitestatistic
+Key columns: `id`, `domain`, `success`, `fail`, `seconds`, `lst_state`, `lst_mod_date`
+
+### mediaserveritem
+Key columns: `id`, `server`, `library`, `item_id`, `item_type`, `title`, `original_title`, `year`, `tmdbid`, `imdbid`, `tvdbid`, `path`
+
+### systemconfig
+Key columns: `id`, `key`, `value`
+
+### userconfig
+Key columns: `id`, `username`, `key`, `value`
+
+### plugindata
+Key columns: `id`, `plugin_id`, `key`, `value`
+
+### message
+Key columns: `id`, `channel`, `source`, `mtype`, `title`, `text`, `image`, `link`, `userid`, `reg_time`
+
+### workflow
+Key columns: `id`, `name`, `description`, `timer`, `trigger_type`, `event_type`, `state`, `run_count`, `actions`, `flows`, `last_time`
+
+### passkey
+Key columns: `id`, `user_id`, `credential_id`, `public_key`, `name`, `created_at`, `last_used_at`, `is_active`
+
+### siteicon
+Key columns: `id`, `name`, `domain`, `url`, `base64`
+
+## Common Queries
+
+Total downloads:
+
+```sql
+SELECT COUNT(*) AS total FROM downloadhistory
+```
+
+Recent download history:
+
+```sql
+SELECT title, year, type, torrent_site, date FROM downloadhistory ORDER BY id DESC LIMIT 10
+```
+
+Failed transfers:
+
+```sql
+SELECT id, title, src, errmsg, date FROM transferhistory WHERE status = 0 ORDER BY id DESC LIMIT 10
+```
+
+Active subscriptions:
+
+```sql
+SELECT name, year, type, season, state, lack_episode FROM subscribe WHERE state = 'R' LIMIT 50
+```
+
+Site upload/download statistics:
+
+```sql
+SELECT name, domain, upload, download, ratio, bonus, seeding, user_level FROM siteuserdata ORDER BY upload DESC LIMIT 50
+```
+
+Media library statistics:
+
+```sql
+SELECT server, library, COUNT(*) AS count FROM mediaserveritem GROUP BY server, library
+```
+
+Site access success rate:
+
+```sql
+SELECT domain, success, fail, ROUND(success * 100.0 / (success + fail), 1) AS success_rate FROM sitestatistic WHERE success + fail > 0 ORDER BY success_rate DESC LIMIT 50
+```
+
+Plugin data keys:
+
+```sql
+SELECT plugin_id, key FROM plugindata ORDER BY plugin_id, key LIMIT 100
+```
+
+## SQL Dialect Notes
 
 | Feature | SQLite | PostgreSQL |
-|---------|--------|------------|
+|---|---|---|
 | Boolean values | `0` / `1` | `false` / `true` |
-| String concat | `\|\|` | `\|\|` or `CONCAT()` |
+| String concat | `||` | `||` or `CONCAT()` |
 | Current time | `datetime('now')` | `NOW()` |
-| LIMIT syntax | `LIMIT n` | `LIMIT n` |
 | JSON access | `json_extract(col, '$.key')` | `col->>'key'` |
-| Case sensitivity | Case-insensitive by default | Case-sensitive |
-| LIKE | Case-insensitive | Use `ILIKE` for case-insensitive |
+| Case-insensitive match | `LIKE` | `ILIKE` |
 
 ## Troubleshooting
 
-- **sqlite3 not found**: The `sqlite3` CLI should be pre-installed in the MoviePilot Docker container. If missing, you can try using Python: `python3 -c "import sqlite3; ..."`
-- **psql not found**: For PostgreSQL, if `psql` is not available, use Python: `python3 -c "import psycopg2; ..."`
-- **Permission denied**: Database queries require admin privileges
-- **Table not found**: Use the "list all tables" query first to verify table names
+- Missing dependency: run inside the MoviePilot project environment so SQLAlchemy and database drivers are available.
+- Connection failure: verify MoviePilot config with `moviepilot doctor`.
+- Table not found: run `python scripts/mp-db.py tables`, then inspect the table with `schema`.

@@ -1,6 +1,6 @@
 ---
 name: moviepilot-update
-version: 2
+version: 3
 description: Use this skill when you need to check MoviePilot versions, restart MoviePilot, or trigger a MoviePilot upgrade. Prefer the built-in system APIs instead of docker commands or manual file replacement. If auto-update on restart is already enabled, just restart. If it is disabled, call the upgrade API so MoviePilot performs a one-shot upgrade and restart.
 ---
 
@@ -12,13 +12,7 @@ Use this skill for MoviePilot restart and upgrade operations.
 
 ## Setup
 
-This skill reuses the `moviepilot-api` client configuration.
-
-Configure host and API key once:
-
-```bash
-python ../moviepilot-api/scripts/mp-api.py configure --host http://localhost:3000 --apikey <API_TOKEN>
-```
+This skill reuses the `moviepilot-api` client. When running inside the MoviePilot project, the API client imports `app.core.config.settings` and reads the local host, port, and API token directly. Do not ask the user for `API_TOKEN`.
 
 ## Preferred Commands
 
