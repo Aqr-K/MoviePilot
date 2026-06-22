@@ -215,6 +215,9 @@ async def close_database():
     关闭所有数据库连接并清理资源
     """
     try:
+        # 释放所有插件自管理的独立数据库容器
+        from app.db.manager import db_manager
+        db_manager.dispose_all()
         # 释放同步连接池
         Engine.dispose()  # noqa
         # 释放异步连接池
@@ -438,12 +441,12 @@ class Base(DeclarativeBase):
 
     @classmethod
     @db_query
-    def get(cls, db: Session, rid: int) -> Self:
+    def get(cls, db: Session, rid: int) -> Optional[Self] :
         return db.execute(select(cls).where(and_(cls.id == rid))).scalars().first()
 
     @classmethod
     @async_db_query
-    async def async_get(cls, db: AsyncSession, rid: int) -> Self:
+    async def async_get(cls, db: AsyncSession, rid: int) -> Optional[Self] :
         result = await db.execute(select(cls).where(and_(cls.id == rid)))
         return result.scalars().first()
 
@@ -487,20 +490,20 @@ class Base(DeclarativeBase):
     @classmethod
     @db_query
     def list(cls, db: Session) -> List[Self]:
-        return db.execute(select(cls)).scalars().all()
+        return list(db.execute(select(cls)).scalars().all())
 
     @classmethod
     @async_db_query
-    async def async_list(cls, db: AsyncSession) -> Sequence[Self]:
+    async def async_list(cls, db: AsyncSession) -> List[Self]:
         result = await db.execute(select(cls))
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     def to_dict(self):
         return {c.name: getattr(self, c.name, None) for c in self.__table__.columns}  # noqa
 
-    @declared_attr
-    def __tablename__(self) -> str:
-        return self.__name__.lower()
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return cls.__name__.lower()
 
 
 class DbOper:

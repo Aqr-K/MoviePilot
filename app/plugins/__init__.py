@@ -323,6 +323,33 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_models(self) -> List[Type]:
+        """
+        声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。
+
+        返回继承自 build_plugin_base(本插件ID) 的 ORM 模型【类】列表（非实例）。
+        这些模型挂在插件专属的独立 MetaData 上，落到插件独立的 .db 文件 / schema，
+        与核心库及其它插件完全隔离；框架（PluginManager 启停）据此自动建表/卸载删库，
+        无需插件自行管理 Engine/Session。默认不声明任何表。
+
+        用法：在插件模块内 `PluginBase = build_plugin_base(self.__class__.__name__)`，
+        定义 `class XxxModel(PluginBase): ...`，再于此返回 `[XxxModel, ...]`；
+        读写用 `self.get_plugin_db().session()`（即「自会话管理」）。
+
+        [XxxModel, YyyModel, ...]
+        """
+        return []
+
+    def provides_migration_location(self) -> Optional[Path]:
+        """
+        【可选】声明本插件 Alembic 迁移目录（启用 per-plugin 迁移链而非 create_all）。
+
+        返回包含 env.py（用 app.db.plugin_migration.write_plugin_alembic_env 生成）
+        与 versions/ 迁移脚本的目录路径；框架启动插件时自动 upgrade 到 head。
+        返回 None（默认）则走 create_all 直接建表，适合无需演进表结构的插件。
+        """
+        return None
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作
@@ -389,6 +416,17 @@ class _PluginBase(metaclass=ABCMeta):
         if not data_path.exists():
             data_path.mkdir(parents=True)
         return data_path
+
+    def get_plugin_db(self):
+        """
+        获取本插件【独立】的数据库容器（按插件类名自动注册，幂等）。
+
+        返回 app.db.manager.PluginDatabase（持有插件专属 Engine + ScopedSession，
+        落 PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db）。配合 provides_models()
+        声明的模型，用 `self.get_plugin_db().session()` 进行读写（自会话管理）。
+        """
+        from app.db.manager import db_manager
+        return db_manager.register_plugin(self.__class__.__name__)
 
     def save_data(self, key: str, value: Any, plugin_id: Optional[str] = None):
         """
