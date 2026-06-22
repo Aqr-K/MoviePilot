@@ -253,6 +253,15 @@ def test_send_msg_markdown_escaping(telegram):
     assert send_kwargs["text"].startswith("*测试标题*\n")
 
 
+def test_telegramify_new_content_fields_are_used_directly():
+    """新版telegramify对象应直接使用已渲染的MarkdownV2字段"""
+    text_item = SimpleNamespace(content="已转义\\_文本")
+    file_item = SimpleNamespace(caption="已转义\\_说明")
+
+    assert Telegram._telegramify_item_text(text_item) == "已转义\\_文本"
+    assert Telegram._telegramify_item_caption(file_item) == "已转义\\_说明"
+
+
 def test_send_msg_with_html_parse_mode_keeps_html(telegram):
     """HTML模式发送时应保留调用方传入的HTML内容"""
     result = telegram.send_msg(

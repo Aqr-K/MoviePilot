@@ -15,8 +15,15 @@ from telebot.types import (
     InlineKeyboardButton,
     InputMediaPhoto,
 )
-from telegramify_markdown import entities_to_markdownv2, standardize, telegramify  # noqa
-from telegramify_markdown.content import ContentTypes, File, Photo, Text
+from telegramify_markdown import standardize, telegramify  # noqa
+try:
+    from telegramify_markdown import entities_to_markdownv2  # noqa
+except ImportError:
+    entities_to_markdownv2 = None
+try:
+    from telegramify_markdown.content import ContentTypes, File, Photo, Text
+except ImportError:
+    from telegramify_markdown.type import ContentTypes, File, Photo, Text
 
 from app.core.config import settings
 from app.core.context import MediaInfo, Context
@@ -255,14 +262,22 @@ class Telegram:
     @staticmethod
     def _telegramify_item_text(item: Text) -> str:
         """将 telegramify 文本片段转换为 Telegram MarkdownV2 字符串。"""
-        return entities_to_markdownv2(item.text, item.entities)
+        if hasattr(item, "content"):
+            return item.content
+        if entities_to_markdownv2:
+            return entities_to_markdownv2(item.text, item.entities)
+        return standardize(item.text)
 
     @staticmethod
     def _telegramify_item_caption(item: Text | File | Photo) -> str:
         """将 telegramify 文本或媒体片段转换为 Telegram MarkdownV2 caption。"""
         if isinstance(item, Text):
             return Telegram._telegramify_item_text(item)
-        return entities_to_markdownv2(item.caption_text, item.caption_entities)
+        if hasattr(item, "caption"):
+            return item.caption
+        if entities_to_markdownv2:
+            return entities_to_markdownv2(item.caption_text, item.caption_entities)
+        return standardize(item.caption_text)
 
     @staticmethod
     def _normalize_parse_mode(parse_mode: Optional[str] = None) -> str:
