@@ -4,7 +4,7 @@ from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, 
 from sqlalchemy import NullPool, QueuePool, and_, create_engine, inspect, text, select, delete, Integer, \
     Sequence, Identity
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import Mapped, Session, as_declarative, declared_attr, mapped_column, scoped_session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, declared_attr, mapped_column, scoped_session, sessionmaker
 
 from app.core.config import settings
 
@@ -215,6 +215,9 @@ async def close_database():
     关闭所有数据库连接并清理资源
     """
     try:
+        # 释放所有插件自管理的独立数据库容器
+        from app.db.manager import db_manager
+        db_manager.dispose_all()
         # 释放同步连接池
         Engine.dispose()  # noqa
         # 释放异步连接池
@@ -421,8 +424,8 @@ def async_db_query(func):
     return wrapper
 
 
-@as_declarative()
-class Base:
+class Base(DeclarativeBase):
+    __allow_unmapped__ = True
     id: Any
     __name__: str
 
@@ -438,12 +441,12 @@ class Base:
 
     @classmethod
     @db_query
-    def get(cls, db: Session, rid: int) -> Self:
-        return db.query(cls).filter(and_(cls.id == rid)).first()
+    def get(cls, db: Session, rid: int) -> Optional[Self] :
+        return db.execute(select(cls).where(and_(cls.id == rid))).scalars().first()
 
     @classmethod
     @async_db_query
-    async def async_get(cls, db: AsyncSession, rid: int) -> Self:
+    async def async_get(cls, db: AsyncSession, rid: int) -> Optional[Self] :
         result = await db.execute(select(cls).where(and_(cls.id == rid)))
         return result.scalars().first()
 
@@ -464,7 +467,7 @@ class Base:
     @classmethod
     @db_update
     def delete(cls, db: Session, rid):
-        db.query(cls).filter(and_(cls.id == rid)).delete()
+        db.execute(delete(cls).where(and_(cls.id == rid)))
 
     @classmethod
     @async_db_update
@@ -477,7 +480,7 @@ class Base:
     @classmethod
     @db_update
     def truncate(cls, db: Session):
-        db.query(cls).delete()
+        db.execute(delete(cls))
 
     @classmethod
     @async_db_update
@@ -487,20 +490,20 @@ class Base:
     @classmethod
     @db_query
     def list(cls, db: Session) -> List[Self]:
-        return db.query(cls).all()
+        return list(db.execute(select(cls)).scalars().all())
 
     @classmethod
     @async_db_query
-    async def async_list(cls, db: AsyncSession) -> Sequence[Self]:
+    async def async_list(cls, db: AsyncSession) -> List[Self]:
         result = await db.execute(select(cls))
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     def to_dict(self):
         return {c.name: getattr(self, c.name, None) for c in self.__table__.columns}  # noqa
 
-    @declared_attr
-    def __tablename__(self) -> str:
-        return self.__name__.lower()
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return cls.__name__.lower()
 
 
 class DbOper:
