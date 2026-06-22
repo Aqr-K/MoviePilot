@@ -298,56 +298,68 @@ def test_empty_tool_selection_logs_info_not_warning():
         SimpleNamespace(name="search", description="Search for information"),
         SimpleNamespace(name="calendar", description="Manage events"),
     ]
+    model = _FakeModel(content='{"tools": []}')
     middleware = tool_selector_module.ToolSelectorMiddleware(
         max_tools=2,
         selection_tools=tools,
     )
+    middleware.model = model
     request = _FakeRequest(
         tools=tools,
         messages=[HumanMessage(content="帮我安排明天的行程并查天气")],
-        model=_FakeModel(),
+        model=model,
     )
 
     with patch.object(tool_selector_module.logger, "info") as logger_info, \
             patch.object(tool_selector_module.logger, "warning") as logger_warning:
-        result = middleware._process_selection_response(
-            {"tools": []},
-            available_tools=tools,
-            valid_tool_names=[tool.name for tool in tools],
-            request=request,
+        state_update = asyncio.run(
+            middleware.abefore_agent(request.state, runtime=None, config=None)
         )
 
-    assert [tool.name for tool in result.tools] == ["search", "calendar"]
-    logger_info.assert_called_once_with("工具筛选结果为空，将恢复使用所有工具。")
+    assert state_update == {"selected_tool_names": ["search", "calendar"]}
+    logger_info.assert_called_once_with("工具筛选结果为空，将恢复使用所有工具（共 2 个）。")
     logger_warning.assert_not_called()
 
 
-def test_process_selection_response_logs_selected_tools():
+def test_abefore_agent_logs_selected_tools():
     """工具筛选返回有效工具时应记录最终生效的工具名。"""
     tools = [
         SimpleNamespace(name="search", description="Search for information"),
         SimpleNamespace(name="calendar", description="Manage events"),
     ]
+    model = _FakeModel(content='{"tools": ["calendar"]}')
     middleware = tool_selector_module.ToolSelectorMiddleware(
         max_tools=2,
         selection_tools=tools,
     )
+    middleware.model = model
     request = _FakeRequest(
         tools=tools,
         messages=[HumanMessage(content="帮我安排明天的行程并查天气")],
-        model=_FakeModel(),
+        model=model,
     )
 
     with patch.object(tool_selector_module.logger, "info") as logger_info:
-        result = middleware._process_selection_response(
-            {"tools": ["calendar"]},
-            available_tools=tools,
-            valid_tool_names=[tool.name for tool in tools],
-            request=request,
+        state_update = asyncio.run(
+            middleware.abefore_agent(request.state, runtime=None, config=None)
         )
 
-    assert [tool.name for tool in result.tools] == ["calendar"]
+    assert state_update == {"selected_tool_names": ["calendar"]}
     logger_info.assert_called_once_with("工具筛选结果: calendar")
+
+
+def test_abefore_agent_logs_skipped_selection():
+    """工具筛选未启用时也应记录跳过原因。"""
+    middleware = tool_selector_module.ToolSelectorMiddleware(selection_tools=[])
+    request_state = {"messages": [HumanMessage(content="帮我安排明天的行程")]}
+
+    with patch.object(tool_selector_module.logger, "info") as logger_info:
+        state_update = asyncio.run(
+            middleware.abefore_agent(request_state, runtime=None, config=None)
+        )
+
+    assert state_update == {"selected_tool_names": None}
+    logger_info.assert_called_once_with("工具筛选跳过: 没有可筛选工具。")
 
 
 def test_normalize_selection_response_accepts_code_fence_json():
