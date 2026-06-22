@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -289,6 +290,64 @@ def test_tool_selection_failure_falls_back_to_all_tools():
     )
 
     assert state_update == {"selected_tool_names": ["search", "calendar"]}
+
+
+def test_empty_tool_selection_logs_info_not_warning():
+    """工具筛选返回空数组时应按信息日志记录降级。"""
+    tools = [
+        SimpleNamespace(name="search", description="Search for information"),
+        SimpleNamespace(name="calendar", description="Manage events"),
+    ]
+    middleware = tool_selector_module.ToolSelectorMiddleware(
+        max_tools=2,
+        selection_tools=tools,
+    )
+    request = _FakeRequest(
+        tools=tools,
+        messages=[HumanMessage(content="帮我安排明天的行程并查天气")],
+        model=_FakeModel(),
+    )
+
+    with patch.object(tool_selector_module.logger, "info") as logger_info, \
+            patch.object(tool_selector_module.logger, "warning") as logger_warning:
+        result = middleware._process_selection_response(
+            {"tools": []},
+            available_tools=tools,
+            valid_tool_names=[tool.name for tool in tools],
+            request=request,
+        )
+
+    assert [tool.name for tool in result.tools] == ["search", "calendar"]
+    logger_info.assert_called_once_with("工具筛选结果为空，将恢复使用所有工具。")
+    logger_warning.assert_not_called()
+
+
+def test_process_selection_response_logs_selected_tools():
+    """工具筛选返回有效工具时应记录最终生效的工具名。"""
+    tools = [
+        SimpleNamespace(name="search", description="Search for information"),
+        SimpleNamespace(name="calendar", description="Manage events"),
+    ]
+    middleware = tool_selector_module.ToolSelectorMiddleware(
+        max_tools=2,
+        selection_tools=tools,
+    )
+    request = _FakeRequest(
+        tools=tools,
+        messages=[HumanMessage(content="帮我安排明天的行程并查天气")],
+        model=_FakeModel(),
+    )
+
+    with patch.object(tool_selector_module.logger, "info") as logger_info:
+        result = middleware._process_selection_response(
+            {"tools": ["calendar"]},
+            available_tools=tools,
+            valid_tool_names=[tool.name for tool in tools],
+            request=request,
+        )
+
+    assert [tool.name for tool in result.tools] == ["calendar"]
+    logger_info.assert_called_once_with("工具筛选结果: calendar")
 
 
 def test_normalize_selection_response_accepts_code_fence_json():
