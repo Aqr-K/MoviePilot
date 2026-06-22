@@ -368,3 +368,120 @@ def test_setup_plugin_database_uses_migrations_when_location_declared():
     finally:
         teardown_plugin_database("MigHookPlugin")
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_setup_plugin_database_creates_pg_schema_before_tables(monkeypatch):
+    """PG 模式下 setup_plugin_database 必须先 CREATE SCHEMA、再在该事务连接上建表。
+
+    回归保护（Bug #1）：旧实现直接 ``metadata.create_all(bundle.engine)``，对 PG 的
+    schema 路由引擎而言目标 schema 从未创建，建表必报 ``schema ... does not exist``。
+    PG 的 SQL 无法在 SQLite 测试环境端到端执行，故以记录式 mock 断言 DDL 内容与顺序。
+    """
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.orm import Mapped, mapped_column
+    from sqlalchemy.schema import CreateSchema
+
+    from app.core.config import settings
+    from app.db.manager import db_manager
+    from app.db.plugin import build_plugin_base, setup_plugin_database
+
+    PluginBase = build_plugin_base("PgHookPlugin")
+
+    class Doc(PluginBase):
+        __tablename__ = "doc"
+        id: Mapped[int] = mapped_column(primary_key=True)
+
+    class PgHookPlugin:
+        def provides_models(self):
+            return [Doc]
+
+    # build_plugin_base 已按当前（SQLite）模式注册，先注销再以 PG 模式重注册
+    db_manager.dispose("PgHookPlugin")
+    original = settings.DB_TYPE
+    settings.DB_TYPE = "postgresql"
+    try:
+        bundle = db_manager.register_plugin("PgHookPlugin")
+        assert bundle.schema == "plugin_PgHookPlugin"
+
+        # 记录式连接：捕获在事务内执行的 DDL 与 create_all 的绑定目标及调用顺序
+        events = []
+        conn = MagicMock(name="conn")
+        conn.execute.side_effect = lambda stmt, *a, **k: events.append(("execute", stmt))
+        begin_ctx = MagicMock(name="begin_ctx")
+        begin_ctx.__enter__.return_value = conn
+        begin_ctx.__exit__.return_value = False
+        fake_engine = MagicMock(name="engine")
+        fake_engine.begin.return_value = begin_ctx
+        bundle.engine = fake_engine
+
+        # 记录 create_all 的绑定目标（旧 bug 会绑定到 engine，修复后应绑定到事务 conn）
+        monkeypatch.setattr(
+            Doc.metadata,
+            "create_all",
+            lambda bind=None, *a, **k: events.append(("create_all", bind)),
+        )
+
+        setup_plugin_database(PgHookPlugin())
+
+        kinds = [e[0] for e in events]
+        # 必须执行了 DDL（旧实现直接对 engine.create_all，不会进 begin()/execute）
+        assert "execute" in kinds, "PG 路径未执行任何 DDL —— schema 未被创建（Bug #1）"
+        schema_ddls = [s for k, s in events if k == "execute" and isinstance(s, CreateSchema)]
+        assert schema_ddls, "未发出 CREATE SCHEMA"
+        assert "plugin_PgHookPlugin" in str(schema_ddls[0].element)
+        # 顺序：先建 schema，后建表
+        assert "create_all" in kinds, "未建表"
+        assert kinds.index("execute") < kinds.index("create_all"), "CREATE SCHEMA 必须先于建表"
+        # 建表绑定到事务连接（schema 路由生效），而非直接 engine
+        create_all_binds = [b for k, b in events if k == "create_all"]
+        assert create_all_binds == [conn], "建表应绑定到已建 schema 的事务连接"
+    finally:
+        db_manager.dispose("PgHookPlugin")
+        settings.DB_TYPE = original
+
+
+def test_setup_plugin_database_delegates_to_create_tables(monkeypatch):
+    """setup_plugin_database 的默认建表路径必须经由 db_manager.create_tables。
+
+    create_tables 是唯一同时处理「PG 建 schema」与「建表」的入口；直接 create_all
+    会绕过建 schema 逻辑（Bug #1 根因）。本测试锁定接线、防止回归到直接 create_all。
+    """
+    from sqlalchemy import String, inspect
+    from sqlalchemy.orm import Mapped, mapped_column
+
+    from app.db.manager import db_manager
+    from app.db.plugin import (
+        build_plugin_base,
+        setup_plugin_database,
+        teardown_plugin_database,
+    )
+
+    PluginBase = build_plugin_base("DelegPlugin")
+
+    class M(PluginBase):
+        __tablename__ = "m"
+        id: Mapped[int] = mapped_column(primary_key=True)
+        s: Mapped[str] = mapped_column(String)
+
+    class DelegPlugin:
+        def provides_models(self):
+            return [M]
+
+    calls = []
+    real_create_tables = db_manager.create_tables
+
+    def spy(plugin_id):
+        calls.append(plugin_id)
+        return real_create_tables(plugin_id)
+
+    monkeypatch.setattr(db_manager, "create_tables", spy)
+    try:
+        setup_plugin_database(DelegPlugin())
+        # 必须经由 create_tables（含建 schema 逻辑），而非直接 metadata.create_all
+        assert calls == ["DelegPlugin"]
+        # SQLite 下仍正确建表
+        bundle = db_manager.get("DelegPlugin")
+        assert "m" in inspect(bundle.engine).get_table_names()
+    finally:
+        teardown_plugin_database("DelegPlugin")
