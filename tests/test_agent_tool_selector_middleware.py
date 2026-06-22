@@ -292,8 +292,8 @@ def test_tool_selection_failure_falls_back_to_all_tools():
     assert state_update == {"selected_tool_names": ["search", "calendar"]}
 
 
-def test_empty_tool_selection_logs_info_not_warning():
-    """工具筛选返回空数组时应按信息日志记录降级。"""
+def test_empty_tool_selection_keeps_empty_tool_list():
+    """工具筛选返回空数组时应保持空工具列表。"""
     tools = [
         SimpleNamespace(name="search", description="Search for information"),
         SimpleNamespace(name="calendar", description="Manage events"),
@@ -310,15 +310,53 @@ def test_empty_tool_selection_logs_info_not_warning():
         model=model,
     )
 
+    async def handler(updated_request):
+        return updated_request
+
     with patch.object(tool_selector_module.logger, "info") as logger_info, \
             patch.object(tool_selector_module.logger, "warning") as logger_warning:
         state_update = asyncio.run(
             middleware.abefore_agent(request.state, runtime=None, config=None)
         )
+        request.state.update(state_update)
+        result = asyncio.run(middleware.awrap_model_call(request, handler))
 
-    assert state_update == {"selected_tool_names": ["search", "calendar"]}
-    logger_info.assert_called_once_with("工具筛选结果为空，将恢复使用所有工具（共 2 个）。")
+    assert state_update == {"selected_tool_names": []}
+    assert result.tools == []
+    logger_info.assert_called_once_with("工具筛选结果: 无有效工具")
     logger_warning.assert_not_called()
+
+
+def test_empty_tool_selection_keeps_always_included_tools():
+    """工具筛选返回空数组时仍应保留必须包括的工具。"""
+    tools = [
+        SimpleNamespace(name="search", description="Search for information"),
+        SimpleNamespace(name="skill", description="Run skill"),
+    ]
+    model = _FakeModel(content='{"tools": []}')
+    middleware = tool_selector_module.ToolSelectorMiddleware(
+        max_tools=2,
+        selection_tools=tools,
+        always_include=["skill"],
+    )
+    middleware.model = model
+    request = _FakeRequest(
+        tools=tools,
+        messages=[HumanMessage(content="不用工具，直接回答")],
+        model=model,
+    )
+
+    async def handler(updated_request):
+        return updated_request
+
+    state_update = asyncio.run(
+        middleware.abefore_agent(request.state, runtime=None, config=None)
+    )
+    request.state.update(state_update)
+    result = asyncio.run(middleware.awrap_model_call(request, handler))
+
+    assert state_update == {"selected_tool_names": ["skill"]}
+    assert [tool.name for tool in result.tools] == ["skill"]
 
 
 def test_abefore_agent_logs_selected_tools():

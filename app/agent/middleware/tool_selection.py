@@ -328,7 +328,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             request: ModelRequest[ContextT],
     ) -> ModelRequest[ContextT]:
         """
-        处理工具筛选响应，并保留空结果回退所有工具的 MoviePilot 策略。
+        处理工具筛选响应，并在正常空结果时禁用可筛选工具。
         """
         if response.get("tools") == []:
             always_included_tools: list[BaseTool] = [
@@ -337,10 +337,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
                 if not isinstance(tool, dict) and tool.name in self.always_include
             ]
             provider_tools = [tool for tool in request.tools if isinstance(tool, dict)]
-
-            return request.override(
-                tools=[*available_tools, *always_included_tools, *provider_tools]
-            )
+            return request.override(tools=[*always_included_tools, *provider_tools])
 
         response["tools"] = self._complete_low_count_selection(
             selected_tool_names=[
@@ -427,7 +424,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         """
         limit_instruction = ""
         if self.max_tools:
-            limit_instruction = f"- Select up to {self.max_tools} tools. IF NO TOOLS ARE RELEVANT, DO NOT RETURN AN EMPTY ARRAY. SELECT THE MOST APPLICABLE ONES TO ENSURE THE REQUEST IS HANDLED."
+            limit_instruction = f"- Select up to {self.max_tools} tools. Return an empty array if no tools are relevant."
 
         return (
             f"{selection_request.system_message}\n\n"
@@ -502,9 +499,6 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             selected_text = ", ".join(attempt.selected_tool_names) or "无有效工具"
             logger.info(f"工具筛选结果: {selected_text}")
             return
-        if attempt.status == "empty_fallback":
-            logger.info(f"工具筛选结果为空，将恢复使用所有工具（共 {tool_count} 个）。")
-            return
         if attempt.status == "failed_fallback":
             logger.warning(
                 f"工具筛选失败，将恢复使用所有工具（共 {tool_count} 个）: {attempt.detail}"
@@ -528,9 +522,6 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         这里只复用首次筛选出的客户端工具名；provider-specific 的 dict 工具仍然
         原样保留，避免破坏 LangChain/provider 自身的工具绑定约定。
         """
-        if not selected_tool_names:
-            return request
-
         current_tools_by_name = {
             tool.name: tool for tool in request.tools if not isinstance(tool, dict)
         }
@@ -576,15 +567,10 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
                 selection_request.valid_tool_names,
                 request,
             )
-            status = (
-                "empty_fallback"
-                if response.get("tools") == []
-                else "selected"
-            )
             return _ToolSelectionAttempt(
                 request=modified_request,
                 selected_tool_names=self._extract_selected_tool_names(modified_request),
-                status=status,
+                status="selected",
             )
         except Exception as err:
             return _ToolSelectionAttempt(
@@ -650,7 +636,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         attempt = await self._aselect_request_once_with_status(selection_request)
         self._log_selection_attempt(attempt)
         selected_tool_names = attempt.selected_tool_names
-        return ToolSelectionStateUpdate(selected_tool_names=selected_tool_names or None)
+        return ToolSelectionStateUpdate(selected_tool_names=selected_tool_names)
 
     async def awrap_model_call(
             self,
@@ -674,10 +660,10 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             attempt = await self._aselect_request_once_with_status(request)
             self._log_selection_attempt(attempt)
             request = attempt.request
-            selected_tool_names = attempt.selected_tool_names or None
+            selected_tool_names = attempt.selected_tool_names
             request.state["selected_tool_names"] = selected_tool_names  # noqa
 
-        if selected_tool_names:
+        if selected_tool_names is not None:
             request = self._apply_selected_tools(request, selected_tool_names)
 
         return await handler(request)
