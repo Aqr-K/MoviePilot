@@ -9,7 +9,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.chain.search import SearchChain
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.sites import SitesHelper
+from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
 from app.schemas.types import MediaType, SystemConfigKey
 from ._torrent_search_utils import (
