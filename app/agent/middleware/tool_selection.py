@@ -321,7 +321,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         处理工具筛选响应，并保留空结果回退所有工具的 MoviePilot 策略。
         """
         if response.get("tools") == []:
-            logger.warning("工具筛选结果为空，将恢复使用所有工具。")
+            logger.info("工具筛选结果为空，将恢复使用所有工具。")
 
             always_included_tools: list[BaseTool] = [
                 tool
@@ -343,12 +343,15 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             valid_tool_names=valid_tool_names,
             available_tools=available_tools,
         )
-        return super()._process_selection_response(
+        modified_request = super()._process_selection_response(
             response,
             available_tools,
             valid_tool_names,
             request,
         )
+        selected_tool_names = self._extract_selected_tool_names(modified_request)
+        logger.info(f"工具筛选结果: {', '.join(selected_tool_names) or '无有效工具'}")
+        return modified_request
 
     @staticmethod
     def _parse_json_object(text: str) -> dict[str, Any]:
