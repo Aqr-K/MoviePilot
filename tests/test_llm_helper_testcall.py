@@ -589,6 +589,59 @@ class LlmHelperTestCallTest(unittest.TestCase):
         )
         self.assertEqual(llm_calls[0].get("default_headers"), {"X-Test": "1"})
 
+    def test_get_llm_attaches_runtime_metadata(self):
+        """LLM 实例应带上内部 runtime 元数据，供 Agent 中间件判断兼容分支。"""
+
+        class _FakeProviderManager:
+            async def resolve_runtime(self, **kwargs):
+                return {
+                    "provider_id": kwargs["provider_id"],
+                    "runtime": "anthropic_compatible",
+                    "model_id": kwargs["model"],
+                    "api_key": kwargs["api_key"],
+                    "base_url": kwargs["base_url"],
+                    "default_headers": None,
+                    "use_responses_api": None,
+                    "model_record": None,
+                    "model_metadata": None,
+                }
+
+        class _FakeChatAnthropic:
+            def __init__(self, **kwargs):
+                self.model = kwargs["model"]
+                self.profile = None
+
+        provider_module = ModuleType("app.agent.llm.provider")
+        provider_module.LLMProviderManager = _FakeProviderManager
+        anthropic_module = ModuleType("langchain_anthropic")
+        anthropic_module.ChatAnthropic = _FakeChatAnthropic
+
+        with patch.dict(
+            sys.modules,
+            {
+                "app.agent.llm.provider": provider_module,
+                "langchain_anthropic": anthropic_module,
+            },
+        ):
+            model = asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="minimax",
+                    model="MiniMax-M2.7",
+                    api_key="sk-test",
+                    base_url="https://api.minimaxi.com/anthropic/v1",
+                )
+            )
+
+        self.assertEqual(
+            getattr(model, "_moviepilot_llm_runtime"),
+            "anthropic_compatible",
+        )
+        self.assertEqual(getattr(model, "_moviepilot_llm_provider_id"), "minimax")
+        self.assertEqual(
+            getattr(model, "_moviepilot_llm_base_url"),
+            "https://api.minimaxi.com/anthropic/v1",
+        )
+
     def test_get_llm_applies_proxy_only_when_enabled(self):
         """LLM 构造时应按独立开关决定是否传入系统代理。"""
         calls = []

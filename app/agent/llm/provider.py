@@ -1564,6 +1564,70 @@ class LLMProviderManager(metaclass=Singleton):
                 return models[candidate]
         return None
 
+    def _cached_models_dev_model(
+            self,
+            provider_id: str,
+            model_id: str,
+            base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
+    ) -> dict[str, Any] | None:
+        """从已缓存或内置的 models.dev 数据中同步读取模型元数据。"""
+        try:
+            spec = self.get_provider(provider_id)
+        except LLMProviderError:
+            return None
+
+        models_dev_provider_id = self._resolve_provider_models_dev_provider_id(
+            spec,
+            base_url,
+            base_url_preset_id=base_url_preset_id,
+        )
+        if not models_dev_provider_id:
+            return None
+
+        payload = self._cached_models_dev_payload().get(models_dev_provider_id, {}) or {}
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, dict):
+            return None
+
+        candidates = [model_id]
+        if model_id.startswith("models/"):
+            candidates.append(model_id.removeprefix("models/"))
+
+        for candidate in candidates:
+            if candidate in models:
+                return models[candidate]
+        return None
+
+    def resolve_cached_model_metadata(
+            self,
+            provider_id: str,
+            model_id: Optional[str],
+            base_url: Optional[str] = None,
+            base_url_preset_id: Optional[str] = None,
+    ) -> dict[str, Any] | None:
+        """同步解析缓存中的模型元数据，不触发远端 models.dev 刷新。"""
+        if not model_id:
+            return None
+        metadata = self._cached_models_dev_model(
+            provider_id,
+            model_id,
+            base_url=base_url,
+            base_url_preset_id=base_url_preset_id,
+        )
+        if metadata:
+            return metadata
+        if provider_id == "chatgpt":
+            return self._cached_models_dev_model("openai", model_id)
+        if provider_id == "openai":
+            return (
+                self._cached_models_dev_payload()
+                .get("openai", {})
+                .get("models", {})
+                .get(model_id)
+            )
+        return None
+
     @staticmethod
     def _normalize_model_record(
             model_id: str,

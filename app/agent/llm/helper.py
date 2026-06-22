@@ -5,7 +5,7 @@ import inspect
 import json
 import time
 from functools import wraps
-from typing import Any, List
+from typing import Any, List, Optional
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 
@@ -700,11 +700,85 @@ class LLMHelper:
         return {}
 
     @staticmethod
-    def supports_image_input() -> bool:
+    def _metadata_supports_image_input(metadata: Any) -> Optional[bool]:
+        """从模型元数据中读取图片输入能力，未知时返回 None。"""
+        if not isinstance(metadata, dict):
+            return None
+
+        modalities = metadata.get("modalities") or {}
+        input_modalities = modalities.get("input")
+        if isinstance(input_modalities, str):
+            input_modalities = [input_modalities]
+        if isinstance(input_modalities, list):
+            normalized_modalities = {
+                str(item or "").strip().lower() for item in input_modalities
+            }
+            return "image" in normalized_modalities
+        return None
+
+    @classmethod
+    def _resolve_catalog_image_input_support(
+            cls,
+            provider: Optional[str] = None,
+            model: Optional[str] = None,
+            base_url: Optional[str] = None,
+            base_url_preset: Optional[str] = None,
+    ) -> Optional[bool]:
+        """复用 provider 目录缓存解析当前模型是否支持图片输入。"""
+        provider_name = str(provider if provider is not None else settings.LLM_PROVIDER).strip()
+        model_name = str(model if model is not None else settings.LLM_MODEL).strip()
+        if not provider_name or not model_name:
+            return None
+
+        try:
+            from app.agent.llm.provider import LLMProviderManager
+
+            metadata = LLMProviderManager().resolve_cached_model_metadata(
+                provider_id=provider_name,
+                model_id=model_name,
+                base_url=base_url if base_url is not None else settings.LLM_BASE_URL,
+                base_url_preset_id=(
+                    base_url_preset
+                    if base_url_preset is not None
+                    else settings.LLM_BASE_URL_PRESET
+                ),
+            )
+        except Exception as err:
+            logger.debug(f"解析模型图片能力失败: {err}")
+            return None
+
+        return cls._metadata_supports_image_input(metadata)
+
+    @classmethod
+    def supports_image_input(
+            cls,
+            provider: Optional[str] = None,
+            model: Optional[str] = None,
+            base_url: Optional[str] = None,
+            base_url_preset: Optional[str] = None,
+    ) -> bool:
         """
         判断当前模型是否启用了图片输入能力。
+
+        用户开关为总开关；当内置模型目录明确标注当前模型不支持 image 输入时，
+        即使总开关开启也降级为纯文本，避免文本模型收到 `image_url` 内容块后
+        被兼容端点以 400 拒绝。无参调用保持旧版“只读总开关”语义，
+        未知自定义模型也保持原有开关语义。
         """
-        return bool(settings.LLM_SUPPORT_IMAGE_INPUT)
+        if not settings.LLM_SUPPORT_IMAGE_INPUT:
+            return False
+        if provider is None and model is None:
+            return True
+
+        image_support = cls._resolve_catalog_image_input_support(
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            base_url_preset=base_url_preset,
+        )
+        if image_support is not None:
+            return image_support
+        return True
 
     @staticmethod
     def _build_legacy_runtime(
@@ -797,6 +871,41 @@ class LLMHelper:
         if model_name.startswith(("gpt-5", "o1", "o3", "o4")):
             return True
         return None
+
+    @staticmethod
+    def _attach_runtime_metadata(model: Any, runtime: dict[str, Any]) -> None:
+        """
+        将 MoviePilot 已解析出的 provider 运行时信息挂到模型实例上。
+
+        这些字段只供内部中间件识别协议能力，不参与 LangChain 请求序列化。
+        """
+        runtime_metadata = {
+            "runtime": runtime.get("runtime"),
+            "provider_id": runtime.get("provider_id"),
+            "base_url": runtime.get("base_url"),
+        }
+
+        def _set_metadata_attr(name: str, value: Any) -> None:
+            try:
+                setattr(model, name, value)
+            except Exception:
+                object.__setattr__(model, name, value)
+
+        try:
+            _set_metadata_attr("_moviepilot_llm_runtime", runtime_metadata["runtime"])
+            _set_metadata_attr(
+                "_moviepilot_llm_provider_id",
+                runtime_metadata["provider_id"],
+            )
+            _set_metadata_attr("_moviepilot_llm_base_url", runtime_metadata["base_url"])
+        except Exception as err:
+            logger.debug(f"LLM运行时元数据附加失败: {str(err)}")
+
+        profile = getattr(model, "profile", None)
+        if isinstance(profile, dict):
+            profile["moviepilot_runtime"] = runtime_metadata["runtime"]
+            profile["moviepilot_provider_id"] = runtime_metadata["provider_id"]
+            profile["moviepilot_base_url"] = runtime_metadata["base_url"]
 
     @classmethod
     def _resolve_thinking_level(
@@ -1011,6 +1120,7 @@ class LLMHelper:
                 "max_input_tokens": int(max_input_tokens),
             }
 
+        cls._attach_runtime_metadata(model, runtime)
         return model
 
     @staticmethod
