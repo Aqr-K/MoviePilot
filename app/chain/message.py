@@ -243,7 +243,7 @@ class MessageChain(ChainBase):
                 processing_status=processing_status,
             )
         finally:
-            if continues_async is not True:
+            if continues_async:
                 self._mark_message_processing_finished(
                     channel=channel,
                     source=source,
@@ -1278,7 +1278,10 @@ class MessageChain(ChainBase):
             # 将可直接输入给 LLM 的附件统一转换为 data URL
             original_images = images
             all_files = list(files or [])
-            if images and LLMHelper.supports_image_input():
+            if images and LLMHelper.supports_image_input(
+                    provider=settings.LLM_PROVIDER,
+                    model=settings.LLM_MODEL,
+            ):
                 images = self._download_attachments_to_data_urls(
                     images, channel, source
                 )
