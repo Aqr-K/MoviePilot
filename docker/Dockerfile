@@ -86,7 +86,6 @@ RUN python3 -m venv ${VENV_PATH} \
     && ln -sf /usr/local/bin/uv-pip-compat ${VENV_PATH}/bin/pip3.12 \
     && ln -sf /usr/local/bin/uv-pip-compat ${VENV_PATH}/bin/pip-compile \
     && ln -sf /usr/local/bin/uv-pip-compat ${VENV_PATH}/bin/pip-sync \
-    && pip install "Cython~=3.1.2" \
     && pip-compile requirements.in -o requirements.txt \
     && pip install -r requirements.txt
 
