@@ -36,42 +36,17 @@ function apply_package_cache_env() {
 
 apply_package_cache_env
 
-function apply_no_proxy_env() {
-    local default_no_proxy="localhost,127.0.0.1,::1,0.0.0.0,10.0.0.0/8,100.64.0.0/10,169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10,host.docker.internal,host.containers.internal,gateway.docker.internal,.local,.lan,.internal,.home.arpa,.localdomain"
-    local merged="${NO_PROXY:-}"
-    local source_value item old_ifs
-    local -a no_proxy_items
+PIP_ENV=()
 
-    # 代理仅用于外网依赖下载，容器访问本机、局域网和内网服务时应保持直连。
-    for source_value in "${no_proxy:-}" "${default_no_proxy}"; do
-        old_ifs="${IFS}"
-        IFS=','
-        read -ra no_proxy_items <<< "${source_value}"
-        IFS="${old_ifs}"
-        for item in "${no_proxy_items[@]}"; do
-            item="${item#"${item%%[![:space:]]*}"}"
-            item="${item%"${item##*[![:space:]]}"}"
-            if [[ -z "${item}" ]]; then
-                continue
-            fi
-            case ",${merged}," in
-                *",${item},"*) ;;
-                *) merged="${merged:+${merged},}${item}" ;;
-            esac
-        done
-    done
-
-    export NO_PROXY="${merged}"
-    export no_proxy="${merged}"
-}
-
-function apply_package_proxy_env() {
-    if [[ -n "${PROXY_HOST:-}" ]]; then
-        export HTTP_PROXY="${PROXY_HOST}"
-        export HTTPS_PROXY="${PROXY_HOST}"
-        export http_proxy="${PROXY_HOST}"
-        export https_proxy="${PROXY_HOST}"
-        apply_no_proxy_env
+function set_package_proxy_env() {
+    PIP_ENV=()
+    if [[ -n "${PROXY_HOST}" ]]; then
+        PIP_ENV=(
+            "HTTP_PROXY=${PROXY_HOST}"
+            "HTTPS_PROXY=${PROXY_HOST}"
+            "http_proxy=${PROXY_HOST}"
+            "https_proxy=${PROXY_HOST}"
+        )
     fi
 }
 
@@ -120,13 +95,13 @@ function install_backend_and_download_resources() {
             # 复制新的requirements.in
             cp "${TMP_PATH}/App/requirements.in" /app/requirements.in
             # 重新编译依赖
-            if ! ${VENV_PATH}/bin/pip-compile /app/requirements.in -o /app/requirements.txt; then
+            if ! env "${PIP_ENV[@]}" ${VENV_PATH}/bin/pip-compile /app/requirements.in -o /app/requirements.txt; then
                 ERROR "依赖编译失败，恢复原依赖"
                 cp /tmp/requirements.txt.backup /app/requirements.txt
                 return 1
             fi
             # 安装新依赖
-            if ! ${VENV_PATH}/bin/pip install ${PIP_OPTIONS} -r /app/requirements.txt; then
+            if ! env "${PIP_ENV[@]}" ${VENV_PATH}/bin/pip install ${PIP_OPTIONS} -r /app/requirements.txt; then
                 ERROR "依赖安装失败，恢复原依赖"
                 cp /tmp/requirements.txt.backup /app/requirements.txt
                 return 1
@@ -236,7 +211,7 @@ function test_connectivity_pip() {
             if [[ $? -eq 0 ]]; then
                 PIP_OPTIONS="-i ${PIP_PROXY}"
                 PIP_LOG="镜像代理模式"
-                apply_package_proxy_env
+                set_package_proxy_env
                 return 0
             fi
         fi
@@ -248,13 +223,14 @@ function test_connectivity_pip() {
                 ${VENV_PATH}/bin/pip install pip-hello-world > /dev/null 2>&1; then
                 PIP_OPTIONS=""
                 PIP_LOG="全局代理模式"
-                apply_package_proxy_env
+                set_package_proxy_env
                 return 0
             fi
         fi
         return 1
         ;;
     2)
+        PIP_ENV=()
         PIP_OPTIONS=""
         PIP_LOG="不使用代理"
         return 0
