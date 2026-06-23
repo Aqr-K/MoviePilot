@@ -59,6 +59,9 @@ a local plugin source and installed into the running MoviePilot instance.
    - Local runtime examples: `app/plugins/<plugin>/__init__.py`
    - Market/local source candidates: use `query_market_plugins` when the
      running instance is available.
+   - Installed plugin candidates: use `query_installed_plugins`; its summaries
+     include `repo_url` when the source can be matched from a local plugin
+     repository or plugin market metadata.
    - For Vue federation examples, prefer current compliant plugins such as
      `MoviePilot-Plugins/plugins.v2/agenttokens/` and the frontend example
      `MoviePilot-Frontend/examples/plugin-component/`.
