@@ -187,34 +187,32 @@ class UserChain(ChainBase):
             - 如果需要MFA但未提供，返回 "MFA_REQUIRED"
             - 如果MFA验证失败，返回 False
         """
-        # 检查用户是否有PassKey
+        # 委托可插拔 MFA 因子注册表评估（PR3）：内建 OtpFactor + PasskeyFactor 绑定到当前 user，
+        # evaluate_mfa 复现"OTP 优先 / PassKey 延后"语义；外部三值契约不变（由黄金矩阵守护）。
         from app.db.models.passkey import PassKey
-        has_passkey = bool(PassKey.get_by_user_id(db=None, user_id=user.id))
-        
-        # 如果用户既没有启用OTP也没有PassKey，直接通过
-        if not user.is_otp and not has_passkey:
-            return True
-        
-        # 如果用户启用了OTP或PassKey，但没有提供验证码，需要进行二次验证
-        if not mfa_code:
-            logger.info(f"用户 {user.name} 已启用双重验证（OTP: {user.is_otp}, PassKey: {has_passkey}），需要提供验证码")
-            return "MFA_REQUIRED"
-        
-        # 如果提供了验证码，且用户启用了 OTP，则验证 OTP
-        if user.is_otp:
-            if not OtpUtils.check(str(user.otp_secret), mfa_code):
-                logger.info(f"用户 {user.name} 的 MFA 认证失败")
-                return False
-            # OTP 验证成功
-            return True
+        from app.core.auth.mfa_factors import MfaSubmission, MfaUserRef
+        from app.service.auth.builtin_factors import build_builtin_factors
+        from app.service.auth.orchestrator import evaluate_mfa
 
-        # 用户未启用 OTP，此时提供的 mfa_code 无效；如果启用了 PassKey，则仍需通过 PassKey 验证
-        if has_passkey:
+        factors = build_builtin_factors(
+            is_otp_enrolled=lambda _ref: bool(user.is_otp),
+            verify_otp=lambda _ref, code: OtpUtils.check(str(user.otp_secret), code),
+            has_passkey=lambda _ref: bool(PassKey.get_by_user_id(db=None, user_id=user.id)),
+        )
+        result = evaluate_mfa(
+            MfaUserRef(user_id=user.id, username=user.name),
+            MfaSubmission(code=mfa_code),
+            factors,
+        )
+        if result.kind == "mfa_required":
             logger.info(
-                f"用户 {user.name} 未启用 OTP，但已启用 PassKey，提供的 MFA 验证码将被忽略，仍需通过 PassKey 验证"
+                f"用户 {user.name} 已启用双重验证，需要提供验证码"
+                f"（可用因子：{result.factors_available}）"
             )
             return "MFA_REQUIRED"
-        
+        if result.kind == "failure":
+            logger.info(f"用户 {user.name} 的 MFA 认证失败")
+            return False
         return True
 
     def _process_auth_success(self, username: str, credentials: AuthCredentials) -> bool:
