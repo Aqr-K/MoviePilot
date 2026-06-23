@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from app.db import db_query, db_update, get_id_column, Base, async_db_query
 
 
+def _title_like(column, title: str):
+    """构造跨数据库大小写不敏感的标题匹配条件。"""
+    return column.ilike(f"%{title}%")
+
+
 class DownloadHistory(Base):
     """
     下载历史记录
@@ -148,7 +153,7 @@ class DownloadHistory(Base):
         count: Optional[int] = 30,
     ):
         query = (
-            select(cls).filter(cls.title.like(f"%{title}%")).order_by(cls.date.desc())
+            select(cls).filter(_title_like(cls.title, title)).order_by(cls.date.desc())
         )
         query = query.offset((page - 1) * count).limit(count)
         result = await db.execute(query)
@@ -164,7 +169,7 @@ class DownloadHistory(Base):
     @async_db_query
     async def async_count_by_title(cls, db: AsyncSession, title: str):
         result = await db.execute(
-            select(func.count(cls.id)).filter(cls.title.like(f"%{title}%"))
+            select(func.count(cls.id)).filter(_title_like(cls.title, title))
         )
         return result.scalar()
 

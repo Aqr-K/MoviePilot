@@ -1,11 +1,18 @@
 import time
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Boolean, Index, func, or_, JSON, select
+from sqlalchemy import Boolean, Column, Index, Integer, JSON, String, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, get_id_column, Base, async_db_query
+
+
+def _text_like(column, pattern: str, wildcard: bool = False):
+    """构造跨数据库大小写不敏感的文本匹配条件。"""
+    if wildcard:
+        return column.ilike(pattern, escape='\\')
+    return column.ilike(pattern)
 
 
 class TransferHistory(Base):
@@ -71,15 +78,15 @@ class TransferHistory(Base):
                       status: bool = None, wildcard: bool = False):
         if wildcard:
             text_filter = or_(
-                cls.title.like(title, escape='\\'),
-                cls.src.like(title, escape='\\'),
-                cls.dest.like(title, escape='\\'),
+                _text_like(cls.title, title, wildcard=True),
+                _text_like(cls.src, title, wildcard=True),
+                _text_like(cls.dest, title, wildcard=True),
             )
         else:
             text_filter = or_(
-                cls.title.like(f'%{title}%'),
-                cls.src.like(f'%{title}%'),
-                cls.dest.like(f'%{title}%'),
+                _text_like(cls.title, f'%{title}%'),
+                _text_like(cls.src, f'%{title}%'),
+                _text_like(cls.dest, f'%{title}%'),
             )
         query = db.query(cls).filter(text_filter)
         if status is not None:
@@ -98,15 +105,15 @@ class TransferHistory(Base):
                                   status: bool = None, wildcard: bool = False):
         if wildcard:
             text_filter = or_(
-                cls.title.like(title, escape='\\'),
-                cls.src.like(title, escape='\\'),
-                cls.dest.like(title, escape='\\'),
+                _text_like(cls.title, title, wildcard=True),
+                _text_like(cls.src, title, wildcard=True),
+                _text_like(cls.dest, title, wildcard=True),
             )
         else:
             text_filter = or_(
-                cls.title.like(f'%{title}%'),
-                cls.src.like(f'%{title}%'),
-                cls.dest.like(f'%{title}%'),
+                _text_like(cls.title, f'%{title}%'),
+                _text_like(cls.src, f'%{title}%'),
+                _text_like(cls.dest, f'%{title}%'),
             )
         query = select(cls).filter(text_filter)
         if status is not None:
@@ -239,15 +246,15 @@ class TransferHistory(Base):
     def count_by_title(cls, db: Session, title: str, status: bool = None, wildcard: bool = False):
         if wildcard:
             text_filter = or_(
-                cls.title.like(title, escape='\\'),
-                cls.src.like(title, escape='\\'),
-                cls.dest.like(title, escape='\\'),
+                _text_like(cls.title, title, wildcard=True),
+                _text_like(cls.src, title, wildcard=True),
+                _text_like(cls.dest, title, wildcard=True),
             )
         else:
             text_filter = or_(
-                cls.title.like(f'%{title}%'),
-                cls.src.like(f'%{title}%'),
-                cls.dest.like(f'%{title}%'),
+                _text_like(cls.title, f'%{title}%'),
+                _text_like(cls.src, f'%{title}%'),
+                _text_like(cls.dest, f'%{title}%'),
             )
         query = db.query(func.count(cls.id)).filter(text_filter)
         if status is not None:
@@ -259,15 +266,15 @@ class TransferHistory(Base):
     async def async_count_by_title(cls, db: AsyncSession, title: str, status: bool = None, wildcard: bool = False):
         if wildcard:
             text_filter = or_(
-                cls.title.like(title, escape='\\'),
-                cls.src.like(title, escape='\\'),
-                cls.dest.like(title, escape='\\'),
+                _text_like(cls.title, title, wildcard=True),
+                _text_like(cls.src, title, wildcard=True),
+                _text_like(cls.dest, title, wildcard=True),
             )
         else:
             text_filter = or_(
-                cls.title.like(f'%{title}%'),
-                cls.src.like(f'%{title}%'),
-                cls.dest.like(f'%{title}%'),
+                _text_like(cls.title, f'%{title}%'),
+                _text_like(cls.src, f'%{title}%'),
+                _text_like(cls.dest, f'%{title}%'),
             )
         stmt = select(func.count(cls.id)).filter(text_filter)
         if status is not None:
