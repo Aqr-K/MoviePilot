@@ -269,6 +269,129 @@ def test_audiences_readpm_row_is_not_unread_message():
     assert msg_links == []
 
 
+def test_audiences_pm_item_unread_links_use_list_preview_when_detail_empty():
+    """
+    Audiences 新版 div 私信列表应能识别未读行，并在详情页不可解析时使用列表预览通知。
+    """
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    parser.message_unread = 7
+    unread_rows = "".join(
+        f"""
+        <div class="pm-item-row is-unread">
+          <div class="pm-item">
+            <input class="pm-item__check" type="checkbox" name="messages[]" value="{4495900 + index}">
+            <span class="pm-item__status pm-item__status--unread" title="未读"></span>
+            <a class="pm-item__subject"
+               href="messages.php?action=viewmessage&amp;id={4495900 + index}">种子被删除</a>
+            <span class="pm-item__user"><i class="fas fa-user" aria-hidden="true"></i>系统</span>
+            <span class="pm-item__time">2026-06-22 22:32:11</span>
+          </div>
+          <div class="pm-item__preview">
+            你下载的种子'Wonder Wall S01E{index:02d} 2026 1080p WEB-DL H265 AAC-ADWeb'被管理员删除。
+          </div>
+        </div>
+        """
+        for index in range(1, 8)
+    )
+    list_html = f"""
+    <html>
+      <body>
+        <form action="messages.php" method="post">
+          <div class="pm-list">
+            {unread_rows}
+            <div class="pm-item-row">
+              <div class="pm-item">
+                <span class="pm-item__status" title="已读"></span>
+                <a class="pm-item__subject"
+                   href="messages.php?action=viewmessage&amp;id=4419171">已读消息</a>
+                <span class="pm-item__time">2026-06-07 14:27:45</span>
+              </div>
+            </div>
+          </div>
+        </form>
+      </body>
+    </html>
+    """
+    requested_urls = []
+
+    def fake_get_page_content(url, params=None, headers=None):
+        """
+        模拟新版列表页可读，但详情页结构暂不兼容导致解析为空。
+        """
+        requested_urls.append(url)
+        return "<html></html>" if "viewmessage" in url else list_html
+
+    parser._get_page_content = fake_get_page_content
+
+    parser._pase_unread_msgs()
+
+    detail_requests = [url for url in requested_urls if "viewmessage" in url]
+    assert len(detail_requests) == 7
+    assert len(parser.message_unread_contents) == 7
+    assert parser.message_unread_contents[0] == (
+        "种子被删除",
+        "2026-06-22 22:32:11",
+        "你下载的种子'Wonder Wall S01E01 2026 1080p WEB-DL H265 AAC-ADWeb'被管理员删除。",
+    )
+    assert "已读消息" not in [item[0] for item in parser.message_unread_contents]
+
+
+def test_audiences_pm_view_message_content_is_parsed():
+    """
+    Audiences 新版短消息详情页应解析 pm-view 中的标题、日期和正文。
+    """
+    parser = NexusAudiencesSiteUserInfo(
+        site_name="Audiences",
+        url="https://audiences.me/",
+        site_cookie="",
+        apikey=None,
+        token=None,
+    )
+    html_text = """
+    <html>
+      <body>
+        <td class="embedded">
+          <div class="pm-page">
+            <div class="pm-hero">
+              <div class="pm-hero__text">
+                <h1 class="pm-hero__title">种子被删除</h1>
+                <p class="pm-hero__sub">自 系统</p>
+              </div>
+            </div>
+            <article class="pm-view">
+              <header class="pm-view__head">
+                <div class="pm-view__meta">
+                  <span class="pm-view__label">自</span>
+                  <span class="pm-view__value">系统</span>
+                </div>
+                <div class="pm-view__meta">
+                  <span class="pm-view__label">日期</span>
+                  <span class="pm-view__value">2026-06-22 22:32:11 </span>
+                </div>
+              </header>
+              <div class="pm-view__body">
+                你下载的种子'Wonder Wall S01E20 2026 1080p WEB-DL H265 AAC-ADWeb'被管理员删除。原因：已完结剧集，清理单集。
+              </div>
+            </article>
+          </div>
+        </td>
+      </body>
+    </html>
+    """
+
+    head, date, content = parser._parse_message_content(html_text)
+
+    assert head == "种子被删除"
+    assert date == "2026-06-22 22:32:11"
+    assert content == "你下载的种子'Wonder Wall S01E20 2026 1080p WEB-DL H265 AAC-ADWeb'被管理员删除。原因：已完结剧集，清理单集。"
+
+
 def test_audiences_unread_mailbox_only_uses_user_box():
     """
     Audiences 只使用用户消息箱，首页不传 page，page=1 实际表示第二页。

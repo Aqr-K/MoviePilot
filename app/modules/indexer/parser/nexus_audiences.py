@@ -24,6 +24,7 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         self._sys_mail_unread_page = None
         self.__next_mail_page = 1
         self.__seen_unread_message_links = set()
+        self.__message_list_previews = {}
 
     def _parse_message_unread(self, html_text):
         """
@@ -64,10 +65,8 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
             if not StringUtils.is_valid_html_element(html):
                 return None
 
-            message_links = html.xpath(
-                '//tr[.//img[contains(concat(" ", normalize-space(@class), " "), " unreadpm ") '
-                'or @alt="Unread" or @title="未读"]]/td/a[contains(@href, "viewmessage")]/@href'
-            )
+            message_links = self.__parse_table_unread_message_links(html)
+            message_links.extend(self.__parse_pm_item_unread_message_links(html))
             new_message_links = self.__filter_new_message_links(message_links)
             if message_links and not new_message_links:
                 logger.warn(f"{self._site_name} 未读消息页只发现重复消息链接，停止后续翻页")
@@ -80,6 +79,30 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
                 del html
 
         return next_page
+
+    def _parse_message_content(self, html_text):
+        """
+        解析 Audiences 新版短消息详情页。
+        """
+        html = etree.HTML(html_text)
+        try:
+            if StringUtils.is_valid_html_element(html):
+                head = self.__extract_first_text(
+                    html,
+                    '//*[contains(concat(" ", normalize-space(@class), " "), " pm-hero__title ")]'
+                )
+                date = self.__extract_pm_view_meta(html, "日期")
+                content = self.__extract_first_text(
+                    html,
+                    '//*[contains(concat(" ", normalize-space(@class), " "), " pm-view__body ")]'
+                )
+                if not self.__is_empty_message_content(head, date, content):
+                    return head, date, content
+        finally:
+            if html is not None:
+                del html
+
+        return super()._parse_message_content(html_text)
 
     def _pase_unread_msgs(self):
         """
@@ -110,6 +133,7 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
                     headers=self._mail_content_headers
                 )
             )
+            head, date, content = self.__fill_empty_message_content_from_list(msg_link, head, date, content)
             logger.debug(f"{self._site_name} 标题 {head} 时间 {date} 内容 {content}")
             if self.__is_empty_message_content(head, date, content):
                 logger.warn(f"{self._site_name} 信息链接 {msg_link} 解析结果为空，跳过消息通知")
@@ -137,6 +161,7 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
         """
         self.__next_mail_page = 1
         self.__seen_unread_message_links.clear()
+        self.__message_list_previews.clear()
 
     def __filter_new_message_links(self, message_links: list) -> list:
         """
@@ -150,6 +175,118 @@ class NexusAudiencesSiteUserInfo(NexusPhpSiteUserInfo):
             self.__seen_unread_message_links.add(message_link_key)
             new_message_links.append(message_link)
         return new_message_links
+
+    @staticmethod
+    def __parse_table_unread_message_links(html) -> list:
+        """
+        解析 Audiences 旧版表格消息列表中的未读消息链接。
+        """
+        return html.xpath(
+            '//tr[.//img[contains(concat(" ", normalize-space(@class), " "), " unreadpm ") '
+            'or @alt="Unread" or @title="未读"]]/td/a[contains(@href, "viewmessage")]/@href'
+        )
+
+    def __parse_pm_item_unread_message_links(self, html) -> list:
+        """
+        解析 Audiences 新版 pm-item 私信列表中的未读消息链接。
+        """
+        message_links = []
+        unread_rows = html.xpath(
+            '//*[contains(concat(" ", normalize-space(@class), " "), " pm-item-row ") '
+            'and contains(concat(" ", normalize-space(@class), " "), " is-unread ")]'
+        )
+        if not unread_rows:
+            unread_rows = html.xpath(
+                '//*[contains(concat(" ", normalize-space(@class), " "), " pm-item-row ") '
+                'and .//*[contains(concat(" ", normalize-space(@class), " "), " pm-item__status--unread ") '
+                'or @title="未读"]]'
+            )
+
+        for row in unread_rows:
+            row_links = row.xpath('.//a[contains(@href, "viewmessage")]/@href')
+            if not row_links:
+                continue
+            message_link = row_links[0].strip()
+            if not message_link:
+                continue
+            message_links.append(message_link)
+            self.__cache_pm_item_preview(message_link, row)
+        return message_links
+
+    def __cache_pm_item_preview(self, message_link: str, row):
+        """
+        缓存新版列表页预览，用于详情页结构变化时兜底生成站点消息。
+        """
+        head = self.__extract_pm_item_text(
+            row,
+            './/*[contains(concat(" ", normalize-space(@class), " "), " pm-item__subject ")]'
+        )
+        date = self.__extract_pm_item_text(
+            row,
+            './/*[contains(concat(" ", normalize-space(@class), " "), " pm-item__time ")]'
+        )
+        content = self.__extract_pm_item_text(
+            row,
+            './/*[contains(concat(" ", normalize-space(@class), " "), " pm-item__preview ")]'
+        )
+        self.__message_list_previews[urljoin(self._base_url, message_link)] = (head, date, content)
+
+    @staticmethod
+    def __extract_pm_item_text(row, xpath: str):
+        """
+        提取新版私信列表节点文本并规整空白字符。
+        """
+        nodes = row.xpath(xpath)
+        if not nodes:
+            return None
+        text = nodes[0].xpath("string(.)")
+        text = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+        return text or None
+
+    @staticmethod
+    def __extract_first_text(html, xpath: str):
+        """
+        提取第一个匹配节点的规整文本。
+        """
+        nodes = html.xpath(xpath)
+        if not nodes:
+            return None
+        return NexusAudiencesSiteUserInfo.__normalize_text(nodes[0].xpath("string(.)"))
+
+    @staticmethod
+    def __extract_pm_view_meta(html, label: str):
+        """
+        按标签提取 Audiences 新版短消息详情页中的元信息。
+        """
+        values = html.xpath(
+            '//*[contains(concat(" ", normalize-space(@class), " "), " pm-view__meta ") '
+            f'and .//*[contains(concat(" ", normalize-space(@class), " "), " pm-view__label ") '
+            f'and normalize-space()="{label}"]]'
+            '//*[contains(concat(" ", normalize-space(@class), " "), " pm-view__value ")]'
+        )
+        if not values:
+            return None
+        return NexusAudiencesSiteUserInfo.__normalize_text(values[0].xpath("string(.)"))
+
+    @staticmethod
+    def __normalize_text(text: str):
+        """
+        规整 Audiences 新版消息页文本空白字符。
+        """
+        if not text:
+            return None
+        text = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+        return text or None
+
+    def __fill_empty_message_content_from_list(self, msg_link: str, head, date, content):
+        """
+        使用列表页预览填补详情页解析不到的字段。
+        """
+        preview = self.__message_list_previews.get(urljoin(self._base_url, msg_link))
+        if not preview:
+            return head, date, content
+        preview_head, preview_date, preview_content = preview
+        return head or preview_head, date or preview_date, content or preview_content
 
     def __should_fetch_next_unread_page(self, new_message_links: list) -> bool:
         """
