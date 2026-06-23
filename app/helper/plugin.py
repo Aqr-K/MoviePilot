@@ -29,7 +29,7 @@ from requests import Response
 from app.core.cache import cached, is_fresh
 from app.core.config import settings
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.package_installer import PackageInstallRequest, build_package_install_strategies
+from app.helper.package import PackageInstallRequest, build_package_install_strategies
 from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils, AsyncRequestUtils

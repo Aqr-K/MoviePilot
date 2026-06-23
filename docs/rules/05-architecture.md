@@ -31,6 +31,10 @@ The application is structured as four distinct layers. Each layer has a defined 
 
 ## Layer Responsibilities and Boundaries
 
+### Shared File Placement Rule
+
+Before creating a new file under `app/api/endpoints/`, `app/chain/`, `app/helper/`, or `app/utils/`, first check whether the capability belongs in an existing domain file. Prefer extending that file when the domain already exists. Create a new file only for a genuinely new domain or standalone reusable concern, and name it with a single noun according to `07-naming-conventions.md`.
+
 ### Entrypoint Layer
 
 **Directories:** `app/api/endpoints/`, `moviepilot` (CLI), `app/agent/`, scheduler callbacks, webhook handlers, message interactions.
@@ -41,7 +45,7 @@ The application is structured as four distinct layers. Each layer has a defined 
 - Any logic that coordinates multiple modules, triggers events, touches caches, or combines workflows must be moved into `chain`.
 
 **Rules:**
-- Prefer adding new endpoints to an existing domain file. Create a new endpoint file only when introducing a new top-level resource domain.
+- Prefer adding new endpoints to an existing domain file. Create a new endpoint file only when introducing a new top-level resource domain, and use a single-noun filename.
 - After adding a new endpoint, register it in `app/api/apiv1.py`.
 - Endpoints must not contain business logic that belongs in `chain`.
 
@@ -166,4 +170,4 @@ The application is structured as four distinct layers. Each layer has a defined 
 | Few dozen lines of private logic in one chain or module | Private function in the same file; do not create a new helper |
 | New module category or subtype | Also update `app/schemas/types.py` |
 
-*Last Updated: 2026-05-25*
+*Last Updated: 2026-06-23*

@@ -667,7 +667,7 @@ class TestPluginHelper:
             uv_bin.parent.mkdir(parents=True)
             uv_bin.write_text("", encoding="utf-8")
 
-            with patch("app.helper.package_installer._find_uv", return_value=uv_bin), \
+            with patch("app.helper.package._find_uv", return_value=uv_bin), \
                     patch.object(PluginHelper, "_PluginHelper__get_protected_runtime_packages", return_value={}), \
                     patch.object(PluginHelper, "_PluginHelper__run_runtime_healthcheck", return_value=(True, "")), \
                     patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute), \
@@ -830,7 +830,7 @@ class TestPluginHelper:
                         return_value={}
                 ):
                     with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
-                        with patch("app.helper.package_installer._find_uv", return_value=None):
+                        with patch("app.helper.package._find_uv", return_value=None):
                             success, message = PluginHelper.pip_install_with_fallback(requirements_file)
 
         assert success
@@ -867,7 +867,7 @@ class TestPluginHelper:
                     return_value={"fastapi": Version("0.115.14")}
             ):
                 with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
-                    with patch("app.helper.package_installer._find_uv", return_value=None):
+                    with patch("app.helper.package._find_uv", return_value=None):
                         success, message = PluginHelper.pip_install_with_fallback(requirements_file)
 
         assert success
@@ -913,7 +913,7 @@ class TestPluginHelper:
                     return_value={"fastapi": Version("0.115.14")}
             ):
                 with patch("app.helper.plugin.SystemUtils.execute_with_subprocess", side_effect=fake_execute):
-                    with patch("app.helper.package_installer._find_uv", return_value=None):
+                    with patch("app.helper.package._find_uv", return_value=None):
                         success, message = PluginHelper.pip_install_with_fallback(requirements_file)
 
         assert not success
@@ -942,7 +942,7 @@ class TestPluginHelper:
             req = root / "plugin-requirements.txt"
             req.write_text("demo\n", encoding="utf-8")
 
-            with patch("app.helper.package_installer._find_uv", return_value=None), \
+            with patch("app.helper.package._find_uv", return_value=None), \
                     patch.object(PluginHelper, "_PluginHelper__get_protected_runtime_packages", return_value={}), \
                     patch.object(
                         PluginHelper,
@@ -990,7 +990,7 @@ class TestPluginHelper:
             uv_bin.parent.mkdir(parents=True)
             uv_bin.write_text("", encoding="utf-8")
 
-            with patch("app.helper.package_installer._find_uv", return_value=uv_bin), \
+            with patch("app.helper.package._find_uv", return_value=uv_bin), \
                     patch.object(PluginHelper, "_PluginHelper__get_protected_runtime_packages", return_value={}), \
                     patch.object(
                         PluginHelper,
@@ -1014,7 +1014,7 @@ class TestPluginHelper:
         assert len(seen_install_commands) == 1
         assert repair_calls
 
-    def test_repair_main_runtime_dependencies_uses_package_installer_semantics(self):
+    def test_repair_main_runtime_dependencies_uses_package_helper_semantics(self):
         """
         主运行环境恢复与插件安装使用同一套 cache、index、proxy 和安全日志语义。
         """
@@ -1037,7 +1037,7 @@ class TestPluginHelper:
             uv_bin.parent.mkdir(parents=True)
             uv_bin.write_text("", encoding="utf-8")
 
-            with patch("app.helper.package_installer._find_uv", return_value=uv_bin), \
+            with patch("app.helper.package._find_uv", return_value=uv_bin), \
                     patch("app.helper.plugin.settings.CONFIG_DIR", str(root / "config")), \
                     patch("app.helper.plugin.settings.PACKAGE_CACHE_ROOT", str(root / "custom-package-cache")), \
                     patch("app.helper.plugin.settings.PIP_PROXY", "https://user:pass@mirror.example/simple"), \
