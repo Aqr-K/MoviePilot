@@ -103,6 +103,79 @@ def summarize_plugin(plugin: Any) -> dict[str, Any]:
     }
 
 
+def _merge_plugin_source_metadata(plugin: Any, source_plugin: Any) -> Any:
+    """
+    将插件市场或本地仓库中的来源元数据合并到已安装插件对象。
+    """
+    repo_url = getattr(source_plugin, "repo_url", None)
+    if repo_url:
+        setattr(plugin, "repo_url", repo_url)
+
+    for attr in (
+        "has_update",
+        "release",
+        "system_version",
+        "system_version_compatible",
+        "system_version_message",
+    ):
+        value = getattr(source_plugin, attr, None)
+        if value is not None:
+            setattr(plugin, attr, value)
+
+    return plugin
+
+
+def _map_plugins_by_id(plugins: list[Any]) -> dict[str, Any]:
+    """
+    按插件 ID 建立稳定映射，保留同 ID 首个候选来源。
+    """
+    plugin_map: dict[str, Any] = {}
+    for plugin in plugins:
+        plugin_id = getattr(plugin, "id", None)
+        if plugin_id and plugin_id not in plugin_map:
+            plugin_map[plugin_id] = plugin
+    return plugin_map
+
+
+async def enrich_installed_plugin_sources(
+    installed_plugins: list[Any],
+    force_refresh: bool = False,
+) -> list[Any]:
+    """
+    为已安装插件补齐安装来源仓库地址。
+
+    本地插件对象只包含运行目录中的静态元数据，通常没有 repo_url。这里按需从
+    本地插件仓库和插件市场补齐来源，保证 Agent 后续安装、升级判断可以拿到仓库地址。
+    """
+    missing_source_plugins = [
+        plugin for plugin in installed_plugins if not getattr(plugin, "repo_url", None)
+    ]
+    if not missing_source_plugins:
+        return installed_plugins
+
+    plugin_manager = PluginManager()
+    local_repo_map = _map_plugins_by_id(plugin_manager.get_local_repo_plugins())
+    for plugin in missing_source_plugins:
+        source_plugin = local_repo_map.get(getattr(plugin, "id", None))
+        if source_plugin:
+            _merge_plugin_source_metadata(plugin, source_plugin)
+
+    missing_source_plugins = [
+        plugin for plugin in installed_plugins if not getattr(plugin, "repo_url", None)
+    ]
+    if not missing_source_plugins:
+        return installed_plugins
+
+    market_plugins = await plugin_manager.async_get_online_plugins(force=force_refresh)
+    market_map = _map_plugins_by_id(market_plugins or [])
+    for plugin in missing_source_plugins:
+        source_plugin = market_map.get(getattr(plugin, "id", None))
+        if source_plugin:
+            _merge_plugin_source_metadata(plugin, source_plugin)
+
+    return installed_plugins
+
+
 async def load_market_plugins(force_refresh: bool = False) -> list[Any]:
     """
     聚合插件市场与本地插件仓库中的候选插件。

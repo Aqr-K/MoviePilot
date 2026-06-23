@@ -5,7 +5,7 @@ description: >-
   Use this skill ONLY when the user EXPLICITLY requests filing an
   upstream issue for MoviePilot core, frontend, or an installed plugin,
   for example "反馈 issue", "提 issue", "报 bug", "给 MP 提 issue",
-  "让上游修一下", "提交错误报告", "提需求", "功能请求",
+  "让上游修一下", "提交错误报告", "提问题", "提需求", "功能请求",
   or English "file an issue / report a bug / open an upstream issue /
   feature request".
   A bare problem report is not enough: diagnose locally first. This
@@ -242,9 +242,15 @@ python <skill_dir>/scripts/submit_feedback_issue.py \
   --username "<current admin username if known>"
 ```
 
-The script creates the GitHub issue through `GITHUB_TOKEN` when the
-token is configured and has permission. Otherwise it returns a
-`prefill_url`. Relay the result:
+The script automatically imports MoviePilot's `app.core.config.settings`
+and reads the system-configured `GITHUB_TOKEN` / `settings.GITHUB_HEADERS`
+from the running MoviePilot environment. Do not ask the user to provide
+a GitHub token in chat, and never accept or echo a token from the user.
+When that configured token exists and has permission, the script creates
+the GitHub issue through the GitHub API. Otherwise it returns a
+`prefill_url`. 
+
+Relay the result:
 
 - `success=true`: tell the user the issue was submitted and include
   `issue_url` if present.
