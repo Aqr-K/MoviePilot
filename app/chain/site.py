@@ -789,6 +789,7 @@ class SiteChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="站点交互已结束",
+                    save_history=False,
                 )
             )
             return True

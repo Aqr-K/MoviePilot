@@ -90,6 +90,30 @@ class TestSkillsCommand(unittest.TestCase):
         handle_text.assert_called_once()
         handle_ai.assert_not_called()
 
+    def test_skills_text_exit_skips_notification_history(self):
+        chain = SkillsChain()
+        skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain, "post_message") as post_message:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="退出",
+            )
+
+        self.assertTrue(handled)
+        notification = post_message.call_args.args[0]
+        self.assertEqual(notification.title, "技能交互已结束")
+        self.assertFalse(notification.save_history)
+        self.assertIsNone(skills_interaction_manager.get_by_user("10001"))
+
     def test_callback_routes_to_skills_chain(self):
         chain = MessageChain()
         request = skills_interaction_manager.create_or_replace(
