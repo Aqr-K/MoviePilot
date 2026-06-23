@@ -616,7 +616,7 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual([("abc123", "qbittorrent")], completed)
         self.assertEqual([], chain.jobview.list_jobs())
 
-    def test_do_transfer_does_not_sync_extra_files_by_default(self):
+    def test_do_transfer_syncs_same_stem_extra_files_by_default(self):
         chain = make_transfer_chain()
         planned = []
         main_fileitem = make_fileitem(
@@ -680,7 +680,13 @@ class TransferJobManagerTest(unittest.TestCase):
 
         self.assertTrue(state)
         self.assertEqual("", errmsg)
-        self.assertEqual([main_fileitem.path], planned)
+        self.assertEqual(
+            [
+                main_fileitem.path,
+                subtitle_fileitem.path,
+            ],
+            planned,
+        )
 
     def test_manual_transfer_enables_sync_extra_files(self):
         chain = make_transfer_chain()
@@ -956,10 +962,11 @@ class TransferJobManagerTest(unittest.TestCase):
         self.assertEqual(
             [
                 (main_ep1_fileitem.path, 1),
-                (main_ep2_fileitem.path, 2),
                 (ep1_subtitle_fileitem.path, 1),
                 (ep1_audio_fileitem.path, 1),
+                (main_ep2_fileitem.path, 2),
                 (ep2_subtitle_fileitem.path, 2),
+                (other_title_fileitem.path, 1),
             ],
             planned,
         )
