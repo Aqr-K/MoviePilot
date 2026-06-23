@@ -266,6 +266,7 @@ class SkillsChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="技能交互已结束",
+                    save_history=False,
                 )
             )
             return True

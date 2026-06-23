@@ -2240,6 +2240,7 @@ class SubscribeChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="订阅交互已结束",
+                    save_history=False,
                 )
             )
             return True
