@@ -209,6 +209,14 @@ def get_plugin_provided_channel_capabilities(running_plugins, pid: Optional[str]
     """聚合插件经 provides_channel_capabilities() 声明【新增】的消息渠道能力矩阵，按 plugin_id 归集。"""
     return _get_plugin_provided(running_plugins, "provides_channel_capabilities", "注册渠道能力", pid)
 
+def get_plugin_provided_credential_providers(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """聚合插件经 provides_credential_providers() 声明【新增】的主认证 provider 实例，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_credential_providers", "注册主认证提供方", pid)
+
+def get_plugin_provided_mfa_factors(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """聚合插件经 provides_mfa_factors() 声明【新增】的 MFA 第二因子实例，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_mfa_factors", "注册MFA因子", pid)
+
 def get_plugin_actions(running_plugins, pid: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取插件动作

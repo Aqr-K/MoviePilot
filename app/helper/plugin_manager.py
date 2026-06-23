@@ -672,6 +672,26 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     if not ok:
                         logger.warning(f"注册插件 {plugin_id} 登录提供方 "
                                        f"{getattr(provider, 'provider_id', provider)} 失败：{reason}")
+        # 注册插件经 provides_credential_providers 声明的主认证 provider（非重定向直验，owner=plugin_id）：
+        provided_cred = plugin_metadata.get_plugin_provided_credential_providers(self._running_plugins, pid)
+        if provided_cred:
+            from app.core.auth.credentials import register_credential_provider
+            for plugin_id, providers in provided_cred.items():
+                for provider in providers:
+                    ok, reason = register_credential_provider(provider, owner=plugin_id)
+                    if not ok:
+                        logger.warning(f"注册插件 {plugin_id} 主认证提供方 "
+                                       f"{getattr(provider, 'provider_id', provider)} 失败：{reason}")
+        # 注册插件经 provides_mfa_factors 声明的 MFA 第二因子（owner=plugin_id）：
+        provided_factors = plugin_metadata.get_plugin_provided_mfa_factors(self._running_plugins, pid)
+        if provided_factors:
+            from app.core.auth.mfa_factors import register_mfa_factor
+            for plugin_id, factors in provided_factors.items():
+                for factor in factors:
+                    ok, reason = register_mfa_factor(factor, owner=plugin_id)
+                    if not ok:
+                        logger.warning(f"注册插件 {plugin_id} MFA 因子 "
+                                       f"{getattr(factor, 'factor_id', factor)} 失败：{reason}")
         # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/消息渠道/媒体服务器）：
         # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
         for _get_provided, _verify, _label in (
@@ -724,6 +744,13 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 unregister_auth_providers(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 登录提供方出错：{str(err)}")
+            try:
+                from app.core.auth.credentials import unregister_credential_providers
+                from app.core.auth.mfa_factors import unregister_mfa_factors
+                unregister_credential_providers(owner=plugin_id)
+                unregister_mfa_factors(owner=plugin_id)
+            except Exception as err:
+                logger.error(f"卸载插件 {plugin_id} 认证组件出错：{str(err)}")
 
     def sync(self) -> List[str]:
         """

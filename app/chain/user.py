@@ -82,6 +82,12 @@ class UserChain(ChainBase):
             success, user_or_message = self.password_authenticate(credentials=credentials)
             if success:
                 return _AuthOutcome(user_or_message, None, apply_mfa=True)
+            # 主认证 provider fallback（PR5）：LDAP/AD/RADIUS/OIDC-ROPC 等插件注册的 ICredentialProvider，
+            # 按 priority 询问，首个成功者经守护式 provisioning 解析本地用户。注册表为空时为 no-op（行为不变）。
+            from app.service.auth.orchestrator import try_credential_providers
+            resolved = try_credential_providers(credentials)
+            if resolved is not None:
+                return _AuthOutcome(resolved.user, None, apply_mfa=resolved.apply_mfa)
             # 用户不存在或密码错误 → 辅助认证兜底
             if not settings.AUXILIARY_AUTH_ENABLE:
                 logger.debug(f"辅助认证未启用，用户 {credentials.username} 认证失败")
@@ -199,6 +205,10 @@ class UserChain(ChainBase):
             verify_otp=lambda _ref, code: OtpUtils.check(str(user.otp_secret), code),
             has_passkey=lambda _ref: bool(PassKey.get_by_user_id(db=None, user_id=user.id)),
         )
+        # 合并插件经 provides_mfa_factors 注册的第二因子（按 priority 与内建因子统一评估）；
+        # 注册表为空时不改变行为。插件因子经 MfaUserRef 自行查库，不接触密钥。
+        from app.core.auth.mfa_factors import all_mfa_factors
+        factors = factors + all_mfa_factors()
         result = evaluate_mfa(
             MfaUserRef(user_id=user.id, username=user.name),
             MfaSubmission(code=mfa_code),

@@ -323,6 +323,29 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_credential_providers(self) -> List[Any]:
+        """
+        声明本插件向登录【新增】的主认证 provider（非重定向直验：LDAP/AD/RADIUS/OIDC-ROPC 等）。
+        返回实现 app.core.auth.credentials.ICredentialProvider 契约的【实例】列表，每个含
+        provider_id / factor_kind / priority + applies_to(req) / verify_credentials(req)。
+        框架在本地密码失败后按 priority 询问，首个 success 经守护式 provisioning 解析/建本地用户；
+        与 SSO 重定向车道（provides_auth_providers）分工互补。默认不新增。
+
+        [LdapCredentialProvider(...), ...]
+        """
+        return []
+
+    def provides_mfa_factors(self) -> List[Any]:
+        """
+        声明本插件向登录【新增】的 MFA 第二因子（SMS/Email OTP、备份码、推送、风控等）。
+        返回实现 app.core.auth.mfa_factors.IMfaFactor 契约的【实例】列表，每个含 factor_id /
+        factor_kind / display_name / priority + is_enrolled / verify / challenge_hint。
+        框架在二次验证阶段把它们与内建 OTP/PassKey 因子按 priority 合并评估。默认不新增。
+
+        [SmsOtpFactor(...), ...]
+        """
+        return []
+
     def provides_models(self) -> List[Type]:
         """
         声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。
