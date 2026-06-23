@@ -7,8 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
-from app.db import AsyncSessionFactory
-from app.db.models.transferhistory import TransferHistory
+from app.db.transferhistory_oper import TransferHistoryOper
 from app.log import logger
 from app.schemas.types import media_type_to_agent
 from app.utils.jieba import cut as jieba_cut
@@ -70,70 +69,69 @@ class QueryTransferHistoryTool(MoviePilotTool):
             # 每页固定 30 条，与工具说明保持一致，避免整理路径等字段撑大上下文。
             count = 30
 
-            # 获取数据库会话
-            async with AsyncSessionFactory() as db:
-                # 处理标题搜索
-                if title:
-                    # 使用统一分词封装处理标题，便于替换底层实现。
-                    words = jieba_cut(title, HMM=False)
-                    title_search = "%".join(words)
-                    # 查询记录
-                    result = await TransferHistory.async_list_by_title(
-                        db, title=title_search, page=page, count=count, status=status_bool
-                    )
-                    total = await TransferHistory.async_count_by_title(
-                        db, title=title_search, status=status_bool
-                    )
-                else:
-                    # 查询所有记录
-                    result = await TransferHistory.async_list_by_page(
-                        db, page=page, count=count, status=status_bool
-                    )
-                    total = await TransferHistory.async_count(db, status=status_bool)
+            transferhis = TransferHistoryOper()
+            # 处理标题搜索
+            if title:
+                # 使用统一分词封装处理标题，便于替换底层实现。
+                words = jieba_cut(title, HMM=False)
+                title_search = "%".join(words)
+                # 查询记录
+                result = await transferhis.async_list_by_title(
+                    title=title_search, page=page, count=count, status=status_bool
+                )
+                total = await transferhis.async_count_by_title(
+                    title=title_search, status=status_bool
+                )
+            else:
+                # 查询所有记录
+                result = await transferhis.async_list_by_page(
+                    page=page, count=count, status=status_bool
+                )
+                total = await transferhis.async_count(status=status_bool)
 
-                if not result:
-                    return "未找到相关整理历史记录"
+            if not result:
+                return "未找到相关整理历史记录"
 
-                # 转换为字典格式，只保留关键信息
-                simplified_records = []
-                for record in result:
-                    simplified = {
-                        "id": record.id,
-                        "title": record.title,
-                        "year": record.year,
-                        "type": media_type_to_agent(record.type),
-                        "category": record.category,
-                        "seasons": record.seasons,
-                        "episodes": record.episodes,
-                        "src": record.src,
-                        "dest": record.dest,
-                        "mode": record.mode,
-                        "status": "成功" if record.status else "失败",
-                        "date": record.date,
-                        "downloader": record.downloader,
-                        "download_hash": record.download_hash
-                    }
-                    # 如果失败，添加错误信息
-                    if not record.status and record.errmsg:
-                        simplified["errmsg"] = record.errmsg
-                    # 添加媒体ID信息（如果有）
-                    if record.tmdbid:
-                        simplified["tmdbid"] = record.tmdbid
-                    if record.imdbid:
-                        simplified["imdbid"] = record.imdbid
-                    if record.doubanid:
-                        simplified["doubanid"] = record.doubanid
-                    simplified_records.append(simplified)
+            # 转换为字典格式，只保留关键信息
+            simplified_records = []
+            for record in result:
+                simplified = {
+                    "id": record.id,
+                    "title": record.title,
+                    "year": record.year,
+                    "type": media_type_to_agent(record.type),
+                    "category": record.category,
+                    "seasons": record.seasons,
+                    "episodes": record.episodes,
+                    "src": record.src,
+                    "dest": record.dest,
+                    "mode": record.mode,
+                    "status": "成功" if record.status else "失败",
+                    "date": record.date,
+                    "downloader": record.downloader,
+                    "download_hash": record.download_hash
+                }
+                # 如果失败，添加错误信息
+                if not record.status and record.errmsg:
+                    simplified["errmsg"] = record.errmsg
+                # 添加媒体ID信息（如果有）
+                if record.tmdbid:
+                    simplified["tmdbid"] = record.tmdbid
+                if record.imdbid:
+                    simplified["imdbid"] = record.imdbid
+                if record.doubanid:
+                    simplified["doubanid"] = record.doubanid
+                simplified_records.append(simplified)
 
-                result_json = json.dumps(simplified_records, ensure_ascii=False, indent=2)
+            result_json = json.dumps(simplified_records, ensure_ascii=False, indent=2)
 
-                # 计算总页数
-                total_pages = (total + count - 1) // count if total > 0 else 1
+            # 计算总页数
+            total_pages = (total + count - 1) // count if total > 0 else 1
 
-                # 构建分页信息
-                pagination_info = f"第 {page}/{total_pages} 页，共 {total} 条记录（每页 {count} 条）"
+            # 构建分页信息
+            pagination_info = f"第 {page}/{total_pages} 页，共 {total} 条记录（每页 {count} 条）"
 
-                return f"{pagination_info}\n\n{result_json}"
+            return f"{pagination_info}\n\n{result_json}"
         except Exception as e:
             logger.error(f"查询整理历史记录失败: {e}", exc_info=True)
             return f"查询整理历史记录时发生错误: {str(e)}"

@@ -7,12 +7,14 @@
 """
 
 import json
+import os
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, NotRequired, Optional, TypedDict
 
+import anyio
 from anyio import Path as AsyncPath
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -579,14 +581,29 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
         entry = f"- **{now_str}** {summary}\n"
         try:
             if await log_path.exists():
-                existing = await log_path.read_text(encoding="utf-8", errors="replace")
-                await log_path.write_text(existing + entry, encoding="utf-8")
+                async with await anyio.open_file(
+                    log_path,
+                    mode="a",
+                    encoding="utf-8",
+                ) as stream:
+                    await stream.write(entry)
             else:
                 header = f"# {today_str} 活动日志\n\n"
-                await log_path.write_text(header + entry, encoding="utf-8")
-            logger.debug("Activity logged: %s", summary[:80])
+                try:
+                    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                except FileExistsError:
+                    async with await anyio.open_file(
+                        log_path,
+                        mode="a",
+                        encoding="utf-8",
+                    ) as stream:
+                        await stream.write(entry)
+                else:
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        stream.write(header + entry)
+            logger.debug(f"Activity logged: {summary[:80]}")
         except Exception as e:
-            logger.warning("Failed to append activity log: %s", e)
+            logger.warning(f"Failed to append activity log: {e}")
 
     async def _cleanup_old_logs(self) -> None:
         """清理超过保留天数的旧日志文件。"""
@@ -608,20 +625,16 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
                     file_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
                     if file_date < cutoff_date:
                         await path.unlink()
-                        logger.debug("Cleaned up old activity log: %s", path.name)
+                        logger.debug(f"Cleaned up old activity log: {path.name}")
                 except ValueError:
                     continue
         except Exception as e:
-            logger.warning("Failed to cleanup old activity logs: %s", e)
+            logger.warning(f"Failed to cleanup old activity logs: {e}")
 
     async def abefore_agent(
         self, state: ActivityLogState, runtime: Runtime
     ) -> Optional[ActivityLogStateUpdate]:
         """在 Agent 执行前加载近期活动日志。"""
-        # 如果已经加载则跳过
-        if "activity_log_contents" in state:
-            return None
-
         contents = await self._load_recent_logs()
 
         # 趁机清理旧日志（低频操作，不影响性能）
@@ -709,7 +722,7 @@ class ActivityLogMiddleware(AgentMiddleware[ActivityLogState, ContextT, Response
             if summary:
                 await self._append_activity(summary)
         except Exception as e:
-            logger.warning("Failed to record activity: %s", e)
+            logger.warning(f"Failed to record activity: {e}")
 
         return None
 

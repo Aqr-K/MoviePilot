@@ -12,7 +12,7 @@ from app.log import logger
 
 
 class EditFileInput(BaseModel):
-    """Input parameters for edit file tool"""
+    """文件编辑工具的输入参数模型。"""
 
     file_path: str = Field(..., description="The absolute path of the file to edit")
     old_text: str = Field(..., description="The exact old text to be replaced")
@@ -27,8 +27,8 @@ class EditFileTool(MoviePilotTool):
     ]
     description: str = (
         "Edit a local text file by replacing specific old text with new text. "
-        "Non-admin users can only edit files inside the MoviePilot config, "
-        "Agent memory/activity, and log directories."
+        "Non-admin users can only edit files inside the MoviePilot Agent config "
+        "and log directories."
     )
     args_schema: Type[BaseModel] = EditFileInput
 

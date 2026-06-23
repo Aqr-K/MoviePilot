@@ -15,7 +15,7 @@ MAX_READ_SIZE = 50 * 1024
 
 
 class ReadFileInput(BaseModel):
-    """Input parameters for read file tool"""
+    """文件读取工具的输入参数模型。"""
     file_path: str = Field(..., description="The absolute path of the file to read")
     start_line: Optional[int] = Field(None, description="The starting line number (1-based, inclusive). If not provided, reading starts from the beginning of the file.")
     end_line: Optional[int] = Field(None, description="The ending line number (1-based, inclusive). If not provided, reading goes until the end of the file.")

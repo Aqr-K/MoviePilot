@@ -322,7 +322,7 @@ def _extract_version(skill_md: Path) -> int:
     try:
         content = skill_md.read_text(encoding="utf-8", errors="replace")
     except Exception as err:
-        print(err)
+        logger.debug(f"读取技能版本失败: {err}")
         return 0
     match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
     if not match:
@@ -627,13 +627,8 @@ class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # no
     ) -> SkillsStateUpdate | None:  # ty: ignore[invalid-method-override]
         """在 Agent 执行前异步加载技能元数据。
 
-        每个会话仅加载一次。若 state 中已有则跳过。
         首次加载时，会先将内置技能同步到用户目录（如不存在）。
         """
-        # 如果 state 中已存在元数据则跳过
-        if "skills_metadata" in state:
-            return None
-
         self._sync_bundled_skills()
 
         all_skills: dict[str, SkillMetadata] = {}

@@ -13,6 +13,7 @@ from typing import Any, Literal, Optional, TextIO, Type
 
 from pydantic import BaseModel, Field
 
+from app.agent.tools.impl._command_safety import validate_command_safety
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._terminal_session import (
@@ -30,14 +31,6 @@ MAX_OUTPUT_PREVIEW_BYTES = 10 * 1024
 READ_CHUNK_SIZE = 4096
 KILL_GRACE_SECONDS = 3
 COMMAND_CONCURRENCY_LIMIT = 2
-COMMAND_FORBIDDEN_KEYWORDS = (
-    ":(){ :|:& };:",
-    "dd if=/dev/zero",
-    "mkfs",
-    "reboot",
-    "shutdown",
-)
-
 _command_semaphore = asyncio.Semaphore(COMMAND_CONCURRENCY_LIMIT)
 
 
@@ -195,6 +188,13 @@ class ExecuteCommandInput(BaseModel):
         60,
         description="For action=run, max execution time in seconds.",
     )
+    confirm_dangerous: Optional[bool] = Field(
+        False,
+        description=(
+            "Explicit confirmation for high-risk commands such as recursive root deletion, "
+            "disk formatting, shutdown/reboot, or destructive permission changes."
+        ),
+    )
 
 
 class ExecuteCommandTool(MoviePilotTool):
@@ -255,34 +255,9 @@ class ExecuteCommandTool(MoviePilotTool):
         return command
 
     @staticmethod
-    def _validate_command(command: str) -> None:
+    def _validate_command(command: str, *, confirmed: bool = False) -> None:
         """复用旧工具的基础危险命令过滤，避免明显破坏性命令进入 shell。"""
-        for keyword in COMMAND_FORBIDDEN_KEYWORDS:
-            if keyword in command:
-                raise ValueError(f"命令包含禁止使用的关键字 '{keyword}'")
-
-        # 检查是否使用了 rm -r/R 删除根目录或一级目录，防止误杀多级目录
-        import re
-        import os.path
-        tokens = re.split(r'\s+', command.strip())
-        if any(t == "rm" or t.endswith("/rm") for t in tokens):
-            has_r = False
-            for token in tokens:
-                if token.startswith("-") and ("r" in token or "R" in token):
-                    has_r = True
-                    break
-            
-            if has_r:
-                for token in tokens:
-                    # 提取可能包含目标路径的部分（去除重定向、管道、分号等末尾干扰）
-                    m = re.match(r'^([^;\|&><]+)', token)
-                    if m:
-                        clean_token = m.group(1).strip('"\'')
-                        # 仅对绝对路径进行一级目录限制
-                        if clean_token.startswith('/'):
-                            norm_path = os.path.normpath(clean_token)
-                            if re.match(r'^/[^/]*$', norm_path) or re.match(r'^/[^/]*/$', norm_path):
-                                raise ValueError(f"不允许使用 rm 命令删除根目录或一级目录: {clean_token}")
+        validate_command_safety(command, confirmed=confirmed)
 
     @staticmethod
     def _normalize_timeout(timeout: Optional[int]) -> tuple[int, Optional[str]]:
@@ -367,7 +342,7 @@ class ExecuteCommandTool(MoviePilotTool):
                 asyncio.shield(wait_task), timeout=KILL_GRACE_SECONDS
             )
         except asyncio.TimeoutError:
-            logger.warning("命令进程强制清理超时: pid=%s", process.pid)
+            logger.warning(f"命令进程强制清理超时: pid={process.pid}")
 
     @staticmethod
     async def _finish_reader_tasks(reader_tasks: list[asyncio.Task]) -> None:
@@ -382,7 +357,7 @@ class ExecuteCommandTool(MoviePilotTool):
             if isinstance(result, Exception) and not isinstance(
                 result, asyncio.CancelledError
             ):
-                logger.debug("命令输出读取任务异常: %s", result)
+                logger.debug(f"命令输出读取任务异常: {result}")
 
     @staticmethod
     def _format_run_result(
@@ -425,9 +400,10 @@ class ExecuteCommandTool(MoviePilotTool):
         command: str,
         timeout: Optional[int],
         cwd: Optional[str] = None,
+        confirm_dangerous: bool = False,
     ) -> str:
         """按旧模式一次性执行命令，等待完成或超时后返回文本结果。"""
-        self._validate_command(command)
+        self._validate_command(command, confirmed=confirm_dangerous)
         normalized_timeout, timeout_note = self._normalize_timeout(timeout)
 
         async with _command_semaphore:
@@ -482,27 +458,29 @@ class ExecuteCommandTool(MoviePilotTool):
         max_bytes: Optional[int] = TERMINAL_DEFAULT_READ_BYTES,
         timeout_ms: Optional[int] = TERMINAL_WAIT_DEFAULT_MS,
         timeout: Optional[int] = 60,
+        confirm_dangerous: Optional[bool] = False,
         **kwargs,
     ) -> str:
         """执行命令动作：默认后台启动，也支持读取、等待、写入、终止和一次性执行。"""
         normalized_action = (action or "start").strip().lower()
         logger.info(
-            "执行工具: %s, action=%s, command=%s, session_id=%s",
-            self.name,
-            normalized_action,
-            command,
-            session_id,
+            f"执行工具: {self.name}, action={normalized_action}, "
+            f"command={command}, session_id={session_id}"
         )
 
         try:
             if normalized_action == "start":
                 start_command = self._require_command(command)
-                self._validate_command(start_command)
+                self._validate_command(
+                    start_command,
+                    confirmed=bool(confirm_dangerous),
+                )
                 payload = await terminal_session_manager.start(
                     command=start_command,
                     cwd=cwd,
                     env=env,
                     use_pty=use_pty,
+                    confirm_dangerous=bool(confirm_dangerous),
                 )
                 return self._dump(payload)
 
@@ -542,9 +520,10 @@ class ExecuteCommandTool(MoviePilotTool):
                     command=self._require_command(command),
                     timeout=timeout,
                     cwd=cwd,
+                    confirm_dangerous=bool(confirm_dangerous),
                 )
 
             raise ValueError(f"不支持的 action: {action}")
         except Exception as err:
-            logger.error("执行命令 action 失败: %s", err, exc_info=True)
+            logger.error(f"执行命令 action 失败: {err}", exc_info=True)
             return self._dump({"error": str(err), "status": "error", "action": normalized_action})

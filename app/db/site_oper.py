@@ -79,6 +79,15 @@ class SiteOper(DbOper):
         site.update(self._db, payload)
         return site
 
+    async def async_update(self, sid: int, payload: dict) -> Site:
+        """
+        异步更新站点。
+        """
+        site = await self.async_get(sid)
+        if site:
+            await site.async_update(self._db, payload)
+        return site
+
     def get_by_domain(self, domain: str) -> Site:
         """
         按域名获取站点
@@ -169,6 +178,16 @@ class SiteOper(DbOper):
         获取站点用户数据
         """
         return SiteUserData.get_by_domain(self._db, domain=domain, workdate=workdate)
+
+    async def async_get_userdata_by_domain(
+        self, domain: str, workdate: Optional[str] = None
+    ) -> List[SiteUserData]:
+        """
+        异步获取站点用户数据。
+        """
+        return await SiteUserData.async_get_by_domain(
+            self._db, domain=domain, workdate=workdate
+        )
 
     def get_userdata_by_date(self, date: str) -> List[SiteUserData]:
         """

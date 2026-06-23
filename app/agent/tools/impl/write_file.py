@@ -12,7 +12,7 @@ from app.log import logger
 
 
 class WriteFileInput(BaseModel):
-    """Input parameters for write file tool"""
+    """文件写入工具的输入参数模型。"""
 
     file_path: str = Field(..., description="The absolute path of the file to write")
     content: str = Field(..., description="The content to write into the file")
@@ -26,7 +26,7 @@ class WriteFileTool(MoviePilotTool):
     ]
     description: str = (
         "Write full content to a local text file. Non-admin users can only write "
-        "inside the MoviePilot config, Agent memory/activity, and log directories."
+        "inside the MoviePilot Agent config and log directories."
     )
     args_schema: Type[BaseModel] = WriteFileInput
 

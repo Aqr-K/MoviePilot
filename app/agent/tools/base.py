@@ -431,7 +431,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         :return: 普通用户允许读写的本地目录列表
         """
         roots = [
-            settings.CONFIG_PATH / "agent"
+            settings.CONFIG_PATH / "agent",
+            settings.LOG_PATH,
         ]
         resolved_roots = []
         for root in roots:
@@ -467,7 +468,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         allowed_text = "、".join(str(root) for root in allowed_roots)
         return (
             resolved_path,
-            f"抱歉，普通用户只能{operation}配置目录、Agent记忆目录和日志目录内的文件或目录：{allowed_text}",
+            f"抱歉，普通用户只能{operation}Agent配置目录和日志目录内的文件或目录：{allowed_text}",
         )
 
     async def _check_local_storage_access(

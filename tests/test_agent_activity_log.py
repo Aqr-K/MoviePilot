@@ -73,6 +73,22 @@ def test_activity_log_prompt_injects_index_not_full_log(tmp_path):
     assert "query_activity_log" in system_text
 
 
+def test_activity_log_abefore_agent_refreshes_existing_state(tmp_path):
+    """复用 Agent 图时，活动日志索引仍应在每轮执行前刷新。"""
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    middleware = ActivityLogMiddleware(activity_dir=str(tmp_path), prompt_load_days=1)
+    state = {"activity_log_contents": {"old": "旧索引"}}
+
+    _write_activity_log(
+        tmp_path,
+        date_str,
+        ["- **10:00** 新增活动记录"],
+    )
+    state_update = asyncio.run(middleware.abefore_agent(state, runtime=None))
+
+    assert state_update == {"activity_log_contents": {date_str: "1 条活动记录"}}
+
+
 def test_activity_log_skips_trivial_greeting_without_llm(tmp_path):
     """无实际任务的寒暄不应调用 LLM，也不应写入活动日志。"""
     middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))

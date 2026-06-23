@@ -283,12 +283,7 @@ class JobsMiddleware(AgentMiddleware[JobsState, ContextT, ResponseT]):  # noqa
     ) -> JobsStateUpdate | None:
         """在 Agent 执行前异步加载任务元数据。
 
-        每个会话仅加载一次。若 state 中已有则跳过。
         """
-        # 如果 state 中已存在元数据则跳过
-        if "jobs_metadata" in state:
-            return None
-
         return JobsStateUpdate(
             jobs_metadata=await load_jobs_metadata(self.sources)
         )

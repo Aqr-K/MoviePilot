@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from app.agent.tools.impl._command_safety import validate_command_safety
 from app.core.config import settings
 from app.log import logger
 
@@ -34,14 +35,6 @@ TERMINAL_PTY_POLL_INTERVAL = 0.05
 TERMINAL_WAIT_DEFAULT_MS = 1000
 TERMINAL_WAIT_MAX_MS = 60 * 1000
 TERMINAL_KILL_GRACE_SECONDS = 3
-TERMINAL_FORBIDDEN_KEYWORDS = (
-    "rm -rf /",
-    ":(){ :|:& };:",
-    "dd if=/dev/zero",
-    "mkfs",
-    "reboot",
-    "shutdown",
-)
 
 
 @dataclass
@@ -176,13 +169,9 @@ class _TerminalSessionManager:
         return merged_env
 
     @staticmethod
-    def _validate_command(command: str) -> None:
+    def _validate_command(command: str, *, confirmed: bool = False) -> None:
         """拒绝明显危险或空白命令。"""
-        if not command or not command.strip():
-            raise ValueError("命令不能为空")
-        for keyword in TERMINAL_FORBIDDEN_KEYWORDS:
-            if keyword in command:
-                raise ValueError(f"命令包含禁止使用的关键字 '{keyword}'")
+        validate_command_safety(command, confirmed=confirmed)
 
     @staticmethod
     def _set_nonblocking(fd: int) -> None:
@@ -213,9 +202,10 @@ class _TerminalSessionManager:
         cwd: Optional[str] = None,
         env: Optional[dict[str, Any]] = None,
         use_pty: Any = True,
+        confirm_dangerous: bool = False,
     ) -> dict[str, Any]:
         """启动后台命令并立即返回会话 ID。"""
-        self._validate_command(command)
+        self._validate_command(command, confirmed=confirm_dangerous)
         normalized_cwd = self._normalize_cwd(cwd)
         normalized_env = self._build_env(env)
         should_use_pty = self._normalize_bool(use_pty, default=True) and os.name == "posix"
@@ -313,7 +303,10 @@ class _TerminalSessionManager:
                 continue
             except OSError as err:
                 if err.errno not in {errno.EIO, errno.EBADF}:
-                    logger.debug("PTY 输出读取异常: session_id=%s, error=%s", session.session_id, err)
+                    logger.debug(
+                        f"PTY 输出读取异常: session_id={session.session_id}, "
+                        f"error={err}"
+                    )
                 break
 
             if not data:
@@ -343,7 +336,9 @@ class _TerminalSessionManager:
             session.mark_finished(session.exit_code)
         except Exception as err:
             session.mark_error(str(err))
-            logger.warning("等待 PTY 进程失败: session_id=%s, error=%s", session.session_id, err)
+            logger.warning(
+                f"等待 PTY 进程失败: session_id={session.session_id}, error={err}"
+            )
         finally:
             await self._finish_reader_tasks(session)
             session.close_pty()
@@ -358,7 +353,9 @@ class _TerminalSessionManager:
             session.mark_finished(exit_code)
         except Exception as err:
             session.mark_error(str(err))
-            logger.warning("等待管道进程失败: session_id=%s, error=%s", session.session_id, err)
+            logger.warning(
+                f"等待管道进程失败: session_id={session.session_id}, error={err}"
+            )
         finally:
             await self._finish_reader_tasks(session)
 
