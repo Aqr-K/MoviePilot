@@ -35,43 +35,15 @@ function apply_package_cache_env() {
     mkdir -p "${PIP_CACHE_DIR}" "${UV_CACHE_DIR}"
 }
 
-function apply_no_proxy_env() {
-    local default_no_proxy="localhost,127.0.0.1,::1,0.0.0.0,10.0.0.0/8,100.64.0.0/10,169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10,host.docker.internal,host.containers.internal,gateway.docker.internal,.local,.lan,.internal,.home.arpa,.localdomain"
-    local merged="${NO_PROXY:-}"
-    local source_value item old_ifs
-    local -a no_proxy_items
-
-    # Docker 内常见本机、局域网和内网服务必须直连，避免 PROXY_HOST 被映射到
-    # HTTP_PROXY 后拦截 Telegram 回调、下载器、媒体服务器等本地请求。
-    for source_value in "${no_proxy:-}" "${default_no_proxy}"; do
-        old_ifs="${IFS}"
-        IFS=','
-        read -ra no_proxy_items <<< "${source_value}"
-        IFS="${old_ifs}"
-        for item in "${no_proxy_items[@]}"; do
-            item="${item#"${item%%[![:space:]]*}"}"
-            item="${item%"${item##*[![:space:]]}"}"
-            if [ -z "${item}" ]; then
-                continue
-            fi
-            case ",${merged}," in
-                *",${item},"*) ;;
-                *) merged="${merged:+${merged},}${item}" ;;
-            esac
-        done
-    done
-
-    export NO_PROXY="${merged}"
-    export no_proxy="${merged}"
-}
-
-function apply_package_proxy_env() {
-    if [ -n "${PROXY_HOST:-}" ]; then
-        export HTTP_PROXY="${PROXY_HOST}"
-        export HTTPS_PROXY="${PROXY_HOST}"
-        export http_proxy="${PROXY_HOST}"
-        export https_proxy="${PROXY_HOST}"
-        apply_no_proxy_env
+function run_package_command() {
+    if [ -n "${PROXY_HOST}" ]; then
+        HTTP_PROXY="${PROXY_HOST}" \
+            HTTPS_PROXY="${PROXY_HOST}" \
+            http_proxy="${PROXY_HOST}" \
+            https_proxy="${PROXY_HOST}" \
+            "$@"
+    else
+        "$@"
     fi
 }
 
@@ -198,9 +170,6 @@ function load_config_from_app_env() {
     done
 
     shopt -u extglob
-    if [ -n "${PROXY_HOST:-}${HTTP_PROXY:-}${HTTPS_PROXY:-}${http_proxy:-}${https_proxy:-}" ]; then
-        apply_no_proxy_env
-    fi
     INFO "配置加载流程执行完毕。"
 }
 
@@ -328,13 +297,12 @@ function ensure_backend_runtime_dependencies() {
     fi
 
     WARN "→ 检测到后端核心依赖异常，开始尝试恢复主程序依赖..."
-    apply_package_proxy_env
     local -a pip_cmd=("${VENV_PATH}/bin/pip" "install" "-r" "/app/requirements.txt")
     if [ -n "${PIP_PROXY}" ]; then
         pip_cmd+=("-i" "${PIP_PROXY}")
     fi
 
-    if ! "${pip_cmd[@]}" > /dev/stdout 2> /dev/stderr; then
+    if ! run_package_command "${pip_cmd[@]}" > /dev/stdout 2> /dev/stderr; then
         ERROR "→ 自动恢复主程序依赖失败，后端无法启动。"
         diagnostic_keepalive 1
     fi
