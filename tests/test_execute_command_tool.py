@@ -137,8 +137,29 @@ class TestExecuteCommandTool(unittest.TestCase):
 
         payload = json.loads(result)
         self.assertEqual(payload["status"], "error")
-        # rm -rf / 命中删除根目录防护；断言拒绝原因点明 rm 根目录，避免锁死单一文案
-        self.assertIn("不允许使用 rm", payload["error"])
+        # rm -rf / 命中高危命令防护；断言拒绝且提示需要显式确认，避免锁死单一文案。
+        self.assertIn("confirm_dangerous=true", payload["error"])
+
+    def test_dangerous_command_requires_explicit_confirmation(self):
+        """高危命令只有携带显式确认参数时才允许进入执行层。"""
+        tool = ExecuteCommandTool(session_id="session-1", user_id="10001")
+
+        rejected = asyncio.run(
+            tool.run(action="run", command="echo ok && shutdown now", timeout=1)
+        )
+        allowed = asyncio.run(
+            tool.run(
+                action="run",
+                command=_python_command("print('shutdown now confirmed')"),
+                timeout=1,
+                confirm_dangerous=True,
+            )
+        )
+
+        rejected_payload = json.loads(rejected)
+        self.assertEqual("error", rejected_payload["status"])
+        self.assertIn("confirm_dangerous=true", rejected_payload["error"])
+        self.assertIn("shutdown now confirmed", allowed)
 
 
 class TestExecuteCommandSessionTool(unittest.IsolatedAsyncioTestCase):

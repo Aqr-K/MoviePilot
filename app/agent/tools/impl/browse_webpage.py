@@ -229,6 +229,11 @@ class BrowseWebpageTool(MoviePilotTool):
             if browser_action == BrowserAction.EVALUATE and not script:
                 return "错误: 'evaluate' 操作需要提供 script 参数"
             if (
+                browser_action == BrowserAction.EVALUATE
+                and not await self.is_admin_user()
+            ):
+                return "错误: 'evaluate' 操作仅允许管理员使用"
+            if (
                 browser_action in (BrowserAction.FOCUS_TAB, BrowserAction.CLOSE_TAB)
                 and tab_index is None
             ):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -243,9 +244,15 @@ class AgentRuntimeManager:
         self._cache_lock = threading.Lock()
         self._cached_signature: Optional[tuple[tuple[str, int, int], ...]] = None
         self._cached_config: Optional[AgentRuntimeConfig] = None
+        self._cached_signature_checked_at = 0.0
+        self._signature_check_interval = 1.0
+        self._layout_ready = False
 
     def ensure_layout(self) -> None:
         """创建目录、同步默认文件，并清理废弃的旧版 runtime 文件。"""
+        with self._cache_lock:
+            if self._layout_ready:
+                return
         self.agent_root_dir.mkdir(parents=True, exist_ok=True)
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -257,11 +264,13 @@ class AgentRuntimeManager:
         self._remove_obsolete_runtime_files()
         self._sync_bundled_defaults()
         self._migrate_root_memory_files()
+        with self._cache_lock:
+            self._layout_ready = True
 
     def load_runtime_config(self) -> AgentRuntimeConfig:
         """加载配置。用户目录损坏时自动回退到内置默认配置。"""
         self.ensure_layout()
-        signature = self._build_signature()
+        signature = self.current_signature()
         with self._cache_lock:
             if self._cached_signature == signature and self._cached_config:
                 return self._cached_config
@@ -269,7 +278,7 @@ class AgentRuntimeManager:
             try:
                 config = self._load_from_root(self.runtime_dir)
             except AgentRuntimeConfigError as err:
-                logger.warning("Agent 根层配置无效，回退到内置默认配置: %s", err)
+                logger.warning(f"Agent 根层配置无效，回退到内置默认配置: {err}")
                 config = self._load_from_root(self.bundled_defaults_dir)
                 config.used_fallback = True
                 config.warnings.insert(
@@ -285,6 +294,25 @@ class AgentRuntimeManager:
         with self._cache_lock:
             self._cached_signature = None
             self._cached_config = None
+            self._cached_signature_checked_at = 0.0
+            self._layout_ready = False
+
+    def current_signature(self) -> tuple[tuple[str, int, int], ...]:
+        """返回当前运行时配置文件签名，供调用方判断缓存是否仍可复用。"""
+        now = time.monotonic()
+        with self._cache_lock:
+            if (
+                self._cached_signature is not None
+                and now - self._cached_signature_checked_at
+                < self._signature_check_interval
+            ):
+                return self._cached_signature
+
+        signature = self._build_signature()
+        with self._cache_lock:
+            self._cached_signature = signature
+            self._cached_signature_checked_at = now
+        return signature
 
     def set_active_persona(self, persona_query: str) -> AgentRuntimeConfig:
         """切换当前激活人格，并立即刷新缓存。"""
@@ -308,7 +336,7 @@ class AgentRuntimeManager:
         )
         current_path.write_text(document, encoding="utf-8")
         self.invalidate_cache()
-        logger.info("已切换 Agent 人格: %s", persona.persona_id)
+        logger.info(f"已切换 Agent 人格: {persona.persona_id}")
         return self.load_runtime_config()
 
     def list_personas(self) -> list[PersonaDefinition]:
@@ -439,7 +467,7 @@ class AgentRuntimeManager:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
-            logger.info("已同步默认 Agent 运行时文件: %s", target)
+            logger.info(f"已同步默认 Agent 运行时文件: {target}")
 
     @classmethod
     def _should_update_bundled_subagent(
@@ -478,7 +506,7 @@ class AgentRuntimeManager:
             return
         target.parent.mkdir(parents=True, exist_ok=True)
         source.rename(target)
-        logger.info("已迁移旧版 Agent 根配置文件: %s -> %s", source, target)
+        logger.info(f"已迁移旧版 Agent 根配置文件: {source} -> {target}")
 
     def _remove_obsolete_runtime_files(self) -> None:
         """删除不再支持的旧版 Agent 配置文件，避免被误迁移到 memory。"""
@@ -487,14 +515,14 @@ class AgentRuntimeManager:
             if not path.exists() or not path.is_file():
                 continue
             path.unlink()
-            logger.info("已删除废弃的 Agent 根配置文件: %s", path)
+            logger.info(f"已删除废弃的 Agent 根配置文件: {path}")
 
         for relative_path in sorted(OBSOLETE_RUNTIME_FILES):
             path = self.runtime_dir / relative_path
             if not path.exists() or not path.is_file():
                 continue
             path.unlink()
-            logger.info("已删除废弃的 Agent 运行时文件: %s", path)
+            logger.info(f"已删除废弃的 Agent 运行时文件: {path}")
 
     def _migrate_root_memory_files(self) -> None:
         """将旧版根目录 memory 文件移入 `config/agent/memory`。"""
@@ -505,7 +533,7 @@ class AgentRuntimeManager:
             if target.exists():
                 continue
             path.rename(target)
-            logger.info("已迁移旧版 Agent memory 文件: %s -> %s", path, target)
+            logger.info(f"已迁移旧版 Agent memory 文件: {path} -> {target}")
 
     def _load_from_root(self, root: Path) -> AgentRuntimeConfig:
         current_persona_path = root / CURRENT_PERSONA_FILE

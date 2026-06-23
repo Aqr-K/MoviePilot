@@ -1,7 +1,7 @@
 """系统设置工具共用的键解析与分组元数据。"""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from app.core.config import Settings
 from app.schemas.types import SystemConfigKey
@@ -15,6 +15,7 @@ class SettingSpec:
     source: str
     group: str
     label: str
+    systemconfig_key: Optional[SystemConfigKey] = None
 
 
 SYSTEMCONFIG_SETTING_METADATA = {
@@ -234,6 +235,7 @@ def _build_specs() -> tuple[dict[str, SettingSpec], dict[str, SettingSpec]]:
             source="systemconfig",
             group=metadata.get("group", "misc"),
             label=metadata.get("label", item.value),
+            systemconfig_key=item,
         )
     return core_specs, system_specs
 
@@ -333,3 +335,57 @@ def list_setting_specs(
 
 def get_default_list_match_field(setting_key: str) -> Optional[str]:
     return LIST_ITEM_MATCH_FIELD_DEFAULTS.get(setting_key)
+
+
+SECRET_KEYWORDS = (
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "cookie",
+    "authorization",
+    "refresh_token",
+    "access_token",
+)
+
+
+def is_secret_setting_key(key: str) -> bool:
+    """判断设置键名是否疑似敏感字段。"""
+    normalized = _normalize_token(key)
+    return any(keyword in normalized for keyword in SECRET_KEYWORDS)
+
+
+def redact_secret_value(value: Any, *, redact_scalar: bool = False) -> Any:
+    """递归脱敏配置值中的密钥、Cookie、Token 等敏感字段。"""
+    if isinstance(value, dict):
+        return {
+            key: "***"
+            if is_secret_setting_key(str(key))
+            else redact_secret_value(item, redact_scalar=redact_scalar)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            redact_secret_value(item, redact_scalar=redact_scalar)
+            for item in value
+        ]
+    if isinstance(value, str):
+        return "***" if value and redact_scalar else value
+    return value
+
+
+def should_redact_setting(spec: SettingSpec, value: Any) -> bool:
+    """判断某项设置在默认查询响应中是否需要脱敏。"""
+    if is_secret_setting_key(spec.key):
+        return True
+    if isinstance(value, dict):
+        return any(is_secret_setting_key(str(key)) for key in value.keys())
+    if isinstance(value, list):
+        return any(
+            should_redact_setting(spec, item)
+            for item in value
+            if isinstance(item, dict)
+        )
+    return False

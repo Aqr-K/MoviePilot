@@ -5,8 +5,7 @@ import re
 from typing import Any, Dict, Iterable, Optional
 
 from app.core.event import eventmanager
-from app.db import AsyncSessionFactory
-from app.db.models.subscribe import Subscribe
+from app.db.subscribe_oper import SubscribeOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.rule import RuleHelper
 from app.modules.filter.RuleParser import RuleParser
@@ -284,23 +283,22 @@ async def collect_rule_group_usages(
             continue
         ensure_usage(name)["used_in_global_best_version"] = True
 
-    async with AsyncSessionFactory() as db:
-        subscribes = await Subscribe.async_list(db)
-        for subscribe in subscribes:
-            filter_groups = subscribe.filter_groups or []
-            for name in filter_groups:
-                if target_names and name not in target_names:
-                    continue
-                ensure_usage(name)["subscribes"].append(
-                    {
-                        "subscribe_id": subscribe.id,
-                        "name": subscribe.name,
-                        "season": subscribe.season,
-                        "type": subscribe.type,
-                        "username": subscribe.username,
-                        "best_version": bool(subscribe.best_version),
-                    }
-                )
+    subscribes = await SubscribeOper().async_list()
+    for subscribe in subscribes:
+        filter_groups = subscribe.filter_groups or []
+        for name in filter_groups:
+            if target_names and name not in target_names:
+                continue
+            ensure_usage(name)["subscribes"].append(
+                {
+                    "subscribe_id": subscribe.id,
+                    "name": subscribe.name,
+                    "season": subscribe.season,
+                    "type": subscribe.type,
+                    "username": subscribe.username,
+                    "best_version": bool(subscribe.best_version),
+                }
+            )
 
     return usage_map
 
@@ -482,22 +480,22 @@ async def rename_rule_group_references(old_name: str, new_name: str) -> dict:
             await save_system_config(config_key, updated)
             changed["global_settings"][config_key.value] = updated
 
-    async with AsyncSessionFactory() as db:
-        subscribes = await Subscribe.async_list(db)
-        for subscribe in subscribes:
-            original = subscribe.filter_groups or []
-            updated = replace_group_name_in_list(original, old_name, new_name)
-            if updated == original:
-                continue
-            await subscribe.async_update(db, {"filter_groups": updated})
-            changed["subscribes"].append(
-                {
-                    "subscribe_id": subscribe.id,
-                    "name": subscribe.name,
-                    "season": subscribe.season,
-                    "filter_groups": updated,
-                }
-            )
+    subscribe_oper = SubscribeOper()
+    subscribes = await subscribe_oper.async_list()
+    for subscribe in subscribes:
+        original = subscribe.filter_groups or []
+        updated = replace_group_name_in_list(original, old_name, new_name)
+        if updated == original:
+            continue
+        await subscribe_oper.async_update_filter_groups(subscribe.id, updated)
+        changed["subscribes"].append(
+            {
+                "subscribe_id": subscribe.id,
+                "name": subscribe.name,
+                "season": subscribe.season,
+                "filter_groups": updated,
+            }
+        )
 
     return changed
 
@@ -520,21 +518,21 @@ async def remove_rule_group_references(group_name: str) -> dict:
             await save_system_config(config_key, updated)
             changed["global_settings"][config_key.value] = updated
 
-    async with AsyncSessionFactory() as db:
-        subscribes = await Subscribe.async_list(db)
-        for subscribe in subscribes:
-            original = subscribe.filter_groups or []
-            updated = [value for value in original if value != group_name]
-            if updated == original:
-                continue
-            await subscribe.async_update(db, {"filter_groups": updated})
-            changed["subscribes"].append(
-                {
-                    "subscribe_id": subscribe.id,
-                    "name": subscribe.name,
-                    "season": subscribe.season,
-                    "filter_groups": updated,
-                }
-            )
+    subscribe_oper = SubscribeOper()
+    subscribes = await subscribe_oper.async_list()
+    for subscribe in subscribes:
+        original = subscribe.filter_groups or []
+        updated = [value for value in original if value != group_name]
+        if updated == original:
+            continue
+        await subscribe_oper.async_update_filter_groups(subscribe.id, updated)
+        changed["subscribes"].append(
+            {
+                "subscribe_id": subscribe.id,
+                "name": subscribe.name,
+                "season": subscribe.season,
+                "filter_groups": updated,
+            }
+        )
 
     return changed

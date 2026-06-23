@@ -26,6 +26,51 @@ class TransferHistoryOper(DbOper):
         """
         return await TransferHistory.async_get(self._db, historyid)
 
+    async def async_list_by_title(
+        self,
+        title: str,
+        page: Optional[int] = 1,
+        count: Optional[int] = 30,
+        status: Optional[bool] = None,
+    ) -> List[TransferHistory]:
+        """
+        异步按标题分页查询转移记录。
+        """
+        return await TransferHistory.async_list_by_title(
+            self._db, title=title, page=page, count=count, status=status
+        )
+
+    async def async_list_by_page(
+        self,
+        page: Optional[int] = 1,
+        count: Optional[int] = 30,
+        status: Optional[bool] = None,
+    ) -> List[TransferHistory]:
+        """
+        异步分页查询转移记录。
+        """
+        return await TransferHistory.async_list_by_page(
+            self._db, page=page, count=count, status=status
+        )
+
+    async def async_count(self, status: Optional[bool] = None) -> int:
+        """
+        异步统计转移记录数量。
+        """
+        return await TransferHistory.async_count(self._db, status=status)
+
+    async def async_count_by_title(
+        self,
+        title: str,
+        status: Optional[bool] = None,
+    ) -> int:
+        """
+        异步按标题统计转移记录数量。
+        """
+        return await TransferHistory.async_count_by_title(
+            self._db, title=title, status=status
+        )
+
     def get_by_title(self, title: str) -> List[TransferHistory]:
         """
         按标题查询转移记录

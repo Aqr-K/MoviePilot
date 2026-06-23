@@ -114,6 +114,12 @@ class DownloadHistoryOper(DbOper):
         """
         return DownloadHistory.list_by_page(self._db, page, count)
 
+    async def async_delete_history(self, historyid: int):
+        """
+        异步删除下载记录。
+        """
+        await DownloadHistory.async_delete(self._db, historyid)
+
     def truncate(self):
         """
         清空下载记录

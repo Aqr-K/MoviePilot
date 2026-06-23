@@ -7,8 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
-from app.db import AsyncSessionFactory
-from app.db.models.subscribehistory import SubscribeHistory
+from app.db.subscribehistory_oper import SubscribeHistoryOper
 from app.log import logger
 from app.schemas.types import media_type_to_agent
 
@@ -74,88 +73,87 @@ class QuerySubscribeHistoryTool(MoviePilotTool):
             if media_type not in ["all", "movie", "tv"]:
                 return f"错误：无效的媒体类型 '{media_type}'，支持的类型：'movie', 'tv', 'all'"
 
-            # 获取数据库会话
-            async with AsyncSessionFactory() as db:
-                if name:
-                    # 有名称过滤时，获取足够多的记录在内存中过滤，不分页
-                    fetch_count = 500
-                    if media_type == "all":
-                        movie_history = await SubscribeHistory.async_list_by_type(
-                            db, mtype="movie", page=1, count=fetch_count
-                        )
-                        tv_history = await SubscribeHistory.async_list_by_type(
-                            db, mtype="tv", page=1, count=fetch_count
-                        )
-                        all_history = list(movie_history) + list(tv_history)
-                        all_history.sort(key=lambda x: x.date or "", reverse=True)
-                    else:
-                        all_history = list(
-                            await SubscribeHistory.async_list_by_type(
-                                db, mtype=media_type, page=1, count=fetch_count
-                            )
-                        )
-
-                    # 按名称过滤
-                    name_lower = name.lower()
-                    filtered_history = [
-                        record
-                        for record in all_history
-                        if record.name and name_lower in record.name.lower()
-                    ]
-
-                    if not filtered_history:
-                        return "未找到相关订阅历史记录"
-
-                    # 名称过滤时直接返回所有匹配结果，不分页
-                    simplified_records = self._simplify_records(filtered_history)
-                    result_json = json.dumps(
-                        simplified_records, ensure_ascii=False, indent=2
+            subscribe_history_oper = SubscribeHistoryOper()
+            if name:
+                # 有名称过滤时，获取足够多的记录在内存中过滤，不分页
+                fetch_count = 500
+                if media_type == "all":
+                    movie_history = await subscribe_history_oper.async_list_by_type(
+                        mtype="movie", page=1, count=fetch_count
                     )
-                    return result_json
+                    tv_history = await subscribe_history_oper.async_list_by_type(
+                        mtype="tv", page=1, count=fetch_count
+                    )
+                    all_history = list(movie_history) + list(tv_history)
+                    all_history.sort(key=lambda x: x.date or "", reverse=True)
                 else:
-                    # 无名称过滤时，直接利用数据库分页
-                    if media_type == "all":
-                        movie_history = await SubscribeHistory.async_list_by_type(
-                            db, mtype="movie", page=1, count=page * PAGE_SIZE
+                    all_history = list(
+                        await subscribe_history_oper.async_list_by_type(
+                            mtype=media_type, page=1, count=fetch_count
                         )
-                        tv_history = await SubscribeHistory.async_list_by_type(
-                            db, mtype="tv", page=1, count=page * PAGE_SIZE
-                        )
-                        all_history = list(movie_history) + list(tv_history)
-                        all_history.sort(key=lambda x: x.date or "", reverse=True)
-                        filtered_history = all_history
-                    else:
-                        filtered_history = list(
-                            await SubscribeHistory.async_list_by_type(
-                                db, mtype=media_type, page=1, count=page * PAGE_SIZE
-                            )
-                        )
+                    )
+
+                # 按名称过滤
+                name_lower = name.lower()
+                filtered_history = [
+                    record
+                    for record in all_history
+                    if record.name and name_lower in record.name.lower()
+                ]
 
                 if not filtered_history:
                     return "未找到相关订阅历史记录"
 
-                # 分页切片
-                total_count = len(filtered_history)
-                start = (page - 1) * PAGE_SIZE
-                end = start + PAGE_SIZE
-                page_records = filtered_history[start:end]
-
-                if not page_records:
-                    return f"第 {page} 页没有数据。"
-
-                simplified_records = self._simplify_records(page_records)
+                # 名称过滤时直接返回所有匹配结果，不分页
+                simplified_records = self._simplify_records(filtered_history)
                 result_json = json.dumps(
                     simplified_records, ensure_ascii=False, indent=2
                 )
-
-                has_more = total_count > end
-                payload_msg = f"第 {page} 页，当前页 {len(simplified_records)} 条结果。"
-                if has_more:
-                    payload_msg += (
-                        f" 可能有更多数据，可使用 page={page + 1} 获取下一页。"
+                return result_json
+            else:
+                # 无名称过滤时，直接利用数据库分页
+                if media_type == "all":
+                    movie_history = await subscribe_history_oper.async_list_by_type(
+                        mtype="movie", page=1, count=page * PAGE_SIZE
+                    )
+                    tv_history = await subscribe_history_oper.async_list_by_type(
+                        mtype="tv", page=1, count=page * PAGE_SIZE
+                    )
+                    all_history = list(movie_history) + list(tv_history)
+                    all_history.sort(key=lambda x: x.date or "", reverse=True)
+                    filtered_history = all_history
+                else:
+                    filtered_history = list(
+                        await subscribe_history_oper.async_list_by_type(
+                            mtype=media_type, page=1, count=page * PAGE_SIZE
+                        )
                     )
 
-                return f"{payload_msg}\n\n{result_json}"
+            if not filtered_history:
+                return "未找到相关订阅历史记录"
+
+            # 分页切片
+            total_count = len(filtered_history)
+            start = (page - 1) * PAGE_SIZE
+            end = start + PAGE_SIZE
+            page_records = filtered_history[start:end]
+
+            if not page_records:
+                return f"第 {page} 页没有数据。"
+
+            simplified_records = self._simplify_records(page_records)
+            result_json = json.dumps(
+                simplified_records, ensure_ascii=False, indent=2
+            )
+
+            has_more = total_count > end
+            payload_msg = f"第 {page} 页，当前页 {len(simplified_records)} 条结果。"
+            if has_more:
+                payload_msg += (
+                    f" 可能有更多数据，可使用 page={page + 1} 获取下一页。"
+                )
+
+            return f"{payload_msg}\n\n{result_json}"
         except Exception as e:
             logger.error(f"查询订阅历史失败: {e}", exc_info=True)
             return f"查询订阅历史时发生错误: {str(e)}"

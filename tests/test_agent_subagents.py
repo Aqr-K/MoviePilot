@@ -466,14 +466,16 @@ def test_after_agent_cancels_unfinished_tasks():
                 )
             )
             await asyncio.wait_for(task_started.wait(), timeout=1)
+            task_id = start_payload["tasks"][0]["task_id"]
             await middleware.aafter_agent({}, None)
             status_payload = json.loads(
                 await middleware._control_task(
                     action="status",
-                    task_ids=[start_payload["tasks"][0]["task_id"]],
+                    task_ids=[task_id],
                 )
             )
 
-        assert status_payload["tasks"][0]["status"] == "cancelled"
+        assert status_payload["tasks"] == []
+        assert status_payload["missing_task_ids"] == [task_id]
 
     asyncio.run(_run_test())

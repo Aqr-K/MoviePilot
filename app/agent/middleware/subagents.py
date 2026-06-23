@@ -197,18 +197,44 @@ def is_subagent_stream_metadata(metadata: Any) -> bool:
     ) == SUBAGENT_STREAM_MARKER_VALUE:
         return True
 
-    return bool(metadata.get("lc_agent_name") in builtin_subagent_names())
+    return bool(
+        metadata.get("lc_agent_name")
+        in builtin_subagent_names(agent_runtime_manager.current_signature())
+    )
 
 
-@lru_cache(maxsize=1)
-def builtin_subagent_names() -> frozenset[str]:
+def builtin_subagent_names(
+    runtime_signature: Optional[tuple[tuple[str, int, int], ...]] = None,
+) -> frozenset[str]:
     """返回内置子代理名称集合。"""
-    return frozenset(profile.name for profile in _builtin_subagent_profiles())
+    runtime_signature = runtime_signature or agent_runtime_manager.current_signature()
+    return _cached_builtin_subagent_names(runtime_signature)
 
 
-@lru_cache(maxsize=1)
-def _builtin_subagent_profiles() -> tuple[_SubAgentProfile, ...]:
+@lru_cache(maxsize=8)
+def _cached_builtin_subagent_names(
+    runtime_signature: tuple[tuple[str, int, int], ...],
+) -> frozenset[str]:
+    """按运行时签名缓存内置子代理名称集合。"""
+    return frozenset(
+        profile.name
+        for profile in _builtin_subagent_profiles(runtime_signature)
+    )
+
+
+def _builtin_subagent_profiles(
+    runtime_signature: Optional[tuple[tuple[str, int, int], ...]] = None,
+) -> tuple[_SubAgentProfile, ...]:
     """从运行时配置目录加载 MoviePilot 子代理定义。"""
+    runtime_signature = runtime_signature or agent_runtime_manager.current_signature()
+    return _cached_builtin_subagent_profiles(runtime_signature)
+
+
+@lru_cache(maxsize=8)
+def _cached_builtin_subagent_profiles(
+    runtime_signature: tuple[tuple[str, int, int], ...],
+) -> tuple[_SubAgentProfile, ...]:
+    """按运行时签名缓存 MoviePilot 子代理定义。"""
     definitions = agent_runtime_manager.list_subagents()
     profiles = tuple(
         _profile_from_runtime_definition(definition)
@@ -235,6 +261,10 @@ def _builtin_subagent_profiles() -> tuple[_SubAgentProfile, ...]:
             ),
         ),
     )
+
+
+builtin_subagent_names.cache_clear = _cached_builtin_subagent_names.cache_clear
+_builtin_subagent_profiles.cache_clear = _cached_builtin_subagent_profiles.cache_clear
 
 
 def _profile_from_runtime_definition(
@@ -1044,6 +1074,7 @@ class SubAgentTaskControlMiddleware(AgentMiddleware):
         if unfinished_records:
             logger.info(f"Agent 结束，取消未完成子代理任务: tasks={len(unfinished_records)}")
         await self._cancel_records(unfinished_records)
+        self._tasks.clear()
 
     async def awrap_tool_call(
         self,
@@ -1083,9 +1114,8 @@ def create_subagent_middlewares(
     stream_handler: Any = None,
 ) -> tuple[list[AgentMiddleware], list[BaseTool]]:
     """创建子代理中间件列表和任务工具列表。"""
-    _builtin_subagent_profiles.cache_clear()
-    builtin_subagent_names.cache_clear()
-    profiles = _builtin_subagent_profiles()
+    runtime_signature = agent_runtime_manager.current_signature()
+    profiles = _builtin_subagent_profiles(runtime_signature)
     subagent_middleware = MoviePilotSubAgentMiddleware(
         model=model,
         profiles=profiles,

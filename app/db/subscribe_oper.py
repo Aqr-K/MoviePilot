@@ -169,6 +169,22 @@ class SubscribeOper(DbOper):
         """
         await Subscribe.async_delete(self._db, rid=sid)
 
+    async def async_update(self, sid: int, payload: dict) -> Subscribe:
+        """
+        异步更新订阅。
+        """
+        subscribe = await self.async_get(sid)
+        if subscribe:
+            payload = _normalize_integer_flags(payload)
+            await subscribe.async_update(self._db, payload)
+        return subscribe
+
+    async def async_update_filter_groups(self, sid: int, filter_groups: list) -> Subscribe:
+        """
+        异步更新订阅使用的过滤规则组。
+        """
+        return await self.async_update(sid, {"filter_groups": filter_groups})
+
     def update(self, sid: int, payload: dict) -> Subscribe:
         """
         更新订阅

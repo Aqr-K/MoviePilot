@@ -302,7 +302,6 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         """在代理执行前扫描记忆目录并加载所有 .md 文件的内容。
 
         自动发现目录下所有 `.md` 文件并加载其内容到状态中。
-        如果状态中尚未存在则进行加载。
         同时检测记忆文件是否为空，设置 memory_empty 标志位，
         以便在系统提示词中触发初始化引导流程。
 
@@ -314,10 +313,6 @@ class MemoryMiddleware(AgentMiddleware[MemoryState, ContextT, ResponseT]):  # no
         返回：
             填充了 memory_contents 和 memory_empty 的状态更新。
         """
-        # 如果已经加载则跳过
-        if "memory_contents" in state:
-            return None
-
         # 扫描目录下所有 .md 文件
         md_files = await self._scan_memory_files()
 

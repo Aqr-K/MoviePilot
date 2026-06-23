@@ -592,22 +592,6 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         这样后续多轮 `model -> tools -> model` 循环都只复用这一次结果，
         不会为每次模型回合重复追加一笔 selector LLM 开销。
         """
-        if "selected_tool_names" in state:
-            self._log_selection_attempt(
-                _ToolSelectionAttempt(
-                    request=ModelRequest(
-                        model=self.model,
-                        tools=list(self.selection_tools),
-                        messages=state["messages"],
-                        state=state,
-                        runtime=runtime,
-                    ),
-                    selected_tool_names=state.get("selected_tool_names") or [],
-                    status="reused",
-                )
-            )
-            return None
-
         if not self.selection_tools or self.model is None:
             detail = "没有可筛选工具" if not self.selection_tools else "未配置筛选模型"
             self._log_selection_attempt(
