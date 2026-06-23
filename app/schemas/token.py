@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,10 @@ class Token(BaseModel):
     permissions: Optional[dict] = Field(default_factory=dict)
     # 是否显示配置向导
     wizard: Optional[bool] = None
+    # 登录结果状态："success" | "mfa_required" | "challenge"（PR6 结构化响应，附加字段，旧端忽略）
+    status: Optional[str] = None
+    # 需 MFA 时可用的第二因子 id 列表（前端据此渲染因子选择）
+    factors_available: Optional[List[str]] = None
 
 
 class TokenPayload(BaseModel):

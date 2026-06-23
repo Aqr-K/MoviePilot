@@ -8,10 +8,14 @@ from app import schemas
 from app.chain.user import UserChain
 from app.core import security
 from app.core.config import settings
+from app.core.event import eventmanager
 from app.db.systemconfig_oper import SystemConfigOper
+from app.db.user_oper import UserOper
 from app.helper.sites import SitesHelper  # noqa
 from app.helper.image import WallpaperHelper
-from app.schemas.types import SystemConfigKey
+from app.schemas.event import AuthObservationEventData, MfaChallengeEventData
+from app.schemas.types import ChainEventType, SystemConfigKey
+from app.service.auth.orchestrator import enrolled_factor_ids
 
 router = APIRouter()
 
@@ -30,14 +34,35 @@ def login_access_token(
         username=form_data.username, password=form_data.password, mfa_code=otp_password
     )
 
+    client_ip = request.client.host if request.client else None
     if not success:
-        # 如果是需要MFA验证，返回特殊标识
+        # 需要 MFA：枚举该用户可用的第二因子，结构化返回 + 触发观测事件（前端联动渲染因子选择）
         if user_or_message == "MFA_REQUIRED":
+            factors: List[str] = []
+            mfa_user = UserOper().get_by_name(name=form_data.username)
+            if mfa_user is not None:
+                try:
+                    factors = enrolled_factor_ids(mfa_user)
+                except Exception:  # noqa: BLE001 —— 枚举失败不阻断 MFA 提示
+                    factors = []
+            eventmanager.send_event(
+                etype=ChainEventType.MfaChallengeRequired,
+                data=MfaChallengeEventData(username=form_data.username, factors_available=factors),
+            )
             raise HTTPException(
                 status_code=401,
-                detail="需要双重验证，请提供验证码或使用通行密钥",
+                detail={
+                    "message": "需要双重验证，请提供验证码或使用通行密钥",
+                    "status": "mfa_required",
+                    "factors_available": factors,
+                },
                 headers={"X-MFA-Required": "true"},
             )
+        eventmanager.send_event(
+            etype=ChainEventType.AuthFailed,
+            data=AuthObservationEventData(username=form_data.username, success=False,
+                                          reason="invalid_credentials", client_ip=client_ip),
+        )
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     # 用户等级
@@ -66,6 +91,11 @@ def login_access_token(
         ),
     )
 
+    eventmanager.send_event(
+        etype=ChainEventType.AuthSucceeded,
+        data=AuthObservationEventData(username=user_or_message.name, success=True,
+                                      client_ip=client_ip),
+    )
     return schemas.Token(
         access_token=access_token,
         token_type="bearer",
@@ -76,6 +106,7 @@ def login_access_token(
         level=level,
         permissions=user_or_message.permissions or {},
         wizard=show_wizard,
+        status="success",
     )
 
 

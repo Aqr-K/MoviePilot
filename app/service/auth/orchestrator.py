@@ -96,3 +96,34 @@ def try_credential_providers(credentials, *, providers=None, deps=None) -> Optio
             return None
         return ResolvedIdentity(user=user, apply_mfa=not outcome.mfa_already_satisfied)
     return None
+
+
+def factors_for_user(user) -> list:
+    """构造该用户的全部 MFA 因子：内建 OTP/PassKey（绑定到 user）+ 插件经注册表声明的因子。
+
+    单一来源，供 ``_verify_mfa`` 评估与 ``enrolled_factor_ids`` 枚举共用，避免构建逻辑漂移。
+    """
+    from app.core.auth.mfa_factors import all_mfa_factors
+    from app.db.models.passkey import PassKey
+    from app.service.auth.builtin_factors import build_builtin_factors
+    from app.utils.otp import OtpUtils
+
+    builtin = build_builtin_factors(
+        is_otp_enrolled=lambda _ref: bool(getattr(user, "is_otp", False)),
+        verify_otp=lambda _ref, code: OtpUtils.check(str(user.otp_secret), code),
+        has_passkey=lambda _ref: bool(PassKey.get_by_user_id(db=None, user_id=user.id)),
+    )
+    return builtin + all_mfa_factors()
+
+
+def enrolled_factor_ids(user) -> list:
+    """枚举该用户已注册的 MFA 因子 id（内建 + 插件），供端点回传 factors_available / 观测事件。"""
+    ref = MfaUserRef(user_id=user.id, username=getattr(user, "name", "") or "")
+    ids = []
+    for factor in factors_for_user(user):
+        try:
+            if factor.is_enrolled(ref):
+                ids.append(factor.factor_id)
+        except Exception as e:  # noqa: BLE001 —— 单个因子枚举异常不影响整体
+            logger.error(f"枚举 MFA 因子 {getattr(factor, 'factor_id', factor)} 注册态异常：{str(e)}")
+    return ids

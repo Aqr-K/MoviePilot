@@ -193,26 +193,15 @@ class UserChain(ChainBase):
             - 如果需要MFA但未提供，返回 "MFA_REQUIRED"
             - 如果MFA验证失败，返回 False
         """
-        # 委托可插拔 MFA 因子注册表评估（PR3）：内建 OtpFactor + PasskeyFactor 绑定到当前 user，
-        # evaluate_mfa 复现"OTP 优先 / PassKey 延后"语义；外部三值契约不变（由黄金矩阵守护）。
-        from app.db.models.passkey import PassKey
+        # 委托可插拔 MFA 评估（PR3/PR6）：factors_for_user 统一构造内建 OTP/PassKey（绑定 user）+
+        # 插件注册的因子；evaluate_mfa 复现"OTP 优先 / PassKey 延后"语义，外部三值契约不变（黄金矩阵守护）。
         from app.core.auth.mfa_factors import MfaSubmission, MfaUserRef
-        from app.service.auth.builtin_factors import build_builtin_factors
-        from app.service.auth.orchestrator import evaluate_mfa
+        from app.service.auth.orchestrator import evaluate_mfa, factors_for_user
 
-        factors = build_builtin_factors(
-            is_otp_enrolled=lambda _ref: bool(user.is_otp),
-            verify_otp=lambda _ref, code: OtpUtils.check(str(user.otp_secret), code),
-            has_passkey=lambda _ref: bool(PassKey.get_by_user_id(db=None, user_id=user.id)),
-        )
-        # 合并插件经 provides_mfa_factors 注册的第二因子（按 priority 与内建因子统一评估）；
-        # 注册表为空时不改变行为。插件因子经 MfaUserRef 自行查库，不接触密钥。
-        from app.core.auth.mfa_factors import all_mfa_factors
-        factors = factors + all_mfa_factors()
         result = evaluate_mfa(
             MfaUserRef(user_id=user.id, username=user.name),
             MfaSubmission(code=mfa_code),
-            factors,
+            factors_for_user(user),
         )
         if result.kind == "mfa_required":
             logger.info(
