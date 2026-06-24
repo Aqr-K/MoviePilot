@@ -7,6 +7,32 @@ from pydantic import BaseModel, Field, field_validator
 from app.schemas.types import ContentType, NotificationType, MessageChannel
 
 
+class NotificationClearScope(str, Enum):
+    """
+    通知中心清理范围。
+    """
+
+    # 全部消息
+    All = "all"
+    # 系统消息
+    System = "system"
+    # 媒体消息
+    Media = "media"
+
+
+class NotificationClearBefore(BaseModel):
+    """
+    通知中心按范围记录的清理时间。
+    """
+
+    # 全部消息清理时间
+    all: int = 0
+    # 系统消息清理时间
+    system: int = 0
+    # 媒体消息清理时间
+    media: int = 0
+
+
 class MessageResponse(BaseModel):
     """
     消息发送响应，包含消息ID等信息用于后续编辑

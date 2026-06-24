@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Union, Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
@@ -13,14 +14,52 @@ from app.core.security import verify_token, verify_apitoken
 from app.db import get_async_db
 from app.db.models import User
 from app.db.message_oper import MessageOper
+from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_superuser
 from app.helper.service import ServiceConfigHelper
 from app.helper.webpush import is_webpush_subscription_gone
 from app.log import logger
 from app.modules.wechat.WXBizMsgCrypt3 import WXBizMsgCrypt
-from app.schemas.types import MessageChannel
+from app.schemas.types import MessageChannel, SystemConfigKey
 
 router = APIRouter()
+
+
+def _normalize_notification_clear_timestamp(value: Any) -> int:
+    """
+    规范化通知清理时间戳。
+    """
+    try:
+        normalized_value = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return normalized_value if normalized_value > 0 else 0
+
+
+def _get_notification_clear_before() -> schemas.NotificationClearBefore:
+    """
+    读取通知中心清理时间配置。
+    """
+    value = SystemConfigOper().get(SystemConfigKey.NotificationClearBefore)
+    if isinstance(value, dict):
+        return schemas.NotificationClearBefore(
+            all=_normalize_notification_clear_timestamp(value.get("all")),
+            system=_normalize_notification_clear_timestamp(value.get("system")),
+            media=_normalize_notification_clear_timestamp(value.get("media")),
+        )
+    return schemas.NotificationClearBefore(
+        all=_normalize_notification_clear_timestamp(value),
+    )
+
+
+def _format_notification_clear_time(value: int) -> Optional[str]:
+    """
+    将清理时间戳转换为消息表使用的时间字符串。
+    """
+    if not value:
+        return None
+    timestamp = value / 1000 if value > 10000000000 else value
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
 
 
 def start_message_chain(body: Any, form: Any, args: Any):
@@ -140,8 +179,30 @@ async def get_notification_message(
     """
     获取系统发送的通知消息列表。
     """
-    messages = await MessageOper(db).async_list_sent_by_page(page=page, count=count)
+    clear_before = _get_notification_clear_before()
+    messages = await MessageOper(db).async_list_sent_by_page(
+        page=page,
+        count=count,
+        all_clear_before=_format_notification_clear_time(clear_before.all),
+        system_clear_before=_format_notification_clear_time(clear_before.system),
+        media_clear_before=_format_notification_clear_time(clear_before.media),
+    )
     return [schemas.NotificationHistoryItem(**message.to_dict()) for message in messages]
+
+
+@router.delete("/notification", summary="清理通知消息", response_model=schemas.Response)
+async def clear_notification_message(
+    scope: schemas.NotificationClearScope = schemas.NotificationClearScope.All,
+    _: schemas.TokenPayload = Depends(verify_token),
+):
+    """
+    记录通知中心清理时间，后续通知历史查询会在服务端过滤。
+    """
+    clear_before = _get_notification_clear_before()
+    value = clear_before.model_dump()
+    value[scope.value] = int(time.time() * 1000)
+    await SystemConfigOper().async_set(SystemConfigKey.NotificationClearBefore, value)
+    return schemas.Response(success=True, data={"clear_before": value})
 
 
 def wechat_verify(

@@ -267,6 +267,8 @@ class SystemConfigKey(Enum):
     AIAgentConfig = "AIAgentConfig"
     # 通知消息格式模板
     NotificationTemplates = "NotificationTemplates"
+    # 通知中心清理时间
+    NotificationClearBefore = "NotificationClearBefore"
     # 刮削开关设置
     ScrapingSwitchs = "ScrapingSwitchs"
     # 插件安装统计
