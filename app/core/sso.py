@@ -11,16 +11,13 @@ SSO（外部 IdP 单点登录）框架能力 —— db-free 核心。
 用户解析/建号（碰 db）与 HTTP 端点编排在更上层（helper / api），本模块保持 **db-free**
 （延续 auth_bridge 去 db 的方向，不新增 core→db 边）。
 """
-import re
 import secrets
-import time
 from dataclasses import dataclass, field
-from threading import RLock
-from typing import Any, Dict, List, NamedTuple, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
-# provider_id 合法字符集：字母数字与连字符，1–32 位。禁用下划线等分隔符——provider_id 会进入本地用户名
-# ``sso_{provider_id}_{外部用户名}`` 与回调 URL 路径片段，禁分隔符可数学上杜绝跨提供方撞名与路径注入。
-_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9\-]{1,32}$")
+from app.core.auth.identifiers import is_valid_identifier
+from app.core.auth.registry import OwnerScopedRegistry
+from app.core.challenge_store import ChallengeStore
 
 
 @dataclass
@@ -64,7 +61,7 @@ def verify_auth_provider_contract(provider: Any) -> Tuple[bool, List[str]]:
     """
     reasons: List[str] = []
     pid = getattr(provider, "provider_id", None)
-    if not isinstance(pid, str) or not _PROVIDER_ID_RE.match(pid):
+    if not is_valid_identifier(pid):
         reasons.append("provider_id 必须为 1–32 位字母、数字或连字符（不含下划线/路径分隔符）")
     for attr in ("provider_name", "provider_icon"):
         if not isinstance(getattr(provider, attr, None), str):
@@ -77,90 +74,45 @@ def verify_auth_provider_contract(provider: Any) -> Tuple[bool, List[str]]:
 
 class SsoStateStore:
     """
-    OAuth ``state`` 短时一次性存储（CSRF 防护）：内存 + 锁 + TTL，签发时写、回调时取（取即销毁）。
+    OAuth ``state`` 短时一次性存储（CSRF 防护）：签发时写、回调时取（取即销毁）。
+
+    复用 ``ChallengeStore``（内存 + 锁 + TTL）承载存储语义，本类只负责"签发不可猜测随机串 +
+    把消费结果折叠为布尔"。state 无 payload，故消费判定用 ``is not None``（空 payload 仍合法）。
     """
 
     def __init__(self, ttl_seconds: int = 600) -> None:
-        self._ttl = ttl_seconds
-        self._states: Dict[str, float] = {}
-        self._lock = RLock()
+        self._store = ChallengeStore(ttl_seconds=ttl_seconds)
 
     def issue(self) -> str:
         """生成并登记一个新 state，返回不可猜测的随机串。"""
         state = secrets.token_urlsafe(24)
-        now = time.time()
-        with self._lock:
-            self._cleanup(now)
-            self._states[state] = now
+        self._store.put(state)
         return state
 
     def consume(self, state: Optional[str]) -> bool:
         """取用一个 state：存在且未过期返回 True（并删除），否则 False（单次有效）。"""
         if not state:
             return False
-        now = time.time()
-        with self._lock:
-            issued_at = self._states.pop(state, None)
-            self._cleanup(now)
-        return bool(issued_at) and (now - issued_at) <= self._ttl
-
-    def _cleanup(self, now: float) -> None:
-        expired = [s for s, t in self._states.items() if now - t > self._ttl]
-        for s in expired:
-            self._states.pop(s, None)
+        return self._store.consume(state) is not None
 
 
-class _Entry(NamedTuple):
-    provider: Any
-    owner: Optional[str]                            # 注册来源插件 id；None 表示内建
-
-
-class AuthProviderRegistry:
+class AuthProviderRegistry(OwnerScopedRegistry):
     """
-    SSO 登录提供方注册表：按 ``provider_id`` 单索引（仿 storage_registry），带 owner 以便按插件卸载。
+    SSO 登录提供方注册表：按 ``provider_id`` 单索引、带 owner 以便按插件卸载。
+
+    收口为 ``OwnerScopedRegistry`` 子类（与主认证 provider / MFA 因子注册表共用 register/unregister/
+    碰撞检测逻辑）；只声明取键与契约校验。无 priority 概念，故不覆写 ``_sort_key``，``all()`` 保持注册顺序。
     """
 
-    def __init__(self) -> None:
-        self._registry: Dict[str, _Entry] = {}
-        self._lock = RLock()
+    def _id_of(self, item: Any) -> str:
+        return item.provider_id
 
-    def register(self, provider: Any, owner: Optional[str]) -> Tuple[bool, str]:
-        """
-        注册一个提供方：先过契约校验，再做 provider_id 碰撞检测（不同 owner 占用同 id 则拒绝）。
-        返回 (是否成功, 失败原因)。同一 owner 重复注册同 id 视为幂等覆盖。
-        """
-        ok, reasons = verify_auth_provider_contract(provider)
-        if not ok:
-            return False, "；".join(reasons)
-        pid = provider.provider_id
-        with self._lock:
-            existing = self._registry.get(pid)
-            if existing is not None and existing.owner != owner:
-                return False, f"provider_id 冲突：{pid} 已由 {existing.owner or '内建'} 注册"
-            self._registry[pid] = _Entry(provider, owner)
-        return True, ""
-
-    def unregister(self, owner: Optional[str]) -> None:
-        """卸载某 owner（插件）注册的全部提供方。"""
-        with self._lock:
-            for pid in [k for k, e in self._registry.items() if e.owner == owner]:
-                self._registry.pop(pid, None)
-
-    def get(self, provider_id: str) -> Optional[Any]:
-        """按 provider_id 取提供方，不存在返回 None。"""
-        with self._lock:
-            entry = self._registry.get(provider_id)
-            return entry.provider if entry else None
+    def _validate(self, item: Any) -> Tuple[bool, List[str]]:
+        return verify_auth_provider_contract(item)
 
     def provider_ids(self) -> List[str]:
-        """已注册的 provider_id 列表。"""
-        with self._lock:
-            return list(self._registry.keys())
-
-    def all(self) -> List[Any]:
-        """已注册的全部提供方对象。"""
-        with self._lock:
-            return [e.provider for e in self._registry.values()]
+        """已注册的 provider_id 列表（``ids()`` 的语义化别名，保持历史 API）。"""
+        return self.ids()
 
 
 # 模块级单例：state 与提供方注册表均需跨请求/跨插件存活

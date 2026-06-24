@@ -10,15 +10,13 @@ OIDC-ROPC/SAML-ECP 等非重定向联合认证、passwordless 等。插件交出
   - 重定向（浏览器跳到 IdP 再回调）→ ``IAuthProvider``；
   - 直接用凭证换身份（无浏览器重定向）→ 本模块 ``ICredentialProvider``。
 """
-import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
+from app.core.auth.identifiers import is_valid_identifier
 from app.core.auth.outcome import CredentialOutcome
 from app.core.auth.registry import OwnerScopedRegistry
 
-# provider_id 合法字符集：与 sso.py 对齐（字母数字与连字符，1–32 位，禁分隔符防撞名/路径注入）
-_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9\-]{1,32}$")
 # 因子大类：对齐认证分类（知识/持有 + 本地目录/非重定向联合）
 _FACTOR_KINDS = {"knowledge", "possession", "directory", "federated_direct"}
 
@@ -64,7 +62,7 @@ def verify_credential_provider_contract(provider: Any) -> Tuple[bool, List[str]]
     """
     reasons: List[str] = []
     pid = getattr(provider, "provider_id", None)
-    if not isinstance(pid, str) or not _PROVIDER_ID_RE.match(pid):
+    if not is_valid_identifier(pid):
         reasons.append("provider_id 必须为 1–32 位字母、数字或连字符（不含下划线/路径分隔符）")
     if getattr(provider, "factor_kind", None) not in _FACTOR_KINDS:
         reasons.append(f"factor_kind 必须为 {sorted(_FACTOR_KINDS)} 之一")

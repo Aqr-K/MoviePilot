@@ -13,16 +13,11 @@ OIDC-ROPC 等 ``ICredentialProvider``）解析/建号复用。审计点名此处
 DB 协作经 ``ProvisioningDeps`` 端口注入（生产用 ``default_deps()`` 接 SsoIdentity/User/UserOper；
 单测注入内存 fake），保持本模块逻辑可独立特征测试。**本模块在 PR4 为休眠态**（无 provider 注册）。
 """
-import re
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
+from app.core.auth.identifiers import derive_local_username, is_valid_subject
 from app.log import logger
-
-# subject 合法字符集（与 helper/sso 一致：字母数字与 . _ -，最长 64，首尾为字母数字）
-_SUBJECT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._\-]{0,62}[A-Za-z0-9])?$")
-# 外部托管账号用户名前缀（与本地账号命名空间隔离，沿用 SSO 约定以共享绑定语义）
-_USERNAME_PREFIX = "sso_"
 
 
 @dataclass
@@ -45,7 +40,7 @@ def resolve_or_create(provider_id: str, *, subject: str, username: Optional[str]
     返回本地用户对象；任一护栏触发或失败返回 ``None``。
     """
     subject = (subject or "").strip()
-    if not _SUBJECT_RE.match(subject):
+    if not is_valid_subject(subject):
         logger.warning(f"provider {provider_id} 返回非法 subject，已拒绝")
         return None
 
@@ -63,7 +58,7 @@ def resolve_or_create(provider_id: str, *, subject: str, username: Optional[str]
         logger.info(f"身份 {provider_id}:{subject} 未绑定且未开启自动建号，拒绝登录")
         return None
 
-    local_username = f"{_USERNAME_PREFIX}{provider_id}_{subject}"
+    local_username = derive_local_username(provider_id, subject)
     user = deps.get_user_by_name(local_username)
     if user is not None:
         if not getattr(user, "is_active", False):

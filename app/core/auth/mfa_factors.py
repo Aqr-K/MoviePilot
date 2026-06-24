@@ -8,14 +8,13 @@ MFA 因子契约 + 注册表（db-free）。
 因子保持 db-free：core 只持有契约与注册表；需要查库的因子（如 PassKey 读凭证表）自行查询，
 通过传入的轻量 ``MfaUserRef``（仅身份引用，不含密钥）定位用户。
 """
-import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
+from app.core.auth.identifiers import is_valid_identifier
 from app.core.auth.outcome import MfaFactorResult
 from app.core.auth.registry import OwnerScopedRegistry
 
-_FACTOR_ID_RE = re.compile(r"^[A-Za-z0-9\-]{1,32}$")
 _MFA_FACTOR_KINDS = {"knowledge", "possession", "biometric"}
 
 
@@ -74,7 +73,7 @@ def verify_mfa_factor_contract(factor: Any) -> Tuple[bool, List[str]]:
     """校验对象是否满足 ``IMfaFactor`` 契约。返回 (是否通过, 失败原因列表)。"""
     reasons: List[str] = []
     fid = getattr(factor, "factor_id", None)
-    if not isinstance(fid, str) or not _FACTOR_ID_RE.match(fid):
+    if not is_valid_identifier(fid):
         reasons.append("factor_id 必须为 1–32 位字母、数字或连字符")
     if getattr(factor, "factor_kind", None) not in _MFA_FACTOR_KINDS:
         reasons.append(f"factor_kind 必须为 {sorted(_MFA_FACTOR_KINDS)} 之一")

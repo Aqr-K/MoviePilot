@@ -79,8 +79,8 @@ class CompleteLoginTest(TestCase):
         # 已绑定身份：按 (provider_id, subject) 命中绑定 → 返回绑定用户、铸票（改名安全：不查用户名）
         prov = _Provider(identity=_identity(username="renamed-login", subject="42"))
         binding = type("B", (), {"user_id": 7})()
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.User") as U, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.models.user.User") as U, \
                 patch("app.helper.sso.create_plugin_auth_ticket", return_value="TK") as mint:
             SI.get_by_subject.return_value = binding
             U.get.return_value = _User(uid=7)
@@ -92,8 +92,8 @@ class CompleteLoginTest(TestCase):
 
     def test_unbound_without_auto_create(self):
         prov = _Provider(identity=_identity(subject="99"))
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.UserOper") as UO, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.user_oper.UserOper") as UO, \
                 patch("app.helper.sso.create_plugin_auth_ticket") as mint:
             SI.get_by_subject.return_value = None
             ticket, error = sso_helper.complete_login(prov, "c", issue_state(), "cb", auto_create=False)
@@ -104,10 +104,10 @@ class CompleteLoginTest(TestCase):
     def test_auto_create_makes_non_superuser_and_binds(self):
         # 未绑定 + auto_create：建非管理员用户（用户名由 subject 派生）+ 落 SsoIdentity 绑定
         prov = _Provider(identity=_identity(username="newbie", subject="123"))
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.UserOper") as UO, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.user_oper.UserOper") as UO, \
                 patch("app.helper.sso.create_plugin_auth_ticket", return_value="TK"), \
-                patch("app.helper.sso.get_password_hash", return_value="hashed"):
+                patch("app.core.security.get_password_hash", return_value="hashed"):
             SI.get_by_subject.return_value = None
             UO.return_value.get_by_name.side_effect = [None, _User(uid=9, name="sso_github_123")]
             ticket, error = sso_helper.complete_login(prov, "c", issue_state(), "cb", auto_create=True)
@@ -125,8 +125,8 @@ class CompleteLoginTest(TestCase):
     def test_auto_create_reuses_sso_managed_residual_user(self):
         # 同名残留用户且确为 SSO 托管账号（有绑定）+ 未禁用 → 复用，不重复建号
         prov = _Provider(identity=_identity(subject="77"))
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.UserOper") as UO, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.user_oper.UserOper") as UO, \
                 patch("app.helper.sso.create_plugin_auth_ticket", return_value="TK"):
             SI.get_by_subject.return_value = None
             SI.list_by_user.return_value = [object()]            # 确为 SSO 托管账号
@@ -138,8 +138,8 @@ class CompleteLoginTest(TestCase):
     def test_residual_disabled_user_not_reused(self):
         # B-4：同名残留用户被禁用 → 拒绝复用（防绕过封禁）
         prov = _Provider(identity=_identity(subject="78"))
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.UserOper") as UO, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.user_oper.UserOper") as UO, \
                 patch("app.helper.sso.create_plugin_auth_ticket") as mint:
             SI.get_by_subject.return_value = None
             UO.return_value.get_by_name.return_value = _User(uid=3, is_active=False)
@@ -151,8 +151,8 @@ class CompleteLoginTest(TestCase):
     def test_residual_non_sso_user_not_taken_over(self):
         # C-1：同名残留用户无任何身份绑定（非 SSO 本地账号）→ 拒绝接管
         prov = _Provider(identity=_identity(subject="79"))
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.UserOper") as UO, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.user_oper.UserOper") as UO, \
                 patch("app.helper.sso.create_plugin_auth_ticket") as mint:
             SI.get_by_subject.return_value = None
             SI.list_by_user.return_value = []                    # 无绑定 → 非 SSO 账号
@@ -166,7 +166,7 @@ class CompleteLoginTest(TestCase):
         # A-3：纯分隔符 subject（无字母数字）被拒
         for bad in ("...", "---", ".-_"):
             prov = _Provider(identity=_identity(subject=bad))
-            with patch("app.helper.sso.SsoIdentity") as SI:
+            with patch("app.db.models.ssoidentity.SsoIdentity") as SI:
                 ticket, error = sso_helper.complete_login(prov, "c", issue_state(), "cb", auto_create=True)
             self.assertEqual((ticket, error), (None, "user_not_provisioned"), f"应拒绝 subject={bad}")
             SI.get_by_subject.assert_not_called()
@@ -175,9 +175,9 @@ class CompleteLoginTest(TestCase):
         # 并发首登：落绑定唯一键冲突 → 复用已存在绑定用户，不 500
         prov = _Provider(identity=_identity(subject="88"))
         existing = type("B", (), {"user_id": 4})()
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.User") as U, \
-                patch("app.helper.sso.UserOper") as UO, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.models.user.User") as U, \
+                patch("app.db.user_oper.UserOper") as UO, \
                 patch("app.helper.sso.create_plugin_auth_ticket", return_value="TK") as mint:
             SI.get_by_subject.side_effect = [None, existing]      # 首查未绑定，冲突后再查命中
             SI.return_value.create.side_effect = Exception("UNIQUE")
@@ -190,8 +190,8 @@ class CompleteLoginTest(TestCase):
     def test_disabled_bound_user_rejected(self):
         prov = _Provider(identity=_identity(subject="55"))
         binding = type("B", (), {"user_id": 5})()
-        with patch("app.helper.sso.SsoIdentity") as SI, \
-                patch("app.helper.sso.User") as U, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
+                patch("app.db.models.user.User") as U, \
                 patch("app.helper.sso.create_plugin_auth_ticket") as mint:
             SI.get_by_subject.return_value = binding
             U.get.return_value = _User(uid=5, is_active=False)
@@ -202,7 +202,7 @@ class CompleteLoginTest(TestCase):
     def test_malformed_subject_rejected(self):
         # 安全：非法 subject 在任何绑定查询/建号之前被拒
         prov = _Provider(identity=_identity(subject="bad/../x"))
-        with patch("app.helper.sso.SsoIdentity") as SI, \
+        with patch("app.db.models.ssoidentity.SsoIdentity") as SI, \
                 patch("app.helper.sso.create_plugin_auth_ticket") as mint:
             ticket, error = sso_helper.complete_login(prov, "c", issue_state(), "cb", auto_create=True)
         self.assertEqual((ticket, error), (None, "user_not_provisioned"))
