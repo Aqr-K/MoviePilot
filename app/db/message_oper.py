@@ -114,9 +114,21 @@ class MessageOper(DbOper):
         return await Message.async_list_by_page(self._db, page, count)
 
     async def async_list_sent_by_page(
-            self, page: Optional[int] = 1, count: Optional[int] = 30
+            self,
+            page: Optional[int] = 1,
+            count: Optional[int] = 30,
+            all_clear_before: Optional[str] = None,
+            system_clear_before: Optional[str] = None,
+            media_clear_before: Optional[str] = None,
     ) -> list[Message]:
         """
         分页获取系统发送的通知消息。
         """
-        return await Message.async_list_sent_by_page(self._db, page, count)
+        return await Message.async_list_sent_by_page(
+            self._db,
+            page,
+            count,
+            all_clear_before=all_clear_before,
+            system_clear_before=system_clear_before,
+            media_clear_before=media_clear_before,
+        )
