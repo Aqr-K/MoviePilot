@@ -692,6 +692,16 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     if not ok:
                         logger.warning(f"注册插件 {plugin_id} MFA 因子 "
                                        f"{getattr(factor, 'factor_id', factor)} 失败：{reason}")
+        # 注册插件经 provides_auth_flows 声明的自定义认证流程规格（owner=plugin_id）：
+        provided_flows = plugin_metadata.get_plugin_provided_auth_flows(self._running_plugins, pid)
+        if provided_flows:
+            from app.core.auth.flow_registry import register_auth_flow
+            for plugin_id, flows in provided_flows.items():
+                for spec in flows:
+                    ok, reason = register_auth_flow(spec, owner=plugin_id)
+                    if not ok:
+                        logger.warning(f"注册插件 {plugin_id} 认证流程 "
+                                       f"{getattr(spec, 'flow_id', spec)} 失败：{reason}")
         # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/消息渠道/媒体服务器）：
         # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
         for _get_provided, _verify, _label in (
@@ -746,9 +756,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 logger.error(f"卸载插件 {plugin_id} 登录提供方出错：{str(err)}")
             try:
                 from app.core.auth.credentials import unregister_credential_providers
+                from app.core.auth.flow_registry import unregister_auth_flows
                 from app.core.auth.mfa_factors import unregister_mfa_factors
                 unregister_credential_providers(owner=plugin_id)
                 unregister_mfa_factors(owner=plugin_id)
+                unregister_auth_flows(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 认证组件出错：{str(err)}")
 

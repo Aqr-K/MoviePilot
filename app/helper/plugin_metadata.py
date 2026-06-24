@@ -217,6 +217,10 @@ def get_plugin_provided_mfa_factors(running_plugins, pid: Optional[str] = None) 
     """聚合插件经 provides_mfa_factors() 声明【新增】的 MFA 第二因子实例，按 plugin_id 归集。"""
     return _get_plugin_provided(running_plugins, "provides_mfa_factors", "注册MFA因子", pid)
 
+def get_plugin_provided_auth_flows(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """聚合插件经 provides_auth_flows() 声明【新增】的自定义流程规格实例，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_auth_flows", "注册认证流程", pid)
+
 def get_plugin_actions(running_plugins, pid: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取插件动作

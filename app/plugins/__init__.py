@@ -346,6 +346,17 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_auth_flows(self) -> List[Any]:
+        """
+        声明本插件向登录【新增】的自定义流程形状（组合策略），而不止于贡献单个步骤。
+        返回实现 app.core.auth.flow_registry.IFlowSpec 契约的【实例】列表，每个含 flow_id +
+        mfa_requirement(factor_steps)，可据已装配因子返回 AnyOf / NOf / AllOf 组合（如 2-of-3 强 MFA、
+        强制多因子）。上层端点按 flow_id 选用。默认不新增（即沿用任一因子满足的默认策略）。
+
+        [HighAssuranceFlowSpec(...), ...]
+        """
+        return []
+
     def provides_models(self) -> List[Type]:
         """
         声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。

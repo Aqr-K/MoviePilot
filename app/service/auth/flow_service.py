@@ -22,12 +22,16 @@ class FlowService:
     def __init__(self, *, flow_store: Any, credential_steps: List[Any],
                  factor_steps_for: Callable[[Any], List[Any]],
                  load_user: Callable[[Any], Optional[Any]],
-                 issue_token: Callable[[Any], Any]) -> None:
+                 issue_token: Callable[[Any], Any],
+                 mfa_requirement: Optional[Callable[[List[Any]], AuthRequirement]] = None) -> None:
         self._store = flow_store
         self._credential_steps = list(credential_steps)
         self._factor_steps_for = factor_steps_for
         self._load_user = load_user
         self._issue_token = issue_token
+        # MFA 组合策略可注入：缺省 AnyOf（任一因子，复现 v2 OR）；
+        # 传 ``lambda steps: NOf(2, [...])`` 即得 N-of-M 强 MFA。插件/配置可据此定制流程形状。
+        self._mfa_requirement_strategy = mfa_requirement
 
     # ----------------------------- 对外入口 -----------------------------
     def begin(self, submission: Any) -> dict:
@@ -104,10 +108,9 @@ class FlowService:
                 "factors_available": result.factors_available or []}
 
     def _mfa_requirement(self, factor_steps: List[Any]) -> AuthRequirement:
-        """默认 MFA 策略：任一已注册因子满足即可（复现 v2 OR 语义）。
-
-        插件自定义流程可覆写本方法返回 ``NOf``/``AllOf`` 以实现 N-of-M / 强制多因子。
-        """
+        """MFA 组合策略：优先用注入的策略（如 N-of-M），否则默认 ``AnyOf``（复现 v2 OR 语义）。"""
+        if self._mfa_requirement_strategy is not None:
+            return self._mfa_requirement_strategy(factor_steps)
         return AnyOf([StepRef(s.step_id) for s in factor_steps])
 
     def _succeed(self, context: AuthContext, user: Any) -> dict:

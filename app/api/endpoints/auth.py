@@ -139,15 +139,22 @@ def _build_flow_service():
     from app.service.auth.flow_steps import CredentialProviderStep, FactorStep, PasswordStep
     from app.service.auth.orchestrator import factors_for_user
 
+    from app.core.auth.flow_registry import get_auth_flow
+
     credential_steps = [PasswordStep()] + [
         CredentialProviderStep(provider) for provider in all_credential_providers()
     ]
+    # 流程形状可插拔：若有插件注册了名为 "default" 的流程规格（如 N-of-M 强 MFA），用其组合策略；
+    # 否则沿用默认 AnyOf（任一因子，复现 v2 OR）。
+    default_spec = get_auth_flow("default")
+    mfa_requirement = (lambda steps: default_spec.mfa_requirement(steps)) if default_spec else None
     return FlowService(
         flow_store=_FLOW_STORE,
         credential_steps=credential_steps,
         factor_steps_for=lambda user: [FactorStep(f) for f in factors_for_user(user)],
         load_user=lambda uid: User.get(db=None, rid=uid),
         issue_token=build_token_response,
+        mfa_requirement=mfa_requirement,
     )
 
 
