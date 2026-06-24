@@ -101,6 +101,35 @@ def test_flow_token_is_unguessable_and_consumed_on_success():
     assert again["status"] == "failure"
 
 
+# ----------------------------- 联合方断言 MFA 已满足 → 跳过 MFA -----------------------------
+class _FederatedCredStep:
+    """联合凭证步骤：认证成功并断言外部已完成 MFA（mfa_satisfied=True）。"""
+    step_id = "fed"
+    step_kind = "credential"
+    priority = 5
+
+    def applies_to(self, ctx):
+        return ctx.resolved_user_id is None
+
+    def advance(self, ctx, submission):
+        from app.core.auth.flow import AuthStepResult
+        return AuthStepResult(status="satisfied", user_id=2, mfa_satisfied=True)
+
+
+def test_federated_mfa_satisfied_skips_mfa_stage():
+    # otpuser(id=2) 启用了 OTP；但联合方断言 MFA 已满足 → 应直接成功，不进 MFA 阶段
+    svc = FlowService(
+        flow_store=FlowStore(ttl_seconds=600),
+        credential_steps=[_FederatedCredStep()],
+        factor_steps_for=_factor_steps_for,   # 对 id=2 会返回 OTP 因子
+        load_user=lambda uid: USERS.get(uid),
+        issue_token=lambda user: {"access_token": f"TK-{user.id}"},
+    )
+    out = svc.begin(_sub(username="otpuser", password="anything"))
+    assert out["status"] == "success"          # mfa_satisfied 短路，未要求 OTP
+    assert out["token"]["access_token"] == "TK-2"
+
+
 # ----------------------------- 禁用用户在第二步被拦 -----------------------------
 def test_disabled_user_blocked_at_advance():
     svc, _ = _service()
