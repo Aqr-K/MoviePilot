@@ -170,6 +170,48 @@ class PasswordStep:
         return user
 
 
+# --------------------------------------------------------------------------- SSO 重定向（统一为 step）
+
+
+class RedirectStep:
+    """把一个 SSO 重定向 ``IAuthProvider`` 统一表示为流程步骤。
+
+    重定向天然无法在单轮内同步完成，故本步推进时下发"跳转 IdP 授权页"的挑战
+    （``challenge={kind:"redirect", provider_id, authorize_url}``）；真正的回调换身份/铸票仍走既有
+    被验证过的 ``/auth/sso/{id}/callback`` → ticket → ``/auth/exchange`` 路径。如此 SSO 在**流程模型**
+    里与密码/因子并列为一种步骤（可放入 ``AnyOf([password, github-sso])`` 等组合），而不重写其机制。
+
+    ``authorize_url_builder(provider) -> url`` 注入（生产侧由端点用 ``begin_login`` + 请求派生 redirect_uri 提供）。
+    """
+
+    step_kind = "redirect"
+
+    def __init__(self, provider: Any, *, authorize_url_builder: Optional[Callable[[Any], str]] = None,
+                 step_id: Optional[str] = None) -> None:
+        self._provider = provider
+        self._build_url = authorize_url_builder
+        self.step_id = step_id or provider.provider_id
+        self.priority = int(getattr(provider, "priority", 100))
+
+    def applies_to(self, context: AuthContext) -> bool:
+        return context.resolved_user_id is None
+
+    def advance(self, context: AuthContext, submission: Any) -> AuthStepResult:
+        url = None
+        if self._build_url is not None:
+            try:
+                url = self._build_url(self._provider)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"SSO 步骤 {self.step_id} 构造授权 URL 异常：{str(e)}")
+        if not url:
+            return AuthStepResult(status="pending")
+        return AuthStepResult(status="challenge", challenge={
+            "kind": "redirect",
+            "provider_id": getattr(self._provider, "provider_id", self.step_id),
+            "authorize_url": url,
+        })
+
+
 # --------------------------------------------------------------------------- 流程构建器
 
 

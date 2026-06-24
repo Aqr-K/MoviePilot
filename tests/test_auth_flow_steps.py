@@ -14,6 +14,7 @@ from app.service.auth.flow_steps import (
     CredentialProviderStep,
     FactorStep,
     PasswordStep,
+    RedirectStep,
     build_credential_flow,
     build_mfa_flow,
 )
@@ -151,3 +152,36 @@ def test_build_credential_flow_or_fallback():
                                _sub(grant_type="password", username="alice", password="dir"))
     assert result.kind == "success"
     assert ctx.resolved_user_id == 2  # 本地密码不符 → 回落目录 provider
+
+
+# ----------------------------- SSO 统一为 step -----------------------------
+class _FakeSsoProvider:
+    provider_id = "github"
+    provider_name = "GitHub"
+    provider_icon = "mdi-github"
+    priority = 100
+
+
+def test_redirect_step_emits_authorize_url_challenge():
+    step = RedirectStep(_FakeSsoProvider(),
+                        authorize_url_builder=lambda p: "https://idp.example.com/auth?state=xyz")
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    _, result = flow.advance(AuthContext(flow_id="f1"), _sub(step_id="github"))
+    assert result.kind == "challenge"
+    assert result.challenge["kind"] == "redirect"
+    assert result.challenge["provider_id"] == "github"
+    assert result.challenge["authorize_url"].startswith("https://idp.example.com/auth")
+
+
+def test_redirect_step_in_or_with_password():
+    # 组合：密码 OR GitHub-SSO —— 选 SSO 即下发跳转挑战（不影响密码路径）
+    user = types.SimpleNamespace(id=1, is_active=True)
+    pw = PasswordStep(authenticate=lambda u, p: user if p == "pw" else None)
+    sso = RedirectStep(_FakeSsoProvider(), authorize_url_builder=lambda p: "https://idp/x")
+    flow = build_credential_flow([pw, sso])
+    _, picked_sso = flow.advance(AuthContext(flow_id="f1", username="alice"),
+                                 _sub(step_id="github"))
+    assert picked_sso.kind == "challenge"
+    ctx, picked_pw = flow.advance(AuthContext(flow_id="f1", username="alice"),
+                                  _sub(step_id="password", username="alice", password="pw"))
+    assert picked_pw.kind == "success" and ctx.resolved_user_id == 1

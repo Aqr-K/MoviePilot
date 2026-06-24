@@ -8,9 +8,13 @@ from app import schemas
 from app.core import sso
 from app.core.auth_bridge import build_token_response, consume_plugin_auth_ticket
 from app.core.config import settings
+from app.core.event import eventmanager
 from app.helper.plugin_manager import PluginManager
 from app.helper.sso import begin_login, complete_login
 from app.log import logger
+from app.schemas.event import AuthObservationEventData, MfaChallengeEventData
+from app.schemas.types import ChainEventType
+from app.service.auth.flow_engine import FlowStore
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
 
@@ -18,6 +22,9 @@ router = APIRouter()
 
 # SSO 端点前缀（auth.router 挂载于 /api/v1/auth）
 _SSO_BASE = "/api/v1/auth/sso"
+
+# 多步登录流程状态存储（进程级，跨请求承载未完成的流程；重启失效=重新登录，可接受）
+_FLOW_STORE = FlowStore()
 
 
 class AuthExchangeRequest(BaseModel):
@@ -102,6 +109,94 @@ def auth_exchange(body: AuthExchangeRequest) -> schemas.Token:
         raise HTTPException(status_code=403, detail="用户不存在或已禁用")
 
     return build_token_response(user)
+
+
+class FlowBeginRequest(BaseModel):
+    """开始多步登录流程的请求（通常携带用户名/口令；也可用于纯枚举步骤）。"""
+
+    username: Optional[str] = None
+    password: Optional[str] = None
+    grant_type: str = "password"
+
+
+class FlowAdvanceRequest(BaseModel):
+    """推进多步登录流程的请求（提交因子码 / 挑战应答 / 后补凭证）。"""
+
+    flow_token: str
+    step_id: Optional[str] = None
+    code: Optional[str] = None
+    response: Optional[dict] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    grant_type: str = "password"
+
+
+def _build_flow_service():
+    """按当前注册表实时装配多步登录服务（凭证步骤 = 本地密码 + 已注册 ICredentialProvider；
+    因子步骤 = 该用户的内建 + 插件 MFA 因子）。复用 ``build_token_response`` 作为唯一铸 Token 来源。"""
+    from app.core.auth.credentials import all_credential_providers
+    from app.service.auth.flow_service import FlowService
+    from app.service.auth.flow_steps import CredentialProviderStep, FactorStep, PasswordStep
+    from app.service.auth.orchestrator import factors_for_user
+
+    credential_steps = [PasswordStep()] + [
+        CredentialProviderStep(provider) for provider in all_credential_providers()
+    ]
+    return FlowService(
+        flow_store=_FLOW_STORE,
+        credential_steps=credential_steps,
+        factor_steps_for=lambda user: [FactorStep(f) for f in factors_for_user(user)],
+        load_user=lambda uid: User.get(db=None, rid=uid),
+        issue_token=build_token_response,
+    )
+
+
+def _emit_flow_event(result: dict, username: Optional[str], client_ip: Optional[str]) -> None:
+    """流程结果 → 观测事件（与 /access-token 一致，fire-and-forget，绝不阻断登录）。"""
+    try:
+        status = result.get("status")
+        if status == "success":
+            name = (result.get("token") or {})
+            uname = getattr(name, "user_name", None) or username
+            eventmanager.send_event(
+                etype=ChainEventType.AuthSucceeded,
+                data=AuthObservationEventData(username=uname or "", success=True, client_ip=client_ip))
+        elif status == "failure":
+            eventmanager.send_event(
+                etype=ChainEventType.AuthFailed,
+                data=AuthObservationEventData(username=username or "", success=False,
+                                              reason=result.get("error"), client_ip=client_ip))
+        elif status in ("mfa_required", "challenge"):
+            eventmanager.send_event(
+                etype=ChainEventType.MfaChallengeRequired,
+                data=MfaChallengeEventData(username=username or "",
+                                           factors_available=result.get("factors_available") or []))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"多步登录观测事件发送失败：{str(e)}")
+
+
+def _flow_http(result: dict, username: Optional[str], request: Request) -> dict:
+    """把服务层结构化结果折成 HTTP 响应：失败 → 401；其余 → 200 + 状态体。"""
+    client_ip = request.client.host if request.client else None
+    _emit_flow_event(result, username, client_ip)
+    if result.get("status") == "failure":
+        raise HTTPException(status_code=401, detail=result.get("error") or "认证失败")
+    return result
+
+
+@router.post("/flow/begin", summary="开始多步登录流程")
+def flow_begin(body: FlowBeginRequest, request: Request) -> dict:
+    """开始一条可组合、可多轮的登录流程。返回 ``status``：success（带 token）/ mfa_required /
+    challenge / continue。后续以返回的 ``flow_token`` 调用 ``/auth/flow/advance`` 推进。"""
+    result = _build_flow_service().begin(body)
+    return _flow_http(result, body.username, request)
+
+
+@router.post("/flow/advance", summary="推进多步登录流程")
+def flow_advance(body: FlowAdvanceRequest, request: Request) -> dict:
+    """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。"""
+    result = _build_flow_service().advance(body.flow_token, body)
+    return _flow_http(result, body.username, request)
 
 
 def _sso_redirect_uri(provider_id: str, request: Request) -> str:
