@@ -17,6 +17,7 @@ from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain
 from app.core.cache import TTLCache, FileCache
 from app.core.config import settings
+from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.directory import DirectoryHelper
 from app.helper.message import MessageHelper
 from app.log import logger
@@ -328,10 +329,9 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 try:
                     if not self.__is_transfer_candidate_path(Path(file_path)):
                         continue
-                    logger.info(f"处理文件：{file_path}")
                     file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
-                    self.__handle_file(storage=storage, event_path=Path(file_path), file_size=file_size)
-                    processed_count += 1
+                    if self.__handle_file(storage=storage, event_path=Path(file_path), file_size=file_size):
+                        processed_count += 1
                 except Exception as e:
                     logger.error(f"处理文件 {file_path} 失败: {e}")
                     continue
@@ -452,6 +452,26 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         if self.__has_suffix_in(file_path, settings.DOWNLOAD_TMPEXT):
             return False
         return self.__has_suffix_in(file_path, self.all_exts)
+
+    @staticmethod
+    def __build_transfer_src_path(event_path: Path, is_bluray_folder: bool) -> str:
+        """
+        生成整理记录使用的源路径。
+        """
+        if is_bluray_folder:
+            return f"{event_path.as_posix()}/"
+        return event_path.as_posix()
+
+    @staticmethod
+    def __has_transfer_history(storage: str, src_path: str) -> Optional[bool]:
+        """
+        判断源文件是否已经存在整理记录。
+        """
+        try:
+            return bool(TransferHistoryOper().get_by_src(src_path, storage=storage))
+        except Exception as err:
+            logger.error(f"查询整理历史失败: {src_path} - {err}")
+            return None
 
     @staticmethod
     def count_directory_files(directory: Path, max_check: int = 10000) -> int:
@@ -761,22 +781,24 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                     ]
 
                     # 处理新增文件
+                    handled_added_count = 0
                     for new_file in added_files:
-                        logger.info(f"发现新增文件：{new_file}")
                         file_info = new_snapshot.get(new_file, {})
                         file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
-                        self.__handle_file(storage=storage, event_path=Path(new_file), file_size=file_size)
+                        if self.__handle_file(storage=storage, event_path=Path(new_file), file_size=file_size):
+                            handled_added_count += 1
 
                     # 处理修改文件
+                    handled_modified_count = 0
                     for modified_file in modified_files:
-                        logger.info(f"发现修改文件：{modified_file}")
                         file_info = new_snapshot.get(modified_file, {})
                         file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
-                        self.__handle_file(storage=storage, event_path=Path(modified_file), file_size=file_size)
+                        if self.__handle_file(storage=storage, event_path=Path(modified_file), file_size=file_size):
+                            handled_modified_count += 1
 
-                    if added_files or modified_files:
+                    if handled_added_count or handled_modified_count:
                         logger.info(
-                            f"{storage} 发现 {len(added_files)} 个新增文件，{len(modified_files)} 个修改文件")
+                            f"{storage} 发现 {handled_added_count} 个新增文件，{handled_modified_count} 个修改文件")
                     else:
                         logger.debug(f"{storage} 无文件变化")
                 else:
@@ -813,17 +835,16 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         if not event.is_directory:
             if not self.__is_transfer_candidate_path(Path(event_path)):
                 return
-            # 文件发生变化
-            logger.debug(f"检测到文件变化: {event_path} [{text}]")
             # 整理文件
             self.__handle_file(storage="local", event_path=Path(event_path), file_size=file_size)
 
-    def __handle_file(self, storage: str, event_path: Path, file_size: float = None):
+    def __handle_file(self, storage: str, event_path: Path, file_size: float = None) -> bool:
         """
         整理一个文件
         :param storage: 存储
         :param event_path: 事件文件路径
         :param file_size: 文件大小
+        :return: 是否进入整理链
         """
         # 全程加锁
         with lock:
@@ -832,16 +853,26 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             if self.__is_bluray_sub(event_path):
                 event_path = self.__get_bluray_dir(event_path)
                 if not event_path:
-                    return
+                    return False
                 is_bluray_folder = True
             elif not self.__is_transfer_candidate_path(event_path):
-                return
+                return False
 
             # TTL缓存控重
             if self._cache.get(str(event_path)):
-                logger.debug(f"文件 {event_path} 在缓存中，跳过处理")
-                return
+                return False
             self._cache[str(event_path)] = True
+
+            src_path = self.__build_transfer_src_path(
+                event_path=event_path,
+                is_bluray_folder=is_bluray_folder,
+            )
+            has_transfer_history = self.__has_transfer_history(
+                storage=storage,
+                src_path=src_path,
+            )
+            if has_transfer_history is not False:
+                return False
 
             try:
                 if is_bluray_folder:
@@ -852,11 +883,7 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 TransferChain().do_transfer(
                     fileitem=FileItem(
                         storage=storage,
-                        path=(
-                            event_path.as_posix()
-                            if not is_bluray_folder
-                            else event_path.as_posix() + "/"
-                        ),
+                        path=src_path,
                         type="file" if not is_bluray_folder else "dir",
                         name=event_path.name,
                         basename=event_path.stem,
@@ -864,8 +891,10 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                         size=file_size
                     )
                 )
+                return True
             except Exception as e:
                 logger.error("目录监控整理文件发生错误：%s - %s" % (str(e), traceback.format_exc()))
+                return False
 
     def stop(self):
         """
