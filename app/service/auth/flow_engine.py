@@ -12,11 +12,12 @@
 引擎本身 db-free：成功身份以 ``context.resolved_user_id`` 承载，由上层（端点/服务）据此加载 ``User``。
 """
 import secrets
-from typing import Any, Dict, Optional, Tuple
+import time
+from threading import RLock
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from app.core.auth.flow import AuthContext, AuthRequirement
 from app.core.auth.outcome import AuthResult
-from app.core.challenge_store import ChallengeStore
 from app.log import logger
 
 
@@ -138,30 +139,80 @@ class AuthFlow:
 
 
 class FlowStore:
-    """跨请求承载流程状态：内存 + TTL（建在 ``ChallengeStore`` 上）。
+    """跨请求承载流程状态：内存 + TTL + CAS 版本控制。
 
-    多步/多轮流程**非单次**：``load`` 不消费，每轮推进后用同一 ``flow_id`` 重新 ``save`` 覆盖。
-    进程内存足矣（重启失效 = 重新登录，可接受），不碰 db、不动 ``security.py``。
+    内部以 ``{flow_id: (issued_at, data, version)}`` 存储。
+    - ``load(flow_id)``         向后兼容，返回 ``Optional[AuthContext]``（忽略版本）。
+    - ``load_versioned(flow_id)`` 返回 ``(Optional[AuthContext], int)``（含版本号）。
+    - ``save(context, expected_version=None)`` 返回 ``(ok, new_version)``：
+        - ``expected_version`` 为 None → 无条件写入，版本递增；
+        - 提供 ``expected_version`` → CAS：仅当存储版本一致时写入，否则拒绝。
     """
 
-    def __init__(self, ttl_seconds: int = 600) -> None:
-        self._store = ChallengeStore(ttl_seconds=ttl_seconds)
+    # {flow_id: (issued_at, serialized_data, version)}
+    _Entry = Tuple[float, Dict[str, Any], int]
+
+    def __init__(self, ttl_seconds: int = 600,
+                 now: Optional[Callable[[], float]] = None) -> None:
+        self._ttl = ttl_seconds
+        self._now = now or time.time
+        self._store: Dict[str, "FlowStore._Entry"] = {}
+        self._lock = RLock()
 
     @staticmethod
     def new_flow_id() -> str:
         """生成不可猜测的流程令牌（前端持有，跨轮回传）。"""
         return secrets.token_urlsafe(24)
 
-    def save(self, context: AuthContext) -> str:
-        """保存/覆盖流程状态，返回其 ``flow_id``（即令牌）。"""
-        self._store.put(context.flow_id, context.to_dict())
-        return context.flow_id
+    def _cleanup(self, now: float) -> None:
+        """清除过期条目（须在锁内调用）。"""
+        expired = [k for k, (t, _, _) in self._store.items() if (now - t) > self._ttl]
+        for k in expired:
+            self._store.pop(k, None)
+
+    def save(self, context: AuthContext,
+             expected_version: Optional[int] = None) -> Tuple[bool, int]:
+        """保存/覆盖流程状态。
+
+        - ``expected_version`` 为 None：无条件写入，返回 ``(True, new_version)``。
+        - 提供 ``expected_version``：CAS —— 仅当当前版本与期望版本相符时写入；
+          匹配则返回 ``(True, new_version)``，不匹配则返回 ``(False, current_version)``。
+        整个读-比较-写在锁内完成，保证原子性。
+        """
+        now = self._now()
+        with self._lock:
+            self._cleanup(now)
+            entry = self._store.get(context.flow_id)
+            current_version = entry[2] if entry else 0
+            if expected_version is not None and current_version != expected_version:
+                return (False, current_version)
+            new_version = current_version + 1
+            self._store[context.flow_id] = (now, context.to_dict(), new_version)
+            return (True, new_version)
 
     def load(self, flow_id: str) -> Optional[AuthContext]:
-        """按令牌取回流程状态（不消费）；不存在/过期返回 None。"""
-        data = self._store.get(flow_id)
-        return AuthContext.from_dict(data) if data else None
+        """按令牌取回流程状态（不消费，不返回版本）；不存在/过期返回 None。向后兼容。"""
+        now = self._now()
+        with self._lock:
+            self._cleanup(now)
+            entry = self._store.get(flow_id)
+            if not entry:
+                return None
+            _, data, _ = entry
+            return AuthContext.from_dict(data)
+
+    def load_versioned(self, flow_id: str) -> Tuple[Optional[AuthContext], int]:
+        """按令牌取回流程状态及当前版本号；不存在/过期返回 ``(None, 0)``。"""
+        now = self._now()
+        with self._lock:
+            self._cleanup(now)
+            entry = self._store.get(flow_id)
+            if not entry:
+                return (None, 0)
+            _, data, version = entry
+            return (AuthContext.from_dict(data), version)
 
     def drop(self, flow_id: str) -> None:
         """流程完成/失败后主动清除状态。"""
-        self._store.delete(flow_id)
+        with self._lock:
+            self._store.pop(flow_id, None)

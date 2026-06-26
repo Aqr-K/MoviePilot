@@ -130,6 +130,18 @@ def test_federated_mfa_satisfied_skips_mfa_stage():
     assert out["token"]["access_token"] == "TK-2"
 
 
+# ----------------------------- FlowStore CAS -----------------------------
+def test_flowstore_cas():
+    from app.core.auth.flow import AuthContext
+    from app.service.auth.flow_engine import FlowStore
+    s = FlowStore()
+    c = AuthContext(flow_id="f1")
+    assert s.save(c)[0]
+    _, v = s.load_versioned("f1")
+    s.save(c, expected_version=v)
+    assert s.save(c, expected_version=v)[0] is False
+
+
 # ----------------------------- 禁用用户在第二步被拦 -----------------------------
 def test_disabled_user_blocked_at_advance():
     svc, _ = _service()

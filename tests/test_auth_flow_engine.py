@@ -171,8 +171,8 @@ def test_credential_or_falls_back_to_next_provider():
 def test_flowstore_save_load_drop():
     store = FlowStore(ttl_seconds=600)
     ctx = AuthContext(flow_id="tok-1", username="bob").with_satisfied("pw").with_resolved_user(3)
-    token = store.save(ctx)
-    assert token == "tok-1"
+    ok, _ver = store.save(ctx)
+    assert ok is True
     loaded = store.load("tok-1")
     assert loaded.username == "bob"
     assert loaded.satisfied_steps == frozenset({"pw"})
