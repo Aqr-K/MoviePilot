@@ -1635,6 +1635,10 @@ class _MessageTask:
     processing_status: Optional[dict] = None
     reply_mode: ReplyMode = ReplyMode.DISPATCH
     allow_message_tools: bool = True
+    output_callback: Optional[Callable[[str], None]] = None
+    notification_callback: Optional[Callable[[Any], None]] = None
+    agent_factory: Optional[Callable[..., MoviePilotAgent]] = None
+    completion_future: Optional[asyncio.Future] = None
 
 
 class AgentManager:
@@ -1780,11 +1784,18 @@ class AgentManager:
             original_chat_id: Optional[str] = None,
             reply_mode: ReplyMode = ReplyMode.DISPATCH,
             allow_message_tools: bool = True,
+            output_callback: Optional[Callable[[str], None]] = None,
+            notification_callback: Optional[Callable[[Any], None]] = None,
+            agent_factory: Optional[Callable[..., MoviePilotAgent]] = None,
+            wait_for_completion: bool = False,
     ) -> str:
         """
         处理用户消息：将消息放入会话队列，按顺序依次处理。
         同一会话的消息排队等待，不同会话之间互不影响。
         """
+        completion_future = (
+            asyncio.get_running_loop().create_future() if wait_for_completion else None
+        )
         task = _MessageTask(
             session_id=session_id,
             user_id=user_id,
@@ -1799,6 +1810,10 @@ class AgentManager:
             original_chat_id=original_chat_id,
             reply_mode=reply_mode,
             allow_message_tools=allow_message_tools,
+            output_callback=output_callback,
+            notification_callback=notification_callback,
+            agent_factory=agent_factory,
+            completion_future=completion_future,
         )
         self._record_session_activity(session_id, user_id)
 
@@ -1831,6 +1846,8 @@ class AgentManager:
                 self._session_worker(session_id)
             )
 
+        if completion_future:
+            return await completion_future
         return ""
 
     async def _session_worker(self, session_id: str):
@@ -1854,9 +1871,17 @@ class AgentManager:
 
                 try:
                     await self._start_task_processing_status(task)
-                    await self._process_message_internal(task)
+                    result = await self._process_message_internal(task)
+                    if task.completion_future and not task.completion_future.done():
+                        task.completion_future.set_result(result)
+                except asyncio.CancelledError as err:
+                    if task.completion_future and not task.completion_future.done():
+                        task.completion_future.set_exception(err)
+                    raise
                 except Exception as e:
                     logger.error(f"处理会话 {session_id} 的消息失败: {e}")
+                    if task.completion_future and not task.completion_future.done():
+                        task.completion_future.set_exception(e)
                 finally:
                     await self._finish_task_processing_status(task)
                     queue.task_done()
@@ -1895,21 +1920,36 @@ class AgentManager:
         实际处理单条消息
         """
         session_id = task.session_id
+        existing_agent = self.active_agents.get(session_id)
+        if (
+                existing_agent
+                and task.agent_factory
+                and isinstance(task.agent_factory, type)
+                and not isinstance(existing_agent, task.agent_factory)
+        ):
+            await existing_agent.cleanup()
+            self.active_agents.pop(session_id, None)
+
         if session_id not in self.active_agents:
             logger.info(
                 f"创建新的AI智能体实例，session_id: {session_id}, user_id: {task.user_id}"
             )
-            agent = MoviePilotAgent(
-                session_id=session_id,
-                user_id=task.user_id,
-                channel=task.channel,
-                source=task.source,
-                username=task.username,
-                original_message_id=task.original_message_id,
-                original_chat_id=task.original_chat_id,
-                replay_mode=task.reply_mode,
-                allow_message_tools=task.allow_message_tools,
-            )
+            agent_factory = task.agent_factory or MoviePilotAgent
+            agent_kwargs = {
+                "session_id": session_id,
+                "user_id": task.user_id,
+                "channel": task.channel,
+                "source": task.source,
+                "username": task.username,
+                "original_message_id": task.original_message_id,
+                "original_chat_id": task.original_chat_id,
+                "replay_mode": task.reply_mode,
+                "allow_message_tools": task.allow_message_tools,
+                "output_callback": task.output_callback,
+            }
+            if task.notification_callback is not None and task.agent_factory:
+                agent_kwargs["notification_callback"] = task.notification_callback
+            agent = agent_factory(**agent_kwargs)
             self.active_agents[session_id] = agent
         else:
             agent = self.active_agents[session_id]
@@ -1924,6 +1964,12 @@ class AgentManager:
             agent.original_chat_id = task.original_chat_id
             agent.reply_mode = task.reply_mode
             agent.allow_message_tools = task.allow_message_tools
+            if hasattr(agent, "set_output_callback"):
+                agent.set_output_callback(task.output_callback)
+            else:
+                agent.output_callback = task.output_callback
+            if task.notification_callback is not None and hasattr(agent, "set_notification_callback"):
+                agent.set_notification_callback(task.notification_callback)
 
         process_kwargs = {
             "images": task.images,

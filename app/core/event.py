@@ -525,6 +525,13 @@ class EventManager(metaclass=Singleton):
                                           class_name=class_name, method_name=method_name, e=e)
         else:
             # 全局处理器
+            if not class_name:
+                try:
+                    handler(event)
+                except Exception as e:
+                    self.__handle_event_error(event=event, module_name=self.__get_handler_identifier(handler),
+                                              class_name=class_name, method_name=method_name, e=e)
+                return
             class_obj = self.__get_class_instance(class_name)
             if not class_obj or not hasattr(class_obj, method_name):
                 return
@@ -556,6 +563,16 @@ class EventManager(metaclass=Singleton):
         elif class_name in module_manager.get_module_ids():
             await self.__invoke_module_method_async(module_manager, class_name, method_name, event)
         else:
+            if not class_name:
+                try:
+                    if inspect.iscoroutinefunction(handler):
+                        await handler(event)
+                    else:
+                        await run_in_threadpool(handler, event)
+                except Exception as e:
+                    self.__handle_event_error(event=event, module_name=self.__get_handler_identifier(handler),
+                                              class_name=class_name, method_name=method_name, e=e)
+                return
             await self.__invoke_global_method_async(class_name, method_name, event)
 
     @staticmethod
@@ -566,6 +583,8 @@ class EventManager(metaclass=Singleton):
         :return: (class_name, method_name)
         """
         names = handler.__qualname__.split(".")
+        if len(names) < 2:
+            return "", names[0]
         return names[0], names[1]
 
     async def __invoke_plugin_method_async(self, handler: Any, class_name: str, method_name: str, event: Event):

@@ -88,6 +88,22 @@ class AgentChatChoiceButton(BaseModel):
 
     label: str = Field(..., description="按钮文案")
     callback_data: str = Field(..., description="回调数据")
+    description: Optional[str] = Field(None, description="选项描述")
+
+
+class AgentChatChoiceSelection(BaseModel):
+    """
+    Agent 会话中用户选择的展示快照。
+    """
+
+    choice_id: str = Field(..., description="选择卡片 ID")
+    title: Optional[str] = Field(None, description="标题")
+    prompt: str = Field(default="", description="提示语")
+    buttons: list[AgentChatChoiceButton] = Field(default_factory=list, description="按钮列表")
+    button_rows: list[list[AgentChatChoiceButton]] = Field(default_factory=list, description="按钮行")
+    selected_label: Optional[str] = Field(None, description="已选择文案")
+    selected_value: Optional[str] = Field(None, description="已选择值")
+    selected_description: Optional[str] = Field(None, description="已选择描述")
 
 
 class AgentChatChoiceCard(BaseModel):
@@ -99,9 +115,11 @@ class AgentChatChoiceCard(BaseModel):
     title: Optional[str] = Field(None, description="标题")
     prompt: str = Field(default="", description="提示语")
     buttons: list[AgentChatChoiceButton] = Field(default_factory=list, description="按钮列表")
+    button_rows: list[list[AgentChatChoiceButton]] = Field(default_factory=list, description="按钮行")
     status: str = Field(default="pending", description="选择状态")
     selected_label: Optional[str] = Field(None, description="已选择文案")
     selected_value: Optional[str] = Field(None, description="已选择值")
+    selected_description: Optional[str] = Field(None, description="已选择描述")
 
 
 class AgentChatMessage(BaseModel):
@@ -117,6 +135,7 @@ class AgentChatMessage(BaseModel):
     tools: list[AgentChatToolCall] = Field(default_factory=list, description="工具提示列表")
     attachments: list[AgentChatAttachment] = Field(default_factory=list, description="附件列表")
     choices: list[AgentChatChoiceCard] = Field(default_factory=list, description="选择卡片列表")
+    choice_selection: Optional[AgentChatChoiceSelection] = Field(None, description="用户选择项快照")
 
 
 class AgentChatSession(BaseModel):

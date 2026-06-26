@@ -512,6 +512,48 @@ class TestSkillsCommand(unittest.TestCase):
         self.assertIn("仓库来源 · acme/custom-skills", text)
         self.assertIn("3. 管理技能源", text)
 
+    def test_skills_chain_installed_view_builds_remove_buttons(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.WebAgent,
+            source="web-agent",
+            username="tester",
+        )
+
+        with patch.object(
+            chain.skillhelper,
+            "list_local_skills",
+            return_value=[
+                SkillInfo(
+                    id="builtin",
+                    name="Builtin",
+                    description="Built in skill",
+                    source_type="builtin",
+                    source_label="内置",
+                    removable=False,
+                ),
+                SkillInfo(
+                    id="custom",
+                    name="Custom",
+                    description="Custom skill",
+                    source_type="local",
+                    source_label="本地",
+                    removable=True,
+                ),
+            ],
+        ):
+            title, text, buttons = chain._build_installed_view(request=request)
+
+        self.assertEqual(title, "已安装技能")
+        self.assertIn("builtin", text)
+        self.assertIn("custom", text)
+        self.assertTrue(buttons)
+        self.assertIn(
+            {"text": "删除 2", "callback_data": f"skills:{request.request_id}:remove:2"},
+            [button for row in buttons for button in row],
+        )
+
     def test_skills_chain_callback_enters_search_input_mode(self):
         chain = SkillsChain()
         request = skills_interaction_manager.create_or_replace(

@@ -1000,6 +1000,15 @@ class MessageChain(ChainBase):
             self._schedule_agent_session_clear(old_session[0], userid)
         self._user_sessions[userid] = (session_id, datetime.now())
 
+    def bind_user_session(self, userid: Union[str, int], session_id: str) -> None:
+        """
+        绑定用户与指定智能体会话，供非传统入口复用远程命令状态查询。
+
+        :param userid: 用户 ID
+        :param session_id: 智能体会话 ID
+        """
+        self._bind_session_id(userid, session_id)
+
     def _record_user_message(
             self,
             channel: MessageChannel,
