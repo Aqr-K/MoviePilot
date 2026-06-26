@@ -385,6 +385,82 @@ def test_rate_limit_returns_429(monkeypatch, reset_login_rate_limiter):
     assert "频繁" in exc.value.detail
 
 
+# ----------------------------- try_record atomicity --------------------------
+
+def test_try_record_capacity_invariant():
+    """Single-thread invariant: after max_calls successful try_record, next returns (False, ...)."""
+    from app.utils.limit import WindowRateLimiter
+
+    limiter = WindowRateLimiter(max_calls=3, window_seconds=60)
+
+    for i in range(3):
+        ok, msg = limiter.try_record()
+        assert ok is True, f"call {i+1} should be allowed"
+        assert msg == ""
+
+    ok, msg = limiter.try_record()
+    assert ok is False
+    assert "限流" in msg
+    assert "秒" in msg
+
+
+# ----------------------------- advance 429 -----------------------------------
+
+@pytest.fixture()
+def reset_advance_rate_limiter():
+    """Ensure the advance rate limiter starts clean before and after this test."""
+    from app.api.endpoints import auth as auth_module
+    limiter = getattr(auth_module, "_auth_advance_rate_limiter", None)
+    if limiter is not None:
+        limiter.clear()
+    yield
+    if limiter is not None:
+        limiter.clear()
+
+
+def test_advance_rate_limit_returns_429(monkeypatch, reset_advance_rate_limiter):
+    """Hammering /auth/flow/advance from same ip+username beyond limit → HTTP 429."""
+    from app.api.endpoints import auth as auth_module
+    from app.utils.limit import KeyedWindowRateLimiter
+
+    tight_limiter = KeyedWindowRateLimiter(max_calls=2, window_seconds=60)
+    monkeypatch.setattr(auth_module, "_auth_advance_rate_limiter", tight_limiter)
+
+    class FakeService:
+        def advance(self, flow_token, body):
+            return {"status": "failure", "error": "invalid_code"}
+
+    monkeypatch.setattr(auth_module, "_build_flow_service", lambda: FakeService())
+    monkeypatch.setattr(auth_module, "emit_auth_event", lambda *a, **kw: None)
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/flow/advance",
+            "headers": [(b"host", b"testserver")],
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+    )
+
+    from types import SimpleNamespace
+    body = SimpleNamespace(username="bruteuser", flow_token="tok-x", factor_id=None, answer=None)
+
+    # First 2 calls: under limit → 401 (wrong credentials)
+    for _ in range(2):
+        with pytest.raises(HTTPException) as exc:
+            auth_module.flow_advance(body=body, request=request)
+        assert exc.value.status_code == 401
+
+    # 3rd call: over limit → 429
+    with pytest.raises(HTTPException) as exc:
+        auth_module.flow_advance(body=body, request=request)
+    assert exc.value.status_code == 429
+    assert "频繁" in exc.value.detail
+
+
 def test_upload_avatar_rejects_other_user_for_non_superuser():
     """普通用户不能通过 user_id 参数修改其他用户头像。"""
     current_user = SimpleNamespace(id=1, is_superuser=False)

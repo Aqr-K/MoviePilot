@@ -145,7 +145,7 @@ _CREDENTIAL_STEP_KINDS = {"credential", "directory", "federated_direct", "redire
 # 防内建 id 冒充（Task 9 review #1a）：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password"
 # 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
 # frozenset（不可变）防止调用方意外 mutate 该集合来弱化 owner-routing 护栏（Task 12.5 安全加固）。
-_BUILTIN_CREDENTIAL_IDS: frozenset = frozenset({"password"})
+_BUILTIN_CREDENTIAL_IDS: frozenset[str] = frozenset({"password"})
 
 
 def _builtin_factor_steps(user) -> list:

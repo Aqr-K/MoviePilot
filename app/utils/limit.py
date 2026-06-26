@@ -233,6 +233,22 @@ class WindowRateLimiter(BaseRateLimiter):
         with self.lock:
             self.call_times.append(current_time)
 
+    def try_record(self) -> Tuple[bool, str]:
+        """原子化：窗口清理 + 容量检查 + 记录，单次锁获取，消除 TOCTOU 竞态。
+
+        返回 ``(True, "")`` 表示本次调用已记录并允许；
+        返回 ``(False, message)`` 表示已达上限，本次调用未被记录。
+        """
+        current_time = time.time()
+        with self.lock:
+            while self.call_times and current_time - self.call_times[0] > self.window_seconds:
+                self.call_times.popleft()
+            if len(self.call_times) < self.max_calls:
+                self.call_times.append(current_time)
+                return True, ""
+            wait_time = self.window_seconds - (current_time - self.call_times[0])
+            return False, f"限流期间，将在 {wait_time:.2f} 秒后允许继续调用"
+
 
 # 组合限流器
 class CompositeRateLimiter(BaseRateLimiter):
@@ -448,14 +464,14 @@ class KeyedWindowRateLimiter:
     def check(self, key: str) -> None:
         """Record one attempt for *key*; raise :class:`RateLimitExceededException` if over limit.
 
-        The attempt is recorded BEFORE the limit is enforced so that even the first
-        rejected call is counted (preventing a free last attempt through timing).
+        Uses :meth:`WindowRateLimiter.try_record` for atomic check+record under a single lock
+        acquisition, eliminating the TOCTOU race that allowed burst bypass when multiple threads
+        called ``can_call`` before any ``record_call`` landed.
         """
         limiter = self._get_or_create(key)
-        can, msg = limiter.can_call()
-        if not can:
+        ok, msg = limiter.try_record()
+        if not ok:
             raise RateLimitExceededException(msg or "尝试过于频繁，请稍后再试")
-        limiter.record_call()
 
     def clear(self) -> None:
         """Clear all per-key state.  Intended for use in tests only."""
