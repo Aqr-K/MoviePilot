@@ -20,71 +20,114 @@ from app.core.challenge_store import ChallengeStore
 
 
 class AuthFlow:
-    """一条可推进的认证流程：步骤集合 + 组合策略。"""
+    """一条可推进的认证流程：步骤集合 + 组合策略。
 
-    def __init__(self, steps: Dict[str, Any], requirement: AuthRequirement) -> None:
+    可选关键字参数（Task 10 起由 builder 统一注入，遗留调用方无需传递）：
+      - ``identity_resolver``  : 外部身份断言 → uid 的映射函数；None = 遗留/内建模式。
+      - ``trusted_step_ids``   : 允许直接携带 user_id 的内建步骤白名单；其余步骤须经 identity 端口。
+      - ``max_attempts``       : 单流程最大推进轮数，超限返回 failure（默认 10）。
+    """
+
+    def __init__(
+        self,
+        steps: Dict[str, Any],
+        requirement: AuthRequirement,
+        *,
+        identity_resolver=None,
+        trusted_step_ids=frozenset(),
+        max_attempts: int = 10,
+    ) -> None:
         self.steps = dict(steps)
         self.requirement = requirement
+        self._resolve_identity = identity_resolver
+        self._trusted = frozenset(trusted_step_ids)
+        self._max_attempts = int(max_attempts)
 
-    def _actionable(self, context: AuthContext) -> list:
+    def _actionable(self, ctx: AuthContext) -> list:
         """当前可推进的步骤：策略候选 ∩ 已注册 ∩ ``applies_to`` 为真，按 priority 升序。"""
-        sat = set(context.satisfied_steps)
-        candidates = self.requirement.candidates(sat)
-        steps = [self.steps[s] for s in candidates
-                 if s in self.steps and self.steps[s].applies_to(context)]
+        cand = self.requirement.candidates(set(ctx.satisfied_steps))
+        steps = [self.steps[s] for s in cand
+                 if s in self.steps and self.steps[s].applies_to(ctx)]
         return sorted(steps, key=lambda s: getattr(s, "priority", 0))
 
-    def advance(self, context: AuthContext, submission: Any = None) -> Tuple[AuthContext, AuthResult]:
-        """推进一轮，返回 (新状态, 类型化结果)。"""
-        context = context.with_attempt()
-        if self.requirement.is_satisfied(set(context.satisfied_steps)):
-            return context, AuthResult(kind="success")
+    def _accept_satisfied(self, ctx: AuthContext, step: Any, res: Any) -> Optional[AuthContext]:
+        """满足后的身份落地：受信内建步或遗留模式直接取 user_id；外部断言经 identity 端口。
 
-        target_id = getattr(submission, "step_id", None) if submission is not None else None
-        steps_to_try = self._actionable(context)
-        if target_id:
-            steps_to_try = [s for s in steps_to_try if s.step_id == target_id]
+        返回 None 表示护栏拒绝（非受信步给出 user_id 且已配 resolver）。
+        """
+        # 受信内建步，或未配置 owner 分流（identity_resolver 缺省 = 遗留模式）→ 接受 user_id
+        if res.user_id is not None and (step.step_id in self._trusted or self._resolve_identity is None):
+            return ctx.with_satisfied(step.step_id).with_resolved_user(
+                res.user_id, mfa_satisfied=res.mfa_satisfied or ctx.mfa_satisfied)
+        # 外部身份断言 → 经注入端口落地（单一来源）
+        if res.identity is not None and self._resolve_identity is not None:
+            uid = self._resolve_identity(res.identity)
+            if uid is None:
+                return None
+            return ctx.with_satisfied(step.step_id).with_resolved_user(
+                uid, mfa_satisfied=res.identity.mfa_already_satisfied or ctx.mfa_satisfied)
+        # satisfied 但无身份（如因子步仅标记满足）
+        if res.user_id is None and res.identity is None:
+            c = ctx.with_satisfied(step.step_id)
+            if res.mfa_satisfied and c.resolved_user_id is not None:
+                c = c.with_resolved_user(c.resolved_user_id, mfa_satisfied=True)
+            return c
+        # 非受信步给 user_id 且已配 resolver、又无 identity → 护栏拒绝
+        return None
+
+    def advance(self, ctx: AuthContext, submission: Any = None) -> Tuple[AuthContext, AuthResult]:
+        """推进一轮，返回 (新状态, 类型化结果)。"""
+        ctx = ctx.with_attempt()
+        if self.requirement.is_satisfied(set(ctx.satisfied_steps)):
+            return ctx, AuthResult(kind="success")
+        if ctx.attempts > self._max_attempts:
+            return ctx, AuthResult(kind="failure", error="认证尝试次数超限")
+
+        target = getattr(submission, "step_id", None) if submission is not None else None
+        todo = self._actionable(ctx)
+        if target:
+            todo = [s for s in todo if s.step_id == target]
 
         acted = False
         any_failed = False
-        last_error: Optional[str] = None
-        for step in steps_to_try:
-            result = step.advance(context, submission)
-            if result.status == "satisfied":
-                context = context.with_satisfied(step.step_id)
-                if result.user_id is not None:
-                    context = context.with_resolved_user(
-                        result.user_id, mfa_satisfied=result.mfa_satisfied or context.mfa_satisfied)
-                elif result.mfa_satisfied and context.resolved_user_id is not None:
-                    context = context.with_resolved_user(context.resolved_user_id, mfa_satisfied=True)
+        last_err: Optional[str] = None
+        for step in todo:
+            res = step.advance(ctx, submission)
+            if res.status == "satisfied":
+                nc = self._accept_satisfied(ctx, step, res)
+                if nc is None:
+                    any_failed = True
+                    last_err = "认证步骤被护栏拒绝"
+                    continue
+                ctx = nc
                 acted = True
                 break
-            if result.status == "challenge":
-                context = context.with_challenge(step.step_id, result.challenge or {})
-                remaining = sorted(self.requirement.candidates(set(context.satisfied_steps)))
-                return context, AuthResult(kind="challenge", challenge=result.challenge,
-                                           factors_available=remaining)
-            if result.status == "failed":
+            if res.status == "challenge":
+                # hasattr 守卫：过渡兼容 T8 前步骤直接返回 dict challenge（T13 去守卫）
+                payload = res.challenge.to_dict() if hasattr(res.challenge, "to_dict") else (res.challenge or {})
+                ctx = ctx.with_challenge(step.step_id, payload)
+                return ctx, AuthResult(kind="challenge", challenge=payload or None,
+                                       factors_available=[s.step_id for s in self._actionable(ctx)])
+            if res.status == "failed":
                 any_failed = True
-                last_error = result.error or "认证失败"
+                last_err = res.error or "认证失败"
                 continue
             # pending → 尝试下一个可推进步骤
 
-        satisfied = set(context.satisfied_steps)
-        if self.requirement.is_satisfied(satisfied):
-            return context, AuthResult(kind="success")
+        if self.requirement.is_satisfied(set(ctx.satisfied_steps)):
+            return ctx, AuthResult(kind="success")
 
-        remaining = sorted(self.requirement.candidates(satisfied))
-        if acted:
-            # 本轮有进展（某步满足）但流程未完成 → 还需后续步骤输入
-            return context, AuthResult(kind="mfa_required", factors_available=remaining)
+        rem = [s.step_id for s in self._actionable(ctx)]
+        if acted and rem:
+            # 本轮有进展但流程未完成 → 还需后续步骤输入
+            return ctx, AuthResult(kind="mfa_required", factors_available=rem)
+        if not rem:
+            # 无可推进步骤（死局 / 前置未满足）→ failure
+            return ctx, AuthResult(kind="failure", error=last_err or "所需认证步骤不可用")
         if any_failed:
-            # 本轮所试步骤全部明确失败、无进展 → 认证失败
-            return context, AuthResult(kind="failure", error=last_error)
-        if remaining:
-            # 仅缺输入（步骤适用但本轮未提交）→ 提示需要后续步骤
-            return context, AuthResult(kind="mfa_required", factors_available=remaining)
-        return context, AuthResult(kind="failure", error="无可用认证步骤")
+            # 本轮所试步骤全部明确失败 → 认证失败
+            return ctx, AuthResult(kind="failure", error=last_err)
+        return ctx, AuthResult(kind="mfa_required", factors_available=rem)
 
 
 class FlowStore:

@@ -191,3 +191,63 @@ def test_flowstore_carries_progress_across_rounds():
     reloaded = store.load("tok-2")
     ctx2, r2 = flow.advance(reloaded, _sub(step_id="otp", code="123"))
     assert r2.kind == "success"
+
+
+# ----------------------------- Task 5：actionable 死局 / owner 分流 / attempts / identity 端口 -----
+
+def test_deadlock_terminates_as_failure():
+    """applies_to 恒 False 的步骤 → 凭证满足后无可推进步骤 → deadlock → failure。"""
+    class _PendingSms:
+        step_id = "sms"; step_kind = "factor"; priority = 5
+        def applies_to(self, c): return False
+        def advance(self, c, s): return AuthStepResult(status="pending")
+    class _Pwd:
+        step_id = "password"; step_kind = "credential"; priority = 0
+        def applies_to(self, c): return c.resolved_user_id is None
+        def advance(self, c, s): return AuthStepResult(status="satisfied", user_id=1)
+    f = AuthFlow({"password": _Pwd(), "sms": _PendingSms()},
+                 AllOf([StepRef("password"), StepRef("sms")]),
+                 trusted_step_ids=frozenset({"password"}))
+    c = AuthContext(flow_id="f1")
+    c, _ = f.advance(c, type("S", (), {"username": "a", "password": "b"})())
+    c, r = f.advance(c, None)
+    assert r.kind == "failure"
+
+
+def test_non_builtin_user_id_dropped():
+    """非受信步骤给出 user_id、已配 identity_resolver → 护栏拒绝，resolver 未调用。"""
+    class _Imposter:
+        step_id = "evil"; step_kind = "credential"; priority = 0
+        def applies_to(self, c): return c.resolved_user_id is None
+        def advance(self, c, s): return AuthStepResult(status="satisfied", user_id=1)
+    called = {}
+    f = AuthFlow({"evil": _Imposter()}, StepRef("evil"),
+                 identity_resolver=lambda i: (called.setdefault("x", 1) or 99),
+                 trusted_step_ids=frozenset())
+    c, r = f.advance(AuthContext(flow_id="f2"), object())
+    assert r.kind == "failure" and c.resolved_user_id is None and "x" not in called
+
+
+def test_attempts_cap():
+    """超过 max_attempts 后返回 failure（认证尝试次数超限）。"""
+    class _PendingSms2:
+        step_id = "sms"; step_kind = "factor"; priority = 5
+        def applies_to(self, c): return False
+        def advance(self, c, s): return AuthStepResult(status="pending")
+    f = AuthFlow({"sms": _PendingSms2()}, StepRef("sms"), max_attempts=3)
+    c = AuthContext(flow_id="f3")
+    last = None
+    for _ in range(5):
+        c, last = f.advance(c, None)
+    assert last.kind == "failure"
+
+
+def test_legacy_no_resolver_accepts_user_id():
+    """无 identity_resolver、step 不在 trusted → 遗留模式仍接受 user_id（保旧 builder/测试不破）。"""
+    class _LegacyPwd:
+        step_id = "password"; step_kind = "credential"; priority = 0
+        def applies_to(self, c): return c.resolved_user_id is None
+        def advance(self, c, s): return AuthStepResult(status="satisfied", user_id=7)
+    f = AuthFlow({"password": _LegacyPwd()}, StepRef("password"))  # 无 trusted、无 resolver
+    c, r = f.advance(AuthContext(flow_id="lg"), object())
+    assert r.kind == "success" and c.resolved_user_id == 7
