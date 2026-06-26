@@ -4,7 +4,7 @@ MFA (Multi-Factor Authentication) API 端点
 """
 
 from datetime import timedelta
-from typing import Any, Annotated, Optional
+from typing import Any, Annotated
 
 from app.helper.sites import SitesHelper
 from fastapi import APIRouter, Depends, HTTPException, Body, Request, Response
@@ -81,29 +81,6 @@ async def _check_user_has_passkey(db: AsyncSession, user_id: int) -> bool:
     return bool(await PassKey.async_get_by_user_id(db=db, user_id=user_id))
 
 
-# ==================== 请求模型 ====================
-
-
-class OtpVerifyRequest(schemas.BaseModel):
-    """OTP验证请求"""
-
-    uri: str
-    otpPassword: str
-
-
-class OtpDisableRequest(schemas.BaseModel):
-    """OTP禁用请求"""
-
-    password: str
-
-
-class PassKeyDeleteRequest(schemas.BaseModel):
-    """PassKey删除请求"""
-
-    passkey_id: int
-    password: str
-
-
 # ==================== 通用 MFA 接口 ====================
 
 
@@ -146,7 +123,7 @@ def otp_generate(
 
 @router.post("/otp/verify", summary="绑定并验证 OTP", response_model=schemas.Response)
 async def otp_verify(
-    data: OtpVerifyRequest,
+    data: schemas.OtpVerifyRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
@@ -163,7 +140,7 @@ async def otp_verify(
     "/otp/disable", summary="关闭当前用户的 OTP 验证", response_model=schemas.Response
 )
 async def otp_disable(
-    data: OtpDisableRequest,
+    data: schemas.OtpDisableRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
@@ -184,33 +161,6 @@ async def otp_disable(
 
 
 # ==================== PassKey 相关接口 ====================
-
-
-class PassKeyRegistrationStart(schemas.BaseModel):
-    """PassKey注册开始请求"""
-
-    name: str = "通行密钥"
-
-
-class PassKeyRegistrationFinish(schemas.BaseModel):
-    """PassKey注册完成请求"""
-
-    credential: dict
-    challenge: str
-    name: str = "通行密钥"
-
-
-class PassKeyAuthenticationStart(schemas.BaseModel):
-    """PassKey认证开始请求"""
-
-    username: Optional[str] = None
-
-
-class PassKeyAuthenticationFinish(schemas.BaseModel):
-    """PassKey认证完成请求"""
-
-    credential: dict
-    challenge: str
 
 
 @router.post(
@@ -260,7 +210,7 @@ def passkey_register_start(
     response_model=schemas.Response,
 )
 def passkey_register_finish(
-    passkey_req: PassKeyRegistrationFinish,
+    passkey_req: schemas.PassKeyRegistrationFinish,
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Any:
     """完成注册 PassKey - 验证并保存凭证"""
@@ -307,7 +257,7 @@ def passkey_register_finish(
     response_model=schemas.Response,
 )
 def passkey_authenticate_start(
-    passkey_req: PassKeyAuthenticationStart = Body(...),
+    passkey_req: schemas.PassKeyAuthenticationStart = Body(...),
 ) -> Any:
     """开始 PassKey 认证 - 生成认证选项"""
     try:
@@ -344,7 +294,7 @@ def passkey_authenticate_start(
     response_model=schemas.Token,
 )
 def passkey_authenticate_finish(
-    request: Request, response: Response, passkey_req: PassKeyAuthenticationFinish
+    request: Request, response: Response, passkey_req: schemas.PassKeyAuthenticationFinish
 ) -> Any:
     """完成 PassKey 认证 - 验证凭证并返回 token"""
     try:
@@ -441,7 +391,7 @@ def passkey_list(
 
 @router.post("/passkey/delete", summary="删除 PassKey", response_model=schemas.Response)
 async def passkey_delete(
-    data: PassKeyDeleteRequest,
+    data: schemas.PassKeyDeleteRequest,
     current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
     """删除指定的 PassKey"""
@@ -470,7 +420,7 @@ async def passkey_delete(
     "/passkey/verify", summary="PassKey 二次验证", response_model=schemas.Response
 )
 def passkey_verify_mfa(
-    passkey_req: PassKeyAuthenticationFinish,
+    passkey_req: schemas.PassKeyAuthenticationFinish,
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Any:
     """使用 PassKey 进行二次验证（MFA）"""

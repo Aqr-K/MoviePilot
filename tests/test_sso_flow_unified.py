@@ -80,7 +80,8 @@ def no_emit(monkeypatch):
 
 def test_flow_begin_sso_issues_redirect_challenge(registered_idp, no_emit):
     """begin {flow:"unifiedsso"} → status==challenge，redirect 挑战，authorize_url 含本 flow 绑定 state。"""
-    from app.api.endpoints.auth import FlowBeginRequest, flow_begin
+    from app.api.endpoints.auth import flow_begin
+    from app.schemas import FlowBeginRequest
 
     result = flow_begin(FlowBeginRequest(flow="unifiedsso"), _build_request())
 
@@ -102,7 +103,8 @@ def test_flow_begin_sso_issues_redirect_challenge(registered_idp, no_emit):
 def _seed_callback_flow(monkeypatch, registered_idp, user=None):
     """跑一遍 begin 取回 (flow_token, state)，并把 DB 协作 stub 掉，供 callback 推进。"""
     from app.api.endpoints import auth as auth_module
-    from app.api.endpoints.auth import FlowBeginRequest, flow_begin
+    from app.api.endpoints.auth import flow_begin
+    from app.schemas import FlowBeginRequest
 
     user = user or types.SimpleNamespace(id=42, name="ssouser", is_active=True,
                                          is_superuser=False, avatar=None, permissions={})

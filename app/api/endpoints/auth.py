@@ -3,7 +3,6 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
 
 from app import schemas
 from app.core import security
@@ -33,14 +32,6 @@ _FLOW_STORE = FlowStore()
 # 多步推进端点限流：10 次 / 60 秒 / (ip+username)，进程级；多实例需共享后端（Redis）
 # Chosen limit: 10 attempts / 60 s mirrors the /access-token limit (KISS, same policy)
 _auth_advance_rate_limiter = KeyedWindowRateLimiter(max_calls=10, window_seconds=60)
-
-
-class AuthExchangeRequest(BaseModel):
-    """
-    插件认证票据兑换请求。
-    """
-
-    ticket: str
 
 
 def _system_auth_providers() -> list[dict[str, Any]]:
@@ -106,7 +97,7 @@ def auth_providers() -> list[dict[str, Any]]:
 
 
 @router.post("/exchange", summary="兑换插件认证登录票据", response_model=schemas.Token)
-def auth_exchange(body: AuthExchangeRequest) -> schemas.Token:
+def auth_exchange(body: schemas.AuthExchangeRequest) -> schemas.Token:
     """
     将插件认证成功后生成的一次性票据兑换为系统 Token。
 
@@ -122,29 +113,6 @@ def auth_exchange(body: AuthExchangeRequest) -> schemas.Token:
         raise HTTPException(status_code=403, detail="用户不存在或已禁用")
 
     return build_token_response(user)
-
-
-class FlowBeginRequest(BaseModel):
-    """开始多步登录流程的请求（通常携带用户名/口令；也可用于纯枚举步骤）。"""
-
-    username: Optional[str] = None
-    password: Optional[str] = None
-    grant_type: str = "password"
-    # 步骤选择器：携带某个 SSO/重定向步的 step_id（如 "github"）时，begin 直接定向到该步下发跳转挑战，
-    # 使 SSO 与密码/因子走同一条统一流程（spec §5/§6）。缺省（None）为纯密码/枚举 begin，不受影响。
-    flow: Optional[str] = None
-
-
-class FlowAdvanceRequest(BaseModel):
-    """推进多步登录流程的请求（提交因子码 / 挑战应答 / 后补凭证）。"""
-
-    flow_token: str
-    step_id: Optional[str] = None
-    code: Optional[str] = None
-    response: Optional[dict] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    grant_type: str = "password"
 
 
 # 装配桥按 step_kind 切分全局步骤注册表：以下种归入【凭证阶段】（解析用户），其余 "factor" 归第二因子阶段。
@@ -330,7 +298,7 @@ def _flow_http(result: dict, username: Optional[str], request: Request,
 
 
 @router.post("/flow/begin", summary="开始多步登录流程")
-def flow_begin(body: FlowBeginRequest, request: Request, response: Response = None) -> dict:
+def flow_begin(body: schemas.FlowBeginRequest, request: Request, response: Response = None) -> dict:
     """开始一条可组合、可多轮的登录流程。返回 ``status``：success（带 token）/ mfa_required /
     challenge / continue。后续以返回的 ``flow_token`` 调用 ``/auth/flow/advance`` 推进。
 
@@ -343,7 +311,7 @@ def flow_begin(body: FlowBeginRequest, request: Request, response: Response = No
 
 
 @router.post("/flow/advance", summary="推进多步登录流程")
-def flow_advance(body: FlowAdvanceRequest, request: Request, response: Response = None) -> dict:
+def flow_advance(body: schemas.FlowAdvanceRequest, request: Request, response: Response = None) -> dict:
     """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。
 
     成功时写入资源 Cookie（FastAPI 注入 ``response``；与 /access-token 一致）。"""

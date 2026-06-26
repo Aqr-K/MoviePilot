@@ -689,7 +689,7 @@ def test_flow_begin_sets_resource_token_cookie(monkeypatch):
 
     request = _build_request()
     response = Response()
-    result = auth_module.flow_begin(body=auth_module.FlowBeginRequest(username="kit"),
+    result = auth_module.flow_begin(body=schemas.FlowBeginRequest(username="kit"),
                                     request=request, response=response)
 
     assert result["status"] == "success"
@@ -723,7 +723,7 @@ def test_flow_advance_sets_resource_token_cookie(monkeypatch, reset_advance_rate
         "server": ("testserver", 80), "client": ("testclient", 123),
     })
     response = Response()
-    body = auth_module.FlowAdvanceRequest(flow_token="tok", step_id="otp", code="246")
+    body = schemas.FlowAdvanceRequest(flow_token="tok", step_id="otp", code="246")
     result = auth_module.flow_advance(body=body, request=request, response=response)
 
     assert result["status"] == "success"
