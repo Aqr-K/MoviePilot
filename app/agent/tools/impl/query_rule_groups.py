@@ -19,8 +19,6 @@ from app.log import logger
 class QueryRuleGroupsInput(BaseModel):
     """查询规则组工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     group_names: Optional[List[str]] = Field(
         None,
         description="Optional list of rule group names to query. If omitted, return all rule groups.",

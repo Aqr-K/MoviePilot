@@ -13,7 +13,6 @@ from app.log import logger
 
 class QueryEpisodeScheduleInput(BaseModel):
     """查询剧集上映时间工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     tmdb_id: int = Field(..., description="TMDB ID of the TV series (can be obtained from search_media tool)")
     season: int = Field(..., description="Season number to query")
     episode_group: Optional[str] = Field(None, description="Episode group ID (optional)")

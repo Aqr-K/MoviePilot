@@ -125,6 +125,7 @@ class TestAgentInteraction(unittest.TestCase):
         notification = async_post_message.await_args.args[0]
         self.assertEqual(notification.text, "请选择要执行的操作")
         self.assertEqual(sum(len(row) for row in notification.buttons), 2)
+        self.assertNotIn("description", notification.buttons[0][0])
 
         callback_data = notification.buttons[0][0]["callback_data"]
         _, _, request_id, option_index = callback_data.split(":")

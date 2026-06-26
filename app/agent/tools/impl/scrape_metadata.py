@@ -16,8 +16,6 @@ from app.schemas import FileItem
 class ScrapeMetadataInput(BaseModel):
     """刮削媒体元数据工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     path: str = Field(
         ...,
         description="Path to the file or directory to scrape metadata for (e.g., '/path/to/file.mkv' or '/path/to/directory')",

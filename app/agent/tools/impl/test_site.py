@@ -13,7 +13,6 @@ from app.log import logger
 
 class TestSiteInput(BaseModel):
     """测试站点连通性工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     site_identifier: int = Field(..., description="Site ID to test (can be obtained from query_sites tool)")
 
 

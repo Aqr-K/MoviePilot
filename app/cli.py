@@ -559,8 +559,6 @@ def _format_tool_detail(tool: Dict[str, Any]) -> None:
     required = set((tool.get("inputSchema") or {}).get("required") or [])
     fields = []
     for name, schema in properties.items():
-        if name == "explanation":
-            continue
         fields.append(
             (
                 f"{name}*" if name in required else name,
@@ -1133,8 +1131,7 @@ def tool_show(tool_name: str) -> None:
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def tool_run(tool_name: str, args: tuple[str, ...]) -> None:
     """运行指定工具"""
-    arguments = {"explanation": "CLI invocation"}
-    arguments.update(_parse_key_value_pairs(args))
+    arguments = _parse_key_value_pairs(args)
     result = _call_tool(tool_name, arguments, runtime=_backend_runtime())
     if isinstance(result, (dict, list)):
         _print_json(result)
@@ -1152,7 +1149,7 @@ def scheduler_list() -> None:
     """列出调度任务"""
     result = _call_tool(
         "query_schedulers",
-        {"explanation": "List scheduler jobs from local CLI"},
+        {},
         runtime=_backend_runtime(),
     )
     if isinstance(result, list):
@@ -1168,10 +1165,7 @@ def scheduler_run(job_id: str) -> None:
     """立即执行某个调度任务"""
     result = _call_tool(
         "run_scheduler",
-        {
-            "explanation": "Run a scheduler job from local CLI",
-            "job_id": job_id,
-        },
+        {"job_id": job_id},
         runtime=_backend_runtime(),
     )
     if isinstance(result, (dict, list)):

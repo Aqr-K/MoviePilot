@@ -14,7 +14,6 @@ from app.schemas.types import MediaType, media_type_to_agent
 
 class SearchMediaInput(BaseModel):
     """搜索媒体工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     title: str = Field(..., description="The title of the media to search for (e.g., 'The Matrix', 'Breaking Bad')")
     year: Optional[str] = Field(None, description="Release year of the media (optional, helps narrow down results)")
     media_type: Optional[str] = Field(None,

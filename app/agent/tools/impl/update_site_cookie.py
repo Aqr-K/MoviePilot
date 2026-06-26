@@ -14,8 +14,6 @@ from app.log import logger
 class UpdateSiteCookieInput(BaseModel):
     """更新站点Cookie和UA工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     site_identifier: int = Field(
         ...,
         description="Site ID to update Cookie and User-Agent for (can be obtained from query_sites tool)",

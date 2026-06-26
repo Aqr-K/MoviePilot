@@ -16,7 +16,6 @@ from app.schemas.types import media_type_to_agent
 
 class RecognizeMediaInput(BaseModel):
     """识别媒体信息工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     title: Optional[str] = Field(None, description="The title of the torrent/media to recognize (required for torrent recognition)")
     subtitle: Optional[str] = Field(None, description="The subtitle or description of the torrent (optional, helps improve recognition accuracy)")
     path: Optional[str] = Field(None, description="The file path to recognize (required for file recognition, mutually exclusive with title)")

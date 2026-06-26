@@ -18,8 +18,6 @@ PAGE_SIZE = 20
 class QueryLibraryLatestInput(BaseModel):
     """查询媒体服务器最近入库影片工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     server: Optional[str] = Field(
         None,
         description="Media server name (optional, if not specified queries all enabled media servers)",

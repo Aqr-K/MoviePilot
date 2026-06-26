@@ -20,8 +20,6 @@ from app.schemas.types import SystemConfigKey
 class DeleteCustomFilterRuleInput(BaseModel):
     """删除自定义过滤规则工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     rule_id: str = Field(..., description="Custom rule ID to delete.")
 
 

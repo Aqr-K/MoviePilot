@@ -1,10 +1,18 @@
+import importlib.util
 from types import SimpleNamespace
-from typing import Iterator, Optional
+from pathlib import Path
+from typing import Iterator, Optional, Type
 
 import pytest
+from pydantic import BaseModel
 
+from app.agent.middleware.activity_log import QueryActivityLogInput
+from app.agent.middleware.skills import SkillToolInput
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.factory import MoviePilotToolFactory
+from app.agent.tools.impl.ask_user_choice import AskUserChoiceInput, AskUserChoiceTool
+from app.agent.tools.impl.send_local_file import SendLocalFileTool
+from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
 from app.core.plugin import PluginManager
 from app.utils.singleton import Singleton
 
@@ -54,6 +62,66 @@ def _build_plugin(
         get_state=lambda: state,
         get_agent_tools=get_agent_tools,
     )
+
+
+def _schema_properties(args_schema: Type[BaseModel]) -> dict:
+    """返回工具输入模型的 JSON Schema 属性。"""
+    return args_schema.model_json_schema().get("properties", {})
+
+
+def _load_lexiannot_tool_schemas() -> list[Type[BaseModel]]:
+    """只加载 LexiAnnot schema 文件，避免触发插件包可选依赖。"""
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "plugins"
+        / "lexiannot"
+        / "schemas.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_test_lexiannot_schemas",
+        schema_path,
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return [
+        module.VocabularyAnnotatingToolInput,
+        module.QueryAnnotationTasksToolInput,
+    ]
+
+
+def test_agent_tool_schemas_do_not_expose_explanation_parameter() -> None:
+    """所有 Agent 工具输入模型都不应暴露 explanation 参数。"""
+    tool_classes = [
+        *MoviePilotToolFactory.BUILTIN_TOOL_CLASSES,
+        AskUserChoiceTool,
+        SendLocalFileTool,
+        SendVoiceMessageTool,
+    ]
+    middleware_schemas = [
+        SkillToolInput,
+        QueryActivityLogInput,
+    ]
+    plugin_schemas = _load_lexiannot_tool_schemas()
+
+    for tool_class in tool_classes:
+        args_schema = getattr(tool_class, "args_schema", None)
+        if args_schema is None:
+            continue
+        assert "explanation" not in _schema_properties(args_schema), tool_class.name
+
+    for args_schema in middleware_schemas + plugin_schemas:
+        assert "explanation" not in _schema_properties(args_schema), args_schema.__name__
+
+
+def test_ask_user_choice_option_schema_does_not_expose_description() -> None:
+    """询问用户意图工具的选项参数不应暴露 description 字段。"""
+    schema = AskUserChoiceInput.model_json_schema()
+    option_schema = schema["$defs"]["UserChoiceOptionInput"]
+
+    assert "description" not in option_schema["properties"]
+    assert option_schema["required"] == ["label", "value"]
 
 
 def test_plugin_agent_tools_are_cached(plugin_manager: PluginManager) -> None:

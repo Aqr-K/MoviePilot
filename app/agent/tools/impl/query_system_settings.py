@@ -23,8 +23,6 @@ from app.log import logger
 class QuerySystemSettingsInput(BaseModel):
     """查询系统设置工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     setting_key: Optional[str] = Field(
         None,
         description=(

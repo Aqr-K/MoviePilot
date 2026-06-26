@@ -20,7 +20,6 @@ from ._torrent_search_utils import (
 
 class SearchTorrentsInput(BaseModel):
     """搜索种子工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     tmdb_id: Optional[int] = Field(None, description="TMDB ID (can be obtained from search_media tool). Either tmdb_id or douban_id must be provided.")
     douban_id: Optional[str] = Field(None, description="Douban ID (can be obtained from search_media tool). Either tmdb_id or douban_id must be provided.")
     media_type: Optional[str] = Field(None, description="Allowed values: movie, tv")

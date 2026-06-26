@@ -21,8 +21,6 @@ from ._torrent_search_utils import (
 class GetSearchResultsInput(BaseModel):
     """获取搜索结果工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     site: Optional[List[str]] = Field(None, description="Site name filters")
     season: Optional[List[str]] = Field(None, description="Season or episode filters")
     free_state: Optional[List[str]] = Field(None, description="Promotion state filters")

@@ -15,10 +15,6 @@ from app.log import logger
 class RecognizeCaptchaInput(BaseModel):
     """识别图形验证码工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(
-        None,
-        description="Clear explanation of why this captcha image needs to be recognized",
-    )
     image_url: str = Field(
         ...,
         description=(

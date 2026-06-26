@@ -25,8 +25,6 @@ from app.schemas.types import SystemConfigKey
 class UpdateRuleGroupInput(BaseModel):
     """更新过滤规则组工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     current_name: str = Field(..., description="Existing rule group name to update.")
     new_name: Optional[str] = Field(
         None,

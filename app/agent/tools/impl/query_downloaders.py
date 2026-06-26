@@ -14,9 +14,6 @@ from app.schemas.types import SystemConfigKey
 
 class QueryDownloadersInput(BaseModel):
     """查询下载器工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
-
-
 class QueryDownloadersTool(MoviePilotTool):
     name: str = "query_downloaders"
     tags: list[str] = [

@@ -18,7 +18,6 @@ MAX_PAGE_SIZE = 50
 
 class QueryPopularSubscribesInput(BaseModel):
     """查询热门订阅工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     media_type: str = Field(..., description="Allowed values: movie, tv")
     page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")
     count: Optional[int] = Field(30, description="Number of items per page (default: 30, max: 50)")
