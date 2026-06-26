@@ -17,6 +17,7 @@ from app.log import logger
 from app.schemas.event import AuthObservationEventData, MfaChallengeEventData
 from app.schemas.types import ChainEventType
 from app.service.auth.flow_engine import FlowStore
+from app.service.auth.flow_service import redact_reason
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
 
@@ -172,8 +173,11 @@ def _build_flow_service():
     )
 
 
-def _emit_flow_event(result: dict, username: Optional[str], client_ip: Optional[str]) -> None:
-    """流程结果 → 观测事件（与 /access-token 一致，fire-and-forget，绝不阻断登录）。"""
+def emit_auth_event(result: dict, username: Optional[str], client_ip: Optional[str]) -> None:
+    """流程结果 → 观测事件（fire-and-forget，绝不阻断登录；reason 经脱敏白名单过滤）。
+
+    同时供 /access-token（login.py）与 /auth/flow 端点使用，是唯一事件发射路径。
+    """
     try:
         status = result.get("status")
         if status == "success":
@@ -186,7 +190,8 @@ def _emit_flow_event(result: dict, username: Optional[str], client_ip: Optional[
             eventmanager.send_event(
                 etype=ChainEventType.AuthFailed,
                 data=AuthObservationEventData(username=username or "", success=False,
-                                              reason=result.get("error"), client_ip=client_ip))
+                                              reason=redact_reason(result.get("error") or "auth_failed"),
+                                              client_ip=client_ip))
         elif status in ("mfa_required", "challenge"):
             eventmanager.send_event(
                 etype=ChainEventType.MfaChallengeRequired,
@@ -197,11 +202,12 @@ def _emit_flow_event(result: dict, username: Optional[str], client_ip: Optional[
 
 
 def _flow_http(result: dict, username: Optional[str], request: Request) -> dict:
-    """把服务层结构化结果折成 HTTP 响应：失败 → 401；其余 → 200 + 状态体。"""
+    """把服务层结构化结果折成 HTTP 响应：失败 → 401（detail 已脱敏）；其余 → 200 + 状态体。"""
     client_ip = request.client.host if request.client else None
-    _emit_flow_event(result, username, client_ip)
+    emit_auth_event(result, username, client_ip)
     if result.get("status") == "failure":
-        raise HTTPException(status_code=401, detail=result.get("error") or "认证失败")
+        raise HTTPException(status_code=401,
+                            detail=redact_reason(result.get("error") or "auth_failed"))
     return result
 
 
@@ -303,6 +309,6 @@ def sso_callback(provider_id: str, request: Request, code: str = "", state: str 
     result = svc.begin(types.SimpleNamespace(
         step_id=provider_id, code=code, state=state,
         redirect_uri=_sso_redirect_uri(provider_id, request)))
-    _emit_flow_event(result, getattr(provider, "provider_name", provider_id),
-                     request.client.host if request.client else None)
+    emit_auth_event(result, getattr(provider, "provider_name", provider_id),
+                    request.client.host if request.client else None)
     return _sso_redirect_back(success_redirect, **sso_callback_query(result))

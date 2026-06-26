@@ -117,34 +117,34 @@ def test_system_ping_returns_success():
 
 
 def test_login_sets_resource_token_cookie(monkeypatch):
-    """登录成功时应立即写入资源 Cookie，避免插件静态文件抢先加载失败。"""
+    """登录成功时应立即写入资源 Cookie，避免插件静态文件抢先加载失败。（引擎驱动路径）"""
+    from app import schemas
 
-    class FakeUserChain:
-        """返回登录成功用户的用户链桩。"""
+    fake_token = schemas.Token(
+        access_token="test.jwt.token",
+        token_type="bearer",
+        super_user=False,
+        user_id=1,
+        user_name="user",
+        avatar="",
+        level=1,
+        permissions={"discovery": True},
+        wizard=False,
+    )
 
-        def user_authenticate(self, username, password, mfa_code=None):
-            """返回认证成功结果。"""
-            return True, SimpleNamespace(
-                id=1,
-                name=username,
-                is_superuser=False,
-                avatar="",
-                permissions={"discovery": True},
-            )
+    class FakeService:
+        """返回登录成功结果的流程服务桩。"""
 
-    class FakeSystemConfigOper:
-        """返回已完成向导状态的系统配置桩。"""
-
-        def get(self, key):
-            """返回测试配置值。"""
-            return "1"
+        def run_sync(self, submission):
+            """返回成功结果。"""
+            return {"status": "success", "token": fake_token}
 
     form_data = SimpleNamespace(username="user", password="password")
     request = _build_request()
     response = Response()
 
-    monkeypatch.setattr(login_endpoint, "UserChain", FakeUserChain)
-    monkeypatch.setattr(login_endpoint, "SystemConfigOper", FakeSystemConfigOper)
+    monkeypatch.setattr(login_endpoint, "_build_flow_service", lambda: FakeService())
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda result, username, ip: None)
 
     token = login_endpoint.login_access_token(
         request=request,
@@ -161,6 +161,121 @@ def test_login_sets_resource_token_cookie(monkeypatch):
     assert payload.sub == 1
     assert payload.username == "user"
     assert payload.purpose == "resource"
+
+
+def test_access_token_password_only(monkeypatch):
+    """密码登录成功 → 200，access_token 正确，引擎驱动路径。"""
+    from app import schemas
+
+    fake_token = schemas.Token(
+        access_token="valid.access.token",
+        token_type="bearer",
+        super_user=False,
+        user_id=42,
+        user_name="alice",
+        avatar=None,
+        level=1,
+        permissions={},
+        wizard=False,
+    )
+
+    class FakeService:
+        """返回成功登录结果的流程服务桩。"""
+
+        def run_sync(self, submission):
+            """验证提交内容并返回成功结果。"""
+            assert submission.username == "alice"
+            assert submission.password == "secret"
+            return {"status": "success", "token": fake_token}
+
+    form_data = SimpleNamespace(username="alice", password="secret")
+    request = _build_request()
+    response = Response()
+
+    monkeypatch.setattr(login_endpoint, "_build_flow_service", lambda: FakeService())
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda result, username, ip: None)
+
+    token = login_endpoint.login_access_token(
+        request=request,
+        response=response,
+        form_data=form_data,
+    )
+
+    assert token.access_token == "valid.access.token"
+    assert token.user_id == 42
+    assert token.user_name == "alice"
+
+
+def test_access_token_mfa_required_structured_401(monkeypatch):
+    """需要 MFA 时 → 401 含 X-MFA-Required 头和 detail['factors_available']。"""
+
+    class FakeService:
+        """返回 MFA 必需结果的流程服务桩。"""
+
+        def run_sync(self, submission):
+            """返回 MFA 必需结果。"""
+            return {
+                "status": "mfa_required",
+                "flow_token": "tok-abc",
+                "factors_available": ["totp", "sms"],
+            }
+
+    form_data = SimpleNamespace(username="bob", password="pass")
+    request = _build_request()
+    response = Response()
+
+    monkeypatch.setattr(login_endpoint, "_build_flow_service", lambda: FakeService())
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda result, username, ip: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        login_endpoint.login_access_token(
+            request=request,
+            response=response,
+            form_data=form_data,
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 401
+    assert exc.headers.get("X-MFA-Required") == "true"
+    assert isinstance(exc.detail, dict)
+    assert exc.detail["status"] == "mfa_required"
+    assert "totp" in exc.detail["factors_available"]
+    assert "sms" in exc.detail["factors_available"]
+
+
+def test_redact_reason_not_leaked(monkeypatch):
+    """认证失败时，原始内部错误（如 LDAP 地址）不出现在客户端响应中。"""
+
+    class FakeService:
+        """返回含内部敏感错误信息的失败结果的流程服务桩。"""
+
+        def run_sync(self, submission):
+            """返回含内部错误的失败结果。"""
+            return {
+                "status": "failure",
+                "error": "LDAP bind 10.0.0.1 refused: invalid credentials",
+            }
+
+    form_data = SimpleNamespace(username="eve", password="wrong")
+    request = _build_request()
+    response = Response()
+
+    monkeypatch.setattr(login_endpoint, "_build_flow_service", lambda: FakeService())
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda result, username, ip: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        login_endpoint.login_access_token(
+            request=request,
+            response=response,
+            form_data=form_data,
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 401
+    detail_str = str(exc.detail)
+    assert "LDAP" not in detail_str
+    assert "10.0.0.1" not in detail_str
+    assert "bind" not in detail_str.lower() or "bind" not in detail_str
 
 
 def test_plugin_static_file_requires_resource_token_by_default(monkeypatch):
