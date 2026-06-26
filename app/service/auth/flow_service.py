@@ -23,7 +23,9 @@ class FlowService:
                  factor_steps_for: Callable[[Any], List[Any]],
                  load_user: Callable[[Any], Optional[Any]],
                  issue_token: Callable[[Any], Any],
-                 mfa_requirement: Optional[Callable[[List[Any]], AuthRequirement]] = None) -> None:
+                 mfa_requirement: Optional[Callable[[List[Any]], AuthRequirement]] = None,
+                 identity_resolver: Optional[Callable[[Any], Optional[Any]]] = None,
+                 trusted_step_ids=frozenset({"password"})) -> None:
         self._store = flow_store
         self._credential_steps = list(credential_steps)
         self._factor_steps_for = factor_steps_for
@@ -32,13 +34,17 @@ class FlowService:
         # MFA 组合策略可注入：缺省 AnyOf（任一因子，复现 v2 OR）；
         # 传 ``lambda steps: NOf(2, [...])`` 即得 N-of-M 强 MFA。插件/配置可据此定制流程形状。
         self._mfa_requirement_strategy = mfa_requirement
+        # owner 分流（安全护栏）：仅 ``trusted_step_ids`` 内的内建步可直接携带 user_id；其余凭证步
+        # 须交回 ``identity`` 经 ``identity_resolver`` 统一落地。缺省信任内建本地密码步 "password"。
+        self._identity_resolver = identity_resolver
+        self._trusted_step_ids = frozenset(trusted_step_ids)
 
     # ----------------------------- 对外入口 -----------------------------
     def begin(self, submission: Any) -> dict:
         """开始一条登录流程（通常携带用户名/口令）。"""
         flow_id = self._store.new_flow_id()
         context = AuthContext(flow_id=flow_id, username=getattr(submission, "username", None))
-        cred_flow = build_credential_flow(self._credential_steps)
+        cred_flow = self._build_credential_flow()
         context, result = cred_flow.advance(context, submission)
         return self._after_credential(context, result)
 
@@ -57,7 +63,7 @@ class FlowService:
             return self._run_mfa(context, user, submission)
 
         # 仍在凭证阶段（如分步先取用户名再取口令）
-        cred_flow = build_credential_flow(self._credential_steps)
+        cred_flow = self._build_credential_flow()
         context, result = cred_flow.advance(context, submission)
         return self._after_credential(context, result)
 
@@ -89,9 +95,18 @@ class FlowService:
         return {"status": "mfa_required", "flow_token": context.flow_id,
                 "factors_available": [s.step_id for s in enrolled]}
 
+    def _build_credential_flow(self):
+        """装配凭证阶段流程，注入 owner 分流端口（resolver + trusted），凭证步外部断言经端口落地。"""
+        return build_credential_flow(
+            self._credential_steps,
+            identity_resolver=self._identity_resolver,
+            trusted_step_ids=self._trusted_step_ids)
+
     def _run_mfa(self, context: AuthContext, user: Any, submission: Any) -> dict:
         factor_steps = self._factor_steps_for(user)
-        mfa_flow = build_mfa_flow(factor_steps, requirement=self._mfa_requirement(factor_steps))
+        mfa_flow = build_mfa_flow(factor_steps, requirement=self._mfa_requirement(factor_steps),
+                                  identity_resolver=self._identity_resolver,
+                                  trusted_step_ids=self._trusted_step_ids)
         context, result = mfa_flow.advance(context, submission)
         if result.kind == "success":
             return self._succeed(context, user)

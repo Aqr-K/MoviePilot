@@ -26,7 +26,12 @@ from app.core.challenge_store import ChallengeStore
 from app.service.auth.builtin_factors import OtpFactor
 from app.service.auth.flow_engine import FlowStore
 from app.service.auth.flow_service import FlowService
-from app.service.auth.flow_steps import CredentialProviderStep, FactorStep, PasswordStep
+from app.service.auth.flow_steps import (
+    CredentialProviderStep,
+    FactorStep,
+    PasswordStep,
+    make_identity_resolver,
+)
 from app.service.auth.provisioning import ProvisioningDeps
 
 OWNER = "ex-flow-plugin"
@@ -119,6 +124,8 @@ def test_plugin_ldap_then_sms_challenge_end_to_end_zero_core_change():
                                            if f.factor_id == "sms-flow"],
             load_user=lambda uid: created if uid == 500 else None,
             issue_token=lambda user: {"access_token": "TK", "user_id": user.id},
+            # 迁移（Task 9）：插件 LDAP 凭证步现交回 identity，须经引擎注入的 resolver 落地（resolver 注入式迁移）
+            identity_resolver=make_identity_resolver(deps),
         )
         # 1) 凭证：本地密码不符 → 回落插件 LDAP provider → 解析建号 → 需 SMS
         out1 = svc.begin(_sub(grant_type="password", username="alice", password="secret"))

@@ -138,13 +138,23 @@ def _build_flow_service():
     因子步骤 = 该用户的内建 + 插件 MFA 因子）。复用 ``build_token_response`` 作为唯一铸 Token 来源。"""
     from app.core.auth.credentials import all_credential_providers
     from app.service.auth.flow_service import FlowService
-    from app.service.auth.flow_steps import CredentialProviderStep, FactorStep, PasswordStep
+    from app.service.auth.flow_steps import (
+        CredentialProviderStep,
+        FactorStep,
+        PasswordStep,
+        make_identity_resolver,
+    )
     from app.service.auth.orchestrator import factors_for_user
+    from app.service.auth.provisioning import default_deps
 
     from app.core.auth.flow_registry import get_auth_flow
 
+    # 防内建 id 冒充（T5 review #1a）：排除任何声称内建 id 的插件凭证 provider，杜绝插件以 "password"
+    # 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
+    BUILTIN_CREDENTIAL_IDS = {"password"}
     credential_steps = [PasswordStep()] + [
-        CredentialProviderStep(provider) for provider in all_credential_providers()
+        CredentialProviderStep(p) for p in all_credential_providers()
+        if p.provider_id not in BUILTIN_CREDENTIAL_IDS
     ]
     # 流程形状可插拔：若有插件注册了名为 "default" 的流程规格（如 N-of-M 强 MFA），用其组合策略；
     # 否则沿用默认 AnyOf（任一因子，复现 v2 OR）。
@@ -157,6 +167,8 @@ def _build_flow_service():
         load_user=lambda uid: User.get(db=None, rid=uid),
         issue_token=build_token_response,
         mfa_requirement=mfa_requirement,
+        identity_resolver=make_identity_resolver(default_deps()),
+        trusted_step_ids=BUILTIN_CREDENTIAL_IDS,
     )
 
 

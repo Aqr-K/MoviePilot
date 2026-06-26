@@ -23,8 +23,15 @@ def build_sso_flow_service(provider: Any, *, flow_store: Any,
 
     ``issue_ticket(user) -> ticket``：SSO 成功铸一次性票据交浏览器（而非直接产 Token）；
     ``deps`` / ``consume_state`` 缺省接生产单例（``default_deps`` / ``redirect.consume_state``），单测可注入。
+
+    RedirectStep 为**非受信外部凭证步**：换得外部身份后交回 ``IdentityAssertion``，须经注入的
+    ``identity_resolver``（守护式 ``resolve_or_create`` 单一来源）落地为本地用户——故此处必须注入
+    resolver，且 ``trusted_step_ids`` 留空（SSO 步绝不直接携带 user_id）。
     """
-    sso_step = RedirectStep(provider, consume_state=consume_state, deps=deps)
+    from app.service.auth.flow_steps import make_identity_resolver
+    from app.service.auth.provisioning import default_deps
+    resolved_deps = deps if deps is not None else default_deps()
+    sso_step = RedirectStep(provider, consume_state=consume_state, deps=resolved_deps)
     return FlowService(
         flow_store=flow_store,
         credential_steps=[sso_step],
@@ -32,6 +39,8 @@ def build_sso_flow_service(provider: Any, *, flow_store: Any,
         load_user=load_user,
         issue_token=issue_ticket,
         mfa_requirement=mfa_requirement,
+        identity_resolver=make_identity_resolver(resolved_deps),
+        trusted_step_ids=frozenset(),
     )
 
 

@@ -44,13 +44,18 @@ def _otp_factor():
     return FactorStep(OtpFactor(is_enrolled=lambda ref: True, verify=lambda ref, code: code == "246"))
 
 
+def _state_ok(s):
+    # 迁移（Task 9）：consume_state 现返载荷 dict（含 provider_id，须匹配 provider），而非旧 bool
+    return {"provider_id": "github"}
+
+
 # ----------------------------- SSO 经 flow：无 MFA → 直接铸 ticket -----------------------------
 def test_sso_flow_no_mfa_issues_ticket():
     user = types.SimpleNamespace(id=7, name="octo", is_active=True)
     svc = build_sso_flow_service(
         _FakeIdp(), flow_store=FlowStore(), factors_for_user=lambda u: [],
         load_user=lambda uid: user, issue_ticket=lambda u: f"TICKET-{u.id}",
-        deps=_ok_deps(user), consume_state=lambda s: True)
+        deps=_ok_deps(user), consume_state=_state_ok)
     out = svc.begin(_sub(step_id="github", code="abc123", state="st", redirect_uri="cb"))
     assert out["status"] == "success"
     assert out["token"] == "TICKET-7"
@@ -62,7 +67,7 @@ def test_sso_flow_with_mfa_requires_factor_then_succeeds():
     svc = build_sso_flow_service(
         _FakeIdp(), flow_store=FlowStore(), factors_for_user=lambda u: [_otp_factor()],
         load_user=lambda uid: user, issue_ticket=lambda u: f"TICKET-{u.id}",
-        deps=_ok_deps(user), consume_state=lambda s: True)
+        deps=_ok_deps(user), consume_state=_state_ok)
     out = svc.begin(_sub(step_id="github", code="abc123", state="st", redirect_uri="cb"))
     assert out["status"] == "mfa_required"               # SSO 用户有因子 → 不再豁免 MFA
     out2 = svc.advance(out["flow_token"], _sub(step_id="otp", code="246"))

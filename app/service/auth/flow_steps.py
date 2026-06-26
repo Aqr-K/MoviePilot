@@ -8,12 +8,22 @@
 
 排序前置由各 ``applies_to`` 声明：凭证步要求"尚未解析用户"，因子步要求"已解析用户且本因子已注册"。
 """
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from app.core.auth.challenge import PromptChallenge
-from app.core.auth.flow import AnyOf, AuthContext, AuthRequirement, AuthStepResult, StepRef
+from app.core.auth.challenge import PromptChallenge, RedirectChallenge
+from app.core.auth.flow import (
+    AnyOf,
+    AuthContext,
+    AuthRequirement,
+    AuthStepResult,
+    IdentityAssertion,
+    StepRef,
+)
 from app.core.auth.types import CredentialRequest, MfaSubmission, MfaUserRef
 from app.log import logger
+# 模块级导入：测试经 monkeypatch app.service.auth.flow_steps.resolve_or_create 注入测试缝；
+# provisioning 不反向导入 flow_steps，故无环（已核验）。
+from app.service.auth.provisioning import resolve_or_create
 
 
 def _mfa_ref(ctx: AuthContext) -> MfaUserRef:
@@ -122,16 +132,14 @@ class CredentialProviderStep:
         if not subject:
             logger.warning(f"主认证 provider {self.step_id} 成功但缺少 subject，拒绝")
             return AuthStepResult(status="failed", error="缺少身份标识")
-        from app.service.auth.provisioning import default_deps, resolve_or_create
-        deps = self._deps or default_deps()
-        user = resolve_or_create(
-            self._provider.provider_id, subject=str(subject), username=outcome.username,
-            avatar=outcome.avatar, auto_create=bool(getattr(self._provider, "auto_create", False)),
-            deps=deps)
-        if user is None:
-            return AuthStepResult(status="failed", error="provisioning 被护栏拒绝")
-        return AuthStepResult(status="satisfied", user_id=user.id,
-                              mfa_satisfied=bool(outcome.mfa_already_satisfied))
+        # 不在步骤内解析；交回身份断言，由引擎注入端口 resolve_or_create 统一落地（C-1/B-4 单一来源）
+        return AuthStepResult(status="satisfied", identity=IdentityAssertion(
+            provider_id=self._provider.provider_id,
+            subject=str(subject),
+            username=outcome.username,
+            avatar=outcome.avatar,
+            auto_create=bool(getattr(self._provider, "auto_create", False)),
+            mfa_already_satisfied=bool(outcome.mfa_already_satisfied)))
 
 
 # --------------------------------------------------------------------------- 本地密码
@@ -179,8 +187,9 @@ class PasswordStep:
 # --------------------------------------------------------------------------- SSO 重定向（统一为 step）
 
 
-def _default_consume_state(state: Optional[str]) -> bool:
-    """默认 CSRF state 消费（取即销毁）：接 ``app.core.auth.redirect`` 的单例 state 存储。"""
+def _default_consume_state(state: Optional[str]) -> Optional[Dict[str, Any]]:
+    """默认 CSRF state 消费（取即销毁）：接 ``app.core.auth.redirect`` 的单例 state 存储；
+    现返回载荷 dict（``{flow_token, provider_id}``）或 None（Task 6）。"""
     from app.core.auth.redirect import consume_state
     return consume_state(state)
 
@@ -203,7 +212,7 @@ class RedirectStep:
     step_kind = "redirect"
 
     def __init__(self, provider: Any, *, authorize_url_builder: Optional[Callable[[Any], str]] = None,
-                 consume_state: Optional[Callable[[Optional[str]], bool]] = None,
+                 consume_state: Optional[Callable[[Optional[str]], Optional[Dict[str, Any]]]] = None,
                  deps: Any = None, step_id: Optional[str] = None) -> None:
         self._provider = provider
         self._build_url = authorize_url_builder
@@ -220,8 +229,8 @@ class RedirectStep:
         # 无授权码：下发跳转挑战，等待 IdP 回调
         if not code:
             return self._issue_redirect()
-        # 带授权码：完成回调认证（CSRF → 换身份 → 守护式解析）
-        return self._complete_callback(submission, code)
+        # 带授权码：完成回调认证（CSRF → 换身份 → 交回身份断言）
+        return self._complete_callback(context, submission, code)
 
     def _issue_redirect(self) -> AuthStepResult:
         url = None
@@ -232,18 +241,23 @@ class RedirectStep:
                 logger.error(f"SSO 步骤 {self.step_id} 构造授权 URL 异常：{str(e)}")
         if not url:
             return AuthStepResult(status="pending")
-        return AuthStepResult(status="challenge", challenge={
-            "kind": "redirect",
-            "provider_id": getattr(self._provider, "provider_id", self.step_id),
-            "authorize_url": url,
-        })
+        return AuthStepResult(status="challenge", challenge=RedirectChallenge(
+            step_id=self.step_id,
+            provider_id=getattr(self._provider, "provider_id", self.step_id),
+            authorize_url=url))
 
-    def _complete_callback(self, submission: Any, code: str) -> AuthStepResult:
+    def _complete_callback(self, context: AuthContext, submission: Any, code: str) -> AuthStepResult:
         from app.core.auth.identifiers import is_valid_code
-        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁）
+        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁），现返回载荷 dict 或 None（Task 6）
         consume = self._consume_state or _default_consume_state
-        if not consume(getattr(submission, "state", None)):
+        payload = consume(getattr(submission, "state", None))
+        if not payload:
             logger.warning(f"SSO 步骤 {self.step_id} 回调 state 校验失败（CSRF 或已过期）")
+            return AuthStepResult(status="failed", error="invalid_state")
+        # 跨 provider / 跨 flow 绑定校验（spec §4.7）
+        if payload.get("provider_id") != getattr(self._provider, "provider_id", self.step_id):
+            return AuthStepResult(status="failed", error="invalid_state")
+        if payload.get("flow_token") not in (None, "", context.flow_id):
             return AuthStepResult(status="failed", error="invalid_state")
         # 2) 边界校验授权码
         if not is_valid_code(code):
@@ -257,34 +271,51 @@ class RedirectStep:
             return AuthStepResult(status="failed", error="fetch_identity_failed")
         if not identity or not getattr(identity, "username", None):
             return AuthStepResult(status="failed", error="fetch_identity_failed")
-        # 4) 守护式 provisioning（C-1/B-4/禁用/并发回退护栏单一来源于 resolve_or_create）
-        from app.service.auth.provisioning import default_deps, resolve_or_create
-        deps = self._deps or default_deps()
-        user = resolve_or_create(
-            self._provider.provider_id,
+        # 4) 不在步骤内解析；交回身份断言，由引擎注入端口 resolve_or_create 统一落地（C-1/B-4 单一来源）
+        return AuthStepResult(status="satisfied", identity=IdentityAssertion(
+            provider_id=self._provider.provider_id,
             subject=(getattr(identity, "subject", "") or ""),
             username=getattr(identity, "username", None),
             avatar=getattr(identity, "avatar", None),
-            auto_create=bool(getattr(self._provider, "auto_create", False)),
-            deps=deps)
-        if user is None:
-            return AuthStepResult(status="failed", error="user_not_provisioned")
-        return AuthStepResult(status="satisfied", user_id=user.id)
+            auto_create=bool(getattr(self._provider, "auto_create", False))))
+
+
+# --------------------------------------------------------------------------- 身份解析端口
+
+
+def make_identity_resolver(deps):
+    """把 ``IdentityAssertion`` 经守护式 ``resolve_or_create``（C-1/B-4 护栏单一来源）解析为本地 user_id。
+
+    供流程引擎在外部断言落地时注入（owner 分流：仅受信内建步可直接携带 user_id，其余须经此端口）。
+    使用模块级 ``resolve_or_create`` 以保留测试缝（monkeypatch 本模块同名符号）。
+    """
+    def _resolve(assertion):
+        user = resolve_or_create(
+            assertion.provider_id, subject=assertion.subject, username=assertion.username,
+            avatar=assertion.avatar, auto_create=assertion.auto_create, deps=deps)
+        return user.id if user else None
+    return _resolve
 
 
 # --------------------------------------------------------------------------- 流程构建器
 
 
-def build_credential_flow(steps: List[Any]):
-    """构建"任一凭证步骤满足即可"的单阶段流程（password 与各 ICredentialProvider 的 OR 回落）。"""
+def build_credential_flow(steps: List[Any], *, identity_resolver=None, trusted_step_ids=frozenset()):
+    """构建"任一凭证步骤满足即可"的单阶段流程（password 与各 ICredentialProvider 的 OR 回落）。
+
+    ``identity_resolver`` / ``trusted_step_ids`` 由上层（FlowService / 端点）注入：内建受信步可直接落
+    user_id，外部凭证步交回 ``identity`` 经端口解析（owner 分流的单一落地点）。"""
     from app.service.auth.flow_engine import AuthFlow
     requirement = AnyOf([StepRef(s.step_id) for s in steps])
-    return AuthFlow({s.step_id: s for s in steps}, requirement)
+    return AuthFlow({s.step_id: s for s in steps}, requirement,
+                    identity_resolver=identity_resolver, trusted_step_ids=trusted_step_ids)
 
 
-def build_mfa_flow(factor_steps: List[Any], requirement: Optional[AuthRequirement] = None):
+def build_mfa_flow(factor_steps: List[Any], requirement: Optional[AuthRequirement] = None,
+                   *, identity_resolver=None, trusted_step_ids=frozenset()):
     """构建第二因子流程；``requirement`` 缺省为 ``AnyOf``（任一因子），可传 ``NOf``/``AllOf`` 实现强 MFA。"""
     from app.service.auth.flow_engine import AuthFlow
     if requirement is None:
         requirement = AnyOf([StepRef(s.step_id) for s in factor_steps])
-    return AuthFlow({s.step_id: s for s in factor_steps}, requirement)
+    return AuthFlow({s.step_id: s for s in factor_steps}, requirement,
+                    identity_resolver=identity_resolver, trusted_step_ids=trusted_step_ids)

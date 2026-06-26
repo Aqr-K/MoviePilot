@@ -6,7 +6,7 @@
 """
 import types
 
-from app.core.auth.flow import AllOf, AnyOf, AuthContext, NOf, StepRef
+from app.core.auth.flow import AllOf, AnyOf, AuthContext, IdentityAssertion, NOf, StepRef
 from app.core.auth.outcome import CredentialOutcome
 from app.service.auth.builtin_factors import OtpFactor, PasskeyFactor
 from app.service.auth.flow_engine import AuthFlow
@@ -17,8 +17,14 @@ from app.service.auth.flow_steps import (
     RedirectStep,
     build_credential_flow,
     build_mfa_flow,
+    make_identity_resolver,
 )
 from app.service.auth.provisioning import ProvisioningDeps
+
+
+def _state_ok(provider_id="github"):
+    """新版 consume_state 契约（Task 6）：返回载荷 dict（含 provider_id），而非旧的 bool。"""
+    return lambda s: {"provider_id": provider_id}
 
 
 def _sub(**kw):
@@ -110,9 +116,11 @@ def _ok_deps(user_obj):
 
 
 def test_credential_provider_step_success_resolves_user():
+    # 迁移（Task 9）：凭证步现交回 identity，由引擎注入的 resolver 落地 user_id（resolver 注入式迁移）
     user = types.SimpleNamespace(id=500, is_active=True)
-    step = CredentialProviderStep(_FakeLdap({"alice": "secret"}), deps=_ok_deps(user))
-    flow = AuthFlow({"ldap": step}, AnyOf([StepRef("ldap")]))
+    step = CredentialProviderStep(_FakeLdap({"alice": "secret"}))
+    flow = AuthFlow({"ldap": step}, AnyOf([StepRef("ldap")]),
+                    identity_resolver=lambda a: 500)
     ctx, result = flow.advance(AuthContext(flow_id="f1", username="alice"),
                                _sub(grant_type="password", username="alice", password="secret"))
     assert result.kind == "success"
@@ -156,8 +164,9 @@ def test_build_credential_flow_or_fallback():
     user1 = types.SimpleNamespace(id=1, is_active=True)
     user2 = types.SimpleNamespace(id=2, is_active=True)
     pw = PasswordStep(authenticate=lambda u, p: user1 if p == "local" else None)
-    ldap = CredentialProviderStep(_FakeLdap({"alice": "dir"}), deps=_ok_deps(user2))
-    flow = build_credential_flow([pw, ldap])
+    ldap = CredentialProviderStep(_FakeLdap({"alice": "dir"}))
+    # 迁移（Task 9）：注入 resolver 把目录 provider 交回的 identity 落地为 user2（resolver 注入式迁移）
+    flow = build_credential_flow([pw, ldap], identity_resolver=lambda a: 2)
     ctx, result = flow.advance(AuthContext(flow_id="f1", username="alice"),
                                _sub(grant_type="password", username="alice", password="dir"))
     assert result.kind == "success"
@@ -234,11 +243,12 @@ def _reject_deps():
 
 
 def test_redirect_step_with_code_resolves_user_and_satisfies():
-    # 回调应答（带授权码）：CSRF 通过 → fetch_identity → 守护式 provisioning → satisfied(user_id)
-    user = types.SimpleNamespace(id=7, is_active=True)
+    # 回调应答（带授权码）：CSRF 通过 → fetch_identity → 交回 identity → 引擎 resolver 落地 user_id
+    # 迁移（Task 9）：consume_state 改返载荷 dict；resolver 注入式落地 user 7
     step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity(subject="42", username="octo")),
-                        deps=_ok_deps(user), consume_state=lambda s: True)
-    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+                        consume_state=_state_ok())
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]),
+                    identity_resolver=lambda a: 7)
     ctx, result = flow.advance(AuthContext(flow_id="f1"),
                                _sub(step_id="github", code="abc123", state="st", redirect_uri="cb"))
     assert result.kind == "success"
@@ -257,31 +267,33 @@ def test_redirect_step_invalid_state_fails():
 
 
 def test_redirect_step_fetch_identity_none_fails():
-    step = RedirectStep(_FakeRedirectIdp(identity=None),
-                        deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
-                        consume_state=lambda s: True)
-    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    # 迁移（Task 9）：consume_state 返载荷 dict，使本例真正走到 fetch_identity=None 分支
+    step = RedirectStep(_FakeRedirectIdp(identity=None), consume_state=_state_ok())
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]), identity_resolver=lambda a: 7)
     _, result = flow.advance(AuthContext(flow_id="f1"),
                              _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
 
 
 def test_redirect_step_provisioning_rejected_fails():
-    # resolve_or_create 被安全护栏拒绝（返回 None）→ 整步失败
+    # 迁移（Task 9）：护栏单一来源仍是 resolve_or_create，但现经引擎注入的 resolver 落地——
+    # identity → make_identity_resolver(_reject_deps) → B-4 拒绝返回 None → 引擎拒绝落地 → 整步失败。
+    # 关键安全不变量：未通过护栏的外部身份**绝不**能落得 user_id。
     step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity(subject="42")),
-                        deps=_reject_deps(), consume_state=lambda s: True)
-    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
-    _, result = flow.advance(AuthContext(flow_id="f1"),
-                             _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
+                        consume_state=_state_ok())
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]),
+                    identity_resolver=make_identity_resolver(_reject_deps()))
+    ctx, result = flow.advance(AuthContext(flow_id="f1"),
+                               _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
+    assert ctx.resolved_user_id is None
 
 
 def test_redirect_step_invalid_code_fails():
     # 非法授权码（含换行等注入字符）在换身份前被拒（边界校验，迁移自旧 complete_login）
-    step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity()),
-                        deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
-                        consume_state=lambda s: True)
-    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    # 迁移（Task 9）：consume_state 返载荷 dict，使本例真正走到 is_valid_code 边界校验分支
+    step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity()), consume_state=_state_ok())
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]), identity_resolver=lambda a: 7)
     _, result = flow.advance(AuthContext(flow_id="f1"),
                              _sub(step_id="github", code="bad\ncode", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
@@ -291,8 +303,45 @@ def test_redirect_step_fetch_identity_raises_is_safe():
     # provider.fetch_identity 抛异常 → 安全失败（不泄露、不 500；迁移自旧 complete_login）
     step = RedirectStep(_FakeRedirectIdp(raise_fetch=True),
                         deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
-                        consume_state=lambda s: True)
+                        consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
     _, result = flow.advance(AuthContext(flow_id="f1"),
                              _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
+
+
+# ----------------------------- Task 9: 直验/SSO Step 交回 IdentityAssertion + resolver -----------------------------
+def test_cred_step_identity():
+    # 直验 Step 成功 → 交回 IdentityAssertion（user_id=None，**不**在步内自调 resolve_or_create）
+    step = CredentialProviderStep(_FakeLdap({"alice": "secret"}))
+    r = step.advance(AuthContext(flow_id="f1", username="alice"),
+                     _sub(grant_type="password", username="alice", password="secret"))
+    assert r.status == "satisfied" and r.user_id is None
+    assert r.identity is not None
+    assert r.identity.subject == "alice" and r.identity.provider_id == "ldap"
+
+
+def test_redirect_challenge():
+    # 无授权码 → 直接返回 RedirectChallenge（kind="redirect"，带 authorize_url）
+    step = RedirectStep(_FakeRedirectProvider(),
+                        authorize_url_builder=lambda p: "https://idp/a")
+    r = step.advance(AuthContext(flow_id="f1"), _sub(code=None))
+    assert r.status == "challenge"
+    assert r.challenge.kind == "redirect"
+    assert r.challenge.authorize_url == "https://idp/a"
+
+
+def test_make_identity_resolver(monkeypatch):
+    # 经 module-level resolve_or_create（测试缝）把 IdentityAssertion 解析为本地 user_id
+    import app.service.auth.flow_steps as fs
+    monkeypatch.setattr(fs, "resolve_or_create", lambda pid, **kw: types.SimpleNamespace(id=7))
+    resolver = make_identity_resolver(deps=object())
+    assert resolver(IdentityAssertion(provider_id="ldap", subject="s")) == 7
+
+
+def test_make_identity_resolver_none_when_guard_rejects(monkeypatch):
+    # resolve_or_create 触发护栏返回 None → resolver 返回 None（引擎据此拒绝落地）
+    import app.service.auth.flow_steps as fs
+    monkeypatch.setattr(fs, "resolve_or_create", lambda pid, **kw: None)
+    resolver = make_identity_resolver(deps=object())
+    assert resolver(IdentityAssertion(provider_id="ldap", subject="s")) is None
