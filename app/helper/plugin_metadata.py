@@ -209,6 +209,14 @@ def get_plugin_provided_channel_capabilities(running_plugins, pid: Optional[str]
     """聚合插件经 provides_channel_capabilities() 声明【新增】的消息渠道能力矩阵，按 plugin_id 归集。"""
     return _get_plugin_provided(running_plugins, "provides_channel_capabilities", "注册渠道能力", pid)
 
+def get_plugin_provided_auth_flows(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """聚合插件经 provides_auth_flows() 声明【新增】的自定义流程规格实例，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_auth_flows", "注册认证流程", pid)
+
+def get_plugin_provided_auth_steps(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """聚合插件经 provides_auth_steps() 声明【新增】的统一认证步骤（IAuthStep）实例，按 plugin_id 归集。"""
+    return _get_plugin_provided(running_plugins, "provides_auth_steps", "注册认证步骤", pid)
+
 def get_plugin_actions(running_plugins, pid: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取插件动作

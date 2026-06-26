@@ -1,19 +1,23 @@
-from datetime import timedelta
+import types as _types
 from typing import Any, List, Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app import schemas
-from app.chain.user import UserChain
 from app.core import security
-from app.core.config import settings
-from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.sites import SitesHelper  # noqa
 from app.helper.image import WallpaperHelper
-from app.schemas.types import SystemConfigKey
+from app.schemas import RateLimitExceededException
+from app.utils.limit import KeyedWindowRateLimiter
+
+# Re-exported at module level so tests can monkeypatch on login_endpoint directly.
+from app.api.endpoints.auth import _build_flow_service, emit_auth_event
 
 router = APIRouter()
+
+# 登录端点限流：10 次 / 60 秒 / (ip+username)，进程级；多实例需共享后端（Redis）
+# Limit chosen: 10 attempts / 60 s — enough for legitimate retries, blocks brute-force.
+_auth_rate_limiter = KeyedWindowRateLimiter(max_calls=10, window_seconds=60)
 
 
 @router.post("/access-token", summary="获取token", response_model=schemas.Token)
@@ -24,59 +28,56 @@ def login_access_token(
     otp_password: Annotated[str | None, Form()] = None,
 ) -> Any:
     """
-    获取认证Token
+    获取认证Token（引擎驱动：通过 FlowService.run_sync 完成凭证验证与条件 MFA）。
     """
-    success, user_or_message = UserChain().user_authenticate(
-        username=form_data.username, password=form_data.password, mfa_code=otp_password
-    )
+    client_ip = request.client.host if request.client else "unknown"
+    rl_key = f"{client_ip}:{form_data.username}"
+    try:
+        _auth_rate_limiter.check(rl_key)
+    except RateLimitExceededException:
+        raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
 
-    if not success:
-        # 如果是需要MFA验证，返回特殊标识
-        if user_or_message == "MFA_REQUIRED":
-            raise HTTPException(
-                status_code=401,
-                detail="需要双重验证，请提供验证码或使用通行密钥",
-                headers={"X-MFA-Required": "true"},
-            )
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    submission = _types.SimpleNamespace(
+        username=form_data.username,
+        password=form_data.password,
+        grant_type=getattr(form_data, "grant_type", "password") or "password",
+        code=otp_password,
+        mfa_code=otp_password,
+    )
+    service = _build_flow_service()
+    result = service.run_sync(submission)
 
-    # 用户等级
-    level = SitesHelper().auth_level
-    # 是否显示配置向导
-    show_wizard = (
-        not SystemConfigOper().get(SystemConfigKey.SetupWizardState)
-        and not settings.ADVANCED_MODE
-    )
-    access_token = security.create_access_token(
-        userid=user_or_message.id,
-        username=user_or_message.name,
-        super_user=user_or_message.is_superuser,
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-        level=level,
-    )
-    security.set_or_refresh_resource_token_cookie(
-        request,
-        response,
-        schemas.TokenPayload(
-            sub=user_or_message.id,
-            username=user_or_message.name,
-            super_user=user_or_message.is_superuser,
-            level=level,
-            purpose="authentication",
-        ),
-    )
+    client_ip = request.client.host if request.client else None
+    emit_auth_event(result, form_data.username, client_ip)
 
-    return schemas.Token(
-        access_token=access_token,
-        token_type="bearer",
-        super_user=user_or_message.is_superuser,
-        user_id=user_or_message.id,
-        user_name=user_or_message.name,
-        avatar=user_or_message.avatar,
-        level=level,
-        permissions=user_or_message.permissions or {},
-        wizard=show_wizard,
-    )
+    if result.get("status") == "success":
+        token = result["token"]
+        # 铸资源 Cookie（浏览器侧插件静态文件鉴权所需），与 /auth/flow 路径保持一致行为
+        security.set_or_refresh_resource_token_cookie(
+            request,
+            response,
+            schemas.TokenPayload(
+                sub=token.user_id,
+                username=token.user_name,
+                super_user=token.super_user,
+                level=token.level,
+                purpose="authentication",
+            ),
+        )
+        return token
+
+    if result.get("status") in ("mfa_required", "challenge"):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "message": "需要双重验证，请提供验证码或使用通行密钥",
+                "status": "mfa_required",
+                "factors_available": result.get("factors_available") or [],
+            },
+            headers={"X-MFA-Required": "true"},
+        )
+
+    raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
 @router.get("/wallpaper", summary="登录页面电影海报", response_model=schemas.Response)

@@ -5,16 +5,16 @@ provides_auth_providers 固化（消除 G3）片 1 回归：db-free 核心 + 注
 锁定：
   - verify_auth_provider_contract 契约校验（通过 / 各类失败原因）；
   - AuthProviderRegistry 按 provider_id 单索引、provider_id 碰撞检测、按 owner 卸载；
-  - SsoStateStore CSRF state 单次有效 / 过期 / 拒绝未知空；
+  - RedirectStateStore CSRF state 单次有效 / 过期 / 拒绝未知空；
   - _PluginBase.provides_auth_providers 默认 [] + get_plugin_provided_auth_providers 聚合。
 """
 from unittest import TestCase
 
-from app.core import sso
-from app.core.sso import (
+from app.core.auth import redirect as sso
+from app.core.auth.redirect import (
     AuthProviderIdentity,
     AuthProviderRegistry,
-    SsoStateStore,
+    RedirectStateStore,
     verify_auth_provider_contract,
 )
 from app.helper import plugin_metadata
@@ -56,7 +56,7 @@ class VerifyContractTest(TestCase):
         self.assertTrue(any("provider_name" in r for r in reasons))
 
     def test_provider_id_with_separator_rejected(self):
-        # 安全：provider_id 含下划线会破坏 sso_{pid}_{user} 命名空间隔离（跨提供方撞名）
+        # 安全：provider_id 含下划线会破坏 ext_{pid}_{user} 命名空间隔离（跨提供方撞名）
         for bad_id in ("gh_sso", "github/../x", "a b", "../evil"):
             p = _GoodProvider()
             p.provider_id = bad_id
@@ -141,22 +141,22 @@ class ModuleLevelHelpersTest(TestCase):
 
 
 # ---------------------------------------------------------------- CSRF state
-class SsoStateStoreTest(TestCase):
+class RedirectStateStoreTest(TestCase):
 
     def test_single_use(self):
-        s = SsoStateStore(ttl_seconds=600)
-        st = s.issue()
+        s = RedirectStateStore(ttl_seconds=600)
+        st = s.issue(flow_token="ft", provider_id="test")
         self.assertTrue(s.consume(st))
         self.assertFalse(s.consume(st), "state 必须单次有效")
 
     def test_reject_unknown_and_none(self):
-        s = SsoStateStore(ttl_seconds=600)
+        s = RedirectStateStore(ttl_seconds=600)
         self.assertFalse(s.consume("bogus"))
         self.assertFalse(s.consume(None))
 
     def test_expired_rejected(self):
-        s = SsoStateStore(ttl_seconds=0)
-        self.assertFalse(s.consume(s.issue()), "过期 state 必须拒绝")
+        s = RedirectStateStore(ttl_seconds=0)
+        self.assertFalse(s.consume(s.issue(flow_token="ft", provider_id="test")), "过期 state 必须拒绝")
 
 
 # ---------------------------------------------------------------- 钩子 + 聚合

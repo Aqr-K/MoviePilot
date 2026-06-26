@@ -314,12 +314,37 @@ class _PluginBase(metaclass=ABCMeta):
     def provides_auth_providers(self) -> List[Any]:
         """
         声明本插件向登录页【新增】的 SSO 登录提供方（外部 IdP 单点登录，声明式注册）。
-        返回实现 app.core.sso.IAuthProvider 契约的【实例】列表，每个含 provider_id / provider_name /
+        返回实现 app.core.auth.redirect.IAuthProvider 契约的【实例】列表，每个含 provider_id / provider_name /
         provider_icon + authorize_url(state, redirect_uri) / fetch_identity(code, redirect_uri)。
         框架统一负责 CSRF state、回调端点、用户解析/建号与铸票（消除每个 SSO 插件重复的这套样板），
         插件只实现 IdP 特定的「授权 URL 构造」与「授权码换身份」两件事。默认不新增。
 
         [GithubAuthProvider(...), FeishuAuthProvider(...), ...]
+        """
+        return []
+
+    def provides_auth_flows(self) -> List[Any]:
+        """
+        声明本插件向登录【新增】的自定义流程形状（组合策略），而不止于贡献单个步骤。
+        返回实现 app.core.auth.flow_registry.IFlowSpec 契约的【实例】列表，每个含 flow_id +
+        mfa_requirement(factor_steps)，可据已装配因子返回 AnyOf / NOf / AllOf 组合（如 2-of-3 强 MFA、
+        强制多因子）。上层端点按 flow_id 选用。默认不新增（即沿用任一因子满足的默认策略）。
+
+        [HighAssuranceFlowSpec(...), ...]
+        """
+        return []
+
+    def provides_auth_steps(self) -> List[Any]:
+        """
+        声明本插件向登录流程【新增】的认证步骤（**统一 SPI**：主认证 provider / MFA 因子 / SSO 重定向
+        统一收口为「认证步骤」一条声明）。返回实现 app.core.auth.flow.IAuthStep 契约的【实例】列表 ——
+        通常是把现有认证构件包装成步骤的适配器：CredentialProviderStep(provider) / FactorStep(factor) / RedirectStep(provider)，
+        各含 step_id / step_kind / priority + applies_to(context) / advance(context, submission)。
+        框架以 owner=plugin_id 注册到全局步骤注册表（register_auth_step），装配桥按 step_kind 切分
+        （credential / directory / federated_direct / redirect → 凭证步；factor → 第二因子步）后入多步
+        登录流程。默认不新增。
+
+        [CredentialProviderStep(LdapProvider(...)), FactorStep(SmsFactor(...)), ...]
         """
         return []
 

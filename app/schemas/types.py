@@ -171,6 +171,14 @@ class ChainEventType(Enum):
     AuthVerification = "auth.verification"
     # 认证拦截
     AuthIntercept = "auth.intercept"
+    # 认证成功（观测，fire-and-forget，供审计/风控插件）
+    AuthSucceeded = "auth.succeeded"
+    # 认证失败（观测）
+    AuthFailed = "auth.failed"
+    # 登出（观测）
+    AuthLogout = "auth.logout"
+    # 需要 MFA 二次验证（观测，携带可用因子，供风控/自适应 step-up 插件）
+    MfaChallengeRequired = "auth.mfa.challenge_required"
     # 命令注册
     CommandRegister = "command.register"
     # 整理重命名
