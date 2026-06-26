@@ -10,9 +10,8 @@
 """
 from typing import Any, Callable, List, Optional
 
-from app.core.auth.credentials import CredentialRequest
 from app.core.auth.flow import AnyOf, AuthContext, AuthRequirement, AuthStepResult, StepRef
-from app.core.auth.mfa_factors import MfaSubmission, MfaUserRef
+from app.core.auth.types import CredentialRequest, MfaSubmission, MfaUserRef
 from app.log import logger
 
 

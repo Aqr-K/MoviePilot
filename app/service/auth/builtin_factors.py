@@ -11,7 +11,7 @@
 """
 from typing import Callable, List, Optional
 
-from app.core.auth.mfa_factors import MfaChallengeHint, MfaSubmission, MfaUserRef
+from app.core.auth.types import MfaChallengeHint, MfaSubmission, MfaUserRef
 from app.core.auth.outcome import MfaFactorResult
 
 # 内建因子优先级：OTP 先于 PassKey，复现 _verify_mfa 的 is_otp 优先

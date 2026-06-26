@@ -8,41 +8,15 @@ MFA 因子契约 + 注册表（db-free）。
 因子保持 db-free：core 只持有契约与注册表；需要查库的因子（如 PassKey 读凭证表）自行查询，
 通过传入的轻量 ``MfaUserRef``（仅身份引用，不含密钥）定位用户。
 """
-from dataclasses import dataclass, field
+from dataclasses import field  # noqa: F401 — kept for indirect compat
 from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from app.core.auth.identifiers import is_valid_identifier
 from app.core.auth.outcome import MfaFactorResult
 from app.core.auth.registry import OwnerScopedRegistry
+from app.core.auth.types import MfaChallengeHint, MfaSubmission, MfaUserRef  # re-export (T13 时随契约一并删)
 
 _MFA_FACTOR_KINDS = {"knowledge", "possession", "biometric"}
-
-
-@dataclass(frozen=True)
-class MfaUserRef:
-    """传给因子的轻量用户引用（仅身份，不含 otp_secret 等密钥；需要更多状态的因子自行查库）。"""
-
-    user_id: Any
-    username: str
-
-
-@dataclass(frozen=True)
-class MfaSubmission:
-    """用户对某次 MFA 的提交。``factor_id`` 为空表示遗留单码提交（兼容现 otp_password 路径）。"""
-
-    factor_id: Optional[str] = None
-    code: Optional[str] = None
-    response: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class MfaChallengeHint:
-    """因子对外暴露的"下一步如何应答"提示（前端据此渲染；带外因子可含已下发挑战）。"""
-
-    factor_id: str
-    factor_kind: str
-    display_name: str
-    challenge: Optional[Dict[str, Any]] = None
 
 
 @runtime_checkable

@@ -10,27 +10,16 @@ OIDC-ROPC/SAML-ECP 等非重定向联合认证、passwordless 等。插件交出
   - 重定向（浏览器跳到 IdP 再回调）→ ``IAuthProvider``；
   - 直接用凭证换身份（无浏览器重定向）→ 本模块 ``ICredentialProvider``。
 """
-from dataclasses import dataclass, field
+from dataclasses import field  # noqa: F401 — kept for indirect compat
 from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from app.core.auth.identifiers import is_valid_identifier
 from app.core.auth.outcome import CredentialOutcome
 from app.core.auth.registry import OwnerScopedRegistry
+from app.core.auth.types import CredentialRequest  # re-export (T13 时随契约一并删)
 
 # 因子大类：对齐认证分类（知识/持有 + 本地目录/非重定向联合）
 _FACTOR_KINDS = {"knowledge", "possession", "directory", "federated_direct"}
-
-
-@dataclass(frozen=True)
-class CredentialRequest:
-    """主认证输入（v3 自有 DTO，由编排器从 ``AuthCredentials`` 构造；插件特定字段放 ``extra``）。"""
-
-    grant_type: str
-    username: Optional[str] = None
-    password: Optional[str] = None
-    code: Optional[str] = None
-    mfa_code: Optional[str] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
