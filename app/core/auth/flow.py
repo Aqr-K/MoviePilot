@@ -195,6 +195,9 @@ class AuthContext:
     satisfied_steps: frozenset = field(default_factory=frozenset)
     challenges: Dict[str, Any] = field(default_factory=dict)
     data: Dict[str, Any] = field(default_factory=dict)
+    # 显式选中的步骤 id（如 begin {flow:"github"}）。仅 opt-in 类步骤（SSO RedirectStep）据此 applies_to，
+    # 使密码 grant（requested_step_id=None）绝不误触发重定向挑战。需跨 SSO begin→callback→advance 持久化。
+    requested_step_id: Optional[str] = None
 
     def with_satisfied(self, step_id: str) -> "AuthContext":
         return replace(self, satisfied_steps=self.satisfied_steps | {step_id})
@@ -221,6 +224,7 @@ class AuthContext:
             "satisfied_steps": sorted(self.satisfied_steps),
             "challenges": dict(self.challenges),
             "data": dict(self.data),
+            "requested_step_id": self.requested_step_id,
         }
 
     @classmethod
@@ -234,4 +238,5 @@ class AuthContext:
             satisfied_steps=frozenset(d.get("satisfied_steps") or []),
             challenges=dict(d.get("challenges") or {}),
             data=dict(d.get("data") or {}),
+            requested_step_id=d.get("requested_step_id"),
         )

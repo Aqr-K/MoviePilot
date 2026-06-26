@@ -478,3 +478,257 @@ def test_upload_avatar_rejects_other_user_for_non_superuser():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "用户权限不足"
+
+
+# ============================= I1: SSO 步 opt-in，密码失败不误转挑战 =============================
+
+
+class _StubRedirectProvider:
+    """最小 SSO 重定向提供方：注册即被 _build_flow_service 桥接为 RedirectStep。"""
+
+    provider_id = "stubsso"
+    provider_name = "Stub SSO"
+    provider_icon = "mdi-login"
+    priority = 100
+    enabled = True
+    auto_create = True
+    success_redirect = "/"
+
+    def authorize_url(self, state, redirect_uri):
+        return f"https://idp.example/auth?state={state}"
+
+    def fetch_identity(self, code, redirect_uri):
+        return SimpleNamespace(subject="stub-1", username="stubuser", avatar=None)
+
+
+@pytest.fixture()
+def registered_stub_sso():
+    """注册 stub SSO 提供方到 redirect 注册表，用例退出后卸载（owner 隔离）。"""
+    from app.core.auth import redirect as sso
+
+    provider = _StubRedirectProvider()
+    sso.register_auth_provider(provider, owner="i1test")
+    try:
+        yield provider
+    finally:
+        sso.unregister_auth_providers("i1test")
+
+
+@pytest.fixture()
+def event_recorder(monkeypatch):
+    """捕获 emit_auth_event 经 eventmanager 发出的观测事件（etype 列表）。"""
+    from app.api.endpoints import auth as auth_module
+
+    events = []
+
+    def _record(*, etype=None, data=None):
+        events.append(etype)
+        return SimpleNamespace(event_data=None)
+
+    monkeypatch.setattr(auth_module.eventmanager, "send_event", _record)
+    return events
+
+
+def test_wrong_password_with_sso_provider_fails_not_challenge(
+    monkeypatch, registered_stub_sso, event_recorder, reset_login_rate_limiter
+):
+    """注册了 SSO 重定向提供方时，密码错误仍应 401 '用户名或密码错误'，绝不误转 SSO 跳转挑战。
+
+    回归 I1：RedirectStep 现为 opt-in（仅 requested_step_id 命中才参与）；密码 grant 未选 flow →
+    RedirectStep 不 applies_to → 密码失败如实收口为 AuthFailed，而非 MfaChallengeRequired/302。
+    """
+    from app.api.endpoints import auth as auth_module
+    from app.service.auth import flow_steps
+    from app.schemas.types import ChainEventType
+
+    # 本地密码校验失败（任何用户名/口令都不通过）
+    monkeypatch.setattr(flow_steps.PasswordStep, "_default_authenticate",
+                        staticmethod(lambda u, p: None))
+
+    form_data = SimpleNamespace(username="eve", password="wrong")
+    request = _build_request()
+    response = Response()
+
+    with pytest.raises(HTTPException) as exc_info:
+        login_endpoint.login_access_token(request=request, response=response, form_data=form_data)
+
+    exc = exc_info.value
+    assert exc.status_code == 401
+    assert exc.detail == "用户名或密码错误"          # 非 MFA/challenge 结构体
+    assert (exc.headers or {}).get("X-MFA-Required") is None
+    # 事件：AuthFailed 而非 MfaChallengeRequired（暴力破解可见）
+    assert ChainEventType.AuthFailed in event_recorder
+    assert ChainEventType.MfaChallengeRequired not in event_recorder
+
+
+def test_correct_password_logs_in_with_sso_provider_present(
+    monkeypatch, registered_stub_sso, reset_login_rate_limiter
+):
+    """SSO 重定向提供方在场时，正确密码仍正常登录成功（opt-in 不影响密码主路径）。"""
+    from app import schemas
+    from app.api.endpoints import auth as auth_module
+    from app.service.auth import flow_steps
+
+    user = SimpleNamespace(id=99, name="bob", is_active=True, is_superuser=False,
+                           avatar=None, permissions={})
+    fake_token = schemas.Token(access_token="tok", token_type="bearer", super_user=False,
+                               user_id=99, user_name="bob", avatar=None, level=1,
+                               permissions={}, wizard=False)
+
+    monkeypatch.setattr(flow_steps.PasswordStep, "_default_authenticate",
+                        staticmethod(lambda u, p: user if (u == "bob" and p == "right") else None))
+    # 隔离 DB：装配桥的内建因子与用户加载、Token 铸造改为内存桩
+    monkeypatch.setattr(auth_module, "_builtin_factor_steps", lambda u: [])
+    monkeypatch.setattr(auth_module, "User",
+                        type("FakeUser", (), {"get": staticmethod(lambda db=None, rid=None, **kw: user)}))
+    monkeypatch.setattr(auth_module, "build_token_response", lambda u: fake_token)
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda *a, **kw: None)
+
+    form_data = SimpleNamespace(username="bob", password="right")
+    request = _build_request()
+    response = Response()
+
+    token = login_endpoint.login_access_token(request=request, response=response, form_data=form_data)
+    assert token.user_id == 99
+    assert token.access_token == "tok"
+
+
+# ============================= I2: AuxiliaryCredentialStep 恢复媒体服务器辅助认证 ===============
+
+
+def test_auxiliary_step_present_only_when_enabled(monkeypatch):
+    """AUXILIARY_AUTH_ENABLE → 凭证步含 'auxiliary' 且受信；关闭则缺席。"""
+    from app.api.endpoints import auth as auth_module
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "AUXILIARY_AUTH_ENABLE", True)
+    svc_on = auth_module._build_flow_service()
+    ids_on = [s.step_id for s in svc_on._credential_steps]
+    assert "auxiliary" in ids_on
+    assert "auxiliary" in svc_on._trusted_step_ids   # 受信，引擎方接受其 user_id
+
+    monkeypatch.setattr(settings, "AUXILIARY_AUTH_ENABLE", False)
+    svc_off = auth_module._build_flow_service()
+    ids_off = [s.step_id for s in svc_off._credential_steps]
+    assert "auxiliary" not in ids_off
+
+
+def test_auxiliary_step_authenticates_non_local_user(monkeypatch):
+    """非本地用户：密码步失败 → 辅助步经媒体服务器模块认证成功 → 登录成功。"""
+    from app import schemas
+    from app.api.endpoints import auth as auth_module
+    from app.core.config import settings
+    from app.service.auth import flow_steps
+    from app.chain.user import UserChain
+
+    monkeypatch.setattr(settings, "AUXILIARY_AUTH_ENABLE", True)
+
+    user = SimpleNamespace(id=77, name="plexuser", is_active=True, is_superuser=False,
+                           avatar=None, permissions={})
+    fake_token = schemas.Token(access_token="aux-tok", token_type="bearer", super_user=False,
+                               user_id=77, user_name="plexuser", avatar=None, level=1,
+                               permissions={}, wizard=False)
+
+    # 本地密码失败（用户非本地）
+    monkeypatch.setattr(flow_steps.PasswordStep, "_default_authenticate",
+                        staticmethod(lambda u, p: None))
+    # 媒体服务器辅助认证成功（桩 auxiliary_authenticate）
+    monkeypatch.setattr(UserChain, "auxiliary_authenticate",
+                        lambda self, credentials: (True, user))
+    monkeypatch.setattr(auth_module, "_builtin_factor_steps", lambda u: [])
+    monkeypatch.setattr(auth_module, "User",
+                        type("FakeUser", (), {"get": staticmethod(lambda db=None, rid=None, **kw: user)}))
+    monkeypatch.setattr(auth_module, "build_token_response", lambda u: fake_token)
+
+    svc = auth_module._build_flow_service()
+    out = svc.run_sync(SimpleNamespace(username="plexuser", password="serverpw",
+                                       grant_type="password", code=None, mfa_code=None))
+    assert out["status"] == "success"
+    assert out["token"].user_id == 77
+
+
+def test_auxiliary_step_user_id_dropped_when_untrusted(monkeypatch):
+    """owner-routing 仍生效：辅助步若不在受信集，其直接携带的 user_id 被引擎护栏丢弃。"""
+    from app.core.auth.flow import AuthContext
+    from app.service.auth.flow_engine import AuthFlow
+    from app.core.auth.flow import AnyOf, StepRef
+    from app.service.auth.flow_steps import AuxiliaryCredentialStep
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "AUXILIARY_AUTH_ENABLE", True)
+    user = SimpleNamespace(id=5, is_active=True)
+    step = AuxiliaryCredentialStep(authenticate=lambda creds: (True, user))
+    # 配 resolver 但 trusted 为空 → 非受信步直接给 user_id 被护栏拒绝
+    flow = AuthFlow({"auxiliary": step}, AnyOf([StepRef("auxiliary")]),
+                    identity_resolver=lambda a: None, trusted_step_ids=frozenset())
+    ctx, result = flow.advance(AuthContext(flow_id="f1", username="x"),
+                               SimpleNamespace(username="x", password="pw", grant_type="password",
+                                               code=None))
+    assert result.kind == "failure"            # user_id 被丢弃 → 无身份落地
+    assert ctx.resolved_user_id is None
+
+
+# ============================= M3: flow 成功写入资源 Cookie ===================================
+
+
+def test_flow_begin_sets_resource_token_cookie(monkeypatch):
+    """/auth/flow/begin 成功（带 Token）应写入资源 Cookie，与 /access-token 行为一致。"""
+    from app import schemas
+    from app.api.endpoints import auth as auth_module
+
+    fake_token = schemas.Token(access_token="f.jwt", token_type="bearer", super_user=False,
+                               user_id=7, user_name="kit", avatar="", level=1,
+                               permissions={"discovery": True}, wizard=False)
+
+    class FakeService:
+        def begin(self, body):
+            return {"status": "success", "token": fake_token}
+
+    monkeypatch.setattr(auth_module, "_build_flow_service", lambda request=None: FakeService())
+    monkeypatch.setattr(auth_module, "emit_auth_event", lambda *a, **kw: None)
+
+    request = _build_request()
+    response = Response()
+    result = auth_module.flow_begin(body=auth_module.FlowBeginRequest(username="kit"),
+                                    request=request, response=response)
+
+    assert result["status"] == "success"
+    assert "set-cookie" in response.headers
+    cookie = response.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+    payload = verify_resource_token(cookie)
+    assert payload.sub == 7
+    assert payload.username == "kit"
+    assert payload.purpose == "resource"
+
+
+def test_flow_advance_sets_resource_token_cookie(monkeypatch, reset_advance_rate_limiter):
+    """/auth/flow/advance 成功（带 Token）同样写入资源 Cookie。"""
+    from app import schemas
+    from app.api.endpoints import auth as auth_module
+
+    fake_token = schemas.Token(access_token="f2.jwt", token_type="bearer", super_user=False,
+                               user_id=8, user_name="ada", avatar="", level=1,
+                               permissions={}, wizard=False)
+
+    class FakeService:
+        def advance(self, flow_token, body):
+            return {"status": "success", "token": fake_token}
+
+    monkeypatch.setattr(auth_module, "_build_flow_service", lambda request=None: FakeService())
+    monkeypatch.setattr(auth_module, "emit_auth_event", lambda *a, **kw: None)
+
+    request = Request({
+        "type": "http", "method": "POST", "path": "/api/v1/auth/flow/advance",
+        "headers": [(b"host", b"testserver")], "scheme": "http",
+        "server": ("testserver", 80), "client": ("testclient", 123),
+    })
+    response = Response()
+    body = auth_module.FlowAdvanceRequest(flow_token="tok", step_id="otp", code="246")
+    result = auth_module.flow_advance(body=body, request=request, response=response)
+
+    assert result["status"] == "success"
+    assert "set-cookie" in response.headers
+    cookie = response.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+    payload = verify_resource_token(cookie)
+    assert payload.sub == 8
+    assert payload.purpose == "resource"

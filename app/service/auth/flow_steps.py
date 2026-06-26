@@ -184,6 +184,67 @@ class PasswordStep:
         return user
 
 
+# --------------------------------------------------------------------------- 媒体服务器辅助认证
+
+
+class AuxiliaryCredentialStep:
+    """把 ``UserChain.auxiliary_authenticate``（媒体服务器 ``user_authenticate`` 模块 + AuthVerification
+    事件）适配为内建凭证步骤，恢复 ``AUXILIARY_AUTH_ENABLE`` 用户经媒体服务器登录的能力。
+
+    排在本地密码（priority 0）之后（priority 50）：本地密码失败（如用户非本地）→ 引擎 AnyOf 回落到本步，
+    用同一份用户名/口令尝试媒体服务器辅助认证。
+
+    **受信内建步**：直接返回 ``user_id``（其建号经 ``_process_auth_success`` 走媒体服务器专属逻辑，
+    而非统一的 ``resolve_or_create`` 护栏），故须由装配桥纳入 ``trusted_step_ids`` 方能被引擎接受。
+    任何异常一律安全失败（回落/收口），绝不拖垮流程。
+    """
+
+    step_id = "auxiliary"
+    step_kind = "credential"
+    priority = 50
+
+    def __init__(self, authenticate: Optional[Callable[[Any], Any]] = None) -> None:
+        # authenticate(credentials) -> (ok: bool, user_or_msg)；缺省接 UserChain().auxiliary_authenticate。
+        self._authenticate = authenticate
+
+    def applies_to(self, context: AuthContext) -> bool:
+        from app.core.config import settings
+        return context.resolved_user_id is None and bool(settings.AUXILIARY_AUTH_ENABLE)
+
+    def advance(self, context: AuthContext, submission: Any) -> AuthStepResult:
+        from app.schemas import AuthCredentials
+        username = getattr(submission, "username", None) or context.username
+        try:
+            credentials = AuthCredentials(
+                grant_type=getattr(submission, "grant_type", "password") or "password",
+                username=username,
+                password=getattr(submission, "password", None),
+                code=getattr(submission, "code", None),
+                mfa_code=getattr(submission, "mfa_code", None),
+                token=getattr(submission, "token", None),
+                channel=getattr(submission, "channel", None),
+                service=getattr(submission, "service", None),
+            )
+            authenticate = self._authenticate or self._default_authenticate
+            ok, result = authenticate(credentials)
+        except Exception as e:  # noqa: BLE001 —— 辅助认证异常一律安全失败（回落/收口）
+            logger.error(f"辅助认证步骤异常：{str(e)}")
+            return AuthStepResult(status="failed", error="辅助认证异常")
+        if not ok:
+            return AuthStepResult(status="failed", error="辅助认证未通过")
+        user_id = getattr(result, "id", None)
+        if user_id is None:
+            logger.warning("辅助认证成功但缺少用户 id，拒绝")
+            return AuthStepResult(status="failed", error="辅助认证未通过")
+        # 受信内建步：直接落 user_id（其 provisioning 为媒体服务器专属，非 resolve_or_create）
+        return AuthStepResult(status="satisfied", user_id=user_id)
+
+    @staticmethod
+    def _default_authenticate(credentials: Any) -> Any:
+        from app.chain.user import UserChain
+        return UserChain().auxiliary_authenticate(credentials)
+
+
 # --------------------------------------------------------------------------- SSO 重定向（统一为 step）
 
 
@@ -245,7 +306,10 @@ class RedirectStep:
         self.priority = int(getattr(provider, "priority", 100))
 
     def applies_to(self, context: AuthContext) -> bool:
-        return context.resolved_user_id is None
+        # **opt-in**：仅当流程显式选中本重定向步（``requested_step_id == step_id``）时才参与。
+        # 否则密码 grant 的 OR 回落会在密码失败后误触 RedirectStep 下发跳转挑战，把"密码错误"伪装成
+        # "需 MFA/重定向"（暴力破解不可见）。凭证类步（Password/CredentialProvider）保持自动回落不受影响。
+        return context.resolved_user_id is None and context.requested_step_id == self.step_id
 
     def advance(self, context: AuthContext, submission: Any) -> AuthStepResult:
         code = getattr(submission, "code", None)

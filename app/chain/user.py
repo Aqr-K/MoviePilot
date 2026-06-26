@@ -2,7 +2,7 @@ import secrets
 from typing import Optional, Tuple, Union
 
 from app.chain import ChainBase
-from app.core.security import get_password_hash, verify_password
+from app.core.security import get_password_hash
 from app.db.models.user import User
 from app.db.user_oper import UserOper
 from app.log import logger
@@ -16,35 +16,6 @@ class UserChain(ChainBase):
     """
     用户链，处理多种认证协议
     """
-
-    @staticmethod
-    def password_authenticate(credentials: AuthCredentials) -> Tuple[bool, Union[User, str]]:
-        """
-        密码认证
-
-        :param credentials: 认证凭证，包含用户名、密码以及可选的 MFA 认证码
-        :return:
-            - 成功时返回 (True, User)，其中 User 是认证通过的用户对象
-            - 失败时返回 (False, "错误信息")
-        """
-        if not credentials or credentials.grant_type != "password":
-            logger.info("密码认证失败，认证类型不匹配")
-            return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-
-        user = UserOper().get_by_name(name=credentials.username)
-        if not user:
-            logger.info(f"密码认证失败，用户 {credentials.username} 不存在")
-            return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-
-        if not user.is_active:
-            logger.info(f"密码认证失败，用户 {credentials.username} 已被禁用")
-            return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-
-        if not verify_password(credentials.password, str(user.hashed_password)):
-            logger.info(f"密码认证失败，用户 {credentials.username} 的密码验证不通过")
-            return False, PASSWORD_INVALID_CREDENTIALS_MESSAGE
-
-        return True, user
 
     def auxiliary_authenticate(self, credentials: AuthCredentials) -> Tuple[bool, Union[User, str]]:
         """

@@ -97,7 +97,7 @@ def test_with_challenge_and_attempt():
 
 
 def test_context_json_roundtrip():
-    c = (AuthContext(flow_id="f1", username="alice")
+    c = (AuthContext(flow_id="f1", username="alice", requested_step_id="github")
          .with_satisfied("password")
          .with_resolved_user(user_id=7)
          .with_challenge("sms", {"sent": True}))
@@ -109,6 +109,17 @@ def test_context_json_roundtrip():
     assert c2.satisfied_steps == frozenset({"password"})
     assert c2.resolved_user_id == 7
     assert c2.challenges["sms"] == {"sent": True}
+    # I1：requested_step_id 必须跨 JSON 往返存活（SSO begin→callback→advance 据此让 RedirectStep opt-in）
+    assert c2.requested_step_id == "github"
+
+
+def test_requested_step_id_preserved_across_with_copies():
+    """I1：with_* 不可变副本须保留 requested_step_id（opt-in 选择跨多轮推进不丢失）。"""
+    c = AuthContext(flow_id="f1", requested_step_id="github")
+    assert c.with_satisfied("x").requested_step_id == "github"
+    assert c.with_resolved_user(user_id=9).requested_step_id == "github"
+    assert c.with_challenge("s", {}).requested_step_id == "github"
+    assert c.with_attempt().requested_step_id == "github"
 
 
 # ----------------------------- Task 3: IdentityAssertion + typed challenge -----

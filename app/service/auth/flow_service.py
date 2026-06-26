@@ -97,9 +97,16 @@ class FlowService:
         return out  # success / failure / challenge 直接返回
 
     def begin(self, submission: Any) -> dict:
-        """开始一条登录流程（通常携带用户名/口令）。"""
+        """开始一条登录流程（通常携带用户名/口令）。
+
+        携带 ``flow`` 选择器（如 ``{flow:"github"}``）时，把它记入 ``context.requested_step_id``：
+        opt-in 类步骤（SSO RedirectStep）仅在被显式选中时才 ``applies_to``，并跨 begin→callback→advance
+        经 FlowStore 持久化（``requested_step_id`` 已纳入 to_dict/from_dict）。密码 grant 无 flow →
+        requested_step_id 为 None → 任何 RedirectStep 都不参与，密码失败如实收口为失败（而非误转挑战）。
+        """
         flow_id = self._store.new_flow_id()
-        context = AuthContext(flow_id=flow_id, username=getattr(submission, "username", None))
+        context = AuthContext(flow_id=flow_id, username=getattr(submission, "username", None),
+                              requested_step_id=getattr(submission, "flow", None))
         cred_flow = self._build_credential_flow()
         context, result = cred_flow.advance(context, _with_target_step(submission))
         return self._after_credential(context, result)

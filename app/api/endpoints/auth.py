@@ -1,11 +1,12 @@
 import types
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app import schemas
+from app.core import security
 from app.core.auth import redirect as sso
 from app.core.auth_bridge import build_token_response, consume_plugin_auth_ticket
 from app.core.config import settings
@@ -189,7 +190,8 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
     from app.core.auth.flow_registry import get_auth_flow
     from app.core.auth.steps import all_auth_steps
     from app.service.auth.flow_service import FlowService
-    from app.service.auth.flow_steps import PasswordStep, RedirectStep, make_identity_resolver
+    from app.service.auth.flow_steps import (
+        AuxiliaryCredentialStep, PasswordStep, RedirectStep, make_identity_resolver)
     from app.service.auth.provisioning import default_deps
 
     deps = default_deps()
@@ -199,6 +201,15 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
         if getattr(s, "step_kind", None) in _CREDENTIAL_STEP_KINDS
         and getattr(s, "step_id", None) not in _BUILTIN_CREDENTIAL_IDS
     ]
+
+    # 媒体服务器辅助认证（AUXILIARY_AUTH_ENABLE）：以受信内建凭证步恢复（密码失败后 OR 回落）。
+    # 其建号走媒体服务器专属 provisioning（_process_auth_success），故须纳入 trusted_step_ids 方被引擎接受。
+    # 影子防护仍以 _BUILTIN_CREDENTIAL_IDS（仅 "password"）排除插件冒充内建 id；trusted 集另行扩展，
+    # 且本步在 credential_steps 中追加于任何同名插件步之后 → build_credential_flow 的 step_id 字典以内建为准。
+    trusted_step_ids = _BUILTIN_CREDENTIAL_IDS
+    if settings.AUXILIARY_AUTH_ENABLE:
+        credential_steps.append(AuxiliaryCredentialStep())
+        trusted_step_ids = _BUILTIN_CREDENTIAL_IDS | {"auxiliary"}
 
     # 桥接旧 SSO 注册表为统一流程的 RedirectStep（自签 flow 绑定 state + /auth/flow/callback 回调）；
     # 按 step_id 去重：已在内建 / all_auth_steps 出现者优先（绝不被 SSO 覆盖，防内建受信步被影子化）。
@@ -236,7 +247,7 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
         issue_token=issue_token or build_token_response,
         mfa_requirement=mfa_requirement,
         identity_resolver=make_identity_resolver(deps),
-        trusted_step_ids=_BUILTIN_CREDENTIAL_IDS,
+        trusted_step_ids=trusted_step_ids,
     )
 
 
@@ -268,30 +279,63 @@ def emit_auth_event(result: dict, username: Optional[str], client_ip: Optional[s
         logger.error(f"多步登录观测事件发送失败：{str(e)}")
 
 
-def _flow_http(result: dict, username: Optional[str], request: Request) -> dict:
-    """把服务层结构化结果折成 HTTP 响应：失败 → 401（detail 已脱敏）；其余 → 200 + 状态体。"""
+def _set_flow_resource_cookie(token: Any, request: Request, response: Optional[Response]) -> None:
+    """流程成功后写入资源 Cookie（浏览器侧插件静态文件鉴权所需），与 /access-token 行为一致。
+
+    仅当 ``response`` 可用且 ``token`` 为标准 ``Token``（含 user_id；SSO 薄桥铸的 ticket 字符串不在此列）
+    时设置；复用 login.py 同一 helper（``set_or_refresh_resource_token_cookie``），单一来源。
+    """
+    if response is None or token is None or not hasattr(token, "user_id"):
+        return
+    try:
+        security.set_or_refresh_resource_token_cookie(
+            request,
+            response,
+            schemas.TokenPayload(
+                sub=token.user_id,
+                username=token.user_name,
+                super_user=token.super_user,
+                level=token.level,
+                purpose="authentication",
+            ),
+        )
+    except Exception as e:  # noqa: BLE001 —— Cookie 写入失败绝不阻断已成功的登录
+        logger.error(f"流程登录写入资源 Cookie 失败：{str(e)}")
+
+
+def _flow_http(result: dict, username: Optional[str], request: Request,
+               response: Optional[Response] = None) -> dict:
+    """把服务层结构化结果折成 HTTP 响应：失败 → 401（detail 已脱敏）；其余 → 200 + 状态体。
+
+    成功且提供 ``response`` 时，附带写入资源 Cookie（与 /access-token 一致）。"""
     client_ip = request.client.host if request.client else None
     emit_auth_event(result, username, client_ip)
     if result.get("status") == "failure":
         raise HTTPException(status_code=401,
                             detail=redact_reason(result.get("error") or "auth_failed"))
+    if result.get("status") == "success":
+        _set_flow_resource_cookie(result.get("token"), request, response)
     return result
 
 
 @router.post("/flow/begin", summary="开始多步登录流程")
-def flow_begin(body: FlowBeginRequest, request: Request) -> dict:
+def flow_begin(body: FlowBeginRequest, request: Request, response: Response = None) -> dict:
     """开始一条可组合、可多轮的登录流程。返回 ``status``：success（带 token）/ mfa_required /
     challenge / continue。后续以返回的 ``flow_token`` 调用 ``/auth/flow/advance`` 推进。
 
     携带 ``flow="<provider_id>"`` 时定向到该 SSO/重定向步，直接下发跳转挑战（authorize_url），SSO 由此
-    进入与密码/因子同一条统一流程；浏览器 302 至 IdP 后经 ``/auth/flow/callback`` 薄桥回灌推进。"""
+    进入与密码/因子同一条统一流程；浏览器 302 至 IdP 后经 ``/auth/flow/callback`` 薄桥回灌推进。
+
+    成功时写入资源 Cookie（FastAPI 注入 ``response``；与 /access-token 一致）。"""
     result = _build_flow_service(request).begin(body)
-    return _flow_http(result, body.username, request)
+    return _flow_http(result, body.username, request, response)
 
 
 @router.post("/flow/advance", summary="推进多步登录流程")
-def flow_advance(body: FlowAdvanceRequest, request: Request) -> dict:
-    """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。"""
+def flow_advance(body: FlowAdvanceRequest, request: Request, response: Response = None) -> dict:
+    """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。
+
+    成功时写入资源 Cookie（FastAPI 注入 ``response``；与 /access-token 一致）。"""
     client_ip = request.client.host if request.client else "unknown"
     username = body.username or ""
     rl_key = f"{client_ip}:{username}" if username else client_ip
@@ -300,7 +344,7 @@ def flow_advance(body: FlowAdvanceRequest, request: Request) -> dict:
     except RateLimitExceededException:
         raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
     result = _build_flow_service().advance(body.flow_token, body)
-    return _flow_http(result, body.username, request)
+    return _flow_http(result, body.username, request, response)
 
 
 def sso_callback_query(result: dict) -> dict:

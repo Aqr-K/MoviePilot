@@ -185,7 +185,9 @@ def test_redirect_step_emits_authorize_url_challenge():
     step = RedirectStep(_FakeRedirectProvider(),
                         authorize_url_builder=lambda p: "https://idp.example.com/auth?state=xyz")
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
-    _, result = flow.advance(AuthContext(flow_id="f1"), _sub(step_id="github"))
+    # opt-in：RedirectStep 仅在被显式选中（requested_step_id 命中）时参与
+    _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
+                             _sub(step_id="github"))
     assert result.kind == "challenge"
     assert result.challenge["kind"] == "redirect"
     assert result.challenge["provider_id"] == "github"
@@ -198,8 +200,10 @@ def test_redirect_step_in_or_with_password():
     pw = PasswordStep(authenticate=lambda u, p: user if p == "pw" else None)
     redirect = RedirectStep(_FakeRedirectProvider(), authorize_url_builder=lambda p: "https://idp/x")
     flow = build_credential_flow([pw, redirect])
-    _, picked_sso = flow.advance(AuthContext(flow_id="f1", username="alice"),
-                                 _sub(step_id="github"))
+    # opt-in：选中 github（requested_step_id 命中）→ 下发跳转挑战；密码路径不受影响
+    _, picked_sso = flow.advance(
+        AuthContext(flow_id="f1", username="alice", requested_step_id="github"),
+        _sub(step_id="github"))
     assert picked_sso.kind == "challenge"
     ctx, picked_pw = flow.advance(AuthContext(flow_id="f1", username="alice"),
                                   _sub(step_id="password", username="alice", password="pw"))
@@ -249,7 +253,7 @@ def test_redirect_step_with_code_resolves_user_and_satisfies():
                         consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]),
                     identity_resolver=lambda a: 7)
-    ctx, result = flow.advance(AuthContext(flow_id="f1"),
+    ctx, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
                                _sub(step_id="github", code="abc123", state="st", redirect_uri="cb"))
     assert result.kind == "success"
     assert ctx.resolved_user_id == 7
@@ -261,7 +265,7 @@ def test_redirect_step_invalid_state_fails():
                         deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
                         consume_state=lambda s: False)
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
-    _, result = flow.advance(AuthContext(flow_id="f1"),
+    _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
                              _sub(step_id="github", code="abc", state="bad", redirect_uri="cb"))
     assert result.kind == "failure"
 
@@ -270,7 +274,7 @@ def test_redirect_step_fetch_identity_none_fails():
     # 迁移（Task 9）：consume_state 返载荷 dict，使本例真正走到 fetch_identity=None 分支
     step = RedirectStep(_FakeRedirectIdp(identity=None), consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]), identity_resolver=lambda a: 7)
-    _, result = flow.advance(AuthContext(flow_id="f1"),
+    _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
                              _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
 
@@ -283,7 +287,7 @@ def test_redirect_step_provisioning_rejected_fails():
                         consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]),
                     identity_resolver=make_identity_resolver(_reject_deps()))
-    ctx, result = flow.advance(AuthContext(flow_id="f1"),
+    ctx, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
                                _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
     assert ctx.resolved_user_id is None
@@ -294,7 +298,7 @@ def test_redirect_step_invalid_code_fails():
     # 迁移（Task 9）：consume_state 返载荷 dict，使本例真正走到 is_valid_code 边界校验分支
     step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity()), consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]), identity_resolver=lambda a: 7)
-    _, result = flow.advance(AuthContext(flow_id="f1"),
+    _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
                              _sub(step_id="github", code="bad\ncode", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
 
@@ -305,7 +309,7 @@ def test_redirect_step_fetch_identity_raises_is_safe():
                         deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
                         consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
-    _, result = flow.advance(AuthContext(flow_id="f1"),
+    _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
                              _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
     assert result.kind == "failure"
 
@@ -345,3 +349,48 @@ def test_make_identity_resolver_none_when_guard_rejects(monkeypatch):
     monkeypatch.setattr(fs, "resolve_or_create", lambda pid, **kw: None)
     resolver = make_identity_resolver(deps=object())
     assert resolver(IdentityAssertion(provider_id="ldap", subject="s")) is None
+
+
+# ----------------------------- M1: 黄金矩阵双注册（OTP+PassKey）优先级守护 -----------------------------
+def _otp_factor_step(good_code="123456"):
+    return FactorStep(OtpFactor(is_enrolled=lambda ref: True,
+                                verify=lambda ref, code: code == good_code))
+
+
+def _passkey_factor_step():
+    return FactorStep(PasskeyFactor(is_enrolled=lambda ref: True))
+
+
+def test_otp_wins_when_both_otp_and_passkey_enrolled():
+    """OTP+PassKey 同时注册、提交正确 OTP → 流程 success，绝不下发 passkey 挑战。
+
+    OTP priority 10 < PassKey priority 20：引擎按 priority 升序先试 OTP，命中即满足并短路，
+    passkey 步永不被推进（无 challenge 泄漏）。守护双注册下"提交即验因子优先于带外因子"的不变量。
+    """
+    otp = _otp_factor_step(good_code="123456")
+    passkey = _passkey_factor_step()
+    flow = build_mfa_flow([otp, passkey])  # 默认 AnyOf([otp, passkey])
+    # 不指定 step_id，交由引擎按 priority 路由（验证 OTP 优先）
+    ctx, result = flow.advance(_resolved_ctx(), _sub(code="123456"))
+    assert result.kind == "success"
+    assert result.challenge is None            # 未落到 passkey → 无任何挑战
+    assert "passkey" in ctx.satisfied_steps or "otp" in ctx.satisfied_steps
+    assert "passkey" not in ctx.satisfied_steps  # passkey 从未被推进
+    assert "otp" in ctx.satisfied_steps
+
+
+def test_wrong_otp_with_both_enrolled_falls_to_passkey_challenge():
+    """错误 OTP + 两者均注册 → 引擎 AnyOf 回落到 passkey 挑战（NOT 硬失败）。
+
+    显式锚定**新的（预期）引擎契约**：OTP deny 后，AnyOf 仍有未满足候选 passkey，
+    passkey 返回 challenge_required → 整轮以 challenge 收口而非 failure。
+    （对照旧 v2 _verify_mfa：错 OTP 直接拒登；统一流程下改为回落带外因子挑战。）
+    """
+    otp = _otp_factor_step(good_code="123456")
+    passkey = _passkey_factor_step()
+    flow = build_mfa_flow([otp, passkey])
+    ctx, result = flow.advance(_resolved_ctx(), _sub(code="000000"))  # 错误 OTP
+    assert result.kind == "challenge"          # 回落 passkey 挑战，非硬失败
+    assert result.kind != "failure"
+    assert "passkey" in (result.factors_available or [])  # passkey 仍是可用候选
+    assert "otp" not in ctx.satisfied_steps     # 错码未满足 OTP
