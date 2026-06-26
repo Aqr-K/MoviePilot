@@ -14,10 +14,12 @@ from app.helper.plugin_manager import PluginManager
 from app.helper.sso import begin_login
 from app.service.auth.sso_flow import sso_callback_query
 from app.log import logger
+from app.schemas import RateLimitExceededException
 from app.schemas.event import AuthObservationEventData, MfaChallengeEventData
 from app.schemas.types import ChainEventType
 from app.service.auth.flow_engine import FlowStore
 from app.service.auth.flow_service import redact_reason
+from app.utils.limit import KeyedWindowRateLimiter
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
 
@@ -28,6 +30,10 @@ _SSO_BASE = "/api/v1/auth/sso"
 
 # 多步登录流程状态存储（进程级，跨请求承载未完成的流程；重启失效=重新登录，可接受）
 _FLOW_STORE = FlowStore()
+
+# 多步推进端点限流：10 次 / 60 秒 / (ip+username)，进程级；多实例需共享后端（Redis）
+# Chosen limit: 10 attempts / 60 s mirrors the /access-token limit (KISS, same policy)
+_auth_advance_rate_limiter = KeyedWindowRateLimiter(max_calls=10, window_seconds=60)
 
 
 class AuthExchangeRequest(BaseModel):
@@ -138,7 +144,8 @@ class FlowAdvanceRequest(BaseModel):
 _CREDENTIAL_STEP_KINDS = {"credential", "directory", "federated_direct", "redirect"}
 # 防内建 id 冒充（Task 9 review #1a）：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password"
 # 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
-BUILTIN_CREDENTIAL_IDS = {"password"}
+# frozenset（不可变）防止调用方意外 mutate 该集合来弱化 owner-routing 护栏（Task 12.5 安全加固）。
+_BUILTIN_CREDENTIAL_IDS: frozenset = frozenset({"password"})
 
 
 def _builtin_factor_steps(user) -> list:
@@ -180,7 +187,7 @@ def _build_flow_service():
     credential_steps = [PasswordStep()] + [
         s for s in steps
         if getattr(s, "step_kind", None) in _CREDENTIAL_STEP_KINDS
-        and getattr(s, "step_id", None) not in BUILTIN_CREDENTIAL_IDS
+        and getattr(s, "step_id", None) not in _BUILTIN_CREDENTIAL_IDS
     ]
     plugin_factor_steps = [s for s in steps if getattr(s, "step_kind", None) == "factor"]
 
@@ -197,7 +204,7 @@ def _build_flow_service():
         issue_token=build_token_response,
         mfa_requirement=mfa_requirement,
         identity_resolver=make_identity_resolver(default_deps()),
-        trusted_step_ids=BUILTIN_CREDENTIAL_IDS,
+        trusted_step_ids=_BUILTIN_CREDENTIAL_IDS,
     )
 
 
@@ -250,6 +257,13 @@ def flow_begin(body: FlowBeginRequest, request: Request) -> dict:
 @router.post("/flow/advance", summary="推进多步登录流程")
 def flow_advance(body: FlowAdvanceRequest, request: Request) -> dict:
     """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。"""
+    client_ip = request.client.host if request.client else "unknown"
+    username = body.username or ""
+    rl_key = f"{client_ip}:{username}" if username else client_ip
+    try:
+        _auth_advance_rate_limiter.check(rl_key)
+    except RateLimitExceededException:
+        raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
     result = _build_flow_service().advance(body.flow_token, body)
     return _flow_http(result, body.username, request)
 

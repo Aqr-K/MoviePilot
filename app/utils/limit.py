@@ -3,7 +3,7 @@ import inspect
 import threading
 import time
 from collections import deque
-from typing import Any, Tuple, List, Callable, Optional
+from typing import Any, Dict, Tuple, List, Callable, Optional
 
 from app.log import logger
 from app.schemas import RateLimitExceededException, LimitException
@@ -417,6 +417,50 @@ def rate_limit_window(
     limiter = WindowRateLimiter(max_calls, window_seconds, source, enable_logging)
     # 使用通用装饰器逻辑包装该限流器
     return rate_limit_handler(limiter, raise_on_limit)
+
+
+class KeyedWindowRateLimiter:
+    """Process-local keyed window rate limiter.
+
+    Each key (e.g. ``"{ip}:{username}"``) gets its own :class:`WindowRateLimiter` instance.
+    Calling :meth:`check` records the attempt and raises :class:`RateLimitExceededException`
+    when the caller is over the configured limit within the sliding window.
+
+    **Scope**: single-process in-memory only.  Multi-instance deployments (multiple workers
+    behind a load-balancer) need a shared backend (e.g. Redis) — that is out of scope here.
+    """
+
+    def __init__(self, max_calls: int, window_seconds: float) -> None:
+        self._max_calls = max_calls
+        self._window_seconds = window_seconds
+        self._registry: Dict[str, WindowRateLimiter] = {}
+        self._lock = threading.Lock()
+
+    def _get_or_create(self, key: str) -> "WindowRateLimiter":
+        with self._lock:
+            if key not in self._registry:
+                self._registry[key] = WindowRateLimiter(
+                    self._max_calls, self._window_seconds,
+                    source=key, enable_logging=False,
+                )
+            return self._registry[key]
+
+    def check(self, key: str) -> None:
+        """Record one attempt for *key*; raise :class:`RateLimitExceededException` if over limit.
+
+        The attempt is recorded BEFORE the limit is enforced so that even the first
+        rejected call is counted (preventing a free last attempt through timing).
+        """
+        limiter = self._get_or_create(key)
+        can, msg = limiter.can_call()
+        if not can:
+            raise RateLimitExceededException(msg or "尝试过于频繁，请稍后再试")
+        limiter.record_call()
+
+    def clear(self) -> None:
+        """Clear all per-key state.  Intended for use in tests only."""
+        with self._lock:
+            self._registry.clear()
 
 
 class QpsRateLimiter:

@@ -338,6 +338,53 @@ def test_plugin_auth_remote_files_allow_anonymous_bootstrap(monkeypatch):
     assert calls == []
 
 
+# ----------------------------- rate limiting 429 -----------------------------
+
+@pytest.fixture()
+def reset_login_rate_limiter():
+    """Ensure the login rate limiter starts clean before and after this test."""
+    from app.api.endpoints import login as login_module
+    limiter = getattr(login_module, "_auth_rate_limiter", None)
+    if limiter is not None:
+        limiter.clear()
+    yield
+    if limiter is not None:
+        limiter.clear()
+
+
+def test_rate_limit_returns_429(monkeypatch, reset_login_rate_limiter):
+    """Hammering /access-token from same ip+username beyond limit → HTTP 429."""
+    from app.api.endpoints import login as login_module
+    from app.utils.limit import KeyedWindowRateLimiter
+
+    # Use a tight 2-attempt limiter so we hit the ceiling quickly
+    tight_limiter = KeyedWindowRateLimiter(max_calls=2, window_seconds=60)
+    monkeypatch.setattr(login_module, "_auth_rate_limiter", tight_limiter)
+
+    class FakeService:
+        def run_sync(self, submission):
+            return {"status": "failure", "error": "invalid_credentials"}
+
+    monkeypatch.setattr(login_module, "_build_flow_service", lambda: FakeService())
+    monkeypatch.setattr(login_module, "emit_auth_event", lambda *a, **kw: None)
+
+    form_data = SimpleNamespace(username="bruteuser", password="badpass")
+    request = _build_request()
+    response = Response()
+
+    # First 2 calls: under limit → 401 (wrong credentials)
+    for _ in range(2):
+        with pytest.raises(HTTPException) as exc:
+            login_module.login_access_token(request=request, response=response, form_data=form_data)
+        assert exc.value.status_code == 401
+
+    # 3rd call: over limit → 429
+    with pytest.raises(HTTPException) as exc:
+        login_module.login_access_token(request=request, response=response, form_data=form_data)
+    assert exc.value.status_code == 429
+    assert "频繁" in exc.value.detail
+
+
 def test_upload_avatar_rejects_other_user_for_non_superuser():
     """普通用户不能通过 user_id 参数修改其他用户头像。"""
     current_user = SimpleNamespace(id=1, is_superuser=False)

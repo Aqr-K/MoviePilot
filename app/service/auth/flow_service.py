@@ -79,8 +79,13 @@ class FlowService:
         return self._after_credential(context, result)
 
     def advance(self, flow_token: str, submission: Any) -> dict:
-        """凭流程令牌推进下一步（提交因子码 / 挑战应答 / 后补凭证）。"""
-        context = self._store.load(flow_token)
+        """凭流程令牌推进下一步（提交因子码 / 挑战应答 / 后补凭证）。
+
+        使用 CAS (load_versioned + expected_version save) 防止并发丢失更新：
+        若两个并发 advance 竞争同一令牌，后提交者的 save 会被 CAS 拒绝，
+        返回 operation_conflict 且不 drop 对方写入的状态（另一方的胜出状态保留）。
+        """
+        context, version = self._store.load_versioned(flow_token)
         if context is None:
             return {"status": "failure", "error": "流程不存在或已过期"}
 
@@ -90,26 +95,35 @@ class FlowService:
             if user is None or not getattr(user, "is_active", False):
                 self._store.drop(flow_token)
                 return {"status": "failure", "error": "用户不存在或已禁用"}
-            return self._run_mfa(context, user, submission)
+            return self._run_mfa(context, user, submission, expected_version=version)
 
         # 仍在凭证阶段（如分步先取用户名再取口令）
         cred_flow = self._build_credential_flow()
         context, result = cred_flow.advance(context, submission)
-        return self._after_credential(context, result)
+        return self._after_credential(context, result, expected_version=version)
+
+    # ----------------------------- CAS 辅助 -----------------------------
+    def _save_cas(self, context: AuthContext, expected_version: Optional[int]) -> bool:
+        """CAS 写入：返回 True 表示成功，False 表示版本冲突（另一并发方已提交）。"""
+        ok, _ = self._store.save(context, expected_version=expected_version)
+        return ok
 
     # ----------------------------- 阶段编排 -----------------------------
-    def _after_credential(self, context: AuthContext, result: Any) -> dict:
+    def _after_credential(self, context: AuthContext, result: Any,
+                          expected_version: Optional[int] = None) -> dict:
         if result.kind == "failure":
             self._store.drop(context.flow_id)
             return {"status": "failure", "error": result.error or "认证失败"}
         if result.kind == "challenge":
             # SSO/重定向步发起挑战（如 RedirectChallenge）→ 下发 authorize_url，暂存流程状态
-            self._store.save(context)
+            if not self._save_cas(context, expected_version):
+                return {"status": "failure", "error": "operation_conflict"}
             return {"status": "challenge", "flow_token": context.flow_id,
                     "challenge": result.challenge, "factors_available": result.factors_available or []}
         if result.kind != "success":
             # 凭证未就绪（缺输入）→ 暂存，提示继续提交凭证
-            self._store.save(context)
+            if not self._save_cas(context, expected_version):
+                return {"status": "failure", "error": "operation_conflict"}
             return {"status": "continue", "flow_token": context.flow_id,
                     "steps_available": result.factors_available or []}
 
@@ -126,7 +140,8 @@ class FlowService:
         enrolled = [s for s in self._factor_steps_for(user) if s.applies_to(context)]
         if not enrolled:
             return self._succeed(context, user)
-        self._store.save(context)
+        if not self._save_cas(context, expected_version):
+            return {"status": "failure", "error": "operation_conflict"}
         return {"status": "mfa_required", "flow_token": context.flow_id,
                 "factors_available": [s.step_id for s in enrolled]}
 
@@ -137,7 +152,8 @@ class FlowService:
             identity_resolver=self._identity_resolver,
             trusted_step_ids=self._trusted_step_ids)
 
-    def _run_mfa(self, context: AuthContext, user: Any, submission: Any) -> dict:
+    def _run_mfa(self, context: AuthContext, user: Any, submission: Any,
+                 expected_version: Optional[int] = None) -> dict:
         # 仅取当前可推进的已注册因子（enrolled 子集为唯一事实来源，避免恒假叶子污染 candidates）
         factor_steps = [s for s in self._factor_steps_for(user) if s.applies_to(context)]
         requirement = self._validate_requirement(self._mfa_requirement(factor_steps), factor_steps)
@@ -152,11 +168,13 @@ class FlowService:
             self._store.drop(context.flow_id)
             return {"status": "failure", "error": result.error or "二次验证失败"}
         if result.kind == "challenge":
-            self._store.save(context)
+            if not self._save_cas(context, expected_version):
+                return {"status": "failure", "error": "operation_conflict"}
             return {"status": "challenge", "flow_token": context.flow_id,
                     "challenge": result.challenge, "factors_available": result.factors_available or []}
         # mfa_required：仍需因子输入
-        self._store.save(context)
+        if not self._save_cas(context, expected_version):
+            return {"status": "failure", "error": "operation_conflict"}
         return {"status": "mfa_required", "flow_token": context.flow_id,
                 "factors_available": result.factors_available or []}
 

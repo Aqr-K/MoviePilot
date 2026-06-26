@@ -251,3 +251,75 @@ def test_validate_requirement_rejects_empty_true():
     result = svc._validate_requirement(empty_true, [otp_step])
     # 降级后不应对空集满足
     assert not result.is_satisfied(frozenset()), "降级后不应对空 satisfied 集满足"
+
+
+# ============================= S1 tests (Task 12.5) =============================
+
+# ----------------------------- CAS lost-update 防护 -----------------------------
+def test_flowservice_advance_cas_conflict():
+    """Racing advance (credential stage) with stale version → operation_conflict, winning state intact.
+
+    Simulate two concurrent advance() calls on a multi-step credential flow:
+    1. begin() saves initial state unconditionally at version v1.
+    2. A concurrent "winner" bumps the store to v2 out-of-band.
+    3. The "late racer" advance() is monkey-patched to see stale v1 from load_versioned.
+    4. advance() processes the step (still pending → tries to save), but CAS fails (v1 ≠ v2).
+    5. Returns operation_conflict WITHOUT dropping the winning state.
+    """
+    from app.core.auth.flow import AuthStepResult
+
+    class _PendingCredStep:
+        """Credential step that always returns pending — needs more input (multi-round cred flow)."""
+        step_id = "pending_cred"
+        step_kind = "credential"
+        priority = 1
+
+        def applies_to(self, ctx):
+            return ctx.resolved_user_id is None
+
+        def advance(self, ctx, submission):
+            return AuthStepResult(status="pending")
+
+    store = FlowStore(ttl_seconds=600)
+    svc = FlowService(
+        flow_store=store,
+        credential_steps=[_PendingCredStep()],
+        factor_steps_for=lambda user: [],
+        load_user=lambda uid: USERS.get(uid),
+        issue_token=lambda user: {"access_token": f"TK-{user.id}"},
+    )
+
+    # begin() saves state unconditionally → version 1, returns "continue"
+    out = svc.begin(_sub(username="test"))
+    assert out["status"] == "continue"
+    flow_token = out["flow_token"]
+
+    ctx, v1 = store.load_versioned(flow_token)
+    assert v1 >= 1
+
+    # Simulate concurrent winner bumping the version (v1 → v2)
+    ok, v2 = store.save(ctx, expected_version=v1)
+    assert ok and v2 == v1 + 1
+
+    # Monkey-patch load_versioned so the late racer's advance() loads stale v1.
+    # When _after_credential tries save(expected_version=v1) against actual v2 → CAS fails.
+    original_lv = store.load_versioned
+    stale_used = []
+
+    def _stale_load_versioned(fid):
+        if fid == flow_token and not stale_used:
+            stale_used.append(True)
+            return (ctx, v1)
+        return original_lv(fid)
+
+    store.load_versioned = _stale_load_versioned
+
+    out2 = svc.advance(flow_token, _sub())
+    assert out2["status"] == "failure"
+    assert out2.get("error") == "operation_conflict"
+
+    # Winning writer's state (v2) must NOT have been dropped by the losing advance
+    store.load_versioned = original_lv
+    surviving, cv = store.load_versioned(flow_token)
+    assert surviving is not None, "winning writer's flow state must not be dropped by the loser"
+    assert cv == v2

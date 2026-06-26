@@ -7,11 +7,17 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app import schemas
 from app.core import security
 from app.helper.image import WallpaperHelper
+from app.schemas import RateLimitExceededException
+from app.utils.limit import KeyedWindowRateLimiter
 
 # Re-exported at module level so tests can monkeypatch on login_endpoint directly.
 from app.api.endpoints.auth import _build_flow_service, emit_auth_event
 
 router = APIRouter()
+
+# 登录端点限流：10 次 / 60 秒 / (ip+username)，进程级；多实例需共享后端（Redis）
+# Limit chosen: 10 attempts / 60 s — enough for legitimate retries, blocks brute-force.
+_auth_rate_limiter = KeyedWindowRateLimiter(max_calls=10, window_seconds=60)
 
 
 @router.post("/access-token", summary="获取token", response_model=schemas.Token)
@@ -24,6 +30,13 @@ def login_access_token(
     """
     获取认证Token（引擎驱动：通过 FlowService.run_sync 完成凭证验证与条件 MFA）。
     """
+    client_ip = request.client.host if request.client else "unknown"
+    rl_key = f"{client_ip}:{form_data.username}"
+    try:
+        _auth_rate_limiter.check(rl_key)
+    except RateLimitExceededException:
+        raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
+
     submission = _types.SimpleNamespace(
         username=form_data.username,
         password=form_data.password,
