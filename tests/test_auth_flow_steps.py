@@ -36,6 +36,16 @@ def _otp_step(enrolled=True, good_code="123456", step_id=None):
     return FactorStep(otp, step_id=step_id)
 
 
+def test_otp_factor_step_issues_prompt():
+    # S1: 无码提交且因子已注册 → 下发 PromptChallenge（kind="prompt", input_kind="otp"）
+    step = _otp_step()  # enrolled=True, no step_id override → step_id == "otp"
+    r = step.advance(_resolved_ctx(), _sub())  # no code, no response
+    assert r.status == "challenge"
+    assert r.challenge.kind == "prompt"
+    assert r.challenge.input_kind == "otp"
+    assert r.challenge.step_id == step.step_id
+
+
 def test_factor_step_not_actionable_before_user_resolved():
     step = _otp_step()
     assert step.applies_to(AuthContext(flow_id="f1")) is False          # 未解析用户 → 不可推进

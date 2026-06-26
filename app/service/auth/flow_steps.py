@@ -10,6 +10,7 @@
 """
 from typing import Any, Callable, List, Optional
 
+from app.core.auth.challenge import PromptChallenge
 from app.core.auth.flow import AnyOf, AuthContext, AuthRequirement, AuthStepResult, StepRef
 from app.core.auth.types import CredentialRequest, MfaSubmission, MfaUserRef
 from app.log import logger
@@ -48,8 +49,14 @@ class FactorStep:
         # 无任何应答输入：若因子可下发挑战（带外因子）→ 发起挑战；否则等待用户输入
         if not code and not response:
             hint = self._safe_hint(ref)
-            if hint is not None and getattr(hint, "challenge", None):
-                return AuthStepResult(status="challenge", challenge=hint.challenge)
+            if hint is not None:
+                if getattr(hint, "challenge", None):
+                    return AuthStepResult(status="challenge", challenge=hint.challenge)
+                # 因子已注册但无带外挑战（TOTP/OTP）→ 提示用户输入动态码
+                return AuthStepResult(
+                    status="challenge",
+                    challenge=PromptChallenge(step_id=self.step_id, prompt="请输入动态码", input_kind="otp"),
+                )
             return AuthStepResult(status="pending")
         try:
             result = self._factor.verify(ref, MfaSubmission(
