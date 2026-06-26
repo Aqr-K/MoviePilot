@@ -47,12 +47,13 @@ def test_plugin_step_single_spi(make_plugin_with_steps):
 
 def test_plugin_step_unregistered_on_unload(make_plugin_with_steps):
     """卸载插件后其步骤从注册表移除（无僵尸残留）。"""
-    from app.helper.plugin_manager import PluginManager
     from app.core.auth.steps import get_auth_step
 
-    make_plugin_with_steps(plugin_id="myauth2", steps=[_SomeStep()]).activate("myauth2")
+    harness = make_plugin_with_steps(plugin_id="myauth2", steps=[_SomeStep()])
+    harness.activate("myauth2")
     assert get_auth_step("myauth-step") is not None
-    PluginManager()._unregister_plugin_modules(["myauth2"])
+    # 经 harness.deactivate 卸载（会从 fixture.activated 移除，避免 teardown 重复卸载）。
+    harness.deactivate("myauth2")
     assert get_auth_step("myauth-step") is None
 
 
@@ -126,3 +127,47 @@ def test_flow_spec_accepts_non_empty_true():
             return NOf(2, [StepRef(s.step_id) for s in factor_steps])
 
     assert verify_flow_spec_contract(_StrongFlow())[0] is True
+
+
+# ----------------------------- S1.4 impostor-exclusion == trusted 集 (Fix 1) ---------
+def test_impostor_auxiliary_excluded_builtin_wins(capfd, monkeypatch):
+    """安全护栏：插件凭证步声称 step_id='auxiliary' 时，被 trusted_step_ids 过滤器拦截并告警；
+    装配桥最终纳入的 'auxiliary' 步必须是内建 AuxiliaryCredentialStep，而非该插件替代步。
+    """
+    from unittest.mock import MagicMock, patch
+    from app.core.auth.steps import register_auth_step, unregister_auth_steps
+    from app.service.auth.flow_steps import AuxiliaryCredentialStep
+    from app.core.config import settings
+    from app.api.endpoints.auth import _build_flow_service
+
+    class _ImpostorAuxiliary:
+        step_id = "auxiliary"
+        step_kind = "credential"
+        priority = 99
+
+        def applies_to(self, ctx):
+            return True
+
+        def advance(self, ctx, sub):
+            return AuthStepResult(status="pending")
+
+    register_auth_step(_ImpostorAuxiliary(), owner="evil-plugin")
+    monkeypatch.setattr(settings, "AUXILIARY_AUTH_ENABLE", True)
+    mock_logger = MagicMock()
+    try:
+        with patch("app.api.endpoints.auth.logger", mock_logger):
+            svc = _build_flow_service()
+
+        aux_steps = [s for s in svc._credential_steps
+                     if getattr(s, "step_id", None) == "auxiliary"]
+        assert len(aux_steps) == 1, "exactly one 'auxiliary' step must exist"
+        assert isinstance(aux_steps[0], AuxiliaryCredentialStep), (
+            "the 'auxiliary' step must be the builtin AuxiliaryCredentialStep, not the plugin impostor"
+        )
+        # Assert logger.warning was called with "auxiliary" in the message
+        warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any("auxiliary" in msg for msg in warning_calls), (
+            "a warning must be emitted when a plugin step_id clashes with a trusted built-in id"
+        )
+    finally:
+        unregister_auth_steps("evil-plugin")

@@ -87,8 +87,18 @@ def make_plugin_with_steps():
         def activate(self, plugin_id):
             pm._running_plugins[plugin_id] = _StepPlugin(self._steps)
             pm._register_plugin_modules(plugin_id)
-            activated.append(plugin_id)
+            if plugin_id not in activated:
+                activated.append(plugin_id)
             return self
+
+        def deactivate(self, plugin_id):
+            """手动卸载并从 activated 列表移除，防止 fixture teardown 双重卸载。"""
+            pm._unregister_plugin_modules([plugin_id])
+            pm._running_plugins.pop(plugin_id, None)
+            try:
+                activated.remove(plugin_id)
+            except ValueError:
+                pass
 
     def _make(plugin_id, steps):
         return _Harness(steps)

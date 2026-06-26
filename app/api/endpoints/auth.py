@@ -83,7 +83,8 @@ def _registered_sso_providers() -> list[dict[str, Any]]:
             "name": getattr(provider, "provider_name", pid),
             "icon": getattr(provider, "provider_icon", ""),
             "method": "redirect",
-            # 统一流程入口：POST _FLOW_BEGIN_PATH，body 携带 {"flow": pid} 选中该重定向步
+            # 统一流程入口（POST-only）：前端须以 POST _FLOW_BEGIN_PATH + body {"flow": pid} 发起，
+            # 直接 GET login_url 会 405；使用 "flow" 字段作为步骤选择器。
             "login_url": _FLOW_BEGIN_PATH,
             "flow": pid,
             "enabled": bool(getattr(provider, "enabled", True)),
@@ -196,20 +197,30 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
 
     deps = default_deps()
     steps = all_auth_steps()
-    credential_steps = [PasswordStep()] + [
-        s for s in steps
-        if getattr(s, "step_kind", None) in _CREDENTIAL_STEP_KINDS
-        and getattr(s, "step_id", None) not in _BUILTIN_CREDENTIAL_IDS
-    ]
+
+    # 受信 id 集先于过滤器计算：「可直接携 user_id」的内建 id == 「插件不得冒充」的排除 id」——由构造保证，
+    # 不再依赖追加顺序兜底。frozenset 来源 _BUILTIN_CREDENTIAL_IDS 防意外 mutate（Task 12.5 加固）。
+    trusted_step_ids = _BUILTIN_CREDENTIAL_IDS | ({"auxiliary"} if settings.AUXILIARY_AUTH_ENABLE else set())
+
+    credential_steps = [PasswordStep()]
+    for s in steps:
+        if getattr(s, "step_kind", None) not in _CREDENTIAL_STEP_KINDS:
+            continue
+        sid = getattr(s, "step_id", None)
+        if sid in trusted_step_ids:
+            # 插件声称受信内建 id（如 "auxiliary"）→ 拦截并告警；冒充者不纳入凭证步，
+            # 杜绝插件以受信 id 绕过 owner 分流护栏直接落 user_id（镜像 SSO shadow 告警逻辑）。
+            logger.warning(
+                f"插件凭证步 '{sid}' 声称受信内建 step_id，已拒绝注册："
+                f"插件不得冒充内建凭证步以绕过 owner 分流护栏"
+            )
+            continue
+        credential_steps.append(s)
 
     # 媒体服务器辅助认证（AUXILIARY_AUTH_ENABLE）：以受信内建凭证步恢复（密码失败后 OR 回落）。
-    # 其建号走媒体服务器专属 provisioning（_process_auth_success），故须纳入 trusted_step_ids 方被引擎接受。
-    # 影子防护仍以 _BUILTIN_CREDENTIAL_IDS（仅 "password"）排除插件冒充内建 id；trusted 集另行扩展，
-    # 且本步在 credential_steps 中追加于任何同名插件步之后 → build_credential_flow 的 step_id 字典以内建为准。
-    trusted_step_ids = _BUILTIN_CREDENTIAL_IDS
+    # 其建号走媒体服务器专属 provisioning（_process_auth_success），须纳入 trusted_step_ids 方被引擎接受。
     if settings.AUXILIARY_AUTH_ENABLE:
         credential_steps.append(AuxiliaryCredentialStep())
-        trusted_step_ids = _BUILTIN_CREDENTIAL_IDS | {"auxiliary"}
 
     # 桥接旧 SSO 注册表为统一流程的 RedirectStep（自签 flow 绑定 state + /auth/flow/callback 回调）；
     # 按 step_id 去重：已在内建 / all_auth_steps 出现者优先（绝不被 SSO 覆盖，防内建受信步被影子化）。

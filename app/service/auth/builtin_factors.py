@@ -5,7 +5,7 @@
 与插件因子一致的 MFA 因子构件（鸭子类型），但"是否已注册 / 如何验证"通过注入的 callable 提供：
 生产侧由装配桥（``auth._builtin_factor_steps``）绑定到已解析的 ``User``；单测注入 fake，保持 db-free。
 
-行为锚点（``_verify_mfa`` user.py:177-218，由 PR2 黄金矩阵守护）：
+行为锚点（``_verify_mfa`` user.py:177-218，由引擎集成测试与安全回归套件守护）：
   - **OTP 优先**：``is_otp`` 时以 OTP 码判定 allow/deny（priority 更小，先验证）；
   - **PassKey 延后**：仅 PassKey 时本登录流程返回 ``challenge_required``（真正验证在独立 passkey 端点）。
 """
