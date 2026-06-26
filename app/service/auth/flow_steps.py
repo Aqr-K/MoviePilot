@@ -10,7 +10,7 @@
 """
 from typing import Any, Callable, Dict, List, Optional
 
-from app.core.auth.challenge import PromptChallenge, RedirectChallenge
+from app.core.auth.challenge import PromptChallenge, RedirectChallenge, WebAuthnChallenge
 from app.core.auth.flow import (
     AnyOf,
     AuthContext,
@@ -243,6 +243,76 @@ class AuxiliaryCredentialStep:
     def _default_authenticate(credentials: Any) -> Any:
         from app.chain.user import UserChain
         return UserChain().auxiliary_authenticate(credentials)
+
+
+# --------------------------------------------------------------------------- 通行密钥登录
+
+
+class PasskeyLoginStep:
+    """把通行密钥（WebAuthn）登录表示为完整的双模凭证步骤：
+
+    - **无断言**（首次被选中）：生成认证选项并以服务端短时存储登记挑战（TTL + 取即销毁），
+      下发 ``WebAuthnChallenge``（携 publicKeyCredentialRequestOptions）；
+    - **带断言**（用户完成 WebAuthn 后回灌的断言 dict）：取出并销毁本流程的挑战，校验断言解析本地
+      用户 → ``satisfied(user_id)``。挑战缺失 / 过期 / 重放 → ``invalid_state``；断言校验失败 →
+      ``invalid_passkey``。
+
+    它解析的是本地 ``User``（受信直落 ``user_id``，非 identity 端口），故须由装配桥纳入
+    ``trusted_step_ids`` 方被引擎接受。无用户名时不限定凭证，保留 usernameless（discoverable
+    credential）登录。``applies_to`` 为 **opt-in**：仅当流程显式选中本步时参与，密码 grant 绝不误触发。
+
+    协作可注入以便单测：``begin_fn(username)->(options_json, challenge)``、
+    ``verify_fn(assertion, expected_challenge)->User``、``store``（带 ``issue``/``consume``）、``step_id``。
+    任意异常一律捕获并安全失败，绝不拖垮流程。
+    """
+
+    step_kind = "credential"
+    priority = 100
+
+    def __init__(self, *, begin_fn: Optional[Callable[[Optional[str]], Any]] = None,
+                 verify_fn: Optional[Callable[[Dict[str, Any], str], Any]] = None,
+                 store: Any = None, step_id: str = "system:passkey") -> None:
+        from app.service.auth.passkey_login import (
+            begin_passkey_login, passkey_challenge_store, verify_passkey_login)
+        self._begin = begin_fn or begin_passkey_login
+        self._verify = verify_fn or verify_passkey_login
+        self._store = store or passkey_challenge_store
+        self.step_id = step_id
+
+    def applies_to(self, context: AuthContext) -> bool:
+        return context.resolved_user_id is None and context.requested_step_id == self.step_id
+
+    def advance(self, context: AuthContext, submission: Any) -> AuthStepResult:
+        response = getattr(submission, "response", None)
+        if not response:
+            return self._issue_challenge(context, submission)
+        return self._verify_assertion(context, response)
+
+    def _issue_challenge(self, context: AuthContext, submission: Any) -> AuthStepResult:
+        username = getattr(submission, "username", None) or context.username
+        try:
+            options_json, challenge = self._begin(username)
+            self._store.issue(context.flow_id, challenge)
+        except Exception as e:  # noqa: BLE001 —— 下发挑战异常一律安全失败
+            logger.error(f"通行密钥登录步骤 {self.step_id} 下发挑战异常：{str(e)}")
+            return AuthStepResult(status="failed", error="invalid_passkey")
+        return AuthStepResult(status="challenge", challenge=WebAuthnChallenge(
+            step_id=self.step_id, options_json=options_json))
+
+    def _verify_assertion(self, context: AuthContext, response: Dict[str, Any]) -> AuthStepResult:
+        from app.service.auth.passkey_login import PasskeyLoginError
+        expected = self._store.consume(context.flow_id)
+        if not expected:
+            # 挑战缺失 / 过期 / 重放（取即销毁，第二次为空）
+            return AuthStepResult(status="failed", error="invalid_state")
+        try:
+            user = self._verify(response, expected)
+        except PasskeyLoginError:
+            return AuthStepResult(status="failed", error="invalid_passkey")
+        except Exception as e:  # noqa: BLE001 —— 校验异常一律安全失败
+            logger.error(f"通行密钥登录步骤 {self.step_id} 校验异常：{str(e)}")
+            return AuthStepResult(status="failed", error="invalid_passkey")
+        return AuthStepResult(status="satisfied", user_id=user.id)
 
 
 # --------------------------------------------------------------------------- SSO 重定向（统一为 step）

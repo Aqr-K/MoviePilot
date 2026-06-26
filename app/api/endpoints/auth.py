@@ -49,6 +49,9 @@ def _system_auth_providers() -> list[dict[str, Any]]:
             "name": "通行密钥",
             "icon": "material-symbols:passkey",
             "enabled": has_passkey,
+            # 经统一流程入口发起：前端 POST _FLOW_BEGIN_PATH + body {"flow": "system:passkey"}
+            "flow": "system:passkey",
+            "login_url": _FLOW_BEGIN_PATH,
         }
     ]
 
@@ -117,10 +120,10 @@ def auth_exchange(body: schemas.AuthExchangeRequest) -> schemas.Token:
 
 # 装配桥按 step_kind 切分全局步骤注册表：以下种归入【凭证阶段】（解析用户），其余 "factor" 归第二因子阶段。
 _CREDENTIAL_STEP_KINDS = {"credential", "directory", "federated_direct", "redirect"}
-# 防内建 id 冒充：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password"
-# 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
+# 防内建 id 冒充：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password" / "system:passkey"
+# 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步由本地 PasswordStep 与 PasskeyLoginStep 提供。
 # frozenset（不可变）防止调用方意外 mutate 该集合来弱化 owner-routing 护栏。
-_BUILTIN_CREDENTIAL_IDS: frozenset[str] = frozenset({"password"})
+_BUILTIN_CREDENTIAL_IDS: frozenset[str] = frozenset({"password", "system:passkey"})
 
 
 def _builtin_factor_steps(user) -> list:
@@ -160,7 +163,7 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
     from app.core.auth.steps import all_auth_steps
     from app.service.auth.flow_service import FlowService
     from app.service.auth.flow_steps import (
-        AuxiliaryCredentialStep, PasswordStep, RedirectStep, make_identity_resolver)
+        AuxiliaryCredentialStep, PasskeyLoginStep, PasswordStep, RedirectStep, make_identity_resolver)
     from app.service.auth.provisioning import default_deps
 
     deps = default_deps()
@@ -170,7 +173,9 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
     # frozenset 来源 _BUILTIN_CREDENTIAL_IDS 防意外 mutate。
     trusted_step_ids = _BUILTIN_CREDENTIAL_IDS | ({"auxiliary"} if settings.AUXILIARY_AUTH_ENABLE else set())
 
-    credential_steps = [PasswordStep()]
+    # PasskeyLoginStep 为内建受信凭证步（opt-in，仅 flow="system:passkey" 选中时参与）：
+    # 解析本地 User 受信直落 user_id（其 step_id 已在 trusted_step_ids 内）。
+    credential_steps = [PasswordStep(), PasskeyLoginStep()]
     for s in steps:
         if getattr(s, "step_kind", None) not in _CREDENTIAL_STEP_KINDS:
             continue

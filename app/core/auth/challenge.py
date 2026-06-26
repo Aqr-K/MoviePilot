@@ -1,6 +1,6 @@
 # app/core/auth/challenge.py
 # -*- coding: utf-8 -*-
-"""多态认证挑战 ADT（db-free，frozen）。机制差异收敛于此；本期 Prompt/Redirect 两变体。"""
+"""多态认证挑战 ADT（db-free，frozen）。机制差异收敛于此；Prompt/Redirect/WebAuthn 变体。"""
 from dataclasses import dataclass
 from typing import Any, ClassVar, Dict
 
@@ -26,3 +26,10 @@ class RedirectChallenge(Challenge):
     kind: ClassVar[str] = "redirect"
     def to_dict(self) -> Dict[str, Any]:
         d = super().to_dict(); d.update(provider_id=self.provider_id, authorize_url=self.authorize_url); return d
+
+@dataclass(frozen=True)
+class WebAuthnChallenge(Challenge):
+    options_json: str = ""  # publicKeyCredentialRequestOptions 的 JSON 串
+    kind: ClassVar[str] = "webauthn"
+    def to_dict(self) -> Dict[str, Any]:
+        d = super().to_dict(); d["options"] = self.options_json; return d
