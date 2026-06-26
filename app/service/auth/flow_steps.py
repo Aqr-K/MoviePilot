@@ -249,8 +249,12 @@ class RedirectStep:
 
     def advance(self, context: AuthContext, submission: Any) -> AuthStepResult:
         code = getattr(submission, "code", None)
-        # 无授权码：下发跳转挑战，等待 IdP 回调
         if not code:
+            # 回调上下文（带 state / state_payload 却无 code）= IdP 拒绝/取消（?error=...，无 code）：
+            # 快速失败，绝不再 _issue_redirect 铸新孤儿 state（T12c-1 review Minor #1/#2）。
+            # 纯发起态（无 state、无 code）才下发跳转挑战，等待 IdP 回调。
+            if getattr(submission, "state", None) or getattr(submission, "state_payload", None):
+                return AuthStepResult(status="failed", error="invalid_code")
             return self._issue_redirect(context)
         # 带授权码：完成回调认证（CSRF → 换身份 → 交回身份断言）
         return self._complete_callback(context, submission, code)

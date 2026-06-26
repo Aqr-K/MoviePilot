@@ -208,3 +208,79 @@ def test_redirect_step_issue_redirect_binds_state_to_flow():
     assert result.status == "challenge"
     assert "STATE-123" in result.challenge.authorize_url
     assert issued == [("FLOW-9", "github")]  # state 绑定到本 flow + provider
+
+
+# --------------------------------------------------------------------------- 单元：空 code 快速失败护栏
+
+
+def test_redirect_step_callback_without_code_fails_fast():
+    """回调上下文（带 state/state_payload 却无 code，IdP 拒绝）→ failed/invalid_code，绝不铸新孤儿 state。"""
+    from app.core.auth.flow import AuthContext
+    from app.service.auth.flow_steps import RedirectStep
+
+    issued = []
+
+    def _spy_issue(flow_token, provider_id):
+        issued.append((flow_token, provider_id))
+        return "ORPHAN-STATE"
+
+    step = RedirectStep(_FetchIdp(), issue_state=_spy_issue, redirect_uri="http://cb")
+    sub = types.SimpleNamespace(code="", state="raw-state",
+                                state_payload={"flow_token": "f1", "provider_id": "github"})
+    result = step.advance(AuthContext(flow_id="f1"), sub)
+
+    assert result.status == "failed"
+    assert result.error == "invalid_code"
+    assert issued == []                      # 未铸新 state（无 churn）
+
+
+def test_redirect_step_pure_begin_still_issues():
+    """纯发起态（无 state、无 code）仍正常下发跳转挑战（不被快速失败护栏误伤）。"""
+    from app.core.auth.flow import AuthContext
+    from app.service.auth.flow_steps import RedirectStep
+
+    step = RedirectStep(_FetchIdp(), issue_state=lambda flow_token, provider_id: "S1",
+                        redirect_uri="http://cb")
+    result = step.advance(AuthContext(flow_id="f1"), types.SimpleNamespace(code=None))
+
+    assert result.status == "challenge"
+    assert "S1" in result.challenge.authorize_url
+
+
+def test_flow_callback_empty_code_fast_fails_without_churn(registered_idp, no_emit):
+    """GET /auth/flow/callback?code= （IdP 拒绝）→ 302 sso_error=invalid_code；
+    已签发 state 不被消费（任其 TTL 过期）→ 状态存储无 churn。"""
+    from app.api.endpoints import auth as auth_module
+    from fastapi.responses import RedirectResponse
+
+    state = sso.issue_state(flow_token="ft-1", provider_id="unifiedsso")
+    resp = auth_module.flow_callback(
+        _build_request(path="/api/v1/auth/flow/callback", method="GET"),
+        code="", state=state)
+
+    assert isinstance(resp, RedirectResponse)
+    assert "sso_error=invalid_code" in resp.headers["location"]
+    # 快速失败未消费 state → 仍可被消费一次（证明未 churn / 未重铸）
+    assert sso.consume_state(state) == {"flow_token": "ft-1", "provider_id": "unifiedsso"}
+
+
+# --------------------------------------------------------------------------- 单元：sso_callback_query 纯分流
+
+
+def test_sso_callback_query_success_carries_ticket():
+    from app.api.endpoints.auth import sso_callback_query
+
+    assert sso_callback_query({"status": "success", "token": "TK"}) == {"ticket": "TK"}
+
+
+def test_sso_callback_query_mfa_carries_flow_token():
+    from app.api.endpoints.auth import sso_callback_query
+
+    q = sso_callback_query({"status": "mfa_required", "flow_token": "FT", "factors_available": ["otp"]})
+    assert q == {"flow_token": "FT", "sso_mfa": "1"}
+
+
+def test_sso_callback_query_failure_carries_error():
+    from app.api.endpoints.auth import sso_callback_query
+
+    assert sso_callback_query({"status": "failure", "error": "invalid_state"}) == {"sso_error": "invalid_state"}
