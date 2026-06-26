@@ -1,27 +1,39 @@
 import asyncio
 import time
+from queue import Queue
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app import schemas
-from app.agent import ReplyMode
+from app.agent import ReplyMode, agent_manager
 from app.api.endpoints.agent import (
     _WebAgentMoviePilotAgent,
     _WEB_AGENT_FILE_REGISTRY,
+    _WEB_AGENT_NOTICE_QUEUES,
     _apply_web_agent_display_event,
     _build_web_agent_input_attachments,
     _build_web_agent_notification_events,
+    _build_web_agent_command_items,
     _build_web_agent_session_id,
+    _build_web_agent_traditional_callback_payload,
+    _build_web_agent_display_message_from_events,
+    _collect_web_agent_traditional_events,
+    _dispatch_web_agent_notice_event,
+    _extract_web_agent_notification_from_event_data,
+    _has_web_agent_traditional_interaction,
     _prepare_web_agent_audio_attachment_path,
     _transcribe_web_agent_audio_refs,
     web_agent_stream,
     _resolve_web_agent_choice_payload,
     _split_web_agent_output,
 )
+from app.core.event import Event
 from app.db.agentchat_oper import AgentChatOper
-from app.helper.interaction import AgentInteractionOption, agent_interaction_manager
+from app.helper.agent import build_web_agent_message_update_event
+from app.helper.interaction import AgentInteractionOption, agent_interaction_manager, skills_interaction_manager
+from app.chain.message import MessageChain
 from app.schemas.message import ChannelCapability, ChannelCapabilityManager
-from app.schemas.types import MessageChannel, NotificationType
+from app.schemas.types import EventType, MessageChannel, NotificationType
 
 
 def test_split_web_agent_output_extracts_verbose_tool_message():
@@ -144,6 +156,125 @@ def test_build_web_agent_input_attachments_marks_kinds():
     assert attachments[1]["name"] == "report.txt"
 
 
+def test_build_web_agent_command_items_returns_slash_commands():
+    """WebAgent 命令建议应返回可展示的斜杠命令。"""
+    with patch(
+        "app.api.endpoints.agent.Command",
+        return_value=SimpleNamespace(
+            get_commands=lambda: {
+                "/sites": {"description": "管理站点", "category": "站点"},
+                "hidden": {"description": "忽略", "category": "其他"},
+                "/hidden": {"description": "隐藏", "category": "其他", "show": False},
+            }
+        ),
+    ):
+        commands = _build_web_agent_command_items()
+
+    assert commands == [
+        {
+            "command": "/sites",
+            "description": "管理站点",
+            "category": "站点",
+            "type": "",
+            "pid": None,
+        }
+    ]
+
+
+def test_build_web_agent_command_items_includes_sites_command():
+    """WebAgent 命令建议应包含内建站点管理命令。"""
+    commands = _build_web_agent_command_items()
+
+    assert any(command["command"] == "/sites" for command in commands)
+
+
+def test_build_web_agent_traditional_callback_payload_wraps_callback():
+    """传统按钮回调应包装为可继续提交给 MessageChain 的消息。"""
+    payload = _build_web_agent_traditional_callback_payload(
+        "skills:req-1:root",
+        original_message_id="assistant-1",
+        original_chat_id="web-session",
+    )
+
+    assert payload["message"] == "CALLBACK:skills:req-1:root"
+    assert payload["traditional"] is True
+    assert payload["original_message_id"] == "assistant-1"
+    assert payload["original_chat_id"] == "web-session"
+
+
+def test_web_agent_stream_returns_error_for_unknown_command():
+    """不存在的 WebAgent 斜杠命令应立即返回错误，不进入等待队列。"""
+    payload = schemas.AgentWebChatRequest(
+        text="/missing_command 参数",
+        session_id="browser-session",
+    )
+    request = SimpleNamespace()
+    user = SimpleNamespace(id=1, name="admin", is_superuser=True)
+
+    with patch(
+        "app.api.endpoints.agent.Command",
+        return_value=SimpleNamespace(get=lambda _: {}),
+    ), patch("app.api.endpoints.agent.MessageChain.handle_message") as handle_message:
+        response = asyncio.run(web_agent_stream(payload, request, user))
+        body = "".join(asyncio.run(_collect_streaming_response(response)))
+
+    assert "error" in body
+    assert "命令不存在：/missing_command" in body
+    handle_message.assert_not_called()
+
+
+def test_build_web_agent_message_update_event_converts_buttons():
+    """WebAgent 编辑消息应转换为可原地更新卡片的事件。"""
+    event = build_web_agent_message_update_event(
+        message_id="assistant-1",
+        title="技能管理",
+        text="请选择操作",
+        buttons=[[{"text": "返回", "callback_data": "skills:req-1:root"}]],
+    )
+
+    assert event["type"] == "message_update"
+    assert event["target_message"]["id"] == "assistant-1"
+    assert event["target_message"]["choices"][0]["title"] == "技能管理"
+    assert event["target_message"]["choices"][0]["prompt"] == "请选择操作"
+    assert event["target_message"]["choices"][0]["buttons"][0]["label"] == "返回"
+
+
+def test_build_web_agent_display_message_from_events_marks_done():
+    """传统消息事件应聚合为完成态助手展示消息。"""
+    message = _build_web_agent_display_message_from_events([
+        {"type": "delta", "content": "菜单"},
+        {
+            "type": "choice",
+            "choice": {
+                "id": "choice-1",
+                "prompt": "请选择",
+                "buttons": [{"label": "返回", "callback_data": "back"}],
+            },
+        },
+    ])
+
+    assert message["content"] == "菜单"
+    assert message["status"] == "done"
+    assert message["choices"][0]["prompt"] == "请选择"
+
+
+def test_has_web_agent_traditional_interaction_detects_pending_skills():
+    """WebAgent 应能识别命令后的传统交互上下文。"""
+    skills_interaction_manager.clear()
+    try:
+        skills_interaction_manager.create_or_replace(
+            user_id="1",
+            channel=MessageChannel.WebAgent,
+            source="web-agent",
+            username="admin",
+        )
+
+        assert _has_web_agent_traditional_interaction("1") is True
+        assert _has_web_agent_traditional_interaction("2") is False
+    finally:
+        skills_interaction_manager.clear()
+
+
 def test_web_agent_admin_context_uses_current_user_id():
     """Web Agent 工具权限应按当前登录用户 ID 判断管理员身份。"""
     agent = _WebAgentMoviePilotAgent(
@@ -211,6 +342,69 @@ def test_build_web_agent_notification_events_extracts_image():
             },
         },
     ]
+
+
+def test_extract_web_agent_notification_supports_wrapped_message_event():
+    """NoticeMessage 包装 Notification 时应仍能解析为 WebAgent 通知。"""
+    notification = schemas.Notification(
+        channel=MessageChannel.WebAgent,
+        source="web-agent",
+        title="会话状态",
+        userid="1",
+    )
+
+    extracted = _extract_web_agent_notification_from_event_data(
+        {"message": notification, "current_time": "2026-06-26 09:18:38"}
+    )
+
+    assert extracted == notification
+
+
+def test_dispatch_web_agent_notice_event_accepts_wrapped_message_event():
+    """WebAgent 等待队列应接收 message 包装格式的 NoticeMessage 事件。"""
+    notice_queue = Queue()
+    _WEB_AGENT_NOTICE_QUEUES["1"] = [notice_queue]
+    notification = schemas.Notification(
+        channel=MessageChannel.WebAgent,
+        source="web-agent",
+        title="会话状态",
+        userid="1",
+    )
+
+    try:
+        _dispatch_web_agent_notice_event(
+            Event(
+                EventType.NoticeMessage,
+                {"message": notification, "current_time": "2026-06-26 09:18:38"},
+            )
+        )
+    finally:
+        _WEB_AGENT_NOTICE_QUEUES.pop("1", None)
+
+    assert notice_queue.get_nowait() == notification
+
+
+def test_collect_web_agent_traditional_events_does_not_emit_submit_hint():
+    """传统命令未产生通知时不应返回“命令已提交”的兜底提示。"""
+    user = SimpleNamespace(id=1, name="admin")
+
+    with patch(
+        "app.api.endpoints.agent.MessageChain.handle_message",
+    ), patch(
+        "app.api.endpoints.agent.WEB_AGENT_TRADITIONAL_IDLE_TIMEOUT_SECONDS",
+        0.01,
+    ), patch(
+        "app.api.endpoints.agent.WEB_AGENT_TRADITIONAL_MAX_WAIT_SECONDS",
+        0.05,
+    ):
+        events = asyncio.run(
+            _collect_web_agent_traditional_events(
+                text="/session_status",
+                current_user=user,
+            )
+        )
+
+    assert events == []
 
 
 def test_build_web_agent_notification_events_registers_local_file(tmp_path):
@@ -335,6 +529,70 @@ def test_web_agent_stream_returns_error_when_voice_transcription_fails():
     assert "语音识别失败" in body
 
 
+def test_web_agent_stream_binds_session_to_agent_manager():
+    """WebAgent 普通对话应统一进入 AgentManager 并绑定远程命令会话。"""
+    payload = schemas.AgentWebChatRequest(
+        text="查看会话",
+        session_id="browser-session",
+    )
+    request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+    user = SimpleNamespace(id=1, name="admin", is_superuser=True)
+
+    class FakeWebAgent:
+        """测试用 WebAgent，模拟 AgentManager 内部的持久实例。"""
+
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.processed = []
+
+        def set_output_callback(self, output_callback):
+            """更新当前 SSE 输出回调。"""
+            self.output_callback = output_callback
+
+        def set_notification_callback(self, notification_callback):
+            """更新当前 SSE 通知回调。"""
+            self.notification_callback = notification_callback
+
+        async def process(self, message, **kwargs):
+            """模拟一次 WebAgent 推理输出。"""
+            self.processed.append((message, kwargs))
+            self.output_callback("状态正常")
+            return "状态正常"
+
+        async def cleanup(self):
+            """模拟 Agent 资源清理。"""
+            return None
+
+    session_id = _build_web_agent_session_id(user, payload.session_id)
+    MessageChain._user_sessions.clear()
+    agent_manager.active_agents.pop(session_id, None)
+    agent_manager._session_queues.pop(session_id, None)
+    worker = agent_manager._session_workers.pop(session_id, None)
+    if worker:
+        worker.cancel()
+
+    try:
+        with patch("app.api.endpoints.agent.settings.AI_AGENT_ENABLE", True), patch(
+            "app.api.endpoints.agent._WebAgentMoviePilotAgent",
+            FakeWebAgent,
+        ):
+            response = asyncio.run(web_agent_stream(payload, request, user))
+            body = "".join(asyncio.run(_collect_streaming_response(response)))
+
+        assert "状态正常" in body
+        assert MessageChain._user_sessions["1"][0] == session_id
+        assert isinstance(agent_manager.active_agents[session_id], FakeWebAgent)
+    finally:
+        MessageChain._user_sessions.clear()
+        agent = agent_manager.active_agents.pop(session_id, None)
+        if agent:
+            asyncio.run(agent.cleanup())
+        agent_manager._session_queues.pop(session_id, None)
+        worker = agent_manager._session_workers.pop(session_id, None)
+        if worker:
+            worker.cancel()
+
+
 async def _collect_streaming_response(response):
     """读取 StreamingResponse，便于断言 SSE 内容。"""
     chunks = []
@@ -356,6 +614,7 @@ def test_build_web_agent_notification_events_extracts_choice_card():
                     {
                         "text": "继续下载",
                         "callback_data": "agent_interaction:choice:req-1:1",
+                        "description": "继续当前下载任务",
                     }
                 ],
                 [
@@ -379,11 +638,27 @@ def test_build_web_agent_notification_events_extracts_choice_card():
                     {
                         "label": "继续下载",
                         "callback_data": "agent_interaction:choice:req-1:1",
+                        "description": "继续当前下载任务",
                     },
                     {
                         "label": "查看详情",
                         "callback_data": "agent_interaction:choice:req-1:2",
                     },
+                ],
+                "button_rows": [
+                    [
+                        {
+                            "label": "继续下载",
+                            "callback_data": "agent_interaction:choice:req-1:1",
+                            "description": "继续当前下载任务",
+                        }
+                    ],
+                    [
+                        {
+                            "label": "查看详情",
+                            "callback_data": "agent_interaction:choice:req-1:2",
+                        }
+                    ],
                 ],
             },
         }
@@ -403,7 +678,7 @@ def test_resolve_web_agent_choice_payload_returns_next_message():
         prompt="请选择",
         options=[
             AgentInteractionOption(label="电影", value="我选择电影"),
-            AgentInteractionOption(label="电视剧", value="我选择电视剧"),
+            AgentInteractionOption(label="电视剧", value="我选择电视剧", description="选择电视剧并继续清理日志"),
         ],
     )
 
@@ -416,6 +691,12 @@ def test_resolve_web_agent_choice_payload_returns_next_message():
         agent_interaction_manager.clear()
 
     assert result["message"] == "我选择电视剧"
+    assert result["display_message"] == "选择电视剧并继续清理日志"
     assert result["session_id"] == "web-agent:session"
     assert result["feedback"]["prompt"] == "请选择"
     assert result["feedback"]["selected_label"] == "电视剧"
+    assert result["feedback"]["selected_value"] == "我选择电视剧"
+    assert result["feedback"]["selected_description"] == "选择电视剧并继续清理日志"
+    assert result["choice_selection"]["prompt"] == "请选择"
+    assert result["choice_selection"]["selected_description"] == "选择电视剧并继续清理日志"
+    assert result["choice_selection"]["button_rows"][1][0]["description"] == "选择电视剧并继续清理日志"

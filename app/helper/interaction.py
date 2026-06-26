@@ -197,6 +197,9 @@ def update_or_post_message(
             and original_chat_id
             and ChannelCapabilityManager.supports_editing(channel)
     ):
+        edit_kwargs = {}
+        if channel == MessageChannel.WebAgent:
+            edit_kwargs["metadata"] = {"userid": userid}
         edited = chain.edit_message(
             channel=channel,
             source=source,
@@ -205,6 +208,7 @@ def update_or_post_message(
             title=title,
             text=text,
             buttons=buttons,
+            **edit_kwargs,
         )
         if edited:
             return
@@ -402,6 +406,7 @@ class AgentInteractionOption:
 
     label: str
     value: str
+    description: Optional[str] = None
 
 
 @dataclass

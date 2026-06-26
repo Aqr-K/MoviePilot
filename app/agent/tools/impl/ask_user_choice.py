@@ -24,9 +24,14 @@ class UserChoiceOptionInput(BaseModel):
         ...,
         description="The exact content that will be sent back to the agent after the user clicks this button",
     )
+    description: Optional[str] = Field(
+        None,
+        description="Optional user-facing description stored in chat history after this option is selected",
+    )
 
     @model_validator(mode="after")
     def validate_option(self):
+        """校验按钮选项的文案和值不能为空。"""
         label = str(self.label)
         value = str(self.value)
         if not label.strip():
@@ -56,6 +61,7 @@ class AskUserChoiceInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self):
+        """校验按钮选择工具必须提供问题和选项。"""
         message = str(self.message)
         if not message.strip():
             raise ValueError("message 不能为空")
@@ -85,6 +91,7 @@ class AskUserChoiceTool(MoviePilotTool):
     args_schema: Type[BaseModel] = AskUserChoiceInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
+        """生成工具执行提示文案。"""
         message = kwargs.get("message", "") or ""
         if len(message) > 40:
             message = message[:40] + "..."
@@ -92,6 +99,7 @@ class AskUserChoiceTool(MoviePilotTool):
 
     @staticmethod
     def _truncate_button_text(text: str, max_length: int) -> str:
+        """按渠道限制截断按钮文案。"""
         if max_length <= 0 or len(text) <= max_length:
             return text
         if max_length <= 3:
@@ -114,6 +122,14 @@ class AskUserChoiceTool(MoviePilotTool):
         title: Optional[str] = None,
         **kwargs,
     ) -> str:
+        """
+        发送按钮选择消息，并登记待回调的交互上下文。
+
+        :param message: 展示给用户的问题
+        :param options: 可点击的选项列表
+        :param title: 可选标题
+        :return: 工具执行结果描述
+        """
         if self._blocked_by_feedback_quality_gate():
             logger.warning(
                 "ask_user_choice blocked after feedback issue rejected_quality: "
@@ -148,7 +164,9 @@ class AskUserChoiceTool(MoviePilotTool):
 
         choice_options = [
             AgentInteractionOption(
-                label=option.label.strip(), value=option.value.strip()
+                label=option.label.strip(),
+                value=option.value.strip(),
+                description=(option.description.strip() if option.description else None),
             )
             for option in options
         ]
@@ -172,6 +190,7 @@ class AskUserChoiceTool(MoviePilotTool):
                     "callback_data": (
                         f"agent_interaction:choice:{request.request_id}:{index}"
                     ),
+                    "description": option.description or option.label,
                 }
             )
             if len(current_row) >= max_per_row:
