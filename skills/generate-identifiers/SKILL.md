@@ -150,7 +150,7 @@ Write the rule using the appropriate format. Ensure:
 Use the `query_custom_identifiers` tool to get all current rules:
 
 ```
-query_custom_identifiers(explanation="Checking existing identifiers before adding new rules to avoid duplicates")
+query_custom_identifiers()
 ```
 
 ### Step 4: Check for Duplicates
@@ -166,7 +166,6 @@ Merge new non-duplicate rules into the existing list, then use `update_custom_id
 
 ```
 update_custom_identifiers(
-    explanation="Adding new identifier rules for [description]",
     identifiers=["existing rule 1", "existing rule 2", "# new comment", "new rule"]
 )
 ```
@@ -178,7 +177,7 @@ update_custom_identifiers(
 If the user wants to verify the rule works, use `recognize_media` to test:
 
 ```
-recognize_media(explanation="Testing recognition after adding identifier", title="the torrent title to test")
+recognize_media(title="the torrent title to test")
 ```
 
 ### Step 7: Report

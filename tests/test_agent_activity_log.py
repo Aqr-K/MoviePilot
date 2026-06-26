@@ -28,6 +28,13 @@ def _write_activity_log(activity_dir, date_str: str, lines: list[str]) -> None:
     )
 
 
+async def _wait_activity_log_tasks(middleware: ActivityLogMiddleware) -> None:
+    """等待活动日志后台任务完成，避免测试与后台写入竞态。"""
+    tasks = list(middleware._background_tasks)
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
 def test_activity_log_index_counts_entries_without_body(tmp_path):
     """活动日志索引只应包含条目数量，不暴露完整摘要正文。"""
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -91,19 +98,19 @@ def test_activity_log_abefore_agent_refreshes_existing_state(tmp_path):
 
 def test_activity_log_skips_trivial_greeting_without_llm(tmp_path):
     """无实际任务的寒暄不应调用 LLM，也不应写入活动日志。"""
-    middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
-    summarize_mock = AsyncMock(return_value="不应写入")
-    append_mock = AsyncMock()
+    async def _run_test():
+        middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
+        summarize_mock = AsyncMock(return_value="不应写入")
+        append_mock = AsyncMock()
 
-    with (
-        patch(
-            "app.agent.middleware.activity_log._summarize_with_llm",
-            new=summarize_mock,
-        ),
-        patch.object(middleware, "_append_activity", new=append_mock),
-    ):
-        asyncio.run(
-            middleware.aafter_agent(
+        with (
+            patch(
+                "app.agent.middleware.activity_log._summarize_with_llm",
+                new=summarize_mock,
+            ),
+            patch.object(middleware, "_append_activity", new=append_mock),
+        ):
+            await middleware.aafter_agent(
                 {
                     "messages": [
                         HumanMessage(content="你好"),
@@ -112,7 +119,11 @@ def test_activity_log_skips_trivial_greeting_without_llm(tmp_path):
                 },
                 runtime=None,
             )
-        )
+            await _wait_activity_log_tasks(middleware)
+
+        return summarize_mock, append_mock
+
+    summarize_mock, append_mock = asyncio.run(_run_test())
 
     summarize_mock.assert_not_awaited()
     append_mock.assert_not_awaited()
@@ -137,18 +148,18 @@ def test_summarize_with_llm_ignores_skip_marker():
 
 def test_activity_log_records_detailed_summary(tmp_path):
     """有实际工具动作的交互应写入较完整的活动摘要。"""
-    middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
     summary = (
         "用户要求整理 `/downloads/Show`，助手调用 transfer_file 识别并转移剧集，"
         "结果成功写入目标媒体库。"
     )
 
-    with patch(
-        "app.agent.middleware.activity_log._summarize_with_llm",
-        new=AsyncMock(return_value=summary),
-    ):
-        asyncio.run(
-            middleware.aafter_agent(
+    async def _run_test():
+        middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
+        with patch(
+            "app.agent.middleware.activity_log._summarize_with_llm",
+            new=AsyncMock(return_value=summary),
+        ):
+            await middleware.aafter_agent(
                 {
                     "messages": [
                         HumanMessage(content="帮我整理 /downloads/Show"),
@@ -170,13 +181,70 @@ def test_activity_log_records_detailed_summary(tmp_path):
                 },
                 runtime=None,
             )
-        )
+            await _wait_activity_log_tasks(middleware)
+
+    asyncio.run(_run_test())
 
     log_files = list(tmp_path.glob("*.md"))
     assert len(log_files) == 1
     content = log_files[0].read_text(encoding="utf-8")
     assert summary in content
     assert "- **" in content
+
+
+def test_activity_log_after_agent_does_not_wait_for_summary(tmp_path):
+    """活动日志摘要生成应在后台执行，不阻塞当前 Agent 会话结束。"""
+
+    async def _slow_summarize(_conversation_text: str) -> str:
+        """模拟较慢的活动摘要生成。"""
+        await asyncio.sleep(0.05)
+        return "用户要求检查下载任务，助手调用工具完成检查。"
+
+    async def _run_test():
+        middleware = ActivityLogMiddleware(activity_dir=str(tmp_path))
+        append_mock = AsyncMock()
+        with (
+            patch(
+                "app.agent.middleware.activity_log._summarize_with_llm",
+                side_effect=_slow_summarize,
+            ) as summarize_mock,
+            patch.object(middleware, "_append_activity", new=append_mock),
+        ):
+            await middleware.aafter_agent(
+                {
+                    "messages": [
+                        HumanMessage(content="帮我检查下载任务"),
+                        AIMessage(
+                            content="",
+                            tool_calls=[
+                                {
+                                    "name": "query_download_tasks",
+                                    "args": {},
+                                    "id": "call_1",
+                                }
+                            ],
+                        ),
+                        ToolMessage(
+                            content='{"success": true}',
+                            tool_call_id="call_1",
+                        ),
+                    ],
+                },
+                runtime=None,
+            )
+            called_before_wait = summarize_mock.await_count
+            pending_before_wait = len(middleware._background_tasks)
+            await _wait_activity_log_tasks(middleware)
+            return called_before_wait, pending_before_wait, summarize_mock, append_mock
+
+    called_before_wait, pending_before_wait, summarize_mock, append_mock = asyncio.run(
+        _run_test()
+    )
+
+    assert called_before_wait == 0
+    assert pending_before_wait == 1
+    summarize_mock.assert_awaited_once()
+    append_mock.assert_awaited_once_with("用户要求检查下载任务，助手调用工具完成检查。")
 
 
 def test_query_activity_logs_filters_by_keyword_and_date(tmp_path):

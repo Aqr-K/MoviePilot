@@ -14,8 +14,6 @@ from app.schemas import FileItem, MediaType
 class TransferFileInput(BaseModel):
     """整理文件或目录工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     file_path: str = Field(
         ...,
         description="Path to the file or directory to transfer (e.g., '/path/to/file.mkv' or '/path/to/directory')",

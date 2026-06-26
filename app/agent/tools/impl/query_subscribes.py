@@ -48,8 +48,6 @@ QUERY_SUBSCRIBE_OUTPUT_FIELDS = [
 class QuerySubscribesInput(BaseModel):
     """查询订阅工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     status: Optional[str] = Field(
         "all",
         description="Filter subscriptions by status: 'R' for enabled subscriptions, 'S' for paused ones, 'all' for all subscriptions",

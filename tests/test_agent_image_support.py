@@ -563,7 +563,6 @@ class AgentImageSupportTest(unittest.TestCase):
 
     def test_send_message_input_accepts_image_only_payload(self):
         payload = SendMessageInput(
-            explanation="send poster image",
             image_url="https://example.com/poster.png",
         )
 
@@ -659,7 +658,6 @@ class AgentImageSupportTest(unittest.TestCase):
 
     def test_send_local_file_input_accepts_file_payload(self):
         payload = SendLocalFileInput(
-            explanation="send generated report",
             file_path="/tmp/report.txt",
             message="请下载查看",
         )

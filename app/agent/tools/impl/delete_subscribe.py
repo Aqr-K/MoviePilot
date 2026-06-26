@@ -16,8 +16,6 @@ from app.schemas.types import EventType
 class DeleteSubscribeInput(BaseModel):
     """删除订阅工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     subscribe_id: int = Field(
         ...,
         description="The ID of the subscription to delete (can be obtained from query_subscribes tool)",

@@ -15,8 +15,6 @@ from app.log import logger
 class QueryPluginConfigInput(BaseModel):
     """查询插件配置工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     plugin_id: str = Field(
         ...,
         description="The plugin ID to query. Use query_installed_plugins first to discover valid plugin IDs.",

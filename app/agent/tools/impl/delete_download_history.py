@@ -13,8 +13,6 @@ from app.log import logger
 class DeleteDownloadHistoryInput(BaseModel):
     """删除下载历史记录工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     history_id: int = Field(
         ..., description="The ID of the download history record to delete"
     )

@@ -24,7 +24,6 @@ from app.utils.crypto import HashUtils
 class AddDownloadTasksInput(BaseModel):
     """添加下载任务工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     torrent_url: List[str] = Field(
         ...,
         description="One or more torrent_url values. Supports refs from get_search_results (`hash:id`) and magnet links."

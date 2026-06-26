@@ -49,6 +49,10 @@ class DummyTool(MoviePilotTool):
     name: str = "dummy_tool"
     description: str = "Dummy tool for streaming tests."
 
+    def get_tool_message(self, **kwargs) -> str:
+        """返回固定工具执行提示。"""
+        return "run test tool"
+
     async def run(self, **kwargs) -> str:
         """返回固定工具执行结果。"""
         return "ok"
@@ -67,7 +71,7 @@ class TestAgentToolStreaming:
         tool.set_stream_handler(handler)
 
         with patch.object(settings, "AI_AGENT_VERBOSE", False):
-            result = await tool._arun(explanation="run test tool")
+            result = await tool._arun()
 
         buffered_message = await handler.take()
         return result, buffered_message
@@ -103,7 +107,7 @@ class TestAgentToolStreaming:
             tool.set_stream_handler(handler)
 
             with patch.object(settings, "AI_AGENT_VERBOSE", False):
-                await tool._arun(explanation="run test tool")
+                await tool._arun()
 
             handler.emit("已经拿到结果")
             return await handler.take()
@@ -470,7 +474,7 @@ class TestAgentToolStreaming:
                     DummyTool, "send_tool_message", new_callable=AsyncMock
                 ) as send_tool_message,
             ):
-                result = await tool._arun(explanation="run test tool")
+                result = await tool._arun()
                 buffered_message = await handler.take()
                 return result, buffered_message, send_tool_message
 
@@ -497,7 +501,7 @@ class TestAgentToolStreaming:
                     DummyTool, "send_tool_message", new_callable=AsyncMock
                 ) as send_tool_message,
             ):
-                result = await tool._arun(explanation="run test tool")
+                result = await tool._arun()
                 buffered_message = await handler.take()
                 return result, buffered_message, send_tool_message
 

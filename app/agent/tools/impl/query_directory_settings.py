@@ -13,7 +13,6 @@ from app.log import logger
 
 class QueryDirectorySettingsInput(BaseModel):
     """查询系统目录设置工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     directory_type: Optional[str] = Field("all",
                                           description="Filter directories by type: 'download' for download directories, 'library' for media library directories, 'all' for all directories")
     storage_type: Optional[str] = Field("all",

@@ -135,7 +135,6 @@ class _CommandOutput:
 class ExecuteCommandInput(BaseModel):
     """执行 Shell 命令工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this command action is needed")
     action: Optional[Literal["start", "read", "wait", "write", "kill", "run"]] = Field(
         "start",
         description=(

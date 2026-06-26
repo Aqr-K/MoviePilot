@@ -238,10 +238,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
         # 获取工具执行提示消息
         tool_message = self.get_tool_message(**kwargs)
-        if not tool_message:
-            explanation = kwargs.get("explanation")
-            if explanation:
-                tool_message = explanation
 
         # 发送工具执行过程消息（流式传输且非最后终结工具时）
         if self._stream_handler and self._stream_handler.is_streaming and not self.return_direct:
@@ -325,16 +321,13 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         获取工具执行时的友好提示消息。
 
         子类可以重写此方法，根据实际参数生成个性化的提示消息。
-        如果返回 None 或空字符串，将回退使用 explanation 参数。
-
         Args:
-            **kwargs: 工具的所有参数（包括 explanation）
+            **kwargs: 工具的所有参数
 
         Returns:
-            str: 友好的提示消息，如果返回 None 或空字符串则使用 explanation
+            str: 友好的提示消息
         """
-        explanation = kwargs.get("explanation")
-        return str(explanation) if explanation else None
+        return None
 
     @abstractmethod
     async def run(self, **kwargs) -> str:

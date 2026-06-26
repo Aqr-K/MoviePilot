@@ -132,7 +132,6 @@ async def test_skill_tool_call_records_streaming_summary(tmp_path):
         tool_call={
             "args": {
                 "name": "moviepilot-cli",
-                "explanation": "测试加载技能",
             }
         },
     )
@@ -150,7 +149,6 @@ async def test_skill_tool_call_records_streaming_summary(tmp_path):
             "tool_message": "Skill loaded",
             "tool_kwargs": {
                 "name": "moviepilot-cli",
-                "explanation": "测试加载技能",
             },
         }
     ]

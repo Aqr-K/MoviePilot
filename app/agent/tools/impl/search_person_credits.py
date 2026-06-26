@@ -15,7 +15,6 @@ from app.log import logger
 
 class SearchPersonCreditsInput(BaseModel):
     """搜索演员参演作品工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     person_id: int = Field(..., description="The ID of the person/actor to search for credits (e.g., 31 for Tom Hanks in TMDB)")
     source: str = Field(..., description="The data source: 'tmdb' for TheMovieDB, 'douban' for Douban, 'bangumi' for Bangumi")
     page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")

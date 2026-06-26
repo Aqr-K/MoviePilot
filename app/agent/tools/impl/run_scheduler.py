@@ -12,8 +12,6 @@ from app.log import logger
 class RunSchedulerInput(BaseModel):
     """运行定时服务工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     job_id: str = Field(
         ...,
         description="The ID of the scheduled job to run (can be obtained from query_schedulers tool)",

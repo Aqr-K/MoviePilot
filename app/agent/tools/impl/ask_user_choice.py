@@ -24,10 +24,6 @@ class UserChoiceOptionInput(BaseModel):
         ...,
         description="The exact content that will be sent back to the agent after the user clicks this button",
     )
-    description: Optional[str] = Field(
-        None,
-        description="Optional user-facing description stored in chat history after this option is selected",
-    )
 
     @model_validator(mode="after")
     def validate_option(self):
@@ -44,8 +40,6 @@ class UserChoiceOptionInput(BaseModel):
 class AskUserChoiceInput(BaseModel):
     """按钮选择工具输入。"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why the agent needs the user to choose from buttons",)
     message: str = Field(
         ...,
         description="Question or prompt shown to the user together with the buttons",
@@ -166,7 +160,6 @@ class AskUserChoiceTool(MoviePilotTool):
             AgentInteractionOption(
                 label=option.label.strip(),
                 value=option.value.strip(),
-                description=(option.description.strip() if option.description else None),
             )
             for option in options
         ]
@@ -190,7 +183,6 @@ class AskUserChoiceTool(MoviePilotTool):
                     "callback_data": (
                         f"agent_interaction:choice:{request.request_id}:{index}"
                     ),
-                    "description": option.description or option.label,
                 }
             )
             if len(current_row) >= max_per_row:

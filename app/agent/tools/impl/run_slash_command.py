@@ -15,8 +15,6 @@ from app.schemas.types import EventType, MessageChannel
 class RunSlashCommandInput(BaseModel):
     """运行斜杠命令工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     command: str = Field(
         ...,
         description="The slash command to execute, e.g. '/cookiecloud'. "

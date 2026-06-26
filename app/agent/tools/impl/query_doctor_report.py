@@ -14,10 +14,6 @@ from app.log import logger
 class QueryDoctorReportInput(BaseModel):
     """查询 Doctor 诊断报告工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(
-        None,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
     deep: Optional[bool] = Field(
         False,
         description=(

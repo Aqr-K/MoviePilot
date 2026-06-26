@@ -92,10 +92,6 @@ class SkillsStateUpdate(TypedDict):
 class SkillToolInput(BaseModel):
     """Skill 加载工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(
-        None,
-        description="Clear explanation of why this skill is needed in the current context",
-    )
     name: str = Field(
         ...,
         description="Skill name or id from the available skills list.",
@@ -460,9 +456,9 @@ class _SkillToolProvider:
             raw_content = await handle.read(MAX_SKILL_FILE_SIZE)
         return raw_content.decode("utf-8", errors="replace"), truncated
 
-    async def load_skill(self, name: str, explanation: Optional[str] = None) -> str:
+    async def load_skill(self, name: str) -> str:
         """加载指定 Skill 的完整说明并返回 JSON 字符串。"""
-        logger.info(f"加载 Skill: name={name}, explanation={explanation or '-'}")
+        logger.info(f"加载 Skill: name={name}")
         try:
             skill = await self._find_skill(name)
             if not skill:
@@ -674,8 +670,7 @@ class SkillsMiddleware(AgentMiddleware[SkillsState, ContextT, ResponseT]):  # no
         if not isinstance(tool_args, dict):
             tool_args = {}
         logger.info(
-            f"开始执行 Skill 工具: name={tool_args.get('name') or '-'}, "
-            f"explanation={tool_args.get('explanation') or '-'}"
+            f"开始执行 Skill 工具: name={tool_args.get('name') or '-'}"
         )
         if self.stream_handler and getattr(self.stream_handler, "is_streaming", False):
             self.stream_handler.record_tool_call(

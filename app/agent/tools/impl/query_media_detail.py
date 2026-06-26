@@ -18,7 +18,6 @@ SEASON_PREVIEW_LIMIT = 100
 
 class QueryMediaDetailInput(BaseModel):
     """查询媒体详情工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     tmdb_id: Optional[int] = Field(None, description="TMDB ID of the media (movie or TV series, can be obtained from search_media tool)")
     douban_id: Optional[str] = Field(None, description="Douban ID of the media (alternative to tmdb_id)")
     media_type: str = Field(..., description="Allowed values: movie, tv")

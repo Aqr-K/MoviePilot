@@ -22,8 +22,6 @@ from app.log import logger
 class QueryInstalledPluginsInput(BaseModel):
     """查询已安装插件工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     query: Optional[str] = Field(
         None,
         description="Optional keyword to filter installed plugins by plugin ID, name, description, or author.",
