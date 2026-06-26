@@ -11,5 +11,6 @@ from app.core.auth import redirect as sso_core
 
 def begin_login(provider, redirect_uri: str) -> str:
     """签发 CSRF state 并返回 IdP 授权页 URL（框架统一持有 state）。"""
-    state = sso_core.issue_state()
+    # flow_token="" is transitional; legacy begin path is replaced by RedirectStep in a later task.
+    state = sso_core.issue_state(flow_token="", provider_id=getattr(provider, "provider_id", ""))
     return provider.authorize_url(state, redirect_uri)

@@ -83,17 +83,20 @@ class RedirectStateStore:
     def __init__(self, ttl_seconds: int = 600) -> None:
         self._store = ChallengeStore(ttl_seconds=ttl_seconds)
 
-    def issue(self) -> str:
-        """生成并登记一个新 state，返回不可猜测的随机串。"""
+    def issue(self, flow_token: str, provider_id: str) -> str:
+        """生成并登记一个新 state（携带 flow_token + provider_id），返回不可猜测的随机串。"""
         state = secrets.token_urlsafe(24)
-        self._store.put(state)
+        self._store.put(state, {"flow_token": flow_token, "provider_id": provider_id})
         return state
 
-    def consume(self, state: Optional[str]) -> bool:
-        """取用一个 state：存在且未过期返回 True（并删除），否则 False（单次有效）。"""
+    def consume(self, state: Optional[str]) -> Optional[Dict[str, str]]:
+        """取用并销毁一个 state（原子）；返回 {"flow_token", "provider_id"}，未知/过期/已用返回 None。"""
         if not state:
-            return False
-        return self._store.consume(state) is not None
+            return None
+        payload = self._store.consume(state)
+        if payload is None:
+            return None
+        return {"flow_token": payload["flow_token"], "provider_id": payload["provider_id"]}
 
 
 class AuthProviderRegistry(OwnerScopedRegistry):
@@ -120,13 +123,13 @@ _STATE_STORE = RedirectStateStore()
 _REGISTRY = AuthProviderRegistry()
 
 
-def issue_state() -> str:
-    """签发一个一次性 CSRF state。"""
-    return _STATE_STORE.issue()
+def issue_state(flow_token: str, provider_id: str) -> str:
+    """签发一个一次性 CSRF state，携带 flow_token 与 provider_id。"""
+    return _STATE_STORE.issue(flow_token=flow_token, provider_id=provider_id)
 
 
-def consume_state(state: Optional[str]) -> bool:
-    """校验并消费一个 CSRF state（单次有效）。"""
+def consume_state(state: Optional[str]) -> Optional[Dict[str, str]]:
+    """原子取用并销毁一个 CSRF state；返回 {"flow_token", "provider_id"}，否则 None。"""
     return _STATE_STORE.consume(state)
 
 

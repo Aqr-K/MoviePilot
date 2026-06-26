@@ -145,7 +145,7 @@ class RedirectStateStoreTest(TestCase):
 
     def test_single_use(self):
         s = RedirectStateStore(ttl_seconds=600)
-        st = s.issue()
+        st = s.issue(flow_token="ft", provider_id="test")
         self.assertTrue(s.consume(st))
         self.assertFalse(s.consume(st), "state 必须单次有效")
 
@@ -156,7 +156,7 @@ class RedirectStateStoreTest(TestCase):
 
     def test_expired_rejected(self):
         s = RedirectStateStore(ttl_seconds=0)
-        self.assertFalse(s.consume(s.issue()), "过期 state 必须拒绝")
+        self.assertFalse(s.consume(s.issue(flow_token="ft", provider_id="test")), "过期 state 必须拒绝")
 
 
 # ---------------------------------------------------------------- 钩子 + 聚合
