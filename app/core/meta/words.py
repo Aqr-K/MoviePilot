@@ -1,3 +1,5 @@
+import ast
+import operator
 from functools import lru_cache
 from typing import List, Optional, Tuple
 
@@ -12,6 +14,20 @@ from app.utils.singleton import Singleton
 
 _COMBINED_WORD_RE = re.compile(r'^\s*(.*?)\s*=>\s*(.*?)\s*&&\s*(.*?)\s*<>\s*(.*?)\s*>>\s*(.*?)\s*$')
 _LEADING_ZERO_RE = re.compile(r"^0+")
+_EP_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])EP(?![A-Za-z0-9_])")
+_IMPLICIT_EP_EXPRESSION_RE = re.compile(r"(?:\d|\))\s*EP|EP\s*(?:\d|\()")
+_EPISODE_OFFSET_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+}
+_EPISODE_OFFSET_UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
 
 
 @lru_cache(maxsize=1024)
@@ -22,9 +38,56 @@ def _compile_custom_word_regex(pattern: str):
     return re.compile(pattern)
 
 
+def _calculate_episode_offset(offset: str, episode: int) -> int:
+    """
+    按白名单算术语法计算集数偏移，避免执行任意表达式。
+    """
+    if _IMPLICIT_EP_EXPRESSION_RE.search(offset):
+        raise ValueError("EP 表达式不支持省略运算符")
+    expression, replace_count = _EP_TOKEN_RE.subn(str(episode), offset)
+    if "EP" in offset and replace_count == 0:
+        raise ValueError("EP 占位符格式不正确")
+    tree = ast.parse(expression, mode="eval")
+    return int(_evaluate_episode_offset_node(tree.body))
+
+
+def _evaluate_episode_offset_node(node: ast.AST):
+    """
+    递归计算集数偏移 AST 节点，仅允许数字和基础算术运算。
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _EPISODE_OFFSET_OPS:
+        left = _evaluate_episode_offset_node(node.left)
+        right = _evaluate_episode_offset_node(node.right)
+        return _EPISODE_OFFSET_OPS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _EPISODE_OFFSET_UNARY_OPS:
+        operand = _evaluate_episode_offset_node(node.operand)
+        return _EPISODE_OFFSET_UNARY_OPS[type(node.op)](operand)
+    raise ValueError("集数偏移表达式仅支持数字、EP、括号和基础算术运算符")
+
+
+def _format_episode_offset(episode_num_str: str, episode_num_offset_int: int) -> str:
+    """
+    按原集数字符串格式返回偏移后的集数字符串。
+    """
+    if not episode_num_str.isdigit():
+        return cn2an.an2cn(episode_num_offset_int, "low")
+    width = len(episode_num_str) if _LEADING_ZERO_RE.search(episode_num_str) else 0
+    if episode_num_offset_int < 0:
+        return f"-{str(abs(episode_num_offset_int)).zfill(width)}"
+    return str(episode_num_offset_int).zfill(width)
+
+
 class WordsMatcher(metaclass=Singleton):
+    """
+    自定义识别词匹配器。
+    """
 
     def __init__(self):
+        """
+        初始化自定义识别词配置读取器。
+        """
         self.systemconfig = SystemConfigOper()
 
     def prepare(self, title: str, custom_words: List[str] = None) -> Tuple[str, List[str]]:
@@ -122,23 +185,16 @@ class WordsMatcher(metaclass=Singleton):
             offset_order_flag = False
             for episode_num_str in episode_nums_str:
                 episode_num_int = int(cn2an.cn2an(episode_num_str, "smart"))
-                offset_caculate = offset.replace("EP", str(episode_num_int))
-                episode_num_offset_int = int(eval(offset_caculate))
+                episode_num_offset_int = _calculate_episode_offset(offset, episode_num_int)
                 # 向前偏移
                 if episode_num_int > episode_num_offset_int:
                     offset_order_flag = True
                 # 向后偏移
                 elif episode_num_int < episode_num_offset_int:
                     offset_order_flag = False
-                # 原值是中文数字，转换回中文数字，阿拉伯数字则还原0的填充
-                if not episode_num_str.isdigit():
-                    episode_num_offset_str = cn2an.an2cn(episode_num_offset_int, "low")
-                else:
-                    count_0 = _LEADING_ZERO_RE.search(episode_num_str)
-                    if count_0:
-                        episode_num_offset_str = f"{count_0.group(0)}{episode_num_offset_int}"
-                    else:
-                        episode_num_offset_str = str(episode_num_offset_int)
+                episode_num_offset_str = _format_episode_offset(
+                    episode_num_str, episode_num_offset_int
+                )
                 episode_nums_offset_str.append(episode_num_offset_str)
             episode_nums_dict = dict(zip(episode_nums_str, episode_nums_offset_str))
             # 集数向前偏移，集数按升序处理
