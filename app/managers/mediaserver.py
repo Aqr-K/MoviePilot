@@ -1,22 +1,14 @@
-import traceback
-from typing import Any, Generator, List, Optional, Union, TYPE_CHECKING
+from typing import Generator, List, Optional, Union, TYPE_CHECKING
 
-from app.core.event import eventmanager
-from app.core.module import ModuleManager
-from app.helper.message import MessageHelper
-from app.log import logger
+from app.managers.base import ManagerBase
 from app.schemas import (ExistMediaInfo, MediaServerItem, MediaServerLibrary,
                          MediaServerPlayItem, MediaServerSeasonInfo, Statistic)
-from app.schemas.exception import RateLimitExceededException
-from app.schemas.types import EventType
-from app.utils.object import ObjectUtils
-from app.utils.singleton import Singleton
 
 if TYPE_CHECKING:
     from app.core.context import MediaInfo
 
 
-class MediaServerManager(metaclass=Singleton):
+class MediaServerManager(ManagerBase):
     """
     媒体服务器（MediaServer 域）统一入口（单例）。
 
@@ -24,105 +16,12 @@ class MediaServerManager(metaclass=Singleton):
     媒体服务器后端模块（内建 Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 及插件经 provides_mediaservers()
     注册的媒体服务器），并合并各后端结果。每次分发实时查询当前运行的后端，自动纳入运行期注册/卸载的插件。
 
+    分发内核（单面 _dispatch / 合并 / 错误处理）见基类 ManagerBase——媒体服务器后端均经 provides_mediaservers()
+    注册为运行模块，故只用系统后端面，无插件钩子面。
+
     约定：凡接受 server 形参的方法，传 None 时面向全部媒体服务器，传具体名称时只作用于该服务器。
     各后端 server 必填性 / username 形参存在差异，对外统一为最宽松签名并按关键字分发，对全部后端兼容。
     """
-
-    def __init__(self):
-        self._modulemanager = ModuleManager()
-        self._messagehelper = MessageHelper()
-
-    @staticmethod
-    def _is_valid_empty(ret: Any) -> bool:
-        """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
-        if isinstance(ret, tuple):
-            return all(value is None for value in ret)
-        return ret is None
-
-    def _handle_error(self, err: Exception, module_id: str, module_name: str,
-                      method: str, raise_exception: bool) -> None:
-        """
-        后端方法执行出错的处理。
-
-        :param err: 捕获到的异常
-        :param module_id: 后端类名
-        :param module_name: 后端显示名
-        :param method: 出错的方法名
-        :param raise_exception: 为真时直接抛出；否则记录错误日志、推送系统错误消息、广播 SystemError 事件后继续下一个后端
-        """
-        if raise_exception:
-            raise err
-        logger.error(f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}")
-        self._messagehelper.put(title=f"{module_name}发生了错误", message=str(err), role="system")
-        eventmanager.send_event(
-            EventType.SystemError,
-            {
-                "type": "module",
-                "module_id": module_id,
-                "module_name": module_name,
-                "module_method": method,
-                "error": str(err),
-                "traceback": traceback.format_exc(),
-            },
-        )
-
-    @staticmethod
-    def _handle_rate_limit_error(err: RateLimitExceededException, module_id: str,
-                                 method: str, raise_exception: bool) -> None:
-        """
-        后端触发限流时的处理：raise_exception 为真时直接抛出；否则仅记录 INFO 并跳过该后端
-        （限流为预期状态，不作系统告警）。
-        """
-        if raise_exception:
-            raise err
-        logger.info(f"模块 {module_id}.{method} 已限流，跳过执行：{str(err)}")
-
-    def _dispatch(self, method: str, *args, **kwargs) -> Any:
-        """
-        按方法名分发到所有媒体服务器后端模块并合并结果。
-
-        按优先级（get_priority 升序）遍历后端：
-        - 当前结果为空（None / 全 None 元组）→ 取该后端返回值；
-        - 当前结果可作为下一后端的入参（check_signature）→ 透传；
-        - 当前结果为列表 → 合并各后端的列表结果；
-        - 当前结果为非空标量（str/dict/生成器等）→ 短路停止。
-        单个后端异常被隔离后继续其余后端；raise_exception=True 时透传首个异常。
-
-        :param method: 要分发的媒体服务器方法名
-        :param raise_exception: 出错时是否抛出（分发控制位，不透传给后端方法）
-        :return: 各后端合并后的结果
-        """
-        # raise_exception 为分发控制位，pop 出后不随调用透传给后端方法。
-        raise_exception = bool(kwargs.pop("raise_exception", False))
-        result: Any = None
-        for module in sorted(
-                self._modulemanager.get_running_modules(method),
-                key=lambda x: x.get_priority(),
-        ):
-            module_id = module.__class__.__name__
-            try:
-                module_name = module.get_name()
-            except Exception as err:
-                logger.debug(f"获取模块名称出错：{str(err)}")
-                module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self._is_valid_empty(result):
-                    result = func(*args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    result = func(result)
-                elif isinstance(result, list):
-                    temp = func(*args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    break
-            except RateLimitExceededException as err:
-                # 限流先于通用异常捕获：安静跳过、不告警。
-                self._handle_rate_limit_error(err, module_id, method, raise_exception)
-            except Exception as err:
-                self._handle_error(err, module_id, module_name, method, raise_exception)
-        return result
 
     # ------------------------------------------------------------------ #
     # IMediaServer 对外面：按方法名转发到 _dispatch。

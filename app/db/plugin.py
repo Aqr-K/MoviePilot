@@ -61,9 +61,10 @@ def setup_plugin_database(plugin) -> None:
     if not models:
         return
     bundle = db_manager.register_plugin(plugin_id)
-    metadata = models[0].metadata
-    bundle.metadata = metadata
-    metadata.create_all(bundle.engine)
+    bundle.metadata = models[0].metadata
+    # 经 db_manager.create_tables 建表：SQLite 直接建表；PostgreSQL 先 CREATE SCHEMA
+    # 再在 schema 路由的事务连接上建表（直接 metadata.create_all 会绕过建 schema）。
+    db_manager.create_tables(plugin_id)
 
 
 def teardown_plugin_database(plugin_id: str) -> None:

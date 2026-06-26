@@ -2,12 +2,8 @@
 """
 本地插件来源标识(local:// URL)的纯工具函数。
 
-这些函数仅做字符串/URL 处理,零 app 依赖,原先以 @staticmethod 形式挂在
-app.helper.plugin.PluginHelper 上,导致 core/plugin 为调用它们而 import 整个 helper 层的
-PluginHelper(反向依赖)。抽取到 utils 纯工具层后,core 与 helper 均可直接引用,
-PluginHelper 保留同名静态方法委托至此(对插件/agent 调用方零改动)。
-
-这是 S5(plugin.py 去 helper.plugin)的第一刀:先剥离无状态的 URL 工具。
+仅做字符串/URL 处理,零 app 依赖,core 与 helper 均可直接引用;PluginHelper 保留同名静态方法委托至此
+(对插件/agent 调用方不变)。
 """
 from pathlib import Path
 from typing import Optional
