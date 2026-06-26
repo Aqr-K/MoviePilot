@@ -702,6 +702,17 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     if not ok:
                         logger.warning(f"注册插件 {plugin_id} 认证流程 "
                                        f"{getattr(spec, 'flow_id', spec)} 失败：{reason}")
+        # 注册插件经 provides_auth_steps 声明的【统一】认证步骤（owner=plugin_id，进全局步骤注册表）：
+        # 单 SPI 收口——装配桥（_build_flow_service）按 step_kind 切分后入多步流程；与上方三旧 SPI 并存（先桥后删）。
+        provided_steps = plugin_metadata.get_plugin_provided_auth_steps(self._running_plugins, pid)
+        if provided_steps:
+            from app.core.auth.steps import register_auth_step
+            for plugin_id, steps in provided_steps.items():
+                for step in steps:
+                    ok, reason = register_auth_step(step, owner=plugin_id)
+                    if not ok:
+                        logger.warning(f"注册插件 {plugin_id} 认证步骤 "
+                                       f"{getattr(step, 'step_id', step)} 失败：{reason}")
         # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/消息渠道/媒体服务器）：
         # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
         for _get_provided, _verify, _label in (
@@ -758,9 +769,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 from app.core.auth.credentials import unregister_credential_providers
                 from app.core.auth.flow_registry import unregister_auth_flows
                 from app.core.auth.mfa_factors import unregister_mfa_factors
+                from app.core.auth.steps import unregister_auth_steps
                 unregister_credential_providers(owner=plugin_id)
                 unregister_mfa_factors(owner=plugin_id)
                 unregister_auth_flows(owner=plugin_id)
+                unregister_auth_steps(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 认证组件出错：{str(err)}")
 

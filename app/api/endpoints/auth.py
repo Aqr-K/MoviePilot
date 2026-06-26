@@ -134,37 +134,65 @@ class FlowAdvanceRequest(BaseModel):
     grant_type: str = "password"
 
 
-def _build_flow_service():
-    """按当前注册表实时装配多步登录服务（凭证步骤 = 本地密码 + 已注册 ICredentialProvider；
-    因子步骤 = 该用户的内建 + 插件 MFA 因子）。复用 ``build_token_response`` 作为唯一铸 Token 来源。"""
-    from app.core.auth.credentials import all_credential_providers
-    from app.service.auth.flow_service import FlowService
-    from app.service.auth.flow_steps import (
-        CredentialProviderStep,
-        FactorStep,
-        PasswordStep,
-        make_identity_resolver,
+# 装配桥按 step_kind 切分全局步骤注册表：以下种归入【凭证阶段】（解析用户），其余 "factor" 归第二因子阶段。
+_CREDENTIAL_STEP_KINDS = {"credential", "directory", "federated_direct", "redirect"}
+# 防内建 id 冒充（Task 9 review #1a）：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password"
+# 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
+BUILTIN_CREDENTIAL_IDS = {"password"}
+
+
+def _builtin_factor_steps(user) -> list:
+    """该用户的 per-user 内建第二因子（OTP/PassKey，经闭包绑定到本 user）包装为 ``FactorStep``。
+
+    与 ``orchestrator.factors_for_user`` 的内建部分同构，但**不含** ``all_mfa_factors()``——插件因子改由
+    ``all_auth_steps()`` 的 "factor" 种步骤注入，故此处只构内建，避免与注册表里的插件因子双计。
+    内建 OTP/PassKey 天然 per-user（闭包绑定 user.otp_secret/passkey），无法做全局注册表步，故保留内建装配。
+    """
+    from app.db.models.passkey import PassKey
+    from app.service.auth.builtin_factors import build_builtin_factors
+    from app.service.auth.flow_steps import FactorStep
+    from app.utils.otp import OtpUtils
+
+    builtin = build_builtin_factors(
+        is_otp_enrolled=lambda _ref: bool(getattr(user, "is_otp", False)),
+        verify_otp=lambda _ref, code: OtpUtils.check(str(user.otp_secret), code),
+        has_passkey=lambda _ref: bool(PassKey.get_by_user_id(db=None, user_id=user.id)),
     )
-    from app.service.auth.orchestrator import factors_for_user
+    return [FactorStep(f) for f in builtin]
+
+
+def _build_flow_service():
+    """按全局步骤注册表（``all_auth_steps()``）实时装配多步登录服务（装配桥）。
+
+    - 凭证步 = 本地 ``PasswordStep`` + 注册表中 step_kind ∈ ``_CREDENTIAL_STEP_KINDS`` 的插件步（排除冒充内建 id 者）；
+    - 第二因子步 = 该用户的 per-user 内建因子 + 注册表中 step_kind=="factor" 的插件步（applies_to 自行 per-user 过滤）。
+
+    插件步统一经唯一 SPI ``provides_auth_steps()`` 注册（owner=plugin_id）；不再依赖 ``all_credential_providers()``
+    与 ``orchestrator.factors_for_user()``。复用 ``build_token_response`` 作为唯一铸 Token 来源。
+    """
+    from app.core.auth.flow_registry import get_auth_flow
+    from app.core.auth.steps import all_auth_steps
+    from app.service.auth.flow_service import FlowService
+    from app.service.auth.flow_steps import PasswordStep, make_identity_resolver
     from app.service.auth.provisioning import default_deps
 
-    from app.core.auth.flow_registry import get_auth_flow
-
-    # 防内建 id 冒充（T5 review #1a）：排除任何声称内建 id 的插件凭证 provider，杜绝插件以 "password"
-    # 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
-    BUILTIN_CREDENTIAL_IDS = {"password"}
+    steps = all_auth_steps()
     credential_steps = [PasswordStep()] + [
-        CredentialProviderStep(p) for p in all_credential_providers()
-        if p.provider_id not in BUILTIN_CREDENTIAL_IDS
+        s for s in steps
+        if getattr(s, "step_kind", None) in _CREDENTIAL_STEP_KINDS
+        and getattr(s, "step_id", None) not in BUILTIN_CREDENTIAL_IDS
     ]
+    plugin_factor_steps = [s for s in steps if getattr(s, "step_kind", None) == "factor"]
+
     # 流程形状可插拔：若有插件注册了名为 "default" 的流程规格（如 N-of-M 强 MFA），用其组合策略；
-    # 否则沿用默认 AnyOf（任一因子，复现 v2 OR）。
+    # 否则沿用默认 AnyOf（任一因子，复现 v2 OR）。注册期 verify_flow_spec_contract 已拒绝"空真"规格，
+    # 杜绝插件以 default 规格 vacuous 绕过 MFA。
     default_spec = get_auth_flow("default")
     mfa_requirement = (lambda steps: default_spec.mfa_requirement(steps)) if default_spec else None
     return FlowService(
         flow_store=_FLOW_STORE,
         credential_steps=credential_steps,
-        factor_steps_for=lambda user: [FactorStep(f) for f in factors_for_user(user)],
+        factor_steps_for=lambda user: _builtin_factor_steps(user) + plugin_factor_steps,
         load_user=lambda uid: User.get(db=None, rid=uid),
         issue_token=build_token_response,
         mfa_requirement=mfa_requirement,

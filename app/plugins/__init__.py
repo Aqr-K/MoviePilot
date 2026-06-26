@@ -357,6 +357,20 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_auth_steps(self) -> List[Any]:
+        """
+        声明本插件向登录流程【新增】的认证步骤（**统一 SPI**，逐步取代分散的 provider/factor/redirect
+        三类声明）。返回实现 app.core.auth.flow.IAuthStep 契约的【实例】列表 —— 通常是把现有认证构件
+        包装成步骤的适配器：CredentialProviderStep(provider) / FactorStep(factor) / RedirectStep(provider)，
+        各含 step_id / step_kind / priority + applies_to(context) / advance(context, submission)。
+        框架以 owner=plugin_id 注册到全局步骤注册表（register_auth_step），装配桥按 step_kind 切分
+        （credential / directory / federated_direct / redirect → 凭证步；factor → 第二因子步）后入多步
+        登录流程。默认不新增。
+
+        [CredentialProviderStep(LdapProvider(...)), FactorStep(SmsFactor(...)), ...]
+        """
+        return []
+
     def provides_models(self) -> List[Type]:
         """
         声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。
