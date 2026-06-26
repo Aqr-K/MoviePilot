@@ -8,7 +8,8 @@ import json
 
 import pytest
 
-from app.core.auth.flow import AllOf, AnyOf, AuthContext, NOf, StepRef
+from app.core.auth.challenge import PromptChallenge
+from app.core.auth.flow import AllOf, AnyOf, AuthContext, AuthStepResult, IdentityAssertion, NOf, StepRef
 
 
 # ----------------------------- 组合策略 is_satisfied -----------------------------
@@ -108,3 +109,13 @@ def test_context_json_roundtrip():
     assert c2.satisfied_steps == frozenset({"password"})
     assert c2.resolved_user_id == 7
     assert c2.challenges["sms"] == {"sent": True}
+
+
+# ----------------------------- Task 3: IdentityAssertion + typed challenge -----
+def test_result_identity():
+    r = AuthStepResult(status="satisfied", identity=IdentityAssertion(provider_id="ldap", subject="uid=a", username="a"))
+    assert r.user_id is None and r.identity.subject == "uid=a"
+
+
+def test_result_typed_challenge():
+    assert AuthStepResult(status="challenge", challenge=PromptChallenge(step_id="otp")).challenge.kind == "prompt"

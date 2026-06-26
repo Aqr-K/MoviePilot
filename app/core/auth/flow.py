@@ -17,6 +17,23 @@
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Protocol, Set, runtime_checkable
 
+from app.core.auth.challenge import Challenge
+
+# --------------------------------------------------------------------------- 身份断言
+
+
+@dataclass(frozen=True)
+class IdentityAssertion:
+    """凭证步骤完成后携带的身份声明（db-free；provisioning 层再查 / 建 User 记录）。"""
+
+    provider_id: str
+    subject: str
+    username: Optional[str] = None
+    avatar: Optional[str] = None
+    auto_create: bool = False
+    mfa_already_satisfied: bool = False
+
+
 # --------------------------------------------------------------------------- 单步结果
 
 
@@ -32,8 +49,9 @@ class AuthStepResult:
 
     status: str
     user_id: Optional[Any] = None
+    identity: Optional[IdentityAssertion] = None
     mfa_satisfied: bool = False
-    challenge: Optional[Dict[str, Any]] = None
+    challenge: Optional[Challenge] = None
     error: Optional[str] = None
 
 
