@@ -152,3 +152,102 @@ def test_disabled_user_blocked_at_advance():
         assert out2["status"] == "failure"
     finally:
         USERS[2].is_active = True
+
+
+# ============================= S1 tests (Task 10) =============================
+
+# ----------------------------- _run_mfa enrolled 子集防死锁 -----------------------------
+def test_run_mfa_enrolled_no_deadlock():
+    """单注册因子用户在 N-of-2 策略下不应死锁：_validate_requirement 降级为 AnyOf，正确码即成功。"""
+    from app.core.auth.flow import NOf, StepRef
+    # 策略要求 2-of-enrolled，但 otpuser(id=2) 仅有 1 个 OTP 因子
+    nof2_strategy = lambda steps: NOf(2, [StepRef(s.step_id) for s in steps])
+    svc = FlowService(
+        flow_store=FlowStore(ttl_seconds=600),
+        credential_steps=[_password_step()],
+        factor_steps_for=_factor_steps_for,
+        load_user=lambda uid: USERS.get(uid),
+        issue_token=lambda user: {"access_token": f"TK-{user.id}"},
+        mfa_requirement=nof2_strategy,
+    )
+    out = svc.begin(_sub(username="otpuser", password="pw"))
+    assert out["status"] == "mfa_required", f"expected mfa_required, got {out}"
+    # 提交正确 OTP：降级后 AnyOf([otp]) 即满足，不应永久 mfa_required
+    out2 = svc.advance(out["flow_token"], _sub(step_id="otp", code="246"))
+    assert out2["status"] == "success", f"expected success after downgrade, got {out2}"
+
+
+# ----------------------------- run_sync 密码直通 -----------------------------
+def test_sync_password_only():
+    """run_sync：nomfa 用户一轮密码即成功，返回 status==success + token。"""
+    svc, _ = _service()
+    out = svc.run_sync(_sub(username="nomfa", password="pw"))
+    assert out["status"] == "success"
+    assert out["token"]["access_token"] == "TK-1"
+
+
+# ----------------------------- _after_credential challenge 分支 -----------------------------
+class _SsoCredStep:
+    """伪 SSO 凭证步：always 返回 RedirectChallenge（授权 URL 下发挑战）。"""
+    step_id = "github"
+    step_kind = "credential"
+    priority = 10
+
+    def applies_to(self, ctx):
+        return ctx.resolved_user_id is None
+
+    def advance(self, ctx, submission):
+        from app.core.auth.challenge import RedirectChallenge
+        from app.core.auth.flow import AuthStepResult
+        return AuthStepResult(
+            status="challenge",
+            challenge=RedirectChallenge(
+                step_id="github", provider_id="github",
+                authorize_url="https://github.com/login/oauth/authorize?client_id=x"))
+
+
+def test_after_credential_challenge():
+    """begin 触发 SSO 重定向挑战时，status 应为 challenge 并携带 authorize_url，而非被错归为 continue。"""
+    svc = FlowService(
+        flow_store=FlowStore(ttl_seconds=600),
+        credential_steps=[_SsoCredStep()],
+        factor_steps_for=lambda user: [],
+        load_user=lambda uid: USERS.get(uid),
+        issue_token=lambda user: {"access_token": f"TK-{user.id}"},
+    )
+    out = svc.begin(_sub())
+    assert out["status"] == "challenge", f"expected challenge, got {out}"
+    assert out["challenge"]["kind"] == "redirect"
+    assert "authorize_url" in out["challenge"]
+    assert out.get("flow_token")
+
+
+# ----------------------------- redact_reason 脱敏 -----------------------------
+def test_redact_reason():
+    """未知自由文本错误原因应脱敏为 auth_failed；白名单内的安全代码直通。"""
+    from app.service.auth.flow_service import redact_reason
+    # 自由文本（含 IP / 内部信息）→ 脱敏
+    assert redact_reason("LDAP bind 10.0.0.1 refused") == "auth_failed"
+    assert redact_reason("provider 校验异常") == "auth_failed"
+    assert redact_reason("random internal detail xyz") == "auth_failed"
+    # 白名单安全代码直通
+    assert redact_reason("invalid_state") == "invalid_state"
+    assert redact_reason("invalid_code") == "invalid_code"
+    assert redact_reason("fetch_identity_failed") == "fetch_identity_failed"
+    assert redact_reason("用户名或密码错误") == "用户名或密码错误"
+
+
+# ----------------------------- _validate_requirement 非空真拒绝 -----------------------------
+def test_validate_requirement_rejects_empty_true():
+    """AllOf([]) 对空集即为真（空真）→ _validate_requirement 降级为 AnyOf，防绕过 MFA。"""
+    from app.core.auth.flow import AllOf
+    svc, _ = _service()
+    otp_step = FactorStep(OtpFactor(
+        is_enrolled=lambda ref: True,
+        verify=lambda ref, code: code == "246"))
+    # AllOf([]) 对任意 satisfied 集合均满足（包括空集）
+    empty_true = AllOf([])
+    assert empty_true.is_satisfied(frozenset()), "前置：AllOf([]) 对空集确实为真"
+    result = svc._validate_requirement(empty_true, [otp_step])
+    # 降级后不应对空集满足
+    assert not result.is_satisfied(frozenset()), "降级后不应对空 satisfied 集满足"

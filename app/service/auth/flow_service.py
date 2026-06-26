@@ -15,6 +15,21 @@ from app.core.auth.flow import AnyOf, AuthContext, AuthRequirement, StepRef
 from app.log import logger
 from app.service.auth.flow_steps import build_credential_flow, build_mfa_flow
 
+# --------------------------------------------------------------------------- 模块级工具
+
+_SAFE_REASONS = frozenset({
+    "invalid_credentials", "用户名或密码错误", "mfa_required", "invalid_state",
+    "invalid_code", "fetch_identity_failed", "user_not_provisioned",
+})
+
+
+def redact_reason(error: str) -> str:
+    """白名单脱敏：已知安全的错误代码直通；任何自由文本 / 内部细节脱敏为 auth_failed（仅 debug 记录）。"""
+    if error in _SAFE_REASONS:
+        return error
+    logger.debug("auth 失败原因脱敏：%s", error)
+    return "auth_failed"
+
 
 class FlowService:
     """把流程引擎接成多步登录服务。"""
@@ -40,6 +55,21 @@ class FlowService:
         self._trusted_step_ids = frozenset(trusted_step_ids)
 
     # ----------------------------- 对外入口 -----------------------------
+    def run_sync(self, submission: Any) -> dict:
+        """单趟同步模式（兼容 /access-token 端点）：把 submission 反复喂给流程直至终态。
+
+        同一 submission 中可同时携带 username/password/otp；引擎每轮推进一个阶段，凭证成功后
+        自动进入 MFA（若有），再次喂同一 submission 完成 OTP 校验。重定向挑战无法在单趟内完成，
+        会直接返回给调用方处理。无进展保护（避免无限循环）。
+        """
+        out = self.begin(submission)
+        while out.get("status") in ("continue", "mfa_required") and out.get("flow_token"):
+            nxt = self.advance(out["flow_token"], submission)
+            if nxt == out:  # 无进展（缺输入）→ 停，避免死循环
+                break
+            out = nxt
+        return out  # success / failure / challenge 直接返回
+
     def begin(self, submission: Any) -> dict:
         """开始一条登录流程（通常携带用户名/口令）。"""
         flow_id = self._store.new_flow_id()
@@ -72,6 +102,11 @@ class FlowService:
         if result.kind == "failure":
             self._store.drop(context.flow_id)
             return {"status": "failure", "error": result.error or "认证失败"}
+        if result.kind == "challenge":
+            # SSO/重定向步发起挑战（如 RedirectChallenge）→ 下发 authorize_url，暂存流程状态
+            self._store.save(context)
+            return {"status": "challenge", "flow_token": context.flow_id,
+                    "challenge": result.challenge, "factors_available": result.factors_available or []}
         if result.kind != "success":
             # 凭证未就绪（缺输入）→ 暂存，提示继续提交凭证
             self._store.save(context)
@@ -103,10 +138,13 @@ class FlowService:
             trusted_step_ids=self._trusted_step_ids)
 
     def _run_mfa(self, context: AuthContext, user: Any, submission: Any) -> dict:
-        factor_steps = self._factor_steps_for(user)
-        mfa_flow = build_mfa_flow(factor_steps, requirement=self._mfa_requirement(factor_steps),
+        # 仅取当前可推进的已注册因子（enrolled 子集为唯一事实来源，避免恒假叶子污染 candidates）
+        factor_steps = [s for s in self._factor_steps_for(user) if s.applies_to(context)]
+        requirement = self._validate_requirement(self._mfa_requirement(factor_steps), factor_steps)
+        # MFA 阶段无受信凭证步 → trusted 传空集（防 "password" 泄漏进 MFA 阶段）
+        mfa_flow = build_mfa_flow(factor_steps, requirement=requirement,
                                   identity_resolver=self._identity_resolver,
-                                  trusted_step_ids=self._trusted_step_ids)
+                                  trusted_step_ids=frozenset())
         context, result = mfa_flow.advance(context, submission)
         if result.kind == "success":
             return self._succeed(context, user)
@@ -121,6 +159,28 @@ class FlowService:
         self._store.save(context)
         return {"status": "mfa_required", "flow_token": context.flow_id,
                 "factors_available": result.factors_available or []}
+
+    def _validate_requirement(self, requirement: AuthRequirement, steps: List[Any]) -> AuthRequirement:
+        """校验 MFA requirement 合法性；两类降级为 AnyOf，防止绕过或死锁：
+
+        1. 空真（empty-true）：requirement 对空 satisfied 集即满足（如 AllOf([]) / NOf(0)）→
+           降级为 AnyOf([enrolled steps])，强制至少完成一个因子。
+        2. NOf.n 超过可满足叶子数 → 永不可满足（确定性死锁）→ 同样降级为 AnyOf。
+
+        若 steps 为空，AnyOf([]) 对空集仍为 False（任一…不成立），流程引擎的死局分支返回 failure，
+        比无限 mfa_required 更安全。
+        """
+        try:
+            if requirement.is_satisfied(frozenset()):
+                logger.warning("MFA requirement 对空集即满足（空真），降级为 AnyOf 防绕过")
+                return AnyOf([StepRef(s.step_id) for s in steps])
+        except Exception:  # noqa: BLE001
+            pass
+        n = getattr(requirement, "n", None)
+        if isinstance(n, int) and not isinstance(n, bool) and n > len(steps):
+            logger.warning("MFA NOf.n(%s) > 可满足因子数(%s)，降级为 AnyOf", n, len(steps))
+            return AnyOf([StepRef(s.step_id) for s in steps])
+        return requirement
 
     def _mfa_requirement(self, factor_steps: List[Any]) -> AuthRequirement:
         """MFA 组合策略：优先用注入的策略（如 N-of-M），否则默认 ``AnyOf``（复现 v2 OR 语义）。"""
