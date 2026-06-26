@@ -6,7 +6,7 @@
 OIDC-ROPC/SAML-ECP 等非重定向联合认证、passwordless 等。插件交出一个 ``ICredentialProvider``，
 框架按 ``priority`` 升序依次询问，首个返回 ``status="success"`` 者胜出（见 orchestrator，PR3/PR4）。
 
-与 SSO 重定向车道（``app/core/sso.py`` 的 ``IAuthProvider``）的分工：
+与 SSO 重定向车道（``app/core/auth/redirect.py`` 的 ``IAuthProvider``）的分工：
   - 重定向（浏览器跳到 IdP 再回调）→ ``IAuthProvider``；
   - 直接用凭证换身份（无浏览器重定向）→ 本模块 ``ICredentialProvider``。
 """

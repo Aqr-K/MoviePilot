@@ -48,7 +48,7 @@ def test_code_rejects_invalid(value):
 
 
 def test_derive_local_username_is_prefix_provider_subject():
-    assert USERNAME_PREFIX == "sso_"
-    assert derive_local_username("github", "alice") == "sso_github_alice"
+    assert USERNAME_PREFIX == "ext_"
+    assert derive_local_username("github", "alice") == "ext_github_alice"
     # provider_id 不含分隔符（核心契约保证）→ (provider_id, subject) 到用户名单射
-    assert derive_local_username("ldap-example", "a.b-c") == "sso_ldap-example_a.b-c"
+    assert derive_local_username("ldap-example", "a.b-c") == "ext_ldap-example_a.b-c"

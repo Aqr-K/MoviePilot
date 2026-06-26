@@ -3,7 +3,7 @@
 SSO（外部 IdP 单点登录）框架能力 —— db-free 核心。
 
 把每个 SSO 插件原本要各自重复实现的样板（G3）下沉为框架能力：
-  - CSRF ``state`` 的签发/单次校验（``SsoStateStore``）；
+  - CSRF ``state`` 的签发/单次校验（``RedirectStateStore``）；
   - 登录提供方的注册/路由（``AuthProviderRegistry``，按 ``provider_id`` 单索引、带 owner）；
   - 提供方契约校验（``verify_auth_provider_contract``）。
 
@@ -72,7 +72,7 @@ def verify_auth_provider_contract(provider: Any) -> Tuple[bool, List[str]]:
     return (not reasons), reasons
 
 
-class SsoStateStore:
+class RedirectStateStore:
     """
     OAuth ``state`` 短时一次性存储（CSRF 防护）：签发时写、回调时取（取即销毁）。
 
@@ -116,7 +116,7 @@ class AuthProviderRegistry(OwnerScopedRegistry):
 
 
 # 模块级单例：state 与提供方注册表均需跨请求/跨插件存活
-_STATE_STORE = SsoStateStore()
+_STATE_STORE = RedirectStateStore()
 _REGISTRY = AuthProviderRegistry()
 
 

@@ -1,3 +1,4 @@
+import types
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -5,12 +6,13 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app import schemas
-from app.core import sso
+from app.core.auth import redirect as sso
 from app.core.auth_bridge import build_token_response, consume_plugin_auth_ticket
 from app.core.config import settings
 from app.core.event import eventmanager
 from app.helper.plugin_manager import PluginManager
-from app.helper.sso import begin_login, complete_login
+from app.helper.sso import begin_login
+from app.service.auth.sso_flow import sso_callback_query
 from app.log import logger
 from app.schemas.event import AuthObservationEventData, MfaChallengeEventData
 from app.schemas.types import ChainEventType
@@ -56,7 +58,7 @@ def _system_auth_providers() -> list[dict[str, Any]]:
 
 def _registered_sso_providers() -> list[dict[str, Any]]:
     """
-    由 app.core.sso 注册表（provides_auth_providers）派生登录入口摘要。
+    由 app.core.auth.redirect 注册表（provides_auth_providers）派生登录入口摘要。
 
     每个注册提供方自动获得 `/auth/sso/{id}/login` 入口（框架统一驱动 OAuth），无需插件再声明端点。
 
@@ -226,18 +228,14 @@ def _safe_relative(path: Optional[str]) -> str:
     return p
 
 
-def _sso_redirect_back(success_redirect: str, ticket: Optional[str] = None,
-                       error: Optional[str] = None) -> RedirectResponse:
-    """重定向回前端：成功带 ?ticket=（前端再调 /auth/exchange 换 Token），失败带 ?sso_error=。"""
+def _sso_redirect_back(success_redirect: str, **query: Any) -> RedirectResponse:
+    """重定向回前端，按 SSO flow 结果带不同 query：成功 ``?ticket=``（前端再 /auth/exchange 换 Token）、
+    需 MFA ``?flow_token=&sso_mfa=1``（前端复用 /auth/flow/advance 补因子）、失败 ``?sso_error=``。"""
     from urllib.parse import urlencode
     # 保底再过滤一次，确保任何调用方传入的 success_redirect 均为站内相对路径
     success_redirect = _safe_relative(success_redirect)
     base = settings.MP_DOMAIN(success_redirect) or success_redirect
-    query = {}
-    if ticket:
-        query["ticket"] = ticket
-    if error:
-        query["sso_error"] = error
+    query = {k: v for k, v in query.items() if v is not None}
     sep = "&" if "?" in base else "?"
     url = f"{base}{sep}{urlencode(query)}" if query else base
     return RedirectResponse(url=url)
@@ -252,14 +250,47 @@ def sso_login(provider_id: str, request: Request) -> RedirectResponse:
     return RedirectResponse(url=begin_login(provider, _sso_redirect_uri(provider_id, request)))
 
 
+def _build_sso_flow_service(provider: Any, request: Request):
+    """实时装配 SSO 多步登录服务：RedirectStep 凭证步 → 条件 MFA，成功铸一次性 ticket 交浏览器。
+
+    与 ``/access-token`` / ``/auth/flow`` 共用同一批因子与 ``factors_for_user``，故 SSO 用户的 MFA
+    与密码登录完全一致；``issue_ticket`` 铸票（浏览器 GET 导航无法回 JSON body），前端再 /auth/exchange 换 Token。
+    """
+    from app.core.auth.flow_registry import get_auth_flow
+    from app.core.auth_bridge import create_plugin_auth_ticket
+    from app.service.auth.flow_steps import FactorStep
+    from app.service.auth.orchestrator import factors_for_user
+    from app.service.auth.sso_flow import build_sso_flow_service
+
+    default_spec = get_auth_flow("default")
+    mfa_requirement = (lambda steps: default_spec.mfa_requirement(steps)) if default_spec else None
+    return build_sso_flow_service(
+        provider,
+        flow_store=_FLOW_STORE,
+        factors_for_user=lambda user: [FactorStep(f) for f in factors_for_user(user)],
+        load_user=lambda uid: User.get(db=None, rid=uid),
+        issue_ticket=lambda user: create_plugin_auth_ticket(
+            user_id=user.id, provider_id=provider.provider_id,
+            metadata={"sso_provider": provider.provider_id}),
+        mfa_requirement=mfa_requirement,
+    )
+
+
 @router.get("/sso/{provider_id}/callback", summary="SSO 登录回调")
 def sso_callback(provider_id: str, request: Request, code: str = "", state: str = "") -> RedirectResponse:
-    """处理 IdP 回调：框架统一完成 state 校验 / 换身份 / 用户解析建号 / 铸票，再重定向回前端。"""
+    """处理 IdP 回调：经统一流程引擎完成 CSRF 校验 / 换身份 / 解析建号 / **条件 MFA**，再重定向回前端。
+
+    无 MFA → ``?ticket=``（前端再 /auth/exchange 换 Token）；该用户启用了 MFA → ``?flow_token=&sso_mfa=1``
+    （前端复用 /auth/flow/advance 补第二因子）；失败 → ``?sso_error=``。
+    """
     provider = sso.get_auth_provider(provider_id)
     if provider is None:
         raise HTTPException(status_code=404, detail="未知的登录提供方")
     success_redirect = _safe_relative(getattr(provider, "success_redirect", "/"))
-    auto_create = bool(getattr(provider, "auto_create", False))
-    ticket, error = complete_login(provider, code, state,
-                                   _sso_redirect_uri(provider_id, request), auto_create=auto_create)
-    return _sso_redirect_back(success_redirect, ticket=ticket, error=error)
+    svc = _build_sso_flow_service(provider, request)
+    result = svc.begin(types.SimpleNamespace(
+        step_id=provider_id, code=code, state=state,
+        redirect_uri=_sso_redirect_uri(provider_id, request)))
+    _emit_flow_event(result, getattr(provider, "provider_name", provider_id),
+                     request.client.host if request.client else None)
+    return _sso_redirect_back(success_redirect, **sso_callback_query(result))

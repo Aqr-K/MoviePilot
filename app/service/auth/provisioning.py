@@ -10,7 +10,7 @@ OIDC-ROPC 等 ``ICredentialProvider``）解析/建号复用。审计点名此处
   - 绑定为权威主键 ``(provider_id, subject)``，外部用户名仅作快照；建号一律非管理员、随机密码；
   - 并发首登致绑定冲突时回退到已存在的绑定用户。
 
-DB 协作经 ``ProvisioningDeps`` 端口注入（生产用 ``default_deps()`` 接 SsoIdentity/User/UserOper；
+DB 协作经 ``ProvisioningDeps`` 端口注入（生产用 ``default_deps()`` 接 ExternalIdentity/User/UserOper；
 单测注入内存 fake），保持本模块逻辑可独立特征测试。**本模块在 PR4 为休眠态**（无 provider 注册）。
 """
 from dataclasses import dataclass
@@ -92,16 +92,16 @@ def resolve_or_create(provider_id: str, *, subject: str, username: Optional[str]
 
 
 def default_deps() -> ProvisioningDeps:
-    """生产 ``ProvisioningDeps``：接 SsoIdentity / User / UserOper（行为对齐 helper/sso）。"""
+    """生产 ``ProvisioningDeps``：接 ExternalIdentity / User / UserOper（行为对齐 helper/sso）。"""
     import secrets
 
     from app.core.security import get_password_hash
-    from app.db.models.ssoidentity import SsoIdentity
+    from app.db.models.externalidentity import ExternalIdentity
     from app.db.models.user import User
     from app.db.user_oper import UserOper
 
     def get_binding(provider_id: str, subject: str):
-        binding = SsoIdentity.get_by_subject(db=None, provider_id=provider_id, subject=subject)
+        binding = ExternalIdentity.get_by_subject(db=None, provider_id=provider_id, subject=subject)
         return binding.user_id if binding else None
 
     def get_user_by_id(user_id):
@@ -115,10 +115,10 @@ def default_deps() -> ProvisioningDeps:
                        hashed_password=get_password_hash(secrets.token_urlsafe(16)))
 
     def list_bindings_for_user(user_id):
-        return SsoIdentity.list_by_user(db=None, user_id=user_id)
+        return ExternalIdentity.list_by_user(db=None, user_id=user_id)
 
     def create_binding(provider_id: str, subject: str, user_id, username=None):
-        SsoIdentity(provider_id=provider_id, subject=subject,
+        ExternalIdentity(provider_id=provider_id, subject=subject,
                     user_id=user_id, username=username or None).create(db=None)
 
     return ProvisioningDeps(

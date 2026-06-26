@@ -173,23 +173,36 @@ class PasswordStep:
 # --------------------------------------------------------------------------- SSO 重定向（统一为 step）
 
 
+def _default_consume_state(state: Optional[str]) -> bool:
+    """默认 CSRF state 消费（取即销毁）：接 ``app.core.auth.redirect`` 的单例 state 存储。"""
+    from app.core.auth.redirect import consume_state
+    return consume_state(state)
+
+
 class RedirectStep:
-    """把一个 SSO 重定向 ``IAuthProvider`` 统一表示为流程步骤。
+    """把一个 SSO 重定向 ``IAuthProvider`` 表示为**完整的双模流程步骤**：
 
-    重定向天然无法在单轮内同步完成，故本步推进时下发"跳转 IdP 授权页"的挑战
-    （``challenge={kind:"redirect", provider_id, authorize_url}``）；真正的回调换身份/铸票仍走既有
-    被验证过的 ``/auth/sso/{id}/callback`` → ticket → ``/auth/exchange`` 路径。如此 SSO 在**流程模型**
-    里与密码/因子并列为一种步骤（可放入 ``AnyOf([password, github-sso])`` 等组合），而不重写其机制。
+    - **无授权码**（首次被选中）：下发"跳转 IdP 授权页"的挑战
+      （``challenge={kind:"redirect", provider_id, authorize_url}``），由前端 302 用户至 IdP；
+    - **带授权码**（IdP 回调后由端点回灌的应答）：校验 CSRF ``state`` → ``fetch_identity`` 换外部身份
+      → 守护式 ``resolve_or_create`` 解析/建本地用户 → ``satisfied(user_id)``。
 
-    ``authorize_url_builder(provider) -> url`` 注入（生产侧由端点用 ``begin_login`` + 请求派生 redirect_uri 提供）。
+    如此 SSO 与密码/因子一样**完整经流程引擎驱动**（不再走 ticket/exchange 旁路），从而自动获得条件
+    MFA 与任意组合（``AnyOf([password, github])`` 等）。CSRF / 换身份 / 护栏失败均以 ``failed`` 安全收口。
+
+    协作可注入以便单测：``authorize_url_builder(provider)->url``、``consume_state(state)->bool``、
+    provisioning ``deps``（生产侧缺省接单例 state 存储与 ``default_deps``）。
     """
 
     step_kind = "redirect"
 
     def __init__(self, provider: Any, *, authorize_url_builder: Optional[Callable[[Any], str]] = None,
-                 step_id: Optional[str] = None) -> None:
+                 consume_state: Optional[Callable[[Optional[str]], bool]] = None,
+                 deps: Any = None, step_id: Optional[str] = None) -> None:
         self._provider = provider
         self._build_url = authorize_url_builder
+        self._consume_state = consume_state
+        self._deps = deps
         self.step_id = step_id or provider.provider_id
         self.priority = int(getattr(provider, "priority", 100))
 
@@ -197,6 +210,14 @@ class RedirectStep:
         return context.resolved_user_id is None
 
     def advance(self, context: AuthContext, submission: Any) -> AuthStepResult:
+        code = getattr(submission, "code", None)
+        # 无授权码：下发跳转挑战，等待 IdP 回调
+        if not code:
+            return self._issue_redirect()
+        # 带授权码：完成回调认证（CSRF → 换身份 → 守护式解析）
+        return self._complete_callback(submission, code)
+
+    def _issue_redirect(self) -> AuthStepResult:
         url = None
         if self._build_url is not None:
             try:
@@ -210,6 +231,39 @@ class RedirectStep:
             "provider_id": getattr(self._provider, "provider_id", self.step_id),
             "authorize_url": url,
         })
+
+    def _complete_callback(self, submission: Any, code: str) -> AuthStepResult:
+        from app.core.auth.identifiers import is_valid_code
+        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁）
+        consume = self._consume_state or _default_consume_state
+        if not consume(getattr(submission, "state", None)):
+            logger.warning(f"SSO 步骤 {self.step_id} 回调 state 校验失败（CSRF 或已过期）")
+            return AuthStepResult(status="failed", error="invalid_state")
+        # 2) 边界校验授权码
+        if not is_valid_code(code):
+            return AuthStepResult(status="failed", error="invalid_code")
+        # 3) 换取外部身份（提供方异常一律安全失败）
+        redirect_uri = getattr(submission, "redirect_uri", None)
+        try:
+            identity = self._provider.fetch_identity(code, redirect_uri)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"SSO 步骤 {self.step_id} 换取身份异常：{str(e)}")
+            return AuthStepResult(status="failed", error="fetch_identity_failed")
+        if not identity or not getattr(identity, "username", None):
+            return AuthStepResult(status="failed", error="fetch_identity_failed")
+        # 4) 守护式 provisioning（C-1/B-4/禁用/并发回退护栏单一来源于 resolve_or_create）
+        from app.service.auth.provisioning import default_deps, resolve_or_create
+        deps = self._deps or default_deps()
+        user = resolve_or_create(
+            self._provider.provider_id,
+            subject=(getattr(identity, "subject", "") or ""),
+            username=getattr(identity, "username", None),
+            avatar=getattr(identity, "avatar", None),
+            auto_create=bool(getattr(self._provider, "auto_create", False)),
+            deps=deps)
+        if user is None:
+            return AuthStepResult(status="failed", error="user_not_provisioned")
+        return AuthStepResult(status="satisfied", user_id=user.id)
 
 
 # --------------------------------------------------------------------------- 流程构建器

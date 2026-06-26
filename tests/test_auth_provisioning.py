@@ -9,7 +9,7 @@ from app.service.auth.provisioning import ProvisioningDeps, resolve_or_create
 
 PID = "ldap"
 SUBJ = "alice"
-LOCAL = f"sso_{PID}_{SUBJ}"
+LOCAL = f"ext_{PID}_{SUBJ}"
 
 
 def _user(uid=1, is_active=True):

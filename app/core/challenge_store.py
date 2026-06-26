@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-挑战-应答短时状态存储 —— 内存 + 锁 + TTL，仿 ``app/core/sso.py`` 的 ``SsoStateStore``。
+挑战-应答短时状态存储 —— 内存 + 锁 + TTL，仿 ``app/core/auth/redirect.py`` 的 ``RedirectStateStore``。
 
 用于"服务端先下发、用户再应答"的带外因子（SMS/Email OTP、推送等）：首次请求时由因子
 ``put`` 一条挑战状态（键如 ``f"{user_id}:{factor_id}"``），用户带码再次请求时 ``consume``/``get`` 校验。

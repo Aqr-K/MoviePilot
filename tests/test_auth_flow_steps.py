@@ -155,7 +155,7 @@ def test_build_credential_flow_or_fallback():
 
 
 # ----------------------------- SSO 统一为 step -----------------------------
-class _FakeSsoProvider:
+class _FakeRedirectProvider:
     provider_id = "github"
     provider_name = "GitHub"
     provider_icon = "mdi-github"
@@ -163,7 +163,7 @@ class _FakeSsoProvider:
 
 
 def test_redirect_step_emits_authorize_url_challenge():
-    step = RedirectStep(_FakeSsoProvider(),
+    step = RedirectStep(_FakeRedirectProvider(),
                         authorize_url_builder=lambda p: "https://idp.example.com/auth?state=xyz")
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
     _, result = flow.advance(AuthContext(flow_id="f1"), _sub(step_id="github"))
@@ -177,11 +177,112 @@ def test_redirect_step_in_or_with_password():
     # 组合：密码 OR GitHub-SSO —— 选 SSO 即下发跳转挑战（不影响密码路径）
     user = types.SimpleNamespace(id=1, is_active=True)
     pw = PasswordStep(authenticate=lambda u, p: user if p == "pw" else None)
-    sso = RedirectStep(_FakeSsoProvider(), authorize_url_builder=lambda p: "https://idp/x")
-    flow = build_credential_flow([pw, sso])
+    redirect = RedirectStep(_FakeRedirectProvider(), authorize_url_builder=lambda p: "https://idp/x")
+    flow = build_credential_flow([pw, redirect])
     _, picked_sso = flow.advance(AuthContext(flow_id="f1", username="alice"),
                                  _sub(step_id="github"))
     assert picked_sso.kind == "challenge"
     ctx, picked_pw = flow.advance(AuthContext(flow_id="f1", username="alice"),
                                   _sub(step_id="password", username="alice", password="pw"))
     assert picked_pw.kind == "success" and ctx.resolved_user_id == 1
+
+
+# ----------------------------- RedirectStep 双模（带授权码完成回调认证）-----------------------------
+class _FakeRedirectIdp:
+    """带 ``fetch_identity`` 的重定向 provider：用于驱动 RedirectStep 的"回调应答"分支。"""
+
+    provider_id = "github"
+    provider_name = "GitHub"
+    provider_icon = "mdi-github"
+    priority = 100
+    auto_create = True
+
+    def __init__(self, identity=None, raise_fetch=False):
+        self._identity = identity
+        self._raise = raise_fetch
+
+    def fetch_identity(self, code, redirect_uri):
+        if self._raise:
+            raise RuntimeError("boom")
+        return self._identity
+
+
+def _redirect_identity(subject="42", username="octo", avatar=None):
+    return types.SimpleNamespace(subject=subject, username=username, avatar=avatar)
+
+
+def _reject_deps():
+    # 未绑定 + auto_create，但同名残留账号已禁用 → resolve_or_create 触发 B-4 拒绝（返回 None）
+    return ProvisioningDeps(
+        get_binding=lambda p, s: None,
+        get_user_by_id=lambda uid: None,
+        get_user_by_name=lambda n: types.SimpleNamespace(id=3, is_active=False),
+        create_user=lambda name, avatar=None: None,
+        list_bindings_for_user=lambda uid: [],
+        create_binding=lambda **kw: None,
+    )
+
+
+def test_redirect_step_with_code_resolves_user_and_satisfies():
+    # 回调应答（带授权码）：CSRF 通过 → fetch_identity → 守护式 provisioning → satisfied(user_id)
+    user = types.SimpleNamespace(id=7, is_active=True)
+    step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity(subject="42", username="octo")),
+                        deps=_ok_deps(user), consume_state=lambda s: True)
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    ctx, result = flow.advance(AuthContext(flow_id="f1"),
+                               _sub(step_id="github", code="abc123", state="st", redirect_uri="cb"))
+    assert result.kind == "success"
+    assert ctx.resolved_user_id == 7
+
+
+def test_redirect_step_invalid_state_fails():
+    # CSRF state 校验失败 → 整步失败（绝不继续换身份）
+    step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity()),
+                        deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
+                        consume_state=lambda s: False)
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    _, result = flow.advance(AuthContext(flow_id="f1"),
+                             _sub(step_id="github", code="abc", state="bad", redirect_uri="cb"))
+    assert result.kind == "failure"
+
+
+def test_redirect_step_fetch_identity_none_fails():
+    step = RedirectStep(_FakeRedirectIdp(identity=None),
+                        deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
+                        consume_state=lambda s: True)
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    _, result = flow.advance(AuthContext(flow_id="f1"),
+                             _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
+    assert result.kind == "failure"
+
+
+def test_redirect_step_provisioning_rejected_fails():
+    # resolve_or_create 被安全护栏拒绝（返回 None）→ 整步失败
+    step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity(subject="42")),
+                        deps=_reject_deps(), consume_state=lambda s: True)
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    _, result = flow.advance(AuthContext(flow_id="f1"),
+                             _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
+    assert result.kind == "failure"
+
+
+def test_redirect_step_invalid_code_fails():
+    # 非法授权码（含换行等注入字符）在换身份前被拒（边界校验，迁移自旧 complete_login）
+    step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity()),
+                        deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
+                        consume_state=lambda s: True)
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    _, result = flow.advance(AuthContext(flow_id="f1"),
+                             _sub(step_id="github", code="bad\ncode", state="st", redirect_uri="cb"))
+    assert result.kind == "failure"
+
+
+def test_redirect_step_fetch_identity_raises_is_safe():
+    # provider.fetch_identity 抛异常 → 安全失败（不泄露、不 500；迁移自旧 complete_login）
+    step = RedirectStep(_FakeRedirectIdp(raise_fetch=True),
+                        deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
+                        consume_state=lambda s: True)
+    flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]))
+    _, result = flow.advance(AuthContext(flow_id="f1"),
+                             _sub(step_id="github", code="abc", state="st", redirect_uri="cb"))
+    assert result.kind == "failure"

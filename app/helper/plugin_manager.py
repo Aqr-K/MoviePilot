@@ -662,10 +662,10 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     except Exception as err:
                         logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
         # 注册插件经 provides_auth_providers 声明的 SSO 登录提供方（按 provider_id 单索引、owner=plugin_id）：
-        # 与各契约域不同，登录提供方不进 ModuleManager/chain，而是注册到 app.core.sso 由 SSO 端点统一驱动。
+        # 与各契约域不同，登录提供方不进 ModuleManager/chain，而是注册到 app.core.auth.redirect 由 SSO 端点统一驱动。
         provided_auth = plugin_metadata.get_plugin_provided_auth_providers(self._running_plugins, pid)
         if provided_auth:
-            from app.core.sso import register_auth_provider
+            from app.core.auth.redirect import register_auth_provider
             for plugin_id, providers in provided_auth.items():
                 for provider in providers:
                     ok, reason = register_auth_provider(provider, owner=plugin_id)
@@ -750,7 +750,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 渠道能力出错：{str(err)}")
             try:
-                from app.core.sso import unregister_auth_providers
+                from app.core.auth.redirect import unregister_auth_providers
                 unregister_auth_providers(owner=plugin_id)
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 登录提供方出错：{str(err)}")

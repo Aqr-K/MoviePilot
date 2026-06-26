@@ -106,7 +106,7 @@ def test_plugin_ldap_then_sms_challenge_end_to_end_zero_core_change():
     assert register_credential_provider(provider, owner=OWNER)[0]
     assert register_mfa_factor(sms, owner=OWNER)[0]
     try:
-        created = types.SimpleNamespace(id=500, name="sso_ldap-flow_alice", is_active=True)
+        created = types.SimpleNamespace(id=500, name="ext_ldap-flow_alice", is_active=True)
         deps = _deps(created)
         credential_steps = [PasswordStep(authenticate=lambda u, p: None)] + [
             CredentialProviderStep(p, deps=deps)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-owner-scoped 注册表基类 —— 抽取自 ``app/core/sso.py`` 的 ``AuthProviderRegistry``，
+owner-scoped 注册表基类 —— 抽取自 ``app/core/auth/redirect.py`` 的 ``AuthProviderRegistry``，
 供主认证 provider 与 MFA 因子两条车道复用，避免重复实现 register/unregister/碰撞检测逻辑。
 
 子类约定（最小面）：
