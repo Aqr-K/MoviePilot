@@ -194,6 +194,21 @@ def _default_consume_state(state: Optional[str]) -> Optional[Dict[str, Any]]:
     return consume_state(state)
 
 
+def _default_issue_state(flow_token: str, provider_id: str) -> str:
+    """默认 CSRF state 签发：接 ``app.core.auth.redirect`` 的单例 state 存储，绑定 flow_token + provider_id。"""
+    from app.core.auth.redirect import issue_state
+    return issue_state(flow_token=flow_token, provider_id=provider_id)
+
+
+def _default_flow_redirect_uri() -> str:
+    """默认统一流程 SSO 回调 redirect_uri：``/api/v1/auth/flow/callback`` 的绝对 URL（优先 APP_DOMAIN）。
+
+    生产侧端点会注入与请求 Host 一致的 builder（见 ``auth._flow_callback_uri``）以保证签发/回调一致；
+    本默认仅作未注入时的兜底（APP_DOMAIN 已配则为绝对 URL）。"""
+    from app.core.config import settings
+    return settings.MP_DOMAIN("/api/v1/auth/flow/callback") or "/api/v1/auth/flow/callback"
+
+
 class RedirectStep:
     """把一个 SSO 重定向 ``IAuthProvider`` 表示为**完整的双模流程步骤**：
 
@@ -205,18 +220,26 @@ class RedirectStep:
     如此 SSO 与密码/因子一样**完整经流程引擎驱动**（不再走 ticket/exchange 旁路），从而自动获得条件
     MFA 与任意组合（``AnyOf([password, github])`` 等）。CSRF / 换身份 / 护栏失败均以 ``failed`` 安全收口。
 
-    协作可注入以便单测：``authorize_url_builder(provider)->url``、``consume_state(state)->bool``、
-    provisioning ``deps``（生产侧缺省接单例 state 存储与 ``default_deps``）。
+    协作可注入以便单测：``issue_state(flow_token, provider_id)->str``（统一流程签发 flow 绑定 state）、
+    ``consume_state(state)->payload|None``、``redirect_uri``（``/auth/flow/callback`` 的绝对 URL，str 或
+    无参 builder）、provisioning ``deps``（生产侧缺省接单例 state 存储 / ``default_deps`` / APP_DOMAIN）。
+
+    ``authorize_url_builder(provider)->url`` 为**向后兼容**入口（旧 sso_flow / 既有单测直接给 URL，不签发
+    state）；新统一流程不传它，改由 ``provider.authorize_url(state, redirect_uri)`` 自签 flow 绑定 state。
     """
 
     step_kind = "redirect"
 
     def __init__(self, provider: Any, *, authorize_url_builder: Optional[Callable[[Any], str]] = None,
                  consume_state: Optional[Callable[[Optional[str]], Optional[Dict[str, Any]]]] = None,
+                 issue_state: Optional[Callable[[str, str], str]] = None,
+                 redirect_uri: Any = None,
                  deps: Any = None, step_id: Optional[str] = None) -> None:
         self._provider = provider
         self._build_url = authorize_url_builder
         self._consume_state = consume_state
+        self._issue_state = issue_state or _default_issue_state
+        self._redirect_uri = redirect_uri if redirect_uri is not None else _default_flow_redirect_uri
         self._deps = deps
         self.step_id = step_id or provider.provider_id
         self.priority = int(getattr(provider, "priority", 100))
@@ -228,29 +251,40 @@ class RedirectStep:
         code = getattr(submission, "code", None)
         # 无授权码：下发跳转挑战，等待 IdP 回调
         if not code:
-            return self._issue_redirect()
+            return self._issue_redirect(context)
         # 带授权码：完成回调认证（CSRF → 换身份 → 交回身份断言）
         return self._complete_callback(context, submission, code)
 
-    def _issue_redirect(self) -> AuthStepResult:
-        url = None
+    def _issue_redirect(self, context: AuthContext) -> AuthStepResult:
+        provider_id = getattr(self._provider, "provider_id", self.step_id)
         if self._build_url is not None:
+            # 向后兼容：旧构造直接给 URL 构造器（不签发 state，供旧 sso_flow / 既有单测）
             try:
                 url = self._build_url(self._provider)
             except Exception as e:  # noqa: BLE001
                 logger.error(f"SSO 步骤 {self.step_id} 构造授权 URL 异常：{str(e)}")
+                return AuthStepResult(status="pending")
+        else:
+            # 统一流程：签发与本 flow + provider 绑定的一次性 state，再由 provider 构造授权 URL
+            try:
+                state = self._issue_state(flow_token=context.flow_id, provider_id=provider_id)
+                redirect_uri = self._redirect_uri() if callable(self._redirect_uri) else self._redirect_uri
+                url = self._provider.authorize_url(state, redirect_uri)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"SSO 步骤 {self.step_id} 签发 state / 构造授权 URL 异常：{str(e)}")
+                return AuthStepResult(status="pending")
         if not url:
             return AuthStepResult(status="pending")
         return AuthStepResult(status="challenge", challenge=RedirectChallenge(
-            step_id=self.step_id,
-            provider_id=getattr(self._provider, "provider_id", self.step_id),
-            authorize_url=url))
+            step_id=self.step_id, provider_id=provider_id, authorize_url=url))
 
     def _complete_callback(self, context: AuthContext, submission: Any, code: str) -> AuthStepResult:
         from app.core.auth.identifiers import is_valid_code
-        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁），现返回载荷 dict 或 None（Task 6）
+        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁），现返回载荷 dict 或 None（Task 6）。
+        #    薄桥（/auth/flow/callback）已消费一次 state 取回 flow_token，故经 ``state_payload`` 透传预消费
+        #    载荷——本步不再二次消费（consume-once 正确性）；旧 sso_flow 路径无 state_payload → 回落 consume。
         consume = self._consume_state or _default_consume_state
-        payload = consume(getattr(submission, "state", None))
+        payload = getattr(submission, "state_payload", None) or consume(getattr(submission, "state", None))
         if not payload:
             logger.warning(f"SSO 步骤 {self.step_id} 回调 state 校验失败（CSRF 或已过期）")
             return AuthStepResult(status="failed", error="invalid_state")

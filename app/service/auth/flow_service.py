@@ -31,6 +31,32 @@ def redact_reason(error: str) -> str:
     return "auth_failed"
 
 
+class _StepTargeted:
+    """只读包装：补 ``step_id`` 以把本轮推进定向到指定步骤，其余属性委派内部 submission。
+
+    遵循不可变原则——不就地修改入参；缺失属性经 ``__getattr__`` 透传，由调用方的 ``getattr(.., default)`` 兜底。
+    """
+
+    def __init__(self, inner: Any, step_id: str) -> None:
+        self._inner = inner
+        self.step_id = step_id
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def _with_target_step(submission: Any) -> Any:
+    """begin 选择器：若 submission 带 ``flow`` 且未显式 ``step_id``，定向到该步骤（如选定某 SSO RedirectStep）。
+
+    引擎本就识别 ``submission.step_id``；此处只补全 step_id，使 ``begin {flow:"<provider>"}`` 直达该步。
+    纯密码 begin（无 flow）原样返回，不受影响。
+    """
+    flow = getattr(submission, "flow", None)
+    if not flow or getattr(submission, "step_id", None):
+        return submission
+    return _StepTargeted(submission, flow)
+
+
 class FlowService:
     """把流程引擎接成多步登录服务。"""
 
@@ -75,7 +101,7 @@ class FlowService:
         flow_id = self._store.new_flow_id()
         context = AuthContext(flow_id=flow_id, username=getattr(submission, "username", None))
         cred_flow = self._build_credential_flow()
-        context, result = cred_flow.advance(context, submission)
+        context, result = cred_flow.advance(context, _with_target_step(submission))
         return self._after_credential(context, result)
 
     def advance(self, flow_token: str, submission: Any) -> dict:

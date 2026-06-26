@@ -126,6 +126,9 @@ class FlowBeginRequest(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     grant_type: str = "password"
+    # 步骤选择器：携带某个 SSO/重定向步的 step_id（如 "github"）时，begin 直接定向到该步下发跳转挑战，
+    # 使 SSO 与密码/因子走同一条统一流程（spec §5/§6）。缺省（None）为纯密码/枚举 begin，不受影响。
+    flow: Optional[str] = None
 
 
 class FlowAdvanceRequest(BaseModel):
@@ -168,27 +171,50 @@ def _builtin_factor_steps(user) -> list:
     return [FactorStep(f) for f in builtin]
 
 
-def _build_flow_service():
-    """按全局步骤注册表（``all_auth_steps()``）实时装配多步登录服务（装配桥）。
+def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optional[Any] = None):
+    """按全局步骤注册表（``all_auth_steps()``）+ SSO 重定向注册表实时装配多步登录服务（装配桥）。
 
-    - 凭证步 = 本地 ``PasswordStep`` + 注册表中 step_kind ∈ ``_CREDENTIAL_STEP_KINDS`` 的插件步（排除冒充内建 id 者）；
+    - 凭证步 = 本地 ``PasswordStep`` + 注册表中 step_kind ∈ ``_CREDENTIAL_STEP_KINDS`` 的插件步（排除冒充内建 id 者）
+      + 旧 SSO 注册表（``redirect.registered_provider_ids()``）每个提供方包装的 ``RedirectStep``
+      （"先桥后删"：把旧 SSO 注册表桥接进统一流程；与 ``all_auth_steps()`` 的 redirect 步按 step_id 去重，
+      内建 / all_auth_steps 优先）；
     - 第二因子步 = 该用户的 per-user 内建因子 + 注册表中 step_kind=="factor" 的插件步（applies_to 自行 per-user 过滤）。
 
-    插件步统一经唯一 SPI ``provides_auth_steps()`` 注册（owner=plugin_id）；不再依赖 ``all_credential_providers()``
-    与 ``orchestrator.factors_for_user()``。复用 ``build_token_response`` 作为唯一铸 Token 来源。
+    ``issue_token`` 可注入覆盖（缺省 ``build_token_response`` 产 Token；SSO 薄桥经浏览器导航无法回 JSON，
+    故注入"铸一次性 ticket"以经 ``/auth/exchange`` 兑换）。复用同一批步骤/因子，SSO 的条件 MFA 与密码登录一致。
     """
+    from app.core.auth import redirect as sso_redirect
     from app.core.auth.flow_registry import get_auth_flow
     from app.core.auth.steps import all_auth_steps
     from app.service.auth.flow_service import FlowService
-    from app.service.auth.flow_steps import PasswordStep, make_identity_resolver
+    from app.service.auth.flow_steps import PasswordStep, RedirectStep, make_identity_resolver
     from app.service.auth.provisioning import default_deps
 
+    deps = default_deps()
     steps = all_auth_steps()
     credential_steps = [PasswordStep()] + [
         s for s in steps
         if getattr(s, "step_kind", None) in _CREDENTIAL_STEP_KINDS
         and getattr(s, "step_id", None) not in _BUILTIN_CREDENTIAL_IDS
     ]
+
+    # 桥接旧 SSO 注册表为统一流程的 RedirectStep（自签 flow 绑定 state + /auth/flow/callback 回调）；
+    # 按 step_id 去重：已在内建 / all_auth_steps 出现者优先（绝不被 SSO 覆盖，防内建受信步被影子化）。
+    existing_ids = {getattr(s, "step_id", None) for s in credential_steps}
+    for pid in sso_redirect.registered_provider_ids():
+        if pid in existing_ids:
+            continue
+        provider = sso_redirect.get_auth_provider(pid)
+        if provider is None:
+            continue
+        credential_steps.append(RedirectStep(
+            provider,
+            issue_state=sso_redirect.issue_state,
+            redirect_uri=lambda: _flow_callback_uri(request),
+            consume_state=sso_redirect.consume_state,
+            deps=deps))
+        existing_ids.add(pid)
+
     plugin_factor_steps = [s for s in steps if getattr(s, "step_kind", None) == "factor"]
 
     # 流程形状可插拔：若有插件注册了名为 "default" 的流程规格（如 N-of-M 强 MFA），用其组合策略；
@@ -201,9 +227,9 @@ def _build_flow_service():
         credential_steps=credential_steps,
         factor_steps_for=lambda user: _builtin_factor_steps(user) + plugin_factor_steps,
         load_user=lambda uid: User.get(db=None, rid=uid),
-        issue_token=build_token_response,
+        issue_token=issue_token or build_token_response,
         mfa_requirement=mfa_requirement,
-        identity_resolver=make_identity_resolver(default_deps()),
+        identity_resolver=make_identity_resolver(deps),
         trusted_step_ids=_BUILTIN_CREDENTIAL_IDS,
     )
 
@@ -249,8 +275,11 @@ def _flow_http(result: dict, username: Optional[str], request: Request) -> dict:
 @router.post("/flow/begin", summary="开始多步登录流程")
 def flow_begin(body: FlowBeginRequest, request: Request) -> dict:
     """开始一条可组合、可多轮的登录流程。返回 ``status``：success（带 token）/ mfa_required /
-    challenge / continue。后续以返回的 ``flow_token`` 调用 ``/auth/flow/advance`` 推进。"""
-    result = _build_flow_service().begin(body)
+    challenge / continue。后续以返回的 ``flow_token`` 调用 ``/auth/flow/advance`` 推进。
+
+    携带 ``flow="<provider_id>"`` 时定向到该 SSO/重定向步，直接下发跳转挑战（authorize_url），SSO 由此
+    进入与密码/因子同一条统一流程；浏览器 302 至 IdP 后经 ``/auth/flow/callback`` 薄桥回灌推进。"""
+    result = _build_flow_service(request).begin(body)
     return _flow_http(result, body.username, request)
 
 
@@ -268,6 +297,41 @@ def flow_advance(body: FlowAdvanceRequest, request: Request) -> dict:
     return _flow_http(result, body.username, request)
 
 
+@router.get("/flow/callback", summary="SSO 统一流程回调薄桥")
+def flow_callback(request: Request, code: str = "", state: str = "") -> RedirectResponse:
+    """SSO IdP 回调薄桥（"先桥后删"）：把回调应答回灌**统一流程引擎**推进，与 ``/auth/sso/{id}/callback`` 并存。
+
+    薄桥**消费一次** CSRF state 取回 flow_token（CSRF 校验单一来源），再经 ``state_payload`` 透传给
+    RedirectStep（本步不二次消费）→ 引擎完成换身份 / 解析建号 / **条件 MFA**：
+      - 成功 → 铸一次性 ticket（浏览器导航无法回 JSON Token；前端再 /auth/exchange 换 Token），``?ticket=``；
+      - 需 MFA → ``?flow_token=&sso_mfa=1``（前端复用 /auth/flow/advance 补第二因子，flow_token 非 Token，低风险）；
+      - 失败 / 未知 state → ``?sso_error=``。flow_token / Token 绝不随成功跳转入 URL。
+    """
+    from app.core.auth.redirect import consume_state
+    from app.core.auth_bridge import create_plugin_auth_ticket
+
+    payload = consume_state(state)
+    if not payload or not payload.get("flow_token"):
+        return _sso_redirect_back("/", sso_error="invalid_state")
+    provider_id = payload.get("provider_id")
+    provider = sso.get_auth_provider(provider_id)
+    if provider is None:
+        # state 合法但 provider 已卸载 → 无对应 RedirectStep 可推进，安全收口
+        return _sso_redirect_back("/", sso_error="invalid_state")
+    success_redirect = _safe_relative(getattr(provider, "success_redirect", "/"))
+
+    submission = types.SimpleNamespace(
+        code=code, state=state, state_payload=payload,
+        step_id=provider_id, redirect_uri=_flow_callback_uri(request))
+    svc = _build_flow_service(request, issue_token=lambda user: create_plugin_auth_ticket(
+        user_id=user.id, provider_id=provider_id,
+        metadata={"sso_provider": provider_id}))
+    result = svc.advance(payload["flow_token"], submission)
+    emit_auth_event(result, getattr(provider, "provider_name", provider_id),
+                    request.client.host if request.client else None)
+    return _sso_redirect_back(success_redirect, **sso_callback_query(result))
+
+
 def _sso_redirect_uri(provider_id: str, request: Request) -> str:
     """构造 OAuth redirect_uri（须与 IdP 注册回调一致）：优先 APP_DOMAIN，否则从请求 Host 推导。"""
     path = f"{_SSO_BASE}/{provider_id}/callback"
@@ -277,6 +341,24 @@ def _sso_redirect_uri(provider_id: str, request: Request) -> str:
     # 兜底：从请求 Host 推导，依赖反代正确校验 Host 头；生产应配置 APP_DOMAIN
     logger.warning("SSO 未配置 APP_DOMAIN，回退用请求 Host 推导 redirect_uri，存在 Host 头注入风险")
     return f"{str(request.base_url).rstrip('/')}{path}"
+
+
+# 统一流程 SSO 回调路径（所有 provider 共用同一回调，由 state 内绑定的 provider_id 路由）
+_FLOW_CALLBACK_PATH = "/api/v1/auth/flow/callback"
+
+
+def _flow_callback_uri(request: Optional[Request] = None) -> str:
+    """构造统一流程 SSO 回调 redirect_uri（须与签发授权时一致）：优先 APP_DOMAIN，否则从请求 Host 推导。
+
+    签发（begin）与回调（callback）须用同一 redirect_uri 才能完成 OAuth 换码；配 APP_DOMAIN 时两侧恒等，
+    未配则各自据请求 Host 推导（同域同 Host → 一致）。无 request（如非端点直调）时回退相对路径。"""
+    domain_url = settings.MP_DOMAIN(_FLOW_CALLBACK_PATH)
+    if domain_url:
+        return domain_url
+    if request is not None:
+        logger.warning("统一 SSO 回调未配置 APP_DOMAIN，回退用请求 Host 推导 redirect_uri，存在 Host 头注入风险")
+        return f"{str(request.base_url).rstrip('/')}{_FLOW_CALLBACK_PATH}"
+    return _FLOW_CALLBACK_PATH
 
 
 def _safe_relative(path: Optional[str]) -> str:
