@@ -154,7 +154,7 @@ def test_disabled_user_blocked_at_advance():
         USERS[2].is_active = True
 
 
-# ============================= S1 tests (Task 10) =============================
+# ============================= S1 tests =============================
 
 # ----------------------------- _run_mfa enrolled 子集防死锁 -----------------------------
 def test_run_mfa_enrolled_no_deadlock():
@@ -253,7 +253,7 @@ def test_validate_requirement_rejects_empty_true():
     assert not result.is_satisfied(frozenset()), "降级后不应对空 satisfied 集满足"
 
 
-# ============================= S1 tests (Task 12.5) =============================
+# ============================= S1 tests =============================
 
 # ----------------------------- CAS lost-update 防护 -----------------------------
 def test_flowservice_advance_cas_conflict():

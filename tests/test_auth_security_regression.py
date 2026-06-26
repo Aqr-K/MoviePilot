@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Task 13a: 安全回归套件 — 锁定插件化认证框架的安全不变量。
+"""安全回归套件 — 锁定插件化认证框架的安全不变量。
 
 每条测试对应一个明确的安全威胁或不变量；凡已有散件覆盖者均以明确安全名 CONSOLIDATE，
 保证任意单一测试可独立描述所捍卫的威胁。
@@ -51,7 +51,7 @@ def _ctx(flow_id="sec-test"):
 
 def test_dynamic_strong_mfa_insufficient_factors_fails_not_hangs():
     """NOf(2, ...) 策略 + 仅 1 个注册因子 → _validate_requirement 降级为 AnyOf；
-    流程终止为 success，绝不永久循环 mfa_required。(Task 10 anti-deadlock consolidation)
+    流程终止为 success，绝不永久循环 mfa_required。
 
     威胁: 若 NOf(n) 降级失败，用户即使提交了所有因子也无法完成 MFA。
     """
@@ -96,7 +96,6 @@ def test_dynamic_strong_mfa_insufficient_factors_fails_not_hangs():
 
 def test_static_flowspec_unsatisfiable_step_fails():
     """AllOf 内含 applies_to 恒 False 的步骤 → 引擎检测死局，返回 failure（不循环）。
-    (Task 5 actionable-deadlock consolidation)
 
     威胁: 若引擎不检测死局，认证永远处于 mfa_required/pending，形成 DoS 隐患。
     """
@@ -178,7 +177,6 @@ def test_runtime_enrollment_drift_terminates():
 def test_plugin_step_userid_imposter_dropped():
     """非受信步骤给出 user_id=1（含 identity_resolver 配置）→ 护栏拒绝；
     resolved_user_id 保持 None，流程 failure，resolver 未被调用。
-    (Task 5/9 owner-routing consolidation)
 
     威胁: 若护栏不阻断，恶意插件可声称任意 user_id（包括管理员 id=1）绕过认证。
     """
@@ -211,7 +209,7 @@ def test_plugin_step_userid_imposter_dropped():
 def test_builtin_id_spoof_excluded_from_assembly():
     """插件注册 step_id=='password' 的步骤时，_build_flow_service 的 _BUILTIN_CREDENTIAL_IDS
     过滤器将其排除；credential_steps 中唯一的 'password' 是内建 PasswordStep。
-    (Task 9 review #1a — frozenset 防冒充)
+    (frozenset 防冒充)
 
     威胁: 若无过滤，插件可以 step_id='password' 影子化内建步骤，使其 user_id 直接落地。
     """
@@ -252,7 +250,7 @@ def test_builtin_id_spoof_excluded_from_assembly():
 
 def test_plugin_default_flow_empty_true_cannot_bypass_mfa():
     """AllOf([]) 和 NOf(0, ...) 对空 satisfied 集即满足（空真），
-    verify_flow_spec_contract 必须拒绝注册。(Task 12 contract check)
+    verify_flow_spec_contract 必须拒绝注册。
 
     威胁: 插件以 flow_id='default' 注册空真规格，所有用户无需完成任何因子即视为 MFA 通过。
     """
@@ -284,7 +282,7 @@ def test_plugin_default_flow_empty_true_cannot_bypass_mfa():
 def test_state_cross_provider_rejected():
     """RedirectStep 回调的 state.provider_id != step.provider_id → failed / invalid_state。
     防止攻击者把为 'other-provider' 签发的 CSRF state 复用到 'github' step。
-    (Task 9 spec §4.7 cross-provider binding consolidation)
+    (spec §4.7 cross-provider binding)
 
     威胁: 若不校验 provider_id 绑定，攻击者可用任意 provider 的 state 完成任意 provider 的回调。
     """
@@ -322,7 +320,7 @@ def test_state_cross_provider_rejected():
 
 def test_concurrent_advance_lost_update_guarded():
     """并发的两个 advance 调用竞争同一 flow_token；后到者（stale version）收到 operation_conflict，
-    胜出方写入的状态不被覆盖。(Task 12.5 CAS lost-update consolidation)
+    胜出方写入的状态不被覆盖。
 
     威胁: 若无 CAS，两个并发请求可能撕裂流程状态，导致认证状态不一致。
     """
@@ -382,7 +380,6 @@ def test_concurrent_advance_lost_update_guarded():
 
 def test_reason_redaction_maps_unknown_error():
     """自由文本 / 含 IP / 内部细节 → 脱敏为 auth_failed；白名单安全代码直通。
-    (Task 10 redact_reason consolidation)
 
     威胁: 若内部错误原文泄漏到 HTTP 响应，攻击者可枚举用户名、发现 LDAP 拓扑等。
     """
@@ -415,7 +412,6 @@ def _reset_login_limiter():
 
 def test_rate_limit_returns_429(monkeypatch, _reset_login_limiter):
     """同一 (ip+username) 在短窗口内超过阈值 → HTTP 429（含友好提示）。
-    (Task 12 rate-limit consolidation)
 
     威胁: 无限流则凭证暴力穷举在技术上可行。
     """
@@ -463,7 +459,7 @@ def test_rate_limit_returns_429(monkeypatch, _reset_login_limiter):
 
 def test_observability_events_schema_parity(monkeypatch):
     """emit_auth_event 对 success / failure / mfa_required 均发送 schema 一致的事件，
-    且 failure 原因已脱敏（无内部细节）。(Task 10/12 observability consolidation)
+    且 failure 原因已脱敏（无内部细节）。
 
     威胁: 若 failure 事件携带原始错误，审计日志消费者可能二次泄漏内部信息。
     """

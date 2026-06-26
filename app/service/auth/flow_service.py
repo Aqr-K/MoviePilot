@@ -4,7 +4,7 @@
 
 为何分两阶段而非单条静态流程：MFA 是否必需取决于**已解析用户**的因子注册态（凭证通过后才知道），
 故凭证满足后再据用户装配 MFA 子流程——既复现 v2"无因子则免 MFA"语义，又支持 MFA 子流程内任意
-组合（AnyOf / NOf 强 MFA）与多轮挑战-应答。引擎与遗留单趟共享同一批步骤/因子/provider 对象。
+组合（AnyOf / NOf 强 MFA）与多轮挑战-应答。引擎与单趟同步模式共享同一批步骤/因子/provider 对象。
 
 全部协作经构造注入（FlowStore / 凭证步骤 / 因子装配 / 用户加载 / 铸 Token），本类不直接碰 db。
 返回结构化 dict：``{status: success|mfa_required|challenge|continue|failure, ...}``。
@@ -82,7 +82,7 @@ class FlowService:
 
     # ----------------------------- 对外入口 -----------------------------
     def run_sync(self, submission: Any) -> dict:
-        """单趟同步模式（兼容 /access-token 端点）：把 submission 反复喂给流程直至终态。
+        """单趟同步模式（用于 ``/access-token`` 端点）：把同一 submission 反复推进流程直至终态。
 
         同一 submission 中可同时携带 username/password/otp；引擎每轮推进一个阶段，凭证成功后
         自动进入 MFA（若有），再次喂同一 submission 完成 OTP 校验。重定向挑战无法在单趟内完成，
@@ -102,7 +102,7 @@ class FlowService:
         携带 ``flow`` 选择器（如 ``{flow:"github"}``）时，把它记入 ``context.requested_step_id``：
         opt-in 类步骤（SSO RedirectStep）仅在被显式选中时才 ``applies_to``，并跨 begin→callback→advance
         经 FlowStore 持久化（``requested_step_id`` 已纳入 to_dict/from_dict）。密码 grant 无 flow →
-        requested_step_id 为 None → 任何 RedirectStep 都不参与，密码失败如实收口为失败（而非误转挑战）。
+        requested_step_id 为 None → 任何 RedirectStep 都不参与，密码失败如实返回失败（而非误转挑战）。
         """
         flow_id = self._store.new_flow_id()
         context = AuthContext(flow_id=flow_id, username=getattr(submission, "username", None),

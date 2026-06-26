@@ -24,8 +24,8 @@ from app.log import logger
 class AuthFlow:
     """一条可推进的认证流程：步骤集合 + 组合策略。
 
-    可选关键字参数（Task 10 起由 builder 统一注入，遗留调用方无需传递）：
-      - ``identity_resolver``  : 外部身份断言 → uid 的映射函数；None = 遗留/内建模式。
+    可选关键字参数（由 builder 统一注入）：
+      - ``identity_resolver``  : 外部身份断言 → uid 的映射函数；None 表示内建模式。
       - ``trusted_step_ids``   : 允许直接携带 user_id 的内建步骤白名单；其余步骤须经 identity 端口。
       - ``max_attempts``       : 单流程最大推进轮数，超限返回 failure（默认 10）。
     """
@@ -53,11 +53,11 @@ class AuthFlow:
         return sorted(steps, key=lambda s: getattr(s, "priority", 0))
 
     def _accept_satisfied(self, ctx: AuthContext, step: Any, res: Any) -> Optional[AuthContext]:
-        """满足后的身份落地：受信内建步或遗留模式直接取 user_id；外部断言经 identity 端口。
+        """满足后的身份落地：受信内建步或内建模式直接取 user_id；外部断言经 identity 端口。
 
         返回 None 表示护栏拒绝（非受信步给出 user_id 且已配 resolver）。
         """
-        # 受信内建步，或未配置 owner 分流（identity_resolver 缺省 = 遗留模式）→ 接受 user_id
+        # 受信内建步，或未配置 owner 分流（identity_resolver 缺省 = 内建模式）→ 接受 user_id
         if res.user_id is not None and (step.step_id in self._trusted or self._resolve_identity is None):
             return ctx.with_satisfied(step.step_id).with_resolved_user(
                 res.user_id, mfa_satisfied=res.mfa_satisfied or ctx.mfa_satisfied)
@@ -111,7 +111,7 @@ class AuthFlow:
                 acted = True
                 break
             if res.status == "challenge":
-                # hasattr 守卫：过渡兼容 T8 前步骤直接返回 dict challenge（T13 去守卫）
+                # challenge 可能是带 to_dict 的对象或原始 dict，统一归一化为 dict
                 payload = res.challenge.to_dict() if hasattr(res.challenge, "to_dict") else (res.challenge or {})
                 ctx = ctx.with_challenge(step.step_id, payload)
                 return ctx, AuthResult(kind="challenge", challenge=payload or None,
@@ -142,7 +142,7 @@ class FlowStore:
     """跨请求承载流程状态：内存 + TTL + CAS 版本控制。
 
     内部以 ``{flow_id: (issued_at, data, version)}`` 存储。
-    - ``load(flow_id)``         向后兼容，返回 ``Optional[AuthContext]``（忽略版本）。
+    - ``load(flow_id)``         返回 ``Optional[AuthContext]``（忽略版本号）。
     - ``load_versioned(flow_id)`` 返回 ``(Optional[AuthContext], int)``（含版本号）。
     - ``save(context, expected_version=None)`` 返回 ``(ok, new_version)``：
         - ``expected_version`` 为 None → 无条件写入，版本递增；
@@ -191,7 +191,7 @@ class FlowStore:
             return (True, new_version)
 
     def load(self, flow_id: str) -> Optional[AuthContext]:
-        """按令牌取回流程状态（不消费，不返回版本）；不存在/过期返回 None。向后兼容。"""
+        """按令牌取回流程状态（不消费、不返回版本号）；不存在/过期返回 None。"""
         now = self._now()
         with self._lock:
             self._cleanup(now)

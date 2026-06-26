@@ -1,17 +1,12 @@
 # -*- coding: utf-8 -*-
-"""
-共享值类型（db-free 冻结数据类）。
-
-从 credentials.py / mfa_factors.py 迁入；T1–T12 期间原模块保留 re-export 以不破旧路径；
-T13 删契约时一并清掉 re-export。
-"""
+"""认证流程在各层间传递的共享值类型（db-free 冻结数据类）。"""
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
 class CredentialRequest:
-    """主认证输入（v3 自有 DTO，由编排器从 ``AuthCredentials`` 构造；插件特定字段放 ``extra``）。"""
+    """主认证输入 DTO：由编排器从 ``AuthCredentials`` 构造，插件特定字段放入 ``extra``。"""
 
     grant_type: str
     username: Optional[str] = None
@@ -31,7 +26,7 @@ class MfaUserRef:
 
 @dataclass(frozen=True)
 class MfaSubmission:
-    """用户对某次 MFA 的提交。``factor_id`` 为空表示遗留单码提交（兼容现 otp_password 路径）。"""
+    """用户对某次 MFA 的提交。``factor_id`` 为空表示单码提交（对应 ``otp_password`` 路径）。"""
 
     factor_id: Optional[str] = None
     code: Optional[str] = None

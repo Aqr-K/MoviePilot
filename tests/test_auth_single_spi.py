@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Task 12：单 SPI ``provides_auth_steps`` + 装配桥（``_build_flow_service`` 读 ``all_auth_steps``）
-+ ``verify_flow_spec_contract`` 非空真校验 —— S1 失败测试（先红后绿）。
+"""单 SPI ``provides_auth_steps`` + 装配桥（``_build_flow_service`` 读 ``all_auth_steps``）
++ ``verify_flow_spec_contract`` 非空真校验。
 """
 from app.core.auth.flow import AllOf, AnyOf, AuthStepResult, NOf, StepRef
 

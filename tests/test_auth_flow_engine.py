@@ -193,7 +193,7 @@ def test_flowstore_carries_progress_across_rounds():
     assert r2.kind == "success"
 
 
-# ----------------------------- Task 5：actionable 死局 / owner 分流 / attempts / identity 端口 -----
+# ----------------------------- actionable 死局 / owner 分流 / attempts / identity 端口 -----
 
 def test_deadlock_terminates_as_failure():
     """applies_to 恒 False 的步骤 → 凭证满足后无可推进步骤 → deadlock → failure。"""
@@ -243,7 +243,7 @@ def test_attempts_cap():
 
 
 def test_legacy_no_resolver_accepts_user_id():
-    """无 identity_resolver、step 不在 trusted → 遗留模式仍接受 user_id（保旧 builder/测试不破）。"""
+    """无 identity_resolver、step 不在 trusted → 内建模式仍接受 user_id。"""
     class _LegacyPwd:
         step_id = "password"; step_kind = "credential"; priority = 0
         def applies_to(self, c): return c.resolved_user_id is None

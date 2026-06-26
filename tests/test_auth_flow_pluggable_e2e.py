@@ -8,7 +8,7 @@
      "凭证回落 → 条件 MFA → 多轮挑战-应答 → 成功铸 Token"；
   2. 任意组合：注入 N-of-M（2/3）策略即得强 MFA 多步流程；
 均不改动任何 core/服务代码，仅复用 ``register_auth_step`` / ``all_auth_steps`` 统一步骤 SPI
-（Task 13b 迁移：原经已删的 credential/factor 三车道注册表，现统一为单 Step 模型）。
+（credential/factor 统一为单 Step 模型）。
 """
 import types
 
@@ -108,7 +108,7 @@ def test_plugin_ldap_then_sms_challenge_end_to_end_zero_core_change():
     sms = ExampleSmsFactor(enrolled_users={500}, store=store)
     created = types.SimpleNamespace(id=500, name="ext_ldap-flow_alice", is_active=True)
     deps = _deps(created)
-    # 统一 SPI（Task 13b）：把插件构件包装成 IAuthStep 后经 register_auth_step 注册到全局步骤注册表
+    # 统一 SPI：把插件构件包装成 IAuthStep 后经 register_auth_step 注册到全局步骤注册表
     #（模拟 provides_auth_steps）；凭证步与因子步统一一条注册表，由装配桥按 step_kind 切分。
     assert register_auth_step(CredentialProviderStep(provider), owner=OWNER)[0]
     assert register_auth_step(FactorStep(sms), owner=OWNER)[0]

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Task 2 — 共享值类型迁入 types.py
+共享值类型定义于 types.py
 
 验证四个冻结数据类可直接从 app.core.auth.types 导入并实例化。
 """

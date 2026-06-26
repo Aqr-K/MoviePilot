@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SSO 收敛进统一流程引擎（spec §5/§6 "先桥后删"）：
+"""SSO 收敛进统一流程引擎（spec §5/§6）：
 
 证明 SSO 不再走 ticket 旁路，而是与密码/因子**同一条** ``FlowService``：
   - ``/auth/flow/begin {flow:"<provider>"}`` → RedirectStep 自签 flow 绑定 state 并下发跳转挑战；
@@ -7,7 +7,7 @@
     透传，RedirectStep 不二次消费）→ 解析身份 → 302 回前端（成功铸 ticket，flow_token 绝不入 URL）。
 
 单元层另证：RedirectStep 收到 ``state_payload`` 时**不**二次消费；``_issue_redirect`` 签发的 state
-绑定到 ``context.flow_id``。旧 ``/sso/*`` + ``sso_flow`` 路径不在本文件触碰（另文件保持绿）。
+绑定到 ``context.flow_id``。旧 ``/sso/*`` + ``sso_flow`` 路径不在本文件触碰。
 """
 import types
 from urllib.parse import parse_qs, urlparse, urlencode

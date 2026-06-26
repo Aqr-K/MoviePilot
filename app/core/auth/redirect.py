@@ -103,7 +103,7 @@ class AuthProviderRegistry(OwnerScopedRegistry):
     """
     SSO 登录提供方注册表：按 ``provider_id`` 单索引、带 owner 以便按插件卸载。
 
-    收口为 ``OwnerScopedRegistry`` 子类（与主认证 provider / MFA 因子注册表共用 register/unregister/
+    实现为 ``OwnerScopedRegistry`` 子类（与主认证 provider / MFA 因子注册表共用 register/unregister/
     碰撞检测逻辑）；只声明取键与契约校验。无 priority 概念，故不覆写 ``_sort_key``，``all()`` 保持注册顺序。
     """
 
@@ -114,7 +114,7 @@ class AuthProviderRegistry(OwnerScopedRegistry):
         return verify_auth_provider_contract(item)
 
     def provider_ids(self) -> List[str]:
-        """已注册的 provider_id 列表（``ids()`` 的语义化别名，保持历史 API）。"""
+        """已注册的 provider_id 列表（``ids()`` 的语义化别名）。"""
         return self.ids()
 
 

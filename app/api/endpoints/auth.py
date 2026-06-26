@@ -68,7 +68,7 @@ def _registered_sso_providers() -> list[dict[str, Any]]:
 
     每个注册提供方经统一多步流程入口登录：前端 POST ``/api/v1/auth/flow/begin`` 并携带
     ``{"flow": "<provider_id>"}`` 定向到该重定向步，框架据此下发跳转挑战（authorize_url）并统一驱动
-    OAuth 回调，无需插件再声明 `/sso/{id}/login` 端点（该旧端点已删）。
+    OAuth 回调，无需插件再声明 `/sso/{id}/login` 端点。
 
     :return: SSO 认证提供方列表
     """
@@ -149,9 +149,9 @@ class FlowAdvanceRequest(BaseModel):
 
 # 装配桥按 step_kind 切分全局步骤注册表：以下种归入【凭证阶段】（解析用户），其余 "factor" 归第二因子阶段。
 _CREDENTIAL_STEP_KINDS = {"credential", "directory", "federated_direct", "redirect"}
-# 防内建 id 冒充（Task 9 review #1a）：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password"
+# 防内建 id 冒充：排除任何声称内建 id 的插件凭证步，杜绝插件以 "password"
 # 影子化/继承受信而直接落 user_id 绕过 owner 分流。内建受信步仅由本地 PasswordStep 提供。
-# frozenset（不可变）防止调用方意外 mutate 该集合来弱化 owner-routing 护栏（Task 12.5 安全加固）。
+# frozenset（不可变）防止调用方意外 mutate 该集合来弱化 owner-routing 护栏。
 _BUILTIN_CREDENTIAL_IDS: frozenset[str] = frozenset({"password"})
 
 
@@ -179,8 +179,8 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
     """按全局步骤注册表（``all_auth_steps()``）+ SSO 重定向注册表实时装配多步登录服务（装配桥）。
 
     - 凭证步 = 本地 ``PasswordStep`` + 注册表中 step_kind ∈ ``_CREDENTIAL_STEP_KINDS`` 的插件步（排除冒充内建 id 者）
-      + 旧 SSO 注册表（``redirect.registered_provider_ids()``）每个提供方包装的 ``RedirectStep``
-      （"先桥后删"：把旧 SSO 注册表桥接进统一流程；与 ``all_auth_steps()`` 的 redirect 步按 step_id 去重，
+      + SSO 注册表（``redirect.registered_provider_ids()``）每个提供方包装的 ``RedirectStep``
+      （把 SSO 注册表桥接进统一流程；与 ``all_auth_steps()`` 的 redirect 步按 step_id 去重，
       内建 / all_auth_steps 优先）；
     - 第二因子步 = 该用户的 per-user 内建因子 + 注册表中 step_kind=="factor" 的插件步（applies_to 自行 per-user 过滤）。
 
@@ -198,8 +198,8 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
     deps = default_deps()
     steps = all_auth_steps()
 
-    # 受信 id 集先于过滤器计算：「可直接携 user_id」的内建 id == 「插件不得冒充」的排除 id」——由构造保证，
-    # 不再依赖追加顺序兜底。frozenset 来源 _BUILTIN_CREDENTIAL_IDS 防意外 mutate（Task 12.5 加固）。
+    # 受信 id 集先于过滤器计算：「可直接携 user_id」的内建 id == 「插件不得冒充」的排除 id，由构造保证二者一致。
+    # frozenset 来源 _BUILTIN_CREDENTIAL_IDS 防意外 mutate。
     trusted_step_ids = _BUILTIN_CREDENTIAL_IDS | ({"auxiliary"} if settings.AUXILIARY_AUTH_ENABLE else set())
 
     credential_steps = [PasswordStep()]
@@ -222,13 +222,13 @@ def _build_flow_service(request: Optional[Request] = None, *, issue_token: Optio
     if settings.AUXILIARY_AUTH_ENABLE:
         credential_steps.append(AuxiliaryCredentialStep())
 
-    # 桥接旧 SSO 注册表为统一流程的 RedirectStep（自签 flow 绑定 state + /auth/flow/callback 回调）；
+    # 桥接 SSO 注册表为统一流程的 RedirectStep（自签 flow 绑定 state + /auth/flow/callback 回调）；
     # 按 step_id 去重：已在内建 / all_auth_steps 出现者优先（绝不被 SSO 覆盖，防内建受信步被影子化）。
     existing_ids = {getattr(s, "step_id", None) for s in credential_steps}
     for pid in sso_redirect.registered_provider_ids():
         if pid in existing_ids:
             # all_auth_steps() 的某凭证步已占用此 step_id → 该 SSO provider 被影子化、不纳入统一流程，
-            # 告警以便运维侦测命名冲突（T12c-1 review Minor #3）。
+            # 告警以便运维侦测命名冲突。
             logger.warning(
                 f"SSO provider '{pid}' 被同名凭证步影子化，未纳入统一登录流程；请检查 step_id 冲突")
             continue
@@ -387,7 +387,7 @@ def flow_callback(request: Request, code: str = "", state: str = "") -> Redirect
     from app.core.auth_bridge import create_plugin_auth_ticket
 
     # IdP 拒绝/取消（?error=...，无 code）→ 快速失败：不消费 state（任其 TTL 过期）、不推进流程，
-    # 杜绝空 code 在引擎里铸新孤儿 state churn 状态存储（T12c-1 review Minor #1/#2）。
+    # 杜绝空 code 在引擎里铸新孤儿 state、churn 状态存储。
     if not code:
         return _sso_redirect_back("/", sso_error="invalid_code")
 
@@ -397,7 +397,7 @@ def flow_callback(request: Request, code: str = "", state: str = "") -> Redirect
     provider_id = payload.get("provider_id")
     provider = sso.get_auth_provider(provider_id)
     if provider is None:
-        # state 合法但 provider 已卸载 → 无对应 RedirectStep 可推进，安全收口
+        # state 合法但 provider 已卸载 → 无对应 RedirectStep 可推进，安全返回失败
         return _sso_redirect_back("/", sso_error="invalid_state")
     success_redirect = _safe_relative(getattr(provider, "success_redirect", "/"))
 

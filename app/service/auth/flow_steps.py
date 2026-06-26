@@ -196,7 +196,7 @@ class AuxiliaryCredentialStep:
 
     **受信内建步**：直接返回 ``user_id``（其建号经 ``_process_auth_success`` 走媒体服务器专属逻辑，
     而非统一的 ``resolve_or_create`` 护栏），故须由装配桥纳入 ``trusted_step_ids`` 方能被引擎接受。
-    任何异常一律安全失败（回落/收口），绝不拖垮流程。
+    任何异常一律捕获并安全失败，绝不拖垮流程。
     """
 
     step_id = "auxiliary"
@@ -227,7 +227,7 @@ class AuxiliaryCredentialStep:
             )
             authenticate = self._authenticate or self._default_authenticate
             ok, result = authenticate(credentials)
-        except Exception as e:  # noqa: BLE001 —— 辅助认证异常一律安全失败（回落/收口）
+        except Exception as e:  # noqa: BLE001 —— 辅助认证异常一律捕获并安全失败
             logger.error(f"辅助认证步骤异常：{str(e)}")
             return AuthStepResult(status="failed", error="辅助认证异常")
         if not ok:
@@ -250,7 +250,7 @@ class AuxiliaryCredentialStep:
 
 def _default_consume_state(state: Optional[str]) -> Optional[Dict[str, Any]]:
     """默认 CSRF state 消费（取即销毁）：接 ``app.core.auth.redirect`` 的单例 state 存储；
-    现返回载荷 dict（``{flow_token, provider_id}``）或 None（Task 6）。"""
+    返回载荷 dict（``{flow_token, provider_id}``）或 None。"""
     from app.core.auth.redirect import consume_state
     return consume_state(state)
 
@@ -279,14 +279,14 @@ class RedirectStep:
       → 守护式 ``resolve_or_create`` 解析/建本地用户 → ``satisfied(user_id)``。
 
     如此 SSO 与密码/因子一样**完整经流程引擎驱动**（不再走 ticket/exchange 旁路），从而自动获得条件
-    MFA 与任意组合（``AnyOf([password, github])`` 等）。CSRF / 换身份 / 护栏失败均以 ``failed`` 安全收口。
+    MFA 与任意组合（``AnyOf([password, github])`` 等）。CSRF / 换身份 / 护栏失败均返回 ``failed``。
 
     协作可注入以便单测：``issue_state(flow_token, provider_id)->str``（统一流程签发 flow 绑定 state）、
     ``consume_state(state)->payload|None``、``redirect_uri``（``/auth/flow/callback`` 的绝对 URL，str 或
     无参 builder）、provisioning ``deps``（生产侧缺省接单例 state 存储 / ``default_deps`` / APP_DOMAIN）。
 
-    ``authorize_url_builder(provider)->url`` 为**向后兼容**入口（旧 sso_flow / 既有单测直接给 URL，不签发
-    state）；新统一流程不传它，改由 ``provider.authorize_url(state, redirect_uri)`` 自签 flow 绑定 state。
+    ``authorize_url_builder(provider)->url`` 为可选注入：传入时直接用它构造授权 URL（不签发 state）；
+    不传时（默认）由 ``provider.authorize_url(state, redirect_uri)`` 自签 flow 绑定的 state。
     """
 
     step_kind = "redirect"
@@ -315,7 +315,7 @@ class RedirectStep:
         code = getattr(submission, "code", None)
         if not code:
             # 回调上下文（带 state / state_payload 却无 code）= IdP 拒绝/取消（?error=...，无 code）：
-            # 快速失败，绝不再 _issue_redirect 铸新孤儿 state（T12c-1 review Minor #1/#2）。
+            # 快速失败，不再调用 _issue_redirect 铸新的孤儿 state。
             # 纯发起态（无 state、无 code）才下发跳转挑战，等待 IdP 回调。
             if getattr(submission, "state", None) or getattr(submission, "state_payload", None):
                 return AuthStepResult(status="failed", error="invalid_code")
@@ -326,7 +326,7 @@ class RedirectStep:
     def _issue_redirect(self, context: AuthContext) -> AuthStepResult:
         provider_id = getattr(self._provider, "provider_id", self.step_id)
         if self._build_url is not None:
-            # 向后兼容：旧构造直接给 URL 构造器（不签发 state，供旧 sso_flow / 既有单测）
+            # 注入了 URL 构造器时：直接用它构造授权 URL，不签发 state
             try:
                 url = self._build_url(self._provider)
             except Exception as e:  # noqa: BLE001
@@ -348,9 +348,9 @@ class RedirectStep:
 
     def _complete_callback(self, context: AuthContext, submission: Any, code: str) -> AuthStepResult:
         from app.core.auth.identifiers import is_valid_code
-        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁），现返回载荷 dict 或 None（Task 6）。
+        # 1) CSRF：state 必须本服务签发、未过期、未用过（取即销毁），返回载荷 dict 或 None。
         #    薄桥（/auth/flow/callback）已消费一次 state 取回 flow_token，故经 ``state_payload`` 透传预消费
-        #    载荷——本步不再二次消费（consume-once 正确性）；旧 sso_flow 路径无 state_payload → 回落 consume。
+        #    载荷——本步不再二次消费（保证 consume-once）；无 state_payload 时回落到直接 consume。
         consume = self._consume_state or _default_consume_state
         payload = getattr(submission, "state_payload", None) or consume(getattr(submission, "state", None))
         if not payload:

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-认证标识符的集中校验与派生（PR8 收口）。
+认证标识符的集中校验与派生。
 
 把原本散落在 ``sso.py`` / ``credentials.py`` / ``mfa_factors.py`` / ``helper/sso.py`` /
 ``provisioning.py`` 五处、逐字重复的正则与命名前缀收敛到唯一来源，杜绝拷贝漂移。
 
-约定（与历史完全一致，仅去重不改语义）：
+约定：
   - ``IDENTIFIER_RE``：provider_id / factor_id —— 字母数字与连字符，1–32 位。禁下划线等分隔符，
     因 provider_id 会进入本地用户名 ``ext_{provider_id}_{subject}`` 与回调 URL 路径片段，
     禁分隔符可数学上杜绝跨提供方撞名与路径注入。
@@ -19,7 +19,7 @@ from typing import Any
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9\-]{1,32}$")
 SUBJECT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._\-]{0,62}[A-Za-z0-9])?$")
 CODE_RE = re.compile(r"^[A-Za-z0-9_\-]{1,256}$")
-# 外部托管账号的本地用户名前缀。取 "ext_"（external）而非旧的 "sso_"：该前缀经
+# 外部托管账号的本地用户名前缀。取 "ext_"（external）而非 "sso_"：该前缀经
 # provisioning.resolve_or_create 落到**所有外部来源**建号——既含 SSO 重定向车道
 # （IAuthProvider），也含 ICredentialProvider 直验车道（LDAP/AD/RADIUS 等，并非 SSO），
 # 故用更宽泛的 "ext_" 表「外部身份」，与 ExternalIdentity 绑定表同义对齐。

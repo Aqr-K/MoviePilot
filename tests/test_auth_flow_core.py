@@ -122,7 +122,7 @@ def test_requested_step_id_preserved_across_with_copies():
     assert c.with_attempt().requested_step_id == "github"
 
 
-# ----------------------------- Task 3: IdentityAssertion + typed challenge -----
+# ----------------------------- IdentityAssertion + typed challenge -----
 def test_result_identity():
     r = AuthStepResult(status="satisfied", identity=IdentityAssertion(provider_id="ldap", subject="uid=a", username="a"))
     assert r.user_id is None and r.identity.subject == "uid=a"

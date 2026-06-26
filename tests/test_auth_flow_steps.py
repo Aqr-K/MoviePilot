@@ -23,7 +23,7 @@ from app.service.auth.provisioning import ProvisioningDeps
 
 
 def _state_ok(provider_id="github"):
-    """新版 consume_state 契约（Task 6）：返回载荷 dict（含 provider_id），而非旧的 bool。"""
+    """consume_state 契约：返回载荷 dict（含 provider_id）。"""
     return lambda s: {"provider_id": provider_id}
 
 
@@ -116,7 +116,7 @@ def _ok_deps(user_obj):
 
 
 def test_credential_provider_step_success_resolves_user():
-    # 迁移（Task 9）：凭证步现交回 identity，由引擎注入的 resolver 落地 user_id（resolver 注入式迁移）
+    # 凭证步交回 identity，由引擎注入的 resolver 落地 user_id
     user = types.SimpleNamespace(id=500, is_active=True)
     step = CredentialProviderStep(_FakeLdap({"alice": "secret"}))
     flow = AuthFlow({"ldap": step}, AnyOf([StepRef("ldap")]),
@@ -165,7 +165,7 @@ def test_build_credential_flow_or_fallback():
     user2 = types.SimpleNamespace(id=2, is_active=True)
     pw = PasswordStep(authenticate=lambda u, p: user1 if p == "local" else None)
     ldap = CredentialProviderStep(_FakeLdap({"alice": "dir"}))
-    # 迁移（Task 9）：注入 resolver 把目录 provider 交回的 identity 落地为 user2（resolver 注入式迁移）
+    # 注入 resolver 把目录 provider 交回的 identity 落地为 user2
     flow = build_credential_flow([pw, ldap], identity_resolver=lambda a: 2)
     ctx, result = flow.advance(AuthContext(flow_id="f1", username="alice"),
                                _sub(grant_type="password", username="alice", password="dir"))
@@ -248,7 +248,7 @@ def _reject_deps():
 
 def test_redirect_step_with_code_resolves_user_and_satisfies():
     # 回调应答（带授权码）：CSRF 通过 → fetch_identity → 交回 identity → 引擎 resolver 落地 user_id
-    # 迁移（Task 9）：consume_state 改返载荷 dict；resolver 注入式落地 user 7
+    # consume_state 返载荷 dict；resolver 注入式落地 user 7
     step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity(subject="42", username="octo")),
                         consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]),
@@ -271,7 +271,7 @@ def test_redirect_step_invalid_state_fails():
 
 
 def test_redirect_step_fetch_identity_none_fails():
-    # 迁移（Task 9）：consume_state 返载荷 dict，使本例真正走到 fetch_identity=None 分支
+    # consume_state 返载荷 dict，使本例真正走到 fetch_identity=None 分支
     step = RedirectStep(_FakeRedirectIdp(identity=None), consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]), identity_resolver=lambda a: 7)
     _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
@@ -280,7 +280,7 @@ def test_redirect_step_fetch_identity_none_fails():
 
 
 def test_redirect_step_provisioning_rejected_fails():
-    # 迁移（Task 9）：护栏单一来源仍是 resolve_or_create，但现经引擎注入的 resolver 落地——
+    # 护栏单一来源是 resolve_or_create，经引擎注入的 resolver 落地——
     # identity → make_identity_resolver(_reject_deps) → B-4 拒绝返回 None → 引擎拒绝落地 → 整步失败。
     # 关键安全不变量：未通过护栏的外部身份**绝不**能落得 user_id。
     step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity(subject="42")),
@@ -294,8 +294,8 @@ def test_redirect_step_provisioning_rejected_fails():
 
 
 def test_redirect_step_invalid_code_fails():
-    # 非法授权码（含换行等注入字符）在换身份前被拒（边界校验，迁移自旧 complete_login）
-    # 迁移（Task 9）：consume_state 返载荷 dict，使本例真正走到 is_valid_code 边界校验分支
+    # 非法授权码（含换行等注入字符）在换身份前被拒（边界校验）
+    # consume_state 返载荷 dict，使本例真正走到 is_valid_code 边界校验分支
     step = RedirectStep(_FakeRedirectIdp(identity=_redirect_identity()), consume_state=_state_ok())
     flow = AuthFlow({"github": step}, AnyOf([StepRef("github")]), identity_resolver=lambda a: 7)
     _, result = flow.advance(AuthContext(flow_id="f1", requested_step_id="github"),
@@ -304,7 +304,7 @@ def test_redirect_step_invalid_code_fails():
 
 
 def test_redirect_step_fetch_identity_raises_is_safe():
-    # provider.fetch_identity 抛异常 → 安全失败（不泄露、不 500；迁移自旧 complete_login）
+    # provider.fetch_identity 抛异常 → 安全失败（不泄露、不 500）
     step = RedirectStep(_FakeRedirectIdp(raise_fetch=True),
                         deps=_ok_deps(types.SimpleNamespace(id=7, is_active=True)),
                         consume_state=_state_ok())
@@ -314,7 +314,7 @@ def test_redirect_step_fetch_identity_raises_is_safe():
     assert result.kind == "failure"
 
 
-# ----------------------------- Task 9: 直验/SSO Step 交回 IdentityAssertion + resolver -----------------------------
+# ----------------------------- 直验/SSO Step 交回 IdentityAssertion + resolver -----------------------------
 def test_cred_step_identity():
     # 直验 Step 成功 → 交回 IdentityAssertion（user_id=None，**不**在步内自调 resolve_or_create）
     step = CredentialProviderStep(_FakeLdap({"alice": "secret"}))
@@ -351,7 +351,7 @@ def test_make_identity_resolver_none_when_guard_rejects(monkeypatch):
     assert resolver(IdentityAssertion(provider_id="ldap", subject="s")) is None
 
 
-# ----------------------------- M1: 黄金矩阵双注册（OTP+PassKey）优先级守护 -----------------------------
+# ----------------------------- 黄金矩阵双注册（OTP+PassKey）优先级守护 -----------------------------
 def _otp_factor_step(good_code="123456"):
     return FactorStep(OtpFactor(is_enrolled=lambda ref: True,
                                 verify=lambda ref, code: code == good_code))
