@@ -251,3 +251,14 @@ def test_legacy_no_resolver_accepts_user_id():
     f = AuthFlow({"password": _LegacyPwd()}, StepRef("password"))  # 无 trusted、无 resolver
     c, r = f.advance(AuthContext(flow_id="lg"), object())
     assert r.kind == "success" and c.resolved_user_id == 7
+
+
+def test_step_advance_exception_is_failsafe():
+    """抛异常的 step 不得让引擎崩溃；应作 failed 处理→流程 failure（spec 不变量⑤）。"""
+    class _Boom:
+        step_id = "boom"; step_kind = "credential"; priority = 0
+        def applies_to(self, c): return True
+        def advance(self, c, s): raise RuntimeError("boom")
+    f = AuthFlow({"boom": _Boom()}, StepRef("boom"))
+    c, r = f.advance(AuthContext(flow_id="bx"), object())
+    assert r.kind == "failure"   # 不抛、不崩溃

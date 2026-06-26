@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 from app.core.auth.flow import AuthContext, AuthRequirement
 from app.core.auth.outcome import AuthResult
 from app.core.challenge_store import ChallengeStore
+from app.log import logger
 
 
 class AuthFlow:
@@ -92,7 +93,13 @@ class AuthFlow:
         any_failed = False
         last_err: Optional[str] = None
         for step in todo:
-            res = step.advance(ctx, submission)
+            try:
+                res = step.advance(ctx, submission)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("AuthFlow: step %r raised unexpectedly — treating as failed: %s", step.step_id, exc)
+                any_failed = True
+                last_err = f"认证步骤内部错误: {exc}"
+                continue
             if res.status == "satisfied":
                 nc = self._accept_satisfied(ctx, step, res)
                 if nc is None:
