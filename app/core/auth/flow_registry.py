@@ -2,8 +2,8 @@
 """
 命名认证流程注册表（db-free）—— 让插件声明**自定义流程形状**（组合策略），而不止于贡献单个步骤。
 
-步骤（凭证 provider / MFA 因子）已可经 ``provides_credential_providers`` / ``provides_mfa_factors``
-插拔；本注册表补上"流程形状"维度：插件交出一个 ``IFlowSpec``（``flow_id`` + ``mfa_requirement``），
+认证步骤（凭证 / MFA 因子 / 重定向）已可经统一 ``provides_auth_steps`` SPI 插拔；本注册表补上
+"流程形状"维度：插件交出一个 ``IFlowSpec``（``flow_id`` + ``mfa_requirement``），
 即可声明如 2-of-3 强 MFA、AllOf 强制多因子等组合策略。上层（端点）按 ``flow_id`` 选用对应策略。
 
 沿用统一注册纪律（owner-scoped、契约校验、flow_id 碰撞检测，见 ``registry.py``）。

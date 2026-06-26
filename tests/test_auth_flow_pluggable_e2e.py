@@ -1,27 +1,25 @@
 # -*- coding: utf-8 -*-
-"""PR12：多步状态机端到端证明 —— 插件件经**现有 SPI** 注册后，零 core 改动地驱动多步登录流程。
+"""多步状态机端到端证明 —— 插件件经**统一 SPI**（``register_auth_step`` / ``provides_auth_steps``）
+注册后，零 core 改动地驱动多步登录流程。
 
 证明：
-  1. 插件目录 provider（LDAP 类）+ 插件 SMS 挑战因子注册到全局注册表后，FlowService 端到端
-     完成"凭证回落 → 条件 MFA → 多轮挑战-应答 → 成功铸 Token"；
+  1. 插件目录 provider（LDAP 类，包装为 ``CredentialProviderStep``）+ 插件 SMS 挑战因子（包装为
+     ``FactorStep``）经 ``register_auth_step`` 注册到**全局步骤注册表**后，FlowService 端到端完成
+     "凭证回落 → 条件 MFA → 多轮挑战-应答 → 成功铸 Token"；
   2. 任意组合：注入 N-of-M（2/3）策略即得强 MFA 多步流程；
-均不改动任何 core/服务代码，仅复用 register_credential_provider / register_mfa_factor 公共 SPI。
+均不改动任何 core/服务代码，仅复用 ``register_auth_step`` / ``all_auth_steps`` 统一步骤 SPI
+（Task 13b 迁移：原经已删的 credential/factor 三车道注册表，现统一为单 Step 模型）。
 """
 import types
 
-from app.core.auth.credentials import (
-    all_credential_providers,
-    register_credential_provider,
-    unregister_credential_providers,
-)
 from app.core.auth.flow import NOf, StepRef
-from app.core.auth.mfa_factors import (
-    MfaChallengeHint,
-    all_mfa_factors,
-    register_mfa_factor,
-    unregister_mfa_factors,
-)
 from app.core.auth.outcome import CredentialOutcome, MfaFactorResult
+from app.core.auth.steps import (
+    all_auth_steps,
+    register_auth_step,
+    unregister_auth_steps,
+)
+from app.core.auth.types import MfaChallengeHint
 from app.core.challenge_store import ChallengeStore
 from app.service.auth.builtin_factors import OtpFactor
 from app.service.auth.flow_engine import FlowStore
@@ -108,26 +106,30 @@ def test_plugin_ldap_then_sms_challenge_end_to_end_zero_core_change():
     provider = ExampleLdapProvider({"alice": "secret"})
     store = ChallengeStore()
     sms = ExampleSmsFactor(enrolled_users={500}, store=store)
-    assert register_credential_provider(provider, owner=OWNER)[0]
-    assert register_mfa_factor(sms, owner=OWNER)[0]
+    created = types.SimpleNamespace(id=500, name="ext_ldap-flow_alice", is_active=True)
+    deps = _deps(created)
+    # 统一 SPI（Task 13b）：把插件构件包装成 IAuthStep 后经 register_auth_step 注册到全局步骤注册表
+    #（模拟 provides_auth_steps）；凭证步与因子步统一一条注册表，由装配桥按 step_kind 切分。
+    assert register_auth_step(CredentialProviderStep(provider), owner=OWNER)[0]
+    assert register_auth_step(FactorStep(sms), owner=OWNER)[0]
     try:
-        created = types.SimpleNamespace(id=500, name="ext_ldap-flow_alice", is_active=True)
-        deps = _deps(created)
+        steps = all_auth_steps()
         credential_steps = [PasswordStep(authenticate=lambda u, p: None)] + [
-            CredentialProviderStep(p, deps=deps)
-            for p in all_credential_providers() if p.provider_id == "ldap-flow"
+            s for s in steps
+            if getattr(s, "step_kind", None) == "credential" and s.step_id == "ldap-flow"
         ]
+        factor_steps = [s for s in steps
+                        if getattr(s, "step_kind", None) == "factor" and s.step_id == "sms-flow"]
         svc = FlowService(
             flow_store=FlowStore(),
             credential_steps=credential_steps,
-            factor_steps_for=lambda user: [FactorStep(f) for f in all_mfa_factors()
-                                           if f.factor_id == "sms-flow"],
+            factor_steps_for=lambda user: factor_steps,
             load_user=lambda uid: created if uid == 500 else None,
             issue_token=lambda user: {"access_token": "TK", "user_id": user.id},
-            # 迁移（Task 9）：插件 LDAP 凭证步现交回 identity，须经引擎注入的 resolver 落地（resolver 注入式迁移）
+            # 插件 LDAP 凭证步交回 identity，须经引擎注入的 resolver 落地（resolver 注入式解析）
             identity_resolver=make_identity_resolver(deps),
         )
-        # 1) 凭证：本地密码不符 → 回落插件 LDAP provider → 解析建号 → 需 SMS
+        # 1) 凭证：本地密码不符 → 回落插件 LDAP 凭证步 → 解析建号 → 需 SMS
         out1 = svc.begin(_sub(grant_type="password", username="alice", password="secret"))
         assert out1["status"] == "mfa_required"
         assert out1["factors_available"] == ["sms-flow"]
@@ -141,11 +143,10 @@ def test_plugin_ldap_then_sms_challenge_end_to_end_zero_core_change():
         assert out3["status"] == "success"
         assert out3["token"]["access_token"] == "TK"
     finally:
-        unregister_credential_providers(owner=OWNER)
-        unregister_mfa_factors(owner=OWNER)
-    # 卸载干净
-    assert all(p.provider_id != "ldap-flow" for p in all_credential_providers())
-    assert all(f.factor_id != "sms-flow" for f in all_mfa_factors())
+        unregister_auth_steps(owner=OWNER)
+    # 卸载干净（统一步骤注册表中不再残留插件凭证步 / 因子步）
+    assert all(s.step_id != "ldap-flow" for s in all_auth_steps())
+    assert all(s.step_id != "sms-flow" for s in all_auth_steps())
 
 
 # ----------------------------- 端到端：N-of-M（2/3）强 MFA -----------------------------

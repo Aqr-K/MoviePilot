@@ -672,26 +672,6 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     if not ok:
                         logger.warning(f"注册插件 {plugin_id} 登录提供方 "
                                        f"{getattr(provider, 'provider_id', provider)} 失败：{reason}")
-        # 注册插件经 provides_credential_providers 声明的主认证 provider（非重定向直验，owner=plugin_id）：
-        provided_cred = plugin_metadata.get_plugin_provided_credential_providers(self._running_plugins, pid)
-        if provided_cred:
-            from app.core.auth.credentials import register_credential_provider
-            for plugin_id, providers in provided_cred.items():
-                for provider in providers:
-                    ok, reason = register_credential_provider(provider, owner=plugin_id)
-                    if not ok:
-                        logger.warning(f"注册插件 {plugin_id} 主认证提供方 "
-                                       f"{getattr(provider, 'provider_id', provider)} 失败：{reason}")
-        # 注册插件经 provides_mfa_factors 声明的 MFA 第二因子（owner=plugin_id）：
-        provided_factors = plugin_metadata.get_plugin_provided_mfa_factors(self._running_plugins, pid)
-        if provided_factors:
-            from app.core.auth.mfa_factors import register_mfa_factor
-            for plugin_id, factors in provided_factors.items():
-                for factor in factors:
-                    ok, reason = register_mfa_factor(factor, owner=plugin_id)
-                    if not ok:
-                        logger.warning(f"注册插件 {plugin_id} MFA 因子 "
-                                       f"{getattr(factor, 'factor_id', factor)} 失败：{reason}")
         # 注册插件经 provides_auth_flows 声明的自定义认证流程规格（owner=plugin_id）：
         provided_flows = plugin_metadata.get_plugin_provided_auth_flows(self._running_plugins, pid)
         if provided_flows:
@@ -703,7 +683,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                         logger.warning(f"注册插件 {plugin_id} 认证流程 "
                                        f"{getattr(spec, 'flow_id', spec)} 失败：{reason}")
         # 注册插件经 provides_auth_steps 声明的【统一】认证步骤（owner=plugin_id，进全局步骤注册表）：
-        # 单 SPI 收口——装配桥（_build_flow_service）按 step_kind 切分后入多步流程；与上方三旧 SPI 并存（先桥后删）。
+        # 单 SPI 收口——装配桥（_build_flow_service）按 step_kind 切分后入多步流程。
         provided_steps = plugin_metadata.get_plugin_provided_auth_steps(self._running_plugins, pid)
         if provided_steps:
             from app.core.auth.steps import register_auth_step
@@ -766,12 +746,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             except Exception as err:
                 logger.error(f"卸载插件 {plugin_id} 登录提供方出错：{str(err)}")
             try:
-                from app.core.auth.credentials import unregister_credential_providers
                 from app.core.auth.flow_registry import unregister_auth_flows
-                from app.core.auth.mfa_factors import unregister_mfa_factors
                 from app.core.auth.steps import unregister_auth_steps
-                unregister_credential_providers(owner=plugin_id)
-                unregister_mfa_factors(owner=plugin_id)
                 unregister_auth_flows(owner=plugin_id)
                 unregister_auth_steps(owner=plugin_id)
             except Exception as err:

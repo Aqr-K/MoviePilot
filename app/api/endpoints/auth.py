@@ -23,8 +23,8 @@ from app.db.models.user import User
 
 router = APIRouter()
 
-# SSO 端点前缀（auth.router 挂载于 /api/v1/auth）
-_SSO_BASE = "/api/v1/auth/sso"
+# 统一登录流程入口（所有 SSO/重定向提供方经此进入与密码/因子同一条多步流程）
+_FLOW_BEGIN_PATH = "/api/v1/auth/flow/begin"
 
 # 多步登录流程状态存储（进程级，跨请求承载未完成的流程；重启失效=重新登录，可接受）
 _FLOW_STORE = FlowStore()
@@ -65,7 +65,9 @@ def _registered_sso_providers() -> list[dict[str, Any]]:
     """
     由 app.core.auth.redirect 注册表（provides_auth_providers）派生登录入口摘要。
 
-    每个注册提供方自动获得 `/auth/sso/{id}/login` 入口（框架统一驱动 OAuth），无需插件再声明端点。
+    每个注册提供方经统一多步流程入口登录：前端 POST ``/api/v1/auth/flow/begin`` 并携带
+    ``{"flow": "<provider_id>"}`` 定向到该重定向步，框架据此下发跳转挑战（authorize_url）并统一驱动
+    OAuth 回调，无需插件再声明 `/sso/{id}/login` 端点（该旧端点已删）。
 
     :return: SSO 认证提供方列表
     """
@@ -80,7 +82,9 @@ def _registered_sso_providers() -> list[dict[str, Any]]:
             "name": getattr(provider, "provider_name", pid),
             "icon": getattr(provider, "provider_icon", ""),
             "method": "redirect",
-            "login_url": f"{_SSO_BASE}/{pid}/login",
+            # 统一流程入口：POST _FLOW_BEGIN_PATH，body 携带 {"flow": pid} 选中该重定向步
+            "login_url": _FLOW_BEGIN_PATH,
+            "flow": pid,
             "enabled": bool(getattr(provider, "enabled", True)),
         })
     return items
@@ -152,8 +156,8 @@ _BUILTIN_CREDENTIAL_IDS: frozenset[str] = frozenset({"password"})
 def _builtin_factor_steps(user) -> list:
     """该用户的 per-user 内建第二因子（OTP/PassKey，经闭包绑定到本 user）包装为 ``FactorStep``。
 
-    与 ``orchestrator.factors_for_user`` 的内建部分同构，但**不含** ``all_mfa_factors()``——插件因子改由
-    ``all_auth_steps()`` 的 "factor" 种步骤注入，故此处只构内建，避免与注册表里的插件因子双计。
+    只构内建因子——插件因子改由 ``all_auth_steps()`` 的 "factor" 种步骤注入，故此处不含插件因子，
+    避免与注册表里的插件因子双计。
     内建 OTP/PassKey 天然 per-user（闭包绑定 user.otp_secret/passkey），无法做全局注册表步，故保留内建装配。
     """
     from app.db.models.passkey import PassKey

@@ -323,29 +323,6 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
-    def provides_credential_providers(self) -> List[Any]:
-        """
-        声明本插件向登录【新增】的主认证 provider（非重定向直验：LDAP/AD/RADIUS/OIDC-ROPC 等）。
-        返回实现 app.core.auth.credentials.ICredentialProvider 契约的【实例】列表，每个含
-        provider_id / factor_kind / priority + applies_to(req) / verify_credentials(req)。
-        框架在本地密码失败后按 priority 询问，首个 success 经守护式 provisioning 解析/建本地用户；
-        与 SSO 重定向车道（provides_auth_providers）分工互补。默认不新增。
-
-        [LdapCredentialProvider(...), ...]
-        """
-        return []
-
-    def provides_mfa_factors(self) -> List[Any]:
-        """
-        声明本插件向登录【新增】的 MFA 第二因子（SMS/Email OTP、备份码、推送、风控等）。
-        返回实现 app.core.auth.mfa_factors.IMfaFactor 契约的【实例】列表，每个含 factor_id /
-        factor_kind / display_name / priority + is_enrolled / verify / challenge_hint。
-        框架在二次验证阶段把它们与内建 OTP/PassKey 因子按 priority 合并评估。默认不新增。
-
-        [SmsOtpFactor(...), ...]
-        """
-        return []
-
     def provides_auth_flows(self) -> List[Any]:
         """
         声明本插件向登录【新增】的自定义流程形状（组合策略），而不止于贡献单个步骤。
@@ -359,9 +336,9 @@ class _PluginBase(metaclass=ABCMeta):
 
     def provides_auth_steps(self) -> List[Any]:
         """
-        声明本插件向登录流程【新增】的认证步骤（**统一 SPI**，逐步取代分散的 provider/factor/redirect
-        三类声明）。返回实现 app.core.auth.flow.IAuthStep 契约的【实例】列表 —— 通常是把现有认证构件
-        包装成步骤的适配器：CredentialProviderStep(provider) / FactorStep(factor) / RedirectStep(provider)，
+        声明本插件向登录流程【新增】的认证步骤（**统一 SPI**：主认证 provider / MFA 因子 / SSO 重定向
+        统一收口为「认证步骤」一条声明）。返回实现 app.core.auth.flow.IAuthStep 契约的【实例】列表 ——
+        通常是把现有认证构件包装成步骤的适配器：CredentialProviderStep(provider) / FactorStep(factor) / RedirectStep(provider)，
         各含 step_id / step_kind / priority + applies_to(context) / advance(context, submission)。
         框架以 owner=plugin_id 注册到全局步骤注册表（register_auth_step），装配桥按 step_kind 切分
         （credential / directory / federated_direct / redirect → 凭证步；factor → 第二因子步）后入多步

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""PR10：把现有 ``IMfaFactor`` / ``ICredentialProvider`` / 本地密码包装为流程 ``IAuthStep`` 的适配器。
+"""把现有 MFA 因子 / 主认证 provider / 本地密码构件包装为流程 ``IAuthStep`` 的适配器。
 
-证明引擎可零改动地驱动**现有**因子与 provider 对象（构件级复用，逻辑不重复实现），
+证明引擎可零改动地驱动**现有**因子与 provider 构件（鸭子类型，构件级复用，逻辑不重复实现），
 并支持任意组合（N-of-M）与挑战-应答。
 """
 import types

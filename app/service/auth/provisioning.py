@@ -2,8 +2,8 @@
 """
 身份 → 本地用户 provisioning（带安全护栏）。
 
-忠实泛化 ``app/helper/sso.py._resolve_user`` 的护栏，供**主认证 provider**（LDAP/AD/RADIUS/
-OIDC-ROPC 等 ``ICredentialProvider``）解析/建号复用。审计点名此处为最高正确性风险，故：
+忠实泛化 ``app/helper/sso.py._resolve_user`` 的护栏，供**外部直验认证步**（LDAP/AD/RADIUS/
+OIDC-ROPC 等凭证步，经 ``CredentialProviderStep``）解析/建号复用。审计点名此处为最高正确性风险，故：
   - **C-1**：``auto_create`` 时，派生用户名若被一个**无任何身份绑定**的同名账号占用 → 拒绝接管
     （防接管管理员手建的非外部账号）；
   - **B-4**：派生用户名被**已禁用**的同名残留账号占用 → 拒绝复用（防绕过封禁）；

@@ -2,8 +2,8 @@
 """
 流程步骤适配器 —— 把现有认证构件包装成 ``IAuthStep``，供流程引擎驱动（构件级复用，逻辑不重复）。
 
-  - ``FactorStep``            ：包装 ``IMfaFactor``（OTP / PassKey / SMS / 插件因子）；
-  - ``CredentialProviderStep``：包装 ``ICredentialProvider``（LDAP/AD/RADIUS/OIDC-ROPC…）+ 守护式 provisioning；
+  - ``FactorStep``            ：包装一个 MFA 因子构件（OTP / PassKey / SMS / 插件因子，鸭子类型）；
+  - ``CredentialProviderStep``：包装一个主认证 provider 构件（LDAP/AD/RADIUS/OIDC-ROPC…，鸭子类型）+ 守护式 provisioning；
   - ``PasswordStep``          ：本地密码（默认接 UserOper + verify_password，可注入以便测试）。
 
 排序前置由各 ``applies_to`` 声明：凭证步要求"尚未解析用户"，因子步要求"已解析用户且本因子已注册"。
@@ -34,7 +34,7 @@ def _mfa_ref(ctx: AuthContext) -> MfaUserRef:
 
 
 class FactorStep:
-    """把一个 ``IMfaFactor`` 适配为流程步骤。``step_id`` 默认取 ``factor_id``，可覆写以支持同类多实例。"""
+    """把一个 MFA 因子构件适配为流程步骤。``step_id`` 默认取 ``factor_id``，可覆写以支持同类多实例。"""
 
     step_kind = "factor"
 
@@ -98,7 +98,7 @@ class FactorStep:
 
 
 class CredentialProviderStep:
-    """把一个 ``ICredentialProvider`` 适配为流程步骤（校验成功后经守护式 provisioning 解析本地用户）。"""
+    """把一个主认证 provider 构件适配为流程步骤（校验成功后经守护式 provisioning 解析本地用户）。"""
 
     step_kind = "credential"
 
@@ -339,7 +339,7 @@ def make_identity_resolver(deps):
 
 
 def build_credential_flow(steps: List[Any], *, identity_resolver=None, trusted_step_ids=frozenset()):
-    """构建"任一凭证步骤满足即可"的单阶段流程（password 与各 ICredentialProvider 的 OR 回落）。
+    """构建"任一凭证步骤满足即可"的单阶段流程（password 与各外部直验凭证步的 OR 回落）。
 
     ``identity_resolver`` / ``trusted_step_ids`` 由上层（FlowService / 端点）注入：内建受信步可直接落
     user_id，外部凭证步交回 ``identity`` 经端口解析（owner 分流的单一落地点）。"""
