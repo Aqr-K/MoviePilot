@@ -227,17 +227,6 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
-    def provides_channel_capabilities(self) -> List[Any]:
-        """
-        声明本插件新增的消息渠道的能力矩阵（配合 provides_modules 新增消息渠道模块使用）。
-        返回 ChannelCapabilities 实例列表，每个实例的 channel 字段为该渠道的字符串 id
-        （无需扩展封闭 MessageChannel 枚举）。由框架注册到 ChannelCapabilityManager，
-        使插件渠道获得正确的按钮/Markdown/分段等能力声明（不声明则走降级默认）。默认不新增。
-
-        [ChannelCapabilities(channel="mychannel", capabilities={...}), ...]
-        """
-        return []
-
     def provides_data_sources(self) -> List[Type]:
         """
         声明本插件向模块层【新增】的数据源（媒体识别/信息源，MediaRecognize 域）类，
@@ -270,7 +259,8 @@ class _PluginBase(metaclass=ABCMeta):
         契约且 get_type()==ModuleType.Notification，并实现 post_message（其余 post_medias /
         post_torrents / delete_message / register_commands 等由 run_module 按方法名分发、按需实现）。
         子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭 MessageChannel 枚举）；
-        渠道的按钮/Markdown/分段等能力矩阵另经 provides_channel_capabilities() 声明。默认不新增。
+        渠道的按钮/Markdown/分段等能力矩阵由渠道模块自带的 get_channel_capabilities() 声明（返回
+        ChannelCapabilities，其 channel 以 get_subtype_id() 为准盖章；不声明则走降级默认）。默认不新增。
 
         [MyNotificationClass, ...]
         """
