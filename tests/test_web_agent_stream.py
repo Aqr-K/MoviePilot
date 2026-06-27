@@ -37,22 +37,22 @@ from app.schemas.types import EventType, MessageChannel, NotificationType
 
 
 def test_split_web_agent_output_extracts_verbose_tool_message():
-    """应将啰嗦模式工具提示拆成独立工具事件。"""
+    """应将啰嗦模式工具提示拆成独立工具事件，并保留渠道展示文案。"""
     events = _split_web_agent_output("准备查询。\n\n⚙️ => 查询站点\n\n已完成")
 
     assert events == [
         {"type": "delta", "content": "准备查询。\n\n"},
-        {"type": "tool", "message": "查询站点"},
+        {"type": "tool", "message": "⚙️ => 查询站点"},
         {"type": "delta", "content": "已完成"},
     ]
 
 
 def test_split_web_agent_output_extracts_summary_tool_message():
-    """应将非啰嗦模式工具汇总行拆成独立工具事件。"""
+    """应将非啰嗦模式工具汇总行拆成独立工具事件，并保留渠道展示文案。"""
     events = _split_web_agent_output("（查询了 2 次数据）\n\n这里是结果")
 
     assert events == [
-        {"type": "tool", "message": "查询了 2 次数据"},
+        {"type": "tool", "message": "（查询了 2 次数据）"},
         {"type": "delta", "content": "\n这里是结果"},
     ]
 
