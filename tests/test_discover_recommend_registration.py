@@ -8,8 +8,7 @@
      「事件扩展源（ChainEventType）」，并按 api_path 去重（声明式优先、向后兼容事件）。
 
 与消息渠道/媒体服务器（模块类注册）不同，发现/推荐是【数据对象】注册（DiscoverMediaSource /
-RecommendMediaSource），仿 provides_channel_capabilities 范式，仅在 /source 端点聚合枚举，
-不进入 run_module 分发。
+RecommendMediaSource），仅在 /source 端点聚合枚举，不进入 run_module 分发。
 """
 from unittest import TestCase
 from unittest.mock import MagicMock, patch

@@ -205,10 +205,6 @@ def get_plugin_provided_auth_providers(running_plugins, pid: Optional[str] = Non
     """聚合插件经 provides_auth_providers() 声明【新增】的 SSO 登录提供方实例，按 plugin_id 归集。"""
     return _get_plugin_provided(running_plugins, "provides_auth_providers", "注册登录提供方", pid)
 
-def get_plugin_provided_channel_capabilities(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
-    """聚合插件经 provides_channel_capabilities() 声明【新增】的消息渠道能力矩阵，按 plugin_id 归集。"""
-    return _get_plugin_provided(running_plugins, "provides_channel_capabilities", "注册渠道能力", pid)
-
 def get_plugin_provided_auth_flows(running_plugins, pid: Optional[str] = None) -> Dict[str, List[Any]]:
     """聚合插件经 provides_auth_flows() 声明【新增】的自定义流程规格实例，按 plugin_id 归集。"""
     return _get_plugin_provided(running_plugins, "provides_auth_flows", "注册认证流程", pid)

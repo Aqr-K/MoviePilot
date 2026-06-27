@@ -2,6 +2,7 @@ import ast
 import asyncio
 import concurrent
 import concurrent.futures
+import dataclasses
 import importlib.util
 import inspect
 import os
@@ -367,47 +368,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             plugins_to_reload = set()
             local_plugins_to_sync = {}
             for _change_type, path_str in changes:
-                event_path = Path(path_str)
-
-                # 跳过 pycache 目录中的文件
-                if "__pycache__" in event_path.parts:
-                    continue
-
-                if event_path.name == "requirements.txt":
-                    candidate = self._get_local_plugin_candidate_from_path(event_path)
-                    if candidate:
-                        if candidate.get("compatible") is False:
-                            logger.info(
-                                f"检测到本地插件 {candidate.get('id')} 依赖文件变化，"
-                                f"但跳过处理：{candidate.get('skip_reason')}"
-                            )
-                            continue
-                        logger.warn(f"检测到本地插件 {candidate.get('id')} 依赖文件变化，请重新安装本地插件以安装依赖")
-                    continue
-
-                # 跳过非 .py 文件
-                if not event_path.name.endswith(".py"):
-                    continue
-
-                # 解析插件ID
-                runtime_pid = self._get_plugin_id_from_path(event_path)
-                local_candidate = self._get_local_plugin_candidate_from_path(event_path) if not runtime_pid else None
-                if runtime_pid:
-                    last_sync_time = self._recent_local_sync.get(runtime_pid)
-                    if last_sync_time and time.time() - last_sync_time < 2:
-                        continue
-                    # 运行目录变化只重载，不能反向触发本地同步。
-                    plugins_to_reload.add(runtime_pid)
-                elif local_candidate:
-                    if local_candidate.get("compatible") is False:
-                        package_version = local_candidate.get("package_version")
-                        source_root = f"plugins.{package_version}" if package_version else "plugins"
-                        logger.info(
-                            f"检测到本地插件 {local_candidate.get('id')} 文件变化，来源：{source_root}，"
-                            f"文件：{event_path}，但跳过同步：{local_candidate.get('skip_reason')}"
-                        )
-                        continue
-                    local_plugins_to_sync[local_candidate.get("id")] = (local_candidate, event_path)
+                self._collect_watch_change(Path(path_str), plugins_to_reload, local_plugins_to_sync)
 
             for pid, (candidate, event_path) in local_plugins_to_sync.items():
                 package_version = candidate.get("package_version")
@@ -424,6 +385,61 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                         self.reload_plugin(pid)
                     except Exception as e:
                         logger.error(f"插件 {pid} 热重载失败: {e}", exc_info=True)
+
+    def _collect_watch_change(self, event_path: Path, plugins_to_reload: set,
+                              local_plugins_to_sync: dict) -> None:
+        """
+        归类单个文件变化事件，按需登记重载或本地同步目标。
+
+        :param event_path: 变化的文件路径
+        :param plugins_to_reload: 待重载插件 id 集合（原地累加）
+        :param local_plugins_to_sync: 待同步本地插件 {id: (candidate, path)}（原地累加）
+        :return: 无
+        """
+        # 跳过 pycache 目录中的文件
+        if "__pycache__" in event_path.parts:
+            return
+
+        # 依赖文件变化：仅提示，不触发重载/同步
+        if event_path.name == "requirements.txt":
+            candidate = self._get_local_plugin_candidate_from_path(event_path)
+            if not candidate:
+                return
+            if candidate.get("compatible") is False:
+                logger.info(
+                    f"检测到本地插件 {candidate.get('id')} 依赖文件变化，"
+                    f"但跳过处理：{candidate.get('skip_reason')}"
+                )
+                return
+            logger.warn(f"检测到本地插件 {candidate.get('id')} 依赖文件变化，请重新安装本地插件以安装依赖")
+            return
+
+        # 跳过非 .py 文件
+        if not event_path.name.endswith(".py"):
+            return
+
+        # 运行目录变化：只重载，不能反向触发本地同步
+        runtime_pid = self._get_plugin_id_from_path(event_path)
+        if runtime_pid:
+            last_sync_time = self._recent_local_sync.get(runtime_pid)
+            if last_sync_time and time.time() - last_sync_time < 2:
+                return
+            plugins_to_reload.add(runtime_pid)
+            return
+
+        # 本地插件源变化：登记待同步
+        local_candidate = self._get_local_plugin_candidate_from_path(event_path)
+        if not local_candidate:
+            return
+        if local_candidate.get("compatible") is False:
+            package_version = local_candidate.get("package_version")
+            source_root = f"plugins.{package_version}" if package_version else "plugins"
+            logger.info(
+                f"检测到本地插件 {local_candidate.get('id')} 文件变化，来源：{source_root}，"
+                f"文件：{event_path}，但跳过同步：{local_candidate.get('skip_reason')}"
+            )
+            return
+        local_plugins_to_sync[local_candidate.get("id")] = (local_candidate, event_path)
 
     @staticmethod
     def _get_plugin_id_from_path(event_path: Path) -> Optional[str]:
@@ -650,63 +666,34 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     except Exception as err:
                         logger.error(f"注册插件 {plugin_id} 存储器 "
                                      f"{getattr(storage_cls, '__name__', storage_cls)} 出错：{str(err)}")
-        # 注册插件经 provides_channel_capabilities 声明的消息渠道能力矩阵
-        provided_caps = plugin_metadata.get_plugin_provided_channel_capabilities(self._running_plugins, pid)
-        if provided_caps:
-            from app.schemas.message import ChannelCapabilityManager
-            for plugin_id, caps_list in provided_caps.items():
-                for caps in caps_list:
-                    try:
-                        ChannelCapabilityManager.register_capabilities(
-                            getattr(caps, "channel", None), caps, owner=plugin_id)
-                    except Exception as err:
-                        logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
-        # 注册插件经 provides_auth_providers 声明的 SSO 登录提供方（按 provider_id 单索引、owner=plugin_id）：
-        # 与各契约域不同，登录提供方不进 ModuleManager/chain，而是注册到 app.core.auth.redirect 由 SSO 端点统一驱动。
-        provided_auth = plugin_metadata.get_plugin_provided_auth_providers(self._running_plugins, pid)
-        if provided_auth:
-            from app.core.auth.redirect import register_auth_provider
-            for plugin_id, providers in provided_auth.items():
-                for provider in providers:
-                    ok, reason = register_auth_provider(provider, owner=plugin_id)
-                    if not ok:
-                        logger.warning(f"注册插件 {plugin_id} 登录提供方 "
-                                       f"{getattr(provider, 'provider_id', provider)} 失败：{reason}")
-        # 注册插件经 provides_auth_flows 声明的自定义认证流程规格（owner=plugin_id）：
-        provided_flows = plugin_metadata.get_plugin_provided_auth_flows(self._running_plugins, pid)
-        if provided_flows:
-            from app.core.auth.flow_registry import register_auth_flow
-            for plugin_id, flows in provided_flows.items():
-                for spec in flows:
-                    ok, reason = register_auth_flow(spec, owner=plugin_id)
-                    if not ok:
-                        logger.warning(f"注册插件 {plugin_id} 认证流程 "
-                                       f"{getattr(spec, 'flow_id', spec)} 失败：{reason}")
-        # 注册插件经 provides_auth_steps 声明的【统一】认证步骤（owner=plugin_id，进全局步骤注册表）：
-        # 单 SPI 收口——装配桥（_build_flow_service）按 step_kind 切分后入多步流程。
-        provided_steps = plugin_metadata.get_plugin_provided_auth_steps(self._running_plugins, pid)
-        if provided_steps:
-            from app.core.auth.steps import register_auth_step
-            for plugin_id, steps in provided_steps.items():
-                for step in steps:
-                    ok, reason = register_auth_step(step, owner=plugin_id)
-                    if not ok:
-                        logger.warning(f"注册插件 {plugin_id} 认证步骤 "
-                                       f"{getattr(step, 'step_id', step)} 失败：{reason}")
-        # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/消息渠道/媒体服务器）：
+        # 注册插件经 provides_auth_* 声明的认证域实例（登录提供方 / 认证流程 / 认证步骤）：
+        # 不进 ModuleManager/chain，而是注册到 app.core.auth 各注册表（owner=plugin_id），由认证流程统一驱动。
+        from app.core.auth.flow_registry import register_auth_flow
+        from app.core.auth.redirect import register_auth_provider
+        from app.core.auth.steps import register_auth_step
+        for _get_provided, _register, _id_attr, _label in (
+            (plugin_metadata.get_plugin_provided_auth_providers, register_auth_provider, "provider_id", "登录提供方"),
+            (plugin_metadata.get_plugin_provided_auth_flows, register_auth_flow, "flow_id", "认证流程"),
+            (plugin_metadata.get_plugin_provided_auth_steps, register_auth_step, "step_id", "认证步骤"),
+        ):
+            self._register_auth_domain(pid, _get_provided, _register, _id_attr, _label)
+        # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/媒体服务器）：
         # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
         for _get_provided, _verify, _label in (
             (plugin_metadata.get_plugin_provided_data_sources, ModuleManager.verify_data_source_contract, "数据源"),
             (plugin_metadata.get_plugin_provided_downloaders, ModuleManager.verify_downloader_contract, "下载器"),
-            (plugin_metadata.get_plugin_provided_notifications, ModuleManager.verify_notification_contract, "消息渠道"),
             (plugin_metadata.get_plugin_provided_mediaservers, ModuleManager.verify_mediaserver_contract, "媒体服务器"),
         ):
             self._register_contract_domain(pid, _get_provided, _verify, _label)
+        # 注册插件经 provides_notifications 声明【新增】的消息渠道（Notification 域）：经契约校验注册模块外，
+        # 渠道模块自带的 get_channel_capabilities() 能力矩阵随注册一并登记（能力声明收口于渠道模块）。
+        self._register_notification_domain(pid)
 
     def _register_contract_domain(self, pid, get_provided, verify_contract, label: str):
         """
-        注册某契约域插件类的共用实现（数据源/下载器/消息渠道/媒体服务器）：聚合插件声明的类 →
+        注册某契约域插件类的共用实现（数据源/下载器/媒体服务器）：聚合插件声明的类 →
         经域契约校验（不通过仅警告拒绝、不影响其它）→ register_module(owner=plugin_id)。
+        消息渠道（Notification 域）另经 _register_notification_domain 处理（需附带能力矩阵登记）。
         """
         for plugin_id, classes in get_provided(self._running_plugins, pid).items():
             for cls in classes:
@@ -720,6 +707,71 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     ModuleManager().register_module(cls, owner=plugin_id)
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} {label} {_name} 出错：{str(err)}")
+
+    def _register_notification_domain(self, pid: Optional[str] = None) -> None:
+        """
+        注册插件经 provides_notifications 声明【新增】的消息渠道（Notification 域）：聚合插件声明的类 →
+        经消息渠道契约校验（不通过仅警告拒绝、不影响其它）→ register_module(owner=plugin_id) 进 chain 分发 →
+        读取渠道模块运行实例自带的 get_channel_capabilities() 能力矩阵一并登记到 ChannelCapabilityManager
+        （能力声明随渠道模块一处声明）。
+        """
+        for plugin_id, classes in plugin_metadata.get_plugin_provided_notifications(self._running_plugins, pid).items():
+            for cls in classes:
+                _name = getattr(cls, "__name__", cls)
+                ok, reasons = ModuleManager.verify_notification_contract(cls)
+                if not ok:
+                    logger.warning(f"插件 {plugin_id} 消息渠道 {_name} 未通过消息渠道契约校验，拒绝注册："
+                                   f"{'；'.join(reasons)}")
+                    continue
+                try:
+                    if not ModuleManager().register_module(cls, owner=plugin_id):
+                        continue
+                except Exception as err:
+                    logger.error(f"注册插件 {plugin_id} 消息渠道 {_name} 出错：{str(err)}")
+                    continue
+                self._register_channel_capabilities(plugin_id, cls)
+
+    @staticmethod
+    def _register_channel_capabilities(plugin_id: str, module_cls: type) -> None:
+        """
+        从已注册的消息渠道模块运行实例读取其自带 get_channel_capabilities() 能力矩阵，按 get_subtype_id()
+        的 channel id 登记到 ChannelCapabilityManager（owner=plugin_id）。模块未声明能力则跳过，走降级默认。
+        channel id 仅在模块 get_subtype_id() 一处声明，能力矩阵的 channel 字段以此为准盖章，避免两处对齐。
+        """
+        instance = ModuleManager().get_running_module(getattr(module_cls, "__name__", ""))
+        getter = getattr(instance, "get_channel_capabilities", None)
+        if not callable(getter):
+            return
+        try:
+            caps = getter()
+            if caps is None:
+                return
+            channel_id = instance.get_subtype_id()
+            if not channel_id:
+                return
+            from app.schemas.message import ChannelCapabilityManager
+            ChannelCapabilityManager.register_capabilities(
+                channel_id, dataclasses.replace(caps, channel=channel_id), owner=plugin_id)
+        except Exception as err:
+            logger.error(f"注册插件 {plugin_id} 渠道能力出错：{str(err)}")
+
+    def _register_auth_domain(self, pid, get_provided, register_fn, id_attr: str, label: str) -> None:
+        """
+        注册某认证域插件实例的共用实现（登录提供方 / 认证流程 / 认证步骤）：聚合插件声明的实例 →
+        经 register_fn 注册到对应核心注册表（owner=plugin_id）→ 失败仅警告、不影响其它。
+
+        :param pid: 目标插件 id；None 表示全部运行中插件
+        :param get_provided: plugin_metadata 中对应的聚合函数
+        :param register_fn: 核心注册表的注册函数，签名 (item, owner) -> (ok, reason)
+        :param id_attr: 用于日志的实例标识属性名（provider_id / flow_id / step_id）
+        :param label: 中文域名（用于日志）
+        :return: 无
+        """
+        for plugin_id, items in get_provided(self._running_plugins, pid).items():
+            for item in items:
+                ok, reason = register_fn(item, owner=plugin_id)
+                if not ok:
+                    logger.warning(f"注册插件 {plugin_id} {label} {getattr(item, id_attr, item)} 失败：{reason}")
 
     def _unregister_plugin_modules(self, plugin_ids: List[str]):
         """
@@ -1299,10 +1351,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # ID
         plugin.id = pid
         # 安装状态
-        if pid in installed_apps and plugin_static:
-            plugin.installed = True
-        else:
-            plugin.installed = False
+        plugin.installed = bool(pid in installed_apps and plugin_static)
         # 是否有新版本
         plugin.has_update = False
         if plugin_static:
@@ -1327,36 +1376,27 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         else:
             plugin.state = False
         # 是否有详情页面
-        plugin.has_page = False
-        if plugin_obj and hasattr(plugin_obj, "get_page"):
-            if ObjectUtils.check_method(plugin_obj.get_page):
-                plugin.has_page = True
-        # 公钥
-        if plugin_info.get("key"):
-            plugin.plugin_public_key = plugin_info.get("key")
+        plugin.has_page = bool(
+            plugin_obj and hasattr(plugin_obj, "get_page")
+            and ObjectUtils.check_method(plugin_obj.get_page))
         # 权限
         if not self.__set_and_check_auth_level(plugin=plugin, source=plugin_info):
             return None
-        # 名称
-        if plugin_info.get("name"):
-            plugin.plugin_name = plugin_info.get("name")
-        # 描述
-        if plugin_info.get("description"):
-            plugin.plugin_desc = plugin_info.get("description")
-        # 版本
-        if plugin_info.get("version"):
-            plugin.plugin_version = plugin_info.get("version")
-        # 图标
-        if plugin_info.get("icon"):
-            plugin.plugin_icon = plugin_info.get("icon")
+        # 市场字段 → Plugin 属性：仅当市场提供真值时覆盖，否则保留 schema 默认值
+        for field, attr in (
+            ("key", "plugin_public_key"),
+            ("name", "plugin_name"),
+            ("description", "plugin_desc"),
+            ("version", "plugin_version"),
+            ("icon", "plugin_icon"),
+            ("author", "plugin_author"),
+            ("history", "history"),
+        ):
+            value = plugin_info.get(field)
+            if value:
+                setattr(plugin, attr, value)
         # 标签
         plugin.plugin_label = self._normalize_plugin_label(plugin_info.get("labels"))
-        # 作者
-        if plugin_info.get("author"):
-            plugin.plugin_author = plugin_info.get("author")
-        # 更新历史
-        if plugin_info.get("history"):
-            plugin.history = plugin_info.get("history")
         # Release 能力位来自插件市场索引，用于前端展示和后端安装入口双重校验。
         plugin.release = bool(plugin_info.get("release"))
         # 仓库链接
