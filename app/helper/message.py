@@ -180,6 +180,8 @@ class TemplateContextBuilder:
             "season_fmt": meta.season,
             # 集号
             "episode": meta.episode_seqs,
+            # 当前季总集数
+            "total_episodes": len(episodes) if episodes else 0,
             # 季集 SxxExx
             "season_episode": "%s%s" % (meta.season, meta.episode),
             # 段/节

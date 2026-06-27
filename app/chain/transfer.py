@@ -40,6 +40,7 @@ from app.schemas import (
     TransferQueue,
     TransferJob,
     TransferJobTask,
+    TmdbEpisode,
 )
 from app.schemas.exception import OperationInterrupted
 from app.schemas.types import (
@@ -947,6 +948,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     mediainfo=task.mediainfo,
                     transferinfo=transferinfo,
                     season_episode=se_str,
+                    episodes_info=task.episodes_info,
                     username=task.username,
                 )
 
@@ -3395,10 +3397,17 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             mediainfo: MediaInfo,
             transferinfo: TransferInfo,
             season_episode: Optional[str] = None,
+            episodes_info: Optional[List[TmdbEpisode]] = None,
             username: Optional[str] = None,
     ):
         """
         发送入库成功的消息
+        :param meta: 文件元数据
+        :param mediainfo: 识别的媒体信息
+        :param transferinfo: 文件整理信息
+        :param season_episode: 已入库季集文本
+        :param episodes_info: 当前季的全部集信息
+        :param username: 用户名
         """
         self.post_message(
             Notification(
@@ -3412,6 +3421,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             mediainfo=mediainfo,
             transferinfo=transferinfo,
             season_episode=season_episode,
+            episodes_info=episodes_info,
             username=username,
         )
 
