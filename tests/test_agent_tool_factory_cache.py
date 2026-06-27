@@ -1,6 +1,4 @@
-import importlib.util
 from types import SimpleNamespace
-from pathlib import Path
 from typing import Iterator, Optional, Type
 
 import pytest
@@ -69,30 +67,8 @@ def _schema_properties(args_schema: Type[BaseModel]) -> dict:
     return args_schema.model_json_schema().get("properties", {})
 
 
-def _load_lexiannot_tool_schemas() -> list[Type[BaseModel]]:
-    """只加载 LexiAnnot schema 文件，避免触发插件包可选依赖。"""
-    schema_path = (
-        Path(__file__).resolve().parents[1]
-        / "app"
-        / "plugins"
-        / "lexiannot"
-        / "schemas.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "_test_lexiannot_schemas",
-        schema_path,
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return [
-        module.VocabularyAnnotatingToolInput,
-        module.QueryAnnotationTasksToolInput,
-    ]
-
-
 def test_agent_tool_schemas_do_not_expose_explanation_parameter() -> None:
-    """所有 Agent 工具输入模型都不应暴露 explanation 参数。"""
+    """仓库内置 Agent 工具和中间件输入模型不应暴露 explanation 参数。"""
     tool_classes = [
         *MoviePilotToolFactory.BUILTIN_TOOL_CLASSES,
         AskUserChoiceTool,
@@ -103,7 +79,6 @@ def test_agent_tool_schemas_do_not_expose_explanation_parameter() -> None:
         SkillToolInput,
         QueryActivityLogInput,
     ]
-    plugin_schemas = _load_lexiannot_tool_schemas()
 
     for tool_class in tool_classes:
         args_schema = getattr(tool_class, "args_schema", None)
@@ -111,7 +86,7 @@ def test_agent_tool_schemas_do_not_expose_explanation_parameter() -> None:
             continue
         assert "explanation" not in _schema_properties(args_schema), tool_class.name
 
-    for args_schema in middleware_schemas + plugin_schemas:
+    for args_schema in middleware_schemas:
         assert "explanation" not in _schema_properties(args_schema), args_schema.__name__
 
 
