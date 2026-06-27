@@ -65,7 +65,7 @@ def _build_tv_context(title: str = "葬送的芙莉莲") -> Context:
 
 
 def _build_download_dirs() -> list[TransferDirectoryConf]:
-    """构造消息交互可选择的下载目录配置。"""
+    """构造不同媒体类型各一个下载目录的配置。"""
     return [
         TransferDirectoryConf(
             name="电影下载",
@@ -81,6 +81,46 @@ def _build_download_dirs() -> list[TransferDirectoryConf]:
             priority=2,
             media_type=MediaType.TV.value,
             media_category="动漫",
+        ),
+    ]
+
+
+def _build_multiple_movie_download_dirs() -> list[TransferDirectoryConf]:
+    """构造多个匹配电影类型的下载目录配置。"""
+    return [
+        TransferDirectoryConf(
+            name="电影下载",
+            storage="local",
+            download_path="/downloads/movies",
+            priority=1,
+            media_type=MediaType.MOVIE.value,
+        ),
+        TransferDirectoryConf(
+            name="4K电影下载",
+            storage="local",
+            download_path="/downloads/uhd-movies",
+            priority=2,
+            media_type=MediaType.MOVIE.value,
+        ),
+        TransferDirectoryConf(
+            name="动画下载",
+            storage="rclone",
+            download_path="/media/anime",
+            priority=3,
+            media_type=MediaType.TV.value,
+            media_category="动漫",
+        ),
+    ]
+
+
+def _build_single_download_dir() -> list[TransferDirectoryConf]:
+    """构造只有一个下载目录的配置。"""
+    return [
+        TransferDirectoryConf(
+            name="默认下载",
+            storage="local",
+            download_path="/downloads",
+            priority=1,
         ),
     ]
 
@@ -295,7 +335,7 @@ def test_media_interaction_legacy_page_callback_updates_existing_request():
 
 
 def test_torrent_selection_prompts_download_dir_buttons_before_download():
-    """支持按钮的渠道选择资源后，应先发送下载目录按钮而不是立即下载。"""
+    """匹配当前媒体的目录有多个时，应先发送下载目录按钮而不是立即下载。"""
     chain = MediaInteractionChain()
     context = _build_context()
     request = media_interaction_manager.create_or_replace(
@@ -313,7 +353,7 @@ def test_torrent_selection_prompts_download_dir_buttons_before_download():
 
     with patch(
         "app.chain.message.DirectoryHelper.get_download_dirs",
-        return_value=_build_download_dirs(),
+        return_value=_build_multiple_movie_download_dirs(),
     ), patch.object(chain, "post_message") as post_message, patch(
         "app.chain.message.DownloadChain.download_single"
     ) as download_single:
@@ -334,12 +374,93 @@ def test_torrent_selection_prompts_download_dir_buttons_before_download():
     assert "请选择下载目录" in notification.title
     assert "1. 自动匹配目录" in notification.text
     assert "2. 电影下载 (/downloads/movies)" in notification.text
+    assert "3. 4K电影下载 (/downloads/uhd-movies)" in notification.text
     assert "动画下载" not in notification.text
     assert notification.buttons[0][0]["callback_data"] == f"media:{request.request_id}:download-dir:1"
 
 
+def test_torrent_selection_skips_download_dir_when_only_one_dir_matches_media():
+    """匹配当前媒体的目录只有一个时，应跳过目录选择并交给下载链自动匹配。"""
+    chain = MediaInteractionChain()
+    context = _build_context()
+    request = media_interaction_manager.create_or_replace(
+        user_id="10001",
+        channel=MessageChannel.Telegram,
+        source="telegram-test",
+        username="tester",
+        action="Search",
+        keyword="星际穿越",
+        title="星际穿越",
+        meta=_build_meta("星际穿越"),
+        items=[context],
+    )
+    request.phase = "torrent"
+
+    with patch(
+        "app.chain.message.DirectoryHelper.get_download_dirs",
+        return_value=_build_download_dirs(),
+    ), patch.object(chain, "post_message") as post_message, patch(
+        "app.chain.message.DownloadChain.download_single",
+        return_value="hash",
+    ) as download_single:
+        handled = chain.handle_text_interaction(
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            userid="10001",
+            username="tester",
+            text="1",
+        )
+
+    assert handled
+    assert request.phase == "torrent"
+    post_message.assert_not_called()
+    download_single.assert_called_once()
+    assert download_single.call_args.args[0] is context
+    assert "save_path" not in download_single.call_args.kwargs
+
+
+def test_torrent_selection_skips_download_dir_when_user_has_single_dir():
+    """用户只有一个下载目录时，也应跳过目录选择并交给下载链自动匹配。"""
+    chain = MediaInteractionChain()
+    context = _build_context()
+    request = media_interaction_manager.create_or_replace(
+        user_id="10001",
+        channel=MessageChannel.Telegram,
+        source="telegram-test",
+        username="tester",
+        action="Search",
+        keyword="星际穿越",
+        title="星际穿越",
+        meta=_build_meta("星际穿越"),
+        items=[context],
+    )
+    request.phase = "torrent"
+
+    with patch(
+        "app.chain.message.DirectoryHelper.get_download_dirs",
+        return_value=_build_single_download_dir(),
+    ), patch.object(chain, "post_message") as post_message, patch(
+        "app.chain.message.DownloadChain.download_single",
+        return_value="hash",
+    ) as download_single:
+        handled = chain.handle_text_interaction(
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            userid="10001",
+            username="tester",
+            text="1",
+        )
+
+    assert handled
+    assert request.phase == "torrent"
+    post_message.assert_not_called()
+    download_single.assert_called_once()
+    assert download_single.call_args.args[0] is context
+    assert "save_path" not in download_single.call_args.kwargs
+
+
 def test_torrent_selection_prompts_text_download_dir_for_plain_channel():
-    """不支持按钮的渠道选择资源后，应提示用户回复数字选择下载目录。"""
+    """不支持按钮的渠道在多个匹配目录时，应提示用户回复数字选择下载目录。"""
     chain = MediaInteractionChain()
     context = _build_context()
     request = media_interaction_manager.create_or_replace(
@@ -357,7 +478,7 @@ def test_torrent_selection_prompts_text_download_dir_for_plain_channel():
 
     with patch(
         "app.chain.message.DirectoryHelper.get_download_dirs",
-        return_value=_build_download_dirs(),
+        return_value=_build_multiple_movie_download_dirs(),
     ), patch.object(chain, "post_message") as post_message:
         handled = chain.handle_text_interaction(
             channel=MessageChannel.Wechat,
@@ -374,6 +495,7 @@ def test_torrent_selection_prompts_text_download_dir_for_plain_channel():
     assert notification.buttons is None
     assert "1. 自动匹配目录" in notification.text
     assert "2. 电影下载 (/downloads/movies)" in notification.text
+    assert "3. 4K电影下载 (/downloads/uhd-movies)" in notification.text
     assert "动画下载" not in notification.text
 
 
@@ -398,7 +520,7 @@ def test_download_dir_callback_runs_pending_single_download_without_save_path_fo
 
     with patch(
         "app.chain.message.DirectoryHelper.get_download_dirs",
-        return_value=_build_download_dirs(),
+        return_value=_build_multiple_movie_download_dirs(),
     ), patch(
         "app.chain.message.DownloadChain.download_single",
         return_value="hash",
@@ -440,7 +562,7 @@ def test_download_dir_callback_runs_pending_single_download_with_save_path():
 
     with patch(
         "app.chain.message.DirectoryHelper.get_download_dirs",
-        return_value=_build_download_dirs(),
+        return_value=_build_multiple_movie_download_dirs(),
     ), patch(
         "app.chain.message.DownloadChain.download_single",
         return_value="hash",
@@ -482,7 +604,7 @@ def test_download_dir_text_reply_runs_pending_single_download_without_save_path(
 
     with patch(
         "app.chain.message.DirectoryHelper.get_download_dirs",
-        return_value=_build_download_dirs(),
+        return_value=_build_multiple_movie_download_dirs(),
     ), patch(
         "app.chain.message.DownloadChain.download_single",
         return_value="hash",
@@ -515,7 +637,6 @@ def test_get_download_dirs_keeps_matching_tv_category_dir():
         download_dirs = chain._get_download_dirs(context.media_info)
 
     assert [download_dir.name for download_dir in download_dirs] == [
-        "自动匹配目录",
         "动画下载",
     ]
-    assert download_dirs[1].save_path == "rclone:/media/anime"
+    assert download_dirs[0].save_path == "rclone:/media/anime"

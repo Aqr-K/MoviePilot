@@ -2635,6 +2635,8 @@ class MediaInteractionChain(ChainBase):
         download_dirs = self._get_download_dirs(media_info)
         if not download_dirs:
             return False
+        if len(download_dirs) == 1 and not self._is_auto_download_dir(download_dirs[0]):
+            return False
 
         request.pending_torrent_page = request.page
         request.phase = "download-dir"
@@ -3252,6 +3254,11 @@ class MediaInteractionChain(ChainBase):
         """
         获取可供消息交互选择的下载目录。
         """
+        dir_infos = [
+            dir_info
+            for dir_info in DirectoryHelper().get_download_dirs()
+            if dir_info.download_path
+        ]
         download_dirs = [
             DownloadDirectory(
                 name=dir_info.name,
@@ -3265,11 +3272,13 @@ class MediaInteractionChain(ChainBase):
                 media_type=dir_info.media_type,
                 media_category=dir_info.media_category,
             )
-            for dir_info in DirectoryHelper().get_download_dirs()
-            if dir_info.download_path and cls._match_download_dir_media(dir_info, media_info)
+            for dir_info in dir_infos
+            if cls._match_download_dir_media(dir_info, media_info)
         ]
         if not download_dirs:
             return []
+        if len(download_dirs) == 1:
+            return download_dirs
         return [cls._build_auto_download_dir(), *download_dirs]
 
     @classmethod
