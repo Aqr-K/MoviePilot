@@ -1597,6 +1597,7 @@ class MoviePilotAgent:
                 original_chat_id=self.original_chat_id,
                 title=title,
                 text=message,
+                save_history=False,
             )
         )
 

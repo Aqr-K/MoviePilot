@@ -96,6 +96,7 @@ class SendVoiceMessageTool(MoviePilotTool):
                     if voice_path and settings.AUDIO_OUTPUT_INCLUDE_TEXT
                     else None
                 ),
+                save_history=False,
             )
         )
         self._agent_context["user_reply_sent"] = True
