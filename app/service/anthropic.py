@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app import schemas
 from app.core.config import settings
+from app.core.security import compare_secret
 
 
 def anthropic_error_response(
@@ -26,7 +27,7 @@ def anthropic_error_response(
 
 
 def check_auth(api_key: Optional[str]) -> Optional[JSONResponse]:
-    if not api_key or api_key != settings.API_TOKEN:
+    if not compare_secret(api_key, settings.API_TOKEN):
         return anthropic_error_response(
             "invalid x-api-key",
             401,

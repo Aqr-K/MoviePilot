@@ -668,15 +668,20 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                                      f"{getattr(storage_cls, '__name__', storage_cls)} 出错：{str(err)}")
         # 注册插件经 provides_auth_* 声明的认证域实例（登录提供方 / 认证流程 / 认证步骤）：
         # 不进 ModuleManager/chain，而是注册到 app.core.auth 各注册表（owner=plugin_id），由认证流程统一驱动。
-        from app.core.auth.flow_registry import register_auth_flow
-        from app.core.auth.redirect import register_auth_provider
-        from app.core.auth.steps import register_auth_step
-        for _get_provided, _register, _id_attr, _label in (
-            (plugin_metadata.get_plugin_provided_auth_providers, register_auth_provider, "provider_id", "登录提供方"),
-            (plugin_metadata.get_plugin_provided_auth_flows, register_auth_flow, "flow_id", "认证流程"),
-            (plugin_metadata.get_plugin_provided_auth_steps, register_auth_step, "step_id", "认证步骤"),
-        ):
-            self._register_auth_domain(pid, _get_provided, _register, _id_attr, _label)
+        # auth 域注册整体隔离：import 或注册失败仅记录日志，不得波及后续契约域/通知域注册
+        # （与 _unregister_plugin_modules 的逐项 try 对称，避免单域故障放大为全插件注册失败）。
+        try:
+            from app.core.auth.flow_registry import register_auth_flow
+            from app.core.auth.redirect import register_auth_provider
+            from app.core.auth.steps import register_auth_step
+            for _get_provided, _register, _id_attr, _label in (
+                (plugin_metadata.get_plugin_provided_auth_providers, register_auth_provider, "provider_id", "登录提供方"),
+                (plugin_metadata.get_plugin_provided_auth_flows, register_auth_flow, "flow_id", "认证流程"),
+                (plugin_metadata.get_plugin_provided_auth_steps, register_auth_step, "step_id", "认证步骤"),
+            ):
+                self._register_auth_domain(pid, _get_provided, _register, _id_attr, _label)
+        except Exception as err:
+            logger.error(f"注册插件 {pid} 认证域出错（不影响其它域）：{str(err)}")
         # 注册插件经 provides_* 声明新增的各契约域模块（数据源/下载器/媒体服务器）：
         # 经各自契约校验通过后注册到 ModuleManager（owner=plugin_id），参与 chain 分发。
         for _get_provided, _verify, _label in (
@@ -725,6 +730,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     continue
                 try:
                     if not ModuleManager().register_module(cls, owner=plugin_id):
+                        logger.debug(f"插件 {plugin_id} 消息渠道 {_name} register_module 未激活，跳过能力矩阵登记")
                         continue
                 except Exception as err:
                     logger.error(f"注册插件 {plugin_id} 消息渠道 {_name} 出错：{str(err)}")
@@ -741,6 +747,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         instance = ModuleManager().get_running_module(getattr(module_cls, "__name__", ""))
         getter = getattr(instance, "get_channel_capabilities", None)
         if not callable(getter):
+            logger.debug(f"插件 {plugin_id} 消息渠道 {getattr(module_cls, '__name__', module_cls)} "
+                         f"未提供 get_channel_capabilities，跳过能力登记（走降级默认）")
             return
         try:
             caps = getter()

@@ -1,16 +1,13 @@
-import inspect
 import traceback
 from typing import Any
 
-from fastapi.concurrency import run_in_threadpool
-
+from app.core import dispatch
 from app.core.event import eventmanager
 from app.core.module import ModuleManager
 from app.helper.message import MessageHelper
 from app.log import logger
 from app.schemas.exception import RateLimitExceededException
 from app.schemas.types import EventType
-from app.utils.object import ObjectUtils
 from app.utils.singleton import Singleton
 
 
@@ -20,9 +17,8 @@ class ManagerBase(metaclass=Singleton):
     以及仅面向系统后端的单步分发入口 _dispatch。
 
     门面管理器（Managers）按方法名把领域操作分发到各后端模块，被 ChainBase 直接调用。各域门面
-    （downloader/mediaserver/notification/storage/mediarecognize）原先各自复刻同一套分发/错误处理逻辑；
-    本基类把它们收敛为单一实现，子类只声明对外的类型化方法并转发到 _dispatch（单面）或 dispatch（两步，
-    见 PluginDispatchManager）。
+    （downloader/mediaserver/notification/storage/mediarecognize）的遍历/合并/隔离逻辑统一收敛到
+    app.core.dispatch；本基类与子类只构造后端三元组与错误回调后委托内核。
 
     合并规则（各域一致）：当前结果为空（None / 全 None 元组）取后端返回值；可作为下一后端入参时经
     check_signature 透传（管道域逐源精化）；为列表时跨后端 extend；为非空标量时短路停止。
@@ -46,9 +42,7 @@ class ManagerBase(metaclass=Singleton):
     @staticmethod
     def _is_valid_empty(ret: Any) -> bool:
         """判断分发结果是否为空：元组需全部为 None，其余按 is None 判断。"""
-        if isinstance(ret, tuple):
-            return all(value is None for value in ret)
-        return ret is None
+        return dispatch.is_valid_empty(ret)
 
     def _handle_system_error(self, err: Exception, module_id: str, module_name: str,
                              method: str, raise_exception: bool) -> None:
@@ -96,19 +90,10 @@ class ManagerBase(metaclass=Singleton):
     # 系统后端面（同步）
     # ------------------------------------------------------------------ #
 
-    def _dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
-                                 *args, **kwargs) -> Any:
+    def _system_entries(self, method: str):
         """
-        按优先级（get_priority 升序）依次调用各系统后端模块的同名方法，按合并规则累积结果。
-
-        单个后端异常被隔离后继续其余后端；限流安静跳过；raise_exception=True 时透传首个异常。
-
-        :param method: 方法名
-        :param result: 已累积的结果（单步分发传 None）
-        :param raise_exception: 出错时是否抛出
-        :return: 累积后的结果
+        生成系统后端面的后端三元组 (module_id, module_name, func)：按优先级（get_priority 升序）取各运行模块的同名方法。
         """
-        logger.debug(f"请求系统模块执行：{method} ...")
         for module in sorted(
                 self._modulemanager.get_running_modules(method),
                 key=lambda x: x.get_priority(),
@@ -119,24 +104,33 @@ class ManagerBase(metaclass=Singleton):
             except Exception as err:
                 logger.debug(f"获取模块名称出错：{str(err)}")
                 module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self._is_valid_empty(result):
-                    result = func(*args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    result = func(result)
-                elif isinstance(result, list):
-                    temp = func(*args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    break
-            except RateLimitExceededException as err:
-                # 限流先于通用异常捕获：安静跳过、不告警。
-                self._handle_rate_limit_error(err, "模块", module_id, method, raise_exception)
-            except Exception as err:
-                self._handle_system_error(err, module_id, module_name, method, raise_exception)
-        return result
+            yield module_id, module_name, getattr(module, method)
+
+    def _dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
+                                 *args, **kwargs) -> Any:
+        """
+        按优先级依次调用各系统后端模块的同名方法，按合并规则累积结果（启用 check_signature 管道精化）。
+
+        单个后端异常被隔离后继续其余后端；限流安静跳过；raise_exception=True 时透传首个异常。
+        系统后端方法无 raise_exception 形参，故 kwargs 不携带该控制位。
+
+        :param method: 方法名
+        :param result: 已累积的结果（单步分发传 None）
+        :param raise_exception: 出错时是否抛出
+        :return: 累积后的结果
+        """
+        logger.debug(f"请求系统模块执行：{method} ...")
+        return dispatch.execute_modules(
+            self._system_entries(method), method, result, *args,
+            pipeline=True,
+            on_rate_limit=lambda err, ident, name, m: self._handle_rate_limit_error(
+                err, "模块", ident, m, raise_exception
+            ),
+            on_error=lambda err, ident, name, m: self._handle_system_error(
+                err, ident, name, m, raise_exception
+            ),
+            **kwargs,
+        )
 
     # ------------------------------------------------------------------ #
     # 单步分发（仅系统后端面）：downloader / mediaserver 域
@@ -185,20 +179,12 @@ class PluginDispatchManager(ManagerBase):
             },
         )
 
-    def _dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
-                                 *args, **kwargs) -> Any:
+    def _plugin_entries(self, method: str):
         """
-        依次调用各已启用插件注册的同名方法，按合并规则累积结果。
-
-        :param method: 方法名
-        :param result: 已累积的结果，用于判定空值合并 / 列表合并 / 短路
-        :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法（插件可据此决定内部异常是否上抛）
-        :return: 累积后的结果
+        生成插件钩子面的后端三元组 (plugin_id, plugin_name, func)：取各已启用插件注册的同名方法。
         """
         # 延迟导入，避免包初始化期的循环依赖（同时是测试的 patch 目标）。
         from app.helper.plugin_manager import PluginManager
-        # raise_exception 随调用透传给插件方法；系统后端面则不透传。
-        plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
         for plugin, module_dict in PluginManager().get_plugin_modules().items():
             plugin_id, plugin_name = plugin
             if method not in module_dict:
@@ -206,21 +192,33 @@ class PluginDispatchManager(ManagerBase):
             func = module_dict[method]
             if not func:
                 continue
-            try:
-                logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
-                if self._is_valid_empty(result):
-                    result = func(*args, **plugin_kwargs)
-                elif isinstance(result, list):
-                    temp = func(*args, **plugin_kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    break
-            except RateLimitExceededException as err:
-                self._handle_rate_limit_error(err, "插件", plugin_id, method, raise_exception)
-            except Exception as err:
-                self._handle_plugin_error(err, plugin_id, plugin_name, method, raise_exception)
-        return result
+            yield plugin_id, plugin_name, func
+
+    def _dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
+                                 *args, **kwargs) -> Any:
+        """
+        依次调用各已启用插件注册的同名方法，按合并规则累积结果（不做 check_signature 精化）。
+
+        raise_exception 随调用透传给插件方法（插件可据此决定内部异常是否上抛）；系统后端面则不透传。
+
+        :param method: 方法名
+        :param result: 已累积的结果，用于判定空值合并 / 列表合并 / 短路
+        :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法
+        :return: 累积后的结果
+        """
+        plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
+        return dispatch.execute_modules(
+            self._plugin_entries(method), method, result, *args,
+            pipeline=False,
+            log_each=lambda name, m: logger.info(f"请求插件 {name} 执行：{m} ..."),
+            on_rate_limit=lambda err, ident, name, m: self._handle_rate_limit_error(
+                err, "插件", ident, m, raise_exception
+            ),
+            on_error=lambda err, ident, name, m: self._handle_plugin_error(
+                err, ident, name, m, raise_exception
+            ),
+            **plugin_kwargs,
+        )
 
     def dispatch(self, method: str, *args, **kwargs) -> Any:
         """
@@ -248,7 +246,7 @@ class AsyncDispatchMixin:
     一并继承）。
 
     依赖宿主类（PluginDispatchManager/ManagerBase）提供的：_is_valid_empty、_handle_rate_limit_error、
-    _handle_plugin_error、_handle_system_error、_modulemanager。
+    _handle_plugin_error、_handle_system_error、_plugin_entries、_system_entries。
     """
 
     async def _async_dispatch_plugin_modules(self, method: str, result: Any, raise_exception: bool,
@@ -261,42 +259,26 @@ class AsyncDispatchMixin:
         :param raise_exception: 出错时是否抛出；同时随调用透传给插件方法
         :return: 累积后的结果
         """
-        from app.helper.plugin_manager import PluginManager
         plugin_kwargs = {**kwargs, "raise_exception": raise_exception}
-        for plugin, module_dict in PluginManager().get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
-            if method not in module_dict:
-                continue
-            func = module_dict[method]
-            if not func:
-                continue
-            try:
-                logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
-                if self._is_valid_empty(result):
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(*args, **plugin_kwargs)
-                    else:
-                        result = await run_in_threadpool(func, *args, **plugin_kwargs)
-                elif isinstance(result, list):
-                    if inspect.iscoroutinefunction(func):
-                        temp = await func(*args, **plugin_kwargs)
-                    else:
-                        temp = await run_in_threadpool(func, *args, **plugin_kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    break
-            except RateLimitExceededException as err:
-                self._handle_rate_limit_error(err, "插件", plugin_id, method, raise_exception)
-            except Exception as err:
-                self._handle_plugin_error(err, plugin_id, plugin_name, method, raise_exception)
-        return result
+        return await dispatch.async_execute_modules(
+            self._plugin_entries(method), method, result, *args,
+            pipeline=False,
+            log_each=lambda name, m: logger.info(f"请求插件 {name} 执行：{m} ..."),
+            on_rate_limit=lambda err, ident, name, m: self._handle_rate_limit_error(
+                err, "插件", ident, m, raise_exception
+            ),
+            on_error=lambda err, ident, name, m: self._handle_plugin_error(
+                err, ident, name, m, raise_exception
+            ),
+            **plugin_kwargs,
+        )
 
     async def _async_dispatch_system_modules(self, method: str, result: Any, raise_exception: bool,
                                              *args, **kwargs) -> Any:
         """
-        异步按优先级（get_priority 升序）依次调用各系统后端模块的同名方法（同步方法经线程池执行），
-        按合并规则累积结果（识别为管道域：结果可作为下一后端入参时经 check_signature 透传，逐源精化）。
+        异步按优先级依次调用各系统后端模块的同名方法（同步方法经线程池执行），按合并规则累积结果
+        （管道域：结果可作为下一后端入参时经 check_signature 透传，逐源精化）。系统后端方法无
+        raise_exception 形参，故 kwargs 不携带该控制位。
 
         :param method: 方法名
         :param result: 已累积的结果
@@ -304,42 +286,17 @@ class AsyncDispatchMixin:
         :return: 累积后的结果
         """
         logger.debug(f"请求系统模块执行：{method} ...")
-        for module in sorted(
-                self._modulemanager.get_running_modules(method),
-                key=lambda x: x.get_priority(),
-        ):
-            module_id = module.__class__.__name__
-            try:
-                module_name = module.get_name()
-            except Exception as err:
-                logger.debug(f"获取模块名称出错：{str(err)}")
-                module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self._is_valid_empty(result):
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(*args, **kwargs)
-                    else:
-                        result = await run_in_threadpool(func, *args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(result)
-                    else:
-                        result = await run_in_threadpool(func, result)
-                elif isinstance(result, list):
-                    if inspect.iscoroutinefunction(func):
-                        temp = await func(*args, **kwargs)
-                    else:
-                        temp = await run_in_threadpool(func, *args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    break
-            except RateLimitExceededException as err:
-                self._handle_rate_limit_error(err, "模块", module_id, method, raise_exception)
-            except Exception as err:
-                self._handle_system_error(err, module_id, module_name, method, raise_exception)
-        return result
+        return await dispatch.async_execute_modules(
+            self._system_entries(method), method, result, *args,
+            pipeline=True,
+            on_rate_limit=lambda err, ident, name, m: self._handle_rate_limit_error(
+                err, "模块", ident, m, raise_exception
+            ),
+            on_error=lambda err, ident, name, m: self._handle_system_error(
+                err, ident, name, m, raise_exception
+            ),
+            **kwargs,
+        )
 
     async def async_dispatch(self, method: str, *args, **kwargs) -> Any:
         """

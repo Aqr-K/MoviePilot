@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.context import MediaInfo
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
-from app.core.security import verify_token, verify_apitoken
+from app.core.security import verify_token, verify_apitoken, compare_secret
 from app.db import get_async_db, get_db
 from app.db.models.subscribe import Subscribe
 from app.db.models.subscribehistory import SubscribeHistory
@@ -372,7 +372,7 @@ async def seerr_subscribe(
     """
     Jellyseerr/Overseerr网络勾子通知订阅
     """
-    if not authorization or authorization != settings.API_TOKEN:
+    if not compare_secret(authorization, settings.API_TOKEN):
         raise HTTPException(
             status_code=400,
             detail="授权失败",
