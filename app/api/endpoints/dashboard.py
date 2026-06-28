@@ -21,22 +21,27 @@ router = APIRouter()
 
 @router.get("/statistic", summary="媒体数量统计", response_model=schemas.Statistic)
 def statistic(
-    name: Optional[str] = None, _: Any = Depends(get_current_active_superuser)
+    name: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: Any = Depends(get_current_active_superuser),
 ) -> Any:
     """
     查询媒体数量统计信息
     """
-    return _build_statistic(name)
+    return _build_statistic(db, name)
 
 
 @router.get(
     "/statistic2", summary="媒体数量统计（API_TOKEN）", response_model=schemas.Statistic
 )
-def statistic2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
+def statistic2(
+    _: Annotated[str, Depends(verify_apitoken)],
+    db: Session = Depends(get_db),
+) -> Any:
     """
     查询媒体数量统计信息 API_TOKEN认证（?token=xxx）
     """
-    return _build_statistic()
+    return _build_statistic(db)
 
 
 @router.get("/storage", summary="本地存储空间", response_model=schemas.Storage)
@@ -63,6 +68,14 @@ def processes(_: Any = Depends(get_current_active_superuser)) -> Any:
     查询进程信息
     """
     return SystemUtils.processes()
+
+
+@router.get("/system", summary="系统摘要信息", response_model=schemas.DashboardSystemInfo)
+def system_info(_: Any = Depends(get_current_active_superuser)) -> Any:
+    """
+    查询仪表板系统摘要信息
+    """
+    return SystemUtils.dashboard_system_info()
 
 
 @router.get("/downloader", summary="下载器信息", response_model=schemas.DownloaderInfo)

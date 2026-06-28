@@ -8,14 +8,17 @@ DashboardChain/StorageChain/DirectoryHelper 进行单测，亦是后续 Rust 移
 from pathlib import Path
 from typing import List, Optional
 
+from sqlalchemy.orm import Session
+
 from app import schemas
 from app.chain.dashboard import DashboardChain
 from app.chain.storage import StorageChain
+from app.db.models.transferhistory import TransferHistory
 from app.helper.directory import DirectoryHelper
 from app.utils.system import SystemUtils
 
 
-def build_statistic(name: Optional[str] = None) -> schemas.Statistic:
+def build_statistic(db: Session, name: Optional[str] = None) -> schemas.Statistic:
     """
     构建媒体数量统计信息。
     """
@@ -36,8 +39,14 @@ def build_statistic(name: Optional[str] = None) -> schemas.Statistic:
         if not has_episode_count:
             # 所有媒体服务都未提供剧集统计时，返回 None 供前端展示“未获取”。
             ret_statistic.episode_count = None
-        return ret_statistic
-    return schemas.Statistic()
+    else:
+        ret_statistic = schemas.Statistic()
+
+    movie_count_month, tv_count_month, episode_count_month = TransferHistory.monthly_media_statistics(db)
+    ret_statistic.movie_count_month = movie_count_month
+    ret_statistic.tv_count_month = tv_count_month
+    ret_statistic.episode_count_month = episode_count_month
+    return ret_statistic
 
 
 def build_storage() -> schemas.Storage:
