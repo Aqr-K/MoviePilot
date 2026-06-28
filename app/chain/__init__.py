@@ -1,5 +1,4 @@
 import copy
-import inspect
 import pickle
 import traceback
 from abc import ABCMeta
@@ -8,8 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
-from fastapi.concurrency import run_in_threadpool
-
+from app.core import dispatch
 from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
@@ -50,7 +48,6 @@ from app.schemas.types import (
     EventType,
     MessageChannel,
 )
-from app.utils.object import ObjectUtils
 
 
 class ChainBase(metaclass=ABCMeta):
@@ -252,12 +249,9 @@ class ChainBase(metaclass=ABCMeta):
     @staticmethod
     def __is_valid_empty(ret):
         """
-        判断结果是否为空
+        判断结果是否为空：元组需全部为 None，其余按 is None 判断。
         """
-        if isinstance(ret, tuple):
-            return all(value is None for value in ret)
-        else:
-            return ret is None
+        return dispatch.is_valid_empty(ret)
 
     def __handle_plugin_error(
             self, err: Exception, plugin_id: str, plugin_name: str, method: str, **kwargs
@@ -323,177 +317,110 @@ class ChainBase(metaclass=ABCMeta):
             raise err
         logger.info(f"{source_type} {source_id}.{method} 已限流，跳过执行：{str(err)}")
 
+    def __plugin_entries(self, method: str):
+        """
+        生成插件钩子面的后端三元组 (plugin_id, plugin_name, func)：取各插件经 get_module 注册的同名方法。
+        """
+        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
+            plugin_id, plugin_name = plugin
+            if method not in module_dict:
+                continue
+            func = module_dict[method]
+            if not func:
+                continue
+            yield plugin_id, plugin_name, func
+
+    def __system_entries(self, method: str):
+        """
+        生成系统后端面的后端三元组 (module_id, module_name, func)：按优先级（get_priority 升序）取各运行模块的同名方法。
+        """
+        for module in sorted(
+                self.modulemanager.get_running_modules(method),
+                key=lambda x: x.get_priority(),
+        ):
+            module_id = module.__class__.__name__
+            try:
+                module_name = module.get_name()
+            except Exception as err:
+                logger.debug(f"获取模块名称出错：{str(err)}")
+                module_name = module_id
+            yield module_id, module_name, getattr(module, method)
+
     def __execute_plugin_modules(
             self, method: str, result: Any, *args, **kwargs
     ) -> Any:
         """
-        执行插件模块
+        执行插件模块（插件钩子面，不做 check_signature 精化）。kwargs 原样转发给插件方法。
         """
-        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
-            if method in module_dict:
-                func = module_dict[method]
-                if func:
-                    try:
-                        logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
-                        if self.__is_valid_empty(result):
-                            # 返回None，第一次执行或者需继续执行下一模块
-                            result = func(*args, **kwargs)
-                        elif isinstance(result, list):
-                            # 返回为列表，有多个模块运行结果时进行合并
-                            temp = func(*args, **kwargs)
-                            if isinstance(temp, list):
-                                result.extend(temp)
-                        else:
-                            break
-                    except RateLimitExceededException as err:
-                        self.__handle_rate_limit_error(
-                            err, "插件", plugin_id, method, **kwargs
-                        )
-                    except Exception as err:
-                        self.__handle_plugin_error(
-                            err, plugin_id, plugin_name, method, **kwargs
-                        )
-        return result
+        return dispatch.execute_modules(
+            self.__plugin_entries(method), method, result, *args,
+            pipeline=False,
+            log_each=lambda name, m: logger.info(f"请求插件 {name} 执行：{m} ..."),
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "插件", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_plugin_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
 
     async def __async_execute_plugin_modules(
             self, method: str, result: Any, *args, **kwargs
     ) -> Any:
         """
-        异步执行插件模块
+        异步执行插件模块（插件钩子面，不做 check_signature 精化）。kwargs 原样转发给插件方法。
         """
-        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
-            if method in module_dict:
-                func = module_dict[method]
-                if func:
-                    try:
-                        logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
-                        if self.__is_valid_empty(result):
-                            # 返回None，第一次执行或者需继续执行下一模块
-                            if inspect.iscoroutinefunction(func):
-                                result = await func(*args, **kwargs)
-                            else:
-                                # 插件同步函数在异步环境中运行，避免阻塞
-                                result = await run_in_threadpool(func, *args, **kwargs)
-                        elif isinstance(result, list):
-                            # 返回为列表，有多个模块运行结果时进行合并
-                            if inspect.iscoroutinefunction(func):
-                                temp = await func(*args, **kwargs)
-                            else:
-                                # 插件同步函数在异步环境中运行，避免阻塞
-                                temp = await run_in_threadpool(func, *args, **kwargs)
-                            if isinstance(temp, list):
-                                result.extend(temp)
-                        else:
-                            break
-                    except RateLimitExceededException as err:
-                        self.__handle_rate_limit_error(
-                            err, "插件", plugin_id, method, **kwargs
-                        )
-                    except Exception as err:
-                        self.__handle_plugin_error(
-                            err, plugin_id, plugin_name, method, **kwargs
-                        )
-        return result
+        return await dispatch.async_execute_modules(
+            self.__plugin_entries(method), method, result, *args,
+            pipeline=False,
+            log_each=lambda name, m: logger.info(f"请求插件 {name} 执行：{m} ..."),
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "插件", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_plugin_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
 
     def __execute_system_modules(
             self, method: str, result: Any, *args, **kwargs
     ) -> Any:
         """
-        执行系统模块
+        执行系统模块（系统后端面，启用 check_signature 管道精化）。kwargs 原样转发给系统方法。
         """
         logger.debug(f"请求系统模块执行：{method} ...")
-        for module in sorted(
-                self.modulemanager.get_running_modules(method),
-                key=lambda x: x.get_priority(),
-        ):
-            module_id = module.__class__.__name__
-            try:
-                module_name = module.get_name()
-            except Exception as err:
-                logger.debug(f"获取模块名称出错：{str(err)}")
-                module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self.__is_valid_empty(result):
-                    # 返回None，第一次执行或者需继续执行下一模块
-                    result = func(*args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    # 返回结果与方法签名一致，将结果传入
-                    result = func(result)
-                elif isinstance(result, list):
-                    # 返回为列表，有多个模块运行结果时进行合并
-                    temp = func(*args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    # 中止继续执行
-                    break
-            except RateLimitExceededException as err:
-                self.__handle_rate_limit_error(
-                    err, "模块", module_id, method, **kwargs
-                )
-            except Exception as err:
-                logger.error(traceback.format_exc())
-                self.__handle_system_error(
-                    err, module_id, module_name, method, **kwargs
-                )
-        return result
+        return dispatch.execute_modules(
+            self.__system_entries(method), method, result, *args,
+            pipeline=True,
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "模块", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_system_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
 
     async def __async_execute_system_modules(
             self, method: str, result: Any, *args, **kwargs
     ) -> Any:
         """
-        异步执行系统模块
+        异步执行系统模块（系统后端面，启用 check_signature 管道精化）。kwargs 原样转发给系统方法。
         """
         logger.debug(f"请求系统模块执行：{method} ...")
-        for module in sorted(
-                self.modulemanager.get_running_modules(method),
-                key=lambda x: x.get_priority(),
-        ):
-            module_id = module.__class__.__name__
-            try:
-                module_name = module.get_name()
-            except Exception as err:
-                logger.debug(f"获取模块名称出错：{str(err)}")
-                module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self.__is_valid_empty(result):
-                    # 返回None，第一次执行或者需继续执行下一模块
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(*args, **kwargs)
-                    else:
-                        # 系统同步模块在异步路径里也必须切到线程池，避免阻塞共享事件循环。
-                        result = await run_in_threadpool(func, *args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    # 返回结果与方法签名一致，将结果传入
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(result)
-                    else:
-                        result = await run_in_threadpool(func, result)
-                elif isinstance(result, list):
-                    # 返回为列表，有多个模块运行结果时进行合并
-                    if inspect.iscoroutinefunction(func):
-                        temp = await func(*args, **kwargs)
-                    else:
-                        temp = await run_in_threadpool(func, *args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    # 中止继续执行
-                    break
-            except RateLimitExceededException as err:
-                self.__handle_rate_limit_error(
-                    err, "模块", module_id, method, **kwargs
-                )
-            except Exception as err:
-                logger.error(traceback.format_exc())
-                self.__handle_system_error(
-                    err, module_id, module_name, method, **kwargs
-                )
-        return result
+        return await dispatch.async_execute_modules(
+            self.__system_entries(method), method, result, *args,
+            pipeline=True,
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "模块", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_system_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
 
     def run_module(self, method: str, *args, **kwargs) -> Any:
         """
