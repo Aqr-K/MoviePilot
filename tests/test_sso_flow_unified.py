@@ -286,3 +286,77 @@ def test_sso_callback_query_failure_carries_error():
     from app.api.endpoints.auth import sso_callback_query
 
     assert sso_callback_query({"status": "failure", "error": "invalid_state"}) == {"sso_error": "invalid_state"}
+
+
+# --------------------------------------------------------------------------- 限流：begin 防暴力破解（#51 / CWE-307）
+
+
+def test_flow_begin_rate_limited_returns_429(monkeypatch, no_emit):
+    """同一 (ip+username) 短窗口内超阈值 → /flow/begin 返回 HTTP 429（含友好提示）。
+
+    威胁: begin 缺限流则未认证口令校验端点（解析用户/校验口令）可被无限暴力穷举（CWE-307）。
+    """
+    from fastapi import HTTPException
+
+    from app.api.endpoints import auth as auth_module
+    from app.schemas import FlowBeginRequest
+    from app.utils.limit import KeyedWindowRateLimiter
+
+    tight = KeyedWindowRateLimiter(max_calls=2, window_seconds=60)
+    monkeypatch.setattr(auth_module, "_auth_advance_rate_limiter", tight)
+
+    class _FailSvc:
+        def begin(self, body):
+            return {"status": "failure", "error": "invalid_credentials"}
+
+    monkeypatch.setattr(auth_module, "_build_flow_service", lambda *a, **kw: _FailSvc())
+
+    body = FlowBeginRequest(username="brute", password="bad")
+
+    # 阈值内：放行后落到失败服务 → 401（限流未误伤正常失败路径）
+    for _ in range(2):
+        with pytest.raises(HTTPException) as exc:
+            auth_module.flow_begin(body, _build_request())
+        assert exc.value.status_code == 401
+
+    # 超阈值：在进入服务前即被限流拦截 → 429
+    with pytest.raises(HTTPException) as exc:
+        auth_module.flow_begin(body, _build_request())
+    assert exc.value.status_code == 429
+    assert "频繁" in exc.value.detail
+
+
+def test_flow_begin_and_advance_share_same_rate_limiter(monkeypatch, no_emit):
+    """begin 与 advance 复用同一限流器实例：begin 打满额度后，同 (ip+username) 的 advance 立即 429。
+
+    锁定规格“复用 advance 现有限流器实例、不新建不一致限流器”。
+    """
+    from fastapi import HTTPException
+
+    from app.api.endpoints import auth as auth_module
+    from app.schemas import FlowAdvanceRequest, FlowBeginRequest
+    from app.utils.limit import KeyedWindowRateLimiter
+
+    tight = KeyedWindowRateLimiter(max_calls=1, window_seconds=60)
+    monkeypatch.setattr(auth_module, "_auth_advance_rate_limiter", tight)
+
+    class _FailSvc:
+        def begin(self, body):
+            return {"status": "failure", "error": "invalid_credentials"}
+
+        def advance(self, flow_token, body):
+            return {"status": "failure", "error": "invalid_credentials"}
+
+    monkeypatch.setattr(auth_module, "_build_flow_service", lambda *a, **kw: _FailSvc())
+
+    # begin 消耗掉唯一额度（仍按失败路径返回 401，但已记一次）
+    with pytest.raises(HTTPException) as exc:
+        auth_module.flow_begin(FlowBeginRequest(username="brute", password="bad"), _build_request())
+    assert exc.value.status_code == 401
+
+    # 同 (ip+username) 的 advance 立即命中 429 —— 证明二者共用同一限流器实例
+    with pytest.raises(HTTPException) as exc:
+        auth_module.flow_advance(
+            FlowAdvanceRequest(flow_token="ft", username="brute", password="bad"), _build_request())
+    assert exc.value.status_code == 429
+    assert "频繁" in exc.value.detail

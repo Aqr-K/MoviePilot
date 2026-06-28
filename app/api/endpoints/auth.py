@@ -239,6 +239,20 @@ def _flow_http(result: dict, username: Optional[str], request: Request,
     return result
 
 
+def _check_flow_rate_limit(request: Request, username: Optional[str]) -> None:
+    """未认证口令校验端点防暴力破解（CWE-307）：按 (ip+username) 滑窗限流后放行，超阈值抛 429。
+
+    /flow/begin 与 /flow/advance 共用同一限流器实例（``_auth_advance_rate_limiter``）与异常类型
+    （``RateLimitExceededException``），策略与 /access-token 一致（10 次 / 60 秒），由本函数单一来源保证。
+    ``username`` 为空（纯枚举/SSO begin）时退化为按 ip 限流。"""
+    client_ip = request.client.host if request.client else "unknown"
+    rl_key = f"{client_ip}:{username}" if username else client_ip
+    try:
+        _auth_advance_rate_limiter.check(rl_key)
+    except RateLimitExceededException:
+        raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
+
+
 @router.post("/flow/begin", summary="开始多步登录流程")
 def flow_begin(body: schemas.FlowBeginRequest, request: Request, response: Response = None) -> dict:
     """开始一条可组合、可多轮的登录流程。返回 ``status``：success（带 token）/ mfa_required /
@@ -247,7 +261,9 @@ def flow_begin(body: schemas.FlowBeginRequest, request: Request, response: Respo
     携带 ``flow="<provider_id>"`` 时定向到该 SSO/重定向步，直接下发跳转挑战（authorize_url），SSO 由此
     进入与密码/因子同一条统一流程；浏览器 302 至 IdP 后经 ``/auth/flow/callback`` 薄桥回灌推进。
 
+    入口按 (ip+username) 限流（与 /flow/advance、/access-token 同策略），防止口令暴力穷举（CWE-307）。
     成功时写入资源 Cookie（FastAPI 注入 ``response``；与 /access-token 一致）。"""
+    _check_flow_rate_limit(request, body.username)
     result = _build_flow_service(request).begin(body)
     return _flow_http(result, body.username, request, response)
 
@@ -257,13 +273,7 @@ def flow_advance(body: schemas.FlowAdvanceRequest, request: Request, response: R
     """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。
 
     成功时写入资源 Cookie（FastAPI 注入 ``response``；与 /access-token 一致）。"""
-    client_ip = request.client.host if request.client else "unknown"
-    username = body.username or ""
-    rl_key = f"{client_ip}:{username}" if username else client_ip
-    try:
-        _auth_advance_rate_limiter.check(rl_key)
-    except RateLimitExceededException:
-        raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
+    _check_flow_rate_limit(request, body.username)
     result = _build_flow_service().advance(body.flow_token, body)
     return _flow_http(result, body.username, request, response)
 
