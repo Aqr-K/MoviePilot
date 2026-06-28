@@ -4,8 +4,10 @@ import os
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import time
 import urllib.parse
 import uuid
 from pathlib import Path
@@ -14,6 +16,7 @@ from typing import List, Optional, Tuple, Union
 import psutil
 
 from app import schemas
+from version import APP_VERSION
 
 
 class SystemUtils:
@@ -616,6 +619,36 @@ class SystemUtils:
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
         return processes
+
+    @staticmethod
+    def dashboard_system_info() -> schemas.DashboardSystemInfo:
+        """
+        获取仪表板展示所需的系统摘要信息。
+
+        运行时间以当前 MoviePilot 进程为基准，避免宿主机或容器长期运行时间
+        掩盖服务最近一次重启。
+        """
+        return schemas.DashboardSystemInfo(
+            hostname=socket.gethostname(),
+            operating_system=SystemUtils._operating_system_name(),
+            runtime=max(0, int(time.time() - psutil.Process().create_time())),
+            version=APP_VERSION,
+        )
+
+    @staticmethod
+    def _operating_system_name() -> str:
+        """返回适合在仪表板展示的操作系统名称。"""
+        if SystemUtils.is_windows():
+            return platform.platform()
+        if SystemUtils.is_macos():
+            version = platform.mac_ver()[0]
+            return f"macOS {version}".strip()
+
+        try:
+            operating_system = platform.freedesktop_os_release()
+            return operating_system.get("PRETTY_NAME") or operating_system.get("NAME") or platform.platform()
+        except OSError:
+            return platform.platform()
 
     @staticmethod
     def is_bluray_dir(dir_path: Path) -> bool:

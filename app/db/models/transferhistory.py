@@ -1,3 +1,4 @@
+import re
 import time
 from typing import Optional
 
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.db import db_query, db_update, get_id_column, Base, async_db_query
+from app.schemas.types import MediaType
 
 
 def _text_like(column, pattern: str, wildcard: bool = False):
@@ -204,6 +206,49 @@ class TransferHistory(Base):
             cls.date >= time.strftime("%Y-%m-%d %H:%M:%S",
                                       time.localtime(time.time() - 86400 * days))).subquery()
         return db.query(sub_query.c.date, func.count(sub_query.c.id)).group_by(sub_query.c.date).all()
+
+    @classmethod
+    @db_query
+    def monthly_media_statistics(cls, db: Session):
+        """
+        统计当月成功整理的电影、电视剧和剧集数量。
+
+        电影和电视剧按媒体身份去重；剧集优先按历史记录中的集数字段计算，
+        缺少集数时按单条成功整理记录计数。
+        """
+        month_prefix = time.strftime("%Y-%m-", time.localtime())
+        histories = db.query(cls).filter(
+            cls.status.is_(True),
+            cls.date.like(f"{month_prefix}%"),
+            cls.type.in_([MediaType.MOVIE.value, MediaType.TV.value]),
+        ).all()
+        movie_identities = set()
+        tv_identities = set()
+        episode_count = 0
+
+        for history in histories:
+            identity = (history.tmdbid or 0, history.title or "", history.year or "")
+            if history.type == MediaType.MOVIE.value:
+                movie_identities.add(identity)
+                continue
+
+            tv_identities.add(identity)
+            episode_count += cls._history_episode_count(history)
+
+        return len(movie_identities), len(tv_identities), episode_count
+
+    @staticmethod
+    def _history_episode_count(history: "TransferHistory") -> int:
+        """从单条整理历史中估算成功入库的剧集数量。"""
+        episode_numbers = [int(value) for value in re.findall(r"\d+", history.episodes or "")]
+        if len(episode_numbers) >= 2 and "-" in (history.episodes or ""):
+            return max(1, episode_numbers[-1] - episode_numbers[0] + 1)
+        if episode_numbers:
+            return len(set(episode_numbers))
+        if isinstance(history.files, list) and history.files:
+            return len(history.files)
+
+        return 1
 
     @classmethod
     @async_db_query

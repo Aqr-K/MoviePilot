@@ -282,7 +282,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | POST | `/api/v1/transfer/manual` | Manual transfer. Params: `background`. Body: ManualTransferItem JSON |
 | GET | `/api/v1/transfer/now` | Run immediate transfer |
 
-### Dashboard (16 endpoints)
+### Dashboard (17 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -291,6 +291,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/dashboard/storage` | Local storage space |
 | GET | `/api/v1/dashboard/storage2` | Local storage space (API_TOKEN) |
 | GET | `/api/v1/dashboard/processes` | Process info |
+| GET | `/api/v1/dashboard/system` | Host name, operating system, MoviePilot runtime, and backend version |
 | GET | `/api/v1/dashboard/downloader` | Downloader info. Params: `name` |
 | GET | `/api/v1/dashboard/downloader2` | Downloader info (API_TOKEN) |
 | GET | `/api/v1/dashboard/schedule` | Scheduled services |
