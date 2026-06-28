@@ -948,6 +948,7 @@ class DownloadChain(ChainBase):
                             continue
                         # 种子季是需要季或者子集
                         if set(torrent_season).issubset(set(need_season)):
+                            complete_coverage_matched = False
                             if len(torrent_season) == 1:
                                 # 只有一季的可能是命名错误，需要打开种子鉴别，只有实际集数大于等于总集数才下载
                                 logger.info(f"开始下载种子 {torrent.title} ...")
@@ -972,7 +973,13 @@ class DownloadChain(ChainBase):
                                 required_episodes = __get_required_episodes(need_mid, torrent_season[0]) \
                                     if __requires_complete_coverage(need_tv_info) else set()
                                 need_total = __get_season_episodes(need_mid, torrent_season[0])
-                                if required_episodes and not required_episodes.issubset(torrent_episodes_set):
+                                complete_coverage_matched = bool(required_episodes) \
+                                    and required_episodes.issubset(torrent_episodes_set)
+                                if complete_coverage_matched:
+                                    logger.info(
+                                        f"{meta.org_string} 解析文件集数已完整覆盖目标范围："
+                                        f"{StringUtils.format_ep(sorted(required_episodes))}")
+                                if required_episodes and not complete_coverage_matched:
                                     missing_episodes = sorted(required_episodes.difference(torrent_episodes_set))
                                     logger.info(
                                         f"{meta.org_string} 解析文件集数未覆盖目标范围，"
@@ -1005,6 +1012,8 @@ class DownloadChain(ChainBase):
 
                             if download_id:
                                 # 下载成功
+                                if complete_coverage_matched:
+                                    context.confirmed_full_coverage = True
                                 logger.info(f"{torrent.title} 添加下载成功")
                                 downloaded_list.append(context)
                                 # 更新仍需季集
@@ -1086,6 +1095,8 @@ class DownloadChain(ChainBase):
                                                                    downloader=downloader)
                                 if download_id:
                                     # 下载成功
+                                    if __requires_complete_coverage(tv):
+                                        context.confirmed_full_coverage = True
                                     logger.info(f"{meta.title} 添加下载成功")
                                     downloaded_list.append(context)
                                     # 更新仍需集数
