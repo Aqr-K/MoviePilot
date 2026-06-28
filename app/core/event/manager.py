@@ -336,13 +336,15 @@ class EventManager(metaclass=Singleton):
         同步方式调度链式事件，按优先级顺序逐个调用事件处理器，并记录每个处理器的处理时间
         :param event: 要调度的事件对象
         """
-        handlers = self.__chain_subscribers.get(event.event_type, {})
-        if not handlers:
+        # 在锁内快照订阅者后再过滤/迭代，避免与运行时 add/remove_event_listener 并发改字典。
+        with self.__lock:
+            handler_items = list(self.__chain_subscribers.get(event.event_type, {}).items())
+        if not handler_items:
             logger.debug(f"No handlers found for chain event: {event}")
             return False
 
         # 过滤出启用的处理器
-        enabled_handlers = {handler_id: (priority, handler) for handler_id, (priority, handler) in handlers.items()
+        enabled_handlers = {handler_id: (priority, handler) for handler_id, (priority, handler) in handler_items
                             if self.__is_handler_enabled(handler)}
 
         if not enabled_handlers:
@@ -365,13 +367,15 @@ class EventManager(metaclass=Singleton):
         异步方式调度链式事件，按优先级顺序逐个调用事件处理器，并记录每个处理器的处理时间
         :param event: 要调度的事件对象
         """
-        handlers = self.__chain_subscribers.get(event.event_type, {})
-        if not handlers:
+        # 在锁内快照订阅者后再过滤/迭代，避免与运行时 add/remove_event_listener 并发改字典。
+        with self.__lock:
+            handler_items = list(self.__chain_subscribers.get(event.event_type, {}).items())
+        if not handler_items:
             logger.debug(f"No handlers found for chain event: {event}")
             return False
 
         # 过滤出启用的处理器
-        enabled_handlers = {handler_id: (priority, handler) for handler_id, (priority, handler) in handlers.items()
+        enabled_handlers = {handler_id: (priority, handler) for handler_id, (priority, handler) in handler_items
                             if self.__is_handler_enabled(handler)}
 
         if not enabled_handlers:
@@ -394,12 +398,16 @@ class EventManager(metaclass=Singleton):
         异步方式调度广播事件，通过线程池逐个调用事件处理器
         :param event: 要调度的事件对象
         """
-        handlers = self.__broadcast_subscribers.get(event.event_type, {})
-        if not handlers:
+        # 在锁内快照订阅者后再迭代：广播在消费者线程进行，期间插件启停/热重载会经
+        # add_event_listener/remove_event_listener 并发改同一字典，直接迭代活字典会抛
+        # RuntimeError: dictionary changed size during iteration，逃出消费者循环致广播停摆。
+        with self.__lock:
+            handler_items = list(self.__broadcast_subscribers.get(event.event_type, {}).items())
+        if not handler_items:
             logger.debug(f"No handlers found for broadcast event: {event}")
             return
         # 为每个处理器提供独立的事件实例，防止某个处理器对 event_data 的修改影响其他处理器
-        for handler_id, handler in handlers.items():
+        for handler_id, handler in handler_items:
             # 仅浅拷贝顶层字典，避免不必要的深拷贝开销；这样可以隔离键级别的替换/赋值
             if isinstance(event.event_data, dict):
                 event_data_copy = event.event_data.copy()
@@ -646,6 +654,9 @@ class EventManager(metaclass=Singleton):
             except Empty:
                 rate_limiter.current_wait = rate_limiter.current_wait * random.uniform(1, 1 + jitter_factor)
                 rate_limiter.trigger_limit()
+            except Exception as e:
+                # 纵深防御：单次广播分发异常不得杀死消费者线程导致广播永久停摆。
+                logger.error(f"广播事件处理出错：{str(e)} - {traceback.format_exc()}")
 
     @staticmethod
     def __log_event_lifecycle(event: Event, stage: str):
