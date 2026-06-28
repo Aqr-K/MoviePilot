@@ -687,15 +687,27 @@ class SystemUtils:
         return psutil.cpu_percent()
 
     @staticmethod
-    def memory_usage() -> List[int]:
+    def memory_usage() -> schemas.DashboardMemoryInfo:
         """
-        获取当前程序的内存使用量和使用率
+        获取系统已使用、缓存、可用和总内存信息。
         """
-        current_process = psutil.Process()
-        process_memory = current_process.memory_info().rss
-        system_memory = psutil.virtual_memory().total
-        process_memory_percent = (process_memory / system_memory) * 100
-        return [process_memory, int(process_memory_percent)]
+        memory = psutil.virtual_memory()
+        total = max(0, int(memory.total))
+        used = max(0, int(memory.used))
+        cached = max(
+            0,
+            int(getattr(memory, "cached", 0) or 0)
+            + int(getattr(memory, "buffers", 0) or 0),
+        )
+        available = max(0, total - used - cached)
+        usage = used / total * 100 if total else 0.0
+        return schemas.DashboardMemoryInfo(
+            total=total,
+            used=used,
+            cached=cached,
+            available=available,
+            usage=usage,
+        )
 
     @staticmethod
     def network_usage() -> List[int]:

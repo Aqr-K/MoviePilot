@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import pillow_avif  # noqa 用于自动注册AVIF支持
 
@@ -27,11 +27,16 @@ class RecommendChain(ChainBase, metaclass=Singleton):
     # 推荐缓存区域
     recommend_cache_region = "recommend"
 
-    def refresh_recommend(self, manual: bool = False):
+    def refresh_recommend(
+            self,
+            manual: bool = False,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> None:
         """
         刷新推荐
 
         :param manual: 手动触发
+        :param progress_callback: 定时服务进度更新回调
         """
         logger.debug("Starting to refresh Recommend data.")
 
@@ -56,6 +61,14 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         recommends = []
         # 记录哪些方法已完成
         methods_finished = set()
+        total_requests = len(recommend_methods) * self.cache_max_pages
+        finished_requests = 0
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始刷新推荐缓存，共 {total_requests} 个数据分页 ...",
+                data={"total": total_requests, "finished": 0},
+            )
         # 这里避免区间内连续调用相同来源，因此遍历方案为每页遍历所有推荐来源，再进行页数遍历
         for page in range(1, self.cache_max_pages + 1):
             for method in recommend_methods:
@@ -67,6 +80,21 @@ class RecommendChain(ChainBase, metaclass=Singleton):
                 # 手动触发的刷新，总是需要获取最新数据
                 with fresh(manual):
                     data = method(page=page)
+                finished_requests += 1
+                if progress_callback:
+                    progress_callback(
+                        value=finished_requests / total_requests * 90,
+                        text=(
+                            f"正在刷新推荐缓存"
+                            f"（{finished_requests}/{total_requests}）..."
+                        ),
+                        data={
+                            "total": total_requests,
+                            "finished": finished_requests,
+                            "current": method.__name__,
+                            "page": page,
+                        },
+                    )
                 if not data:
                     logger.debug("All recommendation methods have finished fetching data. Ending pagination early.")
                     methods_finished.add(method)
@@ -77,24 +105,40 @@ class RecommendChain(ChainBase, metaclass=Singleton):
                 break
 
         # 缓存收集到的海报
-        self.__cache_posters(recommends)
+        if progress_callback:
+            progress_callback(value=90, text="推荐数据刷新完成，正在缓存海报 ...")
+        self.__cache_posters(recommends, progress_callback=progress_callback)
         logger.debug("Recommend data refresh completed.")
+        if progress_callback:
+            progress_callback(value=100, text="推荐缓存刷新完成")
 
-    def __cache_posters(self, datas: List[dict]):
+    def __cache_posters(
+            self,
+            datas: List[dict],
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> None:
         """
         提取 poster_path 并缓存图片
         :param datas: 数据列表
+        :param progress_callback: 定时服务进度更新回调
         """
         if not settings.GLOBAL_IMAGE_CACHE:
             return
 
-        for data in datas:
+        total_num = len(datas)
+        for index, data in enumerate(datas, start=1):
             if global_vars.is_system_stopped:
                 return
             poster_path = data.get("poster_path")
             if poster_path:
                 poster_url = poster_path.replace("original", "w500")
                 self.__fetch_and_save_image(poster_url)
+            if progress_callback:
+                progress_callback(
+                    value=90 + (index / total_num * 10 if total_num else 10),
+                    text=f"正在缓存推荐海报（{index}/{total_num}）...",
+                    data={"poster_total": total_num, "poster_finished": index},
+                )
 
     @staticmethod
     def __fetch_and_save_image(url: str):

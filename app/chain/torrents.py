@@ -1,6 +1,6 @@
 import re
 import traceback
-from typing import Dict, List, Union, Optional
+from typing import Callable, Dict, List, Union, Optional
 
 from app.helper.sites import SitesHelper  # noqa
 
@@ -192,11 +192,17 @@ class TorrentsChain(ChainBase):
             del rss_items
         return ret_torrents
 
-    def refresh(self, stype: Optional[str] = None, sites: List[int] = None) -> Dict[str, List[Context]]:
+    def refresh(
+            self,
+            stype: Optional[str] = None,
+            sites: List[int] = None,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> Dict[str, List[Context]]:
         """
         刷新站点最新资源，识别并缓存起来
         :param stype: 强制指定缓存类型，spider:爬虫缓存，rss:rss缓存
         :param sites: 强制指定站点ID列表，为空则读取设置的订阅站点
+        :param progress_callback: 资源刷新进度更新回调
         """
 
         def __is_no_cache_site(_domain: str) -> bool:
@@ -226,13 +232,34 @@ class TorrentsChain(ChainBase):
 
         # 需要刷新的站点domain
         domains = []
+        indexers = [
+            indexer for indexer in SitesHelper().get_indexers()
+            if not sites or indexer.get("id") in sites
+        ]
+        total_indexers = len(indexers)
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始刷新站点资源，共 {total_indexers} 个站点 ...",
+                data={"total": total_indexers, "finished": 0},
+            )
         # 遍历站点缓存资源
-        for indexer in SitesHelper().get_indexers():
+        for index, indexer in enumerate(indexers, start=1):
             if global_vars.is_system_stopped:
                 break
-            # 未开启的站点不刷新
-            if sites and indexer.get("id") not in sites:
-                continue
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_indexers * 100 if total_indexers else 100,
+                    text=(
+                        f"正在刷新站点资源（{index}/{total_indexers}）"
+                        f"{indexer.get('name')} ..."
+                    ),
+                    data={
+                        "total": total_indexers,
+                        "finished": index - 1,
+                        "current": indexer.get("id"),
+                    },
+                )
             domain = StringUtils.get_url_domain(indexer.get("domain"))
             domains.append(domain)
             if stype == "spider":
@@ -334,6 +361,13 @@ class TorrentsChain(ChainBase):
         # 去除不在站点范围内的缓存种子
         if sites and torrents_cache:
             torrents_cache = {k: v for k, v in torrents_cache.items() if k in domains}
+
+        if progress_callback:
+            progress_callback(
+                value=100,
+                text="站点资源刷新完成",
+                data={"total": total_indexers, "finished": total_indexers},
+            )
 
         return torrents_cache
 

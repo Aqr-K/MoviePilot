@@ -1155,11 +1155,16 @@ class WorkflowChain(ChainBase):
         self.process(workflow_id, from_begin=False)
 
     @staticmethod
-    def process(workflow_id: int, from_begin: Optional[bool] = True) -> Tuple[bool, str]:
+    def process(
+            workflow_id: int,
+            from_begin: Optional[bool] = True,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> Tuple[bool, str]:
         """
         处理工作流
         :param workflow_id: 工作流ID
         :param from_begin: 是否从头开始，默认为True
+        :param progress_callback: 定时服务进度更新回调
         """
         workflowoper = WorkflowOper()
 
@@ -1173,6 +1178,23 @@ class WorkflowChain(ChainBase):
                 context=_serialize_workflow_context(context),
                 execution_state=_serialize_workflow_value(execution_state)
             )
+            if progress_callback:
+                runtime = execution_state.get("runtime") or {}
+                finished_actions = int(runtime.get("finished_actions") or 0)
+                total_actions = len(workflow.actions)
+                progress_callback(
+                    value=finished_actions / total_actions * 100,
+                    text=(
+                        f"工作流动作（{finished_actions}/{total_actions}）"
+                        f"{action.name or action.type or action.id} "
+                        f"{'执行完成' if completed else '执行中'}"
+                    ),
+                    data={
+                        "total": total_actions,
+                        "finished": finished_actions,
+                        "current": action.id,
+                    },
+                )
 
         # 重置工作流
         if from_begin:
@@ -1191,6 +1213,12 @@ class WorkflowChain(ChainBase):
             return False, "工作流无流程"
 
         logger.info(f"开始执行工作流 {workflow.name}，共 {len(workflow.actions)} 个动作 ...")
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始执行工作流 {workflow.name} ...",
+                data={"total": len(workflow.actions), "finished": 0},
+            )
         workflowoper.start(workflow_id)
 
         # 执行工作流
@@ -1207,6 +1235,8 @@ class WorkflowChain(ChainBase):
             return False, executor.errmsg
         logger.info(f"工作流 {workflow.name} 执行完成")
         workflowoper.success(workflow_id)
+        if progress_callback:
+            progress_callback(value=100, text=f"工作流 {workflow.name} 执行完成")
         return True, ""
 
     @staticmethod

@@ -30,6 +30,28 @@ def test_dashboard_system_info_returns_runtime_environment(monkeypatch):
     assert result.version == "v2.13.16"
 
 
+def test_memory_usage_returns_used_cached_and_available(monkeypatch):
+    """内存统计应拆分已使用、缓存和可用容量，并返回已使用百分比。"""
+
+    class FakeMemory:
+        """提供固定系统内存值的桩。"""
+
+        total = 16 * 1024**3
+        used = 5 * 1024**3
+        cached = 3 * 1024**3
+        buffers = 512 * 1024**2
+
+    monkeypatch.setattr(system_module.psutil, "virtual_memory", FakeMemory)
+
+    result = SystemUtils.memory_usage()
+
+    assert result.total == 16 * 1024**3
+    assert result.used == 5 * 1024**3
+    assert result.cached == int(3.5 * 1024**3)
+    assert result.available == int(7.5 * 1024**3)
+    assert result.usage == 31.25
+
+
 def test_monthly_media_statistics_counts_successful_unique_media():
     """本月新增统计应只计算成功记录，并按媒体去重。"""
     month = system_module.time.strftime("%Y-%m-", system_module.time.localtime())
