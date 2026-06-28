@@ -649,5 +649,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 title=title,
                 text=message,
                 image=image,
+                save_history=False,
             )
         )

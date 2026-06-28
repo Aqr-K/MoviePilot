@@ -536,6 +536,7 @@ class StreamingHandler:
                         original_chat_id=self._original_chat_id,
                         title=self._title,
                         text=current_text,
+                        save_history=False,
                     ),
                 )
                 if response and response.success and response.message_id:
@@ -581,6 +582,7 @@ class StreamingHandler:
                                 original_chat_id=self._original_chat_id,
                                 title=self._title,
                                 text=current_text,
+                                save_history=False,
                             ),
                         )
                         if response and response.success and response.message_id:

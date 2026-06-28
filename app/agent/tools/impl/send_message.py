@@ -100,6 +100,7 @@ class SendMessageTool(MoviePilotTool):
                     title=title,
                     text=text,
                     image=image_url,
+                    save_history=False,
                 )
             )
             self._agent_context["user_reply_sent"] = True

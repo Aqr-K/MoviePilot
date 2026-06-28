@@ -105,6 +105,7 @@ class SendLocalFileTool(MoviePilotTool):
                 text=message,
                 file_path=str(resolved_path),
                 file_name=file_name or resolved_path.name,
+                save_history=False,
             )
         )
         return "本地附件已发送"
