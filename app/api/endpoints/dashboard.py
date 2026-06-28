@@ -178,6 +178,23 @@ async def schedule(_: Any = Depends(get_current_active_superuser)) -> Any:
 
 
 @router.get(
+    "/schedule/{job_id}/progress",
+    summary="后台服务进度",
+    response_model=schemas.Response,
+)
+async def schedule_progress(
+    job_id: str, _: Any = Depends(get_current_active_superuser)
+) -> Any:
+    """
+    查询指定后台服务的执行进度。
+    """
+    progress = Scheduler().get_progress(job_id)
+    if not progress:
+        return schemas.Response(success=False, message="后台服务不存在")
+    return schemas.Response(success=True, data=progress.model_dump())
+
+
+@router.get(
     "/schedule2",
     summary="后台服务（API_TOKEN）",
     response_model=List[schemas.ScheduleInfo],
@@ -187,6 +204,23 @@ async def schedule2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
     查询下载器信息 API_TOKEN认证（?token=xxx）
     """
     return Scheduler().list()
+
+
+@router.get(
+    "/schedule2/{job_id}/progress",
+    summary="后台服务进度（API_TOKEN）",
+    response_model=schemas.Response,
+)
+async def schedule_progress2(
+    job_id: str, _: Annotated[str, Depends(verify_apitoken)]
+) -> Any:
+    """
+    查询指定后台服务的执行进度 API_TOKEN认证（?token=xxx）
+    """
+    progress = Scheduler().get_progress(job_id)
+    if not progress:
+        return schemas.Response(success=False, message="后台服务不存在")
+    return schemas.Response(success=True, data=progress.model_dump())
 
 
 @router.get("/transfer", summary="文件整理统计", response_model=List[int])
@@ -218,22 +252,26 @@ def cpu2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
     return SystemUtils.cpu_usage()
 
 
-@router.get("/memory", summary="获取当前内存使用量和使用率", response_model=List[int])
+@router.get(
+    "/memory",
+    summary="获取当前系统内存信息",
+    response_model=schemas.DashboardMemoryInfo,
+)
 def memory(_: Any = Depends(get_current_active_superuser)) -> Any:
     """
-    获取当前内存使用率
+    获取当前系统内存信息
     """
     return SystemUtils.memory_usage()
 
 
 @router.get(
     "/memory2",
-    summary="获取当前内存使用量和使用率（API_TOKEN）",
-    response_model=List[int],
+    summary="获取当前系统内存信息（API_TOKEN）",
+    response_model=schemas.DashboardMemoryInfo,
 )
 def memory2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
     """
-    获取当前内存使用率 API_TOKEN认证（?token=xxx）
+    获取当前系统内存信息 API_TOKEN认证（?token=xxx）
     """
     return SystemUtils.memory_usage()
 

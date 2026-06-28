@@ -1624,60 +1624,99 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             return " ".join(normalized_labels) or None
         return None
 
-    async def async_get_online_plugins(self, force: bool = False) -> List[schemas.Plugin]:
+    async def async_get_online_plugins(
+            self,
+            force: bool = False,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> List[schemas.Plugin]:
         """
         异步获取所有在线插件信息
         :param force: 是否强制刷新（忽略缓存）
+        :param progress_callback: 定时服务进度更新回调
         """
         if not settings.PLUGIN_MARKET:
+            if progress_callback:
+                progress_callback(value=100, text="未配置插件市场，跳过刷新")
             return []
 
-        # 用于存储高于 v1 版本的插件（如 v2, v3 等）
+        async def fetch_market(
+                market: str,
+                package_version: Optional[str],
+                result_version: str,
+                task_index: int,
+        ) -> Tuple[int, str, List[schemas.Plugin]]:
+            """
+            获取单个市场版本的插件列表并保留结果分组。
+            """
+            plugins = await self.async_get_plugins_from_market(
+                market,
+                package_version,
+                force,
+            )
+            return task_index, result_version, plugins or []
+
         higher_version_plugins = []
-        # 用于存储 v1 版本插件
         base_version_plugins = []
-
-        # 使用异步并发获取线上插件
-        import asyncio
         tasks = []
-        task_to_version = {}
 
-        for m in settings.PLUGIN_MARKET.split(","):
-            if not m:
+        for market in settings.PLUGIN_MARKET.split(","):
+            if not market:
                 continue
-            # 创建任务获取 v1 版本插件
-            base_task = asyncio.create_task(self.async_get_plugins_from_market(m, None, force))
-            tasks.append(base_task)
-            task_to_version[base_task] = "base_version"
-
-            # 创建任务获取高版本插件（如 v2、v3）
+            tasks.append(
+                asyncio.create_task(
+                    fetch_market(market, None, "base_version", len(tasks))
+                )
+            )
             if settings.VERSION_FLAG:
-                higher_version_task = asyncio.create_task(
-                    self.async_get_plugins_from_market(m, settings.VERSION_FLAG, force))
-                tasks.append(higher_version_task)
-                task_to_version[higher_version_task] = "higher_version"
+                tasks.append(
+                    asyncio.create_task(
+                        fetch_market(
+                            market,
+                            settings.VERSION_FLAG,
+                            "higher_version",
+                            len(tasks),
+                        )
+                    )
+                )
 
-        # 并发执行所有任务
         if tasks:
-            completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
-            for i, result in enumerate(completed_tasks):
-                task = tasks[i]
-                version = task_to_version[task]
-
-                # 检查是否有异常
-                if isinstance(result, Exception):
-                    logger.error(f"获取插件市场数据失败：{str(result)}")
-                    continue
-
-                plugins = result
+            total_tasks = len(tasks)
+            finished_tasks = 0
+            task_results = {}
+            if progress_callback:
+                progress_callback(
+                    value=0,
+                    text=f"开始刷新插件市场，共 {total_tasks} 个请求 ...",
+                    data={"total": total_tasks, "finished": 0},
+                )
+            for completed_task in asyncio.as_completed(tasks):
+                try:
+                    task_index, version, plugins = await completed_task
+                    task_results[task_index] = (version, plugins)
+                except Exception as err:
+                    logger.error(f"获取插件市场数据失败：{str(err)}")
+                finished_tasks += 1
+                if progress_callback:
+                    progress_callback(
+                        value=finished_tasks / total_tasks * 100,
+                        text=(
+                            f"插件市场请求"
+                            f"（{finished_tasks}/{total_tasks}）处理完成"
+                        ),
+                        data={"total": total_tasks, "finished": finished_tasks},
+                    )
+            for task_index in sorted(task_results):
+                version, plugins = task_results[task_index]
                 if plugins:
                     if version == "higher_version":
-                        higher_version_plugins.extend(plugins)  # 收集高版本插件
+                        higher_version_plugins.extend(plugins)
                     else:
-                        base_version_plugins.extend(plugins)  # 收集 v1 版本插件
+                        base_version_plugins.extend(plugins)
 
         result = self.process_plugins_list(higher_version_plugins, base_version_plugins)
         logger.info(f"获取到 {len(result)} 个线上插件")
+        if progress_callback:
+            progress_callback(value=100, text="插件市场缓存刷新完成")
         return result
 
     async def async_get_plugins_from_market(self, market: str,

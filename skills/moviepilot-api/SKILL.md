@@ -282,7 +282,7 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | POST | `/api/v1/transfer/manual` | Manual transfer. Params: `background`. Body: ManualTransferItem JSON |
 | GET | `/api/v1/transfer/now` | Run immediate transfer |
 
-### Dashboard (17 endpoints)
+### Dashboard (19 endpoints)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -296,6 +296,8 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | GET | `/api/v1/dashboard/downloader2` | Downloader info (API_TOKEN) |
 | GET | `/api/v1/dashboard/schedule` | Scheduled services |
 | GET | `/api/v1/dashboard/schedule2` | Scheduled services (API_TOKEN) |
+| GET | `/api/v1/dashboard/schedule/{job_id}/progress` | Scheduled service real-time progress |
+| GET | `/api/v1/dashboard/schedule2/{job_id}/progress` | Scheduled service real-time progress (API_TOKEN) |
 | GET | `/api/v1/dashboard/transfer` | Transfer statistics. Params: `days` |
 | GET | `/api/v1/dashboard/cpu` | CPU usage |
 | GET | `/api/v1/dashboard/cpu2` | CPU usage (API_TOKEN) |

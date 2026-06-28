@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
 from app import schemas
 from app.chain import ChainBase
@@ -979,12 +979,19 @@ class SubscribeChain(ChainBase):
             return True
         return False
 
-    def search(self, sid: Optional[int] = None, state: Optional[str] = 'N', manual: Optional[bool] = False):
+    def search(
+            self,
+            sid: Optional[int] = None,
+            state: Optional[str] = 'N',
+            manual: Optional[bool] = False,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> None:
         """
         订阅搜索
         :param sid: 订阅ID，有值时只处理该订阅
         :param state: 订阅状态 N:新建, R:订阅中, P:待定, S:暂停
         :param manual: 是否手动搜索
+        :param progress_callback: 定时服务进度更新回调
         :return: 更新订阅状态为R或删除订阅
         """
         lock_acquired = False
@@ -1002,12 +1009,29 @@ class SubscribeChain(ChainBase):
                 subscribes = [subscribe] if subscribe else []
             else:
                 subscribes = subscribeoper.list(self.get_states_for_search(state))
+            total_num = len(subscribes)
+            if progress_callback:
+                progress_callback(
+                    value=0,
+                    text=f"开始订阅搜索，共 {total_num} 个订阅 ...",
+                    data={"total": total_num, "finished": 0},
+                )
 
             try:
                 # 遍历订阅
-                for subscribe in subscribes:
+                for index, subscribe in enumerate(subscribes, start=1):
                     if global_vars.is_system_stopped:
                         break
+                    if progress_callback:
+                        progress_callback(
+                            value=(index - 1) / total_num * 100 if total_num else 100,
+                            text=f"正在搜索订阅（{index}/{total_num}）{subscribe.name} ...",
+                            data={
+                                "total": total_num,
+                                "finished": index - 1,
+                                "current": subscribe.id,
+                            },
+                        )
                     mediakey = subscribe.tmdbid or subscribe.doubanid
                     custom_word_list = subscribe.custom_words.split("\n") if subscribe.custom_words else None
                     # 校验当前时间减订阅创建时间是否大于1分钟，否则跳过先，留出编辑订阅的时间
@@ -1021,6 +1045,10 @@ class SubscribeChain(ChainBase):
                     if not sid and state in ['R', 'P']:
                         sleep_time = random.randint(60, 300)
                         logger.info(f'订阅搜索随机休眠 {sleep_time} 秒 ...')
+                        if progress_callback:
+                            progress_callback(
+                                text=f"订阅搜索随机休眠 {sleep_time} 秒后继续 ..."
+                            )
                         time.sleep(sleep_time)
                     try:
                         logger.info(f'开始搜索订阅，标题：{subscribe.name} ...')
@@ -1168,6 +1196,12 @@ class SubscribeChain(ChainBase):
                         # 如果状态为N则更新为R
                         if subscribe and subscribe.state == 'N':
                             subscribeoper.update(subscribe.id, {'state': 'R'})
+                        if progress_callback:
+                            progress_callback(
+                                value=index / total_num * 100 if total_num else 100,
+                                text=f"订阅搜索（{index}/{total_num}）处理完成",
+                                data={"total": total_num, "finished": index},
+                            )
 
                 # 手动触发时发送系统消息
                 if manual:
@@ -1178,6 +1212,8 @@ class SubscribeChain(ChainBase):
                             self.messagehelper.put('所有订阅搜索完成！', title="订阅搜索", role="system")
                     else:
                         self.messagehelper.put('没有找到订阅！', title="订阅搜索", role="system")
+                if progress_callback:
+                    progress_callback(value=100, text="订阅搜索完成")
 
             finally:
                 subscribes.clear()
@@ -1294,17 +1330,54 @@ class SubscribeChain(ChainBase):
         elif not downloads:
             logger.info(f'{mediainfo.title_year} 继续洗版 ...')
 
-    def refresh(self):
+    def refresh(self, progress_callback: Optional[Callable[..., None]] = None) -> None:
         """
         订阅刷新
+
+        :param progress_callback: 定时服务进度更新回调
         """
         # 触发刷新站点资源，从缓存中匹配订阅
         sites = self.get_subscribed_sites()
         if sites is None:
+            if progress_callback:
+                progress_callback(value=100, text="没有订阅需要刷新")
             return
-        self.match(
-            TorrentsChain().refresh(sites=sites)
+        def _update_refresh_progress(
+                value: Optional[float] = None,
+                text: Optional[str] = None,
+                data: Optional[dict] = None,
+        ) -> None:
+            """将站点刷新进度映射到订阅刷新的前半阶段。"""
+            if progress_callback:
+                progress_callback(
+                    value=(value or 0) * 0.6,
+                    text=text,
+                    data=data,
+                )
+
+        def _update_match_progress(
+                value: Optional[float] = None,
+                text: Optional[str] = None,
+                data: Optional[dict] = None,
+        ) -> None:
+            """将订阅匹配进度映射到订阅刷新的后半阶段。"""
+            if progress_callback:
+                progress_callback(
+                    value=60 + (value or 0) * 0.4,
+                    text=text,
+                    data=data,
+                )
+
+        torrents = TorrentsChain().refresh(
+            sites=sites,
+            progress_callback=_update_refresh_progress if progress_callback else None,
         )
+        self.match(
+            torrents,
+            progress_callback=_update_match_progress if progress_callback else None,
+        )
+        if progress_callback:
+            progress_callback(value=100, text="订阅刷新完成")
 
     @staticmethod
     def get_sub_sites(subscribe: Subscribe) -> List[int]:
@@ -1349,13 +1422,25 @@ class SubscribeChain(ChainBase):
 
         return ret_sites
 
-    def match(self, torrents: Dict[str, List[Context]]):
+    def match(
+            self,
+            torrents: Dict[str, List[Context]],
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> None:
         """
         从缓存中匹配订阅，并自动下载
+
+        :param torrents: 按站点分组的资源上下文
+        :param progress_callback: 订阅匹配进度更新回调
         """
         if not torrents:
             logger.warn('没有缓存资源，无法匹配订阅')
+            if progress_callback:
+                progress_callback(value=100, text="没有缓存资源，跳过订阅匹配")
             return
+
+        if progress_callback:
+            progress_callback(value=0, text="正在预处理订阅资源 ...")
 
         lock_acquired = False
         try:
@@ -1409,10 +1494,32 @@ class SubscribeChain(ChainBase):
 
             # 所有订阅
             subscribes = SubscribeOper().list(self.get_states_for_search('R'))
+            total_num = len(subscribes)
+            if progress_callback:
+                progress_callback(
+                    value=20,
+                    text=f"资源预处理完成，开始匹配 {total_num} 个订阅 ...",
+                    data={"total": total_num, "finished": 0},
+                )
             try:
-                for subscribe in subscribes:
+                for index, subscribe in enumerate(subscribes, start=1):
                     if global_vars.is_system_stopped:
                         break
+                    if progress_callback:
+                        progress_callback(
+                            value=20 + (
+                                (index - 1) / total_num * 80 if total_num else 80
+                            ),
+                            text=(
+                                f"正在匹配订阅（{index}/{total_num}）"
+                                f"{subscribe.name} ..."
+                            ),
+                            data={
+                                "total": total_num,
+                                "finished": index - 1,
+                                "current": subscribe.id,
+                            },
+                        )
                     logger.info(f'开始匹配订阅，标题：{subscribe.name} ...')
                     mediakey = subscribe.tmdbid or subscribe.doubanid
                     try:
@@ -1693,22 +1800,48 @@ class SubscribeChain(ChainBase):
                 del processed_torrents
                 subscribes.clear()
                 del subscribes
+                if progress_callback:
+                    progress_callback(
+                        value=100,
+                        text="订阅资源匹配完成",
+                        data={"total": total_num, "finished": total_num},
+                    )
         finally:
             if lock_acquired:
                 self._rlock.release()
                 logger.debug(f"match Lock released at {datetime.now()}")
 
-    def check(self):
+    def check(self, progress_callback: Optional[Callable[..., None]] = None) -> None:
         """
         定时检查订阅，更新订阅信息
+
+        :param progress_callback: 定时服务进度更新回调
         """
         # 查询所有订阅
         subscribeoper = SubscribeOper()
+        subscribes = subscribeoper.list()
+        total_num = len(subscribes)
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始更新订阅元数据，共 {total_num} 个订阅 ...",
+                data={"total": total_num, "finished": 0},
+            )
         # 遍历订阅
-        for subscribe in subscribeoper.list():
+        for index, subscribe in enumerate(subscribes, start=1):
             if global_vars.is_system_stopped:
                 break
             logger.info(f'开始更新订阅元数据：{subscribe.name} ...')
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在更新订阅元数据（{index}/{total_num}）{subscribe.name} ...",
+                    data={
+                        "total": total_num,
+                        "finished": index - 1,
+                        "current": subscribe.id,
+                    },
+                )
             try:
                 meta = build_subscribe_meta(subscribe)
             except ValueError:
@@ -1773,6 +1906,14 @@ class SubscribeChain(ChainBase):
             subscribe.lack_episode = lack_episode
             subscribeoper.update(subscribe.id, update_data)
             logger.info(f'{subscribe.name} 订阅元数据更新完成')
+            if progress_callback:
+                progress_callback(
+                    value=index / total_num * 100 if total_num else 100,
+                    text=f"订阅元数据（{index}/{total_num}）更新完成",
+                    data={"total": total_num, "finished": index},
+                )
+        if progress_callback:
+            progress_callback(value=100, text="订阅元数据更新完成")
 
     def get_subscribe_by_source(self, source: str) -> Optional[Subscribe]:
         """
@@ -1788,19 +1929,37 @@ class SubscribeChain(ChainBase):
         return SubscribeOper().get_by(**valid_fields)
 
     @staticmethod
-    def follow():
+    def follow(progress_callback: Optional[Callable[..., None]] = None) -> None:
         """
         刷新follow的用户分享，并自动添加订阅
+
+        :param progress_callback: 定时服务进度更新回调
         """
         follow_users: List[str] = SystemConfigOper().get(SystemConfigKey.FollowSubscribers)
         if not follow_users:
+            if progress_callback:
+                progress_callback(value=100, text="未配置 Follow 订阅用户，跳过刷新")
             return
         logger.info(f'开始刷新follow用户分享订阅 ...')
         success_count = 0
         subscribeoper = SubscribeOper()
-        for share_sub in MoviePilotServerHelper.get_subscribe_shares():
+        share_subscribes = MoviePilotServerHelper.get_subscribe_shares() or []
+        total_num = len(share_subscribes)
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始刷新 Follow 订阅分享，共 {total_num} 条 ...",
+                data={"total": total_num, "finished": 0},
+            )
+        for index, share_sub in enumerate(share_subscribes, start=1):
             if global_vars.is_system_stopped:
                 break
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在处理 Follow 订阅分享（{index}/{total_num}）...",
+                    data={"total": total_num, "finished": index - 1},
+                )
             uid = share_sub.get("share_uid")
             if uid and uid in follow_users:
                 # 订阅已存在则跳过
@@ -1852,16 +2011,49 @@ class SubscribeChain(ChainBase):
                 else:
                     logger.error(f'follow用户分享订阅 {title} 添加失败：{message}')
         logger.info(f'follow用户分享订阅刷新完成，共添加 {success_count} 个订阅')
+        if progress_callback:
+            progress_callback(
+                value=100,
+                text=f"Follow 订阅分享刷新完成，新增 {success_count} 个订阅",
+                data={
+                    "total": total_num,
+                    "finished": total_num,
+                    "added": success_count,
+                },
+            )
 
-    async def cache_calendar(self):
+    async def cache_calendar(
+            self,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> None:
         """
         预缓存订阅日历，实际上就是查询一遍所有订阅的媒体信息
         前端请示是异常的，所以需要使用异步缓存方法
+
+        :param progress_callback: 定时服务进度更新回调
         """
         logger.info(f'开始预缓存订阅日历 ...')
-        for subscribe in await SubscribeOper().async_list():
+        subscribes = await SubscribeOper().async_list()
+        total_num = len(subscribes)
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始预缓存订阅日历，共 {total_num} 个订阅 ...",
+                data={"total": total_num, "finished": 0},
+            )
+        for index, subscribe in enumerate(subscribes, start=1):
             if global_vars.is_system_stopped:
                 break
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在预缓存订阅日历（{index}/{total_num}）{subscribe.name} ...",
+                    data={
+                        "total": total_num,
+                        "finished": index - 1,
+                        "current": subscribe.id,
+                    },
+                )
             try:
                 mtype = MediaType(subscribe.type)
             except ValueError:
@@ -1887,7 +2079,15 @@ class SubscribeChain(ChainBase):
                     logger.warn(
                         f'未识别到季集信息，标题：{subscribe.name}，tmdbid：{subscribe.tmdbid}，豆瓣ID：{subscribe.doubanid}，季：{subscribe.season}')
                     continue
+            if progress_callback:
+                progress_callback(
+                    value=index / total_num * 100 if total_num else 100,
+                    text=f"订阅日历（{index}/{total_num}）预缓存完成",
+                    data={"total": total_num, "finished": index},
+                )
         logger.info(f'订阅日历预缓存完成')
+        if progress_callback:
+            progress_callback(value=100, text="订阅日历预缓存完成")
 
     @staticmethod
     def __update_subscribe_note(subscribe: Subscribe, downloads: Optional[List[Context]]):

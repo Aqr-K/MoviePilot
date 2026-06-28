@@ -1,7 +1,7 @@
 import base64
 import re
 from datetime import datetime
-from typing import List, Optional, Tuple, Union, Dict
+from typing import Callable, List, Optional, Tuple, Union, Dict
 from urllib.parse import urljoin
 
 from app.helper.sites import SitesHelper  # noqa
@@ -103,24 +103,54 @@ class SiteChain(ChainBase):
                 ))
         return userdata
 
-    def refresh_userdatas(self) -> Optional[Dict[str, SiteUserData]]:
+    def refresh_userdatas(
+            self,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> Optional[Dict[str, SiteUserData]]:
         """
         刷新所有站点的用户数据
+
+        :param progress_callback: 定时服务进度更新回调
         """
         any_site_updated = False
         result = {}
-        for site in SitesHelper().get_indexers():
+        sites = [site for site in SitesHelper().get_indexers() if site.get("is_active")]
+        total_num = len(sites)
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始刷新站点数据，共 {total_num} 个站点 ...",
+                data={"total": total_num, "finished": 0},
+            )
+        for index, site in enumerate(sites, start=1):
             if global_vars.is_system_stopped:
                 return None
-            if site.get("is_active"):
-                userdata = self.refresh_userdata(site)
-                if userdata:
-                    any_site_updated = True
-                    result[site.get("name")] = userdata
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在刷新站点数据（{index}/{total_num}）{site.get('name')} ...",
+                    data={
+                        "total": total_num,
+                        "finished": index - 1,
+                        "current": site.get("id"),
+                    },
+                )
+            userdata = self.refresh_userdata(site)
+            if userdata:
+                any_site_updated = True
+                result[site.get("name")] = userdata
+            if progress_callback:
+                progress_callback(
+                    value=index / total_num * 100 if total_num else 100,
+                    text=f"站点数据（{index}/{total_num}）刷新完成",
+                    data={"total": total_num, "finished": index},
+                )
         if any_site_updated:
             eventmanager.send_event(EventType.SiteRefreshed, {
                 "site_id": "*"
             })
+        if progress_callback:
+            progress_callback(value=100, text="站点数据刷新完成")
 
         return result
 
@@ -323,9 +353,16 @@ class SiteChain(ChainBase):
                 del html
         return favicon_url, None
 
-    def sync_cookies(self, manual=False) -> Tuple[bool, str]:
+    def sync_cookies(
+            self,
+            manual: bool = False,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> Tuple[bool, str]:
         """
         通过CookieCloud同步站点Cookie
+
+        :param manual: 是否手动同步
+        :param progress_callback: 定时服务进度更新回调
         """
 
         def __indexer_domain(inx: dict, sub_domain: str) -> str:
@@ -340,9 +377,13 @@ class SiteChain(ChainBase):
             return sub_domain
 
         logger.info("开始同步CookieCloud站点 ...")
+        if progress_callback:
+            progress_callback(value=0, text="开始下载 CookieCloud 数据 ...")
         cookies, msg = CookieCloudHelper().download()
         if not cookies:
             logger.error(f"CookieCloud同步失败：{msg}")
+            if progress_callback:
+                progress_callback(value=100, text=f"CookieCloud同步失败：{msg}")
             if manual:
                 self.messagehelper.put(msg, title="CookieCloud同步失败", role="system")
             return False, msg
@@ -353,11 +394,22 @@ class SiteChain(ChainBase):
         siteshelper = SitesHelper()
         siteoper = SiteOper()
         rsshelper = RssHelper()
-        for domain, cookie in cookies.items():
+        total_num = len(cookies)
+        for index, (domain, cookie) in enumerate(cookies.items(), start=1):
             # 检查系统是否停止
             if global_vars.is_system_stopped:
                 logger.info("系统正在停止，中断CookieCloud同步")
                 return False, "系统正在停止，同步被中断"
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在同步 CookieCloud 站点（{index}/{total_num}）{domain} ...",
+                    data={
+                        "total": total_num,
+                        "finished": index - 1,
+                        "current": domain,
+                    },
+                )
 
             # 索引器信息
             indexer = siteshelper.get_indexer(domain)
@@ -465,6 +517,12 @@ class SiteChain(ChainBase):
                 eventmanager.send_event(EventType.SiteUpdated, {
                     "domain": domain,
                 })
+            if progress_callback:
+                progress_callback(
+                    value=index / total_num * 100 if total_num else 100,
+                    text=f"CookieCloud 站点（{index}/{total_num}）同步完成",
+                    data={"total": total_num, "finished": index},
+                )
         # 处理完成
         ret_msg = f"更新了{_update_count}个站点，新增了{_add_count}个站点"
         if _fail_count > 0:
@@ -472,6 +530,8 @@ class SiteChain(ChainBase):
         if manual:
             self.messagehelper.put(ret_msg, title="CookieCloud同步成功", role="system")
         logger.info(f"CookieCloud同步成功：{ret_msg}")
+        if progress_callback:
+            progress_callback(value=100, text=f"CookieCloud同步成功：{ret_msg}")
         return True, ret_msg
 
     @eventmanager.register(EventType.SiteUpdated)

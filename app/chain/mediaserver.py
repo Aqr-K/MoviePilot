@@ -1,6 +1,6 @@
 import threading
 from datetime import datetime
-from typing import List, Union, Optional, Generator, Any
+from typing import Callable, List, Union, Optional, Generator, Any
 
 from app.chain import ChainBase
 from app.core.config import global_vars
@@ -191,13 +191,17 @@ class MediaServerChain(ChainBase):
             "mediaserver_image_cookies", server=server, image_url=image_url
         )
 
-    def sync(self):
+    def sync(self, progress_callback: Optional[Callable[..., None]] = None) -> None:
         """
         同步媒体库所有数据到本地数据库
+
+        :param progress_callback: 定时服务进度更新回调
         """
         # 设置的媒体服务器
         mediaservers = ServiceConfigHelper.get_mediaserver_configs()
         if not mediaservers:
+            if progress_callback:
+                progress_callback(value=100, text="未配置媒体服务器，跳过同步")
             return
         with lock:
             # 汇总统计
@@ -206,7 +210,19 @@ class MediaServerChain(ChainBase):
             enabled_servers = [mediaserver.name for mediaserver in mediaservers
                                if mediaserver and mediaserver.enabled and mediaserver.name]
             dboper.delete_excluded_servers(enabled_servers)
+            total_servers = len(enabled_servers)
+            if progress_callback:
+                progress_callback(
+                    value=0,
+                    text=f"开始同步媒体服务器，共 {total_servers} 个 ...",
+                    data={"total": total_servers, "finished": 0},
+                )
+            if not total_servers:
+                if progress_callback:
+                    progress_callback(value=100, text="没有已启用的媒体服务器")
+                return
             # 遍历媒体服务器
+            server_index = 0
             for mediaserver in mediaservers:
                 if not mediaserver:
                     continue
@@ -214,15 +230,36 @@ class MediaServerChain(ChainBase):
                 if not mediaserver.enabled:
                     logger.info(f"媒体服务器 {mediaserver.name} 未启用，跳过")
                     continue
+                server_index += 1
                 server_name = mediaserver.name
+                if progress_callback:
+                    progress_callback(
+                        value=(server_index - 1) / total_servers * 100,
+                        text=(
+                            f"正在同步媒体服务器"
+                            f"（{server_index}/{total_servers}）{server_name} ..."
+                        ),
+                        data={
+                            "total": total_servers,
+                            "finished": server_index - 1,
+                            "current": server_name,
+                        },
+                    )
                 sync_libraries = mediaserver.sync_libraries or []
                 logger.info(f"开始同步媒体服务器 {server_name} 的数据 ...")
                 libraries = self.librarys(server_name)
                 if not libraries:
                     logger.info(f"没有获取到媒体服务器 {server_name} 的媒体库，跳过")
+                    if progress_callback:
+                        progress_callback(
+                            value=server_index / total_servers * 100,
+                            text=f"媒体服务器 {server_name} 无可同步媒体库",
+                            data={"total": total_servers, "finished": server_index},
+                        )
                     continue
                 sync_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-                for library in libraries:
+                total_libraries = len(libraries)
+                for library_index, library in enumerate(libraries, start=1):
                     if sync_libraries \
                             and "all" not in sync_libraries \
                             and str(library.id) not in sync_libraries:
@@ -255,6 +292,36 @@ class MediaServerChain(ChainBase):
                     logger.info(f"{server_name} 媒体库 {library.name} 同步完成，共同步数量：{library_count}")
                     # 总数累加
                     total_count += library_count
+                    if progress_callback:
+                        progress_callback(
+                            value=(
+                                (server_index - 1 + library_index / total_libraries)
+                                / total_servers
+                                * 100
+                            ),
+                            text=(
+                                f"{server_name} 媒体库"
+                                f"（{library_index}/{total_libraries}）{library.name} 同步完成"
+                            ),
+                            data={
+                                "total": total_servers,
+                                "finished": server_index - 1,
+                                "current": server_name,
+                                "library_total": total_libraries,
+                                "library_finished": library_index,
+                            },
+                        )
                 stale_count = dboper.delete_stale(server=server_name, sync_time=sync_time)
                 logger.info(f"媒体服务器 {server_name} 清理陈旧数据完成，删除数量：{stale_count}")
                 logger.info(f"媒体服务器 {server_name} 数据同步完成，总同步数量：{total_count}")
+                if progress_callback:
+                    progress_callback(
+                        value=server_index / total_servers * 100,
+                        text=(
+                            f"媒体服务器（{server_index}/{total_servers}）"
+                            f"{server_name} 同步完成"
+                        ),
+                        data={"total": total_servers, "finished": server_index},
+                    )
+            if progress_callback:
+                progress_callback(value=100, text="媒体服务器同步完成")

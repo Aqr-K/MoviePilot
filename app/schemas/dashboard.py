@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Statistic(BaseModel):
@@ -65,6 +65,50 @@ class DownloaderInfo(BaseModel):
     free_space: Optional[float] = 0.0
 
 
+class DashboardMemoryInfo(BaseModel):
+    """仪表板系统内存统计。"""
+
+    # 总内存字节数
+    total: int = 0
+    # 已使用内存字节数，不包含缓存
+    used: int = 0
+    # 缓存与缓冲区占用字节数
+    cached: int = 0
+    # 可用内存字节数
+    available: int = 0
+    # 已使用内存占总内存百分比，不包含缓存
+    usage: float = 0.0
+
+
+class ScheduleProgress(BaseModel):
+    """后台服务执行进度信息。"""
+
+    # ID
+    id: Optional[str] = None
+    # 名称
+    name: Optional[str] = None
+    # 提供者
+    provider: Optional[str] = None
+    # 是否正在执行
+    enable: Optional[bool] = False
+    # 当前完成百分比
+    value: Optional[float] = 0.0
+    # 当前进度文本
+    text: Optional[str] = None
+    # 执行状态 waiting/running/success/failed
+    status: Optional[str] = None
+    # 最近一次执行是否成功
+    success: Optional[bool] = None
+    # 最近一次开始时间
+    started_at: Optional[str] = None
+    # 最近一次结束时间
+    finished_at: Optional[str] = None
+    # 最近一次错误信息
+    error: Optional[str] = None
+    # 扩展数据
+    data: Optional[dict] = Field(default_factory=dict)
+
+
 class ScheduleInfo(BaseModel):
     """仪表板后台服务信息。"""
 
@@ -78,6 +122,14 @@ class ScheduleInfo(BaseModel):
     status: Optional[str] = None
     # 下次执行时间
     next_run: Optional[str] = None
+    # 当前完成百分比
+    progress: Optional[float] = 0.0
+    # 进度文本
+    progress_text: Optional[str] = None
+    # 是否正在更新进度
+    progress_enable: Optional[bool] = False
+    # 进度详情
+    progress_detail: Optional[ScheduleProgress] = None
 
 
 class DashboardSystemInfo(BaseModel):

@@ -1917,9 +1917,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             sample_files.append(item)
         return sample_files
 
-    def process(self) -> bool:
+    def process(self, progress_callback: Optional[Callable[..., None]] = None) -> bool:
         """
         获取下载器中的种子列表，并执行整理
+
+        :param progress_callback: 定时服务进度更新回调
         """
         # 全局锁，避免定时服务重复
         with downloader_lock:
@@ -1931,9 +1933,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     dir_info.monitor_type == "downloader" and dir_info.storage == "local"
                     for dir_info in download_dirs
             ):
+                if progress_callback:
+                    progress_callback(value=100, text="未配置下载器监控目录，跳过整理")
                 return True
 
             logger.info("开始整理下载器中已经完成下载的文件 ...")
+            if progress_callback:
+                progress_callback(value=0, text="正在查询已完成下载任务 ...")
 
             # 从下载器获取种子列表
             if torrents_list := self.list_torrents(status=TorrentStatus.TRANSFER):
@@ -1951,14 +1957,38 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
             if not torrents:
                 logger.info("没有已完成下载但未整理的任务")
+                if progress_callback:
+                    progress_callback(value=100, text="没有已完成下载但未整理的任务")
                 return False
 
             logger.info(f"获取到 {len(torrents)} 个已完成的下载任务")
+            if progress_callback:
+                progress_callback(
+                    value=0,
+                    text=f"获取到 {len(torrents)} 个已完成下载任务",
+                    data={"total": len(torrents), "finished": 0},
+                )
 
             try:
-                for torrent in torrents:
+                total_num = len(torrents)
+                for index, torrent in enumerate(torrents, start=1):
                     if global_vars.is_system_stopped:
                         break
+                    if progress_callback:
+                        torrent_name = (
+                            getattr(torrent, "title", None)
+                            or getattr(torrent, "name", None)
+                            or torrent.hash
+                        )
+                        progress_callback(
+                            value=(index - 1) / total_num * 100,
+                            text=f"正在整理下载任务（{index}/{total_num}）{torrent_name} ...",
+                            data={
+                                "total": total_num,
+                                "finished": index - 1,
+                                "current": torrent.hash,
+                            },
+                        )
 
                     # 文件路径
                     file_path = torrent.path
@@ -2022,9 +2052,15 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                             extension=file_path.suffix.lstrip("."),
                         ),
                         mediainfo=mediainfo,
-                        downloader=torrent.downloader,
-                        download_hash=torrent.hash,
-                    )
+                            downloader=torrent.downloader,
+                            download_hash=torrent.hash,
+                        )
+                    if progress_callback:
+                        progress_callback(
+                            value=index / total_num * 100,
+                            text=f"下载任务（{index}/{total_num}）整理处理完成",
+                            data={"total": total_num, "finished": index},
+                        )
 
             finally:
                 torrents.clear()
