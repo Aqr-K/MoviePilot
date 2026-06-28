@@ -66,17 +66,17 @@ class DownloaderInfo(BaseModel):
 
 
 class DashboardMemoryInfo(BaseModel):
-    """仪表板系统内存统计。"""
+    """仪表板应用进程与系统内存统计。"""
 
     # 总内存字节数
     total: int = 0
-    # 已使用内存字节数，不包含缓存
+    # 当前 MoviePilot 进程使用内存字节数
     used: int = 0
     # 缓存与缓冲区占用字节数
     cached: int = 0
     # 可用内存字节数
     available: int = 0
-    # 已使用内存占总内存百分比，不包含缓存
+    # 当前 MoviePilot 进程使用内存占总内存百分比
     usage: float = 0.0
 
 

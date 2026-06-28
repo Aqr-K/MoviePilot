@@ -254,24 +254,24 @@ def cpu2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
 
 @router.get(
     "/memory",
-    summary="获取当前系统内存信息",
+    summary="获取当前应用与系统内存信息",
     response_model=schemas.DashboardMemoryInfo,
 )
 def memory(_: Any = Depends(get_current_active_superuser)) -> Any:
     """
-    获取当前系统内存信息
+    获取当前应用与系统内存信息
     """
     return SystemUtils.memory_usage()
 
 
 @router.get(
     "/memory2",
-    summary="获取当前系统内存信息（API_TOKEN）",
+    summary="获取当前应用与系统内存信息（API_TOKEN）",
     response_model=schemas.DashboardMemoryInfo,
 )
 def memory2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
     """
-    获取当前系统内存信息 API_TOKEN认证（?token=xxx）
+    获取当前应用与系统内存信息 API_TOKEN认证（?token=xxx）
     """
     return SystemUtils.memory_usage()
 
