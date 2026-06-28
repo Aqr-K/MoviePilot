@@ -1,8 +1,7 @@
 import asyncio
-import threading
 
 from app.agent import agent_manager
-from app.core.config import settings
+from app.core.config import settings, global_vars
 from app.log import logger
 
 
@@ -53,34 +52,21 @@ agent_initializer = AgentInitializer()
 
 def init_agent():
     """
-    初始化AI智能体（同步版本，用于在后台线程中运行）
+    初始化AI智能体（同步入口，将初始化协程调度到主事件循环中执行）
+
+    早前实现为每次启动新建守护线程 + 临时事件循环来 run_until_complete，
+    导致 Agent 的后台任务（会话 worker / 空闲清理）绑定在随线程结束即关闭的
+    临时循环上，与关停时 stop_agent 所在的主循环不是同一个，关停无法取消这些任务。
+    改为复用项目既有约定 asyncio.run_coroutine_threadsafe(coro, global_vars.loop)，
+    使 Agent 后台任务与关停同处主循环。
     """
     try:
         if not settings.AI_AGENT_ENABLE:
             logger.info("AI智能体功能未启用")
             return True
 
-        # 在新的事件循环中初始化AI智能体管理器
-        def run_init():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                success = loop.run_until_complete(agent_initializer.initialize())
-                if success:
-                    logger.info("AI智能体管理器初始化成功")
-                else:
-                    logger.error("AI智能体管理器初始化失败")
-                return success
-            except Exception as err:
-                logger.error(f"AI智能体管理器初始化失败: {err}")
-                return False
-            finally:
-                loop.close()
-
-        # 在后台线程中初始化
-        init_thread = threading.Thread(target=run_init, daemon=True)
-        init_thread.start()
-
+        # 调度到主事件循环初始化（fire-and-forget；initialize 内部已记录成功/失败并吞掉异常）
+        asyncio.run_coroutine_threadsafe(agent_initializer.initialize(), global_vars.loop)
         return True
 
     except Exception as e:
