@@ -290,6 +290,19 @@ def verify_resource_token(
     return __verify_token(token=resource_token, purpose="resource")
 
 
+def compare_secret(provided: str | None, expected: str | None) -> bool:
+    """
+    常量时间比较密钥/令牌，防计时侧信道攻击（CWE-208）。
+
+    :param provided: 请求侧提供的密钥/令牌
+    :param expected: 系统配置中的期望值
+    :return: 二者非空且逐字节相等时返回 True；任一为空（None/空串）返回 False
+    """
+    if not provided or not expected:
+        return False
+    return hmac.compare_digest(provided.encode(), expected.encode())
+
+
 def __verify_key(key: str | None, expected_key: str, key_type: str) -> str:
     """
     通用的 API Key 或 Token 验证函数
@@ -299,7 +312,7 @@ def __verify_key(key: str | None, expected_key: str, key_type: str) -> str:
     :return: 返回校验通过的 API Key 或 Token
     :raises HTTPException: 如果校验不通过，抛出 401 错误
     """
-    if not key or key != expected_key:
+    if not compare_secret(key, expected_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"{key_type} 校验不通过"

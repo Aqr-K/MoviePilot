@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 
 # 模块默认优先级：数字越小优先级越高。未显式声明优先级的模块统一回退到此值，
 # 避免 get_priority() 返回 None 在排序/比较时引发 TypeError。
-DEFAULT_MODULE_PRIORITY: int = 100
+# 取值约束：必须大于所有内建模块声明的优先级（当前最大为 qqbot=10），以保证“未声明者恒排最后”。
+DEFAULT_MODULE_PRIORITY: int = 9999
 
 
 class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):

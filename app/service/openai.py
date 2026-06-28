@@ -13,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from app import schemas
 from app.core.config import settings
+from app.core.security import compare_secret
 
 
 def sse_payload(data: dict) -> str:
@@ -48,7 +49,7 @@ def check_auth(
             error_type="authentication_error",
             code="invalid_api_key",
         )
-    if credentials.credentials != settings.API_TOKEN:
+    if not compare_secret(credentials.credentials, settings.API_TOKEN):
         return error_response(
             "Invalid bearer token.",
             401,
