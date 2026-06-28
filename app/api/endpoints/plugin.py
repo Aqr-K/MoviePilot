@@ -428,10 +428,8 @@ def reload_plugin(
     """
     重新加载插件
     """
-    # 重新加载插件
+    # 重新加载插件（PluginManager.reload_plugin 已内聚重建调度/命令/API 路由绑定）
     PluginManager().reload_plugin(plugin_id)
-    # 注册插件服务
-    register_plugin(plugin_id)
     return schemas.Response(success=True)
 
 
@@ -882,7 +880,7 @@ def uninstall_plugin(
         if plugin_base_dir.exists():
             try:
                 shutil.rmtree(plugin_base_dir)
-                plugin_manager.plugins.pop(plugin_id, None)
+                plugin_manager.remove_plugin_class(plugin_id)
             except Exception as e:
                 logger.error(f"删除插件分身目录 {plugin_base_dir} 失败: {str(e)}")
     # 从插件文件夹中移除该插件

@@ -528,6 +528,7 @@ class ChainBase(metaclass=ABCMeta):
             episode_group: Optional[str] = None,
             cache: bool = True,
             share_meta: MetaBase = None,
+            raise_exception: bool = False,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片
@@ -539,6 +540,8 @@ class ChainBase(metaclass=ABCMeta):
         :param bangumiid: BangumiID
         :param episode_group: 剧集组
         :param cache:    是否使用缓存
+        :param raise_exception: 严格模式，为真时后端瞬时异常（TMDB/网络等）上抛而非吞为
+                                "未识别到"的 None；默认 False 保持原有静默语义
         :return: 识别的媒体信息，包括剧集信息
         """
         # 识别用名中含指定信息情形
@@ -555,6 +558,8 @@ class ChainBase(metaclass=ABCMeta):
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
         share_query_meta = share_meta or meta
+        # 仅严格模式才注入分发控制位，默认路径不携带该 kwarg，后端收到的参数与原先逐字节一致
+        _strict = {"raise_exception": True} if raise_exception else {}
         with fresh(not cache):
             mediainfo = self.run_module(
                 "recognize_media",
@@ -565,6 +570,7 @@ class ChainBase(metaclass=ABCMeta):
                 bangumiid=bangumiid,
                 episode_group=episode_group,
                 cache=cache,
+                **_strict,
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
@@ -596,6 +602,7 @@ class ChainBase(metaclass=ABCMeta):
                         bangumiid=shared_params.get("bangumiid"),
                         episode_group=episode_group,
                         cache=cache,
+                        **_strict,
                     )
                 if mediainfo:
                     self._update_local_recognize_cache(shared_cache_meta, mediainfo)
@@ -612,6 +619,7 @@ class ChainBase(metaclass=ABCMeta):
             episode_group: Optional[str] = None,
             cache: bool = True,
             share_meta: MetaBase = None,
+            raise_exception: bool = False,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片（异步版本）
@@ -623,6 +631,8 @@ class ChainBase(metaclass=ABCMeta):
         :param bangumiid: BangumiID
         :param episode_group: 剧集组
         :param cache:    是否使用缓存
+        :param raise_exception: 严格模式，为真时后端瞬时异常（TMDB/网络等）上抛而非吞为
+                                "未识别到"的 None；默认 False 保持原有静默语义
         :return: 识别的媒体信息，包括剧集信息
         """
         # 识别用名中含指定信息情形
@@ -639,6 +649,8 @@ class ChainBase(metaclass=ABCMeta):
         elif not mtype and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
         share_query_meta = share_meta or meta
+        # 仅严格模式才注入分发控制位，默认路径不携带该 kwarg，后端收到的参数与原先逐字节一致
+        _strict = {"raise_exception": True} if raise_exception else {}
         async with async_fresh(not cache):
             mediainfo = await self.async_run_module(
                 "async_recognize_media",
@@ -649,6 +661,7 @@ class ChainBase(metaclass=ABCMeta):
                 bangumiid=bangumiid,
                 episode_group=episode_group,
                 cache=cache,
+                **_strict,
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
@@ -680,6 +693,7 @@ class ChainBase(metaclass=ABCMeta):
                         bangumiid=shared_params.get("bangumiid"),
                         episode_group=episode_group,
                         cache=cache,
+                        **_strict,
                     )
                 if mediainfo:
                     await self._async_update_local_recognize_cache(shared_cache_meta, mediainfo)

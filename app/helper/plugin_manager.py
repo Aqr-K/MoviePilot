@@ -62,6 +62,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 插件智能体工具注册表缓存，插件启停或配置生效时主动失效。
         self._plugin_agent_tools_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._plugin_agent_tools_cache_lock = threading.Lock()
+        # 保护 _plugins / _running_plugins 的可重入锁：热重载监控线程与请求线程会并发读写这两张表，
+        # 写入与遍历读取均须持锁，避免“dictionary changed size during iteration”及读到半更新态。
+        self._plugins_lock = threading.RLock()
         # 开发者模式监测插件修改
         if settings.DEV or settings.PLUGIN_AUTO_RELOAD:
             self.__start_monitor()
@@ -99,18 +102,22 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             try:
                 # 判断插件是否满足认证要求，如不满足则不进行实例化
                 if not self.__set_and_check_auth_level(plugin=plugin):
-                    # 如果是插件热更新实例，这里则进行替换
-                    if plugin_id in self._plugins:
-                        self._plugins[plugin_id] = plugin
+                    # 如果是插件热更新实例，这里则进行替换（check-then-act 须在锁内原子完成，
+                    # 否则与并发 stop() 存在 TOCTOU：检查与替换之间被摘除会复活已下线插件）
+                    with self._plugins_lock:
+                        if plugin_id in self._plugins:
+                            self._plugins = {**self._plugins, plugin_id: plugin}
                     continue
-                # 存储Class
-                self._plugins[plugin_id] = plugin
+                # 存储Class（整体替换式写入：并发读侧遍历的是替换前的完整字典，无需读侧加锁）
+                with self._plugins_lock:
+                    self._plugins = {**self._plugins, plugin_id: plugin}
                 # 生成实例
                 plugin_obj = plugin()
                 # 生效插件配置
                 plugin_obj.init_plugin(self.get_plugin_config(plugin_id))
-                # 存储运行实例
-                self._running_plugins[plugin_id] = plugin_obj
+                # 存储运行实例（整体替换式写入）
+                with self._plugins_lock:
+                    self._running_plugins = {**self._running_plugins, plugin_id: plugin_obj}
                 logger.info(f"加载插件：{plugin_id} 版本：{plugin_obj.plugin_version}")
                 # 启用的插件才设置事件注册状态可用
                 if plugin_obj.get_state():
@@ -179,7 +186,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 plugins = {pid: plugin_obj}
         else:
             logger.info("正在停止所有插件...")
-            plugins = self._running_plugins
+            # 锁内快照后遍历，避免与热重载并发写竞争
+            plugins = self._running_snapshot()
         for plugin_id, plugin in plugins.items():
             eventmanager.disable_event_handler(type(plugin))
             self.__stop_plugin(plugin)
@@ -191,15 +199,17 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         self._unregister_plugin_modules(stopped_ids)
         # 清空对象
         if pid:
-            # 清空指定插件
-            self._plugins.pop(pid, None)
-            self._running_plugins.pop(pid, None)
+            # 清空指定插件（整体替换式写入，读侧免锁遍历安全）
+            with self._plugins_lock:
+                self._plugins = {k: v for k, v in self._plugins.items() if k != pid}
+                self._running_plugins = {k: v for k, v in self._running_plugins.items() if k != pid}
             # 清除插件模块缓存，包括所有子模块
             self._clear_plugin_modules(pid)
         else:
             # 清空
-            self._plugins = {}
-            self._running_plugins = {}
+            with self._plugins_lock:
+                self._plugins = {}
+                self._running_plugins = {}
             # 清除所有插件模块缓存
             self._clear_plugin_modules()
         self.clear_plugin_agent_tools_cache()
@@ -278,11 +288,30 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         return plugins
 
+    def _running_snapshot(self) -> Dict[str, Any]:
+        """
+        运行态插件字典的锁内浅拷贝快照，供需遍历的只读路径使用，避免与热重载并发写竞争。
+        :return: {plugin_id: 运行实例} 的浅拷贝
+        """
+        with self._plugins_lock:
+            return dict(self._running_plugins)
+
+    def _plugins_snapshot(self) -> Dict[str, Any]:
+        """
+        插件类字典的锁内浅拷贝快照，供需遍历的只读路径使用，避免与热重载并发写竞争。
+        :return: {plugin_id: 插件类} 的浅拷贝
+        """
+        with self._plugins_lock:
+            return dict(self._plugins)
+
     @property
     def running_plugins(self) -> Dict[str, Any]:
         """
         获取运行态插件列表
         :return: 运行态插件列表
+
+        注意：返回内部字典的实时引用（既有调用方依赖对其直接 .get()/.pop() 操作），
+        需遍历且要求线程安全的内部路径请改用 _running_snapshot()。
         """
         return self._running_plugins
 
@@ -291,6 +320,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         获取插件列表
         :return: 插件列表
+
+        注意：返回内部字典的实时引用（既有调用方依赖对其直接 .get()/.pop() 操作），
+        需遍历且要求线程安全的内部路径请改用 _plugins_snapshot()。
         """
         return self._plugins
 
@@ -580,6 +612,17 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         except Exception as e:
             logger.warn(f"停止插件 {plugin.get_name()} 时发生错误: {str(e)}")
 
+    def remove_plugin_class(self, plugin_id: str) -> None:
+        """
+        从插件类表中移除指定插件（整体替换式写入，锁内完成）。
+
+        供卸载分身等需在 stop() 之外单独摘除类引用的场景使用，替代对 plugins 属性的就地 .pop()，
+        与 start()/stop() 的整体替换写入保持一致，确保并发读侧遍历安全。
+        :param plugin_id: 插件ID
+        """
+        with self._plugins_lock:
+            self._plugins = {k: v for k, v in self._plugins.items() if k != plugin_id}
+
     def remove_plugin(self, plugin_id: str):
         """
         从内存中移除一个插件
@@ -595,15 +638,26 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
     def reload_plugin(self, plugin_id: str):
         """
-        将一个插件重新加载到内存
+        将一个插件重新加载到内存，并内聚地重建其调度服务、菜单命令与 API 路由。
+
+        热重载须先下线（stop 内含模块/事件处理器下线）、再上线（start 内含模块/事件处理器上线），
+        随后同步重建调度/命令/路由绑定——否则文件监控、插件分身等“直接调用 reload_plugin”的路径
+        会残留指向旧实例的过期定时任务/命令/路由（仅 API、agent 工具两条路径先前在外层补刷）。
+        register_plugin 为幂等（先摘后建/replace_existing），与外层可能的重复调用叠加亦安全。
         :param plugin_id: 插件ID
         """
-        # 先移除插件实例
+        # 先移除插件实例（含模块、事件处理器下线）
         self.stop(plugin_id)
-        # 重新加载
+        # 重新加载（含模块、事件处理器上线）
         self.start(plugin_id)
-        # 广播事件
-        eventmanager.send_event(EventType.PluginReload, data={"plugin_id": plugin_id})
+        # 同步重建调度服务/菜单命令/API 路由（惰性导入，避免 helper 顶层产生对 api/调度/命令层的依赖边）
+        try:
+            from app.api.endpoints.plugin import register_plugin
+            register_plugin(plugin_id)
+            # 绑定就绪后再广播事件，避免在同步绑定失败后仍发出"已重载"信号
+            eventmanager.send_event(EventType.PluginReload, data={"plugin_id": plugin_id})
+        except Exception as err:
+            logger.error(f"重载插件 {plugin_id} 同步调度/命令/API 绑定出错：{str(err)}")
 
     @staticmethod
     def _clear_plugin_modules(plugin_id: Optional[str] = None):
@@ -1142,7 +1196,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         plugins = []
         # 已安装插件
         installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
-        for pid, plugin_class in self._plugins.items():
+        # 锁内快照后遍历，避免与热重载并发写竞争
+        for pid, plugin_class in self._plugins_snapshot().items():
             # 运行状插件
             plugin_obj = self._running_plugins.get(pid)
             # 基本属性
