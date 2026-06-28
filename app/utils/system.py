@@ -689,17 +689,17 @@ class SystemUtils:
     @staticmethod
     def memory_usage() -> schemas.DashboardMemoryInfo:
         """
-        获取系统已使用、缓存、可用和总内存信息。
+        获取当前 MoviePilot 进程内存与系统缓存、可用和总内存信息。
         """
         memory = psutil.virtual_memory()
         total = max(0, int(memory.total))
-        used = max(0, int(memory.used))
+        used = max(0, int(psutil.Process().memory_info().rss))
         cached = max(
             0,
             int(getattr(memory, "cached", 0) or 0)
             + int(getattr(memory, "buffers", 0) or 0),
         )
-        available = max(0, total - used - cached)
+        available = max(0, int(memory.available))
         usage = used / total * 100 if total else 0.0
         return schemas.DashboardMemoryInfo(
             total=total,
