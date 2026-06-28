@@ -19,6 +19,11 @@ if TYPE_CHECKING:
     from app.schemas.types import TorrentStatus
 
 
+# 模块默认优先级：数字越小优先级越高。未显式声明优先级的模块统一回退到此值，
+# 避免 get_priority() 返回 None 在排序/比较时引发 TypeError。
+DEFAULT_MODULE_PRIORITY: int = 100
+
+
 class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
     """
     模块基类，实现对应方法，在有需要时会被自动调用，返回None代表不启用该模块，将继续执行下一模块
@@ -83,7 +88,7 @@ class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
         """
         获取模块优先级，数字越小优先级越高，只有同一接口下优先级才生效
         """
-        pass
+        return DEFAULT_MODULE_PRIORITY
 
     @abstractmethod
     def stop(self) -> None:
