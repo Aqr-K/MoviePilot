@@ -7,17 +7,17 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app import schemas
 from app.core import security
 from app.helper.image import WallpaperHelper
+from app.core.auth_rate_limit import auth_rate_limiter
 from app.schemas import RateLimitExceededException
-from app.utils.limit import KeyedWindowRateLimiter
 
 # Re-exported at module level so tests can monkeypatch on login_endpoint directly.
 from app.api.endpoints.auth import _build_flow_service, emit_auth_event
 
 router = APIRouter()
 
-# 登录端点限流：10 次 / 60 秒 / (ip+username)，进程级；多实例需共享后端（Redis）
-# Limit chosen: 10 attempts / 60 s — enough for legitimate retries, blocks brute-force.
-_auth_rate_limiter = KeyedWindowRateLimiter(max_calls=10, window_seconds=60)
+# 共享认证限流器（与 /auth/flow 同一桶，避免同 ip:username 暴破预算翻倍）；
+# 保留模块级别名供端点代码引用与测试 monkeypatch。
+_auth_rate_limiter = auth_rate_limiter
 
 
 @router.post("/access-token", summary="获取token", response_model=schemas.Token)

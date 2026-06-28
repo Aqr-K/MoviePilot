@@ -17,7 +17,7 @@ from app.schemas.event import AuthObservationEventData, MfaChallengeEventData
 from app.schemas.types import ChainEventType
 from app.service.auth.flow_engine import FlowStore
 from app.service.auth.flow_service import redact_reason
-from app.utils.limit import KeyedWindowRateLimiter
+from app.core.auth_rate_limit import auth_rate_limiter
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
 
@@ -29,9 +29,9 @@ _FLOW_BEGIN_PATH = "/api/v1/auth/flow/begin"
 # 多步登录流程状态存储（进程级，跨请求承载未完成的流程；重启失效=重新登录，可接受）
 _FLOW_STORE = FlowStore()
 
-# 多步推进端点限流：10 次 / 60 秒 / (ip+username)，进程级；多实例需共享后端（Redis）
-# Chosen limit: 10 attempts / 60 s mirrors the /access-token limit (KISS, same policy)
-_auth_advance_rate_limiter = KeyedWindowRateLimiter(max_calls=10, window_seconds=60)
+# 共享认证限流器（与 /access-token 同一桶，避免同 ip:username 暴破预算翻倍）；
+# 保留模块级别名供 _check_flow_rate_limit 引用与测试 monkeypatch。
+_auth_advance_rate_limiter = auth_rate_limiter
 
 
 def _system_auth_providers() -> list[dict[str, Any]]:

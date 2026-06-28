@@ -74,7 +74,9 @@ def __get_api_key(
     return key_header or key_query # 首选请求头
 
 
-@cached(maxsize=1, ttl=600)
+# TTL 收窄至 60s：限制超管被停用/降权后 API_TOKEN/API_KEY 仍被当作超管的 de-auth 窗口
+# （缓存命中期内不复查 DB，60s 为兜底窗口）。
+@cached(maxsize=1, ttl=60)
 def __create_superuser_token_payload() -> schemas.TokenPayload:
     """
     创建管理员用户的TokenPayload
@@ -87,7 +89,7 @@ def __create_superuser_token_payload() -> schemas.TokenPayload:
     from app.db.user_oper import UserOper
 
     user = UserOper().get_by_name(settings.SUPERUSER)
-    if not user or not user.is_superuser:
+    if not user or not user.is_superuser or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户权限不足",

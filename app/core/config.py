@@ -90,6 +90,10 @@ class ConfigModel(BaseModel):
     RESOURCE_SECRET_KEY: str = secrets.token_urlsafe(32)
     # 允许的域名
     ALLOWED_HOSTS: list = Field(default_factory=lambda: ["*"])
+    # 受信任的反向代理 IP（uvicorn forwarded_allow_ips）：仅来自这些 IP 的 X-Forwarded-For 才被采信，
+    # 据以还原真实客户端 IP（限流按真实 IP 生效）。默认仅信任本机；Docker+反代部署需设为反代/网桥 IP，
+    # 切勿在不可信网络设为 "*"（会被伪造 XFF 绕过 IP 限流）。
+    FORWARDED_ALLOW_IPS: str = "127.0.0.1"
     # TOKEN过期时间
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
     # RESOURCE_TOKEN过期时间
