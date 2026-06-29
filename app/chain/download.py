@@ -478,7 +478,8 @@ class DownloadChain(ChainBase):
                         userid: Union[str, int] = None,
                         username: Optional[str] = None,
                         label: Optional[str] = None,
-                        return_detail: bool = False) -> Union[Optional[str], Tuple[Optional[str], Optional[str]]]:
+                        return_detail: bool = False,
+                        custom_words: Optional[str] = None) -> Union[Optional[str], Tuple[Optional[str], Optional[str]]]:
         """
         下载及发送通知
         :param context: 资源上下文
@@ -493,6 +494,7 @@ class DownloadChain(ChainBase):
         :param username: 调用下载的用户名/插件名
         :param label: 自定义标签
         :param return_detail: 是否返回详细结果；False 时返回下载任务 hash 或 None，True 时返回 (hash, error_msg)
+        :param custom_words: 下载来源（如订阅）的完整自定义识别词文本，随下载记录存档，供整理时原样复现识别
         :return: return_detail=False 时返回下载任务 hash 或 None；return_detail=True 时返回 (hash, error_msg)
         """
         _torrent = context.torrent_info
@@ -649,7 +651,8 @@ class DownloadChain(ChainBase):
                 date=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
                 media_category=_media.category,
                 episode_group=_media.episode_group,
-                note={"source": source}
+                note={"source": source},
+                custom_words=custom_words
             )
 
             # 登记下载文件
@@ -738,7 +741,8 @@ class DownloadChain(ChainBase):
                        source: Optional[str] = None,
                        userid: Optional[str] = None,
                        username: Optional[str] = None,
-                       downloader: Optional[str] = None
+                       downloader: Optional[str] = None,
+                       custom_words: Optional[str] = None
                        ) -> Tuple[List[Context], Dict[Union[int, str], Dict[int, NotExistMediaInfo]]]:
         """
         根据缺失数据，自动种子列表中组合择优下载
@@ -750,6 +754,7 @@ class DownloadChain(ChainBase):
         :param userid:  用户ID
         :param username: 调用下载的用户名/插件名
         :param downloader: 下载器
+        :param custom_words: 下载来源（如订阅）的完整自定义识别词文本，随下载记录存档，供整理时原样复现识别
         :return: 已经下载的资源列表、剩余未下载到的剧集 no_exists[tmdb_id/douban_id] = {season: NotExistMediaInfo}
         """
         # 已下载的项目
@@ -890,7 +895,7 @@ class DownloadChain(ChainBase):
                 logger.info(f"开始下载电影 {context.torrent_info.title} ...")
                 if self.download_single(context, save_path=save_path, channel=channel,
                                         source=source, userid=userid, username=username,
-                                        downloader=downloader):
+                                        downloader=downloader, custom_words=custom_words):
                     # 下载成功
                     logger.info(f"{context.torrent_info.title} 添加下载成功")
                     downloaded_list.append(context)
@@ -993,7 +998,8 @@ class DownloadChain(ChainBase):
                                         source=source,
                                         userid=userid,
                                         username=username,
-                                        downloader=downloader
+                                        downloader=downloader,
+                                        custom_words=custom_words
                                     )
                             else:
                                 # 下载
@@ -1001,7 +1007,8 @@ class DownloadChain(ChainBase):
                                 download_id = self.download_single(context, save_path=save_path,
                                                                    channel=channel, source=source,
                                                                    userid=userid, username=username,
-                                                                   downloader=downloader)
+                                                                   downloader=downloader,
+                                                                   custom_words=custom_words)
 
                             if download_id:
                                 # 下载成功
@@ -1085,7 +1092,8 @@ class DownloadChain(ChainBase):
                                 download_id = self.download_single(context, save_path=save_path,
                                                                    channel=channel, source=source,
                                                                    userid=userid, username=username,
-                                                                   downloader=downloader)
+                                                                   downloader=downloader,
+                                                                   custom_words=custom_words)
                                 if download_id:
                                     # 下载成功
                                     if __requires_complete_coverage(tv):
@@ -1182,7 +1190,8 @@ class DownloadChain(ChainBase):
                                 source=source,
                                 userid=userid,
                                 username=username,
-                                downloader=downloader
+                                downloader=downloader,
+                                custom_words=custom_words
                             )
                             if not download_id:
                                 continue
