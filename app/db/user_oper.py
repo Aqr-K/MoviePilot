@@ -60,11 +60,15 @@ async def get_current_active_user_async(
 
 def get_current_active_superuser(
         current_user: User = Depends(get_current_user),
+        token_data: schemas.TokenPayload = Depends(verify_token),
 ) -> User:
     """
     获取当前激活超级管理员
+
+    同时要求令牌声明超管身份（token_data.super_user）与数据库用户为超管，
+    避免降权后的服务令牌（API_TOKEN，super_user=False）凭 sub 解析到超管用户后绕过校验。
     """
-    if not current_user.is_superuser:
+    if not token_data.super_user or not current_user.is_superuser:
         raise HTTPException(
             status_code=400, detail="用户权限不足"
         )
@@ -73,11 +77,15 @@ def get_current_active_superuser(
 
 async def get_current_active_superuser_async(
         current_user: User = Depends(get_current_user_async),
+        token_data: schemas.TokenPayload = Depends(verify_token),
 ) -> User:
     """
     异步获取当前激活超级管理员
+
+    同时要求令牌声明超管身份（token_data.super_user）与数据库用户为超管，
+    避免降权后的服务令牌（API_TOKEN，super_user=False）凭 sub 解析到超管用户后绕过校验。
     """
-    if not current_user.is_superuser:
+    if not token_data.super_user or not current_user.is_superuser:
         raise HTTPException(
             status_code=400, detail="用户权限不足"
         )

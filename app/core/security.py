@@ -34,7 +34,10 @@ oauth2_scheme_manual_error = OAuth2PasswordBearer(
 # RESOURCE TOKEN 通过 Cookie 认证
 resource_token_cookie = APIKeyCookie(name=settings.PROJECT_NAME, auto_error=False, scheme_name="resource_token_cookie")
 
-# API TOKEN 通过 QUERY 认证
+# API TOKEN 通过 Header 认证（首选，避免经 URL/access-log 泄露）
+api_token_header = APIKeyHeader(name="X-API-TOKEN", auto_error=False, scheme_name="api_token_header")
+
+# API TOKEN 通过 QUERY 认证（保留向后兼容，但优先使用请求头）
 api_token_query = APIKeyQuery(name="token", auto_error=False, scheme_name="api_token_query")
 
 # API KEY 通过 Header 认证
@@ -51,14 +54,16 @@ anthropic_api_key_header = APIKeyHeader(name="x-api-key", auto_error=False, sche
 
 
 def __get_api_token(
+        token_header: Annotated[str | None, Security(api_token_header)] = None,
         token_query: Annotated[str | None, Security(api_token_query)] = None
 ) -> str | None:
     """
-    从 URL 查询参数中获取 API Token
-    :param token_query: 从 URL 中的 `token` 查询参数获取 API Token
-    :return: 返回获取到的 API Token，若无则返回 None
+    从请求头或 URL 查询参数中获取 API Token，优先使用请求头
+    :param token_header: 请求头中的 `X-API-TOKEN` 参数
+    :param token_query: URL 中的 `token` 查询参数（向后兼容）
+    :return: 返回获取到的 API Token，优先请求头，若无则返回 None
     """
-    return token_query
+    return token_header or token_query  # 首选请求头，降低经 URL/access-log 泄露
 
 
 def __get_api_key(
@@ -75,11 +80,15 @@ def __get_api_key(
 
 
 @cached(maxsize=1, ttl=600)
-def __create_superuser_token_payload() -> schemas.TokenPayload:
+def __create_service_token_payload() -> schemas.TokenPayload:
     """
-    创建管理员用户的TokenPayload
+    创建服务令牌（API_TOKEN / API_KEY，二者校验同一 settings.API_TOKEN）的 TokenPayload
 
-    :return: 管理员TokenPayload
+    服务令牌不授予超级管理员身份（super_user=False），避免静态密钥经 URL/Header
+    即等价于超级管理员、可直达超管端点（架构审计 3.A #53）。保留普通认证身份，
+    但不具备超管权限；超管能力仅由真实用户名/口令登录签发的 JWT（super_user=True）承载。
+
+    :return: 非超管的服务 TokenPayload
     """
     # 延迟导入
     # pylint: disable=import-outside-toplevel
@@ -87,15 +96,15 @@ def __create_superuser_token_payload() -> schemas.TokenPayload:
     from app.db.user_oper import UserOper
 
     user = UserOper().get_by_name(settings.SUPERUSER)
-    if not user or not user.is_superuser:
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户权限不足",
+            detail="用户不存在",
         )
     return schemas.TokenPayload(
         sub=user.id,
         username=user.name,
-        super_user=user.is_superuser,
+        super_user=False,
         level=get_auth_level(),
         purpose="authentication",
     )
@@ -251,7 +260,7 @@ def verify_token(
     :param response: 响应对象，用于设置 Cookie
     :param jwt_token: 从 Authorization 头部获取的 JWT 令牌
     :param api_key: 从 查询参数`apikey` 或 请求头`X-API-KEY` 获取 API Token
-    :param api_token: 从 查询参数`token` 获取 API Token
+    :param api_token: 从 请求头`X-API-TOKEN`（优先）或 查询参数`token` 获取 API Token
     :return: 解析后的 TokenPayload
     :raises HTTPException: 如果令牌无效或用途不匹配
     """
@@ -265,10 +274,13 @@ def verify_token(
         return payload
     elif api_key:
         verify_apikey(api_key)
-        return __create_superuser_token_payload()
+        # API_KEY 与 API_TOKEN 校验同一 settings.API_TOKEN，必须一致降权：
+        # 否则攻击者用 ?apikey=<API_TOKEN> 即可绕过 api_token 分支的降权拿满超管（#53 旁路）
+        return __create_service_token_payload()
     elif api_token:
         verify_apitoken(api_token)
-        return __create_superuser_token_payload()
+        # 服务令牌（API_TOKEN）降权：非超级管理员身份，避免等价超管直达超管端点
+        return __create_service_token_payload()
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -323,7 +335,7 @@ def __verify_key(key: str | None, expected_key: str, key_type: str) -> str:
 def verify_apitoken(token: Annotated[str | None, Security(__get_api_token)]) -> str:
     """
     使用 API Token 进行身份认证
-    :param token: API Token，从 URL 查询参数中获取 token=xxx
+    :param token: API Token，从请求头 X-API-TOKEN=xxx（优先）或 URL 查询参数 token=xxx 获取
     :return: 返回校验通过的 API Token
     """
     return __verify_key(token, settings.API_TOKEN, "token")
