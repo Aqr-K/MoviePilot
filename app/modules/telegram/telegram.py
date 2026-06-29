@@ -46,10 +46,18 @@ TELEGRAM_PARSE_MODE_ALIASES = {
 
 
 class RetryException(Exception):
+    """
+    Telegram 消息发送重试异常。
+    """
+
     pass
 
 
 class Telegram:
+    """
+    Telegram 消息客户端，负责发送、编辑、接收和转发 Telegram 消息。
+    """
+
     _ds_url = (
         f"http://127.0.0.1:{settings.PORT}/api/v1/message?token={settings.API_TOKEN}"
     )
@@ -1129,6 +1137,69 @@ class Telegram:
         """
         return "there is no text in the message to edit" in str(err).lower()
 
+    @staticmethod
+    def __is_message_not_modified_error(err: Exception) -> bool:
+        """
+        判断 Telegram 是否因为消息内容未变化而拒绝编辑。
+        """
+        return "message is not modified" in str(err).lower()
+
+    @staticmethod
+    def __is_http_url_content_error(err: Exception) -> bool:
+        """
+        判断 Telegram 是否因为无法获取远端图片 URL 而拒绝编辑。
+        """
+        return "failed to get http url content" in str(err).lower()
+
+    def __edit_message_text_or_caption(
+            self,
+            chat_id: str,
+            message_id: int,
+            text: str,
+            reply_markup: Optional[InlineKeyboardMarkup] = None,
+            disable_web_page_preview: Optional[bool] = None,
+            parse_mode: Optional[str] = None,
+    ) -> bool:
+        """
+        编辑 Telegram 文本消息，原消息无文本时回退为 caption 编辑。
+        """
+        prepared_text = self._prepare_text(text, parse_mode)
+        edit_text_kwargs: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": prepared_text,
+            "parse_mode": parse_mode,
+            "reply_markup": reply_markup,
+        }
+        if disable_web_page_preview is not None:
+            edit_text_kwargs["disable_web_page_preview"] = (
+                disable_web_page_preview
+            )
+        try:
+            self._bot.edit_message_text(**edit_text_kwargs)
+        except Exception as err:
+            if self.__is_message_not_modified_error(err):
+                logger.debug(f"Telegram消息内容未变化，跳过编辑：{str(err)}")
+                return True
+            if not self.__is_no_text_edit_error(err):
+                raise
+            try:
+                self._bot.edit_message_caption(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    caption=prepared_text,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                )
+            except Exception as caption_err:
+                if self.__is_message_not_modified_error(caption_err):
+                    logger.debug(
+                        f"Telegram消息内容未变化，跳过编辑：{str(caption_err)}"
+                    )
+                    return True
+                raise
+        return True
+
     def __edit_message(
             self,
             chat_id: str,
@@ -1175,31 +1246,34 @@ class Telegram:
                 )
             else:
                 # 如果没有图片，使用edit_message_text
-                edit_text_kwargs: Dict[str, Any] = {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": self._prepare_text(text, parse_mode),
-                    "parse_mode": parse_mode,
-                    "reply_markup": reply_markup,
-                }
-                if disable_web_page_preview is not None:
-                    edit_text_kwargs["disable_web_page_preview"] = (
-                        disable_web_page_preview
-                    )
-                try:
-                    self._bot.edit_message_text(**edit_text_kwargs)
-                except Exception as err:
-                    if not self.__is_no_text_edit_error(err):
-                        raise
-                    self._bot.edit_message_caption(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        caption=self._prepare_text(text, parse_mode),
-                        parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    )
+                return self.__edit_message_text_or_caption(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=disable_web_page_preview,
+                    parse_mode=parse_mode,
+                )
             return True
         except Exception as e:
+            if self.__is_message_not_modified_error(e):
+                logger.debug(f"Telegram消息内容未变化，跳过编辑：{str(e)}")
+                return True
+            if image and self.__is_http_url_content_error(e):
+                logger.warning(
+                    f"Telegram图片编辑失败，降级为文本编辑：{str(e)}"
+                )
+                try:
+                    return self.__edit_message_text_or_caption(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        reply_markup=reply_markup,
+                        disable_web_page_preview=disable_web_page_preview,
+                        parse_mode=parse_mode,
+                    )
+                except Exception as fallback_err:
+                    e = fallback_err
             logger.error(f"编辑消息失败：{str(e)}")
             return False
 
