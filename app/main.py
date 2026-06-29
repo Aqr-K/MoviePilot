@@ -39,6 +39,7 @@ setproctitle.setproctitle(settings.PROJECT_NAME)
 # uvicorn服务
 Server = uvicorn.Server(Config(app, host=settings.HOST, port=settings.PORT,
                                reload=settings.DEV, workers=multiprocessing.cpu_count() * 2 + 1,
+                               proxy_headers=True, forwarded_allow_ips=settings.FORWARDED_ALLOW_IPS,
                                timeout_graceful_shutdown=60))
 
 
