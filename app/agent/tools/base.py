@@ -509,8 +509,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         return (
             "抱歉，您没有执行此工具的权限。"
             "只有渠道管理员或系统管理员才能执行工具操作。"
-            "如需执行工具，请联系渠道管理员将您的用户ID添加到渠道管理员列表中，"
-            "或联系系统管理员为您设置权限。"
+            "如需执行工具，请联系管理员将您的用户ID添加到渠道管理员列表中（设定 -> 通知 -> 对应渠道配置 -> 管理员名单），"
+            "或联系系统管理员为您设置管理员权限。"
         )
 
     async def _has_channel_admin_permission(self) -> bool:
