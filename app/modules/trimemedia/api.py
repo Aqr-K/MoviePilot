@@ -347,6 +347,32 @@ class Api:
             return [self.__build_item(info) for info in res.data.get("list", [])]
         return None
 
+    def item_count(self, guid: str, types=None) -> Optional[int]:
+        """
+        获取指定媒体库的媒体条目总数
+
+        :param guid: 媒体库GUID
+        :param types: 需要统计的媒体类型
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if types is None:
+            types = [Type.MOVIE, Type.TV]
+        post = {
+            "ancestor_guid": guid,
+            "tags": {"type": types},
+            "exclude_grouped_video": 1,
+            "page": 1,
+            "page_size": 1,
+        }
+        if (res := self.request("/item/list", data=post)) and res.success:
+            if not res.data:
+                return 0
+            total_count = res.data.get("total")
+            if total_count is None:
+                total_count = res.data.get("total_count")
+            return int(total_count) if total_count is not None else None
+        return None
+
     def search_list(self, keywords: str) -> Optional[list[Item]]:
         """
         搜索影片、演员

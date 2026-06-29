@@ -237,6 +237,19 @@ class ZSpaceModule(_ModuleBase, _MediaServerBase[ZSpace]):
             return server_obj.get_items(library_id, start_index, limit)
         return None
 
+    def mediaserver_items_count(self, server: str, library_id: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的媒体条目总数
+
+        :param server: 媒体服务器名称
+        :param library_id: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        server_obj: ZSpace = self.get_instance(server)
+        if server_obj:
+            return server_obj.get_items_count(library_id)
+        return None
+
     def mediaserver_iteminfo(self, server: str, item_id: str) -> Optional[schemas.MediaServerItem]:
         """
         媒体库项目详情

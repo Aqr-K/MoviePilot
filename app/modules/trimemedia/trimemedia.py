@@ -510,6 +510,20 @@ class TrimeMedia:
             use_cookies=True,
         )
 
+    def get_items_count(self, parent: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的媒体条目总数
+
+        :param parent: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if not self.is_authenticated():
+            return None
+        return self._api.item_count(
+            guid=str(parent),
+            types=[fnapi.Type.MOVIE, fnapi.Type.TV],
+        )
+
     def get_items(
         self,
         parent: Union[str, int],
