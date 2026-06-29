@@ -36,8 +36,8 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.image import WallpaperHelper
 from app.helper.message import MessageHelper
 from app.helper.progress import ProgressHelper
-from app.helper.sites import SitesHelper  # noqa
 from app.helper.server import MoviePilotServerHelper
+from app.helper.sites import SitesHelper  # noqa
 from app.log import logger
 from app.schemas import Notification, NotificationType, Workflow
 from app.schemas.types import EventType, SystemConfigKey
@@ -177,16 +177,16 @@ class SchedulerChain(ChainBase):
         )
 
         message_cutoff = (
-            started_at - timedelta(days=message_days)
+                started_at - timedelta(days=message_days)
         ).strftime("%Y-%m-%d %H:%M:%S")
         download_history_cutoff = (
-            started_at - timedelta(days=download_history_days)
+                started_at - timedelta(days=download_history_days)
         ).strftime("%Y-%m-%d %H:%M:%S")
         site_userdata_cutoff = (
-            started_at - timedelta(days=site_userdata_days)
+                started_at - timedelta(days=site_userdata_days)
         ).strftime("%Y-%m-%d")
         transfer_history_cutoff = (
-            started_at - timedelta(days=transfer_history_days)
+                started_at - timedelta(days=transfer_history_days)
         ).strftime("%Y-%m-%d %H:%M:%S")
 
         return [
@@ -472,8 +472,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id="cookiecloud",
                     name="同步CookieCloud站点",
                     minutes=int(settings.COOKIECLOUD_INTERVAL),
-                    next_run_time=datetime.now(pytz.timezone(settings.TZ))
-                                  + timedelta(minutes=5),
+                    next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(minutes=5),
                     kwargs={"job_id": "cookiecloud"},
                 )
 
@@ -488,8 +487,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     id="mediaserver_sync",
                     name="同步媒体服务器",
                     hours=int(settings.MEDIASERVER_SYNC_INTERVAL),
-                    next_run_time=datetime.now(pytz.timezone(settings.TZ))
-                                  + timedelta(minutes=10),
+                    next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(minutes=10),
                     kwargs={"job_id": "mediaserver_sync"},
                 )
 
@@ -582,8 +580,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="random_wallpager",
                 name="壁纸缓存",
                 minutes=30,
-                next_run_time=datetime.now(pytz.timezone(settings.TZ))
-                              + timedelta(seconds=1),
+                next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(seconds=1),
                 kwargs={"job_id": "random_wallpager"},
             )
 
@@ -647,8 +644,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="recommend_refresh",
                 name="推荐缓存",
                 hours=24,
-                next_run_time=datetime.now(pytz.timezone(settings.TZ))
-                              + timedelta(seconds=5),
+                next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(seconds=5),
                 kwargs={"job_id": "recommend_refresh"},
             )
 
@@ -669,8 +665,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 id="subscribe_calendar_cache",
                 name="订阅日历缓存",
                 hours=6,
-                next_run_time=datetime.now(pytz.timezone(settings.TZ))
-                              + timedelta(minutes=2),
+                next_run_time=datetime.now(pytz.timezone(settings.TZ)) + timedelta(minutes=2),
                 kwargs={"job_id": "subscribe_calendar_cache"},
             )
 
@@ -823,7 +818,8 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             data=data,
         )
 
-    def __handle_job_error(self, job_id: str, job: dict, error: Exception) -> None:
+    @staticmethod
+    def __handle_job_error(job_id: str, job: dict, error: Exception) -> None:
         """
         记录定时任务执行异常并发送系统错误事件。
         """

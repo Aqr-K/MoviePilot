@@ -693,6 +693,33 @@ class Emby:
             logger.error(f"连接/Users/{self.user}/Items/{itemid}出错：" + str(e))
         return None
 
+    def get_items_count(self, parent: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的电影和剧集总数
+
+        :param parent: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if not parent or not self._host or not self._apikey:
+            return None
+        url = f"{self._host}emby/Users/{self.user}/Items"
+        params = {
+            "ParentId": parent,
+            "Recursive": "true",
+            "IncludeItemTypes": "Movie,Series",
+            "Limit": 0,
+            "api_key": self._apikey,
+        }
+        try:
+            res = RequestUtils().get_res(url, params)
+            if not res or res.status_code != 200:
+                return None
+            total_count = res.json().get("TotalRecordCount")
+            return int(total_count) if total_count is not None else None
+        except Exception as e:
+            logger.error(f"查询媒体库 {parent} 的媒体总数出错：{str(e)}")
+            return None
+
     def get_items(self, parent: Union[str, int], start_index: Optional[int] = 0,
                   limit: Optional[int] = -1) -> Generator[MediaServerItem | None | Any, Any, None]:
         """
