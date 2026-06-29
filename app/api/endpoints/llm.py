@@ -18,7 +18,7 @@ from app.db.user_oper import (
     get_current_active_user_async,
 )
 from app.log import logger
-from app.service.llm import sanitize_llm_test_error as _sanitize_llm_test_error
+from app.service.llm import sanitize_llm_test_error as _sanitize_llm_error
 
 router = APIRouter()
 
@@ -82,7 +82,10 @@ async def get_llm_models(
             },
         )
     except Exception as err:
-        return schemas.Response(success=False, message=str(err))
+        return schemas.Response(
+            success=False,
+            message=_sanitize_llm_error(str(err), api_key),
+        )
 
 
 @router.get("/providers", summary="获取LLM提供商目录", response_model=schemas.Response)
@@ -281,5 +284,5 @@ async def llm_test(
     except Exception as err:
         return schemas.Response(
             success=False,
-            message=_sanitize_llm_test_error(str(err), payload.api_key),
+            message=_sanitize_llm_error(str(err), payload.api_key),
         )
