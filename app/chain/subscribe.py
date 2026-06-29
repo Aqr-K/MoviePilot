@@ -586,6 +586,7 @@ class SubscribeChain(ChainBase):
                 save_path=save_path,
                 downloader=downloader,
                 source=source,
+                custom_words=subscribe.custom_words,
             )
             if downloads:
                 return downloads, lefts
@@ -598,6 +599,7 @@ class SubscribeChain(ChainBase):
             save_path=save_path,
             downloader=downloader,
             source=source,
+            custom_words=subscribe.custom_words,
         )
 
     @staticmethod
