@@ -248,6 +248,7 @@ class ZSpace:
                     name=library.get("Name"),
                     path=library.get("Path"),
                     type=library_type,
+                    item_count=self.get_items_count(library.get("Id")),
                     image=image,
                     link=f'{self._playhost or self._host}web/index.html'
                          f'#!/videos?serverId={self.serverid}&parentId={library.get("Id")}',

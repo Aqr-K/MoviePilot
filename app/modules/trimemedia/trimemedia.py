@@ -194,6 +194,7 @@ class TrimeMedia:
                     name=library.name,
                     type=library_type,
                     path=library.dir_list,
+                    item_count=self.get_items_count(library.guid),
                     image_list=[
                         f"{self._api.host}{img_path}?w=256"
                         for img_path in library.posters or []

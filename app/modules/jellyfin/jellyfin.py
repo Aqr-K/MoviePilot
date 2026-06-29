@@ -173,6 +173,7 @@ class Jellyfin:
                     name=library.get("Name"),
                     path=library.get("Path"),
                     type=library_type,
+                    item_count=self.get_items_count(library.get("Id")),
                     image=image,
                     link=link,
                     server_type="jellyfin"
