@@ -568,6 +568,7 @@ class Ugreen:
                     name=lib_name,
                     type=library_type,
                     path=lib_path,
+                    item_count=lib.get("video_count") or 0,
                     image_list=image_list,
                     link=self.__build_root_url(),
                     server_type="ugreen",
