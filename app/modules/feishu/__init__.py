@@ -90,6 +90,11 @@ class FeishuModule(_ModuleBase, _MessageBase[Feishu]):
             if not self.check_message(message, conf.name):
                 continue
             userid, chat_id, receive_id_type = self._resolve_message_target(message)
+            # 隔离消息（无 userid 但带 targets）解析不出飞书目标时 fail-closed，
+            # 避免 _resolve_target 回退默认群/默认 open_id 广播（targets 为 None 的全局消息不受影响）
+            if message.targets is not None and not userid and not chat_id:
+                logger.warn("用户没有指定 飞书用户ID，消息无法发送")
+                continue
             client: Feishu = self.get_instance(conf.name)
             if client:
                 if message.image and message.file_path:

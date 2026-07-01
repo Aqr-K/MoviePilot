@@ -52,6 +52,40 @@ class TestSystemNotificationDispatch(unittest.TestCase):
         self.assertIsNone(queued_message.userid)
         self.assertFalse(send_message.call_args.kwargs["immediately"])
 
+    def test_user_admin_without_username_only_admin_no_broadcast(self):
+        """#4 隐私泄漏回归：notify_action='user,admin' 且系统通知无 username 时，
+        应只发管理员，绝不把仅管理员可见的通知广播到全部公开渠道。"""
+        from app.core.config import settings
+        from app.schemas.types import NotificationType
+
+        chain = MessageChain()
+        message = Notification(
+            userid=SYSTEM_INTERNAL_USER_ID,  # 归一化后 userid=None（系统通知，无用户上下文）
+            username=None,
+            mtype=NotificationType.Download,
+            title="下载完成",
+            text="任务完成",
+        )
+        admin_targets = {"telegram_userid": "ADMIN_TARGET"}  # 与真实 get_settings 返回 Optional[dict] 一致
+
+        class FakeUserOper:
+            def get_settings(self, name):
+                return admin_targets if name == settings.SUPERUSER else None
+
+        with patch("app.chain.MessageTemplateHelper.render", return_value=message), patch.object(
+            chain.messageoper, "add"
+        ), patch("app.chain.UserOper", FakeUserOper), patch(
+            "app.chain.ServiceConfigHelper.get_notification_switch", return_value="user,admin"
+        ), patch.object(chain.eventmanager, "send_event"), patch.object(
+            chain.messagequeue, "send_message"
+        ) as send_message:
+            chain.post_message(message)
+
+        # 只应发送一次，且目标为管理员列表（证明走 admin 分支而非广播原始消息到全渠道）
+        self.assertEqual(send_message.call_count, 1)
+        sent = send_message.call_args.kwargs["message"]
+        self.assertEqual(sent.targets, admin_targets)
+
     def test_send_direct_message_normalizes_internal_userid(self):
         chain = MessageChain()
         message = Notification(

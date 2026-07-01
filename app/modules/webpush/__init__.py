@@ -66,6 +66,11 @@ class WebPushModule(_ModuleBase, _MessageBase):
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
+            # 隔离消息（admin/user：无 userid 但带 targets）：WebPush 订阅不含用户身份、无法定向，
+            # 只能全量广播 → fail-closed 跳过，避免仅管理员/特定用户可见的通知推送给全部订阅者
+            if not message.userid and message.targets is not None:
+                logger.debug("WebPush 无法定向隔离通知（订阅无用户身份），跳过发送")
+                continue
             webpush_users = conf.config.get("WEBPUSH_USERNAME") or ""
             if webpush_users:
                 # 设定了接收用户时，非该用户的消息不接收
