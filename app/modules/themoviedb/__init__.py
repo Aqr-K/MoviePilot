@@ -955,10 +955,12 @@ class TheMovieDbModule(_ModuleBase):
         """
         验证 obtain_images 参数
         :param mediainfo: 媒体信息
-        :return: None 表示不处理，MediaInfo 表示继续处理
+        :return: 返回 MediaInfo 表示提前返回（跳过 TMDB 抓图），返回 None 表示继续调用 TMDB 抓图
         """
         if settings.RECOGNIZE_SOURCE != "themoviedb":
-            return None
+            # 识别源非 TMDB，本模块不抓 TMDB 图：返回 MediaInfo 让调用方提前返回，
+            # 避免以可能为 None 的 tmdb_id 发起无效 TMDB 请求
+            return mediainfo
         if not mediainfo.tmdb_id:
             return mediainfo
         if mediainfo.logo_path \
