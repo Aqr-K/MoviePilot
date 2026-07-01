@@ -720,8 +720,9 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             # 是否多进程运行
             run_in_process = job.get("run_in_process", False)
             if inspect.iscoroutinefunction(func):
-                # 协程函数
-                __start_coro(func(*args, **kwargs))
+                # 协程函数：阻塞等待其在主事件循环中执行完成，使协程异常能被下方 except 捕获，
+                # 并保证 __finish_job 在协程真正结束后才复位 running 标志（修复异常黑洞与重入并发）。
+                __start_coro(func(*args, **kwargs)).result()
             elif run_in_process:
                 # 多进程运行
                 p = multiprocessing.Process(target=func, args=args, kwargs=kwargs)

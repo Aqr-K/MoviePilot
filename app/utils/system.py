@@ -263,6 +263,23 @@ class SystemUtils:
         return files
 
     @staticmethod
+    def is_within(base: Union[str, Path], target: Union[str, Path]) -> bool:
+        """
+        判断 target 解析后是否位于 base 目录内（含 base 自身），用于防目录穿越（Zip Slip / 路径逃逸）。
+        会 resolve 两端并跟随符号链接，按路径分段比较，避免 "/x/foo" 误判在 "/x/foobar" 内的前缀陷阱。
+
+        :param base: 基准目录
+        :param target: 待校验路径
+        :return: target 在 base 内返回 True，越界或解析失败返回 False
+        """
+        try:
+            base_resolved = Path(base).resolve()
+            target_resolved = Path(target).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return target_resolved == base_resolved or base_resolved in target_resolved.parents
+
+    @staticmethod
     def unpack_archive(archive_file: Path, extract_dir: Path, archive_format: Optional[str] = None) -> None:
         """
         解压压缩包，并补充标准库未覆盖的 RAR 格式支持。
