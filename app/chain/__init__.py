@@ -1274,7 +1274,12 @@ class _NotificationChainMixin:
                             # 管理员同名已发送
                             admin_sended = True
                     else:
-                        # 按原消息发送全体
+                        if action == "user":
+                            # 系统级通知无用户上下文（username 为空），跳过 user 动作，
+                            # 交由后续 admin 等动作处理，避免仅管理员可见的通知被广播到全部公开渠道
+                            logger.info(f"{send_message.mtype} 的消息无用户上下文，跳过 user 发送")
+                            continue
+                        # 显式的全量/未知动作：按原消息发送全体
                         if not admin_sended:
                             send_orignal = True
                         break
@@ -1390,7 +1395,12 @@ class _NotificationChainMixin:
                             # 管理员同名已发送
                             admin_sended = True
                     else:
-                        # 按原消息发送全体
+                        if action == "user":
+                            # 系统级通知无用户上下文（username 为空），跳过 user 动作，
+                            # 交由后续 admin 等动作处理，避免仅管理员可见的通知被广播到全部公开渠道
+                            logger.info(f"{send_message.mtype} 的消息无用户上下文，跳过 user 发送")
+                            continue
+                        # 显式的全量/未知动作：按原消息发送全体
                         if not admin_sended:
                             send_orignal = True
                         break
