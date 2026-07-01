@@ -13,6 +13,7 @@ import yaml
 
 from app.core.config import settings
 from app.log import logger
+from app.utils.system import SystemUtils
 
 CURRENT_PERSONA_FILE = "CURRENT_PERSONA.md"
 SYSTEM_RUNTIME_DIR = "runtime"
@@ -731,8 +732,16 @@ class AgentRuntimeManager:
 
     @staticmethod
     def _resolve_relative_path(root: Path, value: str) -> Path:
+        # extra_context_files 内容会被读出注入 LLM 上下文，必须限制在 root 目录内：
+        # 拒绝绝对路径与 ".." 逃逸，避免任意文件读取经模型泄露。
         candidate = Path(value)
-        return candidate if candidate.is_absolute() else (root / candidate).resolve()
+        if candidate.is_absolute():
+            raise AgentRuntimeConfigError(f"extra_context_files 不允许绝对路径：{value}")
+        root_resolved = root.resolve()
+        resolved = (root_resolved / candidate).resolve()
+        if not SystemUtils.is_within(root_resolved, resolved):
+            raise AgentRuntimeConfigError(f"extra_context_files 路径越界：{value}")
+        return resolved
 
     @staticmethod
     def _normalize_string_list(values: Any, field_name: str) -> list[str]:
