@@ -1283,9 +1283,10 @@ class _NotificationChainMixin:
                         # 未知动作 / user 无用户上下文 / admin 已发过：fail-closed 跳过，绝不广播到全渠道
                         logger.info(f"{send_message.mtype} 的消息动作 '{action}' 无适用目标，跳过发送")
                         continue
-                    # 目标隔离动作但目标不存在（管理员/用户行缺失）→ 跳过，绝不按无目标广播到全部公开渠道
-                    if send_message.targets is None:
-                        logger.info(f"{send_message.mtype} 的通知目标不存在，跳过发送以避免广播到全部公开渠道")
+                    # 目标隔离动作但目标为空（管理员/用户行缺失 None，或存在但无任何渠道绑定 {}）→ 跳过，
+                    # 绝不按无目标广播到全部公开渠道（集中 fail-closed，兜住下游渠道对空目标处理不一致的风险）
+                    if not send_message.targets:
+                        logger.info(f"{send_message.mtype} 的通知目标为空，跳过发送以避免广播到全部公开渠道")
                         continue
                     # 按设定发送
                     self.eventmanager.send_event(
@@ -1408,9 +1409,10 @@ class _NotificationChainMixin:
                         # 未知动作 / user 无用户上下文 / admin 已发过：fail-closed 跳过，绝不广播到全渠道
                         logger.info(f"{send_message.mtype} 的消息动作 '{action}' 无适用目标，跳过发送")
                         continue
-                    # 目标隔离动作但目标不存在（管理员/用户行缺失）→ 跳过，绝不按无目标广播到全部公开渠道
-                    if send_message.targets is None:
-                        logger.info(f"{send_message.mtype} 的通知目标不存在，跳过发送以避免广播到全部公开渠道")
+                    # 目标隔离动作但目标为空（管理员/用户行缺失 None，或存在但无任何渠道绑定 {}）→ 跳过，
+                    # 绝不按无目标广播到全部公开渠道（集中 fail-closed，兜住下游渠道对空目标处理不一致的风险）
+                    if not send_message.targets:
+                        logger.info(f"{send_message.mtype} 的通知目标为空，跳过发送以避免广播到全部公开渠道")
                         continue
                     # 按设定发送
                     await self.eventmanager.async_send_event(

@@ -66,7 +66,7 @@ class TestSystemNotificationDispatch(unittest.TestCase):
             title="下载完成",
             text="任务完成",
         )
-        admin_targets = ["ADMIN_TARGET"]
+        admin_targets = {"telegram_userid": "ADMIN_TARGET"}  # 与真实 get_settings 返回 Optional[dict] 一致
 
         class FakeUserOper:
             def get_settings(self, name):

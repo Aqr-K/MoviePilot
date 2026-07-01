@@ -21,6 +21,10 @@ from app.core.config import settings
 from app.schemas import Notification
 from app.schemas.types import NotificationType
 
+# 与真实 get_settings 返回类型一致：Optional[dict]（渠道键→ID），而非 list
+ADMIN_TARGETS = {"telegram_userid": "admin_tg"}
+USER_TARGETS = {"telegram_userid": "user_tg"}
+
 
 class TestPostMessageIsolationLeak(unittest.TestCase):
 
@@ -36,13 +40,13 @@ class TestPostMessageIsolationLeak(unittest.TestCase):
         )
 
     @staticmethod
-    def _get_settings_stub(admin_targets, user_targets=None):
-        # get_settings(SUPERUSER) 返回 admin_targets（None 表示超管行不存在）；其余返回 user_targets
+    def _get_settings_stub(admin_targets, user_targets):
+        # get_settings(SUPERUSER) 返回 admin_targets（None=行缺失 / {}=无绑定）；其余用户名返回 user_targets
         def _stub(name):
-            return list(admin_targets) if (name == settings.SUPERUSER and admin_targets is not None) else user_targets
+            return admin_targets if name == settings.SUPERUSER else user_targets
         return _stub
 
-    def _run_sync(self, chain, message, switch, admin_targets=("admin_target",), user_targets=None):
+    def _run_sync(self, chain, message, switch, admin_targets=ADMIN_TARGETS, user_targets=None):
         with patch("app.chain.MessageTemplateHelper.render", return_value=message), \
                 patch.object(chain.messagehelper, "put"), \
                 patch.object(chain.messageoper, "add"), \
@@ -54,7 +58,7 @@ class TestPostMessageIsolationLeak(unittest.TestCase):
             chain.post_message(message)
         return send_message
 
-    def _run_async(self, chain, message, switch, admin_targets=("admin_target",), user_targets=None):
+    def _run_async(self, chain, message, switch, admin_targets=ADMIN_TARGETS, user_targets=None):
         with patch("app.chain.MessageTemplateHelper.render", return_value=message), \
                 patch.object(chain.messagehelper, "put"), \
                 patch.object(chain.messageoper, "add"), \
@@ -82,7 +86,7 @@ class TestPostMessageIsolationLeak(unittest.TestCase):
         send_message = self._run_sync(MessageChain(), self._message(), "user,admin")
         self.assertEqual(send_message.call_count, 1)
         sent = send_message.call_args.kwargs["message"]
-        self.assertEqual(sent.targets, ["admin_target"])
+        self.assertEqual(sent.targets, ADMIN_TARGETS)
 
     # ---- 修复不得破坏 "all" 广播（回归守卫）----
 
@@ -113,7 +117,7 @@ class TestPostMessageIsolationLeak(unittest.TestCase):
         # "user, admin"（逗号后带空格）经 API 直写可达；规范化后应只发管理员、绝不广播
         send_message = self._run_sync(MessageChain(), self._message(), "user, admin")
         self.assertEqual(send_message.call_count, 1)
-        self.assertEqual(send_message.call_args.kwargs["message"].targets, ["admin_target"])
+        self.assertEqual(send_message.call_args.kwargs["message"].targets, ADMIN_TARGETS)
 
     def test_unknown_action_does_not_broadcast(self):
         # 未知/拼写错误 token（自由字符串，无枚举校验）应 fail-closed，不广播
@@ -124,4 +128,19 @@ class TestPostMessageIsolationLeak(unittest.TestCase):
         # 大小写变体应规范化匹配 admin
         send_message = self._run_sync(MessageChain(), self._message(), "ADMIN")
         self.assertEqual(send_message.call_count, 1)
-        self.assertEqual(send_message.call_args.kwargs["message"].targets, ["admin_target"])
+        self.assertEqual(send_message.call_args.kwargs["message"].targets, ADMIN_TARGETS)
+
+    # ---- chain 层空 dict 守卫（审查发现 #1 的集中兜底）----
+
+    def test_admin_empty_bindings_does_not_broadcast(self):
+        # 超管行存在但无任何渠道绑定（get_settings 返回 {}）→ chain 集中 fail-closed，不广播
+        send_message = self._run_sync(MessageChain(), self._message(), "admin", admin_targets={})
+        send_message.assert_not_called()
+
+    # ---- user 隔离主用途：username 命中 → 路由到该用户（审查发现的漏测正路径）----
+
+    def test_user_isolation_routes_to_specific_user(self):
+        msg = Notification(userid=None, username="alice", mtype=NotificationType.Manual, title="t", text="x")
+        send_message = self._run_sync(MessageChain(), msg, "user", user_targets=USER_TARGETS)
+        self.assertEqual(send_message.call_count, 1)
+        self.assertEqual(send_message.call_args.kwargs["message"].targets, USER_TARGETS)
