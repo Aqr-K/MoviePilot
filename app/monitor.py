@@ -790,8 +790,9 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 new_interval = self.adjust_monitor_interval(file_count)
                 current_job = self._scheduler.get_job(f"monitor_{storage}")
                 if current_job and current_job.trigger.interval.total_seconds() / 60 != new_interval:
-                    # 重新安排任务
-                    self._scheduler.modify_job(
+                    # 重新安排任务：APScheduler 3.x 修改触发器须用 reschedule_job；
+                    # modify_job 会把 trigger='interval' 字符串直传 Job._modify（要求 BaseTrigger 实例）而抛错
+                    self._scheduler.reschedule_job(
                         f"monitor_{storage}",
                         trigger='interval',
                         minutes=new_interval
