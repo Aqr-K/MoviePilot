@@ -823,7 +823,17 @@ async def get_public_setting(
         return schemas.Response(success=True, data={"value": getattr(settings, key)})
     if key not in _PUBLIC_SYSTEM_CONFIG_KEYS:
         raise HTTPException(status_code=404, detail="配置项不存在")
-    value = SystemConfigOper().get(_PUBLIC_SYSTEM_CONFIG_KEYS[key])
+    config_key = _PUBLIC_SYSTEM_CONFIG_KEYS[key]
+    value = SystemConfigOper().get(config_key)
+    # 存储配置的 config 内含凭据（网盘 OAuth token / alist 账号密码 / SMB 密码）。
+    # 本端点仅需普通用户（is_active）即可访问，对 Storages 脱敏：仅保留 type/name、
+    # 剥离 config，避免非超管越权读取存储凭据。
+    if config_key == SystemConfigKey.Storages and isinstance(value, list):
+        value = [
+            {"type": item.get("type"), "name": item.get("name")}
+            for item in value
+            if isinstance(item, dict)
+        ]
     return schemas.Response(success=True, data={"value": value})
 
 
