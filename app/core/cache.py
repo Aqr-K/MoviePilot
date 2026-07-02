@@ -19,6 +19,7 @@ from cachetools.keys import hashkey
 from app.core.config import settings
 from app.core.redis import RedisHelper, AsyncRedisHelper
 from app.log import logger
+from app.utils.system import SystemUtils
 
 # 默认缓存区
 DEFAULT_CACHE_REGION = "DEFAULT"
@@ -805,6 +806,19 @@ class FileBackend(CacheBackend):
         if not self.base.exists():
             self.base.mkdir(parents=True, exist_ok=True)
 
+    def _safe_cache_path(self, key: str, region: Optional[str]) -> Optional[Path]:
+        """
+        拼接缓存路径并做目录穿越守卫：key 含 ".." 等逃逸段而越出 base 时返回 None（fail-closed），
+        防止外部可控的缓存键（如图片代理 URL 路径）读写缓存目录之外的任意文件。
+
+        :return: 位于 base 内的缓存路径；越界返回 None
+        """
+        cache_path = self.base / region / key
+        if not SystemUtils.is_within(self.base, cache_path):
+            logger.warning(f"缓存键越界被拒绝：region={region} key={key}")
+            return None
+        return cache_path
+
     def set(self, key: str, value: Any, region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
         """
         设置缓存
@@ -814,7 +828,9 @@ class FileBackend(CacheBackend):
         :param region: 缓存的区
         :param kwargs: kwargs
         """
-        cache_path = self.base / region / key
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None:
+            return
         # 确保缓存目录存在
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         # 将值序列化为字符串存储
@@ -831,7 +847,9 @@ class FileBackend(CacheBackend):
         :param region: 缓存的区
         :return: 存在返回 True，否则返回 False
         """
-        cache_path = self.base / region / key
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None:
+            return False
         return cache_path.exists()
 
     def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Optional[Any]:
@@ -842,8 +860,8 @@ class FileBackend(CacheBackend):
         :param region: 缓存的区
         :return: 返回缓存的值，如果缓存不存在返回 None
         """
-        cache_path = self.base / region / key
-        if not cache_path.exists():
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None or not cache_path.exists():
             return None
         with open(cache_path, 'rb') as f:
             return f.read()
@@ -855,7 +873,9 @@ class FileBackend(CacheBackend):
         :param key: 缓存的键
         :param region: 缓存的区
         """
-        cache_path = self.base / region / key
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None:
+            return
         if cache_path.is_file():
             cache_path.unlink()
         elif cache_path.exists():
@@ -921,6 +941,19 @@ class AsyncFileBackend(AsyncCacheBackend):
         if not self.base.exists():
             self.base.mkdir(parents=True, exist_ok=True)
 
+    def _safe_cache_path(self, key: str, region: Optional[str]) -> Optional[AsyncPath]:
+        """
+        拼接缓存路径并做目录穿越守卫：key 含 ".." 等逃逸段而越出 base 时返回 None（fail-closed），
+        防止外部可控的缓存键（如图片代理 URL 路径）读写缓存目录之外的任意文件。
+
+        :return: 位于 base 内的缓存路径；越界返回 None
+        """
+        raw = Path(self.base) / region / key
+        if not SystemUtils.is_within(self.base, raw):
+            logger.warning(f"缓存键越界被拒绝：region={region} key={key}")
+            return None
+        return AsyncPath(raw)
+
     async def set(self, key: str, value: Any, region: Optional[str] = DEFAULT_CACHE_REGION, **kwargs) -> None:
         """
         设置缓存
@@ -930,7 +963,9 @@ class AsyncFileBackend(AsyncCacheBackend):
         :param region: 缓存的区
         :param kwargs: kwargs
         """
-        cache_path = AsyncPath(self.base) / region / key
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None:
+            return
         # 确保缓存目录存在
         await cache_path.parent.mkdir(parents=True, exist_ok=True)
         # 保存文件
@@ -947,7 +982,9 @@ class AsyncFileBackend(AsyncCacheBackend):
         :param region: 缓存的区
         :return: 存在返回 True，否则返回 False
         """
-        cache_path = AsyncPath(self.base) / region / key
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None:
+            return False
         return await cache_path.exists()
 
     async def get(self, key: str, region: Optional[str] = DEFAULT_CACHE_REGION) -> Optional[Any]:
@@ -958,8 +995,8 @@ class AsyncFileBackend(AsyncCacheBackend):
         :param region: 缓存的区
         :return: 返回缓存的值，如果缓存不存在返回 None
         """
-        cache_path = AsyncPath(self.base) / region / key
-        if not await cache_path.exists():
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None or not await cache_path.exists():
             return None
         async with aiofiles.open(cache_path, 'rb') as f:
             return await f.read()
@@ -971,7 +1008,9 @@ class AsyncFileBackend(AsyncCacheBackend):
         :param key: 缓存的键
         :param region: 缓存的区
         """
-        cache_path = AsyncPath(self.base) / region / key
+        cache_path = self._safe_cache_path(key, region)
+        if cache_path is None:
+            return
         if await cache_path.is_file():
             await cache_path.unlink()
         elif await cache_path.exists():

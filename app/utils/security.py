@@ -836,6 +836,11 @@ class SecurityUtils:
         parsed_url = urlparse(url)
         path = parsed_url.path.lstrip("/")
 
+        # 过滤路径穿越段（"" / "." / ".."）。该路径会被用作文件缓存键，
+        # quote 默认 safe='/' 不会转义 ".."，若不剥离则可经缓存路径逃逸出缓存目录
+        # 导致任意文件读/写（图片代理路径穿越）。
+        path = "/".join(seg for seg in path.split("/") if seg not in ("", ".", ".."))
+
         # 对路径中的特殊字符进行编码
         safe_path = quote(path)
 
