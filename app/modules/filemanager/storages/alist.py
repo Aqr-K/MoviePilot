@@ -701,14 +701,20 @@ class Alist(StorageBase, metaclass=WeakSingleton):
                     for chunk in r.iter_content(chunk_size=8192):
                         if global_vars.is_transfer_stopped(fileitem.path):
                             logger.info(f"【OpenList】{fileitem.path} 下载已取消！")
+                            f.close()
+                            if local_path.exists():
+                                local_path.unlink()
                             return None
                         f.write(chunk)
+            # 仅流循环完整结束才返回路径
+            return local_path
         except Exception as e:
             logger.error(f"【OpenList】下载文件 {fileitem.path} 失败：{e}")
+            # 删除中断产生的部分文件，返回 None。切勿返回残缺文件路径——
+            # transhandler 会不校验大小直接 move 入库、move 模式随后删源，造成数据丢失。
             if local_path.exists():
-                return local_path
-
-        return local_path
+                local_path.unlink()
+            return None
 
     def upload(
         self,
