@@ -230,6 +230,8 @@ class _ThinkTagStripper:
                             self.buffer = self.buffer[-i:]
                             partial_match = True
                             break
+                    # buffer 为等待后续 token 的不完整前缀时跳出 while，
+                    # 避免 buffer 恒为裸前缀时无限自旋（与下方 in-think 分支对称）。
                     if partial_match:
                         break
                     on_output(self.buffer)
