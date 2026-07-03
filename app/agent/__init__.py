@@ -192,6 +192,9 @@ class _ThinkTagStripper:
                         on_output(self.buffer)
                         emitted = True
                         self.buffer = ""
+                    # buffer 已是等待后续 token 的不完整前缀（partial_match）或已清空，
+                    # 必须跳出 while 以免 buffer 恒为裸前缀时无限自旋（与下方 in-think 分支对称）。
+                    break
             else:
                 end_idx = self.buffer.find("</think>")
                 if end_idx != -1:

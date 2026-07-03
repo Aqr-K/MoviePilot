@@ -118,7 +118,10 @@ async def lifespan(app: FastAPI):
             # 停止监控器
             stop_monitor()
             # 停止定时器
-            stop_scheduler()
+            # 经线程池执行，避免在主事件循环上同步 shutdown(wait=True) 与协程定时任务
+            # 的 run_coroutine_threadsafe(...).result() 互等死锁（worker 等主循环推进协程、
+            # 主循环阻塞在 join worker）；off-loop 关停使主循环仍能推进挂起协程。
+            await asyncio.to_thread(stop_scheduler)
             # 停止插件
             stop_plugins()
         # 停止模块
