@@ -6,9 +6,10 @@ append 事件合并。不依赖 Chain/DB，可独立单测。
 端点 app/api/endpoints/search.py 负责鉴权、Chain 调用与 SSE 流编排。
 """
 import json
-from typing import List, Optional
+from typing import Any, AsyncIterator, List, Optional
 
 from app.schemas.types import MediaType
+from app.utils.security import SecurityUtils
 
 
 def parse_site_list(sites: Optional[str]) -> Optional[List[int]]:
@@ -49,3 +50,46 @@ def merge_append_event(pending_event: Optional[dict], event: dict) -> dict:
     merged_event["type"] = "append"
     merged_event["items"] = [*(pending_event.get("items") or []), *items]
     return merged_event
+
+
+def serialize_signed_subtitle_result(subtitle: Any) -> dict:
+    """
+    序列化字幕结果并签名下载链接，签名用途绑定站点 ID。
+    """
+    data = subtitle.to_dict() if hasattr(subtitle, "to_dict") else dict(subtitle)
+    enclosure = data.get("enclosure")
+    if enclosure:
+        data["enclosure"] = SecurityUtils.sign_url(
+            enclosure,
+            purpose=SecurityUtils.subtitle_download_purpose(data.get("site")),
+        )
+    return data
+
+
+def serialize_signed_subtitle_results(subtitles: List[Any]) -> List[dict]:
+    """
+    批量序列化字幕结果，确保返回给客户端的下载链接均已签名。
+    """
+    return [serialize_signed_subtitle_result(subtitle) for subtitle in subtitles]
+
+
+def sign_subtitle_search_event(event: dict) -> dict:
+    """
+    签名字幕搜索流事件中的下载链接。
+    """
+    signed_event = dict(event)
+    if "items" in signed_event:
+        signed_event["items"] = serialize_signed_subtitle_results(
+            signed_event.get("items") or []
+        )
+    return signed_event
+
+
+async def iter_signed_subtitle_search_events(
+    event_source: AsyncIterator[dict],
+) -> AsyncIterator[dict]:
+    """
+    输出仅包含签名字幕下载链接的搜索流事件。
+    """
+    async for event in event_source:
+        yield sign_subtitle_search_event(event)

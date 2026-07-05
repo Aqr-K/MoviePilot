@@ -10,8 +10,10 @@ from typing import Optional, Tuple
 from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
-from app.core.context import Context, MediaInfo, TorrentInfo
+from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.metainfo import MetaInfo
+from app.db.site_oper import SiteOper
+from app.utils.security import SecurityUtils
 
 
 def add_download_with_media(
@@ -90,3 +92,28 @@ def recognize_and_download(
         source="Manual",
     )
     return True, did
+
+
+def prepare_subtitle_download(subtitle: SubtitleInfo) -> Tuple[bool, str]:
+    """
+    校验字幕下载签名，并用服务端站点配置覆盖请求凭据。
+    """
+    if subtitle.site is None:
+        return False, "字幕站点信息为空"
+
+    clean_url = SecurityUtils.verify_signed_url(
+        subtitle.enclosure,
+        purpose=SecurityUtils.subtitle_download_purpose(subtitle.site),
+    )
+    if not clean_url:
+        return False, "字幕下载链接签名无效"
+
+    site = SiteOper().get(subtitle.site)
+    if not site:
+        return False, "字幕站点信息不存在"
+
+    subtitle.enclosure = clean_url
+    subtitle.site_cookie = site.cookie
+    subtitle.site_ua = site.ua
+    subtitle.site_proxy = bool(site.proxy)
+    return True, ""

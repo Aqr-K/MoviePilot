@@ -15,9 +15,11 @@ from app.log import logger
 from app.schemas import MediaRecognizeConvertEventData
 from app.schemas.types import MediaType, ChainEventType
 from app.service.search import (
+    iter_signed_subtitle_search_events as _iter_signed_subtitle_search_events,
     merge_append_event as _merge_append_event,
     parse_media_type as _parse_media_type,
     parse_site_list as _parse_site_list,
+    serialize_signed_subtitle_results as _serialize_signed_subtitle_results,
     sse_event as _sse_event,
 )
 
@@ -133,7 +135,9 @@ async def search_latest_context(_: schemas.TokenPayload = Depends(verify_token))
         success=True,
         data={
             "params": params,
-            "results": [result.to_dict() for result in results],
+            "results": _serialize_signed_subtitle_results(results)
+            if params.get("result_type") == "subtitle"
+            else [result.to_dict() for result in results],
         },
     )
 
@@ -590,7 +594,11 @@ async def search_subtitle_by_title_stream(
         title=keyword, page=page, sites=_parse_site_list(sites), cache_local=True
     )
     return StreamingResponse(
-        _stream_search_events(request, event_source), media_type="text/event-stream"
+        _stream_search_events(
+            request,
+            _iter_signed_subtitle_search_events(event_source),
+        ),
+        media_type="text/event-stream",
     )
 
 
@@ -610,7 +618,7 @@ async def search_subtitle_by_title(
     if not subtitles:
         return schemas.Response(success=False, message="未搜索到任何字幕")
     return schemas.Response(
-        success=True, data=[subtitle.to_dict() for subtitle in subtitles]
+        success=True, data=_serialize_signed_subtitle_results(subtitles)
     )
 
 
@@ -763,7 +771,11 @@ async def search_subtitle_by_id_stream(
             yield event
 
     return StreamingResponse(
-        _stream_search_events(request, event_source()), media_type="text/event-stream"
+        _stream_search_events(
+            request,
+            _iter_signed_subtitle_search_events(event_source()),
+        ),
+        media_type="text/event-stream",
     )
 
 
@@ -797,7 +809,7 @@ async def search_subtitle_by_id(
     if not subtitles:
         return schemas.Response(success=False, message="未搜索到任何字幕")
     return schemas.Response(
-        success=True, data=[subtitle.to_dict() for subtitle in subtitles]
+        success=True, data=_serialize_signed_subtitle_results(subtitles)
     )
 
 

@@ -13,6 +13,7 @@ from app.helper.directory import DirectoryHelper
 from app.schemas.types import SystemConfigKey
 from app.service.download import (
     add_download_with_media as _add_download_with_media,
+    prepare_subtitle_download as _prepare_subtitle_download,
     recognize_and_download as _recognize_and_download,
 )
 
@@ -95,6 +96,10 @@ def download_subtitle(
     """
     subtitle_info = SubtitleInfo()
     subtitle_info.from_dict(subtitle_in.model_dump())
+    valid, message = _prepare_subtitle_download(subtitle_info)
+    if not valid:
+        return schemas.Response(success=False, message=message)
+
     success, message, saved_files = DownloadChain().download_subtitle(
         subtitle=subtitle_info,
         tmdbid=tmdbid,
