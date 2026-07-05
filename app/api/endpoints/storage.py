@@ -8,6 +8,7 @@ from app.chain.storage import StorageChain
 from app.core.security import verify_token
 from app.db.models import User
 from app.db.user_oper import (
+    get_current_active_manage_user,
     get_current_active_superuser,
     get_current_active_superuser_async,
 )
@@ -85,7 +86,7 @@ def list_files(
     fileitem: schemas.FileItem,
     sort: Optional[str] = "updated_at",
     keyword: Optional[str] = None,
-    _: User = Depends(get_current_active_superuser),
+    _: User = Depends(get_current_active_manage_user),
 ) -> Any:
     """
     查询当前目录下所有目录和文件
@@ -102,7 +103,7 @@ def list_files(
 def mkdir(
     fileitem: schemas.FileItem,
     name: str,
-    _: User = Depends(get_current_active_superuser),
+    _: User = Depends(get_current_active_manage_user),
 ) -> Any:
     """
     创建目录
@@ -120,7 +121,7 @@ def mkdir(
 
 @router.post("/delete", summary="删除文件或目录", response_model=schemas.Response)
 def delete(
-    fileitem: schemas.FileItem, _: User = Depends(get_current_active_superuser)
+    fileitem: schemas.FileItem, _: User = Depends(get_current_active_manage_user)
 ) -> Any:
     """
     删除文件或目录
@@ -135,7 +136,7 @@ def delete(
 
 @router.post("/download", summary="下载文件")
 def download(
-    fileitem: schemas.FileItem, _: User = Depends(get_current_active_superuser)
+    fileitem: schemas.FileItem, _: User = Depends(get_current_active_manage_user)
 ) -> Any:
     """
     下载文件或目录
@@ -151,7 +152,7 @@ def download(
 
 @router.post("/image", summary="预览图片")
 def image(
-    fileitem: schemas.FileItem, _: User = Depends(get_current_active_superuser)
+    fileitem: schemas.FileItem, _: User = Depends(get_current_active_manage_user)
 ) -> Any:
     """
     下载文件或目录
@@ -170,7 +171,7 @@ def rename(
     fileitem: schemas.FileItem,
     new_name: str,
     recursive: Optional[bool] = False,
-    _: User = Depends(get_current_active_superuser),
+    _: User = Depends(get_current_active_manage_user),
 ) -> Any:
     """
     重命名文件或目录
