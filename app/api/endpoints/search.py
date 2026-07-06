@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
 from app.core.security import verify_resource_token, verify_token
+from app.helper.locale import LocaleHelper
 from app.log import logger
 from app.schemas import MediaRecognizeConvertEventData
 from app.schemas.types import MediaType, ChainEventType
@@ -90,6 +91,7 @@ async def _stream_search_events(request: Request, event_source: AsyncIterator[di
     """
     输出搜索SSE事件
     """
+    locale = LocaleHelper.get_locale_from_request(request)
     try:
         has_sent_final_replace = False
         async for event in _iter_batched_search_events(event_source):
@@ -105,10 +107,13 @@ async def _stream_search_events(request: Request, event_source: AsyncIterator[di
                 and event.get("items")
             ):
                 event = {key: value for key, value in event.items() if key != "items"}
-            yield _sse_event(event)
+            yield _sse_event(event, locale=locale)
     except Exception as err:
         logger.error(f"渐进式搜索出错：{err}", exc_info=True)
-        yield _sse_event({"type": "error", "success": False, "message": str(err)})
+        yield _sse_event(
+            {"type": "error", "success": False, "message": str(err)},
+            locale=locale,
+        )
 
 
 @router.get("/last", summary="查询搜索结果", response_model=List[schemas.Context])

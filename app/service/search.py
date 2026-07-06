@@ -8,6 +8,7 @@ append 事件合并。不依赖 Chain/DB，可独立单测。
 import json
 from typing import Any, AsyncIterator, List, Optional
 
+from app.helper.locale import LocaleHelper
 from app.schemas.types import MediaType
 from app.utils.security import SecurityUtils
 
@@ -28,11 +29,22 @@ def parse_media_type(mtype: Optional[str]) -> Optional[MediaType]:
     return MediaType.from_agent(mtype) or MediaType(mtype)
 
 
-def sse_event(data: dict) -> str:
+def sse_event(data: dict, locale: Optional[str] = None) -> str:
     """
     转换为SSE事件
     """
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    payload = data
+    message = payload.get("message")
+    text = payload.get("text")
+    if isinstance(message, str) or isinstance(text, str):
+        payload = data.copy()
+        if isinstance(message, str):
+            payload["message_i18n"] = LocaleHelper.translate_text(
+                message, locale=locale
+            )
+        if isinstance(text, str):
+            payload["text_i18n"] = LocaleHelper.translate_text(text, locale=locale)
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def merge_append_event(pending_event: Optional[dict], event: dict) -> dict:
