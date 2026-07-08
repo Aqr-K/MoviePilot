@@ -50,7 +50,9 @@ from app.agent.middleware.tool_selection import ToolSelectorMiddleware
 from app.agent.middleware.usage import UsageMiddleware
 from app.agent.prompt import prompt_manager
 from app.agent.runtime import agent_runtime_manager
+from app.agent.mcp import agent_mcp_manager
 from app.agent.tools.factory import MoviePilotToolFactory
+from app.agent.tools.impl.mcp import create_external_mcp_tools
 from app.chain import ChainBase
 from app.core.config import settings
 from app.core.event import eventmanager
@@ -1034,6 +1036,7 @@ class MoviePilotAgent:
             settings.LLM_MAX_ITERATIONS,
             self._public_runtime_config_signature(runtime_config),
             agent_runtime_manager.current_signature(),
+            agent_mcp_manager.config_signature(),
         )
 
     def _get_cached_agent(
@@ -1090,6 +1093,39 @@ class MoviePilotAgent:
             allow_message_tools=False,
         )
 
+    async def _initialize_mcp_tools(self) -> List:
+        """
+        初始化外部 MCP 工具列表。
+        """
+        return await create_external_mcp_tools(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            channel=self.channel,
+            source=self.source,
+            username=self.username,
+            stream_handler=self.stream_handler,
+            agent_context=self._tool_context,
+        )
+
+    async def _initialize_subagent_mcp_tools(self) -> List:
+        """
+        初始化子代理可用的外部 MCP 工具列表。
+        """
+        return await create_external_mcp_tools(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            channel=self.channel,
+            source=self.source,
+            username=self.username,
+            stream_handler=None,
+            agent_context={
+                "user_reply_sent": False,
+                "reply_mode": None,
+                "should_dispatch_reply": False,
+                "is_admin": bool(self._tool_context.get("is_admin")),
+            },
+        )
+
     async def _create_agent(self, streaming: bool = False):
         """
         创建 LangGraph Agent（使用 create_agent + SummarizationMiddleware）
@@ -1119,6 +1155,7 @@ class MoviePilotAgent:
 
             # 工具列表
             tools = self._initialize_tools()
+            tools.extend(await self._initialize_mcp_tools())
             skills_middleware = SkillsMiddleware(
                 sources=[str(agent_runtime_manager.skills_dir)],
                 bundled_skills_dir=str(settings.ROOT_PATH / "skills"),
@@ -1135,9 +1172,11 @@ class MoviePilotAgent:
                 activity_log_tools = list(
                     getattr(activity_log_middleware, "tools", []) or []
                 )
+            subagent_tools = self._initialize_subagent_tools()
+            subagent_tools.extend(await self._initialize_subagent_mcp_tools())
             subagent_middlewares, subagent_task_tools = create_subagent_middlewares(
                 model=non_streaming_model,
-                tools=self._initialize_subagent_tools(),
+                tools=subagent_tools,
                 stream_handler=self.stream_handler,
             )
             max_tools = settings.LLM_MAX_TOOLS
