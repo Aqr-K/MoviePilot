@@ -457,6 +457,7 @@ class TransferJobManagerTest(unittest.TestCase):
             completed.append((hashs, downloader))
 
         chain.transfer_completed = fake_transfer_completed
+        chain.list_torrents = lambda **kwargs: [SimpleNamespace(progress=100)]
         chain._TransferChain__get_trans_fileitems = lambda fileitem, predicate: [
             (fileitem, False)
         ]
@@ -499,6 +500,7 @@ class TransferJobManagerTest(unittest.TestCase):
             completed.append((hashs, downloader))
 
         chain.transfer_completed = fake_transfer_completed
+        chain.list_torrents = lambda **kwargs: [SimpleNamespace(progress=100)]
         chain._TransferChain__get_trans_fileitems = lambda fileitem, predicate: [
             (fileitem, False)
         ]
@@ -542,6 +544,7 @@ class TransferJobManagerTest(unittest.TestCase):
             completed.append((hashs, downloader))
 
         chain.transfer_completed = fake_transfer_completed
+        chain.list_torrents = lambda **kwargs: [SimpleNamespace(progress=100)]
         task = make_task(1)
         task.downloader = "qbittorrent"
         task.download_hash = "abc123"
