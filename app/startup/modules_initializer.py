@@ -141,6 +141,8 @@ async def stop_modules():
     # 停止虚拟显示
     if (display := service_registry.get("display")) is not None:
         display.stop()
+    # 停止 DoH 服务
+    DohHelper().shutdown()
     # 停止线程池
     ThreadHelper().shutdown()
     # 停止消息服务
@@ -164,7 +166,7 @@ def init_modules():
     service_registry.clear()
     # 虚拟显示（生命周期服务：登记到注册表，stop_modules 取回关闭）
     service_registry.register("display", DisplayHelper())
-    # DoH（仅构造副作用，无 stop()，不纳入注册表）
+    # DoH（Singleton，stop_modules 直接重取同一实例关闭，不纳入注册表）
     DohHelper()
     # 站点管理（同上）
     SitesHelper()
