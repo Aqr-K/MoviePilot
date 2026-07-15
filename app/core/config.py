@@ -1217,7 +1217,7 @@ class GlobalVar(object):
 
     def resume_system(self):
         """
-        恢复系统运行标记。
+        恢复系统运行标记
         """
         self.STOP_EVENT.clear()
 
