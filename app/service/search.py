@@ -29,6 +29,16 @@ def parse_media_type(mtype: Optional[str]) -> Optional[MediaType]:
     return MediaType.from_agent(mtype) or MediaType(mtype)
 
 
+def resolve_media_season(
+        explicit_season: Optional[int],
+        recognized_season: Optional[int],
+) -> Optional[int]:
+    """
+    合并显式季号与识别结果，显式值优先且季 0 属于有效业务值。
+    """
+    return explicit_season if explicit_season is not None else recognized_season
+
+
 def sse_event(data: dict, locale: Optional[str] = None) -> str:
     """
     转换为SSE事件
