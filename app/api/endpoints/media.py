@@ -127,12 +127,28 @@ async def search(
 def scrape(
     fileitem: schemas.FileItem,
     storage: Optional[str] = "local",
+    media_source: Optional[MediaSource] = None,
+    media_id: Optional[str] = None,
+    type_name: Optional[MediaType] = None,
     _: schemas.TokenPayload = Depends(verify_token),
 ) -> Any:
     """
-    刮削媒体信息
+    刮削媒体信息，可按请求指定媒体数据源及其原生ID
+
+    :param fileitem: 待刮削文件项
+    :param storage: 文件所在存储
+    :param media_source: 请求级媒体数据源
+    :param media_id: 数据源原生ID
+    :param type_name: 媒体类型
+    :param _: Token校验
     """
-    success, message = _scrape_path(fileitem, storage)
+    success, message = _scrape_path(
+        fileitem,
+        storage,
+        media_source=media_source,
+        media_id=media_id,
+        type_name=type_name,
+    )
     return schemas.Response(success=success, message=message)
 
 
