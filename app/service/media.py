@@ -6,7 +6,7 @@
 端点退化为薄 HTTP 适配层；本层可通过 mock MediaChain 单测。
 """
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from app import schemas
 from app.chain.media import MediaChain
@@ -27,14 +27,17 @@ async def search_media(
     type: str = "media",
     page: int = 1,
     count: int = 8,
+    source: Optional[str] = None,
 ) -> List[dict]:
     """
     模糊搜索媒体/合集/人物信息：按 SEARCH_SOURCE 配置排序并分页。
     media：媒体信息，collection：合集，person：人物信息。
+
+    :param source: 请求级搜索数据源，仅对 media 分支生效
     """
     media_chain = MediaChain()
     if type == "media":
-        _, medias = await media_chain.async_search(title=title)
+        _, medias = await media_chain.async_search(title=title, source=source)
         result = [media.to_dict() for media in medias] if medias else []
     elif type == "collection":
         collections = await media_chain.async_search_collections(name=title)

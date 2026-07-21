@@ -48,6 +48,9 @@ class TransferHistory(Base):
     imdbid: Mapped[Optional[str]] = mapped_column(String)
     tvdbid: Mapped[Optional[int]] = mapped_column(Integer)
     doubanid: Mapped[Optional[str]] = mapped_column(String)
+    # 统一媒体数据源与原生ID
+    media_source: Mapped[Optional[str]] = mapped_column(String, index=True)
+    media_id: Mapped[Optional[str]] = mapped_column(String, index=True)
     # Sxx
     seasons: Mapped[Optional[str]] = mapped_column(String)
     # Exx

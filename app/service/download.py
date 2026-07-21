@@ -55,24 +55,31 @@ def recognize_and_download(
     downloader: Optional[str],
     save_path: Optional[str],
     username: str,
+    media_source: Optional[str] = None,
+    media_id: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     添加下载（不含媒体信息）：识别媒体 → 构建上下文 → 提交 DownloadChain。
 
-    返回 (recognized, download_id)；recognized=False 表示识别失败。
+    :param media_source: 请求级识别数据源
+    :param media_id: 与 media_source 配套的数据源原生ID
+    :return: (recognized, download_id)；recognized=False 表示识别失败
     """
     # 元数据
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
-    if tmdbid or doubanid:
+    if tmdbid or doubanid or media_id:
         mediainfo = MediaChain().recognize_media(
             meta=metainfo,
+            source=media_source,
+            mediaid=media_id,
             tmdbid=tmdbid,
             doubanid=doubanid,
         )
     else:
         mediainfo = MediaChain().recognize_by_meta(
             metainfo,
+            source=media_source,
             obtain_images=False,
         )
     if not mediainfo:
