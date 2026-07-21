@@ -48,6 +48,8 @@ class TransferHistory(Base):
     imdbid: Mapped[Optional[str]] = mapped_column(String)
     tvdbid: Mapped[Optional[int]] = mapped_column(Integer)
     doubanid: Mapped[Optional[str]] = mapped_column(String)
+    bangumiid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    anilistid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
     # 统一媒体数据源与原生ID
     media_source: Mapped[Optional[str]] = mapped_column(String, index=True)
     media_id: Mapped[Optional[str]] = mapped_column(String, index=True)
@@ -75,6 +77,7 @@ class TransferHistory(Base):
     __table_args__ = (
         Index('ix_transferhistory_status_date', 'status', 'date'),
         Index('ix_transferhistory_date_id', 'date', 'id'),
+        Index('ix_transferhistory_media_identity', 'media_source', 'media_id'),
     )
 
     @classmethod

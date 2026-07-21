@@ -24,6 +24,13 @@ class DownloadFailure(Base):
     tmdbid: Mapped[Optional[int]] = mapped_column(Integer)
     # 豆瓣ID
     doubanid: Mapped[Optional[str]] = mapped_column(String)
+    # Bangumi ID
+    bangumiid: Mapped[Optional[int]] = mapped_column(Integer)
+    # AniList ID
+    anilistid: Mapped[Optional[int]] = mapped_column(Integer)
+    # 统一媒体数据源与原生ID
+    media_source: Mapped[Optional[str]] = mapped_column(String)
+    media_id: Mapped[Optional[str]] = mapped_column(String)
     # Sxx
     seasons: Mapped[Optional[str]] = mapped_column(String)
     # Exx
@@ -57,6 +64,7 @@ class DownloadFailure(Base):
         Index("ux_downloadfailure_fingerprint", "fingerprint", unique=True),
         Index("ix_downloadfailure_next_retry_at", "next_retry_at"),
         Index("ix_downloadfailure_media_site", "type", "tmdbid", "doubanid", "site"),
+        Index("ix_downloadfailure_media_identity_site", "type", "media_source", "media_id", "site"),
     )
 
     @classmethod

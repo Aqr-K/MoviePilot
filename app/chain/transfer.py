@@ -56,6 +56,7 @@ from app.schemas.types import (
     ContentType,
 )
 from app.utils.mixins import ConfigReloadMixin
+from app.utils.media import parse_media_key
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
@@ -143,12 +144,12 @@ class JobManager:
         if not media:
             return None, season
         media_ids = {
-            "themoviedb": getattr(media, "tmdb_id", None),
-            "douban": getattr(media, "douban_id", None),
-            "bangumi": getattr(media, "bangumi_id", None),
-            "anilist": getattr(media, "anilist_id", None),
+            "themoviedb": media.tmdb_id,
+            "douban": media.douban_id,
+            "bangumi": media.bangumi_id,
+            "anilist": media.anilist_id,
         }
-        source = getattr(media, "source", None)
+        source = media.source
         if not source or media_ids.get(source) is None:
             source = next(
                 (name for name, media_id in media_ids.items() if media_id is not None),
@@ -1702,7 +1703,13 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     task.meta, download_history
                 )
                 if (
-                        (download_history.tmdbid or download_history.doubanid)
+                        (
+                            download_history.media_id
+                            or download_history.tmdbid
+                            or download_history.doubanid
+                            or download_history.bangumiid
+                            or download_history.anilistid
+                        )
                         and not history_year_conflict
                 ):
                     # 下载记录中已存在识别信息
@@ -1710,6 +1717,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         mtype=MediaType(download_history.type),
                         tmdbid=download_history.tmdbid,
                         doubanid=download_history.doubanid,
+                        bangumiid=download_history.bangumiid,
+                        anilistid=download_history.anilistid,
+                        source=download_history.media_source,
+                        mediaid=download_history.media_id,
                         episode_group=download_history.episode_group,
                     )
                     need_obtain_images = True
@@ -2248,6 +2259,10 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                             mtype=mtype,
                             tmdbid=downloadhis.tmdbid,
                             doubanid=downloadhis.doubanid,
+                            bangumiid=downloadhis.bangumiid,
+                            anilistid=downloadhis.anilistid,
+                            source=downloadhis.media_source,
+                            mediaid=downloadhis.media_id,
                             episode_group=downloadhis.episode_group,
                         )
                         if mediainfo:
@@ -3484,7 +3499,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             source: Optional[str] = None,
     ):
         """
-        远程重新整理，参数 历史记录ID TMDBID|类型
+        远程重新整理，参数 历史记录ID 来源前缀:媒体ID|类型
         """
 
         def args_error():
@@ -3492,7 +3507,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 Notification(
                     channel=channel,
                     source=source,
-                    title="请输入正确的命令格式：/redo [id] 或 /redo [id] [tmdbid/豆瓣id]|[类型]，"
+                    title="请输入正确的命令格式：/redo [id] 或 /redo [id] [来源前缀:媒体ID]|[类型]，"
                           "[id] 为整理记录编号",
                     userid=userid,
                     save_history=False,
@@ -3526,7 +3541,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     )
                 )
             return
-        # TMDBID/豆瓣ID
+        # 带来源前缀的媒体 ID；旧格式继续兼容纯数字 TMDB ID 和非数字豆瓣 ID。
         id_strs = arg_strs[1].split("|")
         media_id = id_strs[0]
         if not logid.isdigit():
@@ -3586,7 +3601,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         根据历史记录，重新识别整理，只支持简单条件
         :param logid: 历史记录ID
         :param mtype: 媒体类型
-        :param mediaid: TMDB ID/豆瓣ID
+        :param mediaid: 带来源前缀的媒体 ID，或旧格式 TMDB/豆瓣 ID
         """
         # 查询历史记录
         history: TransferHistory = TransferHistoryOper().get(logid)
@@ -3599,12 +3614,21 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             return False, f"源目录不存在：{src_path}"
         # 查询媒体信息
         if mtype and mediaid:
-            mediainfo = self.recognize_media(
-                mtype=mtype,
-                tmdbid=int(mediaid) if str(mediaid).isdigit() else None,
-                doubanid=mediaid,
-                episode_group=history.episode_group,
-            )
+            media_source, source_media_id = parse_media_key(mediaid)
+            if media_source and source_media_id:
+                mediainfo = self.recognize_media(
+                    mtype=mtype,
+                    source=media_source,
+                    mediaid=source_media_id,
+                    episode_group=history.episode_group,
+                )
+            else:
+                mediainfo = self.recognize_media(
+                    mtype=mtype,
+                    tmdbid=int(mediaid) if str(mediaid).isdigit() else None,
+                    doubanid=mediaid if not str(mediaid).isdigit() else None,
+                    episode_group=history.episode_group,
+                )
             if mediainfo:
                 # 更新媒体图片
                 self.obtain_images(mediainfo=mediainfo)
@@ -3666,6 +3690,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             preview: Optional[bool] = False,
             sync_extra_files: Optional[bool] = True,
             cleanup_dest_fileitem: Optional[FileItem] = None,
+            bangumiid: Optional[int] = None,
+            anilistid: Optional[int] = None,
     ) -> Tuple[bool, Union[str, dict]]:
         """
         手动整理，支持复杂条件，带进度显示
@@ -3674,6 +3700,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param target_path: 目标路径
         :param tmdbid: TMDB ID
         :param doubanid: 豆瓣ID
+        :param bangumiid: Bangumi ID
+        :param anilistid: AniList ID
         :param media_source: 媒体数据源
         :param media_id: 数据源原生ID
         :param mtype: 媒体类型
@@ -3694,12 +3722,14 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param cleanup_dest_fileitem: 确认存在待整理任务后需要清理的旧目标文件
         """
         logger.info(f"手动整理：{fileitem.path} ...")
-        if tmdbid or doubanid or media_id:
+        if tmdbid or doubanid or bangumiid or anilistid or media_id:
             # 有输入媒体ID时单个识别
             # 识别媒体信息
             mediainfo: MediaInfo = MediaChain().recognize_media(
                 tmdbid=tmdbid,
                 doubanid=doubanid,
+                bangumiid=bangumiid,
+                anilistid=anilistid,
                 source=media_source,
                 mediaid=media_id,
                 mtype=mtype,

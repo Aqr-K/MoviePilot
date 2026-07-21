@@ -21,7 +21,7 @@ class _Media:
 
 
 def test_search_media_sort_by_search_source_and_paginate(monkeypatch):
-    async def fake_search(title):
+    async def fake_search(title, source=None):
         return None, [_Media("douban", 1), _Media("themoviedb", 2), _Media("douban", 3)]
 
     monkeypatch.setattr(svc, "MediaChain", lambda: SimpleNamespace(async_search=fake_search))
@@ -33,7 +33,7 @@ def test_search_media_sort_by_search_source_and_paginate(monkeypatch):
 
 
 def test_search_media_page_2(monkeypatch):
-    async def fake_search(title):
+    async def fake_search(title, source=None):
         return None, [_Media("douban", 1), _Media("themoviedb", 2), _Media("douban", 3)]
 
     monkeypatch.setattr(svc, "MediaChain", lambda: SimpleNamespace(async_search=fake_search))
@@ -45,7 +45,7 @@ def test_search_media_page_2(monkeypatch):
 
 
 def test_search_media_empty(monkeypatch):
-    async def fake_search(title):
+    async def fake_search(title, source=None):
         return None, []
 
     monkeypatch.setattr(svc, "MediaChain", lambda: SimpleNamespace(async_search=fake_search))
@@ -81,7 +81,7 @@ def test_scrape_path_recognize_fail(monkeypatch):
     fi = SimpleNamespace(path="/x/m.mkv")
     monkeypatch.setattr(
         svc, "MediaChain",
-        lambda: SimpleNamespace(recognize_by_path=lambda p, obtain_images: None),
+        lambda: SimpleNamespace(recognize_by_path=lambda p, source=None, obtain_images=False: None),
     )
     ok, msg = svc.scrape_path(fi, storage="rclone")  # 非 local 跳过 Path.exists
     assert ok is False
@@ -94,7 +94,7 @@ def test_scrape_path_local_not_exist(monkeypatch):
     monkeypatch.setattr(
         svc, "MediaChain",
         lambda: SimpleNamespace(
-            recognize_by_path=lambda p, obtain_images: ctx,
+            recognize_by_path=lambda p, source=None, obtain_images=False: ctx,
             scrape_metadata=lambda **k: None,
         ),
     )
@@ -116,7 +116,7 @@ def test_scrape_path_success(monkeypatch, tmp_path):
     monkeypatch.setattr(
         svc, "MediaChain",
         lambda: SimpleNamespace(
-            recognize_by_path=lambda p, obtain_images: ctx,
+            recognize_by_path=lambda p, source=None, obtain_images=False: ctx,
             scrape_metadata=fake_scrape,
         ),
     )

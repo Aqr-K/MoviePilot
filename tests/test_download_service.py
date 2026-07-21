@@ -76,8 +76,8 @@ def test_recognize_and_download_recognize_fail(monkeypatch):
         svc,
         "MediaChain",
         lambda: SimpleNamespace(
-            recognize_by_meta=lambda meta, obtain_images: None,
-            recognize_media=lambda meta, tmdbid, doubanid: None,
+            recognize_by_meta=lambda meta, source=None, obtain_images=False: None,
+            recognize_media=lambda **kw: None,
         ),
     )
     monkeypatch.setattr(svc, "DownloadChain", fake_dl)
@@ -99,7 +99,7 @@ def test_recognize_and_download_by_meta_success(monkeypatch):
         svc,
         "MediaChain",
         lambda: SimpleNamespace(
-            recognize_by_meta=lambda meta, obtain_images: _truthy_media(),
+            recognize_by_meta=lambda meta, source=None, obtain_images=False: _truthy_media(),
             recognize_media=lambda **kw: None,
         ),
     )
@@ -121,7 +121,7 @@ def test_recognize_and_download_by_meta_success(monkeypatch):
 def test_recognize_and_download_by_tmdbid_uses_recognize_media(monkeypatch):
     calls = {}
 
-    def fake_recognize_media(meta, tmdbid, doubanid):
+    def fake_recognize_media(meta, tmdbid=None, doubanid=None, **kwargs):
         calls["tmdbid"] = tmdbid
         return _truthy_media()
 

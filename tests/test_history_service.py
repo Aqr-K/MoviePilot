@@ -29,6 +29,10 @@ def _h(**kw):
         mode="copy",
         tmdbid=1,
         doubanid=2,
+        bangumiid=None,
+        anilistid=None,
+        media_source="themoviedb",
+        media_id="1",
         errmsg=None,
     )
     base.update(kw)

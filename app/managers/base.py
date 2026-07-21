@@ -229,16 +229,13 @@ class PluginDispatchManager(ManagerBase):
 
         :param method: 要分发的方法名
         :param raise_exception: 出错时是否抛出（默认 False）
-        :param system_only: 为真时跳过插件钩子面，仅经系统后端模块（分发控制位，不透传给后端方法）
         :return: 各后端合并后的结果
         """
         raise_exception = bool(kwargs.pop("raise_exception", False))
-        system_only = bool(kwargs.pop("system_only", False))
         result: Any = None
-        if not system_only:
-            result = self._dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
-            if not self._is_valid_empty(result) and not isinstance(result, list):
-                return result
+        result = self._dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
+        if not self._is_valid_empty(result) and not isinstance(result, list):
+            return result
         return self._dispatch_system_modules(method, result, raise_exception, *args, **kwargs)
 
 
@@ -307,14 +304,11 @@ class AsyncDispatchMixin:
 
         :param method: 要分发的方法名
         :param raise_exception: 出错时是否抛出（默认 False）
-        :param system_only: 为真时跳过插件钩子面，仅经系统后端模块（分发控制位，不透传给后端方法）
         :return: 各后端合并/精化后的结果
         """
         raise_exception = bool(kwargs.pop("raise_exception", False))
-        system_only = bool(kwargs.pop("system_only", False))
         result: Any = None
-        if not system_only:
-            result = await self._async_dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
-            if not self._is_valid_empty(result) and not isinstance(result, list):
-                return result
+        result = await self._async_dispatch_plugin_modules(method, result, raise_exception, *args, **kwargs)
+        if not self._is_valid_empty(result) and not isinstance(result, list):
+            return result
         return await self._async_dispatch_system_modules(method, result, raise_exception, *args, **kwargs)
