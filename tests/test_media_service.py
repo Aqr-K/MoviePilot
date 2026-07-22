@@ -57,7 +57,7 @@ def test_search_media_empty(monkeypatch):
 def test_search_media_person_uses_model_dump(monkeypatch):
     person = SimpleNamespace(model_dump=lambda: {"source": "themoviedb", "name": "P"})
 
-    async def fake_persons(name):
+    async def fake_persons(name, source=None):
         return [person]
 
     monkeypatch.setattr(

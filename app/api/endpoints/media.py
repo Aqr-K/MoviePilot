@@ -163,7 +163,15 @@ async def search(
     _: schemas.TokenPayload = Depends(verify_token),
 ) -> Any:
     """
-    模糊搜索媒体/人物信息列表 media：媒体信息，person：人物信息
+    模糊搜索媒体、合集或人物信息列表。
+
+    :param title: 搜索关键词
+    :param type: 搜索类型，支持 media、collection、person
+    :param page: 页码
+    :param count: 每页数量
+    :param source: 请求级搜索数据源
+    :param _: Token校验
+    :return: 搜索结果列表
     """
     return await _search_media(title=title, type=type, page=page, count=count, source=source)
 

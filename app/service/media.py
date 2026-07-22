@@ -35,19 +35,21 @@ async def search_media(
     模糊搜索媒体/合集/人物信息：按 SEARCH_SOURCE 配置排序并分页。
     media：媒体信息，collection：合集，person：人物信息。
 
-    :param source: 请求级搜索数据源，仅对 media 分支生效
+    :param source: 请求级搜索数据源
     """
     media_chain = MediaChain()
     if type == "media":
         _, medias = await media_chain.async_search(title=title, source=source)
         result = [media.to_dict() for media in medias] if medias else []
     elif type == "collection":
-        collections = await media_chain.async_search_collections(name=title)
+        collections = await media_chain.async_search_collections(
+            name=title, source=source
+        )
         result = (
             [collection.to_dict() for collection in collections] if collections else []
         )
     else:  # person
-        persons = await media_chain.async_search_persons(name=title)
+        persons = await media_chain.async_search_persons(name=title, source=source)
         result = [person.model_dump() for person in persons] if persons else []
 
     if not result:

@@ -719,33 +719,53 @@ class _SearchChainMixin:
             meta=meta, source=source
         )
 
-    def search_persons(self, name: str) -> Optional[List[MediaPerson]]:
+    def search_persons(
+        self, name: str, source: Optional[str] = None
+    ) -> Optional[List[MediaPerson]]:
         """
         搜索人物信息
         :param name:  人物名称
+        :param source: 请求级搜索数据源
+        :return: 人物信息列表
         """
-        return self.mediarecognizemanager.search_persons(name=name)
+        return self.mediarecognizemanager.search_persons(name=name, source=source)
 
-    async def async_search_persons(self, name: str) -> Optional[List[MediaPerson]]:
+    async def async_search_persons(
+        self, name: str, source: Optional[str] = None
+    ) -> Optional[List[MediaPerson]]:
         """
         搜索人物信息（异步版本）
         :param name:  人物名称
+        :param source: 请求级搜索数据源
+        :return: 人物信息列表
         """
-        return await self.mediarecognizemanager.async_search_persons(name=name)
+        return await self.mediarecognizemanager.async_search_persons(
+            name=name, source=source
+        )
 
-    def search_collections(self, name: str) -> Optional[List[MediaInfo]]:
+    def search_collections(
+        self, name: str, source: Optional[str] = None
+    ) -> Optional[List[MediaInfo]]:
         """
         搜索集合信息
         :param name:  集合名称
+        :param source: 请求级搜索数据源
+        :return: 合集信息列表
         """
-        return self.mediarecognizemanager.search_collections(name=name)
+        return self.mediarecognizemanager.search_collections(name=name, source=source)
 
-    async def async_search_collections(self, name: str) -> Optional[List[MediaInfo]]:
+    async def async_search_collections(
+        self, name: str, source: Optional[str] = None
+    ) -> Optional[List[MediaInfo]]:
         """
         搜索集合信息（异步版本）
         :param name:  集合名称
+        :param source: 请求级搜索数据源
+        :return: 合集信息列表
         """
-        return await self.mediarecognizemanager.async_search_collections(name=name)
+        return await self.mediarecognizemanager.async_search_collections(
+            name=name, source=source
+        )
 
     def get_search_page_size(
             self,
