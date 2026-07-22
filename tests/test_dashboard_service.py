@@ -110,7 +110,7 @@ def test_build_downloader_aggregates(monkeypatch):
     monkeypatch.setattr(
         svc, "DashboardChain", lambda: SimpleNamespace(downloader_info=lambda name: infos)
     )
-    monkeypatch.setattr(svc.SystemUtils, "space_usage", staticmethod(lambda paths: (0, 999)))
+    monkeypatch.setattr(svc.SystemUtils, "space_usage", staticmethod(lambda paths, **kw: (0, 999)))
     ret = svc.build_downloader()
     assert ret.download_speed == 4.0
     assert ret.upload_speed == 6.0

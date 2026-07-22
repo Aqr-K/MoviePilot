@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.chain.dashboard import DashboardChain
 from app.chain.storage import StorageChain
+from app.core.config import settings
 from app.db.models.transferhistory import TransferHistory
 from app.helper.directory import DirectoryHelper
 from app.utils.system import SystemUtils
@@ -73,7 +74,8 @@ def build_downloader(name: Optional[str] = None) -> schemas.DownloaderInfo:
     # 下载目录空间
     download_dirs = DirectoryHelper().get_local_download_dirs()
     _, free_space = SystemUtils.space_usage(
-        [Path(d.download_path) for d in download_dirs]
+        [Path(d.download_path) for d in download_dirs],
+        btrfs_fsid_dedup=settings.BTRFS_FSID_DEDUP,
     )
     # 下载器信息
     downloader_info = schemas.DownloaderInfo()
