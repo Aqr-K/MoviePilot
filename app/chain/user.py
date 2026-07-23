@@ -1,5 +1,6 @@
 import secrets
-from typing import Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Literal, Optional, Tuple, Union
 
 from app.chain import ChainBase
 from app.core.security import get_password_hash
@@ -9,7 +10,17 @@ from app.log import logger
 from app.schemas import AuthCredentials, AuthInterceptCredentials
 from app.schemas.types import ChainEventType
 
-PASSWORD_INVALID_CREDENTIALS_MESSAGE = "用户名或密码或二次校验码不正确"
+PASSWORD_INVALID_CREDENTIALS_MESSAGE = "用户名、密码或验证码错误"
+
+
+MfaMethod = Literal["otp"]
+
+
+@dataclass(frozen=True)
+class MfaRequired:
+    """密码验证通过后，当前账号仍需完成的二次验证要求。"""
+
+    methods: Tuple[MfaMethod, ...]
 
 
 class UserChain(ChainBase):
