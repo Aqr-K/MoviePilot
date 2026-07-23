@@ -11,8 +11,8 @@ from app.helper.passkey import (
     PassKeyHelper,
     PassKeyRegistrationOriginMismatchError,
     PassKeyRegistrationVerificationError,
+    PasskeyChallengeStore,
 )
-from app.helper.passkey_challenge import PasskeyChallengeStore
 
 
 def _registration_request(user_id: int = 1) -> schemas.PassKeyRegistrationFinish:
