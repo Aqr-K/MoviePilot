@@ -1,8 +1,8 @@
 """
-S8a/S8b 契约守护：__handle_transfer 的 7 块已全部抽成私有 helper
+S8a/S8b 契约守护：__handle_transfer 的 8 块已全部抽成私有 helper
 （识别块 _recognize_for_transfer（多值回流）；无早返回块 _resolve_episodes_info/
 _resolve_target_directory/_select_storage_opers/_apply_scrap_follow_tmdb；哨兵块
-_migrate_or_skip；终末 tail 块 _run_transfer_and_dispatch），入口方法退化为薄编排
+_migrate_or_skip/_guard_automatic_category；终末 tail 块 _run_transfer_and_dispatch），入口方法退化为薄编排
 + 同序调用 + 原 try/finally。
 
 本测试守护 P5 CRITICAL 的 monkey-patch 契约：p115strmhelper 通过 name-mangled
@@ -14,6 +14,7 @@ _migrate_or_skip；终末 tail 块 _run_transfer_and_dispatch），入口方法�
 tests/test_transfer_*）；本文件只断言「抽取后入口契约与结构」不变，不替代行为测试。
 """
 import inspect
+from unittest.mock import patch
 
 from app.chain.transfer import TransferChain
 
@@ -36,8 +37,8 @@ def test_handle_transfer_signature_stable():
 
 
 def test_extracted_helpers_present():
-    """7 个抽出的 helper 必须就位（单下划线、非 name-mangled）。"""
-    for h in ("_recognize_for_transfer", "_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip", "_run_transfer_and_dispatch"):
+    """8 个抽出的 helper 必须就位（单下划线、非 name-mangled）。"""
+    for h in ("_recognize_for_transfer", "_resolve_episodes_info", "_resolve_target_directory", "_guard_automatic_category", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip", "_run_transfer_and_dispatch"):
         assert hasattr(TransferChain, h), f"抽出的 helper 缺失: {h}"
 
 
@@ -46,18 +47,19 @@ def test_handle_transfer_keeps_finally_cleanup():
     src = inspect.getsource(getattr(TransferChain, MANGLED))
     assert "finally:" in src, "__handle_transfer 丢失 finally"
     assert "try_remove_job" in src and "__finish_scrape_batch_task" in src, "finally 清理动作被改动"
-    # 入口编排仍按序调用 7 个 helper
-    for h in ("_recognize_for_transfer", "_resolve_episodes_info", "_resolve_target_directory", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip", "_run_transfer_and_dispatch"):
+    # 入口编排仍按序调用 8 个 helper
+    for h in ("_recognize_for_transfer", "_resolve_episodes_info", "_resolve_target_directory", "_guard_automatic_category", "_select_storage_opers", "_apply_scrap_follow_tmdb", "_migrate_or_skip", "_run_transfer_and_dispatch"):
         assert h in src, f"入口未调用 helper: {h}"
 
 
-# 入口编排里 7 个 helper 的调用先后顺序（与 __handle_transfer 源码出现次序一致）
+# 入口编排里 8 个 helper 的调用先后顺序（与 __handle_transfer 源码出现次序一致）
 _HELPER_CALL_ORDER = (
     "_recognize_for_transfer",
     "_apply_scrap_follow_tmdb",
     "_migrate_or_skip",
     "_resolve_episodes_info",
     "_resolve_target_directory",
+    "_guard_automatic_category",
     "_select_storage_opers",
     "_run_transfer_and_dispatch",
 )
@@ -78,9 +80,12 @@ import types  # noqa: E402
 from app.core.config import settings  # noqa: E402
 
 
-def _mediainfo(title="New Title", tmdb_id=1, type_value="电影"):
+def _mediainfo(title="New Title", tmdb_id=1, type_value="电影", source="themoviedb"):
     return types.SimpleNamespace(
-        title=title, tmdb_id=tmdb_id, type=types.SimpleNamespace(value=type_value)
+        title=title,
+        tmdb_id=tmdb_id,
+        source=source,
+        type=types.SimpleNamespace(value=type_value),
     )
 
 
@@ -89,8 +94,18 @@ def _transferhis(history):
 
 
 def _apply(mediainfo, changed, transferhis):
-    # 该 helper 不使用 self，unbound 调用传 None
-    return TransferChain._apply_scrap_follow_tmdb(None, mediainfo, changed, transferhis)
+    # 该 helper 不使用 self，unbound 调用传 None；TMDB 辅助合并以恒等桩替代
+    task = types.SimpleNamespace(meta=None, mediainfo=None)
+    with patch(
+        "app.chain.transfer.MediaChain",
+        return_value=types.SimpleNamespace(
+            supplement_tmdb_info=lambda media, _meta: media
+        ),
+    ):
+        _, changed = TransferChain._apply_scrap_follow_tmdb(
+            None, task, mediainfo, changed, transferhis
+        )
+    return changed
 
 
 def test_scrap_follow_enabled_skips(monkeypatch):

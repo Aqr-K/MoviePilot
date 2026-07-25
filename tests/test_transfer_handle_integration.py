@@ -41,13 +41,17 @@ def _prepare_recognized_task():
 
 
 def _apply_patches(chain, transferinfo):
-    """统一的 mock 边界：替换 chain.transfer 并返回 3 个 patch 上下文管理器。"""
+    """统一的 mock 边界：替换 chain.transfer 并返回 4 个 patch 上下文管理器。"""
     chain.transfer = lambda **kw: transferinfo
     transfer_history_oper = SimpleNamespace(
         add_fail=lambda **kw: SimpleNamespace(id=1),
         get_by_type_tmdbid=lambda **kw: None,
     )
-    fake_dir = SimpleNamespace(library_storage="local")
+    fake_dir = SimpleNamespace(
+        library_storage="local",
+        media_category=None,
+        library_category_folder=False,
+    )
     return (
         patch(
             "app.chain.transfer.TransferHistoryOper",
@@ -58,6 +62,13 @@ def _apply_patches(chain, transferinfo):
             return_value=SimpleNamespace(get_dir=lambda **kw: fake_dir),
         ),
         patch("app.chain.transfer.eventmanager.send_event", return_value=None),
+        patch(
+            "app.chain.transfer.MediaChain",
+            return_value=SimpleNamespace(
+                supplement_tmdb_info=lambda media, _meta: media,
+                recognize_by_meta=lambda *a, **kw: None,
+            ),
+        ),
     )
 
 
@@ -69,8 +80,8 @@ class TransferHandleHappyPathTest(unittest.TestCase):
         self.assertTrue(chain.jobview.add_task(task))
         transferinfo = SimpleNamespace(success=True, message="整理完成")
 
-        p1, p2, p3 = _apply_patches(chain, transferinfo)
-        with p1, p2, p3:
+        p1, p2, p3, p4 = _apply_patches(chain, transferinfo)
+        with p1, p2, p3, p4:
             result = chain._TransferChain__handle_transfer(task)
 
         self.assertEqual((True, "整理完成"), result)
@@ -94,8 +105,8 @@ class TransferHandleHappyPathTest(unittest.TestCase):
             seen.append((t, info))
             return True, "via-callback"
 
-        p1, p2, p3 = _apply_patches(chain, transferinfo)
-        with p1, p2, p3:
+        p1, p2, p3, p4 = _apply_patches(chain, transferinfo)
+        with p1, p2, p3, p4:
             result = chain._TransferChain__handle_transfer(task, callback=callback)
 
         self.assertEqual((True, "via-callback"), result)
@@ -109,8 +120,8 @@ class TransferHandleHappyPathTest(unittest.TestCase):
         task = _prepare_recognized_task()
         self.assertTrue(chain.jobview.add_task(task))
 
-        p1, p2, p3 = _apply_patches(chain, None)  # transfer 返回 None
-        with p1, p2, p3:
+        p1, p2, p3, p4 = _apply_patches(chain, None)  # transfer 返回 None
+        with p1, p2, p3, p4:
             result = chain._TransferChain__handle_transfer(task)
 
         self.assertEqual((False, "文件整理模块运行失败"), result)
@@ -161,10 +172,19 @@ class TransferHandleRecognitionPathTest(unittest.TestCase):
         ), patch(
             "app.chain.transfer.DirectoryHelper",
             return_value=SimpleNamespace(
-                get_dir=lambda **kw: SimpleNamespace(library_storage="local")
+                get_dir=lambda **kw: SimpleNamespace(
+                    library_storage="local",
+                    media_category=None,
+                    library_category_folder=False,
+                )
             ),
         ), patch(
             "app.chain.transfer.eventmanager.send_event", return_value=None
+        ), patch(
+            "app.chain.transfer.MediaChain",
+            return_value=SimpleNamespace(
+                supplement_tmdb_info=lambda media, _meta: media,
+            ),
         ):
             result = chain._TransferChain__handle_transfer(task)
 

@@ -56,7 +56,7 @@ from app.schemas.types import (
     ContentType,
 )
 from app.utils.mixins import ConfigReloadMixin
-from app.utils.media import parse_media_key
+from app.utils.media import normalize_media_source, parse_media_key, resolve_media_identity
 from app.utils.singleton import Singleton
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
@@ -143,19 +143,8 @@ class JobManager:
         """
         if not media:
             return None, season
-        media_ids = {
-            "themoviedb": media.tmdb_id,
-            "douban": media.douban_id,
-            "bangumi": media.bangumi_id,
-            "anilist": media.anilist_id,
-        }
-        source = media.source
-        if not source or media_ids.get(source) is None:
-            source = next(
-                (name for name, media_id in media_ids.items() if media_id is not None),
-                source,
-            )
-        return (source, media_ids.get(source)), season
+        source, media_id = resolve_media_identity(media=media)
+        return (source, media_id), season
 
     @staticmethod
     def __get_file_key(fileitem: FileItem) -> Optional[Tuple[str, str]]:
@@ -1446,6 +1435,23 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         "TRANSFER_THREADS",
     }
 
+    @staticmethod
+    def _requires_automatic_category(task: TransferTask) -> bool:
+        """
+        判断当前整理任务是否需要根据媒体识别结果自动创建类别目录。
+
+        :param task: 整理任务
+        :return: 是否必须具备自动分类结果
+        """
+        target_directory = task.target_directory
+        if target_directory and target_directory.media_category:
+            return False
+        if task.library_category_folder is not None:
+            return bool(task.library_category_folder)
+        return bool(
+            target_directory and target_directory.library_category_folder
+        )
+
     def __init__(self):
         """初始化文件整理处理链。"""
         super().__init__()
@@ -1651,9 +1657,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             if early is not None:
                 return early
 
-            # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
-            mediainfo_changed = self._apply_scrap_follow_tmdb(
-                mediainfo, mediainfo_changed, transferhis
+            # 合并 TMDB 辅助信息，并按需沿用历史 TMDB 标题
+            mediainfo, mediainfo_changed = self._apply_scrap_follow_tmdb(
+                task, mediainfo, mediainfo_changed, transferhis
             )
 
             # 更新队列任务（mediainfo 变更时回写并去重），命中重复则提前返回
@@ -1666,6 +1672,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
             # 查询整理目标目录与目标存储
             self._resolve_target_directory(task)
+
+            # 需要自动分类却未识别到类别时，按失败分支收口
+            early = self._guard_automatic_category(task, callback)
+            if early is not None:
+                return early
 
             # 标记运行中，并广播事件请示额外的源/目标存储操作器
             source_oper, target_oper = self._select_storage_opers(task)
@@ -1824,23 +1835,36 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
     def _apply_scrap_follow_tmdb(
         self,
+        task: TransferTask,
         mediainfo: MediaInfo,
         mediainfo_changed: bool,
         transferhis: TransferHistoryOper,
-    ) -> bool:
+    ) -> Tuple[MediaInfo, bool]:
         """
-        未开启「新增已入库媒体跟随 TMDB 信息变化」时，按 tmdbid 查历史 title，
-        若与当前不同则就地覆盖 mediainfo.title 并置 mediainfo_changed=True；
-        返回（可能更新的）mediainfo_changed。
+        合并 TMDB 辅助信息，并在未开启「新增已入库媒体跟随 TMDB 信息变化」时按 tmdbid 查历史 title。
+
+        TMDB 仅作为辅助信息合并，不改变原识别源的主身份与标题；仅 TMDB 主源沿用历史 TMDB 标题。
+
+        :param task: 整理任务
+        :param mediainfo: 识别到的媒体信息
+        :param mediainfo_changed: 媒体信息是否已变更
+        :param transferhis: 整理历史操作器
+        :return: (合并后的媒体信息, 是否变更)
         """
-        if not settings.SCRAP_FOLLOW_TMDB:
+        mediainfo = MediaChain().supplement_tmdb_info(mediainfo, task.meta)
+        task.mediainfo = mediainfo
+
+        if (
+                not settings.SCRAP_FOLLOW_TMDB
+                and normalize_media_source(mediainfo.source) == "themoviedb"
+        ):
             transfer_history = transferhis.get_by_type_tmdbid(
                 tmdbid=mediainfo.tmdb_id, mtype=mediainfo.type.value
             )
             if transfer_history and mediainfo.title != transfer_history.title:
                 mediainfo.title = transfer_history.title
                 mediainfo_changed = True
-        return mediainfo_changed
+        return mediainfo, mediainfo_changed
 
     def _migrate_or_skip(
         self,
@@ -1864,7 +1888,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
 
     def _resolve_episodes_info(self, task: TransferTask) -> None:
         """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。"""
-        if task.mediainfo.type == MediaType.TV and not task.episodes_info:
+        if (
+                task.mediainfo.type == MediaType.TV
+                and task.mediainfo.tmdb_id
+                and not task.episodes_info
+        ):
             # 判断注意season为0的情况
             season_num = task.mediainfo.season
             if season_num is None and task.meta.season_seq:
@@ -1899,6 +1927,35 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 )
         if not task.target_storage and task.target_directory:
             task.target_storage = task.target_directory.library_storage
+
+    def _guard_automatic_category(
+        self, task: TransferTask, callback: Optional[Callable]
+    ) -> Optional[Tuple[bool, str]]:
+        """
+        需要按媒体类别整理却未识别到分类时，走失败分支收口。
+
+        :param task: 整理任务
+        :param callback: 整理结果回调
+        :return: 需提前返回时给出 (False, 错误信息) 哨兵，否则为 None
+        """
+        if not self._requires_automatic_category(task) or task.mediainfo.category:
+            return None
+        if task.mediainfo.tmdb_id:
+            error_message = "TMDB 信息未匹配到媒体分类，无法按媒体类别整理"
+        else:
+            error_message = "未识别到 TMDB 辅助信息，无法按媒体类别整理"
+        logger.error(f"{task.fileitem.name} {error_message}")
+        if callback:
+            return callback(
+                task,
+                TransferInfo(
+                    success=False,
+                    fileitem=task.fileitem,
+                    transfer_type=task.transfer_type,
+                    message=error_message,
+                ),
+            )
+        return False, error_message
 
     def _select_storage_opers(self, task: TransferTask) -> Tuple[Any, Any]:
         """标记任务运行中，并广播事件请示额外的源/目标存储操作器。
