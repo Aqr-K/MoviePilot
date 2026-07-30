@@ -722,6 +722,7 @@ class MoviePilotAgent:
             user_agent=settings.LLM_USER_AGENT,
             use_proxy=settings.LLM_USE_PROXY,
             thinking_level=settings.LLM_THINKING_LEVEL,
+            api_protocol=settings.LLM_API_PROTOCOL,
         )
         selected_event = await eventmanager.async_send_event(
             ChainEventType.AgentLLMProvider,
@@ -762,6 +763,9 @@ class MoviePilotAgent:
                 )
                 or settings.LLM_THINKING_LEVEL
         )
+        api_protocol = self._clean_optional_text(
+            self._get_event_value(resolved_data, "api_protocol")
+        ) or settings.LLM_API_PROTOCOL
         selected_provider_id = self._clean_optional_text(
             self._get_event_value(resolved_data, "selected_provider_id")
         )
@@ -787,6 +791,7 @@ class MoviePilotAgent:
             "user_agent": user_agent,
             "use_proxy": bool(use_proxy),
             "thinking_level": thinking_level,
+            "api_protocol": api_protocol,
         }
         return self._llm_runtime_config
 
@@ -1022,6 +1027,7 @@ class MoviePilotAgent:
             runtime_config.get("user_agent"),
             bool(runtime_config.get("use_proxy")),
             runtime_config.get("thinking_level"),
+            runtime_config.get("api_protocol"),
         )
 
     async def _agent_bundle_signature(self, streaming: bool) -> tuple[Any, ...]:
