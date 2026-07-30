@@ -35,6 +35,11 @@ class LocalDirectoryWatcher:
     POLL_DELAY_LOCAL_MS = 300
     # 网络/FUSE 挂载轮询降频，减少监控自身对挂载后端的持续 stat 压力
     POLL_DELAY_NETWORK_MS = 5000
+    # 新增目录延迟重扫的间隔秒数：FUSE 上目录内容的可见性有延迟，首次展开时
+    # 看不到的文件不会再产生任何事件，只能靠延迟重扫补回
+    DIRECTORY_RESCAN_DELAYS = (30, 120)
+    # 待重扫目录队列上限，避免大批量移入时无限增长
+    MAX_PENDING_RESCANS = 100
 
     def __init__(self, mon_path: Path, callback: Any, force_polling: Optional[bool] = None,
                  poll_delay_ms: Optional[int] = None):
@@ -54,8 +59,12 @@ class LocalDirectoryWatcher:
         self._watch_filter = DefaultFilter()
         # 最近一次监控循环活动时间（monotonic），用于检测静默失效
         self._last_activity: float = 0.0
+        # 最近一次活动的墙钟时间，供监控重建后的补偿扫描定位停摆起点
+        self._last_activity_wall: float = 0.0
         # 累计自动重启次数
         self._restart_count: int = 0
+        # 待延迟重扫的新增目录
+        self._pending_rescans: list[dict] = []
 
     @property
     def watch_path(self) -> Path:
@@ -141,11 +150,20 @@ class LocalDirectoryWatcher:
             return False
         return (time.monotonic() - self._last_activity) > self.STALL_TIMEOUT
 
+    @property
+    def last_activity_time(self) -> float:
+        """
+        获取最近一次监控循环活动的墙钟时间。
+        :return: Unix 时间戳，从未活动过时为 0
+        """
+        return self._last_activity_wall
+
     def _mark_activity(self):
         """
         记录一次监控循环活动时间，作为静默失效检测的心跳。
         """
         self._last_activity = time.monotonic()
+        self._last_activity_wall = time.time()
 
     def _run(self):
         """
@@ -199,6 +217,8 @@ class LocalDirectoryWatcher:
             self._mark_activity()
             if self._stop_event.is_set():
                 break
+            # 空转周期也要推进延迟重扫，否则移入目录后没有新事件就永远不会补扫
+            self._process_pending_rescans()
             if not changes:
                 continue
             self._handle_changes(changes)
@@ -209,7 +229,13 @@ class LocalDirectoryWatcher:
         将 watchfiles 原始变更转换为目录监控事件。
         :param changes: watchfiles 返回的变更集合
         """
-        changes = self._expand_added_directories(changes)
+        self._dispatch_changes(self._expand_added_directories(changes))
+
+    def _dispatch_changes(self, changes: set[tuple[Change, str]]):
+        """
+        将变更集合逐个派发给回调。
+        :param changes: 已展开的变更集合
+        """
         for change_type, path_str in sorted(changes, key=lambda item: item[1]):
             # 批量整理可能持续较久，逐个文件刷新心跳，避免被误判为静默失效
             self._mark_activity()
@@ -217,10 +243,17 @@ class LocalDirectoryWatcher:
                 continue
             event_path = Path(path_str)
             event = self._build_event(change_type=change_type, event_path=event_path)
-            if not event or event.is_directory:
+            if not event:
+                # 区分「文件已消失」与「读取失败」：路径仍在说明是挂载抖动，登记重试
+                if self._path_maybe_exists(event_path):
+                    self._notify_unreadable(event_path)
+                continue
+            if event.is_directory:
                 continue
             file_size = self._get_file_size(event_path)
             if file_size is None:
+                # 读取失败通常是挂载抖动，直接丢弃就是永久漏件，交给回调登记重试
+                self._notify_unreadable(event_path)
                 continue
             text = self._change_text(change_type)
             try:
@@ -247,15 +280,110 @@ class LocalDirectoryWatcher:
             try:
                 if not event_path.is_dir():
                     continue
-                for nested_path in event_path.rglob("*"):
+            except OSError as err:
+                logger.debug(f"读取新增路径类型失败: {event_path} - {err}")
+                continue
+            nested_paths = self._collect_directory_files(event_path, exclude=set())
+            for nested_path_str in nested_paths:
+                expanded_changes.add((Change.added, nested_path_str))
+            # 目录内容在 FUSE 上可能延迟可见，安排延迟重扫补齐本次看不到的文件
+            self._schedule_rescan(event_path, seen=nested_paths)
+        return expanded_changes
+
+    def _collect_directory_files(self, directory: Path, exclude: set[str]) -> set[str]:
+        """
+        收集目录内需要处理的文件路径。
+        :param directory: 目录
+        :param exclude: 需要排除的路径（已处理过的）
+        :return: 文件路径集合
+        """
+        collected: set[str] = set()
+        try:
+            if not directory.is_dir():
+                return collected
+            for nested_path in directory.rglob("*"):
+                try:
                     if not nested_path.is_file():
                         continue
-                    nested_path_str = nested_path.as_posix()
-                    if self._watch_filter(Change.added, nested_path_str):
-                        expanded_changes.add((Change.added, nested_path_str))
-            except OSError as err:
-                logger.debug(f"扫描新增目录失败: {event_path} - {err}")
-        return expanded_changes
+                except OSError as err:
+                    # 单个条目读取失败不应中断整个目录的遍历
+                    logger.debug(f"读取目录内条目失败: {nested_path} - {err}")
+                    continue
+                nested_path_str = nested_path.as_posix()
+                if nested_path_str in exclude:
+                    continue
+                if self._watch_filter(Change.added, nested_path_str):
+                    collected.add(nested_path_str)
+        except OSError as err:
+            logger.debug(f"扫描新增目录失败: {directory} - {err}")
+        return collected
+
+    def _schedule_rescan(self, directory: Path, seen: set[str]):
+        """
+        安排一个新增目录的延迟重扫。
+        :param directory: 新增目录
+        :param seen: 首次展开时已处理的文件路径
+        """
+        if not self.DIRECTORY_RESCAN_DELAYS:
+            return
+        if len(self._pending_rescans) >= self.MAX_PENDING_RESCANS:
+            logger.debug(f"新增目录重扫队列已满，跳过: {directory}")
+            return
+        self._pending_rescans.append({
+            "path": directory,
+            "seen": set(seen),
+            "round": 0,
+            "due": time.monotonic() + self.DIRECTORY_RESCAN_DELAYS[0]
+        })
+
+    def _process_pending_rescans(self):
+        """
+        对到期的新增目录做延迟重扫，补回首次展开时尚不可见的文件。
+        """
+        if not self._pending_rescans:
+            return
+        now = time.monotonic()
+        due_items = [item for item in self._pending_rescans if item["due"] <= now]
+        if not due_items:
+            return
+        self._pending_rescans = [item for item in self._pending_rescans if item["due"] > now]
+        for item in due_items:
+            directory = item["path"]
+            new_paths = self._collect_directory_files(directory, exclude=item["seen"])
+            if new_paths:
+                logger.info(f"新增目录延迟重扫发现 {len(new_paths)} 个此前不可见的文件: {directory}")
+                self._dispatch_changes({(Change.added, path_str) for path_str in new_paths})
+                item["seen"].update(new_paths)
+            next_round = item["round"] + 1
+            if next_round < len(self.DIRECTORY_RESCAN_DELAYS):
+                item["round"] = next_round
+                item["due"] = now + self.DIRECTORY_RESCAN_DELAYS[next_round]
+                self._pending_rescans.append(item)
+
+    def _notify_unreadable(self, event_path: Path):
+        """
+        通知回调登记读取失败的事件，等待重试。
+        :param event_path: 事件文件路径
+        """
+        handler = getattr(self._callback, "event_unreadable", None)
+        if not callable(handler):
+            return
+        try:
+            handler(event_path=event_path)
+        except Exception as err:
+            logger.error(f"登记待重试监控事件失败: {event_path} - {err}")
+
+    @staticmethod
+    def _path_maybe_exists(event_path: Path) -> bool:
+        """
+        判断路径是否仍可能存在，读取本身失败时保守返回 True 交给重试确认。
+        :param event_path: 事件文件路径
+        :return: 是否可能存在
+        """
+        try:
+            return event_path.exists()
+        except OSError:
+            return True
 
     @staticmethod
     def _build_event(change_type: Change, event_path: Path) -> Optional[DirectoryChangeEvent]:

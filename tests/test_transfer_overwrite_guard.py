@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.modules.filemanager.storages import StorageBase
 from app.modules.filemanager.storages.alipan import AliPan
 from app.modules.filemanager.storages.local import LocalStorage
 from app.modules.filemanager.storages.rclone import Rclone
@@ -175,12 +176,14 @@ def test_alipan_strict_returns_item(monkeypatch):
     assert storage.get_item_strict(Path("/movie.mkv")) == "ITEM"
 
 
-def test_storage_base_strict_defaults_to_get_item():
+def test_storage_base_strict_fails_conservatively_without_override():
     """
-    未覆写的存储沿用 get_item 判定，行为不变。
+    未覆写严格查询的存储必须保守失败：沿用 get_item 会把「查询失败」当成
+    「目标不存在」，让 overwrite_mode=size 的覆盖保护被绕过。
     """
     storage = object.__new__(Rclone)
     storage.get_item = MagicMock(return_value=None)
 
-    assert storage.get_item_strict(Path("/movie.mkv")) is None
-    storage.get_item.assert_called_once()
+    with pytest.raises(StorageQueryError):
+        StorageBase.get_item_strict(storage, Path("/movie.mkv"))
+    storage.get_item.assert_not_called()

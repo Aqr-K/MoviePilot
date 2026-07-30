@@ -2,7 +2,7 @@ import re
 import traceback
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.chain.transfer import TransferChain
 from app.core.cache import TTLCache
@@ -97,12 +97,14 @@ class TransferDispatcher:
         """
         return f"{storage}:{Path(event_path).as_posix()}"
 
-    def _register_pending(self, storage: str, event_path: Path, file_size: float = None):
+    def _register_pending(self, storage: str, event_path: Path, file_size: float = None,
+                          reason: str = "整理历史查询失败"):
         """
-        登记历史查询失败的文件待重试，重复失败累计次数，超限后放弃。
+        登记暂时性故障的文件待重试，重复失败累计次数，超限后放弃。
         :param storage: 存储
         :param event_path: 原始事件路径
-        :param file_size: 文件大小
+        :param file_size: 文件大小，None 表示重试时需要重新读取
+        :param reason: 登记原因，用于日志
         """
         key = self._pending_key(storage, event_path)
         with self._pending_guard:
@@ -111,7 +113,7 @@ class TransferDispatcher:
                 entry["attempts"] += 1
                 if entry["attempts"] >= self.MAX_RETRY_ATTEMPTS:
                     self._pending_retries.pop(key, None)
-                    logger.error(f"整理历史查询持续失败，已放弃重试: {key}")
+                    logger.error(f"{reason}持续失败，已放弃重试: {key}")
                 return
             if len(self._pending_retries) >= self.MAX_PENDING_RETRIES:
                 logger.error(f"整理重试队列已满，丢弃: {key}")
@@ -122,7 +124,34 @@ class TransferDispatcher:
                 "file_size": file_size,
                 "attempts": 1
             }
-        logger.warn(f"整理历史查询失败，已登记待重试: {key}")
+        logger.warn(f"{reason}，已登记待重试: {key}")
+
+    def register_unreadable(self, storage: str, event_path: Path):
+        """
+        登记读取失败的监控事件待重试。
+
+        FUSE/网络挂载抖动时 stat 会瞬时失败，直接丢弃事件就是永久漏件，
+        因此复用待重试队列，由健康检查周期重新读取。
+        :param storage: 存储
+        :param event_path: 事件文件路径
+        """
+        self._register_pending(storage=storage, event_path=event_path,
+                               file_size=None, reason="读取监控事件文件失败")
+
+    @staticmethod
+    def _resolve_file_size(event_path: Path) -> Tuple[Optional[int], bool]:
+        """
+        重新读取文件大小。
+        :param event_path: 文件路径
+        :return: (文件大小, 文件是否仍然存在)；大小为 None 表示本次读取仍然失败
+        """
+        try:
+            return Path(event_path).stat().st_size, True
+        except FileNotFoundError:
+            return None, False
+        except OSError as err:
+            logger.debug(f"重试读取文件大小失败: {event_path} - {err}")
+            return None, True
 
     def _discard_pending(self, storage: str, event_path: Path):
         """
@@ -141,9 +170,23 @@ class TransferDispatcher:
         with self._pending_guard:
             items = list(self._pending_retries.values())
         for item in items:
-            logger.info(f"重试整理: {item['storage']}:{item['event_path']}")
-            self.handle_file(storage=item["storage"], event_path=item["event_path"],
-                             file_size=item["file_size"])
+            storage = item["storage"]
+            event_path = item["event_path"]
+            file_size = item["file_size"]
+            if file_size is None and storage == "local":
+                # 因读取失败入队的事件没有大小，重试时必须重新读取
+                file_size, exists = self._resolve_file_size(event_path)
+                if not exists:
+                    logger.debug(f"待重试文件已不存在，放弃: {storage}:{event_path}")
+                    self._discard_pending(storage=storage, event_path=event_path)
+                    continue
+                if file_size is None:
+                    # 仍然读不到，累计失败次数后等下个周期，超限由登记逻辑放弃
+                    self._register_pending(storage=storage, event_path=event_path,
+                                           reason="读取监控事件文件失败")
+                    continue
+            logger.info(f"重试整理: {storage}:{event_path}")
+            self.handle_file(storage=storage, event_path=event_path, file_size=file_size)
 
     def handle_file(self, storage: str, event_path: Path, file_size: float = None) -> bool:
         """
@@ -207,4 +250,21 @@ class TransferDispatcher:
                 return True
             except Exception as e:
                 logger.error("目录监控整理文件发生错误：%s - %s" % (str(e), traceback.format_exc()))
+                # 去重缓存在入口已写入，整理抛异常时必须失效，否则 TTL 窗口内该文件的
+                # 后续事件会被静默吞掉，等于一次异常就丢一个文件
+                self._invalidate_cache(str(event_path))
                 return False
+
+    def _invalidate_cache(self, key: str):
+        """
+        使去重缓存条目失效，兼容缓存后端与测试注入的字典。
+        :param key: 缓存键
+        """
+        try:
+            delete = getattr(self._cache, "delete", None)
+            if callable(delete):
+                delete(key)
+                return
+            self._cache.pop(key, None)
+        except Exception as err:
+            logger.debug(f"清理监控去重缓存失败: {key} - {err}")
