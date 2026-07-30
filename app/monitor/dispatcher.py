@@ -162,6 +162,17 @@ class TransferDispatcher:
         with self._pending_guard:
             self._pending_retries.pop(self._pending_key(storage, event_path), None)
 
+    def clear_pending(self):
+        """
+        清空待重试队列。监控停止或配置重载时调用，避免已移除的监控目录
+        在数据库恢复后仍被看门狗送入整理链。
+        """
+        with self._pending_guard:
+            if not self._pending_retries:
+                return
+            logger.debug(f"清理整理重试队列，丢弃 {len(self._pending_retries)} 个待重试条目")
+            self._pending_retries.clear()
+
     def retry_pending(self):
         """
         重试历史查询失败的文件，由健康检查周期驱动。
