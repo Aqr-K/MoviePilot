@@ -1,6 +1,6 @@
 import traceback
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any, Dict, List, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -29,6 +29,8 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
     WATCHDOG_INTERVAL = 60
     # 连续多少个健康检查周期无新增重启后才宣告恢复，避免反复崩溃时告警刷屏
     RECOVERY_STABLE_CYCLES = 5
+    # 补偿扫描的时间回溯余量（秒），覆盖心跳与文件落地之间的时间差
+    COMPENSATION_MARGIN = 60
 
     def __init__(self):
         super().__init__()
@@ -246,7 +248,8 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             # 网络/FUSE 挂载轮询降频，减少监控自身对挂载后端的持续 stat 压力
             poll_delay_ms = None
             if use_polling and SystemUtils.is_network_filesystem(mon_path):
-                poll_delay_ms = LocalDirectoryWatcher.POLL_DELAY_NETWORK_MS
+                poll_delay_ms = (settings.MONITOR_POLL_DELAY_NETWORK
+                                 or LocalDirectoryWatcher.POLL_DELAY_NETWORK_MS)
                 logger.info(f"检测到网络文件系统，轮询扫描间隔调整为 {poll_delay_ms}ms: {mon_path}")
 
             watcher = LocalDirectoryWatcher(
@@ -381,6 +384,58 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         self._stable_cycles.pop(str(watcher.watch_path), None)
         logger.info(f"✓ 目录监控已重建: {watcher.watch_path}")
         self.__clear_alert(watcher.watch_path, f"目录监控已自动恢复: {watcher.watch_path}")
+        # 重建只恢复未来的事件，停摆期间落地的文件不会再产生任何事件，必须补扫
+        self.__start_compensation(mon_path=watcher.watch_path,
+                                  since=watcher.last_activity_time)
+
+    def __start_compensation(self, mon_path: Path, since: float):
+        """
+        在后台线程发起补偿扫描，避免遍历目录阻塞健康检查周期。
+        :param mon_path: 监控目录
+        :param since: 停摆起点（墙钟时间戳）
+        """
+        if not since:
+            # 从未活动过说明没有可靠的停摆起点，全量补扫代价不可控，跳过
+            logger.debug(f"监控无活动记录，跳过补偿扫描: {mon_path}")
+            return
+        Thread(
+            target=self.__compensate_scan,
+            kwargs={"mon_path": mon_path, "since": since},
+            name=f"MoviePilot-MonitorCompensation-{mon_path.name}",
+            daemon=True
+        ).start()
+
+    def __compensate_scan(self, mon_path: Path, since: float):
+        """
+        补扫监控停摆期间落地的文件。
+
+        只处理修改时间晚于停摆起点的文件，避免全量重整；重复送入整理链是安全的，
+        分发器的去重缓存与整理历史查重会挡掉已处理过的文件。
+        :param mon_path: 监控目录
+        :param since: 停摆起点（墙钟时间戳）
+        """
+        threshold = since - self.COMPENSATION_MARGIN
+        scanned = 0
+        try:
+            for file_path in mon_path.rglob("*"):
+                try:
+                    if not file_path.is_file():
+                        continue
+                    file_stat = file_path.stat()
+                except OSError as err:
+                    logger.debug(f"补偿扫描读取文件失败: {file_path} - {err}")
+                    continue
+                if file_stat.st_mtime < threshold:
+                    continue
+                if not self._dispatcher.is_transfer_candidate_path(file_path):
+                    continue
+                scanned += 1
+                self._dispatcher.handle_file(storage="local", event_path=file_path,
+                                             file_size=file_stat.st_size)
+        except OSError as err:
+            logger.error(f"补偿扫描失败: {mon_path} - {err}")
+            return
+        logger.info(f"✓ 目录监控补偿扫描完成，处理 {scanned} 个停摆期间变化的文件: {mon_path}")
 
     def __retry_pending_locals(self):
         """
@@ -470,6 +525,16 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             return
         # 整理文件
         self._dispatcher.handle_file(storage="local", event_path=Path(event_path), file_size=file_size)
+
+    def event_unreadable(self, event_path: Path):
+        """
+        处理读取失败的监控事件，登记待重试。
+        :param event_path: 事件文件路径
+        """
+        event_path = Path(event_path)
+        if not self._dispatcher.is_transfer_candidate_path(event_path):
+            return
+        self._dispatcher.register_unreadable(storage="local", event_path=event_path)
 
     def stop(self):
         """

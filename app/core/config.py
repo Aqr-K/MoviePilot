@@ -372,6 +372,14 @@ class ConfigModel(BaseModel):
     # 下载器临时文件后缀
     DOWNLOAD_TMPEXT: list = Field(default_factory=lambda: [".!qb", ".part"])
 
+    # ==================== 目录监控配置 ====================
+    # 允许网络文件系统使用快速模式（inotify）。部分 FUSE 实现（如 CloudDrive2）
+    # 会正常下发内核通知，快速模式可用，且比每 N 秒 stat 全部目录的轮询对挂载后端
+    # 的压力小得多，由用户确认后开启
+    MONITOR_NETWORK_FAST_MODE: bool = False
+    # 网络文件系统的轮询扫描间隔（毫秒），0 表示使用内置默认值
+    MONITOR_POLL_DELAY_NETWORK: int = 0
+
     # ==================== CookieCloud配置 ====================
     # CookieCloud是否启动本地服务
     COOKIECLOUD_ENABLE_LOCAL: Optional[bool] = False
