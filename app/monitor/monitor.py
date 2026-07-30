@@ -550,6 +550,8 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 except Exception as e:
                     logger.error(f"停止定时服务出现了错误：{e}")
             self._scheduler = None
+        # 待重试条目按停止前的监控范围登记，重载后范围可能变化，一并清理
+        self._dispatcher.clear_pending()
         with self._watcher_lock:
             watchers = self._watchers
             self._watchers = []

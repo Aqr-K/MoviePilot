@@ -253,6 +253,38 @@ def test_dispatcher_retries_after_history_query_failure(monkeypatch):
     assert dispatcher._pending_retries == {}
 
 
+def test_dispatcher_clear_pending_drops_stale_entries(monkeypatch):
+    """
+    停止/配置重载时应清空待重试队列，避免已移除的监控目录在数据库恢复后
+    仍被送入整理链。
+    """
+    from app.monitor.dispatcher import TransferDispatcher
+    dispatcher = TransferDispatcher(all_exts=[".mkv"], cache={})
+    monkeypatch.setattr(dispatcher, "_has_transfer_history", MagicMock(return_value=None))
+    dispatcher.handle_file(storage="local", event_path=Path("/removed/movie.mkv"), file_size=1)
+    assert dispatcher._pending_retries
+
+    dispatcher.clear_pending()
+
+    assert dispatcher._pending_retries == {}
+    dispatcher.retry_pending()
+    assert dispatcher._pending_retries == {}
+
+
+def test_monitor_stop_clears_dispatcher_pending(monkeypatch):
+    """
+    Monitor.stop 应连带清理分发器的待重试队列。
+    """
+    put_recorder = MagicMock()
+    monitor = _build_monitor(monkeypatch, put_recorder)
+    monitor._scheduler = None
+    monitor._dispatcher = MagicMock()
+
+    monitor.stop()
+
+    monitor._dispatcher.clear_pending.assert_called_once()
+
+
 def test_dispatcher_drops_pending_after_max_attempts(monkeypatch):
     """
     历史查询持续失败达到上限后应放弃重试，避免队列无限累积。

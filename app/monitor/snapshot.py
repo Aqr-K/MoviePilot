@@ -20,17 +20,20 @@ class SnapshotStore:
         self._cache = cache if cache is not None else FileCache(base=settings.CACHE_PATH / "snapshots")
 
     def save(self, storage: str, snapshot: Dict, file_count: int = 0,
-             last_snapshot_time: Optional[float] = None) -> bool:
+             last_snapshot_time: Optional[float] = None,
+             snapshot_time: Optional[float] = None) -> bool:
         """
         保存快照到文件缓存。
         :param storage: 存储名称
         :param snapshot: 快照数据
         :param file_count: 文件数量，用于调整监控间隔
         :param last_snapshot_time: 上次快照时间戳
+        :param snapshot_time: 强制指定的增量游标，用于部分路径失败时固定游标不前进
         :return: 是否保存成功
         """
         try:
-            snapshot_time = max((item.get('modify_time', 0) for item in snapshot.values()), default=None)
+            if snapshot_time is None:
+                snapshot_time = max((item.get('modify_time', 0) for item in snapshot.values()), default=None)
             if snapshot_time is None:
                 snapshot_time = last_snapshot_time or time.time()
             snapshot_data = {
