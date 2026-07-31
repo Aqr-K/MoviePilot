@@ -305,3 +305,14 @@ def test_dispatcher_drops_pending_after_max_attempts(monkeypatch):
     dispatcher.retry_pending()
 
     assert dispatcher._pending_retries == {}
+
+
+def test_monitor_watches_mode_env_keys_for_hot_reload():
+    """
+    快速模式/轮询间隔只在监控线程创建时读取,必须监听对应 env 变更触发
+    init() 重建才能热生效;防止上游合并时丢失监听键。
+    """
+    from app.schemas.types import SystemConfigKey
+    assert SystemConfigKey.Directories.value in Monitor.CONFIG_WATCH
+    assert "MONITOR_NETWORK_FAST_MODE" in Monitor.CONFIG_WATCH
+    assert "MONITOR_POLL_DELAY_NETWORK" in Monitor.CONFIG_WATCH

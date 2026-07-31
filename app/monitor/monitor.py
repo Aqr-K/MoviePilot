@@ -25,7 +25,12 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
     """
     目录监控门面，单例模式：装配本地/远程监控、维护生命周期与健康检查。
     """
-    CONFIG_WATCH = {SystemConfigKey.Directories.value}
+    # 除目录配置外，同时监听仅在监控线程创建时读取的环境变量：这两项经
+    # /system/env 保存后运行时值虽已更新，但已运行的监控不会重新决策模式，
+    # 必须触发 init() 全量重建才能生效（MONITOR_RESCAN_DELAYS 为实时解析，无需在列）
+    CONFIG_WATCH = {SystemConfigKey.Directories.value,
+                    "MONITOR_NETWORK_FAST_MODE",
+                    "MONITOR_POLL_DELAY_NETWORK"}
     # 目录监控健康检查间隔（秒）
     WATCHDOG_INTERVAL = 60
     # 连续多少个健康检查周期无新增重启后才宣告恢复，避免反复崩溃时告警刷屏
