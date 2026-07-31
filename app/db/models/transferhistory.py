@@ -204,6 +204,26 @@ class TransferHistory(Base):
 
     @classmethod
     @db_query
+    def get_success_by_src(
+            cls, db: Session, src: str, storage: Optional[str] = None
+    ) -> Optional["TransferHistory"]:
+        """
+        按源路径和存储查询成功的整理记录，源路径原样精确匹配。
+
+        与 list_success_by_src 不同，这里不对源路径做归一化，蓝光原盘目录记录
+        带尾斜杠，归一化后反而匹配不到。
+        :param db: 数据库会话
+        :param src: 源路径
+        :param storage: 源存储类型
+        :return: 命中的成功整理记录，未命中时返回 None
+        """
+        query = db.query(cls).filter(cls.src == src, cls.status.is_(True))
+        if storage:
+            query = query.filter(cls.src_storage == storage)
+        return query.first()
+
+    @classmethod
+    @db_query
     def get_by_dest(
             cls, db: Session, dest: str, storage: Optional[str] = None
     ) -> Optional["TransferHistory"]:

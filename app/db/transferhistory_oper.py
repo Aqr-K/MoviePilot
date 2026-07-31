@@ -89,6 +89,17 @@ class TransferHistoryOper(DbOper):
         """
         return TransferHistory.get_by_src(self._db, src, storage)
 
+    def get_success_by_src(
+            self, src: str, storage: Optional[str] = None
+    ) -> Optional[TransferHistory]:
+        """
+        按源查询成功的转移记录，源路径原样精确匹配
+        :param src: 数据key
+        :param storage: 存储类型
+        :return: 命中的成功整理记录，未命中时返回 None
+        """
+        return TransferHistory.get_success_by_src(self._db, src, storage)
+
     def get_by_dest(
             self, dest: str, storage: Optional[str] = None
     ) -> Optional[TransferHistory]:
