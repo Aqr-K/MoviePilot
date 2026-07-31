@@ -251,9 +251,9 @@ class LocalDirectoryWatcher:
             event_path = Path(path_str)
             event = self._build_event(change_type=change_type, event_path=event_path)
             if not event:
-                # 区分「文件已消失」与「读取失败」：路径仍在说明是挂载抖动，登记重试
-                if self._path_maybe_exists(event_path):
-                    self._notify_unreadable(event_path)
+                # 「文件已消失」与「挂载抖动瞬时不可见」在此刻无法区分，静默丢弃就是
+                # 永久漏件，一律登记重试：真删除的文件由重试队列在下个周期确认后自动放弃
+                self._notify_unreadable(event_path)
                 continue
             if event.is_directory:
                 continue
@@ -470,18 +470,6 @@ class LocalDirectoryWatcher:
             handler(event_path=event_path)
         except Exception as err:
             logger.error(f"登记待重试监控事件失败: {event_path} - {err}")
-
-    @staticmethod
-    def _path_maybe_exists(event_path: Path) -> bool:
-        """
-        判断路径是否仍可能存在，读取本身失败时保守返回 True 交给重试确认。
-        :param event_path: 事件文件路径
-        :return: 是否可能存在
-        """
-        try:
-            return event_path.exists()
-        except OSError:
-            return True
 
     @staticmethod
     def _build_event(change_type: Change, event_path: Path) -> Optional[DirectoryChangeEvent]:
