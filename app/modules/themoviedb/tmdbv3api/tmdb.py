@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 RETRY_BACKOFF_SECONDS = 2
 
 
+def _is_business_failure_snapshot(snapshot) -> bool:
+    """
+    判断响应快照是否为TMDB业务失败（success=false，如404/限流/服务端错误的合法JSON）。
+
+    这类响应若入缓存会把瞬时失败固化整个TTL周期（如12小时），期间同key请求
+    直接命中失败快照；跳过缓存让下次请求重新确认。真正的负缓存（条目确认
+    不存在）由上层 TmdbCache 负责，request 层不做失败记忆。
+    """
+    if not isinstance(snapshot, dict):
+        return False
+    json_data = snapshot.get("json")
+    return isinstance(json_data, dict) and json_data.get("success") is False
+
+
 class TMDb(object):
     _RESPONSE_SNAPSHOT_MARKER = "__mp_tmdb_response_snapshot__"
 
@@ -142,7 +156,8 @@ class TMDb(object):
     def wait_on_rate_limit(self, wait_on_rate_limit):
         self._wait_on_rate_limit = bool(wait_on_rate_limit)
 
-    @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True)
+    @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True,
+            skip_if=_is_business_failure_snapshot)
     def request(self, method, url, data, json, **kwargs):
         req = self._request_once(method, url, data, json)
         if req is None and method == "GET" and self._owns_session:
@@ -166,7 +181,8 @@ class TMDb(object):
             return self._req.get_res(url, params=data, json=json)
         return self._req.post_res(url, data=data, json=json)
 
-    @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True)
+    @cached(maxsize=settings.CONF.tmdb, ttl=settings.CONF.meta, skip_none=True,
+            skip_if=_is_business_failure_snapshot)
     async def async_request(self, method, url, data, json, **kwargs):
         req = await self._async_request_once(method, url, data, json)
         if req is None:
