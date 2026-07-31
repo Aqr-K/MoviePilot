@@ -62,6 +62,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 插件智能体工具注册表缓存，插件启停或配置生效时主动失效。
         self._plugin_agent_tools_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._plugin_agent_tools_cache_lock = threading.Lock()
+        self._plugin_agent_tools_revision: int = 0
         # 保护 _plugins / _running_plugins 的可重入锁：热重载监控线程与请求线程会并发读写这两张表，
         # 写入与遍历读取均须持锁，避免“dictionary changed size during iteration”及读到半更新态。
         self._plugins_lock = threading.RLock()
@@ -167,6 +168,14 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         with self._plugin_agent_tools_cache_lock:
             self._plugin_agent_tools_cache.clear()
+            self._plugin_agent_tools_revision += 1
+
+    def get_plugin_agent_tools_revision(self) -> int:
+        """
+        获取插件智能体工具注册表版本号。
+        """
+        with self._plugin_agent_tools_cache_lock:
+            return self._plugin_agent_tools_revision
 
     def stop(self, pid: Optional[str] = None):
         """
@@ -1139,16 +1148,21 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         }]
         """
         cache_key = pid or "__all__"
-        with self._plugin_agent_tools_cache_lock:
-            cached_tools = self._plugin_agent_tools_cache.get(cache_key)
-        if cached_tools is not None:
-            return self._copy_plugin_agent_tools(cached_tools)
+        while True:
+            with self._plugin_agent_tools_cache_lock:
+                cache_revision = self._plugin_agent_tools_revision
+                cached_tools = self._plugin_agent_tools_cache.get(cache_key)
+            if cached_tools is not None:
+                return self._copy_plugin_agent_tools(cached_tools)
 
-        # 工具收集逻辑在 app.helper.plugin_metadata，此处仅在其上叠加注册表缓存层
-        ret_tools = plugin_metadata.get_plugin_agent_tools(self._running_plugins, pid)
-        with self._plugin_agent_tools_cache_lock:
-            self._plugin_agent_tools_cache[cache_key] = self._copy_plugin_agent_tools(ret_tools)
-        return ret_tools
+            # 工具收集逻辑在 app.helper.plugin_metadata，此处仅在其上叠加注册表缓存层
+            ret_tools = plugin_metadata.get_plugin_agent_tools(self._running_plugins, pid)
+            with self._plugin_agent_tools_cache_lock:
+                if cache_revision != self._plugin_agent_tools_revision:
+                    # 插件状态在注册表构建期间发生变化，重新读取以避免写回过期快照。
+                    continue
+                self._plugin_agent_tools_cache[cache_key] = self._copy_plugin_agent_tools(ret_tools)
+                return ret_tools
 
     @staticmethod
     def get_plugin_remote_entry(plugin_id: str, dist_path: str) -> str:
