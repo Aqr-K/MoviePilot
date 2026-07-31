@@ -654,6 +654,22 @@ class JobManager:
         with job_lock:
             return sum([len(job.tasks) for job in self._job_view.values()])
 
+    def pending_total(self) -> int:
+        """
+        获取未到终态的任务总数。
+
+        作业要等关联任务全部终态才整体移除,追更/分批场景下已完成任务会
+        跨批次残留在视图中;批次统计若用全量 total() 会把历史任务计入
+        「当前共 N 个文件」并压低进度百分比,因此只数未终态任务。
+        """
+        with job_lock:
+            return sum(
+                1
+                for job in self._job_view.values()
+                for task in job.tasks
+                if task.state not in ("completed", "failed")
+            )
+
     def list_jobs(self) -> List[TransferJob]:
         """
         获取所有作业的任务列表
@@ -1538,8 +1554,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 fileitem = task.fileitem
 
                 with task_lock:
-                    # 获取当前最新总数
-                    current_total = self.jobview.total()
+                    # 批次总数 = 本批已处理数 + 未终态数。作业视图会残留上一批
+                    # 已完成的任务（作业要等关联任务全部终态才移除），用全量
+                    # total() 会把历史任务计入本批（如显示 8 个实际只处理 2 个），
+                    # 且进度分母虚高导致百分比走不满
+                    current_total = self._processed_num + self.jobview.pending_total()
                     # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
                     self._total_num = max(self._total_num, current_total)
 
