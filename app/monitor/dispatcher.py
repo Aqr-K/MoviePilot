@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.chain.transfer import TransferChain
 from app.core.cache import TTLCache
 from app.core.config import settings
+from app.db.models.transferhistory import TransferHistory
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.log import logger
 from app.schemas import FileItem
@@ -79,16 +80,75 @@ class TransferDispatcher:
         return event_path.as_posix()
 
     @staticmethod
-    def _has_transfer_history(storage: str, src_path: str) -> Optional[bool]:
+    def _coerce_size(size: Any) -> Optional[int]:
         """
-        判断源文件是否已经存在整理记录。
-        :return: True/False 查询成功，None 查询失败
+        统一转换文件大小，无法转换时返回 None（视为不可比对）。
+        :param size: 原始大小值
+        :return: 文件大小
+        """
+        if size is None:
+            return None
+        try:
+            return int(size)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _history_src_size(cls, history: TransferHistory) -> Optional[int]:
+        """
+        读取整理记录中的源文件大小。
+        src_fileitem 是 JSON 列，历史数据可能为空、缺 size 键甚至不是字典，
+        取不到时统一返回 None 交由调用方保守处理。
+        :param history: 整理记录
+        :return: 源文件大小，取不到时为 None
+        """
+        src_fileitem = getattr(history, "src_fileitem", None)
+        if not isinstance(src_fileitem, dict):
+            return None
+        return cls._coerce_size(src_fileitem.get("size"))
+
+    @classmethod
+    def _should_skip_by_history(cls, storage: str, src_path: str,
+                                file_size: Optional[float] = None) -> Optional[bool]:
+        """
+        依据整理历史判断本次是否跳过整理。
+
+        只要存在整理记录就跳过是不可接受的：失败记录会让一次瞬时故障（网络/识别/移动）
+        永久锁死该文件，成功记录则会让同路径重新上传的新版本没有机会走到整理链的
+        overwrite_mode 判定。因此这里只在「已成功整理且文件确实没变化」时才跳过。
+        :param storage: 存储
+        :param src_path: 整理记录使用的源路径
+        :param file_size: 当前文件大小，蓝光目录等场景可能为 None
+        :return: True 跳过整理，False 放行整理，None 查询失败
         """
         try:
-            return bool(TransferHistoryOper().get_by_src(src_path, storage=storage))
+            history = TransferHistoryOper().get_by_src(src_path, storage=storage)
+            if history is not None and not history.status:
+                # get_by_src 没有排序，同一源路径同时存在成功与失败记录时返回哪条不确定，
+                # 拿到失败记录后再确认一次有无成功记录，避免把已整理成功的文件重复整理
+                history = TransferHistoryOper().get_success_by_src(src_path, storage=storage) or history
         except Exception as err:
             logger.error(f"查询整理历史失败: {src_path} - {err}")
             return None
+        if history is None:
+            return False
+        if not history.status:
+            # 失败记录放行重试后若再次失败，下一个事件仍会放行；监控事件是稀疏驱动的
+            # （落地事件/延迟重扫/补偿扫描），入口还有 TTL 去重兜底，重试频率可控，
+            # 因此不额外引入节流状态机，宁可多试也不接受永久漏件
+            logger.debug(f"上次整理失败，本次重新送入整理链: {src_path}")
+            return False
+        recorded_size = cls._history_src_size(history)
+        current_size = cls._coerce_size(file_size)
+        if recorded_size is not None and current_size is not None and current_size != recorded_size:
+            # 同路径换成了另一个版本（如升级为更高码率），是否覆盖交给整理链的
+            # overwrite_mode 决断，监控层不做替代判断
+            logger.info(f"已整理过但文件已变化（{recorded_size} -> {current_size}），"
+                        f"重新送入整理链: {src_path}")
+            return False
+        # 无法比对大小（蓝光目录、历史记录缺 size）时保守跳过，避免重复整理
+        logger.debug(f"已整理过且文件未变化，跳过: {src_path}")
+        return True
 
     @staticmethod
     def _pending_key(storage: str, event_path: Path) -> str:
@@ -229,16 +289,17 @@ class TransferDispatcher:
                 event_path=event_path,
                 is_bluray_folder=is_bluray_folder,
             )
-            has_transfer_history = self._has_transfer_history(
+            skip_by_history = self._should_skip_by_history(
                 storage=storage,
                 src_path=src_path,
+                file_size=file_size,
             )
-            if has_transfer_history is None:
+            if skip_by_history is None:
                 # 查询失败是暂时故障，登记待重试（由健康检查周期驱动），不能永久跳过
                 self._register_pending(storage=storage, event_path=origin_path, file_size=file_size)
                 return False
-            self._discard_pending(storage=storage, event_path=origin_path)
-            if has_transfer_history:
+            if skip_by_history:
+                self._discard_pending(storage=storage, event_path=origin_path)
                 return False
 
             try:
@@ -258,12 +319,20 @@ class TransferDispatcher:
                         size=file_size
                     )
                 )
+                # 整理已执行完毕，此前因暂时性故障登记的重试条目到此作废
+                self._discard_pending(storage=storage, event_path=origin_path)
                 return True
             except Exception as e:
                 logger.error("目录监控整理文件发生错误：%s - %s" % (str(e), traceback.format_exc()))
                 # 去重缓存在入口已写入，整理抛异常时必须失效，否则 TTL 窗口内该文件的
                 # 后续事件会被静默吞掉，等于一次异常就丢一个文件
                 self._invalidate_cache(str(event_path))
+                # 已稳定落地的文件不会再产生任何事件，批量整理期间撞上一次 DB/网络瞬断
+                # 就是永久丢件，因此与历史查询失败同样登记待重试；登记用原始事件路径，
+                # 重试时重新解析蓝光目录并重走完整流程。异常未清空登记，重试次数会持续
+                # 累计，达到上限后由 _register_pending 放弃，不会无限重试
+                self._register_pending(storage=storage, event_path=origin_path,
+                                       file_size=file_size, reason="整理执行异常")
                 return False
 
     def _invalidate_cache(self, key: str):

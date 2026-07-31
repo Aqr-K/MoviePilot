@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from watchfiles import Change, DefaultFilter, watch
 
+from app.core.config import settings
 from app.log import logger
 
 
@@ -35,11 +36,17 @@ class LocalDirectoryWatcher:
     POLL_DELAY_LOCAL_MS = 300
     # 网络/FUSE 挂载轮询降频，减少监控自身对挂载后端的持续 stat 压力
     POLL_DELAY_NETWORK_MS = 5000
-    # 新增目录延迟重扫的间隔秒数：FUSE 上目录内容的可见性有延迟，首次展开时
-    # 看不到的文件不会再产生任何事件，只能靠延迟重扫补回
-    DIRECTORY_RESCAN_DELAYS = (30, 120)
+    # 新增目录延迟重扫的间隔秒数默认值：FUSE 上目录内容的可见性有延迟，首次展开时
+    # 看不到的文件不会再产生任何事件，只能靠延迟重扫补回。默认在常见的 30/120 秒
+    # 窗口后追加两轮成本极低的长延迟轮次（600s/1800s），应对超大目录树的极端延迟；
+    # 实际生效值可通过 MONITOR_RESCAN_DELAYS 配置覆盖，见 DIRECTORY_RESCAN_DELAYS
+    DEFAULT_RESCAN_DELAYS = (30, 120, 600, 1800)
     # 待重扫目录队列上限，避免大批量移入时无限增长
     MAX_PENDING_RESCANS = 100
+    # 单个重扫条目允许的连续「整体扫描失败」次数上限：扫描失败（如 FUSE 瞬时抖动）
+    # 时条目会原地重试而不消耗重扫轮次，必须设置上限，避免目录被删除或长期不可
+    # 访问时无限重试、占满队列
+    MAX_RESCAN_FAILURES = 5
 
     def __init__(self, mon_path: Path, callback: Any, force_polling: Optional[bool] = None,
                  poll_delay_ms: Optional[int] = None):
@@ -266,6 +273,44 @@ class LocalDirectoryWatcher:
             except Exception as err:
                 logger.error(f"处理本地目录监控事件失败: {path_str} - {err}")
 
+    @property
+    def DIRECTORY_RESCAN_DELAYS(self) -> tuple[int, ...]:  # noqa: N802 保持与原类常量同名，兼容既有引用/测试
+        """
+        获取当前生效的重扫轮次延迟秒数：每次访问都会重新解析 MONITOR_RESCAN_DELAYS
+        配置，配置热更新后无需重建监控线程即可生效；解析失败或未配置时回退默认值。
+        :return: 重扫轮次延迟秒数元组
+        """
+        return self._parse_rescan_delays(getattr(settings, "MONITOR_RESCAN_DELAYS", None))
+
+    @classmethod
+    def _parse_rescan_delays(cls, raw: Optional[str]) -> tuple[int, ...]:
+        """
+        解析 MONITOR_RESCAN_DELAYS 配置为重扫轮次延迟秒数元组。
+        :param raw: 配置原始字符串，形如 "30,120,600,1800"
+        :return: 重扫轮次延迟秒数元组，解析失败或为空时回退 DEFAULT_RESCAN_DELAYS
+        """
+        if not raw or not raw.strip():
+            return cls.DEFAULT_RESCAN_DELAYS
+        try:
+            delays = tuple(int(part.strip()) for part in raw.split(",") if part.strip())
+            if not delays or any(delay <= 0 for delay in delays):
+                raise ValueError(f"重扫延迟必须是正整数: {raw}")
+            return delays
+        except (TypeError, ValueError) as err:
+            logger.warn(f"MONITOR_RESCAN_DELAYS 配置无效（{raw!r}），"
+                        f"回退默认值 {cls.DEFAULT_RESCAN_DELAYS}: {err}")
+            return cls.DEFAULT_RESCAN_DELAYS
+
+    @staticmethod
+    def _is_descendant_of_any(path: Path, candidates: set[Path]) -> bool:
+        """
+        判断 path 是否是 candidates 中某个目录的子孙路径（不含自身）。
+        :param path: 待判断路径
+        :param candidates: 候选祖先目录集合
+        :return: 是否存在祖先命中
+        """
+        return any(candidate in path.parents for candidate in candidates)
+
     def _expand_added_directories(self, changes: set[tuple[Change, str]]) -> set[tuple[Change, str]]:
         """
         将整体移入监控范围的新增目录展开为内部文件事件。
@@ -273,6 +318,12 @@ class LocalDirectoryWatcher:
         :return: 包含目录内新增文件的变更集合
         """
         expanded_changes = set(changes)
+        # 大目录树整体移入监控范围时，changes 里每一层子目录都会各自产生一次
+        # added 事件；先收集本批全部新增目录路径，用于判断某个新增目录是否还有
+        # 祖先目录也在本批新增中——只有「顶层」新增目录需要登记重扫，顶层目录的
+        # rglob 已经递归覆盖了全部子孙目录的内容，子目录重扫条目纯属冗余，还会在
+        # 大目录树场景下迅速打满重扫队列
+        added_dirs = {Path(path_str) for change_type, path_str in changes if change_type == Change.added}
         for change_type, path_str in changes:
             if change_type != Change.added:
                 continue
@@ -283,30 +334,41 @@ class LocalDirectoryWatcher:
             except OSError as err:
                 logger.debug(f"读取新增路径类型失败: {event_path} - {err}")
                 continue
-            nested_paths = self._collect_directory_files(event_path, exclude=set())
+            nested_paths, _, _ = self._collect_directory_files(event_path, exclude=set())
             for nested_path_str in nested_paths:
                 expanded_changes.add((Change.added, nested_path_str))
+            if self._is_descendant_of_any(event_path, added_dirs):
+                continue
             # 目录内容在 FUSE 上可能延迟可见，安排延迟重扫补齐本次看不到的文件
             self._schedule_rescan(event_path, seen=nested_paths)
         return expanded_changes
 
-    def _collect_directory_files(self, directory: Path, exclude: set[str]) -> set[str]:
+    def _collect_directory_files(self, directory: Path, exclude: set[str]) -> tuple[set[str], bool, bool]:
         """
         收集目录内需要处理的文件路径。
         :param directory: 目录
         :param exclude: 需要排除的路径（已处理过的）
-        :return: 文件路径集合
+        :return: 三元组 (文件路径集合, 目录是否已不存在（终态，不算失败）,
+                 目录整体扫描是否失败（如顶层 rglob 抛出 OSError，通常是 FUSE
+                 瞬时抖动，属于可重试的暂时性失败；与单个条目读取失败区分开，
+                 后者不影响整体遍历，不计入失败）
         """
         collected: set[str] = set()
         try:
             if not directory.is_dir():
-                return collected
+                # 目录已被删除或从未存在，是终态而非抖动，调用方应据此让条目
+                # 直接出队，不再计入失败重试
+                return collected, True, False
+        except OSError as err:
+            logger.debug(f"读取目录状态失败，暂视为可重试的扫描失败: {directory} - {err}")
+            return collected, False, True
+        try:
             for nested_path in directory.rglob("*"):
                 try:
                     if not nested_path.is_file():
                         continue
                 except OSError as err:
-                    # 单个条目读取失败不应中断整个目录的遍历
+                    # 单个条目读取失败不应中断整个目录的遍历，不算整体扫描失败
                     logger.debug(f"读取目录内条目失败: {nested_path} - {err}")
                     continue
                 nested_path_str = nested_path.as_posix()
@@ -315,8 +377,11 @@ class LocalDirectoryWatcher:
                 if self._watch_filter(Change.added, nested_path_str):
                     collected.add(nested_path_str)
         except OSError as err:
+            # 顶层 rglob 中断代表整个目录遍历失败（如 FUSE 瞬时抖动），与「目录
+            # 已删除」区分开：这里应视为可重试的暂时性失败，而不是静默返回空结果
             logger.debug(f"扫描新增目录失败: {directory} - {err}")
-        return collected
+            return collected, False, True
+        return collected, False, False
 
     def _schedule_rescan(self, directory: Path, seen: set[str]):
         """
@@ -326,14 +391,28 @@ class LocalDirectoryWatcher:
         """
         if not self.DIRECTORY_RESCAN_DELAYS:
             return
+        if any(item["path"] == directory for item in self._pending_rescans):
+            # readdir 闪断等原因可能让同一目录产生两次 added 事件，从而被重复
+            # 展开、重复调用到这里；重复登记只会造成队列膨胀和重复扫描——新事件
+            # 覆盖到的文件已经在本次展开时派发过，保留已有条目、由它继续推进
+            # 重扫轮次即可
+            logger.debug(f"目录已在待重扫队列中，跳过重复登记: {directory}")
+            return
+        if self._is_descendant_of_any(directory, {item["path"] for item in self._pending_rescans}):
+            # 祖先目录的重扫会用 rglob 递归覆盖到这里，无需为子孙目录单独登记
+            logger.debug(f"目录的祖先已在待重扫队列中，跳过重复登记: {directory}")
+            return
         if len(self._pending_rescans) >= self.MAX_PENDING_RESCANS:
-            logger.debug(f"新增目录重扫队列已满，跳过: {directory}")
+            # 队列打满意味着可能有目录的重扫机会被挤掉，之后可能永久漏文件，
+            # 需要 warn 级别可见，而不是默默丢弃
+            logger.warn(f"新增目录重扫队列已满（上限 {self.MAX_PENDING_RESCANS}），跳过登记: {directory}")
             return
         self._pending_rescans.append({
             "path": directory,
             "seen": set(seen),
             "round": 0,
-            "due": time.monotonic() + self.DIRECTORY_RESCAN_DELAYS[0]
+            "due": time.monotonic() + self.DIRECTORY_RESCAN_DELAYS[0],
+            "failures": 0,
         })
 
     def _process_pending_rescans(self):
@@ -349,7 +428,26 @@ class LocalDirectoryWatcher:
         self._pending_rescans = [item for item in self._pending_rescans if item["due"] > now]
         for item in due_items:
             directory = item["path"]
-            new_paths = self._collect_directory_files(directory, exclude=item["seen"])
+            new_paths, is_missing, scan_failed = self._collect_directory_files(directory, exclude=item["seen"])
+            if is_missing:
+                # 目录已不存在，是终态：直接出队，不再重新入队，也不计入失败重试
+                logger.debug(f"待重扫目录已不存在，结束重扫: {directory}")
+                continue
+            if scan_failed:
+                # 整体扫描失败（通常是 FUSE 瞬时抖动）：本轮不消耗重扫轮次，
+                # 让条目原样重新入队，下一个监控周期立即再试；但要有失败上限，
+                # 避免目录长期不可访问时无限重试、占满队列
+                item["failures"] = item.get("failures", 0) + 1
+                if item["failures"] >= self.MAX_RESCAN_FAILURES:
+                    logger.warn(
+                        f"目录延迟重扫连续失败 {item['failures']} 次，放弃重扫: {directory}")
+                    continue
+                logger.debug(
+                    f"目录延迟重扫本轮扫描失败（第 {item['failures']} 次），不消耗轮次，稍后重试: {directory}")
+                self._pending_rescans.append(item)
+                continue
+            # 本轮扫描成功，重置失败计数
+            item["failures"] = 0
             if new_paths:
                 logger.info(f"新增目录延迟重扫发现 {len(new_paths)} 个此前不可见的文件: {directory}")
                 self._dispatch_changes({(Change.added, path_str) for path_str in new_paths})

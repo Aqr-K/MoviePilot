@@ -1,7 +1,8 @@
+import time
 import traceback
 from pathlib import Path
 from threading import Lock, Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -31,6 +32,11 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
     RECOVERY_STABLE_CYCLES = 5
     # 补偿扫描的时间回溯余量（秒），覆盖心跳与文件落地之间的时间差
     COMPENSATION_MARGIN = 60
+    # 监控内部退避重启的停摆窗口无法从外部精确观测（重启在 watcher 线程内部完成，
+    # 健康检查只能看到累计重启次数），保守取「健康检查周期 + 最长退避 + 余量」
+    RESTART_STALL_LOOKBACK = WATCHDOG_INTERVAL + max(LocalDirectoryWatcher.RESTART_BACKOFF) + COMPENSATION_MARGIN
+    # 单次补偿扫描最多送入整理链的文件数，避免超大目录把整理链和数据库压垮
+    MAX_COMPENSATION_FILES = 2000
 
     def __init__(self):
         super().__init__()
@@ -340,6 +346,11 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                     self.__send_alert(watcher.watch_path,
                                       f"目录监控发生错误并已自动重启"
                                       f"（累计 {watcher.restart_count} 次）: {watcher.watch_path}")
+                    # 内部退避重启同样是停摆：轮询模式下重启会重建基线快照，停摆窗口内
+                    # 落地的文件会被新基线静默吸收，永远不再产生事件，必须补扫。
+                    # 重启计数只在增长时进入本分支，同一次重启不会被反复补扫
+                    self.__start_compensation(mon_path=watcher.watch_path,
+                                              since=time.time() - self.RESTART_STALL_LOOKBACK)
                 else:
                     # 稳定满恢复窗口才宣告恢复，避免反复崩溃时告警/恢复消息来回刷屏
                     self._stable_cycles[key] = self._stable_cycles.get(key, 0) + 1
@@ -409,15 +420,45 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         """
         补扫监控停摆期间落地的文件。
 
-        只处理修改时间晚于停摆起点的文件，避免全量重整；重复送入整理链是安全的，
-        分发器的去重缓存与整理历史查重会挡掉已处理过的文件。
+        不能用 mtime 判定「停摆期间落地」：CloudDrive2/115 等网盘挂载在转存、移动
+        文件时保留原始 mtime（可能是几年前），按 mtime 过滤会让补偿扫描完全空转。
+        因此把目录内所有候选文件都送入整理链，由分发器的 TTL 去重与整理历史查重挡掉
+        已处理过的文件；代价是每个候选文件一次历史查询，故按 mtime 从新到旧排序并用
+        MAX_COMPENSATION_FILES 限制单次规模，让名额优先给最可能是新落地的文件。
         :param mon_path: 监控目录
-        :param since: 停摆起点（墙钟时间戳）
+        :param since: 停摆起点（墙钟时间戳），仅用于统计与日志
         """
+        candidates = self.__collect_compensation_files(mon_path)
+        if candidates is None:
+            return
+        # mtime 不再作为过滤条件，但仍是「最可能是新文件」的排序依据
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        if len(candidates) > self.MAX_COMPENSATION_FILES:
+            logger.warn(f"补偿扫描候选文件 {len(candidates)} 个，超过单次上限 "
+                        f"{self.MAX_COMPENSATION_FILES}，本次只处理最新的一批: {mon_path}")
+            candidates = candidates[:self.MAX_COMPENSATION_FILES]
         threshold = since - self.COMPENSATION_MARGIN
-        scanned = 0
+        changed_count = sum(1 for candidate in candidates if candidate[1] >= threshold)
+        handled = 0
+        for file_path, _, file_size in candidates:
+            if self._dispatcher.handle_file(storage="local", event_path=file_path,
+                                            file_size=file_size):
+                handled += 1
+        logger.info(f"✓ 目录监控补偿扫描完成，{len(candidates)} 个候选文件"
+                    f"（其中 {changed_count} 个修改时间落在停摆期间）中有 {handled} 个进入整理链: {mon_path}")
+
+    def __collect_compensation_files(self, mon_path: Path) -> Optional[List[Tuple[Path, float, int]]]:
+        """
+        收集补偿扫描的候选文件。
+        :param mon_path: 监控目录
+        :return: (文件路径, 修改时间, 文件大小) 列表，目录遍历失败时返回 None
+        """
+        candidates: List[Tuple[Path, float, int]] = []
         try:
             for file_path in mon_path.rglob("*"):
+                # 扩展名判断是纯字符串运算，先过滤能省掉大量 FUSE 挂载上昂贵的 stat
+                if not self._dispatcher.is_transfer_candidate_path(file_path):
+                    continue
                 try:
                     if not file_path.is_file():
                         continue
@@ -425,17 +466,11 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                 except OSError as err:
                     logger.debug(f"补偿扫描读取文件失败: {file_path} - {err}")
                     continue
-                if file_stat.st_mtime < threshold:
-                    continue
-                if not self._dispatcher.is_transfer_candidate_path(file_path):
-                    continue
-                scanned += 1
-                self._dispatcher.handle_file(storage="local", event_path=file_path,
-                                             file_size=file_stat.st_size)
+                candidates.append((file_path, file_stat.st_mtime, file_stat.st_size))
         except OSError as err:
             logger.error(f"补偿扫描失败: {mon_path} - {err}")
-            return
-        logger.info(f"✓ 目录监控补偿扫描完成，处理 {scanned} 个停摆期间变化的文件: {mon_path}")
+            return None
+        return candidates
 
     def __retry_pending_locals(self):
         """

@@ -130,6 +130,8 @@ def _build_monitor(monkeypatch, put_recorder):
     from threading import Lock
     monkeypatch.setattr("app.monitor.monitor.MessageHelper", MagicMock(return_value=put_recorder))
     monitor = object.__new__(Monitor)
+    # 自动重启后健康检查会发起补偿扫描，骨架需要一个分发器替身
+    monitor._dispatcher = MagicMock()
     monitor._watchers = []
     monitor._watcher_lock = Lock()
     monitor._pending_locals = []
@@ -235,7 +237,7 @@ def test_dispatcher_retries_after_history_query_failure(monkeypatch):
     dispatcher = TransferDispatcher(all_exts=[".mkv"], cache={})
     event_path = Path("/downloads/movie.mkv")
     history = MagicMock(side_effect=[None, False])
-    monkeypatch.setattr(dispatcher, "_has_transfer_history", history)
+    monkeypatch.setattr(dispatcher, "_should_skip_by_history", history)
     transfer_chain_instance = MagicMock()
     monkeypatch.setattr("app.monitor.dispatcher.TransferChain",
                         MagicMock(return_value=transfer_chain_instance))
@@ -260,7 +262,7 @@ def test_dispatcher_clear_pending_drops_stale_entries(monkeypatch):
     """
     from app.monitor.dispatcher import TransferDispatcher
     dispatcher = TransferDispatcher(all_exts=[".mkv"], cache={})
-    monkeypatch.setattr(dispatcher, "_has_transfer_history", MagicMock(return_value=None))
+    monkeypatch.setattr(dispatcher, "_should_skip_by_history", MagicMock(return_value=None))
     dispatcher.handle_file(storage="local", event_path=Path("/removed/movie.mkv"), file_size=1)
     assert dispatcher._pending_retries
 
@@ -292,7 +294,7 @@ def test_dispatcher_drops_pending_after_max_attempts(monkeypatch):
     from app.monitor.dispatcher import TransferDispatcher
     dispatcher = TransferDispatcher(all_exts=[".mkv"], cache={})
     event_path = Path("/downloads/movie.mkv")
-    monkeypatch.setattr(dispatcher, "_has_transfer_history", MagicMock(return_value=None))
+    monkeypatch.setattr(dispatcher, "_should_skip_by_history", MagicMock(return_value=None))
 
     dispatcher.handle_file(storage="local", event_path=event_path, file_size=1)
     key = f"local:{event_path.as_posix()}"

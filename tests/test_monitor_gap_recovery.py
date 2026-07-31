@@ -17,22 +17,46 @@ def _build_monitor(handle_file: MagicMock = None):
     :param handle_file: 替换分发器 handle_file 的替身
     :return: (Monitor 骨架, 分发器)
     """
+    from threading import Lock
     monitor = object.__new__(Monitor)
     dispatcher = TransferDispatcher(all_exts=[".mkv"], cache={})
     if handle_file is not None:
         dispatcher.handle_file = handle_file
     monitor._dispatcher = dispatcher
+    monitor._watchers = []
+    monitor._watcher_lock = Lock()
+    monitor._alerted_paths = set()
+    monitor._restart_marks = {}
+    monitor._stable_cycles = {}
     return monitor, dispatcher
 
 
-def test_compensation_scan_only_handles_files_changed_after_stall(tmp_path):
-    """补偿扫描只应处理停摆起点之后变化的文件，避免全量重整。"""
+def _fake_watcher(mon_path, restart_count=0):
+    """
+    构造存活且未静默失效的监控线程替身。
+    :param mon_path: 监控目录
+    :param restart_count: 累计自动重启次数
+    :return: 监控线程替身
+    """
+    watcher = MagicMock()
+    watcher.watch_path = mon_path
+    watcher.is_alive.return_value = True
+    watcher.is_stalled.return_value = False
+    watcher.restart_count = restart_count
+    return watcher
+
+
+def test_compensation_scan_covers_files_with_old_mtime(tmp_path):
+    """
+    网盘挂载转存/移动文件会保留原始 mtime，补偿扫描不能因 mtime 旧就漏掉文件，
+    但仍应按 mtime 从新到旧优先处理。
+    """
     stale = tmp_path / "old.mkv"
     fresh = tmp_path / "new.mkv"
     stale.write_bytes(b"x")
     fresh.write_bytes(b"y")
     now = time.time()
-    os.utime(stale, (now - 7200, now - 7200))
+    os.utime(stale, (now - 86400 * 365, now - 86400 * 365))
     os.utime(fresh, (now, now))
     handled = MagicMock(return_value=True)
     monitor, _ = _build_monitor(handle_file=handled)
@@ -40,8 +64,53 @@ def test_compensation_scan_only_handles_files_changed_after_stall(tmp_path):
     monitor._Monitor__compensate_scan(mon_path=tmp_path, since=now - 600)
 
     handled_paths = [call.kwargs["event_path"] for call in handled.call_args_list]
-    assert fresh in handled_paths
-    assert stale not in handled_paths
+    assert handled_paths == [fresh, stale]
+
+
+def test_compensation_scan_limits_single_batch(tmp_path, monkeypatch):
+    """候选文件超过上限时只处理最新的一批，避免大目录把整理链与数据库压垮。"""
+    monkeypatch.setattr(Monitor, "MAX_COMPENSATION_FILES", 2)
+    now = time.time()
+    files = []
+    for index in range(3):
+        target = tmp_path / f"{index}.mkv"
+        target.write_bytes(b"x")
+        os.utime(target, (now - index * 60, now - index * 60))
+        files.append(target)
+    handled = MagicMock(return_value=True)
+    monitor, _ = _build_monitor(handle_file=handled)
+
+    monitor._Monitor__compensate_scan(mon_path=tmp_path, since=now - 600)
+
+    handled_paths = [call.kwargs["event_path"] for call in handled.call_args_list]
+    assert handled_paths == [files[0], files[1]]
+
+
+def test_watchdog_compensates_after_internal_restart(tmp_path, monkeypatch):
+    """
+    watcher 内部退避重启期间落地的文件会被新基线快照静默吸收，健康检查发现
+    重启计数增长时应补扫一次，且同一次重启不得反复补扫。
+    """
+    monkeypatch.setattr("app.monitor.monitor.MessageHelper", MagicMock())
+    monitor, _ = _build_monitor(handle_file=MagicMock(return_value=True))
+    watcher = _fake_watcher(tmp_path, restart_count=1)
+    monitor._watchers = [watcher]
+    started = []
+    setattr(monitor, "_Monitor__start_compensation", lambda **kwargs: started.append(kwargs))
+
+    monitor._Monitor__check_watchers()
+    assert len(started) == 1
+    assert started[0]["mon_path"] == tmp_path
+    # 停摆起点无法精确观测，应保守回溯到最坏情况
+    assert 0 < time.time() - started[0]["since"] <= Monitor.RESTART_STALL_LOOKBACK + 5
+
+    monitor._Monitor__check_watchers()
+    monitor._Monitor__check_watchers()
+    assert len(started) == 1
+
+    watcher.restart_count = 2
+    monitor._Monitor__check_watchers()
+    assert len(started) == 2
 
 
 def test_compensation_scan_skips_non_candidate_files(tmp_path):
@@ -116,7 +185,7 @@ def test_transfer_failure_invalidates_dedup_cache(tmp_path, monkeypatch):
     target = tmp_path / "a.mkv"
     target.write_bytes(b"x")
     dispatcher = TransferDispatcher(all_exts=[".mkv"], cache={})
-    monkeypatch.setattr(dispatcher, "_has_transfer_history", lambda **kwargs: False)
+    monkeypatch.setattr(dispatcher, "_should_skip_by_history", lambda **kwargs: False)
 
     class _FailingChain:
         """整理时固定抛异常的整理链替身。"""
