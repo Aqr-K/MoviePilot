@@ -10,6 +10,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 构建 fork 自有前端并放入构建上下文，Dockerfile 检测到 frontend-dist/
+      # 时优先打包本地产物，不再下载官方 release 的 dist.zip
+      - name: Checkout Frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/MoviePilot-Frontend
+          ref: v2
+          path: frontend-src
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build Frontend
+        run: |
+          cd frontend-src
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+          mv dist ../frontend-dist
+          cd ..
+          rm -rf frontend-src
+
       - name: Release version
         id: release_version
         run: |
