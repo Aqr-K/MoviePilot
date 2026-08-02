@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.chain.transfer import TransferChain
 from app.core.cache import TTLCache
 from app.core.config import settings
-from app.db.models.transferhistory import TransferHistory
 from app.db.transferhistory_oper import TransferHistoryOper
+from app.helper.transferhistory import (HistoryGateAction, coerce_size, describe_history_gate,
+                                        evaluate_history_gate, history_src_size, is_skip_action,
+                                        max_failed_retries, resolve_history)
 from app.log import logger
 from app.schemas import FileItem
 
@@ -79,76 +81,39 @@ class TransferDispatcher:
             return f"{event_path.as_posix()}/"
         return event_path.as_posix()
 
-    @staticmethod
-    def _coerce_size(size: Any) -> Optional[int]:
-        """
-        统一转换文件大小，无法转换时返回 None（视为不可比对）。
-        :param size: 原始大小值
-        :return: 文件大小
-        """
-        if size is None:
-            return None
-        try:
-            return int(size)
-        except (TypeError, ValueError):
-            return None
-
-    @classmethod
-    def _history_src_size(cls, history: TransferHistory) -> Optional[int]:
-        """
-        读取整理记录中的源文件大小。
-        src_fileitem 是 JSON 列，历史数据可能为空、缺 size 键甚至不是字典，
-        取不到时统一返回 None 交由调用方保守处理。
-        :param history: 整理记录
-        :return: 源文件大小，取不到时为 None
-        """
-        src_fileitem = getattr(history, "src_fileitem", None)
-        if not isinstance(src_fileitem, dict):
-            return None
-        return cls._coerce_size(src_fileitem.get("size"))
-
     @classmethod
     def _should_skip_by_history(cls, storage: str, src_path: str,
                                 file_size: Optional[float] = None) -> Optional[bool]:
         """
         依据整理历史判断本次是否跳过整理。
 
-        只要存在整理记录就跳过是不可接受的：失败记录会让一次瞬时故障（网络/识别/移动）
-        永久锁死该文件，成功记录则会让同路径重新上传的新版本没有机会走到整理链的
-        overwrite_mode 判定。因此这里只在「已成功整理且文件确实没变化」时才跳过。
+        判定策略由 app/helper/transferhistory.py 统一提供，整理链的计划整理段使用
+        同一套判定，避免此处放行的文件在下游被另一套「存在记录即拦」的策略收回。
         :param storage: 存储
         :param src_path: 整理记录使用的源路径
         :param file_size: 当前文件大小，蓝光目录等场景可能为 None
         :return: True 跳过整理，False 放行整理，None 查询失败
         """
         try:
-            history = TransferHistoryOper().get_by_src(src_path, storage=storage)
-            if history is not None and not history.status:
-                # get_by_src 没有排序，同一源路径同时存在成功与失败记录时返回哪条不确定，
-                # 拿到失败记录后再确认一次有无成功记录，避免把已整理成功的文件重复整理
-                history = TransferHistoryOper().get_success_by_src(src_path, storage=storage) or history
+            history = resolve_history(src_path, storage=storage,
+                                      transfer_history_oper=TransferHistoryOper())
         except Exception as err:
             logger.error(f"查询整理历史失败: {src_path} - {err}")
             return None
-        if history is None:
-            return False
-        if not history.status:
-            # 失败记录放行重试后若再次失败，下一个事件仍会放行；监控事件是稀疏驱动的
-            # （落地事件/延迟重扫/补偿扫描），入口还有 TTL 去重兜底，重试频率可控，
-            # 因此不额外引入节流状态机，宁可多试也不接受永久漏件
-            logger.debug(f"上次整理失败，本次重新送入整理链: {src_path}")
-            return False
-        recorded_size = cls._history_src_size(history)
-        current_size = cls._coerce_size(file_size)
-        if recorded_size is not None and current_size is not None and current_size != recorded_size:
-            # 同路径换成了另一个版本（如升级为更高码率），是否覆盖交给整理链的
-            # overwrite_mode 决断，监控层不做替代判断
-            logger.info(f"已整理过但文件已变化（{recorded_size} -> {current_size}），"
-                        f"重新送入整理链: {src_path}")
-            return False
-        # 无法比对大小（蓝光目录、历史记录缺 size）时保守跳过，避免重复整理
-        logger.debug(f"已整理过且文件未变化，跳过: {src_path}")
-        return True
+        action = evaluate_history_gate(history, file_size=file_size)
+        if action == HistoryGateAction.PASS_FAILED:
+            logger.debug(f"上次整理失败（{describe_history_gate(history)}），"
+                         f"本次重新送入整理链: {src_path}")
+        elif action == HistoryGateAction.PASS_SIZE_CHANGED:
+            logger.info(f"已整理过但文件已变化（{history_src_size(history)} -> "
+                        f"{coerce_size(file_size)}），重新送入整理链: {src_path}")
+        elif action == HistoryGateAction.SKIP_RETRY_EXHAUSTED:
+            # 放弃自动重试意味着该文件需要人介入，不能只留 debug 日志重蹈静默漏件的覆辙
+            logger.warn(f"整理连续失败 {max_failed_retries()} 次已达上限，不再自动重试，"
+                        f"请手动整理或删除整理记录: {src_path}")
+        elif action == HistoryGateAction.SKIP:
+            logger.debug(f"已整理过且文件未变化，跳过: {src_path}")
+        return is_skip_action(action)
 
     @staticmethod
     def _pending_key(storage: str, event_path: Path) -> str:

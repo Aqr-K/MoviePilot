@@ -3,6 +3,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from app.core.config import settings
+from app.helper.transferhistory import (
+    clear_transfer_failures,
+    failed_retry_count,
+    record_transfer_failure,
+)
 from app.monitor.dispatcher import TransferDispatcher
 
 
@@ -14,17 +20,27 @@ def _build_dispatcher() -> TransferDispatcher:
     return TransferDispatcher(all_exts=[".mkv"], cache={})
 
 
-def _history(status: bool = True, size=None, src_fileitem=...):
+def _history(status: bool = True, size=None, src_fileitem=..., src=None, src_storage=None,
+             history_id: int = 1):
     """
     构造整理历史记录替身。
     :param status: 整理是否成功
     :param size: 记录中的源文件大小
     :param src_fileitem: 直接指定源文件项，默认按 size 生成
+    :param src: 记录源路径，未指定时查重闸的失败重试计数按 None 处理（恒为 0）
+    :param src_storage: 记录源存储
+    :param history_id: 记录 ID，describe_history_gate 的日志文案需要
     :return: 整理历史记录替身
     """
     if src_fileitem is ...:
         src_fileitem = {"size": size}
-    return SimpleNamespace(status=status, src_fileitem=src_fileitem)
+    return SimpleNamespace(id=history_id, status=status, src_fileitem=src_fileitem,
+                            src=src, src_storage=src_storage)
+
+
+def _reset_failed_retries(src_path, storage=None):
+    """清空失败重试计数，隔离用例之间共享的模块级计数缓存。"""
+    clear_transfer_failures(src_path, storage)
 
 
 def _patch_history(monkeypatch, record=None, success_record=None) -> MagicMock:
@@ -66,14 +82,51 @@ def test_no_history_goes_to_transfer(monkeypatch):
     chain.do_transfer.assert_called_once()
 
 
-def test_failed_history_is_retried(monkeypatch):
-    """失败的整理记录不得永久锁死文件，应放行重试。"""
+def test_failed_history_is_retried_within_retry_budget(monkeypatch):
+    """失败重试次数未达上限（默认计数为 0）时，失败的整理记录不得永久锁死文件，应放行重试。"""
     dispatcher = _build_dispatcher()
     _patch_history(monkeypatch, record=_history(status=False, size=100))
     chain = _patch_chain(monkeypatch)
 
     assert dispatcher.handle_file(storage="local", event_path=Path("/downloads/a.mkv"), file_size=100) is True
     chain.do_transfer.assert_called_once()
+
+
+def test_failed_history_is_skipped_when_retry_budget_exhausted(monkeypatch):
+    """失败重试次数已达上限时，失败的整理记录仍应被拦截、跳过整理。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 1)
+    src_path = "/downloads/a.mkv"
+    _reset_failed_retries(src_path, "local")
+    try:
+        record_transfer_failure(src_path, "local")
+        dispatcher = _build_dispatcher()
+        _patch_history(monkeypatch,
+                       record=_history(status=False, size=100, src=src_path, src_storage="local"))
+        chain = _patch_chain(monkeypatch)
+
+        assert dispatcher.handle_file(storage="local", event_path=Path(src_path), file_size=100) is False
+        chain.do_transfer.assert_not_called()
+    finally:
+        _reset_failed_retries(src_path, "local")
+
+
+def test_should_skip_by_history_returns_true_when_retry_budget_exhausted(monkeypatch):
+    """直接调用 _should_skip_by_history：失败计数达到上限时应判定为跳过。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 1)
+    src_path = "/downloads/b.mkv"
+    _reset_failed_retries(src_path, "local")
+    try:
+        record_transfer_failure(src_path, "local")
+        _patch_history(monkeypatch,
+                       record=_history(status=False, size=100, src=src_path, src_storage="local"))
+
+        result = TransferDispatcher._should_skip_by_history(
+            storage="local", src_path=src_path, file_size=100
+        )
+
+        assert result is True
+    finally:
+        _reset_failed_retries(src_path, "local")
 
 
 def test_success_history_with_changed_size_is_retried(monkeypatch):
