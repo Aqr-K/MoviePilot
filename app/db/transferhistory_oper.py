@@ -217,17 +217,19 @@ class TransferHistoryOper(DbOper):
 
     def add_force(self, **kwargs) -> TransferHistory:
         """
-        新增转移历史，相同源目录的记录会被删除
+        新增转移历史，相同源存储与源目录的记录会被删除
         """
+        # 删除与查询都带上源存储，否则不同存储上路径字符串相同的记录会互相顶掉
+        src_storage = kwargs.get("src_storage")
         if kwargs.get("src"):
-            transferhistory = TransferHistory.get_by_src(self._db, kwargs.get("src"))
+            transferhistory = TransferHistory.get_by_src(self._db, kwargs.get("src"), src_storage)
             if transferhistory:
                 transferhistory.delete(self._db, transferhistory.id)
         kwargs.update({
             "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         })
         TransferHistory(**kwargs).create(self._db)
-        return TransferHistory.get_by_src(self._db, kwargs.get("src"))
+        return TransferHistory.get_by_src(self._db, kwargs.get("src"), src_storage)
 
     def update_download_hash(self, historyid, download_hash):
         """
