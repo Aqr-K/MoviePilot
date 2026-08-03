@@ -39,8 +39,10 @@ class DownloadHistory(Base):
     seasons: Mapped[Optional[str]] = mapped_column(String)
     # Exx
     episodes: Mapped[Optional[str]] = mapped_column(String)
-    # 海报
+    # 背景图
     image: Mapped[Optional[str]] = mapped_column(String)
+    # 海报
+    poster: Mapped[Optional[str]] = mapped_column(String)
     # 下载器
     downloader: Mapped[Optional[str]] = mapped_column(String)
     # 下载任务Hash
