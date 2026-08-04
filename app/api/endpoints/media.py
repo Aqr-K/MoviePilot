@@ -19,7 +19,7 @@ from app.service.media import (
     scrape_path as _scrape_path,
     search_media as _search_media,
 )
-from app.utils.media import parse_media_key
+from app.utils.media import MEDIA_SOURCE_ID_FIELDS, parse_media_key
 
 router = APIRouter()
 MediaSource = str
@@ -347,8 +347,10 @@ async def detail(
             mediaid=source_media_id,
             mtype=mtype,
         )
-    else:
-        # 广播事件解析媒体信息
+    if not mediainfo and (
+        not media_source or media_source not in MEDIA_SOURCE_ID_FIELDS
+    ):
+        # 旧探索插件可能只提供列表或转换事件，原生 ID 直识别失败后需保留原有兼容链路。
         event_data = MediaRecognizeConvertEventData(
             mediaid=mediaid, convert_type=settings.RECOGNIZE_SOURCE
         )
@@ -365,7 +367,7 @@ async def detail(
                     mediaid=str(new_id),
                     mtype=mtype,
                 )
-        elif title:
+        if not mediainfo and title:
             # 使用名称识别兜底
             meta = MetaInfo(title)
             if year:
