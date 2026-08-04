@@ -1074,6 +1074,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                 record_transfer_failure(
                     task.fileitem.path if task.fileitem else None,
                     task.fileitem.storage if task.fileitem else None,
+                    file_size=task.fileitem.size if task.fileitem else None,
+                    file_modify_time=task.fileitem.modify_time if task.fileitem else None,
+                    fileid=task.fileitem.fileid if task.fileitem else None,
                 )
 
                 # 新增转移失败历史记录
@@ -1782,6 +1785,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     record_transfer_failure(
                         task.fileitem.path if task.fileitem else None,
                         task.fileitem.storage if task.fileitem else None,
+                        file_size=task.fileitem.size if task.fileitem else None,
+                        file_modify_time=task.fileitem.modify_time if task.fileitem else None,
+                        fileid=task.fileitem.fileid if task.fileitem else None,
                     )
                     # 新增整理失败历史记录
                     his = transferhis.add_fail(
@@ -3368,16 +3374,27 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                             )
                             transferd = None
 
+                    if transferd:
+                        history_description = describe_history_gate(
+                            transferd,
+                            file_size=file_item.size,
+                            file_modify_time=file_item.modify_time,
+                            fileid=file_item.fileid,
+                        )
+
                     if transferd and not manual:
                         # 自动路径（目录监控、下载器轮询）与监控分发共用同一套判定，
                         # 否则监控层刚放行的失败重试与升级请求会在这里被全额收回
                         gate_action = evaluate_history_gate(
-                            transferd, file_size=file_item.size
+                            transferd,
+                            file_size=file_item.size,
+                            file_modify_time=file_item.modify_time,
+                            fileid=file_item.fileid,
                         )
                         if not is_skip_action(gate_action):
                             logger.info(
                                 f"{file_item.path} 命中"
-                                f"{describe_history_gate(transferd, file_size=file_item.size)}"
+                                f"{history_description}"
                                 f"，重新送入整理"
                             )
                             transferd = None
@@ -3396,7 +3413,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                             )
                         logger.info(
                             f"{file_item.path} 已整理过（"
-                            f"{describe_history_gate(transferd, file_size=file_item.size)}"
+                            f"{history_description}"
                             f"），如需重新处理，请删除整理记录。"
                         )
                         err_msgs.append(f"{file_item.name} 已整理过")

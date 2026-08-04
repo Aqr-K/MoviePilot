@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.config import settings
+from app.helper import transferhistory as transferhistory_helper
 from app.helper.transferhistory import (
     HistoryGateAction,
     clear_transfer_failures,
@@ -26,12 +27,16 @@ from app.helper.transferhistory import (
 
 def make_history(status: bool, size=1024, has_src_fileitem: bool = True,
                   history_id: int = 1, src_fileitem_override=None,
-                  src=None, src_storage=None):
+                  src=None, src_storage=None, modify_time=None, fileid=None):
     """构造用于查重闸判定的整理记录替身。"""
     if src_fileitem_override is not None:
         src_fileitem = src_fileitem_override
     elif has_src_fileitem:
-        src_fileitem = {"size": size}
+        src_fileitem = {
+            "size": size,
+            "modify_time": modify_time,
+            "fileid": fileid,
+        }
     else:
         src_fileitem = None
     return SimpleNamespace(id=history_id, status=status, src_fileitem=src_fileitem,
@@ -183,6 +188,96 @@ def test_evaluate_history_gate_explicit_retry_count_overrides_realtime_lookup(mo
         _reset_failed_retries(src_path, "local")
 
 
+def test_failed_history_new_size_passes_and_resets_retry_budget(monkeypatch):
+    """失败预算耗尽后同路径文件大小变化时，应放行新版本并从第 1 次失败重新计数。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 2)
+    src_path = "/downloads/gate-test-failed-new-size.mkv"
+    _reset_failed_retries(src_path, "local")
+    try:
+        history = make_history(
+            status=False,
+            size=1024,
+            src=src_path,
+            src_storage="local",
+        )
+        record_transfer_failure(src_path, "local", file_size=1024)
+        record_transfer_failure(src_path, "local", file_size=1024)
+        assert evaluate_history_gate(history, file_size=1024) == HistoryGateAction.SKIP_RETRY_EXHAUSTED
+
+        assert (
+            evaluate_history_gate(history, file_size=2048)
+            == HistoryGateAction.PASS_FAILED_VERSION_CHANGED
+        )
+        assert record_transfer_failure(src_path, "local", file_size=2048) == 1
+        assert failed_retry_count(src_path, "local", file_size=2048) == 1
+    finally:
+        _reset_failed_retries(src_path, "local")
+
+
+@pytest.mark.parametrize(
+    "current_fields",
+    [
+        {"file_modify_time": 200.0, "fileid": "same-id"},
+        {"file_modify_time": 100.0, "fileid": "new-id"},
+    ],
+)
+def test_failed_history_same_size_new_fingerprint_passes(current_fields, monkeypatch):
+    """大小相同但修改时间或文件 ID 改变时，也应视为失败文件的新版本。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 1)
+    src_path = "/downloads/gate-test-failed-new-fingerprint.mkv"
+    _reset_failed_retries(src_path, "local")
+    try:
+        history = make_history(
+            status=False,
+            size=1024,
+            modify_time=100.0,
+            fileid="same-id",
+            src=src_path,
+            src_storage="local",
+        )
+        record_transfer_failure(
+            src_path,
+            "local",
+            file_size=1024,
+            file_modify_time=100.0,
+            fileid="same-id",
+        )
+        assert evaluate_history_gate(history, file_size=1024) == HistoryGateAction.SKIP_RETRY_EXHAUSTED
+
+        assert (
+            evaluate_history_gate(history, file_size=1024, **current_fields)
+            == HistoryGateAction.PASS_FAILED_VERSION_CHANGED
+        )
+    finally:
+        _reset_failed_retries(src_path, "local")
+
+
+def test_legacy_integer_retry_count_is_upgraded_after_new_version_failure(monkeypatch):
+    """Redis 中遗留的整数计数不得阻断新版本，并应在下次失败时升级为指纹状态。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 2)
+    src_path = "/downloads/gate-test-legacy-retry-state.mkv"
+    _reset_failed_retries(src_path, "local")
+    try:
+        key = transferhistory_helper.failed_retry_key(src_path, "local")
+        transferhistory_helper._failed_retry_counts[key] = 2
+        history = make_history(
+            status=False,
+            size=1024,
+            src=src_path,
+            src_storage="local",
+        )
+        assert evaluate_history_gate(history, file_size=1024) == HistoryGateAction.SKIP_RETRY_EXHAUSTED
+        assert (
+            evaluate_history_gate(history, file_size=2048)
+            == HistoryGateAction.PASS_FAILED_VERSION_CHANGED
+        )
+
+        assert record_transfer_failure(src_path, "local", file_size=2048) == 1
+        assert failed_retry_count(src_path, "local", file_size=2048) == 1
+    finally:
+        _reset_failed_retries(src_path, "local")
+
+
 # ---------------------------------------------------------------------------
 # max_failed_retries 钳制
 # ---------------------------------------------------------------------------
@@ -277,6 +372,7 @@ def test_failed_retry_count_defaults_to_zero_without_record():
 @pytest.mark.parametrize("action, expected", [
     (HistoryGateAction.PASS_NO_RECORD, False),
     (HistoryGateAction.PASS_FAILED, False),
+    (HistoryGateAction.PASS_FAILED_VERSION_CHANGED, False),
     (HistoryGateAction.PASS_SIZE_CHANGED, False),
     (HistoryGateAction.SKIP_RETRY_EXHAUSTED, True),
     (HistoryGateAction.SKIP, True),

@@ -129,7 +129,16 @@ class SnapshotStore:
             old_time = old_info.get('modify_time', 0) if isinstance(old_info, dict) else 0
             new_time = new_info.get('modify_time', 0) if isinstance(new_info, dict) else 0
 
-            if old_size != new_size or (old_time and new_time and old_time != new_time):
+            # 支持文件唯一标识的存储器可用它识别同大小且修改时间未变化的替换文件。
+            # 旧快照缺少 fileid 时保持保守，避免升级后首次补齐元数据触发全量重整。
+            old_fileid = old_info.get('fileid') if isinstance(old_info, dict) else None
+            new_fileid = new_info.get('fileid') if isinstance(new_info, dict) else None
+
+            if (
+                    old_size != new_size
+                    or (old_time and new_time and old_time != new_time)
+                    or (old_fileid and new_fileid and old_fileid != new_fileid)
+            ):
                 changes['modified'].append(file_path)
 
         return changes

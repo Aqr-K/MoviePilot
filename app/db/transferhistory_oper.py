@@ -217,19 +217,22 @@ class TransferHistoryOper(DbOper):
 
     def add_force(self, **kwargs) -> TransferHistory:
         """
-        新增转移历史，相同源存储与源目录的记录会被删除
+        新增转移历史，并以同源存储的记录为准替换旧记录。
         """
-        # 删除与查询都带上源存储，否则不同存储上路径字符串相同的记录会互相顶掉
-        src_storage = kwargs.get("src_storage")
-        if kwargs.get("src"):
-            transferhistory = TransferHistory.get_by_src(self._db, kwargs.get("src"), src_storage)
-            if transferhistory:
-                transferhistory.delete(self._db, transferhistory.id)
+        # 文件项的默认存储是 local；归一化旧调用传入的 None，确保运行时语义与
+        # (src, src_storage) 唯一索引一致。
+        kwargs["src_storage"] = kwargs.get("src_storage") or "local"
         kwargs.update({
             "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         })
-        TransferHistory(**kwargs).create(self._db)
-        return TransferHistory.get_by_src(self._db, kwargs.get("src"), src_storage)
+        TransferHistory.replace_by_src(self._db, **kwargs)
+        # 保持 add_force 的既有返回契约：返回可被调用方安全读取字段的查询结果，
+        # 而非事务提交后可能已脱离会话的新建实例。
+        return TransferHistory.get_by_src(
+            self._db,
+            kwargs.get("src"),
+            kwargs["src_storage"],
+        )
 
     def update_download_hash(self, historyid, download_hash):
         """

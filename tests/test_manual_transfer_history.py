@@ -420,6 +420,60 @@ def test_automatic_transfer_skips_failed_history_when_retry_budget_exhausted(mon
         _reset_failed_retries(fileitem.path, fileitem.storage)
 
 
+def test_automatic_transfer_new_version_bypasses_exhausted_retry_budget(monkeypatch):
+    """失败预算耗尽后同路径新版本必须进入整理，且不能给下载任务补打已整理标签。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 1)
+    chain = make_transfer_chain()
+    fileitem = make_fileitem("/downloads/Test.Show.S01E01.mkv")
+    fileitem.size = 200
+    history = SimpleNamespace(
+        id=15,
+        status=False,
+        mode="copy",
+        dest_fileitem=None,
+        download_hash="abc123",
+        downloader="qbittorrent",
+        src=fileitem.path,
+        src_storage=fileitem.storage,
+        src_fileitem={"size": 100},
+    )
+    planned = []
+    deleted = []
+    _patch_transfer_planning(
+        monkeypatch,
+        chain,
+        fileitem,
+        history,
+        planned,
+        deleted,
+    )
+    completed = []
+    chain.transfer_completed = lambda download_hash, downloader: completed.append(
+        (download_hash, downloader)
+    )
+
+    _reset_failed_retries(fileitem.path, fileitem.storage)
+    try:
+        record_transfer_failure(fileitem.path, fileitem.storage, file_size=100)
+
+        state, message = TransferChain.do_transfer(
+            chain,
+            fileitem=fileitem,
+            downloader="qbittorrent",
+            download_hash="abc123",
+            background=False,
+            manual=False,
+        )
+
+        assert state is True
+        assert message == ""
+        assert deleted == []
+        assert planned == [fileitem.path]
+        assert completed == []
+    finally:
+        _reset_failed_retries(fileitem.path, fileitem.storage)
+
+
 def test_manual_transfer_bypasses_retry_budget_when_exhausted(monkeypatch):
     """
     手动整理不受重试次数上限限制：manual=True 时查重闸根本不参与判定

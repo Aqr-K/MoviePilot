@@ -309,6 +309,7 @@ class StorageBase(metaclass=ABCMeta):
                     files_info[_fileitm.path] = {
                         'size': _fileitm.size or 0,
                         'modify_time': getattr(_fileitm, 'modify_time', 0),
+                        'fileid': getattr(_fileitm, 'fileid', None),
                         'type': _fileitm.type
                     }
 

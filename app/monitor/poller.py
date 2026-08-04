@@ -163,7 +163,15 @@ class RemotePoller:
         for new_file in added_files:
             file_info = new_snapshot.get(new_file, {})
             file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
-            if self._dispatcher.handle_file(storage=storage, event_path=Path(new_file), file_size=file_size):
+            file_modify_time = file_info.get('modify_time') if isinstance(file_info, dict) else None
+            fileid = file_info.get('fileid') if isinstance(file_info, dict) else None
+            if self._dispatcher.handle_file(
+                    storage=storage,
+                    event_path=Path(new_file),
+                    file_size=file_size,
+                    file_modify_time=file_modify_time,
+                    fileid=fileid,
+            ):
                 handled_added_count += 1
 
         # 处理修改文件
@@ -171,7 +179,15 @@ class RemotePoller:
         for modified_file in modified_files:
             file_info = new_snapshot.get(modified_file, {})
             file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
-            if self._dispatcher.handle_file(storage=storage, event_path=Path(modified_file), file_size=file_size):
+            file_modify_time = file_info.get('modify_time') if isinstance(file_info, dict) else None
+            fileid = file_info.get('fileid') if isinstance(file_info, dict) else None
+            if self._dispatcher.handle_file(
+                    storage=storage,
+                    event_path=Path(modified_file),
+                    file_size=file_size,
+                    file_modify_time=file_modify_time,
+                    fileid=fileid,
+            ):
                 handled_modified_count += 1
 
         if handled_added_count or handled_modified_count:
@@ -210,8 +226,15 @@ class RemotePoller:
                     if not self._dispatcher.is_transfer_candidate_path(Path(file_path)):
                         continue
                     file_size = file_info.get('size', 0) if isinstance(file_info, dict) else file_info
-                    if self._dispatcher.handle_file(storage=storage, event_path=Path(file_path),
-                                                    file_size=file_size):
+                    file_modify_time = file_info.get('modify_time') if isinstance(file_info, dict) else None
+                    fileid = file_info.get('fileid') if isinstance(file_info, dict) else None
+                    if self._dispatcher.handle_file(
+                            storage=storage,
+                            event_path=Path(file_path),
+                            file_size=file_size,
+                            file_modify_time=file_modify_time,
+                            fileid=fileid,
+                    ):
                         processed_count += 1
                 except Exception as e:
                     logger.error(f"处理文件 {file_path} 失败: {e}")
