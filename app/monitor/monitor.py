@@ -445,9 +445,13 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
         threshold = since - self.COMPENSATION_MARGIN
         changed_count = sum(1 for candidate in candidates if candidate[1] >= threshold)
         handled = 0
-        for file_path, _, file_size in candidates:
-            if self._dispatcher.handle_file(storage="local", event_path=file_path,
-                                            file_size=file_size):
+        for file_path, file_modify_time, file_size in candidates:
+            if self._dispatcher.handle_file(
+                    storage="local",
+                    event_path=file_path,
+                    file_size=file_size,
+                    file_modify_time=file_modify_time,
+            ):
                 handled += 1
         logger.info(f"✓ 目录监控补偿扫描完成，{len(candidates)} 个候选文件"
                     f"（其中 {changed_count} 个修改时间落在停摆期间）中有 {handled} 个进入整理链: {mon_path}")
@@ -563,8 +567,20 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
             return
         if not self._dispatcher.is_transfer_candidate_path(Path(event_path)):
             return
+        file_modify_time = None
+        try:
+            file_modify_time = Path(event_path).stat().st_mtime
+        except OSError as err:
+            logger.debug(f"读取目录监控文件修改时间失败: {event_path} - {err}")
         # 整理文件
-        self._dispatcher.handle_file(storage="local", event_path=Path(event_path), file_size=file_size)
+        handle_kwargs = {
+            "storage": "local",
+            "event_path": Path(event_path),
+            "file_size": file_size,
+        }
+        if file_modify_time is not None:
+            handle_kwargs["file_modify_time"] = file_modify_time
+        self._dispatcher.handle_file(**handle_kwargs)
 
     def event_unreadable(self, event_path: Path):
         """

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from app.core.cache import TTLCache
 from app.core.config import settings
@@ -12,9 +12,9 @@ from app.log import logger
 MIN_FAILED_RETRIES = 1
 MAX_FAILED_RETRIES = 10
 
-# 同一源路径的连续整理失败次数。整理链在写失败历史时累计、整理成功或删除历史时清零，
-# 查重闸只读不写，避免监控层与整理链对同一个事件重复计数。
-# 计数是进程缓存态：过期或重启后归零，重启往往正是为了修复导致失败的问题，再试一轮是期望行为
+# 同一源路径的连续整理失败状态。整理链在写失败历史时累计、整理成功或删除历史时清零，
+# 查重闸只读不写，避免监控层与整理链对同一个事件重复计数。缓存值会同时保存文件指纹，
+# 因此同一路径的新版本天然获得独立预算；内存缓存会随进程重启清空，Redis 后端则保留到 TTL 到期。
 FAILED_RETRY_TTL = 24 * 3600
 _failed_retry_counts = TTLCache(region="transfer_failed_retry", maxsize=5000, ttl=FAILED_RETRY_TTL)
 
@@ -31,6 +31,8 @@ class HistoryGateAction:
     PASS_NO_RECORD = "pass_no_record"
     # 上次整理失败且重试次数未用尽，放行重试
     PASS_FAILED = "pass_failed"
+    # 上次整理失败但源文件已变为新版本，放行并重置该版本的重试预算
+    PASS_FAILED_VERSION_CHANGED = "pass_failed_version_changed"
     # 已整理成功但源文件已变化，放行交由 overwrite_mode 决断
     PASS_SIZE_CHANGED = "pass_size_changed"
     # 上次整理失败且重试次数已用尽，跳过
@@ -86,31 +88,171 @@ def failed_retry_key(src_path: Optional[str], storage: Optional[str] = None) -> 
     return f"{storage or 'local'}:{src_path}"
 
 
-def failed_retry_count(src_path: Optional[str], storage: Optional[str] = None) -> int:
+def coerce_modify_time(modify_time: Any) -> Optional[float]:
+    """
+    统一转换文件修改时间，无法转换时返回 None。
+    :param modify_time: 原始修改时间值
+    :return: 文件修改时间
+    """
+    if modify_time is None:
+        return None
+    try:
+        return float(modify_time)
+    except (TypeError, ValueError):
+        return None
+
+
+def coerce_fileid(fileid: Any) -> Optional[str]:
+    """
+    统一转换文件唯一标识，空值视为不可比对。
+    :param fileid: 原始文件唯一标识
+    :return: 非空文件唯一标识
+    """
+    if fileid is None:
+        return None
+    value = str(fileid).strip()
+    return value or None
+
+
+def file_fingerprint(
+        file_size: Any = None,
+        file_modify_time: Any = None,
+        fileid: Any = None,
+) -> Dict[str, Any]:
+    """
+    生成用于区分同一路径文件版本的稳定指纹。
+
+    大小是所有存储器都尽量提供的最小指纹；两端均有数据时，修改时间和文件 ID 还可
+    识别“同大小替换”。只保留可比较字段，避免缺失元数据把同一文件误判成新版本。
+    :param file_size: 文件大小
+    :param file_modify_time: 文件修改时间
+    :param fileid: 存储器文件唯一标识
+    :return: 非空且可比较的指纹字段
+    """
+    fingerprint = {}
+    size = coerce_size(file_size)
+    if size is not None:
+        fingerprint["size"] = size
+    modify_time = coerce_modify_time(file_modify_time)
+    if modify_time is not None:
+        fingerprint["modify_time"] = modify_time
+    normalized_fileid = coerce_fileid(fileid)
+    if normalized_fileid is not None:
+        fingerprint["fileid"] = normalized_fileid
+    return fingerprint
+
+
+def _retry_state(value: Any) -> tuple[int, Dict[str, Any]]:
+    """将新旧缓存值统一转换为失败次数与文件指纹。"""
+    if isinstance(value, dict):
+        raw_count = value.get("count", 0)
+        raw_fingerprint = value.get("fingerprint")
+    else:
+        # 兼容已写入 Redis 或内存的旧整数计数；下次带指纹写入时会自动升级结构。
+        raw_count = value
+        raw_fingerprint = None
+    try:
+        count = max(int(raw_count or 0), 0)
+    except (TypeError, ValueError):
+        count = 0
+    fingerprint = (
+        file_fingerprint(
+            file_size=raw_fingerprint.get("size"),
+            file_modify_time=raw_fingerprint.get("modify_time"),
+            fileid=raw_fingerprint.get("fileid"),
+        )
+        if isinstance(raw_fingerprint, dict)
+        else {}
+    )
+    return count, fingerprint
+
+
+def _is_file_version_changed(
+        recorded_fingerprint: Dict[str, Any],
+        current_fingerprint: Dict[str, Any],
+) -> bool:
+    """判断两个可比文件指纹是否指向不同版本。"""
+    for field in ("fileid", "modify_time", "size"):
+        recorded_value = recorded_fingerprint.get(field)
+        current_value = current_fingerprint.get(field)
+        if (
+                recorded_value is not None
+                and current_value is not None
+                and recorded_value != current_value
+        ):
+            return True
+    return False
+
+
+def failed_retry_count(src_path: Optional[str], storage: Optional[str] = None,
+                       file_size: Any = None, file_modify_time: Any = None,
+                       fileid: Any = None) -> int:
     """
     读取同一源路径已累计的连续整理失败次数。
     :param src_path: 整理记录使用的源路径
     :param storage: 源存储
-    :return: 已失败次数，无记录时为 0
+    :param file_size: 当前文件大小
+    :param file_modify_time: 当前文件修改时间
+    :param fileid: 当前文件唯一标识
+    :return: 当前文件版本已失败次数，无记录时为 0
     """
     key = failed_retry_key(src_path, storage)
     if not key:
         return 0
-    return _failed_retry_counts.get(key) or 0
+    count, recorded_fingerprint = _retry_state(_failed_retry_counts.get(key))
+    current_fingerprint = file_fingerprint(
+        file_size=file_size,
+        file_modify_time=file_modify_time,
+        fileid=fileid,
+    )
+    if (
+            recorded_fingerprint
+            and current_fingerprint
+            and _is_file_version_changed(recorded_fingerprint, current_fingerprint)
+    ):
+        return 0
+    return count
 
 
-def record_transfer_failure(src_path: Optional[str], storage: Optional[str] = None) -> int:
+def record_transfer_failure(src_path: Optional[str], storage: Optional[str] = None,
+                            file_size: Any = None, file_modify_time: Any = None,
+                            fileid: Any = None) -> int:
     """
     累计一次整理失败。
     :param src_path: 整理记录使用的源路径
     :param storage: 源存储
-    :return: 累计后的失败次数
+    :param file_size: 当前文件大小
+    :param file_modify_time: 当前文件修改时间
+    :param fileid: 当前文件唯一标识
+    :return: 当前文件版本累计后的失败次数
     """
     key = failed_retry_key(src_path, storage)
     if not key:
         return 0
-    count = (_failed_retry_counts.get(key) or 0) + 1
-    _failed_retry_counts[key] = count
+    count, recorded_fingerprint = _retry_state(_failed_retry_counts.get(key))
+    current_fingerprint = file_fingerprint(
+        file_size=file_size,
+        file_modify_time=file_modify_time,
+        fileid=fileid,
+    )
+    if current_fingerprint and (
+            not recorded_fingerprint
+            or _is_file_version_changed(recorded_fingerprint, current_fingerprint)
+    ):
+        count = 0
+    count += 1
+    if current_fingerprint:
+        _failed_retry_counts[key] = {
+            "count": count,
+            "fingerprint": current_fingerprint,
+        }
+    elif recorded_fingerprint:
+        _failed_retry_counts[key] = {
+            "count": count,
+            "fingerprint": recorded_fingerprint,
+        }
+    else:
+        _failed_retry_counts[key] = count
     return count
 
 
@@ -150,10 +292,23 @@ def history_src_size(history: TransferHistory) -> Optional[int]:
     :param history: 整理记录
     :return: 源文件大小，取不到时为 None
     """
+    return history_src_fingerprint(history).get("size")
+
+
+def history_src_fingerprint(history: TransferHistory) -> Dict[str, Any]:
+    """
+    读取整理记录中的源文件版本指纹。
+    :param history: 整理记录
+    :return: 源文件的可比较指纹字段
+    """
     src_fileitem = getattr(history, "src_fileitem", None)
     if not isinstance(src_fileitem, dict):
-        return None
-    return coerce_size(src_fileitem.get("size"))
+        return {}
+    return file_fingerprint(
+        file_size=src_fileitem.get("size"),
+        file_modify_time=src_fileitem.get("modify_time"),
+        fileid=src_fileitem.get("fileid"),
+    )
 
 
 def resolve_history(src_path: str, storage: Optional[str] = None,
@@ -162,9 +317,9 @@ def resolve_history(src_path: str, storage: Optional[str] = None,
     """
     查询源路径对应的整理记录。
 
-    get_by_src 没有排序，同一源路径同时存在成功与失败记录时返回哪条不确定，
-    拿到失败记录后再确认一次有无成功记录，避免把已整理成功的文件重复整理。
-    查询异常不在此处吞掉，由调用方按各自的重试策略处理。
+    新表通过 (src, src_storage) 唯一索引保证单条记录；仍保留对成功记录的二次确认，
+    兼容升级前可能残留的重复数据，避免把已整理成功的文件重复整理。查询异常不在
+    此处吞掉，由调用方按各自的重试策略处理。
     :param src_path: 整理记录使用的源路径
     :param storage: 存储
     :param transfer_history_oper: 复用的历史操作对象，未传时新建
@@ -179,35 +334,49 @@ def resolve_history(src_path: str, storage: Optional[str] = None,
 
 def evaluate_history_gate(history: Optional[TransferHistory],
                           file_size: Optional[float] = None,
+                          file_modify_time: Optional[float] = None,
+                          fileid: Optional[str] = None,
                           retry_count: Optional[int] = None) -> str:
     """
     依据整理历史判断本次是否跳过整理。
 
     成功记录不能简单地「存在即跳过」：同路径重新上传的新版本会因此没有机会走到
-    整理链的 overwrite_mode 判定，升级永远无法入库，故源文件大小变化时一律放行。
-    失败记录按有界重试处理：未达上限放行重试，让瞬时故障（网络/识别/移动）自愈；
-    达到上限后跳过，避免永久失败的文件反复刷失败通知。
+    整理链的 overwrite_mode 判定，升级永远无法入库，故任一可比文件指纹变化时一律放行。
+    失败记录按文件版本使用有界重试：新版本先放行并在下一次失败时从 1 重新计数，
+    同一版本未达上限时继续重试，让瞬时故障（网络/识别/移动）自愈；达到上限后跳过，
+    避免永久失败的文件反复刷失败通知。
     :param history: 整理记录，未命中时为 None
     :param file_size: 当前文件大小，蓝光目录等场景可能为 None
+    :param file_modify_time: 当前文件修改时间
+    :param fileid: 当前文件唯一标识
     :param retry_count: 已累计的失败次数，None 表示按记录源路径实时查询
     :return: HistoryGateAction 之一
     """
     if history is None:
         return HistoryGateAction.PASS_NO_RECORD
+    recorded_fingerprint = history_src_fingerprint(history)
+    current_fingerprint = file_fingerprint(
+        file_size=file_size,
+        file_modify_time=file_modify_time,
+        fileid=fileid,
+    )
     if not history.status:
+        if _is_file_version_changed(recorded_fingerprint, current_fingerprint):
+            return HistoryGateAction.PASS_FAILED_VERSION_CHANGED
         if retry_count is None:
             retry_count = failed_retry_count(
                 getattr(history, "src", None),
                 getattr(history, "src_storage", None),
+                file_size=file_size,
+                file_modify_time=file_modify_time,
+                fileid=fileid,
             )
         if retry_count >= max_failed_retries():
             return HistoryGateAction.SKIP_RETRY_EXHAUSTED
         # 监控事件是稀疏驱动的（落地事件/延迟重扫/补偿扫描），入口还有 TTL 去重兜底，
         # 配合失败次数上限，重试频率与总量都可控
         return HistoryGateAction.PASS_FAILED
-    recorded_size = history_src_size(history)
-    current_size = coerce_size(file_size)
-    if recorded_size is not None and current_size is not None and current_size != recorded_size:
+    if _is_file_version_changed(recorded_fingerprint, current_fingerprint):
         # 同路径换成了另一个版本（如升级为更高码率），是否覆盖交给整理链的
         # overwrite_mode 决断，查重闸不做替代判断
         return HistoryGateAction.PASS_SIZE_CHANGED
@@ -216,23 +385,38 @@ def evaluate_history_gate(history: Optional[TransferHistory],
 
 
 def describe_history_gate(history: Optional[TransferHistory],
-                          file_size: Optional[float] = None) -> str:
+                          file_size: Optional[float] = None,
+                          file_modify_time: Optional[float] = None,
+                          fileid: Optional[str] = None) -> str:
     """
     生成查重闸判定的可读说明，供日志定位「到底是哪条记录在拦」。
     :param history: 整理记录
     :param file_size: 当前文件大小
+    :param file_modify_time: 当前文件修改时间
+    :param fileid: 当前文件唯一标识
     :return: 说明文本
     """
     if history is None:
         return "无整理记录"
+    recorded_fingerprint = history_src_fingerprint(history)
+    current_fingerprint = file_fingerprint(
+        file_size=file_size,
+        file_modify_time=file_modify_time,
+        fileid=fileid,
+    )
     if not history.status:
         count = failed_retry_count(
             getattr(history, "src", None),
             getattr(history, "src_storage", None),
+            file_size=file_size,
+            file_modify_time=file_modify_time,
+            fileid=fileid,
         )
+        if _is_file_version_changed(recorded_fingerprint, current_fingerprint):
+            return f"失败记录 #{history.id}，文件版本已变化，重试预算将重置"
         return f"失败记录 #{history.id}，已重试 {count}/{max_failed_retries()} 次"
-    recorded_size = history_src_size(history)
-    current_size = coerce_size(file_size)
+    recorded_size = recorded_fingerprint.get("size")
+    current_size = current_fingerprint.get("size")
     if recorded_size is None and current_size is None:
         return f"成功记录 #{history.id}，大小不可比对"
     return f"成功记录 #{history.id}，大小 {recorded_size} -> {current_size}"

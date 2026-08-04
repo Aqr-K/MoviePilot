@@ -8,8 +8,8 @@ from app.chain.transfer import TransferChain
 from app.core.cache import TTLCache
 from app.core.config import settings
 from app.db.transferhistory_oper import TransferHistoryOper
-from app.helper.transferhistory import (HistoryGateAction, coerce_size, describe_history_gate,
-                                        evaluate_history_gate, history_src_size, is_skip_action,
+from app.helper.transferhistory import (HistoryGateAction, describe_history_gate,
+                                        evaluate_history_gate, is_skip_action,
                                         max_failed_retries, resolve_history)
 from app.log import logger
 from app.schemas import FileItem
@@ -83,7 +83,9 @@ class TransferDispatcher:
 
     @classmethod
     def _should_skip_by_history(cls, storage: str, src_path: str,
-                                file_size: Optional[float] = None) -> Optional[bool]:
+                                file_size: Optional[float] = None,
+                                file_modify_time: Optional[float] = None,
+                                fileid: Optional[str] = None) -> Optional[bool]:
         """
         依据整理历史判断本次是否跳过整理。
 
@@ -92,6 +94,8 @@ class TransferDispatcher:
         :param storage: 存储
         :param src_path: 整理记录使用的源路径
         :param file_size: 当前文件大小，蓝光目录等场景可能为 None
+        :param file_modify_time: 当前文件修改时间
+        :param fileid: 当前文件唯一标识
         :return: True 跳过整理，False 放行整理，None 查询失败
         """
         try:
@@ -100,13 +104,27 @@ class TransferDispatcher:
         except Exception as err:
             logger.error(f"查询整理历史失败: {src_path} - {err}")
             return None
-        action = evaluate_history_gate(history, file_size=file_size)
+        action = evaluate_history_gate(
+            history,
+            file_size=file_size,
+            file_modify_time=file_modify_time,
+            fileid=fileid,
+        )
+        history_description = describe_history_gate(
+            history,
+            file_size=file_size,
+            file_modify_time=file_modify_time,
+            fileid=fileid,
+        )
         if action == HistoryGateAction.PASS_FAILED:
-            logger.debug(f"上次整理失败（{describe_history_gate(history)}），"
+            logger.debug(f"上次整理失败（{history_description}），"
                          f"本次重新送入整理链: {src_path}")
+        elif action == HistoryGateAction.PASS_FAILED_VERSION_CHANGED:
+            logger.info(f"上次整理失败但文件版本已变化（{history_description}），"
+                        f"本次重新送入整理链: {src_path}")
         elif action == HistoryGateAction.PASS_SIZE_CHANGED:
-            logger.info(f"已整理过但文件已变化（{history_src_size(history)} -> "
-                        f"{coerce_size(file_size)}），重新送入整理链: {src_path}")
+            logger.info(f"已整理过但文件版本已变化（{history_description}），"
+                        f"重新送入整理链: {src_path}")
         elif action == HistoryGateAction.SKIP_RETRY_EXHAUSTED:
             # 放弃自动重试意味着该文件需要人介入，不能只留 debug 日志重蹈静默漏件的覆辙
             logger.warn(f"整理连续失败 {max_failed_retries()} 次已达上限，不再自动重试，"
@@ -123,12 +141,15 @@ class TransferDispatcher:
         return f"{storage}:{Path(event_path).as_posix()}"
 
     def _register_pending(self, storage: str, event_path: Path, file_size: float = None,
+                          file_modify_time: float = None, fileid: Optional[str] = None,
                           reason: str = "整理历史查询失败"):
         """
         登记暂时性故障的文件待重试，重复失败累计次数，超限后放弃。
         :param storage: 存储
         :param event_path: 原始事件路径
         :param file_size: 文件大小，None 表示重试时需要重新读取
+        :param file_modify_time: 文件修改时间
+        :param fileid: 文件唯一标识
         :param reason: 登记原因，用于日志
         """
         key = self._pending_key(storage, event_path)
@@ -147,6 +168,8 @@ class TransferDispatcher:
                 "storage": storage,
                 "event_path": event_path,
                 "file_size": file_size,
+                "file_modify_time": file_modify_time,
+                "fileid": fileid,
                 "attempts": 1
             }
         logger.warn(f"{reason}，已登记待重试: {key}")
@@ -164,19 +187,20 @@ class TransferDispatcher:
                                file_size=None, reason="读取监控事件文件失败")
 
     @staticmethod
-    def _resolve_file_size(event_path: Path) -> Tuple[Optional[int], bool]:
+    def _resolve_file_state(event_path: Path) -> Tuple[Optional[int], Optional[float], bool]:
         """
-        重新读取文件大小。
+        重新读取本地文件指纹。
         :param event_path: 文件路径
-        :return: (文件大小, 文件是否仍然存在)；大小为 None 表示本次读取仍然失败
+        :return: (文件大小, 修改时间, 文件是否仍然存在)；大小为 None 表示本次读取仍然失败
         """
         try:
-            return Path(event_path).stat().st_size, True
+            file_stat = Path(event_path).stat()
+            return file_stat.st_size, file_stat.st_mtime, True
         except FileNotFoundError:
-            return None, False
+            return None, None, False
         except OSError as err:
             logger.debug(f"重试读取文件大小失败: {event_path} - {err}")
-            return None, True
+            return None, None, True
 
     def _discard_pending(self, storage: str, event_path: Path):
         """
@@ -209,9 +233,11 @@ class TransferDispatcher:
             storage = item["storage"]
             event_path = item["event_path"]
             file_size = item["file_size"]
+            file_modify_time = item.get("file_modify_time")
+            fileid = item.get("fileid")
             if file_size is None and storage == "local":
                 # 因读取失败入队的事件没有大小，重试时必须重新读取
-                file_size, exists = self._resolve_file_size(event_path)
+                file_size, file_modify_time, exists = self._resolve_file_state(event_path)
                 if not exists:
                     logger.debug(f"待重试文件已不存在，放弃: {storage}:{event_path}")
                     self._discard_pending(storage=storage, event_path=event_path)
@@ -222,14 +248,23 @@ class TransferDispatcher:
                                            reason="读取监控事件文件失败")
                     continue
             logger.info(f"重试整理: {storage}:{event_path}")
-            self.handle_file(storage=storage, event_path=event_path, file_size=file_size)
+            self.handle_file(
+                storage=storage,
+                event_path=event_path,
+                file_size=file_size,
+                file_modify_time=file_modify_time,
+                fileid=fileid,
+            )
 
-    def handle_file(self, storage: str, event_path: Path, file_size: float = None) -> bool:
+    def handle_file(self, storage: str, event_path: Path, file_size: float = None,
+                    file_modify_time: float = None, fileid: Optional[str] = None) -> bool:
         """
         整理一个文件。
         :param storage: 存储
         :param event_path: 事件文件路径
         :param file_size: 文件大小
+        :param file_modify_time: 文件修改时间
+        :param fileid: 文件唯一标识
         :return: 是否进入整理链
         """
         with self._lock:
@@ -258,10 +293,18 @@ class TransferDispatcher:
                 storage=storage,
                 src_path=src_path,
                 file_size=file_size,
+                file_modify_time=file_modify_time,
+                fileid=fileid,
             )
             if skip_by_history is None:
                 # 查询失败是暂时故障，登记待重试（由健康检查周期驱动），不能永久跳过
-                self._register_pending(storage=storage, event_path=origin_path, file_size=file_size)
+                self._register_pending(
+                    storage=storage,
+                    event_path=origin_path,
+                    file_size=file_size,
+                    file_modify_time=file_modify_time,
+                    fileid=fileid,
+                )
                 return False
             if skip_by_history:
                 self._discard_pending(storage=storage, event_path=origin_path)
@@ -281,7 +324,9 @@ class TransferDispatcher:
                         name=event_path.name,
                         basename=event_path.stem,
                         extension=event_path.suffix[1:],
-                        size=file_size
+                        size=file_size,
+                        modify_time=file_modify_time,
+                        fileid=fileid,
                     )
                 )
                 # 整理已执行完毕，此前因暂时性故障登记的重试条目到此作废
@@ -297,7 +342,10 @@ class TransferDispatcher:
                 # 重试时重新解析蓝光目录并重走完整流程。异常未清空登记，重试次数会持续
                 # 累计，达到上限后由 _register_pending 放弃，不会无限重试
                 self._register_pending(storage=storage, event_path=origin_path,
-                                       file_size=file_size, reason="整理执行异常")
+                                       file_size=file_size,
+                                       file_modify_time=file_modify_time,
+                                       fileid=fileid,
+                                       reason="整理执行异常")
                 return False
 
     def _invalidate_cache(self, key: str):

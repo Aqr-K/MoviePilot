@@ -110,6 +110,38 @@ def test_failed_history_is_skipped_when_retry_budget_exhausted(monkeypatch):
         _reset_failed_retries(src_path, "local")
 
 
+def test_failed_history_new_version_bypasses_exhausted_retry_budget(monkeypatch):
+    """失败预算耗尽后新版本仍应进入整理链，而不是被错误标记为已处理。"""
+    monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 1)
+    src_path = "/downloads/failed-new-version.mkv"
+    _reset_failed_retries(src_path, "local")
+    try:
+        record_transfer_failure(src_path, "local", file_size=100)
+        dispatcher = _build_dispatcher()
+        _patch_history(
+            monkeypatch,
+            record=_history(
+                status=False,
+                size=100,
+                src=src_path,
+                src_storage="local",
+            ),
+        )
+        chain = _patch_chain(monkeypatch)
+
+        assert (
+            dispatcher.handle_file(
+                storage="local",
+                event_path=Path(src_path),
+                file_size=200,
+            )
+            is True
+        )
+        chain.do_transfer.assert_called_once()
+    finally:
+        _reset_failed_retries(src_path, "local")
+
+
 def test_should_skip_by_history_returns_true_when_retry_budget_exhausted(monkeypatch):
     """直接调用 _should_skip_by_history：失败计数达到上限时应判定为跳过。"""
     monkeypatch.setattr(settings, "TRANSFER_MAX_FAILED_RETRIES", 1)
