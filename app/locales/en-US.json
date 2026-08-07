@@ -380,7 +380,8 @@
     "订阅资源匹配完成": "Subscription resource matching completed",
     "订阅元数据更新完成": "Subscription metadata update completed",
     "未配置 Follow 订阅用户，跳过刷新": "No Follow subscription users configured, skipping refresh",
-    "订阅日历预缓存完成": "Subscription calendar precache completed"
+    "订阅日历预缓存完成": "Subscription calendar precache completed",
+    "尝试过于频繁，请稍后再试": "Too many attempts, please try again later"
   },
   "message_patterns": [
     {
