@@ -124,7 +124,6 @@ def test_bedrock_endpoint_url_passthrough():
 
 def test_create_bedrock_client_uses_custom_endpoint():
     """创建 Bedrock 客户端时应把 PrivateLink 地址传给 boto3"""
-    pytest.importorskip("boto3", reason="requirements.in 新增可选依赖 boto3 尚未安装于共享环境")
     manager = LLMProviderManager()
     endpoint_url = (
         "https://vpce-0abc123-xyz.bedrock-runtime.us-west-2.vpce.amazonaws.com"

@@ -261,7 +261,6 @@ def test_rust_metainfo_parser_handles_subtitle_episode_range_fin():
     """
     Rust MetaInfo 入口应识别副标题中的数字范围完结标记。
     """
-    _require_rust_package_version("0.2.2")
     result = rust_accel.parse_metainfo(
         "JoJos Bizarre Adventure S01 2012 1080i BluRay x264 FLAC 2.0-AnimeF@ADE",
         subtitle="JOJO的奇妙冒险 第一季 / JoJo's Bizarre Adventure [01-26Fin] [简繁字幕]",

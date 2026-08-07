@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,25 +10,6 @@ from app.core.meta.metaanime import MetaAnime
 from app.helper.torrent import TorrentHelper
 from app.schemas.types import MediaType
 from tests.cases.meta import meta_cases
-
-
-def _require_rust_package_version(min_version: str) -> None:
-    """
-    跳过依赖尚未发布到 PyPI 的 Rust 扩展新行为用例。
-
-    :param min_version: 该行为所需的 moviepilot-rust 最低版本
-    :return: 无
-    """
-    try:
-        installed_version = version("moviepilot-rust")
-    except PackageNotFoundError:
-        pytest.skip("moviepilot-rust 包版本不可用")
-    installed_parts = tuple(
-        int(part) for part in installed_version.split("+", 1)[0].split(".")[:3]
-    )
-    required_parts = tuple(int(part) for part in min_version.split(".")[:3])
-    if installed_parts < required_parts:
-        pytest.skip(f"需要 moviepilot-rust>={min_version}，当前为 {installed_version}")
 
 
 def test_metainfo():
@@ -209,7 +189,6 @@ def test_python_subtitle_episode_range_fin_with_chinese_season():
 
 def test_subtitle_episode_range_fin_with_default_parser():
     """默认解析路径应识别副标题中 [01-26Fin] 格式的集数范围（#6103）。"""
-    _require_rust_package_version("0.2.2")
     meta = MetaInfo(
         title="JoJos Bizarre Adventure S01 2012 1080i BluRay x264 FLAC 2.0-AnimeF@ADE",
         subtitle="JOJO的奇妙冒险 第一季 / JoJo's Bizarre Adventure [01-26Fin] [简繁字幕]",
