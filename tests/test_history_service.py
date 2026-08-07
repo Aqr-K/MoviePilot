@@ -24,6 +24,7 @@ def _h(**kw):
         src_fileitem=None,
         src_storage="local",
         dest="/dest",
+        dest_fileitem=None,
         dest_storage="local",
         mode="copy",
         tmdbid=1,
@@ -56,6 +57,31 @@ def test_build_manual_redo_template_context_src_fileitem_dict_preferred():
     h = _h(src_fileitem={"path": "/from/item"}, src="/fallback")
     ctx = svc.build_manual_redo_template_context(h)
     assert ctx["source_path"] == "/from/item"
+
+
+def test_build_manual_redo_template_context_successful_move_uses_dest_as_source():
+    h = _h(
+        status=True,
+        mode="move",
+        src_fileitem={"path": "/from/item"},
+        dest_fileitem={"path": "/library/item.mkv"},
+        dest_storage="alist",
+    )
+    ctx = svc.build_manual_redo_template_context(h)
+    assert ctx["source_path"] == "/library/item.mkv"
+    assert ctx["source_storage"] == "alist"
+
+
+def test_build_manual_redo_template_context_failed_move_keeps_source():
+    h = _h(
+        status=False,
+        mode="move",
+        src_fileitem={"path": "/from/item"},
+        dest_fileitem={"path": "/library/item.mkv"},
+    )
+    ctx = svc.build_manual_redo_template_context(h)
+    assert ctx["source_path"] == "/from/item"
+    assert ctx["source_storage"] == "local"
 
 
 def test_build_manual_redo_template_context_failed_and_defaults():
