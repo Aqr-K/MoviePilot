@@ -72,6 +72,9 @@ def test_media_server_chain_preserves_none_from_provider(method_name, run_method
     """媒体服务器处理链应保留提供方失败状态，交由接口层转换为明确错误。"""
     chain = MediaServerChain.__new__(MediaServerChain)
     chain.run_module = lambda method, **kwargs: None
+    chain.mediaservermanager = SimpleNamespace(
+        **{run_method: lambda **kwargs: None}
+    )
 
     result = getattr(chain, method_name)(server="home")
 

@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Set, Tuple, Optional, Union, List, Dict
 
-from qbittorrentapi import TorrentFilesList
 from torrentool.torrent import Torrent
 
 from app import schemas
@@ -43,7 +42,13 @@ _TORRENT_FILES_RETRY_INTERVAL = 1
 
 class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
     """
-    qBittorrent 下载器模块，负责下载任务添加、文件选择和任务管理。
+    Qbittorrent 下载器模块（app.modules.IDownloader 后端）。
+
+    作为 Downloader 域后端，由门面 app.managers.downloader.DownloaderManager 统一分发调用。
+
+    .. deprecated::
+        经 ChainBase.run_module("download"/"list_torrents"/…) 的旧路径仍可用但计划在后续版本废弃；
+        新代码请改用 DownloaderManager 门面的类型化方法。
     """
 
     def init_module(self) -> None:
@@ -598,14 +603,26 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             return None
         return server.stop_torrents(ids=hashs)
 
-    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> Optional[TorrentFilesList]:
+    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> "Optional[List[schemas.DownloaderFile]]":
         """
-        获取种子文件列表
+        获取种子文件列表（归一化为 DownloaderFile，不再泄漏 qbittorrentapi 的 SDK 类型）
         """
         server: Qbittorrent = self.get_instance(downloader)
         if not server:
             return None
-        return server.get_files(tid=tid)
+        files = server.get_files(tid=tid)
+        if files is None:
+            return None
+        return [
+            schemas.DownloaderFile(
+                name=getattr(f, "name", None),
+                size=getattr(f, "size", None),
+                progress=getattr(f, "progress", None),
+                priority=getattr(f, "priority", None),
+                index=getattr(f, "index", idx),
+            )
+            for idx, f in enumerate(files)
+        ]
 
     def downloader_info(self, downloader: Optional[str] = None) -> Optional[List[schemas.DownloaderInfo]]:
         """
