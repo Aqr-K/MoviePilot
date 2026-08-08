@@ -1,7 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.chain.transfer import JobManager, TransferChain
+from app.chain.transfer import (
+    JobManager,
+    ScrapeBatchCoordinator,
+    TransferChain,
+    TransferResultProcessor,
+)
 from app.core.config import settings
 from app.schemas import EpisodeFormat, FileItem
 from app.schemas.types import MediaType
@@ -46,7 +51,8 @@ def make_transfer_chain() -> TransferChain:
         chain._media_exts + chain._audio_exts + chain._subtitle_exts
     )
     chain._success_target_files = {}
-    chain._scrape_batches = {}
+    chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
+    chain._result_processor = TransferResultProcessor(chain=chain)
     return chain
 
 

@@ -1,0 +1,416 @@
+
+==================== __default_callback ====================
+--- 
++++ 
+@@ -45,89 +45,112 @@
+ 
+         transferhis = TransferHistoryOper()
+         target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
++        job_id = self.jobview.get_job_id(task)
+ 
+         # 转移失败
+         if not transferinfo.success:
+-            logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
+-
+-            # 新增转移失败历史记录
+-            history = transferhis.add_fail(
+-                fileitem=task.fileitem,
+-                mode=transferinfo.transfer_type if transferinfo else "",
+-                downloader=task.downloader,
+-                download_hash=task.download_hash,
+-                meta=task.meta,
+-                mediainfo=task.mediainfo,
+-                transferinfo=transferinfo,
+-            )
+-
+-            # 整理失败事件
+-            if self._is_primary_media_file(task.fileitem, task.mediainfo):
+-                # 主要媒体文件整理失败事件
+-                self.eventmanager.send_event(
+-                    EventType.TransferFailed,
+-                    {
+-                        "fileitem": task.fileitem,
+-                        "meta": task.meta,
+-                        "mediainfo": task.mediainfo,
+-                        "transferinfo": transferinfo,
+-                        "downloader": task.downloader,
+-                        "download_hash": task.download_hash,
+-                        "transfer_history_id": history.id if history else None,
+-                    },
+-                )
+-            elif self.__is_subtitle_file(task.fileitem):
+-                # 字幕整理失败事件
+-                self.eventmanager.send_event(
+-                    EventType.SubtitleTransferFailed,
+-                    {
+-                        "fileitem": task.fileitem,
+-                        "meta": task.meta,
+-                        "mediainfo": task.mediainfo,
+-                        "transferinfo": transferinfo,
+-                        "downloader": task.downloader,
+-                        "download_hash": task.download_hash,
+-                        "transfer_history_id": history.id if history else None,
+-                    },
+-                )
+-            elif self.__is_audio_file(task.fileitem):
+-                # 音频文件整理失败事件
+-                self.eventmanager.send_event(
+-                    EventType.AudioTransferFailed,
+-                    {
+-                        "fileitem": task.fileitem,
+-                        "meta": task.meta,
+-                        "mediainfo": task.mediainfo,
+-                        "transferinfo": transferinfo,
+-                        "downloader": task.downloader,
+-                        "download_hash": task.download_hash,
+-                        "transfer_history_id": history.id if history else None,
+-                    },
+-                )
+-
+-            # 发送失败消息
+-            self.post_message(
+-                Notification(
+-                    mtype=NotificationType.Manual,
+-                    title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
+-                    text="\n".join(
+-                        [
+-                            f"原因：{transferinfo.message or '未知'}",
+-                            (
+-                                f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
+-                                if history
+-                                else ""
+-                            ),
+-                        ]
+-                    ).strip(),
+-                    image=task.mediainfo.get_message_image(),
+-                    username=task.username,
+-                    link=settings.MP_DOMAIN("#/history"),
+-                    buttons=self.build_failed_transfer_buttons(
+-                        history.id if history else None
+-                    ),
+-                )
+-            )
++            # 查重闸放行同路径新版本后由 overwrite_mode 判定不覆盖，是一次正常裁决而非故障：
++            # 媒体库里原有版本仍然在位，写失败记录会用 add_force 顶掉原成功记录，此后该路径
++            # 永远处于失败态，每个新事件都会重试并重推失败通知。此时保留原记录、不写历史、
++            # 不发事件与通知、不触发重试，仅把任务置为未入库
++            overwrite_declined = self.__is_overwrite_declined(
++                task, transferinfo, transferhis
++            )
++            history = None
++            if overwrite_declined:
++                logger.info(
++                    f"{task.fileitem.name} 未入库并保留原整理记录：{transferinfo.message}"
++                )
++            else:
++                logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
++
++                # 累计失败次数，达到上限后查重闸不再自动放行重试
++                record_transfer_failure(
++                    task.fileitem.path if task.fileitem else None,
++                    task.fileitem.storage if task.fileitem else None,
++                    file_size=task.fileitem.size if task.fileitem else None,
++                    file_modify_time=task.fileitem.modify_time if task.fileitem else None,
++                    fileid=task.fileitem.fileid if task.fileitem else None,
++                )
++
++                # 新增转移失败历史记录
++                history = transferhis.add_fail(
++                    fileitem=task.fileitem,
++                    mode=transferinfo.transfer_type if transferinfo else "",
++                    downloader=task.downloader,
++                    download_hash=task.download_hash,
++                    meta=task.meta,
++                    mediainfo=task.mediainfo,
++                    transferinfo=transferinfo,
++                )
++
++                # 整理失败事件
++                if self.__is_media_file(task.fileitem):
++                    # 主要媒体文件整理失败事件
++                    self.eventmanager.send_event(
++                        EventType.TransferFailed,
++                        {
++                            "fileitem": task.fileitem,
++                            "meta": task.meta,
++                            "mediainfo": task.mediainfo,
++                            "transferinfo": transferinfo,
++                            "downloader": task.downloader,
++                            "download_hash": task.download_hash,
++                            "transfer_history_id": history.id if history else None,
++                        },
++                    )
++                elif self.__is_subtitle_file(task.fileitem):
++                    # 字幕整理失败事件
++                    self.eventmanager.send_event(
++                        EventType.SubtitleTransferFailed,
++                        {
++                            "fileitem": task.fileitem,
++                            "meta": task.meta,
++                            "mediainfo": task.mediainfo,
++                            "transferinfo": transferinfo,
++                            "downloader": task.downloader,
++                            "download_hash": task.download_hash,
++                            "transfer_history_id": history.id if history else None,
++                        },
++                    )
++                elif self.__is_audio_file(task.fileitem):
++                    # 音频文件整理失败事件
++                    self.eventmanager.send_event(
++                        EventType.AudioTransferFailed,
++                        {
++                            "fileitem": task.fileitem,
++                            "meta": task.meta,
++                            "mediainfo": task.mediainfo,
++                            "transferinfo": transferinfo,
++                            "downloader": task.downloader,
++                            "download_hash": task.download_hash,
++                            "transfer_history_id": history.id if history else None,
++                        },
++                    )
++
++                # 发送失败消息
++                self.post_message(
++                    Notification(
++                        mtype=NotificationType.Manual,
++                        title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
++                        text="\n".join(
++                            [
++                                f"原因：{transferinfo.message or '未知'}",
++                                (
++                                    f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
++                                    if history
++                                    else ""
++                                ),
++                            ]
++                        ).strip(),
++                        image=task.mediainfo.get_message_image(),
++                        username=task.username,
++                        link=settings.MP_DOMAIN("#/history"),
++                        buttons=self.build_failed_transfer_buttons(
++                            history.id if history else None
++                        ),
++                    )
++                )
+ 
+             # 设置任务失败
+             self.jobview.fail_task(task)
+@@ -163,6 +186,12 @@
+         else:
+             # 转移成功
+             logger.info(f"{task.fileitem.name} 入库成功：{target_dir_path or ''}")
++
++            # 整理成功即认为此前的连续失败已恢复，重置计数让后续故障重新获得完整重试额度
++            clear_transfer_failures(
++                task.fileitem.path if task.fileitem else None,
++                task.fileitem.storage if task.fileitem else None,
++            )
+ 
+             # 新增task转移成功历史记录
+             history = transferhis.add_success(
+@@ -221,12 +250,12 @@
+ 
+             # task登记转移成功文件清单
+             target_files = transferinfo.file_list_new
+-            if target_dir_path:
++            if target_files:
+                 with job_lock:
+-                    if self._success_target_files.get(target_dir_path):
+-                        self._success_target_files[target_dir_path].extend(target_files)
++                    if self._success_target_files.get(job_id):
++                        self._success_target_files[job_id].extend(target_files)
+                     else:
+-                        self._success_target_files[target_dir_path] = target_files
++                        self._success_target_files[job_id] = list(target_files)
+ 
+             # 设置任务成功
+             self.jobview.finish_task(task)
+@@ -238,12 +267,11 @@
+         if self.jobview.is_finished(task):
+             # 更新文件清单
+             with job_lock:
+-                if target_dir_path:
+-                    transferinfo.file_list_new = self._success_target_files.pop(
+-                        target_dir_path, []
+-                    )
+-                else:
+-                    transferinfo.file_list_new = transferinfo.file_list_new or []
++                transferinfo.file_list_new = list(dict.fromkeys(
++                    self._success_target_files.pop(job_id, [])
++                    or transferinfo.file_list_new
++                    or []
++                ))
+             __notify()
+             if not task.transfer_batch_id:
+                 self.__send_metadata_scrape_event(task, transferinfo)
+
+==================== __start_transfer ====================
+--- 
++++ 
+@@ -19,8 +19,11 @@
+                 fileitem = task.fileitem
+ 
+                 with task_lock:
+-                    # 获取当前最新总数
+-                    current_total = self.jobview.total()
++                    # 批次总数 = 本批已处理数 + 未终态数。作业视图会残留上一批
++                    # 已完成的任务（作业要等关联任务全部终态才移除），用全量
++                    # total() 会把历史任务计入本批（如显示 8 个实际只处理 2 个），
++                    # 且进度分母虚高导致百分比走不满
++                    current_total = self._processed_num + self.jobview.pending_total()
+                     # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
+                     self._total_num = max(self._total_num, current_total)
+ 
+
+==================== __record_scrape_target ====================
+--- 
++++ 
+@@ -8,7 +8,6 @@
+                 or not transferinfo
+                 or not transferinfo.need_scrape
+                 or not self._is_primary_media_file(task.fileitem, task.mediainfo)
+-                or task.mediainfo.type == MediaType.MUSIC
+         ):
+             return
+ 
+@@ -34,6 +33,7 @@
+                     "meta": task.meta,
+                     "mediainfo": task.mediainfo,
+                     "files": [],
++                    "file_contexts": {},
+                     "overwrite": False,
+                 },
+             )
+@@ -44,4 +44,10 @@
+             for target_file in target_files:
+                 if target_file and target_file not in target["files"]:
+                     target["files"].append(target_file)
++                if target_file and isinstance(task.mediainfo, MusicInfo):
++                    target["file_contexts"][target_file] = {
++                        "path": target_file,
++                        "meta": task.meta,
++                        "mediainfo": task.mediainfo,
++                    }
+ 
+
+==================== __flush_scrape_batch_if_ready ====================
+--- 
++++ 
+@@ -21,14 +21,22 @@
+             if not fileitem:
+                 continue
+             file_list = list(dict.fromkeys(target.get("files") or []))
++            file_contexts = target.get("file_contexts") or {}
++            payload = {
++                "meta": target.get("meta"),
++                "mediainfo": target.get("mediainfo"),
++                "fileitem": fileitem,
++                "file_list": file_list,
++                "overwrite": target.get("overwrite", False),
++            }
++            if file_contexts:
++                payload["file_contexts"] = [
++                    file_contexts[path]
++                    for path in file_list
++                    if path in file_contexts
++                ]
+             self.eventmanager.send_event(
+                 EventType.MetadataScrape,
+-                {
+-                    "meta": target.get("meta"),
+-                    "mediainfo": target.get("mediainfo"),
+-                    "fileitem": fileitem,
+-                    "file_list": file_list,
+-                    "overwrite": target.get("overwrite", False),
+-                },
++                payload,
+             )
+ 
+
+==================== __send_metadata_scrape_event ====================
+--- 
++++ 
+@@ -9,7 +9,6 @@
+                 or not transferinfo
+                 or not transferinfo.need_scrape
+                 or not self._is_primary_media_file(task.fileitem, task.mediainfo)
+-                or task.mediainfo.type == MediaType.MUSIC
+         ):
+             return
+ 
+@@ -19,12 +18,11 @@
+ 
+         self.eventmanager.send_event(
+             EventType.MetadataScrape,
+-            {
+-                "meta": task.meta,
+-                "mediainfo": task.mediainfo,
+-                "fileitem": target_diritem,
+-                "file_list": transferinfo.file_list_new,
+-                "overwrite": False,
+-            },
++            self.__build_metadata_scrape_payload(
++                task=task,
++                fileitem=target_diritem,
++                file_list=transferinfo.file_list_new,
++                overwrite=False,
++            ),
+         )
+ 
+
+==================== __is_overwrite_declined (上游新增全文) ====================
+    def __is_overwrite_declined(task: TransferTask, transferinfo: TransferInfo,
+                                transferhis: TransferHistoryOper) -> bool:
+        """
+        判断本次未入库是否为「同路径已有成功记录 + 覆盖模式裁定不覆盖」。
+
+        只有同路径此前已成功整理过才需要保护：这类文件是查重闸放行的同路径新版本，
+        媒体库中的原有版本仍然在位，不应因一次不覆盖裁决把成功记录改写成失败记录。
+        没有成功记录时（如目标同名文件来自其他源路径）保持原有失败语义，
+        用户仍能在历史与通知中看到裁决结果。
+        :param task: 整理任务
+        :param transferinfo: 整理结果
+        :param transferhis: 历史操作对象
+        :return: True 表示应保留原成功记录
+        """
+        if not transferinfo.overwrite_skipped or not task.fileitem:
+            return False
+        try:
+            history = resolve_history(
+                task.fileitem.path,
+                storage=task.fileitem.storage,
+                transfer_history_oper=transferhis,
+            )
+        except Exception as err:
+            logger.error(f"查询整理历史失败: {task.fileitem.path} - {err}")
+            return False
+        return bool(history and history.status)
+
+
+==================== __build_metadata_scrape_payload (上游新增全文) ====================
+    def __build_metadata_scrape_payload(
+            task: TransferTask,
+            fileitem: FileItem,
+            file_list: Optional[list[str]],
+            overwrite: bool,
+    ) -> dict[str, Any]:
+        """构造刮削事件载荷，并为音乐批次保留逐文件身份上下文。"""
+        paths = list(dict.fromkeys(file_list or []))
+        payload: dict[str, Any] = {
+            "meta": task.meta,
+            "mediainfo": task.mediainfo,
+            "fileitem": fileitem,
+            "file_list": paths,
+            "overwrite": overwrite,
+        }
+        if isinstance(task.mediainfo, MusicInfo):
+            payload["file_contexts"] = [
+                {
+                    "path": path,
+                    "meta": task.meta,
+                    "mediainfo": task.mediainfo,
+                }
+                for path in paths
+            ]
+        return payload
+

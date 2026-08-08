@@ -10,7 +10,8 @@ from time import monotonic
 from typing import List, Optional, Tuple, Union, Dict, Callable, Any
 
 from app import schemas
-from app.agent import ReplyMode, prompt_manager, agent_manager
+from app.core.agent_gateway import get_agent_manager, get_prompt_manager
+from app.schemas.types import ReplyMode
 from app.chain import ChainBase
 from app.chain.media import MediaChain
 from app.chain.storage import StorageChain
@@ -907,7 +908,7 @@ class FailedRetryScheduler:
     def _build_retry_transfer_prompt(self, history_ids: list[int]) -> str:
         """根据失败记录数量构建统一的重试整理后台任务提示词。"""
         task_type, template_context = self._build_retry_transfer_template_context(history_ids)
-        return prompt_manager.render_system_task_message(
+        return get_prompt_manager().render_system_task_message(
             task_type,
             template_context=template_context,
         )
@@ -955,7 +956,7 @@ class FailedRetryScheduler:
         )
 
         try:
-            await agent_manager.run_background_prompt(
+            await get_agent_manager().run_background_prompt(
                 message=self._build_retry_transfer_prompt(history_ids),
                 session_prefix="__agent_retry_transfer_batch",
                 reply_mode=ReplyMode.DISPATCH,
@@ -967,6 +968,772 @@ class FailedRetryScheduler:
             logger.error(
                 f"智能体重试整理失败 (IDs=[{ids_str}], group={group_key}): {err}"
             )
+
+
+class TransferService:
+    """
+    文件整理队列服务（队列 / 守护线程 / 计数器机器）。
+
+    从 TransferChain 抽出，组合于其单例上（``chain._service``）。仅持有与队列调度相关的
+    机器态；契约固定的状态（``jobview`` / ``_success_target_files`` / 刮削批次 /
+    ``__handle_transfer`` / 模块级 ``task_lock``）仍在 TransferChain（整理完成回调已抽到
+    ``TransferResultProcessor.handle``，由入队方传入），本服务通过 ``self._chain`` read-through
+    回调单例——p115strmhelper 的 monkey-patch 与私有态深入访问因此不受影响（worker 仍调用
+    单例的 ``_TransferChain__handle_transfer``）。
+    """
+
+    def __init__(self, chain: "TransferChain"):
+        # 所属整理链单例（契约态 read-through 回调点）
+        self._chain = chain
+        # 待整理任务队列
+        self._queue = queue.Queue()
+        # 文件整理线程
+        self._transfer_threads = []
+        # 队列间隔时间（秒）
+        self._transfer_interval = 15
+        # 整理进度
+        self._progress = ProgressHelper(ProgressKey.FileTransfer)
+        # 队列相关状态
+        self._threads = []
+        self._queue_active = False
+        self._active_tasks = 0
+        self._processed_num = 0
+        self._fail_num = 0
+        self._total_num = 0
+
+    def start(self):
+        """
+        启动文件整理线程
+        """
+        self._queue_active = True
+        for i in range(settings.TRANSFER_THREADS):
+            logger.info(f"启动文件整理线程 {i + 1} ...")
+            thread = threading.Thread(
+                target=self.run_worker, name=f"transfer-{i}", daemon=True
+            )
+            self._threads.append(thread)
+            thread.start()
+
+    def stop(self):
+        """
+        停止文件整理进程
+        """
+        self._queue_active = False
+        for thread in self._threads:
+            thread.join()
+        self._threads = []
+        logger.info("文件整理线程已停止")
+
+    def on_config_changed(self):
+        self.stop()
+        self.start()
+
+    def enqueue(self, task: TransferTask, callback):
+        """
+        把任务放入待整理队列（生产者；去重 / 刮削批次登记由 TransferChain.put_to_queue 负责）
+        """
+        self._queue.put(TransferQueue(task=task, callback=callback))
+
+    def run_worker(self):
+        """
+        处理队列（守护线程主循环）
+        """
+        while not global_vars.is_system_stopped and self._queue_active:
+            try:
+                item: TransferQueue = self._queue.get(
+                    block=True, timeout=self._transfer_interval
+                )
+                if not item:
+                    continue
+
+                task = item.task
+                if not task:
+                    self._queue.task_done()
+                    continue
+
+                # 文件信息
+                fileitem = task.fileitem
+
+                with task_lock:
+                    # 批次总数 = 本批已处理数 + 未终态数。作业视图会残留上一批
+                    # 已完成的任务（作业要等关联任务全部终态才移除），用全量
+                    # total() 会把历史任务计入本批（如显示 8 个实际只处理 2 个），
+                    # 且进度分母虚高导致百分比走不满
+                    current_total = self._processed_num + self._chain.jobview.pending_total()
+                    # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
+                    self._total_num = max(self._total_num, current_total)
+
+                    # 如果当前没有在运行的任务且处理数为0，说明是一个新序列的开始
+                    if self._active_tasks == 0 and self._processed_num == 0:
+                        logger.info("开始整理队列处理...")
+                        # 启动进度
+                        self._progress.start()
+                        # 重置计数
+                        self._processed_num = 0
+                        self._fail_num = 0
+                        __process_msg = (
+                            f"开始整理队列处理，当前共 {self._total_num} 个文件 ..."
+                        )
+                        logger.info(__process_msg)
+                        self._progress.update(value=0, text=__process_msg)
+                    # 增加运行中的任务数
+                    self._active_tasks += 1
+
+                try:
+                    self._chain._TransferChain__start_job_execution(task)
+                    # 更新进度
+                    __process_msg = f"正在整理 {fileitem.name} ..."
+                    logger.info(__process_msg)
+                    with task_lock:
+                        self._progress.update(
+                            value=(self._processed_num / self._total_num * 100)
+                            if self._total_num
+                            else 0,
+                            text=__process_msg,
+                        )
+                    # 整理
+                    state, err_msg = self._chain._TransferChain__handle_transfer(
+                        task=task, callback=item.callback
+                    )
+
+                    with task_lock:
+                        if not state:
+                            # 任务失败
+                            self._fail_num += 1
+                        # 更新进度
+                        self._processed_num += 1
+                        __process_msg = f"{fileitem.name} 整理完成"
+                        logger.info(__process_msg)
+                        self._progress.update(
+                            value=(self._processed_num / self._total_num * 100)
+                            if self._total_num
+                            else 100,
+                            text=__process_msg,
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"{fileitem.name} 整理任务处理出现错误：{e} - {traceback.format_exc()}"
+                    )
+                    self._chain._TransferChain__fail_transfer_task(task)
+                    with task_lock:
+                        self._processed_num += 1
+                        self._fail_num += 1
+                finally:
+                    self._chain._TransferChain__finish_job_execution(task)
+                    self._queue.task_done()
+                    with task_lock:
+                        # 减少运行中的任务数
+                        self._active_tasks -= 1
+                        # 检查是否所有任务都已完成且队列为空
+                        if self._active_tasks == 0 and self._queue.empty():
+                            # 结束进度
+                            __end_msg = f"整理队列处理完成，共整理 {self._processed_num} 个文件，失败 {self._fail_num} 个"
+                            logger.info(__end_msg)
+                            self._progress.update(value=100, text=__end_msg)
+                            self._progress.end()
+                            # 重置计数，_total_num 一并归零，否则会作为历史最大值一直
+                            # 累积，令后续批次的「当前共 N 个文件」与进度百分比失真
+                            self._total_num = 0
+                            self._processed_num = 0
+                            self._fail_num = 0
+
+            except queue.Empty:
+                # 即使队列空了，如果还有任务在运行，也不应该结束进度
+                # 这部分逻辑已经在 finally 的 active_tasks == 0 中处理了
+                self._chain._TransferChain__expire_stale_transfer_tasks()
+                continue
+            except Exception as e:
+                logger.error(f"整理队列处理出现错误：{e} - {traceback.format_exc()}")
+
+
+class ScrapeBatchCoordinator:
+    """批次级刮削事件协调器（从 TransferChain 抽出，组合于其单例上 ``chain._scrape_coordinator``）。
+
+    职责：把同一整理批次（``transfer_batch_id``）内多文件的刮削目标聚合，待批次关闭且批内任务
+    全部结束后统一发送一次 ``MetadataScrape`` 事件——避免逐文件重复触发目录刮削。状态 ``_batches``
+    原 ``TransferChain._scrape_batches``，**非 p115 触达点**，可安全移出；仍用模块级 ``job_lock``
+    守护，并经 ``self._chain`` read-through 读取 ``eventmanager`` 与 ``__is_media_file``（留在单例）。
+    """
+
+    def __init__(self, chain: "TransferChain"):
+        self._chain = chain
+        # batch_id -> {"pending": set[path], "targets": {(storage,path): {...}}, "closed": bool}
+        self._batches: Dict[str, Dict[str, Any]] = {}
+
+    def register(self, task: TransferTask):
+        """
+        登记批次任务。刮削事件只在批次关闭且任务全部完成后统一发送。
+        """
+        if not task or not task.transfer_batch_id:
+            return
+        with job_lock:
+            batch = self._batches.setdefault(
+                task.transfer_batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            batch["pending"].add(task.fileitem.path)
+
+    def close(self, batch_id: Optional[str]):
+        """
+        标记批次不再接收新任务，并尝试发送已聚合的刮削事件。
+        """
+        if not batch_id:
+            return
+        with job_lock:
+            batch = self._batches.setdefault(
+                batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            batch["closed"] = True
+        self._flush_if_ready(batch_id)
+
+    def record_target(self, task: TransferTask, transferinfo: TransferInfo):
+        """
+        记录批次内需要刮削的目标文件，按目标媒体根目录聚合。
+        """
+        if (
+                not task
+                or not task.transfer_batch_id
+                or not transferinfo
+                or not transferinfo.need_scrape
+                or not self._chain._is_primary_media_file(task.fileitem, task.mediainfo)
+        ):
+            return
+
+        target_diritem = transferinfo.target_diritem
+        if not target_diritem:
+            return
+
+        target_files = transferinfo.file_list_new or []
+        target_key = (target_diritem.storage, target_diritem.path)
+        with job_lock:
+            batch = self._batches.setdefault(
+                task.transfer_batch_id,
+                {
+                    "pending": set(),
+                    "targets": {},
+                    "closed": False,
+                },
+            )
+            target = batch["targets"].setdefault(
+                target_key,
+                {
+                    "fileitem": target_diritem,
+                    "meta": task.meta,
+                    "mediainfo": task.mediainfo,
+                    "files": [],
+                    "file_contexts": {},
+                    "overwrite": False,
+                },
+            )
+            if not target.get("meta"):
+                target["meta"] = task.meta
+            if not target.get("mediainfo"):
+                target["mediainfo"] = task.mediainfo
+            for target_file in target_files:
+                if target_file and target_file not in target["files"]:
+                    target["files"].append(target_file)
+                # 音乐批次内各曲目身份不同，逐文件留存上下文供刮削端按文件取用
+                if target_file and isinstance(task.mediainfo, MusicInfo):
+                    target["file_contexts"][target_file] = {
+                        "path": target_file,
+                        "meta": task.meta,
+                        "mediainfo": task.mediainfo,
+                    }
+
+    def finish(self, task: TransferTask):
+        """
+        标记批次内单个任务已结束。
+        """
+        if not task or not task.transfer_batch_id:
+            return
+        with job_lock:
+            batch = self._batches.get(task.transfer_batch_id)
+            if not batch:
+                return
+            batch["pending"].discard(task.fileitem.path)
+        self._flush_if_ready(task.transfer_batch_id)
+
+    def _flush_if_ready(self, batch_id: Optional[str]):
+        """
+        批次任务全部结束后发送聚合后的刮削事件。
+        """
+        if not batch_id:
+            return
+
+        with job_lock:
+            batch = self._batches.get(batch_id)
+            if (
+                    not batch
+                    or not batch.get("closed")
+                    or batch.get("pending")
+            ):
+                return
+            targets = list(batch.get("targets", {}).values())
+            self._batches.pop(batch_id, None)
+
+        for target in targets:
+            fileitem = target.get("fileitem")
+            if not fileitem:
+                continue
+            file_list = list(dict.fromkeys(target.get("files") or []))
+            file_contexts = target.get("file_contexts") or {}
+            payload = {
+                "meta": target.get("meta"),
+                "mediainfo": target.get("mediainfo"),
+                "fileitem": fileitem,
+                "file_list": file_list,
+                "overwrite": target.get("overwrite", False),
+            }
+            if file_contexts:
+                payload["file_contexts"] = [
+                    file_contexts[path]
+                    for path in file_list
+                    if path in file_contexts
+                ]
+            self._chain.eventmanager.send_event(
+                EventType.MetadataScrape,
+                payload,
+            )
+
+
+class TransferResultProcessor:
+    """整理结果处理器（从 TransferChain 抽出，组合于其单例上 ``chain._result_processor``）。
+
+    职责：整理任务（每个文件）完成后的统一后处理——成功/失败分支（记历史、派发完成/失败事件、
+    登记成功文件清单或触发 AI 重试）、批次完成通知、种子已整理标记、移动模式清理。
+    ``handle``（原 ``TransferChain.__default_callback``）及其拆分出的 5 个 helper 均在本类中，
+    外加仅其使用的 ``__get_transfer_target_dir_path`` / ``__send_metadata_scrape_event``。
+
+    p115 契约面（``_success_target_files`` 直接 mutate、``jobview`` 深取、mangled ``__is_*_file`` /
+    ``__mark_torrent_completed_if_done``、留 chain 的 ``_can_delete_torrent``）仍在 TransferChain，
+    经 ``self._chain`` read-through 访问（mangled 写单前导下划线 ``self._chain._TransferChain__x``）；
+    刮削目标登记直接走 ``self._chain._scrape_coordinator``。``handle`` 即原 ``__default_callback``，
+    由 ``put_to_queue`` / ``do_transfer`` 作整理回调传入 ``TransferService`` 队列（p115 自带 callback
+    hand-copy、不引用本方法，故重定向安全）。
+    """
+
+    def __init__(self, chain: "TransferChain"):
+        self._chain = chain
+
+    def handle(
+            self, task: TransferTask, transferinfo: TransferInfo, /
+    ) -> Tuple[bool, str]:
+        """
+        整理完成后处理（薄编排：分派成功/失败分支 → 批次完成通知 → 种子标记 → 移动模式清理）。
+        """
+        transferhis = TransferHistoryOper()
+        target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
+        job_id = self._chain.jobview.get_job_id(task)
+
+        # 分派成功/失败分支
+        if not transferinfo.success:
+            ret_status, ret_message = self._handle_transfer_failure(
+                task, transferinfo, transferhis
+            )
+        else:
+            self._handle_transfer_success(
+                task, transferinfo, transferhis, target_dir_path, job_id
+            )
+            ret_status, ret_message = True, ""
+
+        # 全部整理完成且有成功的任务时，发送消息和事件
+        if self._chain.jobview.is_finished(task):
+            # 更新文件清单
+            with job_lock:
+                transferinfo.file_list_new = list(dict.fromkeys(
+                    self._chain._success_target_files.pop(job_id, [])
+                    or transferinfo.file_list_new
+                    or []
+                ))
+            self._notify_transfer_complete(task, transferinfo)
+            if not task.transfer_batch_id:
+                self.__send_metadata_scrape_event(task, transferinfo)
+
+        # 只要该种子的所有任务都已整理完成，则设置种子状态为已整理
+        self._chain._TransferChain__mark_torrent_completed_if_done(
+            task.download_hash, task.downloader
+        )
+
+        # 移动模式，全部成功时删除空目录和种子文件
+        if transferinfo.transfer_type in ["move"]:
+            self._cleanup_torrents_move_mode(task)
+
+        return ret_status, ret_message
+
+    def _dispatch_transfer_result_event(
+            self,
+            task: TransferTask,
+            transferinfo: TransferInfo,
+            history,
+            *,
+            success: bool,
+    ):
+        """按文件类型（媒体/字幕/音频）派发整理完成或失败事件，载荷对外保持兼容。"""
+        if success:
+            media_evt, subtitle_evt, audio_evt = (
+                EventType.TransferComplete,
+                EventType.SubtitleTransferComplete,
+                EventType.AudioTransferComplete,
+            )
+        else:
+            media_evt, subtitle_evt, audio_evt = (
+                EventType.TransferFailed,
+                EventType.SubtitleTransferFailed,
+                EventType.AudioTransferFailed,
+            )
+
+        if self._chain._is_primary_media_file(task.fileitem, task.mediainfo):
+            event_type = media_evt
+        elif self._chain._TransferChain__is_subtitle_file(task.fileitem):
+            event_type = subtitle_evt
+        elif self._chain._TransferChain__is_audio_file(task.fileitem):
+            event_type = audio_evt
+        else:
+            return
+
+        self._chain.eventmanager.send_event(
+            event_type,
+            {
+                "fileitem": task.fileitem,
+                "meta": task.meta,
+                "mediainfo": task.mediainfo,
+                "transferinfo": transferinfo,
+                "downloader": task.downloader,
+                "download_hash": task.download_hash,
+                "transfer_history_id": history.id if history else None,
+            },
+        )
+
+    @staticmethod
+    def __is_overwrite_declined(task: TransferTask, transferinfo: TransferInfo,
+                                transferhis: TransferHistoryOper) -> bool:
+        """
+        判断本次未入库是否为「同路径已有成功记录 + 覆盖模式裁定不覆盖」。
+
+        只有同路径此前已成功整理过才需要保护：这类文件是查重闸放行的同路径新版本，
+        媒体库中的原有版本仍然在位，不应因一次不覆盖裁决把成功记录改写成失败记录。
+        没有成功记录时（如目标同名文件来自其他源路径）保持原有失败语义，
+        用户仍能在历史与通知中看到裁决结果。
+        :param task: 整理任务
+        :param transferinfo: 整理结果
+        :param transferhis: 历史操作对象
+        :return: True 表示应保留原成功记录
+        """
+        if not transferinfo.overwrite_skipped or not task.fileitem:
+            return False
+        try:
+            history = resolve_history(
+                task.fileitem.path,
+                storage=task.fileitem.storage,
+                transfer_history_oper=transferhis,
+            )
+        except Exception as err:
+            logger.error(f"查询整理历史失败: {task.fileitem.path} - {err}")
+            return False
+        return bool(history and history.status)
+
+    def _handle_transfer_failure(
+            self,
+            task: TransferTask,
+            transferinfo: TransferInfo,
+            transferhis: TransferHistoryOper,
+    ) -> Tuple[bool, str]:
+        """整理失败分支：记失败历史、派发失败事件、发失败消息、置任务失败、按需触发 AI 重试。"""
+        # 查重闸放行同路径新版本后由 overwrite_mode 判定不覆盖，是一次正常裁决而非故障：
+        # 媒体库里原有版本仍然在位，写失败记录会用 add_force 顶掉原成功记录，此后该路径
+        # 永远处于失败态，每个新事件都会重试并重推失败通知。此时保留原记录、不写历史、
+        # 不发事件与通知、不触发重试，仅把任务置为未入库
+        overwrite_declined = self.__is_overwrite_declined(
+            task, transferinfo, transferhis
+        )
+        history = None
+        if overwrite_declined:
+            logger.info(
+                f"{task.fileitem.name} 未入库并保留原整理记录：{transferinfo.message}"
+            )
+        else:
+            logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
+
+            # 累计失败次数，达到上限后查重闸不再自动放行重试
+            record_transfer_failure(
+                task.fileitem.path if task.fileitem else None,
+                task.fileitem.storage if task.fileitem else None,
+                file_size=task.fileitem.size if task.fileitem else None,
+                file_modify_time=task.fileitem.modify_time if task.fileitem else None,
+                fileid=task.fileitem.fileid if task.fileitem else None,
+            )
+
+            # 新增转移失败历史记录
+            history = transferhis.add_fail(
+                fileitem=task.fileitem,
+                mode=transferinfo.transfer_type if transferinfo else "",
+                downloader=task.downloader,
+                download_hash=task.download_hash,
+                meta=task.meta,
+                mediainfo=task.mediainfo,
+                transferinfo=transferinfo,
+            )
+
+            # 整理失败事件
+            self._dispatch_transfer_result_event(
+                task, transferinfo, history, success=False
+            )
+
+            # 发送失败消息
+            self._chain.post_message(
+                Notification(
+                    mtype=NotificationType.Manual,
+                    title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
+                    text="\n".join(
+                        [
+                            f"原因：{transferinfo.message or '未知'}",
+                            (
+                                f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
+                                if history
+                                else ""
+                            ),
+                        ]
+                    ).strip(),
+                    image=task.mediainfo.get_message_image(),
+                    username=task.username,
+                    link=settings.MP_DOMAIN("#/history"),
+                    buttons=self._chain.build_failed_transfer_buttons(
+                        history.id if history else None
+                    ),
+                )
+            )
+
+        # 设置任务失败（含不覆盖裁决：仅置未入库，不改写历史）
+        self._chain.jobview.fail_task(task)
+
+        # AI智能体自动重试整理（不覆盖裁决时 history 恒为 None，天然跳过）
+        if (
+                history
+                and settings.AI_AGENT_ENABLE
+                and settings.AI_AGENT_RETRY_TRANSFER
+        ):
+            try:
+                # 使用 download_hash 或源文件父目录作为分组键，
+                # 同一批次（如同一个种子）的失败记录会被合并为一次agent调用
+                group_key = (
+                    task.download_hash or str(task.fileitem.path).rsplit("/", 1)[0]
+                    if task.fileitem
+                    else ""
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self._chain.retry_scheduler.schedule_retry(
+                        history.id, group_key=group_key
+                    ),
+                    global_vars.loop,
+                )
+                logger.info(f"已触发AI智能体重试整理历史记录 #{history.id}")
+            except Exception as e:
+                logger.error(f"触发AI智能体重试整理失败: {e}")
+
+        # 返回失败
+        return False, transferinfo.message
+
+    def _handle_transfer_success(
+            self,
+            task: TransferTask,
+            transferinfo: TransferInfo,
+            transferhis: TransferHistoryOper,
+            target_dir_path: Optional[str],
+            job_id: Tuple,
+    ):
+        """整理成功分支：记成功历史、派发完成事件、登记成功文件清单、置任务成功、登记刮削目标。"""
+        logger.info(f"{task.fileitem.name} 入库成功：{target_dir_path or ''}")
+
+        # 新增task转移成功历史记录
+        history = transferhis.add_success(
+            fileitem=task.fileitem,
+            mode=transferinfo.transfer_type if transferinfo else "",
+            downloader=task.downloader,
+            download_hash=task.download_hash,
+            meta=task.meta,
+            mediainfo=task.mediainfo,
+            transferinfo=transferinfo,
+        )
+
+        # task整理完成事件
+        self._dispatch_transfer_result_event(
+            task, transferinfo, history, success=True
+        )
+
+        # task登记转移成功文件清单
+        target_files = transferinfo.file_list_new
+        if target_files:
+            with job_lock:
+                if self._chain._success_target_files.get(job_id):
+                    self._chain._success_target_files[job_id].extend(target_files)
+                else:
+                    self._chain._success_target_files[job_id] = list(target_files)
+
+        # 设置任务成功
+        self._chain.jobview.finish_task(task)
+
+        # 登记批次级刮削目标（直接走刮削协调器）
+        self._chain._scrape_coordinator.record_target(task, transferinfo)
+
+    def _notify_transfer_complete(
+            self, task: TransferTask, transferinfo: TransferInfo
+    ):
+        """批次全部整理完成时：更新文件数量/大小，并按需发送入库成功通知。"""
+        # 更新文件数量
+        transferinfo.file_count = (
+                self._chain.jobview.count(task.mediainfo, task.meta.begin_season) or 1
+        )
+        # 更新文件大小
+        transferinfo.total_size = (
+                self._chain.jobview.size(task.mediainfo, task.meta.begin_season)
+                or task.fileitem.size
+        )
+        # 发送通知，实时手动整理时不发
+        if transferinfo.need_notify and (task.background or not task.manual):
+            se_str = None
+            if task.mediainfo.type == MediaType.TV:
+                season_episodes = self._chain.jobview.season_episodes(
+                    task.mediainfo, task.meta.begin_season
+                )
+                if season_episodes:
+                    se_str = f"{task.meta.season} {StringUtils.format_ep(season_episodes)}"
+                else:
+                    se_str = f"{task.meta.season}"
+            # 发送入库成功消息
+            self._chain.send_transfer_message(
+                meta=task.meta,
+                mediainfo=task.mediainfo,
+                transferinfo=transferinfo,
+                season_episode=se_str,
+                episodes_info=task.episodes_info,
+                username=task.username,
+            )
+
+    def _cleanup_torrents_move_mode(self, task: TransferTask):
+        """移动模式且全部整理成功时，删除已整理种子文件与剩余空目录。"""
+        if not self._chain.jobview.is_success(task):
+            return
+        # 所有成功的业务
+        tasks = self._chain.jobview.success_tasks(
+            task.mediainfo, task.meta.begin_season
+        )
+        system_config_oper = SystemConfigOper()
+        # 获取整理屏蔽词
+        transfer_exclude_words = system_config_oper.get(
+            SystemConfigKey.TransferExcludeWords
+        )
+        # 挂载盘空目录清理默认开启
+        delete_mounted_local_disk_empty_dirs = system_config_oper.get(
+            SystemConfigKey.MountedLocalDiskDeleteEmptyDirs
+        ) is not False
+        mounted_filesystem_cache: Dict[Path, bool] = {}
+        processed_hashes = set()
+        for t in tasks:
+            if t.download_hash and t.download_hash not in processed_hashes:
+                # 检查该种子的所有任务（跨作业）是否都已成功
+                if self._chain.jobview.is_torrent_success(t.download_hash):
+                    processed_hashes.add(t.download_hash)
+                    if self._chain._can_delete_torrent(
+                            t.download_hash, t.downloader, transfer_exclude_words
+                    ):
+                        # 移除种子及文件
+                        if self._chain.remove_torrents(
+                                t.download_hash, downloader=t.downloader
+                        ):
+                            logger.info(
+                                f"移动模式删除种子成功：{t.download_hash}"
+                            )
+            if (
+                    not t.download_hash
+                    and t.fileitem
+                    and self._chain._TransferChain__should_delete_empty_source_directories(
+                        t,
+                        delete_mounted_local_disk_empty_dirs,
+                        mounted_filesystem_cache,
+                    )
+            ):
+                # 删除剩余空目录
+                StorageChain().delete_media_file(t.fileitem, delete_self=False)
+
+    def __get_transfer_target_dir_path(
+            self, transferinfo: Optional[TransferInfo]
+    ) -> Optional[str]:
+        """
+        获取整理目标目录路径，兼容 OpenList 等成功后目录项短时间不可见的存储。
+        """
+        if not transferinfo:
+            return None
+        if transferinfo.target_diritem and transferinfo.target_diritem.path:
+            return transferinfo.target_diritem.path
+        if transferinfo.target_item and transferinfo.target_item.path:
+            return Path(transferinfo.target_item.path).parent.as_posix()
+        if transferinfo.file_list_new:
+            return Path(transferinfo.file_list_new[0]).parent.as_posix()
+        return None
+
+    def __send_metadata_scrape_event(
+            self, task: TransferTask, transferinfo: TransferInfo
+    ):
+        """
+        发送元数据刮削事件，保持对外事件载荷兼容。
+        """
+        if (
+                not task
+                or not transferinfo
+                or not transferinfo.need_scrape
+                or not self._chain._is_primary_media_file(task.fileitem, task.mediainfo)
+        ):
+            return
+
+        target_diritem = transferinfo.target_diritem
+        if not target_diritem:
+            return
+
+        self._chain.eventmanager.send_event(
+            EventType.MetadataScrape,
+            self.__build_metadata_scrape_payload(
+                task=task,
+                fileitem=target_diritem,
+                file_list=transferinfo.file_list_new,
+                overwrite=False,
+            ),
+        )
+
+    @staticmethod
+    def __build_metadata_scrape_payload(
+            task: TransferTask,
+            fileitem: FileItem,
+            file_list: Optional[list[str]],
+            overwrite: bool,
+    ) -> dict[str, Any]:
+        """构造刮削事件载荷，并为音乐批次保留逐文件身份上下文。"""
+        paths = list(dict.fromkeys(file_list or []))
+        payload: dict[str, Any] = {
+            "meta": task.meta,
+            "mediainfo": task.mediainfo,
+            "fileitem": fileitem,
+            "file_list": paths,
+            "overwrite": overwrite,
+        }
+        if isinstance(task.mediainfo, MusicInfo):
+            payload["file_contexts"] = [
+                {
+                    "path": path,
+                    "meta": task.meta,
+                    "mediainfo": task.mediainfo,
+                }
+                for path in paths
+            ]
+        return payload
 
 
 class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
@@ -1006,12 +1773,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self._audio_exts = settings.RMT_AUDIOEXT
         # 可处理的文件后缀（视频文件、字幕、音频文件）
         self._allowed_exts = self._media_exts + self._audio_exts + self._subtitle_exts
-        # 待整理任务队列
-        self._queue = queue.Queue()
-        # 文件整理线程
-        self._transfer_threads = []
-        # 队列间隔时间（秒）
-        self._transfer_interval = 15
         # 事件管理器
         self.jobview = JobManager()
         # Agent重试管理器
@@ -1020,47 +1781,18 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self._pendingoper = TransferPendingOper()
         # 转移成功的文件清单
         self._success_target_files: Dict[Tuple, List[str]] = {}
-        # 批次级刮削缓冲，避免同一批多文件入库重复触发目录刮削
-        self._scrape_batches: Dict[str, Dict[str, Any]] = {}
-        # 整理进度进度
-        self._progress = ProgressHelper(ProgressKey.FileTransfer)
-        # 队列相关状态
-        self._threads = []
-        self._queue_active = False
-        self._active_tasks = 0
-        self._processed_num = 0
-        self._fail_num = 0
-        self._total_num = 0
-        # 启动整理任务
-        self.__init()
-
-    def __init(self):
-        """
-        启动文件整理线程
-        """
-        self._queue_active = True
-        for i in range(settings.TRANSFER_THREADS):
-            logger.info(f"启动文件整理线程 {i + 1} ...")
-            thread = threading.Thread(
-                target=self.__start_transfer, name=f"transfer-{i}", daemon=True
-            )
-            self._threads.append(thread)
-            thread.start()
-
-    def __stop(self):
-        """
-        停止文件整理进程
-        """
-        self._queue_active = False
-        for thread in self._threads:
-            thread.join()
-        self._threads = []
-        logger.info("文件整理线程已停止")
+        # 批次级刮削协调器（避免同一批多文件入库重复触发目录刮削；状态已移出本单例到协调器）
+        self._scrape_coordinator = ScrapeBatchCoordinator(chain=self)
+        # 整理结果处理器（入库完成后处理：成功/失败分支、事件派发、完成通知、移动清理；契约态 read-through 本单例）
+        self._result_processor = TransferResultProcessor(chain=self)
+        # 文件整理队列服务（队列 / 守护线程 / 计数器机器；契约态仍 read-through 本单例）
+        self._service = TransferService(chain=self)
+        # 启动整理线程
+        self._service.start()
 
     def on_config_changed(self):
         """配置变更时重启文件整理线程。"""
-        self.__stop()
-        self.__init()
+        self._service.on_config_changed()
 
     def __is_subtitle_file(self, fileitem: FileItem) -> bool:
         """
@@ -1361,379 +2093,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             )
         return not mounted_filesystem_cache[source_directory]
 
-    @staticmethod
-    def __is_overwrite_declined(task: TransferTask, transferinfo: TransferInfo,
-                                transferhis: TransferHistoryOper) -> bool:
-        """
-        判断本次未入库是否为「同路径已有成功记录 + 覆盖模式裁定不覆盖」。
-
-        只有同路径此前已成功整理过才需要保护：这类文件是查重闸放行的同路径新版本，
-        媒体库中的原有版本仍然在位，不应因一次不覆盖裁决把成功记录改写成失败记录。
-        没有成功记录时（如目标同名文件来自其他源路径）保持原有失败语义，
-        用户仍能在历史与通知中看到裁决结果。
-        :param task: 整理任务
-        :param transferinfo: 整理结果
-        :param transferhis: 历史操作对象
-        :return: True 表示应保留原成功记录
-        """
-        if not transferinfo.overwrite_skipped or not task.fileitem:
-            return False
-        try:
-            history = resolve_history(
-                task.fileitem.path,
-                storage=task.fileitem.storage,
-                transfer_history_oper=transferhis,
-            )
-        except Exception as err:
-            logger.error(f"查询整理历史失败: {task.fileitem.path} - {err}")
-            return False
-        return bool(history and history.status)
-
-    def __default_callback(
-            self, task: TransferTask, transferinfo: TransferInfo, /
-    ) -> Tuple[bool, str]:
-        """
-        整理完成后处理
-        """
-        # 状态
-        ret_status = True
-        # 错误信息
-        ret_message = ""
-
-        def __notify():
-            """
-            完成时发送消息、移除任务等
-            """
-            # 更新文件数量
-            transferinfo.file_count = (
-                    self.jobview.count(task.mediainfo, task.meta.begin_season) or 1
-            )
-            # 更新文件大小
-            transferinfo.total_size = (
-                    self.jobview.size(task.mediainfo, task.meta.begin_season)
-                    or task.fileitem.size
-            )
-            # 发送通知，实时手动整理时不发
-            if transferinfo.need_notify and (task.background or not task.manual):
-                se_str = None
-                if task.mediainfo.type == MediaType.TV:
-                    season_episodes = self.jobview.season_episodes(
-                        task.mediainfo, task.meta.begin_season
-                    )
-                    if season_episodes:
-                        se_str = f"{task.meta.season} {StringUtils.format_ep(season_episodes)}"
-                    else:
-                        se_str = f"{task.meta.season}"
-                # 发送入库成功消息
-                self.send_transfer_message(
-                    meta=task.meta,
-                    mediainfo=task.mediainfo,
-                    transferinfo=transferinfo,
-                    season_episode=se_str,
-                    episodes_info=task.episodes_info,
-                    username=task.username,
-                )
-
-        transferhis = TransferHistoryOper()
-        target_dir_path = self.__get_transfer_target_dir_path(transferinfo)
-        job_id = self.jobview.get_job_id(task)
-
-        # 转移失败
-        if not transferinfo.success:
-            # 查重闸放行同路径新版本后由 overwrite_mode 判定不覆盖，是一次正常裁决而非故障：
-            # 媒体库里原有版本仍然在位，写失败记录会用 add_force 顶掉原成功记录，此后该路径
-            # 永远处于失败态，每个新事件都会重试并重推失败通知。此时保留原记录、不写历史、
-            # 不发事件与通知、不触发重试，仅把任务置为未入库
-            overwrite_declined = self.__is_overwrite_declined(
-                task, transferinfo, transferhis
-            )
-            history = None
-            if overwrite_declined:
-                logger.info(
-                    f"{task.fileitem.name} 未入库并保留原整理记录：{transferinfo.message}"
-                )
-            else:
-                logger.warn(f"{task.fileitem.name} 入库失败：{transferinfo.message}")
-
-                # 累计失败次数，达到上限后查重闸不再自动放行重试
-                record_transfer_failure(
-                    task.fileitem.path if task.fileitem else None,
-                    task.fileitem.storage if task.fileitem else None,
-                    file_size=task.fileitem.size if task.fileitem else None,
-                    file_modify_time=task.fileitem.modify_time if task.fileitem else None,
-                    fileid=task.fileitem.fileid if task.fileitem else None,
-                )
-
-                # 新增转移失败历史记录
-                history = transferhis.add_fail(
-                    fileitem=task.fileitem,
-                    mode=transferinfo.transfer_type if transferinfo else "",
-                    downloader=task.downloader,
-                    download_hash=task.download_hash,
-                    meta=task.meta,
-                    mediainfo=task.mediainfo,
-                    transferinfo=transferinfo,
-                )
-
-                # 整理失败事件
-                if self.__is_media_file(task.fileitem):
-                    # 主要媒体文件整理失败事件
-                    self.eventmanager.send_event(
-                        EventType.TransferFailed,
-                        {
-                            "fileitem": task.fileitem,
-                            "meta": task.meta,
-                            "mediainfo": task.mediainfo,
-                            "transferinfo": transferinfo,
-                            "downloader": task.downloader,
-                            "download_hash": task.download_hash,
-                            "transfer_history_id": history.id if history else None,
-                        },
-                    )
-                elif self.__is_subtitle_file(task.fileitem):
-                    # 字幕整理失败事件
-                    self.eventmanager.send_event(
-                        EventType.SubtitleTransferFailed,
-                        {
-                            "fileitem": task.fileitem,
-                            "meta": task.meta,
-                            "mediainfo": task.mediainfo,
-                            "transferinfo": transferinfo,
-                            "downloader": task.downloader,
-                            "download_hash": task.download_hash,
-                            "transfer_history_id": history.id if history else None,
-                        },
-                    )
-                elif self.__is_audio_file(task.fileitem):
-                    # 音频文件整理失败事件
-                    self.eventmanager.send_event(
-                        EventType.AudioTransferFailed,
-                        {
-                            "fileitem": task.fileitem,
-                            "meta": task.meta,
-                            "mediainfo": task.mediainfo,
-                            "transferinfo": transferinfo,
-                            "downloader": task.downloader,
-                            "download_hash": task.download_hash,
-                            "transfer_history_id": history.id if history else None,
-                        },
-                    )
-
-                # 发送失败消息
-                self.post_message(
-                    Notification(
-                        mtype=NotificationType.Manual,
-                        title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
-                        text="\n".join(
-                            [
-                                f"原因：{transferinfo.message or '未知'}",
-                                (
-                                    f"如果按钮不可用，可回复：\n```\n/redo {history.id}\n```"
-                                    if history
-                                    else ""
-                                ),
-                            ]
-                        ).strip(),
-                        image=task.mediainfo.get_message_image(),
-                        username=task.username,
-                        link=settings.MP_DOMAIN("#/history"),
-                        buttons=self.build_failed_transfer_buttons(
-                            history.id if history else None
-                        ),
-                    )
-                )
-
-            # 设置任务失败
-            self.jobview.fail_task(task)
-
-            # AI智能体自动重试整理
-            if (
-                    history
-                    and settings.AI_AGENT_ENABLE
-                    and settings.AI_AGENT_RETRY_TRANSFER
-            ):
-                try:
-                    # 使用 download_hash 或源文件父目录作为分组键，
-                    # 同一批次（如同一个种子）的失败记录会被合并为一次agent调用
-                    group_key = (
-                        task.download_hash or str(task.fileitem.path).rsplit("/", 1)[0]
-                        if task.fileitem
-                        else ""
-                    )
-                    asyncio.run_coroutine_threadsafe(
-                        self.retry_scheduler.schedule_retry(
-                            history.id, group_key=group_key
-                        ),
-                        global_vars.loop,
-                    )
-                    logger.info(f"已触发AI智能体重试整理历史记录 #{history.id}")
-                except Exception as e:
-                    logger.error(f"触发AI智能体重试整理失败: {e}")
-
-            # 返回失败
-            ret_status = False
-            ret_message = transferinfo.message
-
-        else:
-            # 转移成功
-            logger.info(f"{task.fileitem.name} 入库成功：{target_dir_path or ''}")
-
-            # 整理成功即认为此前的连续失败已恢复，重置计数让后续故障重新获得完整重试额度
-            clear_transfer_failures(
-                task.fileitem.path if task.fileitem else None,
-                task.fileitem.storage if task.fileitem else None,
-            )
-
-            # 新增task转移成功历史记录
-            history = transferhis.add_success(
-                fileitem=task.fileitem,
-                mode=transferinfo.transfer_type if transferinfo else "",
-                downloader=task.downloader,
-                download_hash=task.download_hash,
-                meta=task.meta,
-                mediainfo=task.mediainfo,
-                transferinfo=transferinfo,
-            )
-
-            # task整理完成事件
-            if self._is_primary_media_file(task.fileitem, task.mediainfo):
-                # 主要媒体文件整理完成事件
-                self.eventmanager.send_event(
-                    EventType.TransferComplete,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-            elif self.__is_subtitle_file(task.fileitem):
-                # 字幕整理完成事件
-                self.eventmanager.send_event(
-                    EventType.SubtitleTransferComplete,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-            elif self.__is_audio_file(task.fileitem):
-                # 音频文件整理完成事件
-                self.eventmanager.send_event(
-                    EventType.AudioTransferComplete,
-                    {
-                        "fileitem": task.fileitem,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                        "transferinfo": transferinfo,
-                        "downloader": task.downloader,
-                        "download_hash": task.download_hash,
-                        "transfer_history_id": history.id if history else None,
-                    },
-                )
-
-            # task登记转移成功文件清单
-            target_files = transferinfo.file_list_new
-            if target_files:
-                with job_lock:
-                    if self._success_target_files.get(job_id):
-                        self._success_target_files[job_id].extend(target_files)
-                    else:
-                        self._success_target_files[job_id] = list(target_files)
-
-            # 设置任务成功
-            self.jobview.finish_task(task)
-
-            # 登记批次级刮削目标
-            self.__record_scrape_target(task, transferinfo)
-
-        # 全部整理完成且有成功的任务时，发送消息和事件
-        if self.jobview.is_finished(task):
-            # 更新文件清单
-            with job_lock:
-                transferinfo.file_list_new = list(dict.fromkeys(
-                    self._success_target_files.pop(job_id, [])
-                    or transferinfo.file_list_new
-                    or []
-                ))
-            __notify()
-            if not task.transfer_batch_id:
-                self.__send_metadata_scrape_event(task, transferinfo)
-
-        # 只要该种子的所有任务都已整理完成，则设置种子状态为已整理
-        self.__mark_torrent_completed_if_done(task.download_hash, task.downloader)
-
-        # 移动模式，全部成功时删除空目录和种子文件
-        if transferinfo.transfer_type in ["move"]:
-            # 全部整理成功时
-            if self.jobview.is_success(task):
-                # 所有成功的业务
-                tasks = self.jobview.success_tasks(
-                    task.mediainfo, task.meta.begin_season
-                )
-                system_config_oper = SystemConfigOper()
-                # 获取整理屏蔽词
-                transfer_exclude_words = system_config_oper.get(
-                    SystemConfigKey.TransferExcludeWords
-                )
-                # 挂载盘空目录清理默认开启
-                delete_mounted_local_disk_empty_dirs = system_config_oper.get(
-                    SystemConfigKey.MountedLocalDiskDeleteEmptyDirs
-                ) is not False
-                mounted_filesystem_cache: Dict[Path, bool] = {}
-                processed_hashes = set()
-                for t in tasks:
-                    if t.download_hash and t.download_hash not in processed_hashes:
-                        # 检查该种子的所有任务（跨作业）是否都已成功
-                        if self.jobview.is_torrent_success(t.download_hash):
-                            processed_hashes.add(t.download_hash)
-                            if self._can_delete_torrent(
-                                    t.download_hash, t.downloader, transfer_exclude_words
-                            ):
-                                # 移除种子及文件
-                                if self.remove_torrents(
-                                        t.download_hash, downloader=t.downloader
-                                ):
-                                    logger.info(
-                                        f"移动模式删除种子成功：{t.download_hash}"
-                                    )
-                    if (
-                            not t.download_hash
-                            and t.fileitem
-                            and self.__should_delete_empty_source_directories(
-                                t,
-                                delete_mounted_local_disk_empty_dirs,
-                                mounted_filesystem_cache,
-                            )
-                    ):
-                        # 删除剩余空目录
-                        StorageChain().delete_media_file(t.fileitem, delete_self=False)
-
-        return ret_status, ret_message
-
-    def __get_transfer_target_dir_path(
-            self, transferinfo: Optional[TransferInfo]
-    ) -> Optional[str]:
-        """
-        获取整理目标目录路径，兼容 OpenList 等成功后目录项短时间不可见的存储。
-        """
-        if not transferinfo:
-            return None
-        if transferinfo.target_diritem and transferinfo.target_diritem.path:
-            return transferinfo.target_diritem.path
-        if transferinfo.target_item and transferinfo.target_item.path:
-            return Path(transferinfo.target_item.path).parent.as_posix()
-        if transferinfo.file_list_new:
-            return Path(transferinfo.file_list_new[0]).parent.as_posix()
-        return None
-
     def put_to_queue(self, task: TransferTask) -> bool:
         """
         添加到待整理队列
@@ -1746,8 +2105,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if not self.__put_to_jobview(task):
             return False
         self.__register_scrape_batch_task(task)
-        # 添加到队列
-        self._queue.put(TransferQueue(task=task, callback=self.__default_callback))
+        # 添加到队列（队列机器已抽到 TransferService，回调为整理结果处理器 _result_processor.handle）
+        self._service.enqueue(task=task, callback=self._result_processor.handle)
         # 落盘登记：队列是纯内存的，进程重启（挂载挂死后的人工重启、升级、OOM）
         # 会让队列连同「这些文件还没整理」这个事实一起蒸发，而已稳定落地的文件
         # 不会再产生任何监控事件，等于永久漏件。登记放在入队之后，宁可多留一条
@@ -1921,203 +2280,17 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             logger.error(f"检查种子 {download_hash} 下载进度失败：{e}")
             return False
 
-    def __send_metadata_scrape_event(
-            self, task: TransferTask, transferinfo: TransferInfo
-    ):
-        """
-        发送元数据刮削事件，保持对外事件载荷兼容。
-        """
-        if (
-                not task
-                or not transferinfo
-                or not transferinfo.need_scrape
-                or not self._is_primary_media_file(task.fileitem, task.mediainfo)
-        ):
-            return
-
-        target_diritem = transferinfo.target_diritem
-        if not target_diritem:
-            return
-
-        self.eventmanager.send_event(
-            EventType.MetadataScrape,
-            self.__build_metadata_scrape_payload(
-                task=task,
-                fileitem=target_diritem,
-                file_list=transferinfo.file_list_new,
-                overwrite=False,
-            ),
-        )
-
-    @staticmethod
-    def __build_metadata_scrape_payload(
-            task: TransferTask,
-            fileitem: FileItem,
-            file_list: Optional[list[str]],
-            overwrite: bool,
-    ) -> dict[str, Any]:
-        """构造刮削事件载荷，并为音乐批次保留逐文件身份上下文。"""
-        paths = list(dict.fromkeys(file_list or []))
-        payload: dict[str, Any] = {
-            "meta": task.meta,
-            "mediainfo": task.mediainfo,
-            "fileitem": fileitem,
-            "file_list": paths,
-            "overwrite": overwrite,
-        }
-        if isinstance(task.mediainfo, MusicInfo):
-            payload["file_contexts"] = [
-                {
-                    "path": path,
-                    "meta": task.meta,
-                    "mediainfo": task.mediainfo,
-                }
-                for path in paths
-            ]
-        return payload
-
     def __register_scrape_batch_task(self, task: TransferTask):
-        """
-        登记批次任务。刮削事件只在批次关闭且任务全部完成后统一发送。
-        """
-        if not task or not task.transfer_batch_id:
-            return
-        with job_lock:
-            batch = self._scrape_batches.setdefault(
-                task.transfer_batch_id,
-                {
-                    "pending": set(),
-                    "targets": {},
-                    "closed": False,
-                },
-            )
-            batch["pending"].add(task.fileitem.path)
+        """登记批次任务（委派刮削批次协调器）。"""
+        self._scrape_coordinator.register(task)
 
     def __close_scrape_batch(self, batch_id: Optional[str]):
-        """
-        标记批次不再接收新任务，并尝试发送已聚合的刮削事件。
-        """
-        if not batch_id:
-            return
-        with job_lock:
-            batch = self._scrape_batches.setdefault(
-                batch_id,
-                {
-                    "pending": set(),
-                    "targets": {},
-                    "closed": False,
-                },
-            )
-            batch["closed"] = True
-        self.__flush_scrape_batch_if_ready(batch_id)
-
-    def __record_scrape_target(self, task: TransferTask, transferinfo: TransferInfo):
-        """
-        记录批次内需要刮削的目标文件，按目标媒体根目录聚合。
-        """
-        if (
-                not task
-                or not task.transfer_batch_id
-                or not transferinfo
-                or not transferinfo.need_scrape
-                or not self._is_primary_media_file(task.fileitem, task.mediainfo)
-        ):
-            return
-
-        target_diritem = transferinfo.target_diritem
-        if not target_diritem:
-            return
-
-        target_files = transferinfo.file_list_new or []
-        target_key = (target_diritem.storage, target_diritem.path)
-        with job_lock:
-            batch = self._scrape_batches.setdefault(
-                task.transfer_batch_id,
-                {
-                    "pending": set(),
-                    "targets": {},
-                    "closed": False,
-                },
-            )
-            target = batch["targets"].setdefault(
-                target_key,
-                {
-                    "fileitem": target_diritem,
-                    "meta": task.meta,
-                    "mediainfo": task.mediainfo,
-                    "files": [],
-                    "file_contexts": {},
-                    "overwrite": False,
-                },
-            )
-            if not target.get("meta"):
-                target["meta"] = task.meta
-            if not target.get("mediainfo"):
-                target["mediainfo"] = task.mediainfo
-            for target_file in target_files:
-                if target_file and target_file not in target["files"]:
-                    target["files"].append(target_file)
-                if target_file and isinstance(task.mediainfo, MusicInfo):
-                    target["file_contexts"][target_file] = {
-                        "path": target_file,
-                        "meta": task.meta,
-                        "mediainfo": task.mediainfo,
-                    }
+        """标记批次不再接收新任务（委派刮削批次协调器）。"""
+        self._scrape_coordinator.close(batch_id)
 
     def __finish_scrape_batch_task(self, task: TransferTask):
-        """
-        标记批次内单个任务已结束。
-        """
-        if not task or not task.transfer_batch_id:
-            return
-        with job_lock:
-            batch = self._scrape_batches.get(task.transfer_batch_id)
-            if not batch:
-                return
-            batch["pending"].discard(task.fileitem.path)
-        self.__flush_scrape_batch_if_ready(task.transfer_batch_id)
-
-    def __flush_scrape_batch_if_ready(self, batch_id: Optional[str]):
-        """
-        批次任务全部结束后发送聚合后的刮削事件。
-        """
-        if not batch_id:
-            return
-
-        with job_lock:
-            batch = self._scrape_batches.get(batch_id)
-            if (
-                    not batch
-                    or not batch.get("closed")
-                    or batch.get("pending")
-            ):
-                return
-            targets = list(batch.get("targets", {}).values())
-            self._scrape_batches.pop(batch_id, None)
-
-        for target in targets:
-            fileitem = target.get("fileitem")
-            if not fileitem:
-                continue
-            file_list = list(dict.fromkeys(target.get("files") or []))
-            file_contexts = target.get("file_contexts") or {}
-            payload = {
-                "meta": target.get("meta"),
-                "mediainfo": target.get("mediainfo"),
-                "fileitem": fileitem,
-                "file_list": file_list,
-                "overwrite": target.get("overwrite", False),
-            }
-            if file_contexts:
-                payload["file_contexts"] = [
-                    file_contexts[path]
-                    for path in file_list
-                    if path in file_contexts
-                ]
-            self.eventmanager.send_event(
-                EventType.MetadataScrape,
-                payload,
-            )
+        """标记批次内单个任务已结束（委派刮削批次协调器）。"""
+        self._scrape_coordinator.finish(task)
 
     def remove_from_queue(self, fileitem: FileItem):
         """
@@ -2164,117 +2337,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.jobview.try_remove_job(task)
         self.__finish_scrape_batch_task(task)
 
-    def __start_transfer(self):
-        """
-        处理队列
-        """
-        while not global_vars.is_system_stopped and self._queue_active:
-            try:
-                item: TransferQueue = self._queue.get(
-                    block=True, timeout=self._transfer_interval
-                )
-                if not item:
-                    continue
-
-                task = item.task
-                if not task:
-                    self._queue.task_done()
-                    continue
-
-                # 文件信息
-                fileitem = task.fileitem
-
-                with task_lock:
-                    # 批次总数 = 本批已处理数 + 未终态数。作业视图会残留上一批
-                    # 已完成的任务（作业要等关联任务全部终态才移除），用全量
-                    # total() 会把历史任务计入本批（如显示 8 个实际只处理 2 个），
-                    # 且进度分母虚高导致百分比走不满
-                    current_total = self._processed_num + self.jobview.pending_total()
-                    # 更新总数，取当前总数和当前已处理+运行中+队列中的最大值
-                    self._total_num = max(self._total_num, current_total)
-
-                    # 如果当前没有在运行的任务且处理数为0，说明是一个新序列的开始
-                    if self._active_tasks == 0 and self._processed_num == 0:
-                        logger.info("开始整理队列处理...")
-                        # 启动进度
-                        self._progress.start()
-                        # 重置计数
-                        self._processed_num = 0
-                        self._fail_num = 0
-                        __process_msg = (
-                            f"开始整理队列处理，当前共 {self._total_num} 个文件 ..."
-                        )
-                        logger.info(__process_msg)
-                        self._progress.update(value=0, text=__process_msg)
-                    # 增加运行中的任务数
-                    self._active_tasks += 1
-
-                try:
-                    self.__start_job_execution(task)
-                    # 更新进度
-                    __process_msg = f"正在整理 {fileitem.name} ..."
-                    logger.info(__process_msg)
-                    with task_lock:
-                        self._progress.update(
-                            value=(self._processed_num / self._total_num * 100)
-                            if self._total_num
-                            else 0,
-                            text=__process_msg,
-                        )
-                    # 整理
-                    state, err_msg = self.__handle_transfer(
-                        task=task, callback=item.callback
-                    )
-
-                    with task_lock:
-                        if not state:
-                            # 任务失败
-                            self._fail_num += 1
-                        # 更新进度
-                        self._processed_num += 1
-                        __process_msg = f"{fileitem.name} 整理完成"
-                        logger.info(__process_msg)
-                        self._progress.update(
-                            value=(self._processed_num / self._total_num * 100)
-                            if self._total_num
-                            else 100,
-                            text=__process_msg,
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"{fileitem.name} 整理任务处理出现错误：{e} - {traceback.format_exc()}"
-                    )
-                    self.__fail_transfer_task(task)
-                    with task_lock:
-                        self._processed_num += 1
-                        self._fail_num += 1
-                finally:
-                    self.__finish_job_execution(task)
-                    self._queue.task_done()
-                    with task_lock:
-                        # 减少运行中的任务数
-                        self._active_tasks -= 1
-                        # 检查是否所有任务都已完成且队列为空
-                        if self._active_tasks == 0 and self._queue.empty():
-                            # 结束进度
-                            __end_msg = f"整理队列处理完成，共整理 {self._processed_num} 个文件，失败 {self._fail_num} 个"
-                            logger.info(__end_msg)
-                            self._progress.update(value=100, text=__end_msg)
-                            self._progress.end()
-                            # 重置计数，_total_num 一并归零，否则会作为历史最大值一直
-                            # 累积，令后续批次的「当前共 N 个文件」与进度百分比失真
-                            self._total_num = 0
-                            self._processed_num = 0
-                            self._fail_num = 0
-
-            except queue.Empty:
-                # 即使队列空了，如果还有任务在运行，也不应该结束进度
-                # 这部分逻辑已经在 finally 的 active_tasks == 0 中处理了
-                self.__expire_stale_transfer_tasks()
-                continue
-            except Exception as e:
-                logger.error(f"整理队列处理出现错误：{e} - {traceback.format_exc()}")
-
     def __handle_transfer(
             self, task: TransferTask, callback: Optional[Callable] = None
     ) -> Optional[Tuple[bool, str]]:
@@ -2282,19 +2344,90 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         处理整理任务
         """
         try:
-            # 识别
+            # 识别（block-1：双早返回 + 多值回流，抽出后以三元组带出 early/mediainfo/changed）
             transferhis = TransferHistoryOper()
-            mediainfo = task.mediainfo
-            mediainfo_changed = False
-            need_obtain_images = False
-            if not mediainfo:
-                download_history = task.download_history
-                # 下载用户
-                if download_history:
-                    task.username = download_history.username
-                    # 识别媒体信息
-                    history_year_conflict = self._is_movie_year_conflict(
-                        task.meta, download_history
+            early, mediainfo, mediainfo_changed = self._recognize_for_transfer(
+                task, transferhis
+            )
+            if early is not None:
+                return early
+
+            # 合并 TMDB 辅助信息，并按需沿用历史 TMDB 标题
+            mediainfo, mediainfo_changed = self._apply_scrap_follow_tmdb(
+                task, mediainfo, mediainfo_changed, transferhis
+            )
+
+            # 更新队列任务（mediainfo 变更时回写并去重），命中重复则提前返回
+            result = self._migrate_or_skip(task, mediainfo, mediainfo_changed)
+            if result is not None:
+                return result
+
+            # 获取集数据
+            self._resolve_episodes_info(task)
+
+            # 查询整理目标目录与目标存储
+            self._resolve_target_directory(task)
+
+            # 需要自动分类却未识别到类别时，按失败分支收口
+            early = self._guard_automatic_category(task, callback)
+            if early is not None:
+                return early
+
+            # 标记运行中，并广播事件请示额外的源/目标存储操作器
+            source_oper, target_oper = self._select_storage_opers(task)
+
+            # 执行整理并按回调/默认方式分发结果（block-7：tail 抽取，每条分支均 return）
+            return self._run_transfer_and_dispatch(
+                task, source_oper, target_oper, callback
+            )
+
+        finally:
+            # 移除已完成的任务
+            self.jobview.try_remove_job(task)
+            self.__finish_scrape_batch_task(task)
+
+    def _recognize_for_transfer(
+        self, task: TransferTask, transferhis: TransferHistoryOper
+    ) -> Tuple[Optional[Tuple[bool, str]], Optional[MediaInfo], bool]:
+        """识别媒体信息（整理流程的识别步骤，含双早返回与多值回流）。
+
+        返回三元组 (early, mediainfo, mediainfo_changed)：early 非 None 时调用方须 `return early`
+        （preview 短路 / 识别失败两条早返回，值均为 (False, "未识别到媒体信息")）；early 为 None 时
+        带出识别得到的 mediainfo 与 mediainfo_changed 供后续步骤使用。识别失败分支保留 add_fail /
+        通知 / 移除任务 / 标记下载完成 / AI 重试等副作用。
+        """
+        mediainfo = task.mediainfo
+        mediainfo_changed = False
+        need_obtain_images = False
+        if not mediainfo:
+            download_history = task.download_history
+            # 下载用户
+            if download_history:
+                task.username = download_history.username
+                # 识别媒体信息
+                history_year_conflict = self._is_movie_year_conflict(
+                    task.meta, download_history
+                )
+                if (
+                        (
+                            download_history.media_id
+                            or download_history.tmdbid
+                            or download_history.doubanid
+                            or download_history.bangumiid
+                            or download_history.anilistid
+                        )
+                        and not history_year_conflict
+                ):
+                    # 下载记录中已存在识别信息
+                    mediainfo: Optional[MediaInfo] = self.recognize_media(
+                        mtype=MediaType(download_history.type),
+                        tmdbid=download_history.tmdbid,
+                        doubanid=download_history.doubanid,
+                        bangumiid=download_history.bangumiid,
+                        anilistid=download_history.anilistid,
+                        source=download_history.media_source,
+                        mediaid=download_history.media_id,
+                        episode_group=download_history.episode_group,
                     )
                     if (
                             download_history.media_source
@@ -2331,7 +2464,11 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         if mediainfo and download_history.media_category:
                             mediainfo.category = download_history.media_category
                 else:
-                    # 识别媒体信息
+                    if history_year_conflict:
+                        logger.info(
+                            f"{task.fileitem.name} 文件年份 {task.meta.year} 与下载记录年份 "
+                            f"{download_history.year} 不一致，按文件名重新识别"
+                        )
                     recognize_kwargs = {"obtain_images": True}
                     if task.media_source:
                         recognize_kwargs["media_source"] = task.media_source
@@ -2471,110 +2608,281 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                     episode_group=task.mediainfo.episode_group,
                 )
 
-            # 查询整理目标目录
-            if not task.target_directory:
-                if task.target_path:
-                    # 指定目标路径，`手动整理`场景下使用，忽略源目录匹配，使用指定目录匹配
-                    task.target_directory = DirectoryHelper().get_dir(
-                        media=task.mediainfo,
-                        dest_path=task.target_path,
-                        target_storage=task.target_storage,
-                    )
-                else:
-                    # 启用源目录匹配时，根据源目录匹配下载目录，否则按源目录同盘优先原则，如无源目录，则根据媒体信息获取目标目录
-                    task.target_directory = DirectoryHelper().get_dir(
-                        media=task.mediainfo,
-                        storage=task.fileitem.storage,
-                        src_path=Path(task.fileitem.path),
-                        target_storage=task.target_storage,
-                    )
-            if not task.target_storage and task.target_directory:
-                task.target_storage = task.target_directory.library_storage
+            # 按名称识别时已在识别链路补图，这里只补齐显式ID识别的场景。
+            if mediainfo and need_obtain_images:
+                self.obtain_images(mediainfo=mediainfo)
 
-            if self._requires_automatic_category(task) and not task.mediainfo.category:
-                if task.mediainfo.tmdb_id:
-                    error_message = "TMDB 信息未匹配到媒体分类，无法按媒体类别整理"
-                else:
-                    error_message = "未识别到 TMDB 辅助信息，无法按媒体类别整理"
-                logger.error(f"{task.fileitem.name} {error_message}")
-                if callback:
-                    return callback(
-                        task,
-                        TransferInfo(
-                            success=False,
-                            fileitem=task.fileitem,
-                            transfer_type=task.transfer_type,
-                            message=error_message,
+            if mediainfo and task.media_source:
+                mediainfo.scrape_source = task.media_source
+
+            if not mediainfo:
+                if task.preview:
+                    return (False, "未识别到媒体信息"), None, False
+                # 新增整理失败历史记录
+                his = transferhis.add_fail(
+                    fileitem=task.fileitem,
+                    mode=task.transfer_type,
+                    meta=task.meta,
+                    downloader=task.downloader,
+                    download_hash=task.download_hash,
+                )
+                self.post_message(
+                    Notification(
+                        mtype=NotificationType.Manual,
+                        title=f"{task.fileitem.name} 未识别到媒体信息，无法入库！",
+                        text=(
+                            "原因：未识别到媒体信息\n"
+                            "如果按钮不可用，可回复：\n"
+                            f"```\n/redo {his.id}\n/redo {his.id} [tmdbid]|[类型]\n```\n"
+                            "自动重试或手动识别整理。"
+                        ),
+                        username=task.username,
+                        link=settings.MP_DOMAIN("#/history"),
+                        buttons=self.build_failed_transfer_buttons(
+                            his.id if his else None
                         ),
                     )
-                return False, error_message
-
-            # 正在处理
-            self.jobview.running_task(task)
-
-            # 广播事件，请示额外的源存储支持
-            source_oper = None
-            source_event_data = StorageOperSelectionEventData(
-                storage=task.fileitem.storage,
-            )
-            source_event = eventmanager.send_event(
-                ChainEventType.StorageOperSelection, source_event_data
-            )
-            # 使用事件返回的上下文数据
-            if source_event and source_event.event_data:
-                source_event_data: StorageOperSelectionEventData = (
-                    source_event.event_data
                 )
-                if source_event_data.storage_oper:
-                    source_oper = source_event_data.storage_oper
-
-            # 广播事件，请示额外的目标存储支持
-            target_oper = None
-            target_event_data = StorageOperSelectionEventData(
-                storage=task.target_storage,
-            )
-            target_event = eventmanager.send_event(
-                ChainEventType.StorageOperSelection, target_event_data
-            )
-            # 使用事件返回的上下文数据
-            if target_event and target_event.event_data:
-                target_event_data: StorageOperSelectionEventData = (
-                    target_event.event_data
+                # 任务失败，直接移除task
+                self.jobview.remove_task(task.fileitem)
+                self.__mark_torrent_completed_if_done(
+                    task.download_hash, task.downloader
                 )
-                if target_event_data.storage_oper:
-                    target_oper = target_event_data.storage_oper
 
-            # 执行整理
-            transferinfo: TransferInfo = self.transfer(
-                fileitem=task.fileitem,
-                meta=task.meta,
-                mediainfo=task.mediainfo,
-                target_directory=task.target_directory,
-                target_storage=task.target_storage,
-                target_path=task.target_path,
-                transfer_type=task.transfer_type,
-                episodes_info=task.episodes_info,
-                scrape=task.scrape,
-                library_type_folder=task.library_type_folder,
-                library_category_folder=task.library_category_folder,
-                source_oper=source_oper,
-                target_oper=target_oper,
-                preview=task.preview,
+                # AI智能体自动重试整理
+                if (
+                        his
+                        and settings.AI_AGENT_ENABLE
+                        and settings.AI_AGENT_RETRY_TRANSFER
+                ):
+                    try:
+                        # 使用 download_hash 或源文件父目录作为分组键
+                        group_key = (
+                            task.download_hash
+                            or str(task.fileitem.path).rsplit("/", 1)[0]
+                            if task.fileitem
+                            else ""
+                        )
+                        asyncio.run_coroutine_threadsafe(
+                            self.retry_scheduler.schedule_retry(
+                                his.id, group_key=group_key
+                            ),
+                            global_vars.loop,
+                        )
+                        logger.info(f"已触发AI智能体重试整理历史记录 #{his.id}")
+                    except Exception as e:
+                        logger.error(f"触发AI智能体重试整理失败: {e}")
+
+                return (False, "未识别到媒体信息"), None, False
+
+            mediainfo_changed = True
+
+        return None, mediainfo, mediainfo_changed
+
+    def _apply_scrap_follow_tmdb(
+        self,
+        task: TransferTask,
+        mediainfo: MediaInfo,
+        mediainfo_changed: bool,
+        transferhis: TransferHistoryOper,
+    ) -> Tuple[MediaInfo, bool]:
+        """
+        合并 TMDB 辅助信息，并在未开启「新增已入库媒体跟随 TMDB 信息变化」时按 tmdbid 查历史 title。
+
+        TMDB 仅作为辅助信息合并，不改变原识别源的主身份与标题；仅 TMDB 主源沿用历史 TMDB 标题。
+
+        :param task: 整理任务
+        :param mediainfo: 识别到的媒体信息
+        :param mediainfo_changed: 媒体信息是否已变更
+        :param transferhis: 整理历史操作器
+        :return: (合并后的媒体信息, 是否变更)
+        """
+        mediainfo = MediaChain().supplement_tmdb_info(mediainfo, task.meta)
+        task.mediainfo = mediainfo
+
+        if (
+                not settings.SCRAP_FOLLOW_TMDB
+                and normalize_media_source(mediainfo.source) == "themoviedb"
+        ):
+            transfer_history = transferhis.get_by_type_tmdbid(
+                tmdbid=mediainfo.tmdb_id, mtype=mediainfo.type.value
             )
-            if not transferinfo:
-                logger.error("文件整理模块运行失败")
-                return False, "文件整理模块运行失败"
+            if transfer_history and mediainfo.title != transfer_history.title:
+                mediainfo.title = transfer_history.title
+                mediainfo_changed = True
+        return mediainfo, mediainfo_changed
 
-            # 回调，位置传参：任务、整理结果
-            if callback:
-                return callback(task, transferinfo)
+    def _migrate_or_skip(
+        self,
+        task: TransferTask,
+        mediainfo: MediaInfo,
+        mediainfo_changed: bool,
+    ) -> Optional[Tuple[bool, str]]:
+        """
+        早返回子块（哨兵协议）：mediainfo 变更时把（可能重识别后的）mediainfo 回写到 task 并在 jobview
+        重新登记；若 migrate_task 报告任务已存在，则记录日志并返回 (False, ...) 哨兵，由调用方提前返回；
+        否则返回 None 表示继续。未变更时不回写、不去重，直接返回 None。
+        """
+        if mediainfo_changed:
+            # 更新任务信息
+            task.mediainfo = mediainfo
+            # 更新队列任务
+            if not self.jobview.migrate_task(task):
+                logger.info(f"{task.fileitem.name} 已存在整理任务，跳过重复处理")
+                return False, f"{task.fileitem.name} 已在整理队列中"
+        return None
 
-            return transferinfo.success, transferinfo.message
+    def _resolve_episodes_info(self, task: TransferTask) -> None:
+        """获取集数据：TV 且缺失 episodes_info 时从 TMDB 拉取。"""
+        if (
+                task.mediainfo.type == MediaType.TV
+                and task.mediainfo.tmdb_id
+                and not task.episodes_info
+        ):
+            # 判断注意season为0的情况
+            season_num = task.mediainfo.season
+            if season_num is None and task.meta.season_seq:
+                if task.meta.season_seq.isdigit():
+                    season_num = int(task.meta.season_seq)
+            # 默认值1
+            if season_num is None:
+                season_num = 1
+            task.episodes_info = TmdbChain().tmdb_episodes(
+                tmdbid=task.mediainfo.tmdb_id,
+                season=season_num,
+                episode_group=task.mediainfo.episode_group,
+            )
 
-        finally:
-            # 移除已完成的任务
-            self.jobview.try_remove_job(task)
-            self.__finish_scrape_batch_task(task)
+    def _resolve_target_directory(self, task: TransferTask) -> None:
+        """查询整理目标目录与目标存储。"""
+        if not task.target_directory:
+            if task.target_path:
+                # 指定目标路径，`手动整理`场景下使用，忽略源目录匹配，使用指定目录匹配
+                task.target_directory = DirectoryHelper().get_dir(
+                    media=task.mediainfo,
+                    dest_path=task.target_path,
+                    target_storage=task.target_storage,
+                )
+            else:
+                # 启用源目录匹配时，根据源目录匹配下载目录，否则按源目录同盘优先原则，如无源目录，则根据媒体信息获取目标目录
+                task.target_directory = DirectoryHelper().get_dir(
+                    media=task.mediainfo,
+                    storage=task.fileitem.storage,
+                    src_path=Path(task.fileitem.path),
+                    target_storage=task.target_storage,
+                )
+        if not task.target_storage and task.target_directory:
+            task.target_storage = task.target_directory.library_storage
+
+    def _guard_automatic_category(
+        self, task: TransferTask, callback: Optional[Callable]
+    ) -> Optional[Tuple[bool, str]]:
+        """
+        需要按媒体类别整理却未识别到分类时，走失败分支收口。
+
+        :param task: 整理任务
+        :param callback: 整理结果回调
+        :return: 需提前返回时给出 (False, 错误信息) 哨兵，否则为 None
+        """
+        if not self._requires_automatic_category(task) or task.mediainfo.category:
+            return None
+        if task.mediainfo.tmdb_id:
+            error_message = "TMDB 信息未匹配到媒体分类，无法按媒体类别整理"
+        else:
+            error_message = "未识别到 TMDB 辅助信息，无法按媒体类别整理"
+        logger.error(f"{task.fileitem.name} {error_message}")
+        if callback:
+            return callback(
+                task,
+                TransferInfo(
+                    success=False,
+                    fileitem=task.fileitem,
+                    transfer_type=task.transfer_type,
+                    message=error_message,
+                ),
+            )
+        return False, error_message
+
+    def _select_storage_opers(self, task: TransferTask) -> Tuple[Any, Any]:
+        """标记任务运行中，并广播事件请示额外的源/目标存储操作器。
+
+        返回 (source_oper, target_oper) 供整理时传入 transfer()。
+        """
+        # 正在处理
+        self.jobview.running_task(task)
+
+        # 广播事件，请示额外的源存储支持
+        source_oper = None
+        source_event_data = StorageOperSelectionEventData(
+            storage=task.fileitem.storage,
+        )
+        source_event = eventmanager.send_event(
+            ChainEventType.StorageOperSelection, source_event_data
+        )
+        # 使用事件返回的上下文数据
+        if source_event and source_event.event_data:
+            source_event_data: StorageOperSelectionEventData = (
+                source_event.event_data
+            )
+            if source_event_data.storage_oper:
+                source_oper = source_event_data.storage_oper
+
+        # 广播事件，请示额外的目标存储支持
+        target_oper = None
+        target_event_data = StorageOperSelectionEventData(
+            storage=task.target_storage,
+        )
+        target_event = eventmanager.send_event(
+            ChainEventType.StorageOperSelection, target_event_data
+        )
+        # 使用事件返回的上下文数据
+        if target_event and target_event.event_data:
+            target_event_data: StorageOperSelectionEventData = (
+                target_event.event_data
+            )
+            if target_event_data.storage_oper:
+                target_oper = target_event_data.storage_oper
+
+        return source_oper, target_oper
+
+    def _run_transfer_and_dispatch(
+        self,
+        task: TransferTask,
+        source_oper: Any,
+        target_oper: Any,
+        callback: Optional[Callable],
+    ) -> Optional[Tuple[bool, str]]:
+        """执行整理并分发结果。
+
+        transfer 失败返回模块错误；有 callback 则委派 (task, transferinfo) 并返回其结果；
+        否则返回 (transferinfo.success, transferinfo.message)。
+        """
+        # 执行整理
+        transferinfo: TransferInfo = self.transfer(
+            fileitem=task.fileitem,
+            meta=task.meta,
+            mediainfo=task.mediainfo,
+            target_directory=task.target_directory,
+            target_storage=task.target_storage,
+            target_path=task.target_path,
+            transfer_type=task.transfer_type,
+            episodes_info=task.episodes_info,
+            scrape=task.scrape,
+            library_type_folder=task.library_type_folder,
+            library_category_folder=task.library_category_folder,
+            source_oper=source_oper,
+            target_oper=target_oper,
+            preview=task.preview,
+        )
+        if not transferinfo:
+            logger.error("文件整理模块运行失败")
+            return False, "文件整理模块运行失败"
+
+        # 回调，位置传参：任务、整理结果
+        if callback:
+            return callback(task, transferinfo)
+
+        return transferinfo.success, transferinfo.message
 
     def get_queue_tasks(self) -> List[TransferJob]:
         """
@@ -4242,7 +4550,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
                         self.__start_job_execution(transfer_task)
                         state, err_msg = self.__handle_transfer(
                             task=transfer_task,
-                            callback=_preview_callback if preview else self.__default_callback,
+                            callback=_preview_callback if preview else self._result_processor.handle,
                         )
                     except Exception as e:
                         logger.error(
@@ -4758,9 +5066,6 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             torrent_files = self.torrent_files(download_hash, downloader)
             if not torrent_files:
                 return False
-
-            if not isinstance(torrent_files, list):
-                torrent_files = torrent_files.data
 
             # 检查是否有媒体文件未被屏蔽且存在
             save_path = torrents[0].path.parent
