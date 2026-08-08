@@ -6,7 +6,7 @@ from app.core.config import global_vars
 from app.core.event import eventmanager, Event
 from app.db.models import Workflow
 from app.db.workflow_oper import WorkflowOper
-from app.helper.module import ModuleHelper
+from app.core.module_loader import ModuleHelper
 from app.log import logger
 from app.schemas import ActionContext, Action, ActionResult
 from app.schemas.types import EventType

@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 
 from app.startup import lifecycle, modules_initializer
+from app.startup.service_registry import ServiceRegistry
 from app.utils import http as http_utils
 
 
@@ -239,10 +240,22 @@ def test_stop_modules_continues_after_internal_owner_failures(monkeypatch):
 def _patch_module_shutdown_dependencies(monkeypatch) -> dict:
     """替换 stop_modules 的资源所有者，避免测试启动真实后台服务"""
     dependencies = {}
+
+    # 模块/事件消费/虚拟显示经组合根注册表持有；换一份隔离的注册表，
+    # 避免污染真实 service_registry 单例（monkeypatch 退出时自动还原原对象）。
+    registry = ServiceRegistry()
+    for registry_name, key in (
+        ("module_manager", "module"),
+        ("event_manager", "event"),
+        ("display", "display"),
+    ):
+        instance = MagicMock()
+        registry.register(registry_name, instance)
+        method_name = "stop"
+        dependencies[key] = getattr(instance, method_name)
+    monkeypatch.setattr(modules_initializer, "service_registry", registry)
+
     for name, method_name in (
-        ("ModuleManager", "stop"),
-        ("EventManager", "stop"),
-        ("DisplayHelper", "stop"),
         ("DohHelper", "shutdown"),
         ("ThreadHelper", "shutdown"),
         ("RedisHelper", "close"),
