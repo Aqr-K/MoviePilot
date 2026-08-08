@@ -17,6 +17,7 @@ from fastapi.security import OAuth2PasswordBearer, APIKeyHeader, APIKeyQuery, AP
 from passlib.context import CryptContext
 
 from app import schemas
+from app.core.auth_level import get_auth_level
 from app.core.cache import cached
 from app.core.config import settings
 from app.log import logger
@@ -84,7 +85,6 @@ def __create_superuser_token_payload() -> schemas.TokenPayload:
     # pylint: disable=import-outside-toplevel
     # pylint: disable=no-name-in-module
     from app.db.user_oper import UserOper
-    from app.helper.sites import SitesHelper  # noqa
 
     user = UserOper().get_by_name(settings.SUPERUSER)
     if not user or not user.is_superuser:
@@ -96,7 +96,7 @@ def __create_superuser_token_payload() -> schemas.TokenPayload:
         sub=user.id,
         username=user.name,
         super_user=user.is_superuser,
-        level=SitesHelper().auth_level,
+        level=get_auth_level(),
         purpose="authentication",
     )
 

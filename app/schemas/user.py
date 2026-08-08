@@ -95,3 +95,7 @@ class AuthProviderInfo(BaseModel):
     component: Optional[str] = None
     plugin_id: Optional[str] = None
     remote: Optional[AuthProviderRemote] = None
+    # 统一多步流程入口路径，前端 POST 该路径并携带 flow 选择器发起登录
+    login_url: Optional[str] = None
+    # 流程选择器，对应注册的重定向步/提供方 id
+    flow: Optional[str] = None

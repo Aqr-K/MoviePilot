@@ -1,3 +1,4 @@
+from app import schemas
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -34,7 +35,7 @@ def test_registration_transaction_is_bound_to_current_user():
         purpose="registration",
         user_id=1,
     )
-    request = mfa_endpoint.PassKeyRegistrationFinish(
+    request = schemas.PassKeyRegistrationFinish(
         credential={"id": "credential-id"},
         transaction_token=token,
         name="test",
@@ -60,7 +61,7 @@ def test_registration_uses_server_challenge():
         purpose="registration",
         user_id=1,
     )
-    request = mfa_endpoint.PassKeyRegistrationFinish(
+    request = schemas.PassKeyRegistrationFinish(
         credential={"id": "credential-id", "challenge": "client-challenge"},
         transaction_token=token,
         name="test",
@@ -91,7 +92,7 @@ def test_authentication_transaction_rejects_other_user_credential():
         purpose="authentication",
         user_id=1,
     )
-    request = mfa_endpoint.PassKeyAuthenticationFinish(
+    request = schemas.PassKeyAuthenticationFinish(
         credential={"id": "credential-id"},
         transaction_token=token,
     )
@@ -131,7 +132,7 @@ def test_authentication_finish_token_cannot_be_replayed():
         purpose="authentication",
         user_id=1,
     )
-    request = mfa_endpoint.PassKeyAuthenticationFinish(
+    request = schemas.PassKeyAuthenticationFinish(
         credential={"id": "credential-id"},
         transaction_token=token,
     )

@@ -1,3 +1,4 @@
+from app import schemas
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,14 +15,14 @@ from app.helper.passkey import (
 )
 
 
-def _registration_request(user_id: int = 1) -> mfa_endpoint.PassKeyRegistrationFinish:
+def _registration_request(user_id: int = 1) -> schemas.PassKeyRegistrationFinish:
     """构造只用于错误路径的注册完成请求。"""
     transaction_token = PasskeyChallengeStore.issue(
         challenge="challenge",
         purpose="registration",
         user_id=user_id,
     )
-    return mfa_endpoint.PassKeyRegistrationFinish(
+    return schemas.PassKeyRegistrationFinish(
         credential={"id": "credential-id"},
         transaction_token=transaction_token,
         name="测试通行密钥",
