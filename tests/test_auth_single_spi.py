@@ -84,8 +84,9 @@ def test_build_flow_service_partitions_by_step_kind():
 
         user = types.SimpleNamespace(id=1, name="u", is_otp=False, otp_secret="S")
         fac_ids = [getattr(s, "step_id", None) for s in svc._factor_steps_for(user)]
-        # 第二因子步含内建（otp/passkey）+ 插件 factor，且插件 factor 仅出现一次（无双计）
-        assert "otp" in fac_ids and "passkey" in fac_ids
+        # 第二因子步含内建（otp）+ 插件 factor，且插件 factor 仅出现一次（无双计）
+        assert "otp" in fac_ids
+        assert "passkey" not in fac_ids  # PassKey 是主认证方式，不作第二因子
         assert fac_ids.count("plugin-otp") == 1
         assert "myauth-step" not in fac_ids  # 凭证步不进第二因子步
     finally:

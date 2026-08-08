@@ -7,18 +7,21 @@
 import types
 
 from app.core.auth.flow import AllOf, AnyOf, AuthContext, IdentityAssertion, NOf, StepRef
-from app.core.auth.outcome import CredentialOutcome
-from app.service.auth.builtin_factors import OtpFactor, PasskeyFactor
-from app.service.auth.flow_engine import AuthFlow
+from app.core.auth.outcome import CredentialOutcome, MfaFactorResult
+from app.service.auth.builtin_factors import OtpFactor, build_builtin_factors
+from app.service.auth.flow_engine import AuthFlow, FlowStore
+from app.service.auth.flow_service import FlowService
 from app.service.auth.flow_steps import (
     CredentialProviderStep,
     FactorStep,
+    PasskeyLoginStep,
     PasswordStep,
     RedirectStep,
     build_credential_flow,
     build_mfa_flow,
     make_identity_resolver,
 )
+from app.service.auth.passkey_login import PasskeyChallengeStore
 from app.service.auth.provisioning import ProvisioningDeps
 
 
@@ -74,12 +77,26 @@ def test_factor_step_wrong_code_fails():
     assert result.kind == "failure"
 
 
-def test_passkey_step_emits_challenge():
-    # PasskeyFactor.verify 恒为 challenge_required → 适配为 challenge
-    flow = AuthFlow({"passkey": FactorStep(PasskeyFactor(is_enrolled=lambda ref: True))},
-                    AnyOf([StepRef("passkey")]))
-    _, result = flow.advance(_resolved_ctx(), _sub(step_id="passkey", code="x"))
-    assert result.kind in ("challenge", "mfa_required")  # 需走独立 passkey 端点
+class _OutOfBandFactor:
+    """带外因子桩（如插件推送/短信确认）：verify 恒为 ``challenge_required``，校验在带外通道完成。"""
+
+    factor_id = "oob"
+    factor_kind = "possession"
+    display_name = "带外确认"
+    priority = 20
+
+    def is_enrolled(self, user_ref):
+        return True
+
+    def verify(self, user_ref, submission):
+        return MfaFactorResult(status="challenge_required")
+
+
+def test_out_of_band_factor_step_emits_challenge():
+    # 因子返回 challenge_required → FactorStep 适配为 challenge（校验在带外通道完成）
+    flow = AuthFlow({"oob": FactorStep(_OutOfBandFactor())}, AnyOf([StepRef("oob")]))
+    _, result = flow.advance(_resolved_ctx(), _sub(step_id="oob", code="x"))
+    assert result.kind in ("challenge", "mfa_required")
 
 
 # ----------------------------- CredentialProviderStep over 假 provider -----------------------------
@@ -351,46 +368,111 @@ def test_make_identity_resolver_none_when_guard_rejects(monkeypatch):
     assert resolver(IdentityAssertion(provider_id="ldap", subject="s")) is None
 
 
-# ----------------------------- 黄金矩阵双注册（OTP+PassKey）优先级守护 -----------------------------
+# ----------------------------- 黄金矩阵双注册（OTP+带外因子）优先级守护 -----------------------------
 def _otp_factor_step(good_code="123456"):
     return FactorStep(OtpFactor(is_enrolled=lambda ref: True,
                                 verify=lambda ref, code: code == good_code))
 
 
-def _passkey_factor_step():
-    return FactorStep(PasskeyFactor(is_enrolled=lambda ref: True))
+def _oob_factor_step():
+    return FactorStep(_OutOfBandFactor())
 
 
-def test_otp_wins_when_both_otp_and_passkey_enrolled():
-    """OTP+PassKey 同时注册、提交正确 OTP → 流程 success，绝不下发 passkey 挑战。
+def test_otp_wins_when_both_otp_and_out_of_band_enrolled():
+    """OTP+带外因子同时注册、提交正确 OTP → 流程 success，绝不下发带外挑战。
 
-    OTP priority 10 < PassKey priority 20：引擎按 priority 升序先试 OTP，命中即满足并短路，
-    passkey 步永不被推进（无 challenge 泄漏）。守护双注册下"提交即验因子优先于带外因子"的不变量。
+    OTP priority 10 < 带外因子 priority 20：引擎按 priority 升序先试 OTP，命中即满足并短路，
+    带外步永不被推进（无 challenge 泄漏）。守护双注册下"提交即验因子优先于带外因子"的不变量。
     """
     otp = _otp_factor_step(good_code="123456")
-    passkey = _passkey_factor_step()
-    flow = build_mfa_flow([otp, passkey])  # 默认 AnyOf([otp, passkey])
+    oob = _oob_factor_step()
+    flow = build_mfa_flow([otp, oob])  # 默认 AnyOf([otp, oob])
     # 不指定 step_id，交由引擎按 priority 路由（验证 OTP 优先）
     ctx, result = flow.advance(_resolved_ctx(), _sub(code="123456"))
     assert result.kind == "success"
-    assert result.challenge is None            # 未落到 passkey → 无任何挑战
-    assert "passkey" in ctx.satisfied_steps or "otp" in ctx.satisfied_steps
-    assert "passkey" not in ctx.satisfied_steps  # passkey 从未被推进
+    assert result.challenge is None          # 未落到带外因子 → 无任何挑战
+    assert "oob" not in ctx.satisfied_steps  # 带外步从未被推进
     assert "otp" in ctx.satisfied_steps
 
 
-def test_wrong_otp_with_both_enrolled_falls_to_passkey_challenge():
-    """错误 OTP + 两者均注册 → 引擎 AnyOf 回落到 passkey 挑战（NOT 硬失败）。
+def test_wrong_otp_with_out_of_band_enrolled_falls_to_challenge():
+    """错误 OTP + 另有带外因子注册 → 引擎 AnyOf 回落到带外挑战（NOT 硬失败）。
 
-    显式锚定**新的（预期）引擎契约**：OTP deny 后，AnyOf 仍有未满足候选 passkey，
-    passkey 返回 challenge_required → 整轮以 challenge 收口而非 failure。
-    （对照旧 v2 _verify_mfa：错 OTP 直接拒登；统一流程下改为回落带外因子挑战。）
+    锚定引擎契约：OTP deny 后 AnyOf 仍有未满足候选，该候选返回 challenge_required →
+    整轮以 challenge 收口。仅当**确有**其他可用带外因子时才成立。
     """
     otp = _otp_factor_step(good_code="123456")
-    passkey = _passkey_factor_step()
-    flow = build_mfa_flow([otp, passkey])
+    oob = _oob_factor_step()
+    flow = build_mfa_flow([otp, oob])
     ctx, result = flow.advance(_resolved_ctx(), _sub(code="000000"))  # 错误 OTP
-    assert result.kind == "challenge"          # 回落 passkey 挑战，非硬失败
-    assert result.kind != "failure"
-    assert "passkey" in (result.factors_available or [])  # passkey 仍是可用候选
-    assert "otp" not in ctx.satisfied_steps     # 错码未满足 OTP
+    assert result.kind == "challenge"
+    assert "oob" in (result.factors_available or [])
+    assert "otp" not in ctx.satisfied_steps  # 错码未满足 OTP
+
+
+# ----------------------------- PassKey 不作第二因子：登录可达性回归 -----------------------------
+def _builtin_factor_steps_for(user):
+    """按生产装配（``auth._builtin_factor_steps``）为该 user 构造内建第二因子步。"""
+    return [FactorStep(f) for f in build_builtin_factors(
+        is_otp_enrolled=lambda _ref: bool(getattr(user, "is_otp", False)),
+        verify_otp=lambda _ref, code: code == getattr(user, "otp_secret", None))]
+
+
+def _flow_service(user, credential_steps, trusted=frozenset({"password", "system:passkey"})):
+    return FlowService(
+        flow_store=FlowStore(ttl_seconds=600),
+        credential_steps=credential_steps,
+        factor_steps_for=_builtin_factor_steps_for,
+        load_user=lambda uid: user,
+        issue_token=lambda u: {"access_token": f"TK-{u.id}", "user_name": u.name},
+        identity_resolver=lambda a: None,
+        trusted_step_ids=trusted,
+    )
+
+
+def test_builtin_factors_expose_otp_only():
+    """内建第二因子集只含 OTP：PassKey 是主认证方式，不得作为密码登录后的第二因子。"""
+    factors = build_builtin_factors(is_otp_enrolled=lambda _ref: True,
+                                    verify_otp=lambda _ref, code: True)
+    assert [f.factor_id for f in factors] == ["otp"]
+
+
+def test_passkey_only_user_password_login_succeeds_without_mfa():
+    """只绑 PassKey、未开 OTP 的用户，密码登录直接成功（无因子可推进 → 免 MFA）。
+
+    锚定可用性不变量：PassKey 注册态不得让该用户的密码登录卡在无法满足的 MFA 挑战上。
+    """
+    user = types.SimpleNamespace(id=42, name="alice", is_active=True, is_otp=False, otp_secret="")
+    svc = _flow_service(user, [PasswordStep(authenticate=lambda u, p: user if p == "pw" else None)])
+    out = svc.run_sync(_sub(grant_type="password", username="alice", password="pw", code=None))
+    assert out["status"] == "success"
+    assert out["token"]["access_token"] == "TK-42"
+
+
+def test_passkey_primary_login_issues_token_without_mfa():
+    """经统一流程以 PassKey 主认证登录 → 直接产出 Token，绝不再要求第二因子。
+
+    锚定自锁不变量：主认证用的 PassKey 不得在 ``_after_credential`` 里又被算作待满足的第二因子。
+    """
+    user = types.SimpleNamespace(id=7, name="bob", is_active=True, is_otp=False, otp_secret="")
+    step = PasskeyLoginStep(begin_fn=lambda username: ('{"options": 1}', "chal-abc"),
+                            verify_fn=lambda response, expected: user,
+                            store=PasskeyChallengeStore(ttl_seconds=600))
+    svc = _flow_service(user, [step])
+    begun = svc.begin(_sub(username="bob", flow="system:passkey"))
+    assert begun["status"] == "challenge"
+    out = svc.advance(begun["flow_token"], _sub(step_id="system:passkey", response={"id": "x"}))
+    assert out["status"] == "success"
+    assert out["token"]["access_token"] == "TK-7"
+
+
+def test_wrong_otp_fails_hard_for_user_with_passkeys():
+    """已绑 PassKey 且开了 OTP 的用户输错 OTP → ``failure``（非 challenge）。
+
+    锚定审计不变量：唯有 failure 才让 ``emit_auth_event`` 发 ``AuthFailed``，
+    风控/审计插件据此看得见暴破尝试；PassKey 注册态不得把失败降级成挑战。
+    """
+    user = types.SimpleNamespace(id=9, name="carol", is_active=True, is_otp=True, otp_secret="123456")
+    svc = _flow_service(user, [PasswordStep(authenticate=lambda u, p: user if p == "pw" else None)])
+    out = svc.run_sync(_sub(grant_type="password", username="carol", password="pw", code="000000"))
+    assert out["status"] == "failure"

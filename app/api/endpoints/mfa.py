@@ -79,17 +79,6 @@ def _verify_passkey_and_update(
     return success, new_sign_count
 
 
-async def _check_user_has_passkey(db: AsyncSession, user_id: int) -> bool:
-    """
-    检查用户是否有 PassKey
-
-    :param db: 数据库会话
-    :param user_id: 用户 ID
-    :return: 是否有 PassKey
-    """
-    return bool(await PassKey.async_get_by_user_id(db=db, user_id=user_id))
-
-
 # ==================== 通用 MFA 接口 ====================
 
 
@@ -441,58 +430,3 @@ async def passkey_delete(
     except Exception as e:
         logger.error(f"删除PassKey失败: {e}")
         return schemas.Response(success=False, message=f"删除失败: {str(e)}")
-
-
-@router.post(
-    "/passkey/verify", summary="PassKey 二次验证", response_model=schemas.Response
-)
-def passkey_verify_mfa(
-    passkey_req: schemas.PassKeyAuthenticationFinish,
-    current_user: Annotated[User, Depends(get_current_active_user)],
-) -> Any:
-    """使用 PassKey 进行二次验证（MFA）"""
-    try:
-        challenge_state = PasskeyChallengeStore.consume(
-            transaction_token=passkey_req.transaction_token,
-            purpose="authentication",
-        )
-        if not challenge_state:
-            return schemas.Response(success=False, message="验证请求已失效")
-        if (
-            challenge_state.user_id is not None
-            and challenge_state.user_id != current_user.id
-        ):
-            return schemas.Response(success=False, message="验证失败")
-
-        # 提取并标准化凭证ID
-        try:
-            credential_id = _extract_and_standardize_credential_id(
-                passkey_req.credential
-            )
-        except ValueError as e:
-            logger.warning(f"PassKey二次验证失败，提供的凭证无效: {e}")
-            return schemas.Response(success=False, message="验证失败")
-
-        # 查找PassKey（必须属于当前用户）
-        passkey = PassKey.get_by_credential_id(db=None, credential_id=credential_id)
-        if not passkey or passkey.user_id != current_user.id:
-            return schemas.Response(
-                success=False, message="通行密钥不存在或不属于当前用户"
-            )
-
-        # 验证认证响应并更新
-        success, _ = _verify_passkey_and_update(
-            credential=passkey_req.credential,
-            challenge=challenge_state.challenge,
-            passkey=passkey,
-        )
-
-        if not success:
-            return schemas.Response(success=False, message="通行密钥验证失败")
-
-        logger.info(f"用户 {current_user.name} 通过PassKey二次验证成功")
-
-        return schemas.Response(success=True, message="二次验证成功")
-    except Exception as e:
-        logger.error(f"PassKey二次验证失败: {e}")
-        return schemas.Response(success=False, message="验证失败")

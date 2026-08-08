@@ -1,12 +1,16 @@
-"""P0 信任边界（PR-A）单测：is_within 目录守卫、release 解压 Zip Slip 防护、
-Agent extra_context_files 路径穿越防护。"""
+"""P0 信任边界（PR-A）单测：is_within 目录守卫、
+Agent extra_context_files 路径穿越防护。
+
+release 压缩包解压的 Zip Slip 防护由 PluginHelper.__iter_release_zip_targets
+（经 __install_from_release / __async_install_from_release 调用）承担，
+对应用例见 tests/test_plugin_helper.py 的
+test_install_from_release_rejects_unsafe_zip_member 等测试。"""
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from app.utils.system import SystemUtils
-from app.helper.plugin import plan_release_zip_extraction
 from app.agent.runtime import AgentRuntimeManager, AgentRuntimeConfigError
 
 
@@ -41,35 +45,6 @@ class TestIsWithin:
             sibling = Path(d) / "foobar_evil"
             sibling.mkdir()
             assert SystemUtils.is_within(base, sibling / "x") is False
-
-
-class TestPlanReleaseZipExtraction:
-    """plugin.plan_release_zip_extraction 的路径规划与 Zip Slip 防护。"""
-
-    def test_normal_zip_strips_common_prefix(self):
-        names = ["MyPlugin/__init__.py", "MyPlugin/sub/x.py"]
-        planned, err = plan_release_zip_extraction(names, Path("/opt/app/plugins/myplugin"))
-        assert err is None
-        rels = sorted(rel for _, rel in planned)
-        assert rels == ["__init__.py", "sub/x.py"]
-
-    def test_zip_slip_traversal_is_rejected(self):
-        names = ["MyPlugin/__init__.py", "MyPlugin/../../../../etc/evil.py"]
-        planned, err = plan_release_zip_extraction(names, Path("/opt/app/plugins/myplugin"))
-        assert err is not None
-        assert planned == []
-
-    def test_absolute_entry_mixed_is_rejected(self):
-        # 绝对路径条目与普通条目混合时公共前缀不被剥离，绝对路径逃逸应被拦截
-        names = ["MyPlugin/__init__.py", "/etc/evil.py"]
-        planned, err = plan_release_zip_extraction(names, Path("/opt/app/plugins/myplugin"))
-        assert err is not None
-        assert planned == []
-
-    def test_empty_namelist_is_rejected(self):
-        planned, err = plan_release_zip_extraction([], Path("/opt/app/plugins/x"))
-        assert err is not None
-        assert planned == []
 
 
 class TestRuntimeResolveRelativePath:

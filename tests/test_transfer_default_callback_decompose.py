@@ -1,11 +1,10 @@
-"""S8 ⑦a/⑦b 单元测试：整理完成回调的分解与迁出。
+"""TransferResultProcessor 单元测试：整理完成回调的契约与事件派发。
 
-⑦a 把 god-method ``__default_callback`` 就地拆成薄编排 + 5 个私有 helper；⑦b 把这一簇整体
-迁入独立类 ``TransferResultProcessor``（组合于单例 ``chain._result_processor``），原 chain 方法
-``__default_callback`` 消失、回调改由处理器的 ``handle`` 提供。本套覆盖唯一含**新逻辑**的点——
-``_dispatch_transfer_result_event``（把原成功/失败两处逐字重复的「媒体/字幕/音频」三路事件
-派发合并为一个按 success 参数选 EventType 三元组的 helper），并守卫迁出后的结构契约：处理器
-暴露 ``handle`` + 5 helper + 迁入的 2 个私有方法，且 ``__default_callback`` 已从 TransferChain 移除。
+``TransferResultProcessor`` 组合于单例 ``chain._result_processor``，以薄编排 + 5 个私有
+helper 承担整理完成后处理，回调由处理器的 ``handle`` 提供，TransferChain 不再持有
+``__default_callback``。本套覆盖唯一含**新逻辑**的点——``_dispatch_transfer_result_event``
+（把成功/失败两路「媒体/字幕/音频」三路事件派发合并为一个按 success 参数选 EventType
+三元组的 helper），并守卫处理器的结构契约：暴露 ``handle`` + 5 helper + 2 个私有方法。
 
 处理器经 ``self._chain`` read-through 读取 ``eventmanager`` 与 mangled ``__is_*_file``，故测试以
 ``make_transfer_chain()`` 夹具（已种 ``_result_processor`` + 扩展名分类用的 ``_media_exts`` 等）驱动，
@@ -102,7 +101,7 @@ class ResultProcessorExtractionContractTest(unittest.TestCase):
     """迁出后的结构契约：处理器暴露 handle + helper 簇；__default_callback 已离开 TransferChain。"""
 
     def test_default_callback_removed_from_chain(self):
-        # 整理完成回调已迁入 TransferResultProcessor，chain 不再持有 mangled 方法
+        # 整理完成回调由 TransferResultProcessor 处理，chain 不持有该 mangled 方法
         self.assertFalse(hasattr(TransferChain, "_TransferChain__default_callback"))
 
     def test_processor_exposes_handle_and_helpers(self):
@@ -113,7 +112,7 @@ class ResultProcessorExtractionContractTest(unittest.TestCase):
                 "_handle_transfer_success",
                 "_notify_transfer_complete",
                 "_cleanup_torrents_move_mode",
-                # 仅 callback 簇使用、随簇迁入的两个私有方法（name-mangled 到处理器）
+                # 仅回调簇使用的两个私有方法，name-mangled 到处理器
                 "_TransferResultProcessor__get_transfer_target_dir_path",
                 "_TransferResultProcessor__send_metadata_scrape_event",
         ):

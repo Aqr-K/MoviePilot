@@ -1221,9 +1221,9 @@ class TransferResultProcessor:
     """整理结果处理器（从 TransferChain 抽出，组合于其单例上 ``chain._result_processor``）。
 
     职责：整理任务（每个文件）完成后的统一后处理——成功/失败分支（记历史、派发完成/失败事件、
-    登记成功文件清单或触发 AI 重试）、批次完成通知、种子已整理标记、移动模式清理。原
-    ``TransferChain.__default_callback`` 及其 ⑦a 分解出的 5 个 helper 整体迁入，外加仅其使用的
-    ``__get_transfer_target_dir_path`` / ``__send_metadata_scrape_event``。
+    登记成功文件清单或触发 AI 重试）、批次完成通知、种子已整理标记、移动模式清理。
+    ``handle``（原 ``TransferChain.__default_callback``）及其拆分出的 5 个 helper 均在本类中，
+    外加仅其使用的 ``__get_transfer_target_dir_path`` / ``__send_metadata_scrape_event``。
 
     p115 契约面（``_success_target_files`` 直接 mutate、``jobview`` 深取、mangled ``__is_*_file`` /
     ``__mark_torrent_completed_if_done``、留 chain 的 ``_can_delete_torrent``）仍在 TransferChain，
