@@ -8,7 +8,7 @@ from app.api.endpoints.plugin import plugin_releases
 from app.api.endpoints.plugin import reset_plugin
 from app.api.endpoints.system import sync_plugin_market_from_wiki
 from app.core.config import settings
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.schemas.event import PluginDataResetEventData
 from app.schemas.types import ChainEventType
 from app.utils.singleton import Singleton
@@ -458,7 +458,7 @@ def test_delete_plugin_config_can_force_delete_after_plugin_is_stopped():
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
     manager = PluginManager()
 
-    with patch("app.core.plugin.SystemConfigOper") as system_config_oper:
+    with patch("app.helper.plugin_manager.SystemConfigOper") as system_config_oper:
         system_config_oper.return_value.delete.return_value = True
         assert manager.delete_plugin_config("DemoPlugin", force=True) is True
 
@@ -474,7 +474,7 @@ def test_delete_plugin_data_can_force_delete_after_plugin_is_stopped():
     manager = PluginManager()
     calls = []
 
-    with patch("app.core.plugin.PluginDataOper") as plugin_data_oper:
+    with patch("app.helper.plugin_manager.PluginDataOper") as plugin_data_oper:
         plugin_data_oper.return_value.del_data.side_effect = lambda pid: calls.append(pid)
         assert manager.delete_plugin_data("DemoPlugin", force=True) is True
 
