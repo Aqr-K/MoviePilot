@@ -1,11 +1,11 @@
-import asyncio
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, Union
 
-from sqlalchemy import NullPool, QueuePool, and_, create_engine, event, inspect, text, select, delete, Column, Integer, \
+from sqlalchemy import NullPool, QueuePool, and_, create_engine, event, inspect, select, delete, Integer, \
     Sequence, Identity
 from sqlalchemy.engine import Engine as SQLAlchemyEngine, ExceptionContext
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import Session, as_declarative, declared_attr, scoped_session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, declared_attr, mapped_column, scoped_session, sessionmaker
 
 from app.core.config import settings
 from app.log import logger
@@ -63,10 +63,10 @@ def get_id_column():
     """
     if settings.DB_TYPE.lower() == "postgresql":
         # PostgreSQL使用SERIAL类型，让数据库自动处理序列
-        return Column(Integer, Identity(start=1, cycle=True), primary_key=True)
+        return mapped_column(Integer, Identity(start=1, cycle=True), primary_key=True)
     else:
         # SQLite使用Sequence
-        return Column(Integer, Sequence('id'), primary_key=True)
+        return mapped_column(Integer, Sequence('id'), primary_key=True)
 
 
 def _get_database_engine(is_async: bool = False):
@@ -80,6 +80,31 @@ def _get_database_engine(is_async: bool = False):
         return _get_postgresql_engine(is_async)
     else:
         return _get_sqlite_engine(is_async)
+
+
+def _register_sqlite_journal_mode(engine) -> None:
+    """
+    为 SQLite 引擎按连接设置 journal_mode（WAL/DELETE）。
+
+    经 SQLAlchemy connect 事件在每个 DBAPI 连接建立时执行 PRAGMA，取代在模块 import 期
+    主动建连执行 PRAGMA（同步路径）或 asyncio.run() 起停事件循环（异步路径）的副作用。
+    异步引擎须传入其底层同步引擎（AsyncEngine.sync_engine），connect 事件注册于该同步引擎。
+
+    :param engine: 同步 Engine 或异步引擎的 sync_engine
+    """
+    _journal_mode = "WAL" if settings.DB_WAL_ENABLE else "DELETE"
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_journal_mode(dbapi_connection, _connection_record):  # noqa
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f"PRAGMA journal_mode={_journal_mode};")
+        except Exception as err:
+            # 设置失败仅告警并放行该连接：监听器抛出会令连接池拒绝所有连接、使数据库整体不可用，
+            # 故宁可以默认 journal_mode 退化运行，也不让 PRAGMA 失败演变为全局连接失败
+            print(f"Failed to set SQLite journal_mode={_journal_mode}: {err}")
+        finally:
+            cursor.close()
 
 
 def _get_sqlite_engine(is_async: bool = False):
@@ -121,11 +146,8 @@ def _get_sqlite_engine(is_async: bool = False):
         engine = create_engine(**_db_kwargs)
         _register_database_error_logging(engine)
 
-        # 设置WAL模式
-        _journal_mode = "WAL" if settings.DB_WAL_ENABLE else "DELETE"
-        with engine.connect() as connection:
-            current_mode = connection.execute(text(f"PRAGMA journal_mode={_journal_mode};")).scalar()
-            print(f"SQLite database journal mode set to: {current_mode}")
+        # 经 connect 事件按连接设置 journal_mode，避免在模块 import 期对引擎产生建连副作用
+        _register_sqlite_journal_mode(engine)
 
         return engine
     else:
@@ -142,22 +164,9 @@ def _get_sqlite_engine(is_async: bool = False):
         async_engine = create_async_engine(**_db_kwargs)
         _register_database_error_logging(async_engine.sync_engine)
 
-        # 设置WAL模式
-        _journal_mode = "WAL" if settings.DB_WAL_ENABLE else "DELETE"
-
-        async def set_async_wal_mode():
-            """
-            设置异步引擎的WAL模式
-            """
-            async with async_engine.connect() as _connection:
-                result = await _connection.execute(text(f"PRAGMA journal_mode={_journal_mode};"))
-                _current_mode = result.scalar()
-                print(f"Async SQLite database journal mode set to: {_current_mode}")
-
-        try:
-            asyncio.run(set_async_wal_mode())
-        except Exception as e:
-            print(f"Failed to set async SQLite WAL mode: {e}")
+        # 经底层同步引擎的 connect 事件按连接设置 journal_mode，
+        # 取代 import 期 asyncio.run() 起停事件循环的副作用
+        _register_sqlite_journal_mode(async_engine.sync_engine)
 
         return async_engine
 
@@ -267,12 +276,72 @@ async def close_database():
     关闭所有数据库连接并清理资源
     """
     try:
+        # 释放所有插件自管理的独立数据库容器
+        from app.db.manager import db_manager
+        db_manager.dispose_all()
         # 释放同步连接池
         Engine.dispose()  # noqa
         # 释放异步连接池
         await AsyncEngine.dispose()
     except Exception as err:
         print(f"Error while disposing database connections: {err}")
+
+
+@contextmanager
+def atomic_session() -> Generator[Session, None, None]:
+    """
+    原子会话上下文：把多步写入收敛进单一事务，统一提交或回滚。
+
+    会话打上 `_atomic_managed` 标记，块内将其作为 `db=` 传给 @db_update 装饰的写操作时，
+    各层不再各自提交/回滚，改由本上下文在块结束时统一 commit、异常时整体 rollback。
+    会话取 `expire_on_commit=False`，块结束提交后对象属性不过期，便于块后继续读取。
+
+    用法::
+
+        with atomic_session() as db:
+            obj_a.update(db, {...})
+            obj_b.update(db, {...})
+        # 两步写入在此作为单一事务提交，任一步抛错则整体回滚
+
+    :yield: 托管事务的同步 Session
+    """
+    session = SessionFactory(expire_on_commit=False)
+    session.info["_atomic_managed"] = True
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@asynccontextmanager
+async def async_atomic_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    异步原子会话上下文：把多步异步写入收敛进单一事务，统一提交或回滚。
+
+    语义与 atomic_session 一致，配合 @async_db_update 装饰的写操作使用。
+
+    用法::
+
+        async with async_atomic_session() as db:
+            await obj_a.async_update(db, {...})
+            await obj_b.async_update(db, {...})
+
+    :yield: 托管事务的 AsyncSession
+    """
+    session = AsyncSessionFactory(expire_on_commit=False)
+    session.info["_atomic_managed"] = True
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
 
 
 def _get_args_db(args: tuple, kwargs: dict) -> Optional[Session]:
@@ -356,14 +425,19 @@ def db_update(func):
             _close_db = True
             # 更新参数中的数据库会话
             args, kwargs = _update_args_db(args, kwargs, db)
+        # 外部传入且处于 atomic_session 托管事务内的会话：本层仅参与、不提交/回滚/关闭，
+        # 由 atomic_session 统一收尾，从而把多步写入收敛进单一事务（见 atomic_session）。
+        _managed = (not _close_db) and bool(db.info.get("_atomic_managed"))
         try:
             # 执行函数
             result = func(*args, **kwargs)
-            # 提交事务
-            db.commit()
+            # 提交事务（托管事务下交由 atomic_session 统一提交）
+            if not _managed:
+                db.commit()
         except Exception as err:
-            # 回滚事务
-            db.rollback()
+            # 回滚事务（托管事务下交由 atomic_session 统一回滚）
+            if not _managed:
+                db.rollback()
             raise err
         finally:
             # 关闭数据库会话
@@ -391,14 +465,19 @@ def async_db_update(func):
             _close_db = True
             # 更新参数中的异步数据库会话
             args, kwargs = _update_args_async_db(args, kwargs, db)
+        # 外部传入且处于 async_atomic_session 托管事务内的会话：本层仅参与、不提交/回滚/关闭，
+        # 由 async_atomic_session 统一收尾，从而把多步写入收敛进单一事务。
+        _managed = (not _close_db) and bool(db.info.get("_atomic_managed"))
         try:
             # 执行函数
             result = await func(*args, **kwargs)
-            # 提交事务
-            await db.commit()
+            # 提交事务（托管事务下交由 async_atomic_session 统一提交）
+            if not _managed:
+                await db.commit()
         except Exception as err:
-            # 回滚事务
-            await db.rollback()
+            # 回滚事务（托管事务下交由 async_atomic_session 统一回滚）
+            if not _managed:
+                await db.rollback()
             raise err
         finally:
             # 关闭数据库会话
@@ -473,8 +552,8 @@ def async_db_query(func):
     return wrapper
 
 
-@as_declarative()
-class Base:
+class Base(DeclarativeBase):
+    __allow_unmapped__ = True
     id: Any
     __name__: str
 
@@ -490,12 +569,12 @@ class Base:
 
     @classmethod
     @db_query
-    def get(cls, db: Session, rid: int) -> Self:
-        return db.query(cls).filter(and_(cls.id == rid)).first()
+    def get(cls, db: Session, rid: int) -> Optional[Self] :
+        return db.execute(select(cls).where(and_(cls.id == rid))).scalars().first()
 
     @classmethod
     @async_db_query
-    async def async_get(cls, db: AsyncSession, rid: int) -> Self:
+    async def async_get(cls, db: AsyncSession, rid: int) -> Optional[Self] :
         result = await db.execute(select(cls).where(and_(cls.id == rid)))
         return result.scalars().first()
 
@@ -516,7 +595,7 @@ class Base:
     @classmethod
     @db_update
     def delete(cls, db: Session, rid):
-        db.query(cls).filter(and_(cls.id == rid)).delete()
+        db.execute(delete(cls).where(and_(cls.id == rid)))
 
     @classmethod
     @async_db_update
@@ -529,7 +608,7 @@ class Base:
     @classmethod
     @db_update
     def truncate(cls, db: Session):
-        db.query(cls).delete()
+        db.execute(delete(cls))
 
     @classmethod
     @async_db_update
@@ -539,20 +618,20 @@ class Base:
     @classmethod
     @db_query
     def list(cls, db: Session) -> List[Self]:
-        return db.query(cls).all()
+        return list(db.execute(select(cls)).scalars().all())
 
     @classmethod
     @async_db_query
-    async def async_list(cls, db: AsyncSession) -> Sequence[Self]:
+    async def async_list(cls, db: AsyncSession) -> List[Self]:
         result = await db.execute(select(cls))
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     def to_dict(self):
         return {c.name: getattr(self, c.name, None) for c in self.__table__.columns}  # noqa
 
-    @declared_attr
-    def __tablename__(self) -> str:
-        return self.__name__.lower()
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return cls.__name__.lower()
 
 
 class DbOper:

@@ -2,6 +2,7 @@ from .agentchat import AgentChat
 from .agenttask import AgentTask
 from .downloadfailure import DownloadFailure
 from .downloadhistory import DownloadHistory, DownloadFiles
+from .externalidentity import ExternalIdentity
 from .mediaserver import MediaServerItem
 from .message import Message
 from .passkey import PassKey

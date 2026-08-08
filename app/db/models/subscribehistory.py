@@ -1,8 +1,8 @@
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Float, JSON, Index, select
+from sqlalchemy import Integer, String, Float, JSON, Index, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import db_query, Base, get_id_column, async_db_query
 
@@ -11,74 +11,74 @@ class SubscribeHistory(Base):
     """
     订阅历史表
     """
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 标题
-    name = Column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # 年份
-    year = Column(String)
+    year: Mapped[Optional[str]] = mapped_column(String)
     # 类型
-    type = Column(String)
+    type: Mapped[Optional[str]] = mapped_column(String)
     # 搜索关键字
-    keyword = Column(String)
-    tmdbid = Column(Integer, index=True)
-    imdbid = Column(String)
-    tvdbid = Column(Integer)
-    doubanid = Column(String, index=True)
-    bangumiid = Column(Integer, index=True)
-    anilistid = Column(Integer, index=True)
-    mediaid = Column(String, index=True)
-    media_source = Column(String, index=True)
-    media_id = Column(String, index=True)
+    keyword: Mapped[Optional[str]] = mapped_column(String)
+    tmdbid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    imdbid: Mapped[Optional[str]] = mapped_column(String)
+    tvdbid: Mapped[Optional[int]] = mapped_column(Integer)
+    doubanid: Mapped[Optional[str]] = mapped_column(String, index=True)
+    bangumiid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    anilistid: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    mediaid: Mapped[Optional[str]] = mapped_column(String, index=True)
+    media_source: Mapped[Optional[str]] = mapped_column(String, index=True)
+    media_id: Mapped[Optional[str]] = mapped_column(String, index=True)
     # 季号
-    season = Column(Integer)
+    season: Mapped[Optional[int]] = mapped_column(Integer)
     # 海报
-    poster = Column(String)
+    poster: Mapped[Optional[str]] = mapped_column(String)
     # 背景图
-    backdrop = Column(String)
+    backdrop: Mapped[Optional[str]] = mapped_column(String)
     # 评分，float
-    vote = Column(Float)
+    vote: Mapped[Optional[float]] = mapped_column(Float)
     # 简介
-    description = Column(String)
+    description: Mapped[Optional[str]] = mapped_column(String)
     # 过滤规则
-    filter = Column(String)
+    filter: Mapped[Optional[str]] = mapped_column(String)
     # 包含
-    include = Column(String)
+    include: Mapped[Optional[str]] = mapped_column(String)
     # 排除
-    exclude = Column(String)
+    exclude: Mapped[Optional[str]] = mapped_column(String)
     # 质量
-    quality = Column(String)
+    quality: Mapped[Optional[str]] = mapped_column(String)
     # 分辨率
-    resolution = Column(String)
+    resolution: Mapped[Optional[str]] = mapped_column(String)
     # 特效
-    effect = Column(String)
+    effect: Mapped[Optional[str]] = mapped_column(String)
     # 总集数
-    total_episode = Column(Integer)
+    total_episode: Mapped[Optional[int]] = mapped_column(Integer)
     # 开始集数
-    start_episode = Column(Integer)
+    start_episode: Mapped[Optional[int]] = mapped_column(Integer)
     # 订阅完成时间
-    date = Column(String)
+    date: Mapped[Optional[str]] = mapped_column(String)
     # 订阅用户
-    username = Column(String)
+    username: Mapped[Optional[str]] = mapped_column(String)
     # 订阅站点
-    sites = Column(JSON)
+    sites: Mapped[Optional[dict]] = mapped_column(JSON)
     # 是否洗版
-    best_version = Column(Integer, default=0)
+    best_version: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 是否只洗全集整包，开启后电视剧洗版不按单集下载
-    best_version_full = Column(Integer, default=0)
+    best_version_full: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 洗版时已下载剧集的优先级状态，格式：{"1": 90, "2": 100}
-    episode_priority = Column(JSON)
+    episode_priority: Mapped[Optional[dict]] = mapped_column(JSON)
     # 保存路径
-    save_path = Column(String)
+    save_path: Mapped[Optional[str]] = mapped_column(String)
     # 是否使用 imdbid 搜索
-    search_imdbid = Column(Integer, default=0)
+    search_imdbid: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 自定义识别词
-    custom_words = Column(String)
+    custom_words: Mapped[Optional[str]] = mapped_column(String)
     # 自定义媒体类别
-    media_category = Column(String)
+    media_category: Mapped[Optional[str]] = mapped_column(String)
     # 过滤规则组
-    filter_groups = Column(JSON, default=list)
+    filter_groups: Mapped[Optional[list]] = mapped_column(JSON, default=list)
     # 剧集组
-    episode_group = Column(String)
+    episode_group: Mapped[Optional[str]] = mapped_column(String)
 
     __table_args__ = (
         Index('ix_subscribehistory_type_date', 'type', 'date'),
