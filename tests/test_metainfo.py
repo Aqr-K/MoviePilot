@@ -3,6 +3,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from app.core.metainfo import MetaInfo, MetaInfoPath, find_metainfo
 from app.core.meta.metaanime import MetaAnime
 from app.helper.torrent import TorrentHelper
