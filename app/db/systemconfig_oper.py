@@ -41,7 +41,9 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
             conf = SystemConfig.get_by_key(self._db, key)
             if conf:
                 if old_value != value:
-                    if value:
+                    # 用 is not None 而非真值判断：0/False/[]/{}/"" 均为合法配置值，
+                    # 仅 None 表示删除；否则会静默删除合法 falsy 配置并与内存缓存不一致。
+                    if value is not None:
                         conf.update(self._db, {"value": value})
                     else:
                         conf.delete(self._db, conf.id)
@@ -77,7 +79,8 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
                 return None
             # 执行数据库更新
             if conf:
-                if value:
+                # 与 set() 一致：仅 None 删除，合法 falsy 值正常落库。
+                if value is not None:
                     await conf.async_update(self._db, {"value": value})
                 else:
                     await conf.async_delete(self._db, conf.id)

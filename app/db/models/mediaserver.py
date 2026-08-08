@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Optional, List
 
-from sqlalchemy import Column, Integer, String, JSON, Index, or_
+from sqlalchemy import Integer, String, JSON, Index, or_
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import db_query, db_update, get_id_column, async_db_query, Base
 from app.db.models.media_identity import media_identity_constraint
@@ -15,32 +15,32 @@ class MediaServerItem(Base):
     """
     媒体服务器媒体条目表
     """
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 服务器类型
-    server = Column(String)
+    server: Mapped[Optional[str]] = mapped_column(String)
     # 媒体库ID
-    library = Column(String)
+    library: Mapped[Optional[str]] = mapped_column(String)
     # ID
-    item_id = Column(String, index=True)
+    item_id: Mapped[Optional[str]] = mapped_column(String, index=True)
     # 类型
-    item_type = Column(String)
+    item_type: Mapped[Optional[str]] = mapped_column(String)
     # 标题
-    title = Column(String, index=True)
+    title: Mapped[Optional[str]] = mapped_column(String, index=True)
     # 原标题
-    original_title = Column(String)
+    original_title: Mapped[Optional[str]] = mapped_column(String)
     # 年份
-    year = Column(String)
+    year: Mapped[Optional[str]] = mapped_column(String)
     # 媒体数据源与原生ID
-    media_source = Column(String, index=True)
-    media_id = Column(String, index=True)
+    media_source: Mapped[Optional[str]] = mapped_column(String, index=True)
+    media_id: Mapped[Optional[str]] = mapped_column(String, index=True)
     # 路径
-    path = Column(String)
+    path: Mapped[Optional[str]] = mapped_column(String)
     # 季集
-    seasoninfo = Column(JSON, default=dict)
+    seasoninfo: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     # 备注
-    note = Column(JSON)
+    note: Mapped[Optional[dict]] = mapped_column(JSON)
     # 同步时间
-    lst_mod_date = Column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    lst_mod_date: Mapped[Optional[str]] = mapped_column(String, default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     __table_args__ = (
         media_identity_constraint("mediaserveritem"),
