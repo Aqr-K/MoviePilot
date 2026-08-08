@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api.endpoints import login as login_endpoint
-from app.service.auth.builtin_factors import OtpFactor, PasskeyFactor
+from app.service.auth.builtin_factors import OtpFactor
 
 
 def _request() -> Request:
@@ -56,7 +56,6 @@ def test_factor_not_offered_when_not_enrolled():
 
     assert OtpFactor(is_enrolled=lambda _u: False,
                      verify=lambda _u, _c: False).challenge_hint(user) is None
-    assert PasskeyFactor(is_enrolled=lambda _u: False).challenge_hint(user) is None
 
 
 def test_login_mfa_response_contains_methods_after_password_verification(monkeypatch):

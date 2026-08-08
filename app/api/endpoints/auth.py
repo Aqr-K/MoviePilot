@@ -127,13 +127,12 @@ _BUILTIN_CREDENTIAL_IDS: frozenset[str] = frozenset({"password", "system:passkey
 
 
 def _builtin_factor_steps(user) -> list:
-    """该用户的 per-user 内建第二因子（OTP/PassKey，经闭包绑定到本 user）包装为 ``FactorStep``。
+    """该用户的 per-user 内建第二因子（OTP，经闭包绑定到本 user）包装为 ``FactorStep``。
 
     只构内建因子——插件因子改由 ``all_auth_steps()`` 的 "factor" 种步骤注入，故此处不含插件因子，
     避免与注册表里的插件因子双计。
-    内建 OTP/PassKey 天然 per-user（闭包绑定 user.otp_secret/passkey），无法做全局注册表步，故保留内建装配。
+    内建 OTP 天然 per-user（闭包绑定 user.otp_secret），无法做全局注册表步，故保留内建装配。
     """
-    from app.db.models.passkey import PassKey
     from app.service.auth.builtin_factors import build_builtin_factors
     from app.service.auth.flow_steps import FactorStep
     from app.utils.otp import OtpUtils
@@ -141,7 +140,6 @@ def _builtin_factor_steps(user) -> list:
     builtin = build_builtin_factors(
         is_otp_enrolled=lambda _ref: bool(getattr(user, "is_otp", False)),
         verify_otp=lambda _ref, code: OtpUtils.check(str(user.otp_secret), code),
-        has_passkey=lambda _ref: bool(PassKey.get_by_user_id(db=None, user_id=user.id)),
     )
     return [FactorStep(f) for f in builtin]
 
