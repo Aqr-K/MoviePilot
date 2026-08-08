@@ -12,6 +12,11 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_superuser_async
 from app.modules.themoviedb.tmdb_cache import TmdbCache
 from app.schemas.types import MediaType, SystemConfigKey
+from app.service.tmdb import (
+    credits_persons as _credits_persons,
+    recommend_medias as _recommend_medias,
+    similar_medias as _similar_medias,
+)
 
 router = ResponseAPIRouter()
 
@@ -95,16 +100,7 @@ async def tmdb_similar(
     """
     根据TMDBID查询类似电影/电视剧，type_name: 电影/电视剧
     """
-    mediatype = MediaType(type_name)
-    if mediatype == MediaType.MOVIE:
-        medias = await TmdbChain().async_movie_similar(tmdbid=tmdbid)
-    elif mediatype == MediaType.TV:
-        medias = await TmdbChain().async_tv_similar(tmdbid=tmdbid)
-    else:
-        return []
-    if medias:
-        return [media.to_dict() for media in medias]
-    return []
+    return await _similar_medias(tmdbid, type_name)
 
 
 @router.get(
@@ -118,16 +114,7 @@ async def tmdb_recommend(
     """
     根据TMDBID查询推荐电影/电视剧，type_name: 电影/电视剧
     """
-    mediatype = MediaType(type_name)
-    if mediatype == MediaType.MOVIE:
-        medias = await TmdbChain().async_movie_recommend(tmdbid=tmdbid)
-    elif mediatype == MediaType.TV:
-        medias = await TmdbChain().async_tv_recommend(tmdbid=tmdbid)
-    else:
-        return []
-    if medias:
-        return [media.to_dict() for media in medias]
-    return []
+    return await _recommend_medias(tmdbid, type_name)
 
 
 @router.get(
@@ -164,14 +151,7 @@ async def tmdb_credits(
     """
     根据TMDBID查询演员阵容，type_name: 电影/电视剧
     """
-    mediatype = MediaType(type_name)
-    if mediatype == MediaType.MOVIE:
-        persons = await TmdbChain().async_movie_credits(tmdbid=tmdbid, page=page)
-    elif mediatype == MediaType.TV:
-        persons = await TmdbChain().async_tv_credits(tmdbid=tmdbid, page=page)
-    else:
-        return []
-    return persons or []
+    return await _credits_persons(tmdbid, type_name, page)
 
 
 @router.get(

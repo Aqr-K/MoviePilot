@@ -1,5 +1,4 @@
 import asyncio
-import json
 import time
 import uuid
 from typing import AsyncIterator, List, Optional, Tuple
@@ -19,6 +18,11 @@ from app.agent import MoviePilotAgent, StreamingHandler
 from app.core.config import settings
 from app.core.security import openai_bearer_scheme
 from app.schemas.types import MessageChannel
+from app.service.openai import (
+    check_auth as _check_auth,
+    error_response as _error_response,
+    sse_payload as _sse_payload,
+)
 
 OPENAI_ERROR_RESPONSES = {
     400: {"model": schemas.OpenAIErrorResponse, "description": "请求格式错误"},
@@ -120,10 +124,6 @@ class _OpenAIStreamingHandler(StreamingHandler):
         return True, final_text
 
 
-def _sse_payload(data: dict) -> str:
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 async def _stream_response(
     agent: _CollectingMoviePilotAgent,
     prompt: str,
@@ -215,48 +215,6 @@ async def _stream_response(
                 pass
         elif finished:
             await task
-
-
-def _error_response(
-    message: str,
-    status_code: int,
-    error_type: str = "invalid_request_error",
-    code: Optional[str] = None,
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content=schemas.OpenAIErrorResponse(
-            error=schemas.OpenAIErrorDetail(
-                message=message,
-                type=error_type,
-                code=code,
-            )
-        ).model_dump(),
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
-def _check_auth(
-    credentials: Optional[HTTPAuthorizationCredentials],
-) -> Optional[JSONResponse]:
-    """
-    OpenAI 兼容接口以 API_TOKEN 认证受信客户端，认证通过即按管理员级 Agent 集成处理。
-    """
-    if not credentials or credentials.scheme.lower() != "bearer":
-        return _error_response(
-            "Invalid bearer token.",
-            401,
-            error_type="authentication_error",
-            code="invalid_api_key",
-        )
-    if credentials.credentials != settings.API_TOKEN:
-        return _error_response(
-            "Invalid bearer token.",
-            401,
-            error_type="authentication_error",
-            code="invalid_api_key",
-        )
-    return None
 
 
 @router.get(

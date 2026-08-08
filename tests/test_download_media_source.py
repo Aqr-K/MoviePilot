@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from app import schemas
 from app.api.endpoints import download as download_endpoint
+from app.service import download as download_service
 from app.core.context import MediaInfo
 from app.schemas.types import MediaSource, MediaType
 
@@ -33,8 +34,8 @@ def test_download_add_passes_generic_media_source(monkeypatch) -> None:
             captured["download"] = kwargs
             return "download-1"
 
-    monkeypatch.setattr(download_endpoint, "MediaChain", FakeMediaChain)
-    monkeypatch.setattr(download_endpoint, "DownloadChain", FakeDownloadChain)
+    monkeypatch.setattr(download_service, "MediaChain", FakeMediaChain)
+    monkeypatch.setattr(download_service, "DownloadChain", FakeDownloadChain)
 
     response = download_endpoint.add(
         torrent_in=schemas.TorrentInfo(title="Frieren S01E01"),

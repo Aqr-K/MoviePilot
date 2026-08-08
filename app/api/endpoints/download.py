@@ -5,52 +5,21 @@ from fastapi import Depends, Body
 from app import schemas
 from app.api.response import ResponseAPIRouter
 from app.chain.download import DownloadChain
-from app.chain.media import MediaChain
 from app.core.context import Context, MediaInfo, MusicInfo, SubtitleInfo, TorrentInfo
-from app.core.meta import MetaMusic
-from app.core.metainfo import MetaInfo
+from app.core.context import SubtitleInfo
 from app.core.security import verify_token
 from app.db.models.user import User
-from app.db.site_oper import SiteOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user
 from app.helper.directory import DirectoryHelper
-from app.schemas.types import (
-    MUSIC_ENTITY_RECORDING,
-    MediaSource,
-    MediaType,
-    MusicTargetEntityType,
-    SystemConfigKey,
+from app.schemas.types import SystemConfigKey
+from app.service.download import (
+    add_download_with_media as _add_download_with_media,
+    prepare_subtitle_download as _prepare_subtitle_download,
+    recognize_and_download as _recognize_and_download,
 )
-from app.utils.media import is_music_media_source, normalize_music_type
-from app.utils.security import SecurityUtils
 
 router = ResponseAPIRouter()
-
-
-def _prepare_subtitle_download(subtitle: SubtitleInfo) -> tuple[bool, str]:
-    """
-    校验字幕下载签名，并用服务端站点配置覆盖请求凭据。
-    """
-    if subtitle.site is None:
-        return False, "字幕站点信息为空"
-
-    clean_url = SecurityUtils.verify_signed_url(
-        subtitle.enclosure,
-        purpose=SecurityUtils.subtitle_download_purpose(subtitle.site),
-    )
-    if not clean_url:
-        return False, "字幕下载链接签名无效"
-
-    site = SiteOper().get(subtitle.site)
-    if not site:
-        return False, "字幕站点信息不存在"
-
-    subtitle.enclosure = clean_url
-    subtitle.site_cookie = site.cookie
-    subtitle.site_ua = site.ua
-    subtitle.site_proxy = bool(site.proxy)
-    return True, ""
 
 
 @router.get("/", summary="正在下载", response_model=List[schemas.DownloaderTorrent])
@@ -78,28 +47,12 @@ def download(
     """
     添加下载任务（含媒体信息）
     """
-    if isinstance(media_in, schemas.MusicInfo):
-        mediainfo = MusicInfo.from_dict(media_in.model_dump())
-        metainfo = MetaMusic.from_music_info(mediainfo)
-        metainfo.org_string = torrent_in.title
-    else:
-        metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
-        mediainfo = MediaInfo()
-        mediainfo.from_dict(media_in.model_dump())
-    # 种子信息
-    torrentinfo = TorrentInfo()
-    torrentinfo.from_dict(torrent_in.model_dump())
-    # 手动下载始终使用选择的下载器
-    torrentinfo.site_downloader = downloader
-    # 上下文
-    context = Context(
-        meta_info=metainfo, media_info=mediainfo, torrent_info=torrentinfo
-    )
-    did = DownloadChain().download_single(
-        context=context,
-        username=current_user.name,
+    did = _add_download_with_media(
+        media_in=media_in,
+        torrent_in=torrent_in,
+        downloader=downloader,
         save_path=save_path,
-        source="Manual",
+        username=current_user.name,
     )
     if not did:
         return schemas.Response(success=False, message="任务添加失败")
@@ -124,69 +77,20 @@ def add(
     """
     添加下载任务（不含媒体信息）
     """
-    normalized_music_type = normalize_music_type(music_type, allow_artist=False)
-    if music_type is not None and not normalized_music_type:
-        return schemas.Response(
-            success=False,
-            message="音乐实体类型无效，仅支持 recording 或 album",
-        )
-    if (media_source is None) != (media_id is None):
-        return schemas.Response(
-            success=False,
-            message="媒体来源和媒体 ID 必须同时提供",
-        )
-    is_music = (
-        torrent_in.category in (MediaType.MUSIC, MediaType.MUSIC.value, "music")
-        or is_music_media_source(media_source)
-        or normalized_music_type is not None
-    )
-    if is_music and media_source and not is_music_media_source(media_source):
-        return schemas.Response(
-            success=False,
-            message="音乐下载只能使用音乐元数据源",
-        )
-    if is_music and not normalized_music_type:
-        normalized_music_type = MUSIC_ENTITY_RECORDING
-    # 元数据
-    metainfo = (
-        MetaMusic.parse_query(torrent_in.title)
-        if is_music
-        else MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
-    )
-    # 媒体信息
-    if media_source and media_id:
-        mediainfo = MediaChain().recognize_media(
-            meta=metainfo,
-            media_source=media_source,
-            media_id=media_id,
-            mtype=MediaType.MUSIC if is_music else None,
-            music_type=normalized_music_type,
-        )
-    else:
-        mediainfo = MediaChain().recognize_by_meta(
-            metainfo,
-            media_source=media_source,
-            obtain_images=False,
-            mtype=MediaType.MUSIC if is_music else None,
-            music_type=normalized_music_type,
-        )
-    if not mediainfo:
-        return schemas.Response(success=False, message="无法识别媒体信息")
-    # 种子信息
-    torrentinfo = TorrentInfo()
-    torrentinfo.from_dict(torrent_in.model_dump())
-    # 上下文
-    context = Context(
-        meta_info=metainfo, media_info=mediainfo, torrent_info=torrentinfo
-    )
-
-    did = DownloadChain().download_single(
-        context=context,
-        username=current_user.name,
+    recognized, did = _recognize_and_download(
+        torrent_in=torrent_in,
+        tmdbid=tmdbid,
+        doubanid=doubanid,
+        bangumiid=bangumiid,
+        anilistid=anilistid,
+        media_source=media_source,
+        media_id=media_id,
         downloader=downloader,
         save_path=save_path,
-        source="Manual",
+        username=current_user.name,
     )
+    if not recognized:
+        return schemas.Response(success=False, message="无法识别媒体信息")
     if not did:
         return schemas.Response(success=False, message="任务添加失败")
     return schemas.Response(success=True, data={"download_id": did})
