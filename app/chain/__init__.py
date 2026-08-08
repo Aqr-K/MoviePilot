@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
+from fastapi.concurrency import run_in_threadpool
+
 from app.core import dispatch
 from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
