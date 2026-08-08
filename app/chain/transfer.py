@@ -912,10 +912,10 @@ class TransferService:
     """
     文件整理队列服务（队列 / 守护线程 / 计数器机器）。
 
-    从 TransferChain 抽出，组合于其单例上（``chain._service``）。仅持有与队列调度相关的
+    组合于 TransferChain 单例上（``chain._service``）。仅持有与队列调度相关的
     机器态；契约固定的状态（``jobview`` / ``_success_target_files`` / 刮削批次 /
-    ``__handle_transfer`` / 模块级 ``task_lock``）仍在 TransferChain（整理完成回调已抽到
-    ``TransferResultProcessor.handle``，由入队方传入），本服务通过 ``self._chain`` read-through
+    ``__handle_transfer`` / 模块级 ``task_lock``）由 TransferChain 持有（整理完成回调由
+    ``TransferResultProcessor.handle`` 承担，由入队方传入），本服务通过 ``self._chain`` read-through
     回调单例——p115strmhelper 的 monkey-patch 与私有态深入访问因此不受影响（worker 仍调用
     单例的 ``_TransferChain__handle_transfer``）。
     """
@@ -1845,7 +1845,7 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         if not self.__put_to_jobview(task):
             return False
         self.__register_scrape_batch_task(task)
-        # 添加到队列（队列机器已抽到 TransferService，回调为整理结果处理器 _result_processor.handle）
+        # 添加到队列（队列由 TransferService 管理，回调为整理结果处理器 _result_processor.handle）
         self._service.enqueue(task=task, callback=self._result_processor.handle)
         return True
 

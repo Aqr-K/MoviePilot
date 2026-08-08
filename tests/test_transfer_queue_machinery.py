@@ -60,7 +60,7 @@ class MakeQueueChainContractTest(unittest.TestCase):
         self.assertEqual(0, svc._total_num)
         # service read-through 回单例
         self.assertIs(chain, svc._chain)
-        # 契约态仍在 TransferChain（jobview/_success_target_files）；刮削批次已抽到协调器
+        # 契约态由 TransferChain 持有（jobview/_success_target_files）；刮削批次由协调器管理
         self.assertIsInstance(chain.jobview, JobManager)
         self.assertEqual({}, chain._success_target_files)
         self.assertEqual({}, chain._scrape_coordinator._batches)

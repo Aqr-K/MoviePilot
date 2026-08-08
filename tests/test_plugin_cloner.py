@@ -35,7 +35,7 @@ def test_clone_orchestrator_stays_helpers_moved_out():
     assert hasattr(PluginManager, "clone_plugin"), "clone_plugin 必须留在 PluginManager"
     for gone in ("_modify_plugin_files", "_modify_python_file",
                  "_modify_federation_files", "_rename_federation_assets"):
-        assert not hasattr(PluginManager, gone), f"{gone} 应已抽出 PluginManager"
+        assert not hasattr(PluginManager, gone), f"{gone} 不应在 PluginManager 上"
     for fn in ("modify_plugin_files", "modify_python_file",
                "modify_federation_files", "rename_federation_assets"):
         assert hasattr(plugin_cloner, fn), f"plugin_cloner 缺函数 {fn}"
