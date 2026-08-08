@@ -55,7 +55,7 @@ def test_download_endpoint_builds_music_context():
     chain.download_single.return_value = "hash-1"
     current_user = Mock(name="admin")
 
-    with patch("app.api.endpoints.download.DownloadChain", return_value=chain):
+    with patch("app.service.download.DownloadChain", return_value=chain):
         response = download(
             media_in=MusicInfoSchema(**_music_info().to_dict()),
             torrent_in=TorrentInfo(

@@ -141,11 +141,12 @@ def test_download_single_submits_download_added_to_background(monkeypatch):
         "app.helper.directory.DirectoryHelper.get_download_dirs",
         lambda _self: _download_dirs(),
     )
-    monkeypatch.setattr(download_module, "ThreadHelper", _FakeThreadHelper)
     monkeypatch.setattr(download_module, "DownloadHistoryOper", _FakeDownloadHistoryOper)
     monkeypatch.setattr(download_module, "TorrentHelper", _FakeTorrentHelper)
 
     chain = DownloadChain.__new__(DownloadChain)
+    # S6 DI：直接注入 fake 线程池（不再 monkeypatch 全局 ThreadHelper，演示构造注入收益）
+    chain._thread_helper = _FakeThreadHelper()
     chain.download = MagicMock(return_value=("qb", "hash123", "Original", "添加下载成功"))
     chain.download_added = MagicMock()
     chain.eventmanager = MagicMock()

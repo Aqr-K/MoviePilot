@@ -6,6 +6,7 @@ from app import schemas
 from app.chain.recommend import RecommendChain
 from app.core.event import eventmanager
 from app.core.security import verify_token
+from app.helper.plugin_manager import PluginManager
 from app.modules.themoviedb.tmdbv3api.exceptions import TMDbException
 from app.schemas import RecommendSourceEventData
 from app.schemas.types import ChainEventType
@@ -31,17 +32,31 @@ async def _require_tmdb_result(operation: Awaitable[List[Any]]) -> List[Any]:
 )
 def source(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
-    获取推荐数据源
+    获取推荐数据源：合并插件声明式注册（provides_recommend_sources）与事件扩展
+    （ChainEventType.RecommendSource），按 api_path 去重。
     """
-    # 广播事件，请示额外的推荐数据源支持
+    sources: List[schemas.RecommendMediaSource] = []
+    seen_paths = set()
+
+    def _collect(items):
+        for src in items or []:
+            api_path = getattr(src, "api_path", None) if src else None
+            # 跳过畸形源（无 api_path），逐个忽略而非把 None 塞进去重集吞掉后续源
+            if api_path is None or api_path in seen_paths:
+                continue
+            seen_paths.add(api_path)
+            sources.append(src)
+
+    # 1) 插件声明式注册的推荐数据源
+    for plugin_sources in PluginManager().get_plugin_provided_recommend_sources().values():
+        _collect(plugin_sources)
+    # 2) 广播事件，请示额外的推荐数据源支持（向后兼容既有事件扩展）
     event_data = RecommendSourceEventData()
     event = eventmanager.send_event(ChainEventType.RecommendSource, event_data)
-    # 使用事件返回的上下文数据
     if event and event.event_data:
         event_data: RecommendSourceEventData = event.event_data
-        if event_data.extra_sources:
-            return event_data.extra_sources
-    return []
+        _collect(event_data.extra_sources)
+    return sources
 
 
 @router.get(

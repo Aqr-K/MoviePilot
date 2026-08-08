@@ -102,14 +102,14 @@ def test_module_dispatch_always_reaches_plugins() -> None:
 def test_explicit_search_source_reaches_plugins() -> None:
     """请求级搜索来源应进入包含插件的完整模块调度。"""
     chain = _chain_without_init()
-    chain.run_module = Mock(return_value=[])
+    chain.mediarecognizemanager = Mock()
+    chain.mediarecognizemanager.search_medias = Mock(return_value=[])
     meta = MetaBase("Frieren")
 
     result = chain.search_medias(meta, source="anilist")
 
     assert result == []
-    chain.run_module.assert_called_once_with(
-        "search_medias",
+    chain.mediarecognizemanager.search_medias.assert_called_once_with(
         meta=meta,
         source="anilist",
     )

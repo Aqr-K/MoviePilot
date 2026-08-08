@@ -20,11 +20,11 @@ from app.core.music import MusicInfo, MusicMeta
 from app.core.event import eventmanager, Event
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
+from app.core.thread import ThreadHelper
 from app.db.downloadfailure_oper import DownloadFailureOper
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.mediaserver_oper import MediaServerOper
 from app.helper.directory import DirectoryHelper, validate_download_save_path
-from app.helper.thread import ThreadHelper
 from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import ExistMediaInfo, FileURI, NotExistMediaInfo, DownloaderTorrent, Notification, ResourceSelectionEventData, \
@@ -61,6 +61,13 @@ class DownloadChain(ChainBase):
         ".zip": "zip",
         ".rar": "rar",
     }
+
+    def __init__(self, thread_helper: ThreadHelper = None):
+        super().__init__()
+        # S6 DI 试点：线程池依赖可注入，默认回退全局共享单例 ThreadHelper。
+        # 不传参（现有调用点与插件）= 取全局单例，行为不变；测试可注入同步 fake，
+        # 确定性驱动后台提交（_submit_download_added_task），无需 mock.patch 全局。
+        self._thread_helper = thread_helper or ThreadHelper()
 
     @staticmethod
     def _build_download_note(
@@ -485,7 +492,7 @@ class DownloadChain(ChainBase):
                 logger.error(f"执行下载成功后处理失败：{str(e)}")
 
         try:
-            ThreadHelper().submit(_run_download_added)
+            self._thread_helper.submit(_run_download_added)
         except Exception as err:
             logger.error(f"提交下载成功后处理后台任务失败：{str(err)}")
 

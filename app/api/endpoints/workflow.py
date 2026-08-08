@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app import schemas
 from app.chain.workflow import WorkflowChain
 from app.core.config import global_vars
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.workflow import WorkFlowManager
 from app.db import get_async_db, get_db
 from app.db.models import Workflow, User

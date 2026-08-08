@@ -1,6 +1,5 @@
 from pathlib import Path
-from typing import Annotated, Any, List, Optional, Union
-from uuid import UUID
+from typing import List, Any, Annotated, Optional
 
 from fastapi import APIRouter, Depends
 
@@ -10,7 +9,6 @@ from app.chain.music import MusicChain
 from app.chain.tmdb import TmdbChain
 from app.core.config import settings
 from app.core.context import Context
-from app.core.music import MusicInfo
 from app.core.event import eventmanager
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo, MetaInfoPath
@@ -20,21 +18,15 @@ from app.db.user_oper import get_current_active_user, get_current_active_superus
 from app.schemas import MediaType, MediaRecognizeConvertEventData
 from app.schemas.category import CategoryConfig
 from app.schemas.types import ChainEventType
+from app.service.media import (
+    scrape_path as _scrape_path,
+    search_media as _search_media,
+)
 from app.utils.media import MEDIA_SOURCE_ID_FIELDS, parse_media_key
 
 router = APIRouter()
 MediaSource = str
 
-
-def _is_valid_source_media_id(source: Optional[str], media_id: str) -> bool:
-    """按媒体数据源校验原生 ID，MusicBrainz 使用 UUID，其它现有来源使用数字 ID。"""
-    if source == "musicbrainz":
-        try:
-            UUID(media_id)
-            return True
-        except (TypeError, ValueError):
-            return False
-    return media_id.isdigit()
 
 
 def _build_recognize_metainfo(
@@ -212,39 +204,7 @@ async def search(
     :param _: Token校验
     :return: 搜索结果列表
     """
-
-    def __get_source(obj: Union[schemas.MediaInfo, schemas.MediaPerson, dict]):
-        """
-        获取对象属性
-        """
-        if isinstance(obj, dict):
-            return obj.get("source")
-        return obj.source
-
-    media_chain = MediaChain()
-    if type == "media":
-        _, medias = await media_chain.async_search(title=title, source=source)
-        result = [media.to_dict() for media in medias] if medias else []
-    elif type == "collection":
-        collections = await media_chain.async_search_collections(
-            name=title, source=source
-        )
-        result = (
-            [collection.to_dict() for collection in collections] if collections else []
-        )
-    else:  # person
-        persons = await media_chain.async_search_persons(name=title, source=source)
-        result = [person.model_dump() for person in persons] if persons else []
-
-    if not result:
-        return []
-
-    # 排序和分页
-    setting_order = settings.SEARCH_SOURCE.split(",") if settings.SEARCH_SOURCE else []
-    sort_order = {source: index for index, source in enumerate(setting_order)}
-
-    sorted_result = sorted(result, key=lambda x: sort_order.get(__get_source(x), 4))
-    return sorted_result[(page - 1) * count : page * count]
+    return await _search_media(title=title, type=type, page=page, count=count, source=source)
 
 
 @router.post(
@@ -268,75 +228,14 @@ def scrape(
     :param type_name: 媒体类型
     :param _: Token校验
     """
-    if not fileitem or not fileitem.path:
-        return schemas.Response(success=False, message="刮削路径无效")
-    normalized_media_id = media_id.strip() if media_id else None
-    if normalized_media_id and not media_source:
-        return schemas.Response(
-            success=False, message="指定媒体ID时必须同时指定媒体数据源"
-        )
-    if normalized_media_id and not _is_valid_source_media_id(media_source, normalized_media_id):
-        return schemas.Response(success=False, message="媒体ID格式无效")
-
-    is_music = (
-        type_name == MediaType.MUSIC
-        or media_source == "musicbrainz"
-        or MusicChain.is_audio_path(fileitem.path)
+    success, message = _scrape_path(
+        fileitem,
+        storage,
+        media_source=media_source,
+        media_id=media_id,
+        type_name=type_name,
     )
-    if is_music:
-        if type_name not in (None, MediaType.MUSIC):
-            return schemas.Response(success=False, message="MusicBrainz 只能用于音乐刮削")
-        music_info: Optional[MusicInfo] = None
-        if normalized_media_id:
-            music_info = MusicChain().recognize(
-                source=media_source or "musicbrainz",
-                media_id=normalized_media_id,
-            )
-            if not music_info:
-                return schemas.Response(success=False, message="刮削失败，无法识别音乐信息")
-        success, message = MusicChain().scrape_metadata(
-            fileitem=fileitem,
-            mediainfo=music_info,
-            overwrite=True,
-        )
-        return schemas.Response(success=success, message=message)
-
-    chain = MediaChain()
-    if normalized_media_id:
-        meta_info = MetaInfoPath(Path(fileitem.path))
-        media_info = chain.recognize_media(
-            meta=meta_info,
-            mtype=type_name,
-            source=media_source,
-            mediaid=normalized_media_id,
-        )
-        if media_info:
-            media_info.scrape_source = media_source
-            chain.obtain_images(mediainfo=media_info)
-    else:
-        context = chain.recognize_by_path(
-            fileitem.path,
-            source=media_source,
-            obtain_images=True,
-        )
-        meta_info = context.meta_info if context else None
-        media_info = context.media_info if context else None
-
-    if not media_info:
-        return schemas.Response(success=False, message="刮削失败，无法识别媒体信息")
-    if media_source:
-        media_info.scrape_source = media_source
-    if storage == "local":
-        if not Path(fileitem.path).exists():
-            return schemas.Response(success=False, message="刮削路径不存在")
-    # 手动刮削 (暂时使用同步版本，可以后续优化为异步)
-    chain.scrape_metadata(
-        fileitem=fileitem,
-        meta=meta_info,
-        mediainfo=media_info,
-        overwrite=True,
-    )
-    return schemas.Response(success=True, message=f"{fileitem.path} 刮削完成")
+    return schemas.Response(success=success, message=message)
 
 
 @router.get(

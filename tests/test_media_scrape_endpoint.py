@@ -14,7 +14,7 @@ def test_scrape_uses_explicit_media_source_and_id() -> None:
     chain = Mock()
     chain.recognize_media.return_value = media_info
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         result = scrape(
             fileitem=fileitem,
             storage="alist",
@@ -46,7 +46,7 @@ def test_scrape_keeps_automatic_recognition_compatible() -> None:
     chain = Mock()
     chain.recognize_by_path.return_value = Context(meta_info=meta_info, media_info=media_info)
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         result = scrape(
             fileitem=fileitem,
             storage="alist",
@@ -123,7 +123,7 @@ def test_scrape_music_uses_musicbrainz_uuid_and_music_scraper() -> None:
     chain.recognize.return_value = info
     chain.scrape_metadata.return_value = (True, "已刮削 1 个音频文件")
 
-    with patch("app.api.endpoints.media.MusicChain", return_value=chain):
+    with patch("app.service.media.MusicChain", return_value=chain):
         result = scrape(
             fileitem=fileitem,
             storage="local",

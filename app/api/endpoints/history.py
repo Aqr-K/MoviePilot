@@ -8,11 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app import schemas
-from app.agent import ReplyMode, agent_manager
-from app.agent.prompt.transfer_redo import (
-    build_batch_manual_redo_prompt,
-    build_manual_redo_prompt,
-)
+from app.agent import ReplyMode, prompt_manager, agent_manager
 from app.chain.storage import StorageChain
 from app.core.config import settings, global_vars
 from app.core.event import eventmanager
@@ -28,18 +24,32 @@ from app.db.user_oper import (
 )
 from app.helper.progress import ProgressHelper
 from app.schemas.types import EventType
+from app.service.history import (
+    build_batch_manual_redo_template_context,
+    build_manual_redo_template_context,
+    format_manual_redo_record_context,
+    glob_to_like as _glob_to_like,
+    normalize_history_ids,
+)
 from app.utils.jieba import cut as jieba_cut
 
 router = APIRouter()
 
 
-def normalize_history_ids(history_ids: list[int]) -> list[int]:
-    """对输入的历史记录 ID 列表进行规范化处理，去除重复项并保持原有顺序。"""
-    normalized_ids: list[int] = []
-    for history_id in history_ids:
-        if history_id not in normalized_ids:
-            normalized_ids.append(history_id)
-    return normalized_ids
+def build_manual_redo_prompt(history: Any) -> str:
+    """构建手动 AI 整理提示词。"""
+    return prompt_manager.render_system_task_message(
+        "manual_transfer_redo",
+        template_context=build_manual_redo_template_context(history),
+    )
+
+
+def build_batch_manual_redo_prompt(histories: list[Any]) -> str:
+    """构建批量手动 AI 整理提示词。"""
+    return prompt_manager.render_system_task_message(
+        "batch_manual_transfer_redo",
+        template_context=build_batch_manual_redo_template_context(histories),
+    )
 
 
 def _start_ai_redo_task(history_id: int, prompt: str, progress_key: str):
@@ -156,14 +166,6 @@ async def delete_download_history(
     """
     await DownloadHistory.async_delete(db, history_in.id)
     return schemas.Response(success=True)
-
-
-def _glob_to_like(pattern: str) -> str:
-    """
-    将 glob 通配符模式转换为 SQL LIKE 模式（使用 \\ 作为转义字符）
-    """
-    result = pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return result.replace("*", "%").replace("?", "_")
 
 
 @router.get("/transfer", summary="查询整理记录", response_model=schemas.Response)
