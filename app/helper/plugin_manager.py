@@ -1781,6 +1781,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if not plugin_id or not suffix:
                 return False, "插件ID和分身后缀不能为空"
 
+            # 分身后缀白名单：后缀会拼进目录名与生成代码的类名，必须限定为 ASCII 字母数字，
+            # 否则可造成目录穿越（../）或注入 __init__.py 生成代码。
+            if not (1 <= len(suffix) <= 20 and suffix.isascii() and suffix.isalnum()):
+                return False, "分身后缀仅允许 1-20 位字母或数字"
+
             # 检查原插件是否存在
             if plugin_id not in self._plugins:
                 return False, f"原插件 {plugin_id} 不存在"
@@ -1799,6 +1804,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
             # 创建分身插件目录
             clone_plugin_dir = Path(settings.ROOT_PATH) / "app" / "plugins" / clone_id.lower()
+
+            # 目录穿越守卫（防御纵深）：分身目录必须落在 plugins 根目录内
+            plugins_root = Path(settings.ROOT_PATH) / "app" / "plugins"
+            if not SystemUtils.is_within(plugins_root, clone_plugin_dir):
+                return False, "分身插件目录非法（越界）"
 
             # 复制插件目录
             import shutil

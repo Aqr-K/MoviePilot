@@ -1376,7 +1376,8 @@ class _NotificationChainMixin:
             )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
-                actions = notify_action.split(",")
+                # 规范化动作 token：去空白、转小写、丢弃空项，避免 "user, admin"/大小写等变体绕过隔离
+                actions = [a.strip().lower() for a in notify_action.split(",") if a.strip()]
                 # 是否已发送管理员标志
                 admin_sended = False
                 send_orignal = False
@@ -1419,11 +1420,20 @@ class _NotificationChainMixin:
                         elif send_message.username == settings.SUPERUSER:
                             # 管理员同名已发送
                             admin_sended = True
-                    else:
-                        # 按原消息发送全体
+                    elif action == "all":
+                        # 显式全量：按原消息发送全体
                         if not admin_sended:
                             send_orignal = True
                         break
+                    else:
+                        # 未知动作 / user 无用户上下文 / admin 已发过：fail-closed 跳过，绝不广播到全渠道
+                        logger.info(f"{send_message.mtype} 的消息动作 '{action}' 无适用目标，跳过发送")
+                        continue
+                    # 目标隔离动作但目标为空（管理员/用户行缺失 None，或存在但无任何渠道绑定 {}）→ 跳过，
+                    # 绝不按无目标广播到全部公开渠道（集中 fail-closed，兜住下游渠道对空目标处理不一致的风险）
+                    if not send_message.targets:
+                        logger.info(f"{send_message.mtype} 的通知目标为空，跳过发送以避免广播到全部公开渠道")
+                        continue
                     # 按设定发送
                     self.eventmanager.send_event(
                         etype=EventType.NoticeMessage,
@@ -1492,7 +1502,8 @@ class _NotificationChainMixin:
             )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
-                actions = notify_action.split(",")
+                # 规范化动作 token：去空白、转小写、丢弃空项，避免 "user, admin"/大小写等变体绕过隔离
+                actions = [a.strip().lower() for a in notify_action.split(",") if a.strip()]
                 # 是否已发送管理员标志
                 admin_sended = False
                 send_orignal = False
@@ -1535,11 +1546,20 @@ class _NotificationChainMixin:
                         elif send_message.username == settings.SUPERUSER:
                             # 管理员同名已发送
                             admin_sended = True
-                    else:
-                        # 按原消息发送全体
+                    elif action == "all":
+                        # 显式全量：按原消息发送全体
                         if not admin_sended:
                             send_orignal = True
                         break
+                    else:
+                        # 未知动作 / user 无用户上下文 / admin 已发过：fail-closed 跳过，绝不广播到全渠道
+                        logger.info(f"{send_message.mtype} 的消息动作 '{action}' 无适用目标，跳过发送")
+                        continue
+                    # 目标隔离动作但目标为空（管理员/用户行缺失 None，或存在但无任何渠道绑定 {}）→ 跳过，
+                    # 绝不按无目标广播到全部公开渠道（集中 fail-closed，兜住下游渠道对空目标处理不一致的风险）
+                    if not send_message.targets:
+                        logger.info(f"{send_message.mtype} 的通知目标为空，跳过发送以避免广播到全部公开渠道")
+                        continue
                     # 按设定发送
                     await self.eventmanager.async_send_event(
                         etype=EventType.NoticeMessage,

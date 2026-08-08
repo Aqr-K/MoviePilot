@@ -45,6 +45,44 @@ PLUGIN_DIR = Path(settings.ROOT_PATH) / "app" / "plugins"
 PLUGIN_SYSTEM_VERSION_FIELD = "system_version"
 
 
+def plan_release_zip_extraction(namelist: List[str], dest_base: Path) -> Tuple[List[Tuple[str, str]], Optional[str]]:
+    """
+    校验 release 压缩包条目并规划解压路径，阻止 Zip Slip 目录穿越。
+
+    先剥离所有条目共有的顶层目录（如 pid/），再逐条用 SystemUtils.is_within 校验解析后
+    是否仍位于 dest_base 内；任一条目越界（含 ".." 逃逸或绝对路径）即整体拒绝，避免部分写入。
+
+    :param namelist: 压缩包内的条目名列表
+    :param dest_base: 解压目标根目录
+    :return: (规划列表[(原条目名, 相对路径)], 错误信息)；错误信息非 None 时应整体放弃解压
+    """
+    if not namelist:
+        return [], "压缩包内容为空"
+    # 若所有条目均在同一顶层目录下（如 pid/），则剥离这一层，避免出现双层目录
+    names_with_slash = [n for n in namelist if '/' in n]
+    base_prefix = ''
+    if names_with_slash and len(names_with_slash) == len(namelist):
+        first_seg = names_with_slash[0].split('/')[0]
+        if all(n.startswith(first_seg + '/') for n in namelist):
+            base_prefix = first_seg + '/'
+    dest_base_resolved = Path(dest_base).resolve()
+    planned: List[Tuple[str, str]] = []
+    has_file = False
+    for name in namelist:
+        rel_path = name[len(base_prefix):]
+        if not rel_path:
+            continue
+        target = dest_base_resolved / rel_path.rstrip('/')
+        if not SystemUtils.is_within(dest_base_resolved, target):
+            return [], f"检测到非法压缩包路径（目录穿越）：{name}"
+        planned.append((name, rel_path))
+        if not rel_path.endswith('/'):
+            has_file = True
+    if not has_file:
+        return [], "压缩包中无可写入文件"
+    return planned, None
+
+
 class PluginHelper(metaclass=WeakSingleton):
     """
     插件市场管理，下载安装插件到本地
@@ -1847,10 +1885,8 @@ class PluginHelper(metaclass=WeakSingleton):
             if not rel_parts:
                 raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
             dest_path = (dest_root / Path(*rel_parts)).resolve()
-            try:
-                dest_path.relative_to(dest_root)
-            except ValueError as exc:
-                raise ValueError(f"非法 Release 压缩包成员：{raw_name}") from exc
+            if not SystemUtils.is_within(dest_root, dest_path):
+                raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
             targets.append((info, dest_path, info.is_dir()))
         return targets
 

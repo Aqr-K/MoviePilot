@@ -360,13 +360,18 @@ class QQBotModule(_ModuleBase, _MessageBase[QQBot]):
                 continue
             targets = message.targets
             userid = message.userid
-            if not userid and targets:
+            if not userid and targets is not None:
                 userid = targets.get("qq_userid") or targets.get("qq_openid")
                 if not userid:
                     userid = targets.get("qq_group_openid") or targets.get("qq_group")
                     if userid:
                         userid = f"group:{userid}"
-            # 无 userid 且无默认配置时，由 client 向曾发过消息的用户/群广播
+                if not userid:
+                    # 隔离消息（无 userid 但带 targets）解析不出 QQ 目标 → fail-closed，
+                    # 避免回退默认群 / 广播给全部历史交互对象
+                    logger.warn("用户没有指定 QQ用户ID，消息无法发送")
+                    return
+            # targets 为 None 的全局消息：仍由 client 按默认配置向曾发过消息的用户/群广播
             client: QQBot = self.get_instance(conf.name)
             if client:
                 client.send_msg(
