@@ -22,6 +22,18 @@ from app.utils.string import StringUtils
 
 
 class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
+    """
+    Rtorrent 下载器模块（app.modules.IDownloader 后端，已完整实现全部 11 个下载器方法）。
+
+    作为 Downloader 域后端，由门面 app.managers.downloader.DownloaderManager 统一分发调用。
+    torrent_files() 已归一化为 List[schemas.DownloaderFile]（progress 由 0~100 归一到 0~1）、
+    get_torrent_trackers() 已实现（经 xmlrpc t.multicall 取 tracker url），与 qb/tr 对齐无能力缺口。
+
+    .. deprecated::
+        经 ChainBase.run_module("download"/"list_torrents"/…) 的旧路径仍可用但计划在后续版本废弃；
+        新代码请改用 DownloaderManager 门面的类型化方法。
+    """
+
     def init_module(self) -> None:
         """
         初始化模块
@@ -574,6 +586,31 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
             results["category"] = False
         return results
 
+    def get_torrent_trackers(
+        self,
+        hash_string: str,
+        downloader: Optional[str] = None,
+    ) -> Optional[Dict[str, List[str]]]:
+        """
+        查询下载任务 Tracker 列表。
+        :param hash_string: 种子Hash
+        :param downloader: 下载器
+        :return: 下载器名称到 Tracker 列表的映射
+        """
+        if downloader:
+            server: Rtorrent = self.get_instance(downloader)
+            if not server:
+                return None
+            servers = {downloader: server}
+        else:
+            servers: Dict[str, Rtorrent] = self.get_instances()
+        ret_trackers = {}
+        for name, server in servers.items():
+            trackers = server.get_trackers(hash_string)
+            if trackers is not None:
+                ret_trackers[name] = trackers
+        return ret_trackers
+
     def start_torrents(
         self, hashs: Union[list, str], downloader: Optional[str] = None
     ) -> Optional[bool]:
@@ -604,14 +641,29 @@ class RtorrentModule(_ModuleBase, _DownloaderBase[Rtorrent]):
 
     def torrent_files(
         self, tid: str, downloader: Optional[str] = None
-    ) -> Optional[List[Dict]]:
+    ) -> "Optional[List[schemas.DownloaderFile]]":
         """
-        获取种子文件列表
+        获取种子文件列表（归一化为 DownloaderFile，不再泄漏 rTorrent 的裸 Dict 结构，与 qb/tr 对齐）。
+
+        注意：Rtorrent 客户端 get_files() 的 progress 为 0~100 百分比，此处 /100 归一到
+        DownloaderFile 约定的 0~1 区间（qb 原生即 0~1、tr 由 completed/size 计算）。
         """
         server: Rtorrent = self.get_instance(downloader)
         if not server:
             return None
-        return server.get_files(tid=tid)
+        files = server.get_files(tid=tid)
+        if files is None:
+            return None
+        return [
+            schemas.DownloaderFile(
+                name=f.get("name"),
+                size=f.get("size"),
+                progress=(f.get("progress") or 0) / 100.0,
+                priority=f.get("priority"),
+                index=f.get("id", idx),
+            )
+            for idx, f in enumerate(files)
+        ]
 
     def downloader_info(
         self, downloader: Optional[str] = None

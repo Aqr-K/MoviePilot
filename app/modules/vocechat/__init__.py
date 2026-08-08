@@ -357,8 +357,13 @@ class VoceChatModule(_ModuleBase, _MessageBase[VoceChat]):
                 continue
             targets = message.targets
             userid = message.userid
-            if not message.userid and targets:
+            if not userid and targets is not None:
+                # 隔离消息（无 userid 但带 targets）：解析不出本渠道 userid 时 fail-closed，
+                # 绝不用 userid=None 调 send_msg（否则会广播到整个 VoceChat 群）
                 userid = targets.get('vocechat_userid')
+                if not userid:
+                    logger.warn("用户没有指定 VoceChat 用户ID，消息无法发送")
+                    return
             client: VoceChat = self.get_instance(conf.name)
             if client:
                 client.send_msg(title=message.title, text=message.text,
