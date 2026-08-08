@@ -169,7 +169,7 @@ class DashboardStatisticTest(unittest.TestCase):
             schemas.Statistic(movie_count=1, tv_count=2, episode_count=None, user_count=1),
         ]
         with patch(
-            "app.api.endpoints.dashboard.DashboardChain.media_statistic",
+            "app.service.dashboard.DashboardChain.media_statistic",
             return_value=mocked_stats,
         ):
             ret = dashboard_endpoint.statistic(name="ugreen", _=None)
@@ -186,7 +186,7 @@ class DashboardStatisticTest(unittest.TestCase):
             schemas.Statistic(movie_count=1, tv_count=2, episode_count=6, user_count=1),
         ]
         with patch(
-            "app.api.endpoints.dashboard.DashboardChain.media_statistic",
+            "app.service.dashboard.DashboardChain.media_statistic",
             return_value=mocked_stats,
         ):
             ret = dashboard_endpoint.statistic(name="all", _=None)

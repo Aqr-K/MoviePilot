@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, List, Tuple, Union, Dict, Callable
+from typing import Optional, List, Set, Tuple, Union, Dict, Callable
 
 from app.chain.tmdb import TmdbChain
 from app.core.config import settings
@@ -8,9 +8,10 @@ from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo
 from app.helper.directory import DirectoryHelper
 from app.helper.message import MessageHelper
-from app.helper.module import ModuleHelper
+from app.core.module_loader import ModuleHelper
 from app.log import logger
 from app.modules import _ModuleBase
+from app.modules.filemanager import storage_registry
 from app.modules.filemanager.storages import StorageBase
 from app.modules.filemanager.transhandler import TransHandler
 from app.schemas import TransferInfo, ExistMediaInfo, TmdbEpisode, TransferDirectoryConf, FileItem, StorageUsage
@@ -23,20 +24,81 @@ class FileManagerModule(_ModuleBase):
     文件整理模块
     """
 
-    _storage_schemas = []
-    _support_storages = []
-
     def __init__(self):
         super().__init__()
         self.directoryhelper = DirectoryHelper()
         self.messagehelper = MessageHelper()
 
     def init_module(self) -> None:
-        # 加载模块
-        self._storage_schemas = ModuleHelper.load('app.modules.filemanager.storages',
-                                                  filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
-        # 获取存储类型
-        self._support_storages = [storage.schema.value for storage in self._storage_schemas if storage.schema]
+        # 存储器统一收敛到单索引 storage_registry（内建 owner=None + 外部插件），
+        # 此处仅确保内建已扫描入索引（幂等、仅一次）；外部注册随插件启停直接增删索引。
+        storage_registry.ensure_builtins()
+
+    @property
+    def _storage_schemas(self) -> List[type]:
+        """全部存储器类（内建+外部），直读单索引 storage_registry（保留属性名兼容既有读取方/测试）。"""
+        return storage_registry.all_classes()
+
+    @property
+    def _support_storages(self) -> Set[str]:
+        """当前支持的存储类型 schema.value 集合（内建+外部），直读单索引，供成员资格守卫 O(1) 判定。"""
+        return storage_registry.supported_values()
+
+    @staticmethod
+    def verify_storage_contract(storage_class: type) -> Tuple[bool, List[str]]:
+        """
+        校验外部(插件)存储器类是否满足 StorageBase 契约，作为「验证注册」核心判定，
+        对齐 ModuleManager.register_module 的严格注册（其余各域均有 verify_*_contract）。
+        宽松内省策略（不抛异常），返回 (是否通过, 失败原因列表)：
+          1) 须为类对象；
+          2) 须继承 StorageBase（真存储器 vs 任意注入类的核心区分）；
+          3) 抽象方法须全部落地（StorageBase 系 ABCMeta，未实现则不可实例化）；
+          4) 须声明非空 schema 且 schema.value 非空（存储类型身份；__get_storage_oper
+             按 schema.value 路由，缺失则无法被命中、init_module 亦会静默过滤掉）。
+        """
+        if not isinstance(storage_class, type):
+            return False, ["不是类对象"]
+        reasons: List[str] = []
+        if not issubclass(storage_class, StorageBase):
+            reasons.append("未继承 app.modules.filemanager.storages.StorageBase")
+        abstracts = getattr(storage_class, "__abstractmethods__", frozenset())
+        if abstracts:
+            reasons.append(f"抽象方法未实现：{sorted(abstracts)}")
+        schema = getattr(storage_class, "schema", None)
+        if not schema:
+            reasons.append("缺少存储类型标识 schema（须为非空 StorageSchema）")
+        elif not getattr(schema, "value", None):
+            reasons.append("schema.value 为空，无法按存储类型路由")
+        return (not reasons), reasons
+
+    @classmethod
+    def register_storage(cls, storage_class: type, owner: str) -> bool:
+        """
+        注册一个外部(插件)存储器类（StorageBase 子类）：先经 StorageBase 契约严格校验，再交
+        单索引 storage_registry 做 schema.value 碰撞检测后入索引（运行实例经只读属性即时可见，
+        无需刷新）。存储器无需扩展 StorageSchema 封闭枚举：按 schema.value 字符串路由，插件存储类
+        只要 .schema.value 为其字符串 id 即可被命中。
+        """
+        # 验证注册：不通过直接拒绝（对齐 register_module 严格注册，避免畸形类静默入索引后实例化炸裂）
+        ok, reasons = cls.verify_storage_contract(storage_class)
+        if not ok:
+            logger.warning(
+                f"存储器 {getattr(storage_class, '__name__', storage_class)}(owner={owner}) "
+                f"未通过 StorageBase 契约校验，拒绝注册：{'；'.join(reasons)}")
+            return False
+        # schema.value 碰撞检测 = 单索引内一次查（与内建或【其它】owner 冲突即拒，同 owner 幂等放行）
+        accepted, reason = storage_registry.register(storage_class, owner)
+        if not accepted:
+            logger.warning(
+                f"存储器 {getattr(storage_class, '__name__', storage_class)}(owner={owner}) "
+                f"注册被拒：{reason}")
+            return False
+        return True
+
+    @classmethod
+    def unregister_storages(cls, owner: str) -> None:
+        """卸载某来源(owner)注册的外部存储器（从单索引移除；运行实例经只读属性即时反映）。"""
+        storage_registry.unregister(owner)
 
     @staticmethod
     def get_name() -> str:
@@ -106,14 +168,15 @@ class FileManagerModule(_ModuleBase):
 
     def __get_storage_oper(self, _storage: str, _func: Optional[str] = None) -> Optional[StorageBase]:
         """
-        获取存储操作对象
+        获取存储操作对象：按 schema.value 从单索引 O(1) 取后端类并新建实例。
+        _func 非空时门控——后端类须实现该可选方法（如 generate_qrcode/check_login）方返回。
         """
-        for storage_schema in self._storage_schemas:
-            if storage_schema.schema \
-                    and storage_schema.schema.value == _storage \
-                    and (not _func or hasattr(storage_schema, _func)):
-                return storage_schema()
-        return None
+        storage_class = storage_registry.get_class(_storage)
+        if not storage_class:
+            return None
+        if _func and not hasattr(storage_class, _func):
+            return None
+        return storage_class()
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass

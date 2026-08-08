@@ -1,5 +1,4 @@
 import copy
-import inspect
 import pickle
 import traceback
 from abc import ABCMeta
@@ -9,16 +8,17 @@ from pathlib import Path
 from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
 from fastapi.concurrency import run_in_threadpool
-from qbittorrentapi import TorrentFilesList
-from transmission_rpc import File
 
+from app.core import dispatch
 from app.core.cache import FileCache, AsyncFileCache, fresh, async_fresh
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.event import EventManager
 from app.core.meta import MetaBase
 from app.core.module import ModuleManager
-from app.core.plugin import PluginManager
+from app.managers import (DownloaderManager, MediaServerManager, NotificationManager,
+                          MediaRecognizeManager, StorageManager)
+from app.helper.plugin_manager import PluginManager
 from app.db.message_oper import MessageOper
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import UserOper
@@ -31,6 +31,7 @@ from app.schemas import (
     TransferInfo,
     ExistMediaInfo,
     DownloaderTorrent,
+    DownloaderFile,
     CommingMessage,
     Notification,
     WebhookEventInfo,
@@ -52,26 +53,12 @@ from app.schemas.types import (
     MessageChannel,
     SystemConfigKey,
 )
-from app.utils.object import ObjectUtils
 
 
-class ChainBase(metaclass=ABCMeta):
+class _CacheChainMixin:
     """
-    处理链基类
+    ChainBase _CacheChainMixin 域方法。
     """
-
-    def __init__(self):
-        """
-        公共初始化
-        """
-        self.modulemanager = ModuleManager()
-        self.eventmanager = EventManager()
-        self.messageoper = MessageOper()
-        self.messagehelper = MessageHelper()
-        self.messagequeue = MessageQueueManager(send_callback=self.run_module)
-        self.pluginmanager = PluginManager()
-        self.filecache = FileCache()
-        self.async_filecache = AsyncFileCache()
 
     def load_cache(self, filename: str) -> Any:
         """
@@ -125,396 +112,17 @@ class ChainBase(metaclass=ABCMeta):
         """
         self.filecache.delete(filename)
 
-    def start_message_processing_status(
-            self,
-            channel: MessageChannel,
-            source: Optional[str],
-            userid: Optional[Union[str, int]] = None,
-            message_id: Optional[Union[str, int]] = None,
-            chat_id: Optional[Union[str, int]] = None,
-            text: Optional[str] = None,
-    ) -> Optional[dict]:
-        """
-        启动渠道侧消息输入/处理状态。
-        具体表现由消息模块实现，例如 typing 保活或消息 reaction。
-        """
-        if not channel or not ChannelCapabilityManager.supports_capability(
-                channel, ChannelCapability.PROCESSING_STATUS
-        ):
-            return None
-        try:
-            status = self.run_module(
-                "mark_message_processing_started",
-                channel=channel,
-                source=source,
-                userid=userid,
-                message_id=message_id,
-                chat_id=chat_id,
-                text=text,
-            )
-        except Exception as err:
-            logger.debug(f"启动消息处理状态失败: {err}")
-            return None
-        return status if isinstance(status, dict) else None
-
-    def finish_message_processing_status(
-            self,
-            status: Optional[dict] = None,
-            channel: Optional[MessageChannel] = None,
-            source: Optional[str] = None,
-            userid: Optional[Union[str, int]] = None,
-            message_id: Optional[Union[str, int]] = None,
-            chat_id: Optional[Union[str, int]] = None,
-    ) -> None:
-        """
-        结束渠道侧消息输入/处理状态。
-        优先使用 start 返回的 status，缺失时使用显式渠道和消息定位参数。
-        """
-        target_channel = channel
-        if status:
-            try:
-                target_channel = MessageChannel(status.get("channel"))
-            except Exception:
-                target_channel = channel
-        if not target_channel or not ChannelCapabilityManager.supports_capability(
-                target_channel, ChannelCapability.PROCESSING_STATUS
-        ):
-            return
-        try:
-            self.run_module(
-                "mark_message_processing_finished",
-                channel=target_channel,
-                source=(status or {}).get("source") or source,
-                userid=(status or {}).get("userid") or userid,
-                message_id=(status or {}).get("message_id") or message_id,
-                chat_id=(status or {}).get("chat_id") or chat_id,
-                status=status,
-            )
-        except Exception as err:
-            logger.debug(f"结束消息处理状态失败: {err}")
-
-    @staticmethod
-    def _normalize_notification_for_dispatch(
-            message: Notification
-    ) -> Notification:
-        """
-        规范化待发送的通知消息。
-        后台任务会复用内部占位用户ID作为会话身份，这里在真正发送前清空，
-        让消息重新走默认通知路由或基于 targets 的目标解析。
-        """
-        dispatch_message = copy.deepcopy(message)
-        dispatch_message.userid = normalize_internal_user_id(
-            dispatch_message.userid
-        )
-        return dispatch_message
-
-    @staticmethod
-    def _build_notice_message_data(message: Notification) -> dict:
-        """
-        构造消息通知事件数据。
-        """
-        return {**message.model_dump(exclude={"save_history"}), "type": message.mtype}
-
     async def async_remove_cache(self, filename: str) -> None:
         """
         异步删除缓存，同时删除Redis和本地缓存
         """
         await self.async_filecache.delete(filename)
 
-    @staticmethod
-    def __is_valid_empty(ret):
-        """
-        判断结果是否为空
-        """
-        if isinstance(ret, tuple):
-            return all(value is None for value in ret)
-        else:
-            return ret is None
 
-    def __handle_plugin_error(
-            self, err: Exception, plugin_id: str, plugin_name: str, method: str, **kwargs
-    ):
-        """
-        处理插件模块执行错误
-        """
-        if kwargs.get("raise_exception"):
-            raise err
-        logger.error(
-            f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}"
-        )
-        self.messagehelper.put(
-            title=f"{plugin_name} 发生了错误", message=str(err), role="plugin"
-        )
-        self.eventmanager.send_event(
-            EventType.SystemError,
-            {
-                "type": "plugin",
-                "plugin_id": plugin_id,
-                "plugin_name": plugin_name,
-                "plugin_method": method,
-                "error": str(err),
-                "traceback": traceback.format_exc(),
-            },
-        )
-
-    def __handle_system_error(
-            self, err: Exception, module_id: str, module_name: str, method: str, **kwargs
-    ):
-        """
-        处理系统模块执行错误
-        """
-        if kwargs.get("raise_exception"):
-            raise err
-        logger.error(
-            f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}"
-        )
-        self.messagehelper.put(
-            title=f"{module_name}发生了错误", message=str(err), role="system"
-        )
-        self.eventmanager.send_event(
-            EventType.SystemError,
-            {
-                "type": "module",
-                "module_id": module_id,
-                "module_name": module_name,
-                "module_method": method,
-                "error": str(err),
-                "traceback": traceback.format_exc(),
-            },
-        )
-
-    @staticmethod
-    def __handle_rate_limit_error(
-            err: RateLimitExceededException, source_type: str, source_id: str,
-            method: str, **kwargs
-    ) -> None:
-        """
-        处理本地限流跳过，避免预期的限流状态进入系统错误告警。
-        """
-        if kwargs.get("raise_exception"):
-            raise err
-        logger.info(f"{source_type} {source_id}.{method} 已限流，跳过执行：{str(err)}")
-
-    def __execute_plugin_modules(
-            self, method: str, result: Any, *args, **kwargs
-    ) -> Any:
-        """
-        执行插件模块
-        """
-        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
-            if method in module_dict:
-                func = module_dict[method]
-                if func:
-                    try:
-                        logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
-                        if self.__is_valid_empty(result):
-                            # 返回None，第一次执行或者需继续执行下一模块
-                            result = func(*args, **kwargs)
-                        elif isinstance(result, list):
-                            # 返回为列表，有多个模块运行结果时进行合并
-                            temp = func(*args, **kwargs)
-                            if isinstance(temp, list):
-                                result.extend(temp)
-                        else:
-                            break
-                    except RateLimitExceededException as err:
-                        self.__handle_rate_limit_error(
-                            err, "插件", plugin_id, method, **kwargs
-                        )
-                    except Exception as err:
-                        self.__handle_plugin_error(
-                            err, plugin_id, plugin_name, method, **kwargs
-                        )
-        return result
-
-    async def __async_execute_plugin_modules(
-            self, method: str, result: Any, *args, **kwargs
-    ) -> Any:
-        """
-        异步执行插件模块
-        """
-        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
-            if method in module_dict:
-                func = module_dict[method]
-                if func:
-                    try:
-                        logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
-                        if self.__is_valid_empty(result):
-                            # 返回None，第一次执行或者需继续执行下一模块
-                            if inspect.iscoroutinefunction(func):
-                                result = await func(*args, **kwargs)
-                            else:
-                                # 插件同步函数在异步环境中运行，避免阻塞
-                                result = await run_in_threadpool(func, *args, **kwargs)
-                        elif isinstance(result, list):
-                            # 返回为列表，有多个模块运行结果时进行合并
-                            if inspect.iscoroutinefunction(func):
-                                temp = await func(*args, **kwargs)
-                            else:
-                                # 插件同步函数在异步环境中运行，避免阻塞
-                                temp = await run_in_threadpool(func, *args, **kwargs)
-                            if isinstance(temp, list):
-                                result.extend(temp)
-                        else:
-                            break
-                    except RateLimitExceededException as err:
-                        self.__handle_rate_limit_error(
-                            err, "插件", plugin_id, method, **kwargs
-                        )
-                    except Exception as err:
-                        self.__handle_plugin_error(
-                            err, plugin_id, plugin_name, method, **kwargs
-                        )
-        return result
-
-    def __execute_system_modules(
-            self, method: str, result: Any, *args, **kwargs
-    ) -> Any:
-        """
-        执行系统模块
-        """
-        logger.debug(f"请求系统模块执行：{method} ...")
-        for module in sorted(
-                self.modulemanager.get_running_modules(method),
-                key=lambda x: x.get_priority(),
-        ):
-            module_id = module.__class__.__name__
-            try:
-                module_name = module.get_name()
-            except Exception as err:
-                logger.debug(f"获取模块名称出错：{str(err)}")
-                module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self.__is_valid_empty(result):
-                    # 返回None，第一次执行或者需继续执行下一模块
-                    result = func(*args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    # 返回结果与方法签名一致，将结果传入
-                    result = func(result)
-                elif isinstance(result, list):
-                    # 返回为列表，有多个模块运行结果时进行合并
-                    temp = func(*args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    # 中止继续执行
-                    break
-            except RateLimitExceededException as err:
-                self.__handle_rate_limit_error(
-                    err, "模块", module_id, method, **kwargs
-                )
-            except Exception as err:
-                logger.error(traceback.format_exc())
-                self.__handle_system_error(
-                    err, module_id, module_name, method, **kwargs
-                )
-        return result
-
-    async def __async_execute_system_modules(
-            self, method: str, result: Any, *args, **kwargs
-    ) -> Any:
-        """
-        异步执行系统模块
-        """
-        logger.debug(f"请求系统模块执行：{method} ...")
-        for module in sorted(
-                self.modulemanager.get_running_modules(method),
-                key=lambda x: x.get_priority(),
-        ):
-            module_id = module.__class__.__name__
-            try:
-                module_name = module.get_name()
-            except Exception as err:
-                logger.debug(f"获取模块名称出错：{str(err)}")
-                module_name = module_id
-            try:
-                func = getattr(module, method)
-                if self.__is_valid_empty(result):
-                    # 返回None，第一次执行或者需继续执行下一模块
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(*args, **kwargs)
-                    else:
-                        # 系统同步模块在异步路径里也必须切到线程池，避免阻塞共享事件循环。
-                        result = await run_in_threadpool(func, *args, **kwargs)
-                elif ObjectUtils.check_signature(func, result):
-                    # 返回结果与方法签名一致，将结果传入
-                    if inspect.iscoroutinefunction(func):
-                        result = await func(result)
-                    else:
-                        result = await run_in_threadpool(func, result)
-                elif isinstance(result, list):
-                    # 返回为列表，有多个模块运行结果时进行合并
-                    if inspect.iscoroutinefunction(func):
-                        temp = await func(*args, **kwargs)
-                    else:
-                        temp = await run_in_threadpool(func, *args, **kwargs)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
-                    # 中止继续执行
-                    break
-            except RateLimitExceededException as err:
-                self.__handle_rate_limit_error(
-                    err, "模块", module_id, method, **kwargs
-                )
-            except Exception as err:
-                logger.error(traceback.format_exc())
-                self.__handle_system_error(
-                    err, module_id, module_name, method, **kwargs
-                )
-        return result
-
-    def run_module(
-            self,
-            method: str,
-            *args,
-            **kwargs,
-    ) -> Any:
-        """
-        运行包含该方法的所有模块，然后返回结果
-        当kwargs包含命名参数raise_exception时，如模块方法抛出异常且raise_exception为True，则同步抛出异常
-
-        :param method: 模块方法名称
-        """
-        # 执行插件模块
-        result = self.__execute_plugin_modules(method, None, *args, **kwargs)
-
-        if not self.__is_valid_empty(result) and not isinstance(result, list):
-            # 插件模块返回结果不为空且不是列表，直接返回
-            return result
-
-        # 执行系统模块
-        return self.__execute_system_modules(method, result, *args, **kwargs)
-
-    async def async_run_module(
-            self,
-            method: str,
-            *args,
-            **kwargs,
-    ) -> Any:
-        """
-        异步运行包含该方法的所有模块，然后返回结果
-        当kwargs包含命名参数raise_exception时，如模块方法抛出异常且raise_exception为True，则同步抛出异常
-        支持异步和同步方法的混合调用
-
-        :param method: 模块方法名称
-        """
-        # 执行插件模块
-        result = await self.__async_execute_plugin_modules(
-            method, None, *args, **kwargs
-        )
-
-        if not self.__is_valid_empty(result) and not isinstance(result, list):
-            # 插件模块返回结果不为空且不是列表，直接返回
-            return result
-
-        # 执行系统模块
-        return await self.__async_execute_system_modules(
-            method, result, *args, **kwargs
-        )
+class _RecognizeMediaChainMixin:
+    """
+    ChainBase _RecognizeMediaChainMixin 域方法。
+    """
 
     @staticmethod
     def _can_use_media_recognize_share(
@@ -647,6 +255,7 @@ class ChainBase(metaclass=ABCMeta):
             episode_group: Optional[str] = None,
             cache: bool = True,
             share_meta: MetaBase = None,
+            raise_exception: bool = False,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片
@@ -661,6 +270,8 @@ class ChainBase(metaclass=ABCMeta):
         :param anilistid: AniList ID
         :param episode_group: 剧集组
         :param cache:    是否使用缓存
+        :param raise_exception: 严格模式，为真时后端瞬时异常（TMDB/网络等）上抛而非吞为
+                                "未识别到"的 None；默认 False 保持原有静默语义
         :return: 识别的媒体信息，包括剧集信息
         """
         # 识别用名中含指定信息情形
@@ -687,6 +298,8 @@ class ChainBase(metaclass=ABCMeta):
         if not mtype and not tmdbid and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
         share_query_meta = share_meta or meta
+        # 仅严格模式才注入分发控制位，默认路径不携带该 kwarg，后端收到的参数与原先逐字节一致
+        _strict = {"raise_exception": True} if raise_exception else {}
         module_kwargs = {
             "meta": meta,
             "mtype": mtype,
@@ -703,6 +316,7 @@ class ChainBase(metaclass=ABCMeta):
             mediainfo = self.run_module(
                 "recognize_media",
                 **module_kwargs,
+                **_strict,
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
@@ -737,6 +351,7 @@ class ChainBase(metaclass=ABCMeta):
                         anilistid=shared_params.get("anilistid"),
                         episode_group=episode_group,
                         cache=cache,
+                        **_strict,
                     )
                 if mediainfo:
                     self._update_local_recognize_cache(shared_cache_meta, mediainfo)
@@ -757,6 +372,7 @@ class ChainBase(metaclass=ABCMeta):
             episode_group: Optional[str] = None,
             cache: bool = True,
             share_meta: MetaBase = None,
+            raise_exception: bool = False,
     ) -> Optional[MediaInfo]:
         """
         识别媒体信息，不含Fanart图片（异步版本）
@@ -771,6 +387,8 @@ class ChainBase(metaclass=ABCMeta):
         :param anilistid: AniList ID
         :param episode_group: 剧集组
         :param cache:    是否使用缓存
+        :param raise_exception: 严格模式，为真时后端瞬时异常（TMDB/网络等）上抛而非吞为
+                                "未识别到"的 None；默认 False 保持原有静默语义
         :return: 识别的媒体信息，包括剧集信息
         """
         # 识别用名中含指定信息情形
@@ -797,6 +415,8 @@ class ChainBase(metaclass=ABCMeta):
         if not mtype and not tmdbid and meta and meta.type in [MediaType.TV, MediaType.MOVIE]:
             mtype = meta.type
         share_query_meta = share_meta or meta
+        # 仅严格模式才注入分发控制位，默认路径不携带该 kwarg，后端收到的参数与原先逐字节一致
+        _strict = {"raise_exception": True} if raise_exception else {}
         module_kwargs = {
             "meta": meta,
             "mtype": mtype,
@@ -813,6 +433,7 @@ class ChainBase(metaclass=ABCMeta):
             mediainfo = await self.async_run_module(
                 "async_recognize_media",
                 **module_kwargs,
+                **_strict,
             )
         if mediainfo:
             if not mediainfo.recognize_cache_hit:
@@ -847,6 +468,7 @@ class ChainBase(metaclass=ABCMeta):
                         anilistid=shared_params.get("anilistid"),
                         episode_group=episode_group,
                         cache=cache,
+                        **_strict,
                     )
                 if mediainfo:
                     await self._async_update_local_recognize_cache(shared_cache_meta, mediainfo)
@@ -952,7 +574,8 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :return: 更新后的媒体信息
         """
-        return self.run_module("obtain_images", mediainfo=mediainfo)
+        # 走识别域门面（MediaRecognizeManager），等价于 v2 run_module("obtain_images")（保留可用、标废弃）
+        return self.mediarecognizemanager.obtain_images(mediainfo=mediainfo)
 
     async def async_obtain_images(self, mediainfo: MediaInfo) -> Optional[MediaInfo]:
         """
@@ -960,7 +583,7 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :return: 更新后的媒体信息
         """
-        return await self.async_run_module("async_obtain_images", mediainfo=mediainfo)
+        return await self.mediarecognizemanager.async_obtain_images(mediainfo=mediainfo)
 
     def obtain_specific_image(
             self,
@@ -1080,35 +703,11 @@ class ChainBase(metaclass=ABCMeta):
         """
         return await self.async_run_module("async_bangumi_info", bangumiid=bangumiid)
 
-    def message_parser(
-            self, source: str, body: Any, form: Any, args: Any
-    ) -> Optional[CommingMessage]:
-        """
-        解析消息内容，返回字典，注意以下约定值：
-        userid: 用户ID
-        username: 用户名
-        text: 内容
-        :param source: 消息来源（渠道配置名称）
-        :param body: 请求体
-        :param form: 表单
-        :param args: 参数
-        :return: 消息渠道、消息内容
-        """
-        return self.run_module(
-            "message_parser", source=source, body=body, form=form, args=args
-        )
 
-    def webhook_parser(
-            self, body: Any, form: Any, args: Any
-    ) -> Optional[WebhookEventInfo]:
-        """
-        解析Webhook报文体
-        :param body:  请求体
-        :param form:  请求表单
-        :param args:  请求参数
-        :return: 字典，解析为消息时需要包含：title、text、image
-        """
-        return self.run_module("webhook_parser", body=body, form=form, args=args)
+class _SearchChainMixin:
+    """
+    ChainBase _SearchChainMixin 域方法。
+    """
 
     def search_medias(
         self, meta: MetaBase, source: Optional[str] = None
@@ -1119,7 +718,7 @@ class ChainBase(metaclass=ABCMeta):
         :param source: 请求级搜索数据源
         :return: 媒体信息列表
         """
-        return self.run_module("search_medias", meta=meta, source=source)
+        return self.mediarecognizemanager.search_medias(meta=meta, source=source)
 
     async def async_search_medias(
         self, meta: MetaBase, source: Optional[str] = None
@@ -1130,8 +729,8 @@ class ChainBase(metaclass=ABCMeta):
         :param source: 请求级搜索数据源
         :return: 媒体信息列表
         """
-        return await self.async_run_module(
-            "async_search_medias", meta=meta, source=source
+        return await self.mediarecognizemanager.async_search_medias(
+            meta=meta, source=source
         )
 
     def search_persons(
@@ -1143,7 +742,7 @@ class ChainBase(metaclass=ABCMeta):
         :param source: 请求级搜索数据源
         :return: 人物信息列表
         """
-        return self.run_module("search_persons", name=name, source=source)
+        return self.mediarecognizemanager.search_persons(name=name, source=source)
 
     async def async_search_persons(
         self, name: str, source: Optional[str] = None
@@ -1154,8 +753,8 @@ class ChainBase(metaclass=ABCMeta):
         :param source: 请求级搜索数据源
         :return: 人物信息列表
         """
-        return await self.async_run_module(
-            "async_search_persons", name=name, source=source
+        return await self.mediarecognizemanager.async_search_persons(
+            name=name, source=source
         )
 
     def search_collections(
@@ -1167,7 +766,7 @@ class ChainBase(metaclass=ABCMeta):
         :param source: 请求级搜索数据源
         :return: 合集信息列表
         """
-        return self.run_module("search_collections", name=name, source=source)
+        return self.mediarecognizemanager.search_collections(name=name, source=source)
 
     async def async_search_collections(
         self, name: str, source: Optional[str] = None
@@ -1178,8 +777,8 @@ class ChainBase(metaclass=ABCMeta):
         :param source: 请求级搜索数据源
         :return: 合集信息列表
         """
-        return await self.async_run_module(
-            "async_search_collections", name=name, source=source
+        return await self.mediarecognizemanager.async_search_collections(
+            name=name, source=source
         )
 
     def get_search_page_size(
@@ -1328,6 +927,12 @@ class ChainBase(metaclass=ABCMeta):
             mediainfo=mediainfo,
         )
 
+
+class _DownloadTransferChainMixin:
+    """
+    ChainBase _DownloadTransferChainMixin 域方法。
+    """
+
     def download(
             self,
             content: Union[Path, str, bytes],
@@ -1349,8 +954,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: 下载器名称、种子Hash、种子文件布局、错误原因
         """
-        return self.run_module(
-            "download",
+        return self.downloadermanager.download(
             content=content,
             download_dir=download_dir,
             cookie=cookie,
@@ -1395,8 +999,7 @@ class ChainBase(metaclass=ABCMeta):
         :param include_all_tags:  是否包含未打内置标签的下载任务
         :return: 下载器中符合状态的种子列表
         """
-        return self.run_module(
-            "list_torrents",
+        return self.downloadermanager.list_torrents(
             status=status,
             hashs=hashs,
             downloader=downloader,
@@ -1462,7 +1065,7 @@ class ChainBase(metaclass=ABCMeta):
         :param hashs:  种子Hash
         :param downloader:  下载器
         """
-        return self.run_module("transfer_completed", hashs=hashs, downloader=downloader)
+        return self.downloadermanager.transfer_completed(hashs=hashs, downloader=downloader)
 
     def remove_torrents(
             self,
@@ -1477,8 +1080,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module(
-            "remove_torrents",
+        return self.downloadermanager.remove_torrents(
             hashs=hashs,
             delete_file=delete_file,
             downloader=downloader,
@@ -1493,7 +1095,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("start_torrents", hashs=hashs, downloader=downloader)
+        return self.downloadermanager.start_torrents(hashs=hashs, downloader=downloader)
 
     def stop_torrents(
             self, hashs: Union[list, str], downloader: Optional[str] = None
@@ -1504,7 +1106,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("stop_torrents", hashs=hashs, downloader=downloader)
+        return self.downloadermanager.stop_torrents(hashs=hashs, downloader=downloader)
 
     def set_torrents_tag(
             self, hashs: Union[list, str], tags: list, downloader: Optional[str] = None
@@ -1516,7 +1118,7 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("set_torrents_tag", hashs=hashs, tags=tags, downloader=downloader)
+        return self.downloadermanager.set_torrents_tag(hashs=hashs, tags=tags, downloader=downloader)
 
     def update_torrent(
             self,
@@ -1543,8 +1145,7 @@ class ChainBase(metaclass=ABCMeta):
         :param seeding_time_limit: 做种时间限制，单位分钟
         :return: 各项修改结果
         """
-        return self.run_module(
-            "update_torrent",
+        return self.downloadermanager.update_torrent(
             hash_string=hash_string,
             downloader=downloader,
             download_limit=download_limit,
@@ -1567,22 +1168,21 @@ class ChainBase(metaclass=ABCMeta):
         :param downloader: 下载器
         :return: 下载器名称到Tracker列表的映射
         """
-        return self.run_module(
-            "get_torrent_trackers",
+        return self.downloadermanager.get_torrent_trackers(
             hash_string=hash_string,
             downloader=downloader,
         )
 
     def torrent_files(
             self, tid: str, downloader: Optional[str] = None
-    ) -> Optional[Union[TorrentFilesList, List[File]]]:
+    ) -> Optional[List[DownloaderFile]]:
         """
         获取种子文件
         :param tid:  种子Hash
         :param downloader:  下载器
         :return: 种子文件
         """
-        return self.run_module("torrent_files", tid=tid, downloader=downloader)
+        return self.downloadermanager.torrent_files(tid=tid, downloader=downloader)
 
     def media_exists(
             self,
@@ -1597,8 +1197,8 @@ class ChainBase(metaclass=ABCMeta):
         :param server:  媒体服务器
         :return: 如不存在返回None，存在时返回信息，包括每季已存在所有集{type: movie/tv, seasons: {season: [episodes]}}
         """
-        return self.run_module(
-            "media_exists", mediainfo=mediainfo, itemid=itemid, server=server
+        return self.mediaservermanager.media_exists(
+            mediainfo=mediainfo, itemid=itemid, server=server
         )
 
     def media_files(self, mediainfo: MediaInfo) -> Optional[List[FileItem]]:
@@ -1608,6 +1208,132 @@ class ChainBase(metaclass=ABCMeta):
         :return: 媒体文件列表
         """
         return self.run_module("media_files", mediainfo=mediainfo)
+
+
+class _NotificationChainMixin:
+    """
+    ChainBase _NotificationChainMixin 域方法。
+    """
+
+    def start_message_processing_status(
+            self,
+            channel: MessageChannel,
+            source: Optional[str],
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+            text: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        启动渠道侧消息输入/处理状态。
+        具体表现由消息模块实现，例如 typing 保活或消息 reaction。
+        """
+        if not channel or not ChannelCapabilityManager.supports_capability(
+                channel, ChannelCapability.PROCESSING_STATUS
+        ):
+            return None
+        try:
+            status = self.run_module(
+                "mark_message_processing_started",
+                channel=channel,
+                source=source,
+                userid=userid,
+                message_id=message_id,
+                chat_id=chat_id,
+                text=text,
+            )
+        except Exception as err:
+            logger.debug(f"启动消息处理状态失败: {err}")
+            return None
+        return status if isinstance(status, dict) else None
+
+    def finish_message_processing_status(
+            self,
+            status: Optional[dict] = None,
+            channel: Optional[MessageChannel] = None,
+            source: Optional[str] = None,
+            userid: Optional[Union[str, int]] = None,
+            message_id: Optional[Union[str, int]] = None,
+            chat_id: Optional[Union[str, int]] = None,
+    ) -> None:
+        """
+        结束渠道侧消息输入/处理状态。
+        优先使用 start 返回的 status，缺失时使用显式渠道和消息定位参数。
+        """
+        target_channel = channel
+        if status:
+            try:
+                target_channel = MessageChannel(status.get("channel"))
+            except Exception:
+                target_channel = channel
+        if not target_channel or not ChannelCapabilityManager.supports_capability(
+                target_channel, ChannelCapability.PROCESSING_STATUS
+        ):
+            return
+        try:
+            self.run_module(
+                "mark_message_processing_finished",
+                channel=target_channel,
+                source=(status or {}).get("source") or source,
+                userid=(status or {}).get("userid") or userid,
+                message_id=(status or {}).get("message_id") or message_id,
+                chat_id=(status or {}).get("chat_id") or chat_id,
+                status=status,
+            )
+        except Exception as err:
+            logger.debug(f"结束消息处理状态失败: {err}")
+
+    @staticmethod
+    def _normalize_notification_for_dispatch(
+            message: Notification
+    ) -> Notification:
+        """
+        规范化待发送的通知消息。
+        后台任务会复用内部占位用户ID作为会话身份，这里在真正发送前清空，
+        让消息重新走默认通知路由或基于 targets 的目标解析。
+        """
+        dispatch_message = copy.deepcopy(message)
+        dispatch_message.userid = normalize_internal_user_id(
+            dispatch_message.userid
+        )
+        return dispatch_message
+
+    @staticmethod
+    def _build_notice_message_data(message: Notification) -> dict:
+        """
+        构造消息通知事件数据。
+        """
+        return {**message.model_dump(exclude={"save_history"}), "type": message.mtype}
+
+    def message_parser(
+            self, source: str, body: Any, form: Any, args: Any
+    ) -> Optional[CommingMessage]:
+        """
+        解析消息内容，返回字典，注意以下约定值：
+        userid: 用户ID
+        username: 用户名
+        text: 内容
+        :param source: 消息来源（渠道配置名称）
+        :param body: 请求体
+        :param form: 表单
+        :param args: 参数
+        :return: 消息渠道、消息内容
+        """
+        return self.run_module(
+            "message_parser", source=source, body=body, form=form, args=args
+        )
+
+    def webhook_parser(
+            self, body: Any, form: Any, args: Any
+    ) -> Optional[WebhookEventInfo]:
+        """
+        解析Webhook报文体
+        :param body:  请求体
+        :param form:  请求表单
+        :param args:  请求参数
+        :return: 字典，解析为消息时需要包含：title、text、image
+        """
+        return self.run_module("webhook_parser", body=body, form=form, args=args)
 
     def post_message(
             self,
@@ -1654,7 +1380,8 @@ class ChainBase(metaclass=ABCMeta):
             )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
-                actions = notify_action.split(",")
+                # 规范化动作 token：去空白、转小写、丢弃空项，避免 "user, admin"/大小写等变体绕过隔离
+                actions = [a.strip().lower() for a in notify_action.split(",") if a.strip()]
                 # 是否已发送管理员标志
                 admin_sended = False
                 send_orignal = False
@@ -1697,11 +1424,20 @@ class ChainBase(metaclass=ABCMeta):
                         elif send_message.username == settings.SUPERUSER:
                             # 管理员同名已发送
                             admin_sended = True
-                    else:
-                        # 按原消息发送全体
+                    elif action == "all":
+                        # 显式全量：按原消息发送全体
                         if not admin_sended:
                             send_orignal = True
                         break
+                    else:
+                        # 未知动作 / user 无用户上下文 / admin 已发过：fail-closed 跳过，绝不广播到全渠道
+                        logger.info(f"{send_message.mtype} 的消息动作 '{action}' 无适用目标，跳过发送")
+                        continue
+                    # 目标隔离动作但目标为空（管理员/用户行缺失 None，或存在但无任何渠道绑定 {}）→ 跳过，
+                    # 绝不按无目标广播到全部公开渠道（集中 fail-closed，兜住下游渠道对空目标处理不一致的风险）
+                    if not send_message.targets:
+                        logger.info(f"{send_message.mtype} 的通知目标为空，跳过发送以避免广播到全部公开渠道")
+                        continue
                     # 按设定发送
                     self.eventmanager.send_event(
                         etype=EventType.NoticeMessage,
@@ -1770,7 +1506,8 @@ class ChainBase(metaclass=ABCMeta):
             )
             if notify_action:
                 # 'admin' 'user,admin' 'user' 'all'
-                actions = notify_action.split(",")
+                # 规范化动作 token：去空白、转小写、丢弃空项，避免 "user, admin"/大小写等变体绕过隔离
+                actions = [a.strip().lower() for a in notify_action.split(",") if a.strip()]
                 # 是否已发送管理员标志
                 admin_sended = False
                 send_orignal = False
@@ -1813,11 +1550,20 @@ class ChainBase(metaclass=ABCMeta):
                         elif send_message.username == settings.SUPERUSER:
                             # 管理员同名已发送
                             admin_sended = True
-                    else:
-                        # 按原消息发送全体
+                    elif action == "all":
+                        # 显式全量：按原消息发送全体
                         if not admin_sended:
                             send_orignal = True
                         break
+                    else:
+                        # 未知动作 / user 无用户上下文 / admin 已发过：fail-closed 跳过，绝不广播到全渠道
+                        logger.info(f"{send_message.mtype} 的消息动作 '{action}' 无适用目标，跳过发送")
+                        continue
+                    # 目标隔离动作但目标为空（管理员/用户行缺失 None，或存在但无任何渠道绑定 {}）→ 跳过，
+                    # 绝不按无目标广播到全部公开渠道（集中 fail-closed，兜住下游渠道对空目标处理不一致的风险）
+                    if not send_message.targets:
+                        logger.info(f"{send_message.mtype} 的通知目标为空，跳过发送以避免广播到全部公开渠道")
+                        continue
                     # 按设定发送
                     await self.eventmanager.async_send_event(
                         etype=EventType.NoticeMessage,
@@ -1896,8 +1642,8 @@ class ChainBase(metaclass=ABCMeta):
         :param chat_id: 聊天ID（如群组ID）
         :return: 删除是否成功
         """
-        return self.run_module(
-            "delete_message",
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("delete_message")（保留可用、标废弃）
+        return self.notificationmanager.delete_message(
             channel=channel,
             source=source,
             message_id=message_id,
@@ -1942,8 +1688,8 @@ class ChainBase(metaclass=ABCMeta):
                 logger.debug(f"编辑 WebAgent 消息失败: {err}")
                 return False
 
-        return self.run_module(
-            "edit_message",
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("edit_message")（保留可用、标废弃）
+        return self.notificationmanager.edit_message(
             channel=channel,
             source=source,
             message_id=message_id,
@@ -1961,8 +1707,8 @@ class ChainBase(metaclass=ABCMeta):
         :param message: 消息体
         :return: 消息响应（包含message_id, chat_id等）
         """
-        return self.run_module(
-            "send_direct_message",
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("send_direct_message")（保留可用、标废弃）
+        return self.notificationmanager.send_direct_message(
             message=self._normalize_notification_for_dispatch(message),
         )
 
@@ -1974,7 +1720,14 @@ class ChainBase(metaclass=ABCMeta):
         对已发送消息执行渠道收尾动作。
         例如关闭流式卡片状态；无特殊收尾的渠道直接返回 False。
         """
-        return self.run_module("finalize_message", response=response)
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("finalize_message")（保留可用、标废弃）
+        return self.notificationmanager.finalize_message(response=response)
+
+
+class _MetadataCategoryChainMixin:
+    """
+    ChainBase _MetadataCategoryChainMixin 域方法。
+    """
 
     def metadata_img(
             self,
@@ -2015,7 +1768,8 @@ class ChainBase(metaclass=ABCMeta):
         """
         注册菜单命令
         """
-        self.run_module("register_commands", commands=commands)
+        # 走通知域门面（NotificationManager），等价于 v2 run_module("register_commands")（保留可用、标废弃）
+        self.notificationmanager.register_commands(commands=commands)
 
     def scheduler_job(self) -> None:
         """
@@ -2028,3 +1782,267 @@ class ChainBase(metaclass=ABCMeta):
         清理缓存，模块实现该接口响应清理缓存事件
         """
         self.run_module("clear_cache")
+
+
+class ChainBase(_CacheChainMixin, _RecognizeMediaChainMixin, _SearchChainMixin, _DownloadTransferChainMixin, _NotificationChainMixin, _MetadataCategoryChainMixin, metaclass=ABCMeta):
+    """
+    处理链基类
+    """
+
+    def __init__(
+        self,
+        *,
+        modulemanager=None,
+        downloadermanager=None,
+        mediaservermanager=None,
+        notificationmanager=None,
+        mediarecognizemanager=None,
+        storagemanager=None,
+        eventmanager=None,
+        messageoper=None,
+        messagehelper=None,
+        messagequeue=None,
+        pluginmanager=None,
+        filecache=None,
+        async_filecache=None,
+    ):
+        """
+        公共初始化
+
+        S6 DI：8 个公共依赖均可经关键字参数注入，默认回退各自全局单例。不传参（现有所有
+        SomeChain() 调用点、子类 super().__init__()、市场插件如 p115 的 PluginChian(ChainBase)）
+        = 取全局单例，行为不变；测试可注入 fake 而无需 mock.patch 全局。参数为 keyword-only，
+        杜绝位置传参歧义（原 __init__(self) 不接受位置参，无调用方受影响）。
+        """
+        self.modulemanager = modulemanager or ModuleManager()
+        # 下载器（Downloader 域）门面：下载器相关包装方法经此分发到各下载器后端。
+        self.downloadermanager = downloadermanager or DownloaderManager()
+        # 媒体服务器（MediaServer 域）门面：媒服相关包装方法经此分发到各媒体服务器后端。
+        self.mediaservermanager = mediaservermanager or MediaServerManager()
+        self.notificationmanager = notificationmanager or NotificationManager()
+        # 媒体识别/数据源（MediaRecognize 域）门面：识别相关包装方法经此分发到各数据源后端。
+        self.mediarecognizemanager = mediarecognizemanager or MediaRecognizeManager()
+        # 存储（Storage 域）门面：储存相关包装方法经此分发到存储后端。
+        self.storagemanager = storagemanager or StorageManager()
+        self.eventmanager = eventmanager or EventManager()
+        self.messageoper = messageoper or MessageOper()
+        self.messagehelper = messagehelper or MessageHelper()
+        self.messagequeue = messagequeue or MessageQueueManager(send_callback=self.run_module)
+        self.pluginmanager = pluginmanager or PluginManager()
+        self.filecache = filecache or FileCache()
+        self.async_filecache = async_filecache or AsyncFileCache()
+
+    @staticmethod
+    def __is_valid_empty(ret):
+        """
+        判断结果是否为空：元组需全部为 None，其余按 is None 判断。
+        """
+        return dispatch.is_valid_empty(ret)
+
+    def __handle_plugin_error(
+            self, err: Exception, plugin_id: str, plugin_name: str, method: str, **kwargs
+    ):
+        """
+        处理插件模块执行错误
+        """
+        if kwargs.get("raise_exception"):
+            raise err
+        logger.error(
+            f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}"
+        )
+        self.messagehelper.put(
+            title=f"{plugin_name} 发生了错误", message=str(err), role="plugin"
+        )
+        self.eventmanager.send_event(
+            EventType.SystemError,
+            {
+                "type": "plugin",
+                "plugin_id": plugin_id,
+                "plugin_name": plugin_name,
+                "plugin_method": method,
+                "error": str(err),
+                "traceback": traceback.format_exc(),
+            },
+        )
+
+    def __handle_system_error(
+            self, err: Exception, module_id: str, module_name: str, method: str, **kwargs
+    ):
+        """
+        处理系统模块执行错误
+        """
+        if kwargs.get("raise_exception"):
+            raise err
+        logger.error(
+            f"运行模块 {module_id}.{method} 出错：{str(err)}\n{traceback.format_exc()}"
+        )
+        self.messagehelper.put(
+            title=f"{module_name}发生了错误", message=str(err), role="system"
+        )
+        self.eventmanager.send_event(
+            EventType.SystemError,
+            {
+                "type": "module",
+                "module_id": module_id,
+                "module_name": module_name,
+                "module_method": method,
+                "error": str(err),
+                "traceback": traceback.format_exc(),
+            },
+        )
+
+    @staticmethod
+    def __handle_rate_limit_error(
+            err: RateLimitExceededException, source_type: str, source_id: str,
+            method: str, **kwargs
+    ) -> None:
+        """
+        处理本地限流跳过，避免预期的限流状态进入系统错误告警。
+        """
+        if kwargs.get("raise_exception"):
+            raise err
+        logger.info(f"{source_type} {source_id}.{method} 已限流，跳过执行：{str(err)}")
+
+    def __plugin_entries(self, method: str):
+        """
+        生成插件钩子面的后端三元组 (plugin_id, plugin_name, func)：取各插件经 get_module 注册的同名方法。
+        """
+        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
+            plugin_id, plugin_name = plugin
+            if method not in module_dict:
+                continue
+            func = module_dict[method]
+            if not func:
+                continue
+            yield plugin_id, plugin_name, func
+
+    def __system_entries(self, method: str):
+        """
+        生成系统后端面的后端三元组 (module_id, module_name, func)：按优先级（get_priority 升序）取各运行模块的同名方法。
+        """
+        for module in sorted(
+                self.modulemanager.get_running_modules(method),
+                key=lambda x: x.get_priority(),
+        ):
+            module_id = module.__class__.__name__
+            try:
+                module_name = module.get_name()
+            except Exception as err:
+                logger.debug(f"获取模块名称出错：{str(err)}")
+                module_name = module_id
+            yield module_id, module_name, getattr(module, method)
+
+    def __execute_plugin_modules(
+            self, method: str, result: Any, *args, **kwargs
+    ) -> Any:
+        """
+        执行插件模块（插件钩子面，不做 check_signature 精化）。kwargs 原样转发给插件方法。
+        """
+        return dispatch.execute_modules(
+            self.__plugin_entries(method), method, result, *args,
+            pipeline=False,
+            log_each=lambda name, m: logger.info(f"请求插件 {name} 执行：{m} ..."),
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "插件", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_plugin_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
+
+    async def __async_execute_plugin_modules(
+            self, method: str, result: Any, *args, **kwargs
+    ) -> Any:
+        """
+        异步执行插件模块（插件钩子面，不做 check_signature 精化）。kwargs 原样转发给插件方法。
+        """
+        return await dispatch.async_execute_modules(
+            self.__plugin_entries(method), method, result, *args,
+            pipeline=False,
+            log_each=lambda name, m: logger.info(f"请求插件 {name} 执行：{m} ..."),
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "插件", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_plugin_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
+
+    def __execute_system_modules(
+            self, method: str, result: Any, *args, **kwargs
+    ) -> Any:
+        """
+        执行系统模块（系统后端面，启用 check_signature 管道精化）。kwargs 原样转发给系统方法。
+        """
+        logger.debug(f"请求系统模块执行：{method} ...")
+        return dispatch.execute_modules(
+            self.__system_entries(method), method, result, *args,
+            pipeline=True,
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "模块", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_system_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
+
+    async def __async_execute_system_modules(
+            self, method: str, result: Any, *args, **kwargs
+    ) -> Any:
+        """
+        异步执行系统模块（系统后端面，启用 check_signature 管道精化）。kwargs 原样转发给系统方法。
+        """
+        logger.debug(f"请求系统模块执行：{method} ...")
+        return await dispatch.async_execute_modules(
+            self.__system_entries(method), method, result, *args,
+            pipeline=True,
+            on_rate_limit=lambda err, ident, name, m: self.__handle_rate_limit_error(
+                err, "模块", ident, m, **kwargs
+            ),
+            on_error=lambda err, ident, name, m: self.__handle_system_error(
+                err, ident, name, m, **kwargs
+            ),
+            **kwargs,
+        )
+
+    def run_module(self, method: str, *args, **kwargs) -> Any:
+        """
+        运行包含该方法的所有模块，然后返回结果
+        当kwargs包含命名参数raise_exception时，如模块方法抛出异常且raise_exception为True，则同步抛出异常
+        """
+        result = None
+
+        # 执行插件模块
+        result = self.__execute_plugin_modules(method, result, *args, **kwargs)
+
+        if not self.__is_valid_empty(result) and not isinstance(result, list):
+            # 插件模块返回结果不为空且不是列表，直接返回
+            return result
+
+        # 执行系统模块
+        return self.__execute_system_modules(method, result, *args, **kwargs)
+
+    async def async_run_module(self, method: str, *args, **kwargs) -> Any:
+        """
+        异步运行包含该方法的所有模块，然后返回结果
+        当kwargs包含命名参数raise_exception时，如模块方法抛出异常且raise_exception为True，则同步抛出异常
+        支持异步和同步方法的混合调用
+        """
+        result = None
+
+        # 执行插件模块
+        result = await self.__async_execute_plugin_modules(
+            method, result, *args, **kwargs
+        )
+
+        if not self.__is_valid_empty(result) and not isinstance(result, list):
+            # 插件模块返回结果不为空且不是列表，直接返回
+            return result
+
+        # 执行系统模块
+        return await self.__async_execute_system_modules(
+            method, result, *args, **kwargs
+        )

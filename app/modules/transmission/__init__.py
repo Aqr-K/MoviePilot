@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Set, Tuple, Optional, Union, List, Dict
 
 from torrentool.torrent import Torrent
-from transmission_rpc import File
 
 from app import schemas
 from app.core.cache import FileCache
@@ -31,6 +30,15 @@ _TRANSMISSION_PAUSED_STATES = {
 
 
 class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
+    """
+    Transmission 下载器模块（app.modules.IDownloader 后端）。
+
+    作为 Downloader 域后端，由门面 app.managers.downloader.DownloaderManager 统一分发调用。
+
+    .. deprecated::
+        经 ChainBase.run_module("download"/"list_torrents"/…) 的旧路径仍可用但计划在后续版本废弃；
+        新代码请改用 DownloaderManager 门面的类型化方法。
+    """
 
     def init_module(self) -> None:
         """
@@ -610,15 +618,31 @@ class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
             return None
         return server.stop_torrents(ids=hashs)
 
-    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> Optional[List[File]]:
+    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> "Optional[List[schemas.DownloaderFile]]":
         """
-        获取种子文件列表
+        获取种子文件列表（归一化为 DownloaderFile，不再泄漏 transmission_rpc 的 SDK 类型）
         """
         # 获取下载器
         server: Transmission = self.get_instance(downloader)
         if not server:
             return None
-        return server.get_files(tid=tid)
+        files = server.get_files(tid=tid)
+        if files is None:
+            return None
+        result: List[schemas.DownloaderFile] = []
+        for idx, f in enumerate(files):
+            size = getattr(f, "size", None)
+            completed = getattr(f, "completed", None)
+            progress = (completed / size) if (size and completed is not None) else None
+            priority = getattr(f, "priority", None)
+            result.append(schemas.DownloaderFile(
+                name=getattr(f, "name", None),
+                size=size,
+                progress=progress,
+                priority=priority if isinstance(priority, int) else None,
+                index=getattr(f, "id", idx),
+            ))
+        return result
 
     def downloader_info(self, downloader: Optional[str] = None) -> Optional[List[schemas.DownloaderInfo]]:
         """

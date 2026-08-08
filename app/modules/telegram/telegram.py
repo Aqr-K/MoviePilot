@@ -37,8 +37,8 @@ except ImportError:
 from app.core.config import settings  # noqa: E402
 from app.core.context import MediaInfo, Context  # noqa: E402
 from app.core.metainfo import MetaInfo  # noqa: E402
+from app.core.thread import ThreadHelper  # noqa: E402
 from app.helper.image import ImageHelper  # noqa: E402
-from app.helper.thread import ThreadHelper  # noqa: E402
 from app.log import logger  # noqa: E402
 from app.utils.common import retry  # noqa: E402
 from app.utils.http import RequestUtils  # noqa: E402
