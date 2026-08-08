@@ -5,7 +5,7 @@ import shutil
 from typing import Any, Optional
 
 from app.core.config import settings
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.server import MoviePilotServerHelper
 from app.helper.plugin import PluginHelper
@@ -68,17 +68,10 @@ def build_preview_payload(value: Any, max_chars: Optional[int]) -> tuple[bool, i
 def reload_plugin_runtime(plugin_id: str) -> None:
     """
     重载插件并重新注册其命令、定时任务和 API。
-    """
-    # 这些依赖只在真正执行重载时才导入，避免普通查询工具引入不必要的初始化开销。
-    from app.api.endpoints.plugin import register_plugin_api
-    from app.command import Command
-    from app.scheduler import Scheduler
 
-    plugin_manager = PluginManager()
-    plugin_manager.reload_plugin(plugin_id)
-    Scheduler().update_plugin_job(plugin_id)
-    Command().init_commands(plugin_id)
-    register_plugin_api(plugin_id)
+    绑定刷新（调度/命令/API 路由）已内聚于 PluginManager.reload_plugin，此处无需再外层补刷。
+    """
+    PluginManager().reload_plugin(plugin_id)
 
 
 def summarize_plugin(plugin: Any) -> dict[str, Any]:
@@ -357,7 +350,7 @@ async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
         if plugin_base_dir.exists():
             try:
                 shutil.rmtree(plugin_base_dir)
-                plugin_manager.plugins.pop(plugin_id, None)
+                plugin_manager.remove_plugin_class(plugin_id)
                 clone_files_removed = True
             except Exception:
                 clone_files_removed = False

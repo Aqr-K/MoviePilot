@@ -38,10 +38,10 @@ from app.utils.singleton import WeakSingleton
 from app.utils.string import StringUtils
 from app.utils.system import SystemUtils
 from app.utils.url import UrlUtils
+from app.utils import plugin_repo
 from version import APP_VERSION
 
 PLUGIN_DIR = Path(settings.ROOT_PATH) / "app" / "plugins"
-LOCAL_REPO_PREFIX = "local://"
 PLUGIN_SYSTEM_VERSION_FIELD = "system_version"
 # 主程序重大版本可扫描的旧索引；V3 临时默认兼容 V2，条目可用 v3:false 排除。
 VERSION_BACKWARD_COMPATIBLE_FLAGS: Dict[str, List[str]] = {
@@ -84,7 +84,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         判断是否为本地插件来源标识
         """
-        return bool(repo_url and repo_url.startswith(LOCAL_REPO_PREFIX))
+        return plugin_repo.is_local_repo_url(repo_url)
 
     @staticmethod
     def make_local_repo_url(pid: str, repo_path: Optional[Path] = None,
@@ -92,15 +92,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         生成本地插件安装来源标识
         """
-        repo_url = f"{LOCAL_REPO_PREFIX}{quote(pid, safe='')}"
-        params = []
-        if repo_path:
-            params.append(f"path={quote(str(repo_path), safe='/:~')}")
-        if package_version:
-            params.append(f"version={quote(package_version, safe='')}")
-        if params:
-            repo_url = f"{repo_url}?{'&'.join(params)}"
-        return repo_url
+        return plugin_repo.make_local_repo_url(pid, repo_path, package_version)
 
     @staticmethod
     def parse_local_repo_url(repo_url: str) -> Optional[str]:
@@ -113,7 +105,7 @@ class PluginHelper(metaclass=WeakSingleton):
             parts = urlsplit(repo_url)
             pid = unquote(parts.netloc or parts.path.strip("/"))
         except Exception:
-            pid = repo_url[len(LOCAL_REPO_PREFIX):].split("?", 1)[0].strip("/")
+            pid = repo_url[len(plugin_repo.LOCAL_REPO_PREFIX):].split("?", 1)[0].strip("/")
         return pid or None
 
     @staticmethod
@@ -1935,10 +1927,8 @@ class PluginHelper(metaclass=WeakSingleton):
             if not rel_parts:
                 raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
             dest_path = (dest_root / Path(*rel_parts)).resolve()
-            try:
-                dest_path.relative_to(dest_root)
-            except ValueError as exc:
-                raise ValueError(f"非法 Release 压缩包成员：{raw_name}") from exc
+            if not SystemUtils.is_within(dest_root, dest_path):
+                raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
             targets.append((info, dest_path, info.is_dir()))
         return targets
 

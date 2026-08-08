@@ -191,13 +191,179 @@ class _PluginBase(metaclass=ABCMeta):
 
     def get_module(self) -> Dict[str, Any]:
         """
-        获取插件模块声明，用于胁持系统模块实现（方法名：方法实现）
+        【已废弃，将移除】获取插件模块声明，用于胁持系统模块实现（方法名：方法实现）。
+
+        本「方法胁持/注入」路径无契约校验、易与内建实现冲突，已废弃；
+        请改用 provides_modules() 走「验证注册」——框架统一注册到 ModuleManager
+        并参与 chain 分发，无需 monkey-patch app.modules。
         {
             "id1": self.xxx1,
             "id2": self.xxx2,
         }
         """
         pass
+
+    def provides_modules(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的系统模块类（区别于 get_module 的方法胁持：
+        get_module 改既有方法，本钩子新增一个完整模块，如新的下载器/媒体服务器/消息渠道）。
+
+        返回模块【类】列表（非实例），每个类需实现 _ModuleBase 契约：
+        init_module / init_setting / stop / test，以及 get_type / get_subtype（或
+        get_subtype_id 返回枚举外字符串如 "aria2"）/ get_priority。
+        由框架（PluginManager 启停）统一注册到 ModuleManager 并参与 chain 分发，
+        无需插件自行 monkey-patch app.modules。默认不新增任何模块。
+
+        [DownloaderModuleClass, MediaServerModuleClass, ...]
+        """
+        return []
+
+    def provides_storages(self) -> List[Type]:
+        """
+        声明本插件向文件整理层【新增】的存储器类（provides_modules 的语法糖，
+        内部经 FileManager 注册）。返回 StorageBase 子类列表（非实例）。默认不新增。
+
+        [StorageClass1, StorageClass2, ...]
+        """
+        return []
+
+    def provides_data_sources(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的数据源（媒体识别/信息源，MediaRecognize 域）类，
+        如新的 TMDB / IMDB / 豆瓣式来源。provides_modules 的语法糖 + 数据源契约校验：
+        返回的【类】（非实例）须实现 _ModuleBase 契约且 get_type()==ModuleType.MediaRecognize。
+        识别能力方法（recognize_media / search_medias / obtain_images 等）按需实现——
+        框架经 ModuleManager 注册（owner=plugin_id）后按方法名分发，实现哪个就参与哪个
+        识别/搜索/取图流水线；子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭枚举）。默认不新增。
+
+        [TmdbLikeSourceClass, ImdbLikeSourceClass, ...]
+        """
+        return []
+
+    def provides_downloaders(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的下载器（Downloader 域）类，如新的 BT/PT 下载器。
+        provides_modules 的语法糖 + 下载器契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.Downloader，并实现 download / list_torrents / remove_torrents
+        等下载器操作（完整 IDownloader 操作面由 run_module 按方法名分发、按需实现）。
+        子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭 DownloaderType 枚举）。默认不新增。
+
+        [MyDownloaderClass, ...]
+        """
+        return []
+
+    def provides_notifications(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的消息渠道（Notification 域）类，如新的 IM/推送渠道。
+        provides_modules 的语法糖 + 消息渠道契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.Notification，并实现 post_message（其余 post_medias /
+        post_torrents / delete_message / register_commands 等由 run_module 按方法名分发、按需实现）。
+        子类型用 get_subtype_id() 返回字符串 id（无需扩展封闭 MessageChannel 枚举）；
+        渠道的按钮/Markdown/分段等能力矩阵由渠道模块自带的 get_channel_capabilities() 声明（返回
+        ChannelCapabilities，其 channel 以 get_subtype_id() 为准盖章；不声明则走降级默认）。默认不新增。
+
+        [MyNotificationClass, ...]
+        """
+        return []
+
+    def provides_mediaservers(self) -> List[Type]:
+        """
+        声明本插件向模块层【新增】的媒体服务器（MediaServer 域）类，如新的影音库服务端。
+        provides_modules 的语法糖 + 媒体服务器契约校验：返回的【类】（非实例）须实现 _ModuleBase
+        契约且 get_type()==ModuleType.MediaServer。能力方法（mediaserver_librarys /
+        media_statistic / mediaserver_playing / mediaserver_items 等）由 run_module 按方法名
+        分发、按需实现（实现哪个就参与哪个媒体库流水线）。子类型用 get_subtype_id() 返回字符串 id
+        （无需扩展封闭 MediaServerType 枚举）。默认不新增。
+
+        [MyMediaServerClass, ...]
+        """
+        return []
+
+    def provides_discover_sources(self) -> List[Any]:
+        """
+        声明本插件向探索页【新增】的数据源（Discover 域，声明式注册，与现有
+        ChainEventType.DiscoverSource 事件扩展并存、由框架去重合并）。返回 DiscoverMediaSource
+        实例列表，每个含 name / mediaid_prefix / api_path（指向本插件自有 API）/ filter_params /
+        filter_ui 等；由 /api/v1/discover/source 端点聚合后供前端枚举。默认不新增。
+
+        [DiscoverMediaSource(name=..., mediaid_prefix=..., api_path=...), ...]
+        """
+        return []
+
+    def provides_recommend_sources(self) -> List[Any]:
+        """
+        声明本插件向推荐页【新增】的数据源（Recommend 域，声明式注册，与现有
+        ChainEventType.RecommendSource 事件扩展并存、由框架去重合并）。返回 RecommendMediaSource
+        实例列表，每个含 name / api_path（指向本插件自有 API）/ type；由 /api/v1/recommend/source
+        端点聚合后供前端枚举。默认不新增。
+
+        [RecommendMediaSource(name=..., api_path=..., type=...), ...]
+        """
+        return []
+
+    def provides_auth_providers(self) -> List[Any]:
+        """
+        声明本插件向登录页【新增】的 SSO 登录提供方（外部 IdP 单点登录，声明式注册）。
+        返回实现 app.core.auth.redirect.IAuthProvider 契约的【实例】列表，每个含 provider_id / provider_name /
+        provider_icon + authorize_url(state, redirect_uri) / fetch_identity(code, redirect_uri)。
+        框架统一负责 CSRF state、回调端点、用户解析/建号与铸票（消除每个 SSO 插件重复的这套样板），
+        插件只实现 IdP 特定的「授权 URL 构造」与「授权码换身份」两件事。默认不新增。
+
+        [GithubAuthProvider(...), FeishuAuthProvider(...), ...]
+        """
+        return []
+
+    def provides_auth_flows(self) -> List[Any]:
+        """
+        声明本插件向登录【新增】的自定义流程形状（组合策略），而不止于贡献单个步骤。
+        返回实现 app.core.auth.flow_registry.IFlowSpec 契约的【实例】列表，每个含 flow_id +
+        mfa_requirement(factor_steps)，可据已装配因子返回 AnyOf / NOf / AllOf 组合（如 2-of-3 强 MFA、
+        强制多因子）。上层端点按 flow_id 选用。默认不新增（即沿用任一因子满足的默认策略）。
+
+        [HighAssuranceFlowSpec(...), ...]
+        """
+        return []
+
+    def provides_auth_steps(self) -> List[Any]:
+        """
+        声明本插件向登录流程【新增】的认证步骤（**统一 SPI**：主认证 provider / MFA 因子 / SSO 重定向
+        统一收口为「认证步骤」一条声明）。返回实现 app.core.auth.flow.IAuthStep 契约的【实例】列表 ——
+        通常是把现有认证构件包装成步骤的适配器：CredentialProviderStep(provider) / FactorStep(factor) / RedirectStep(provider)，
+        各含 step_id / step_kind / priority + applies_to(context) / advance(context, submission)。
+        框架以 owner=plugin_id 注册到全局步骤注册表（register_auth_step），装配桥按 step_kind 切分
+        （credential / directory / federated_direct / redirect → 凭证步；factor → 第二因子步）后入多步
+        登录流程。默认不新增。
+
+        [CredentialProviderStep(LdapProvider(...)), FactorStep(SmsFactor(...)), ...]
+        """
+        return []
+
+    def provides_models(self) -> List[Type]:
+        """
+        声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。
+
+        返回继承自 build_plugin_base(本插件ID) 的 ORM 模型【类】列表（非实例）。
+        这些模型挂在插件专属的独立 MetaData 上，落到插件独立的 .db 文件 / schema，
+        与核心库及其它插件完全隔离；框架（PluginManager 启停）据此自动建表/卸载删库，
+        无需插件自行管理 Engine/Session。默认不声明任何表。
+
+        用法：在插件模块内 `PluginBase = build_plugin_base(self.__class__.__name__)`，
+        定义 `class XxxModel(PluginBase): ...`，再于此返回 `[XxxModel, ...]`；
+        读写用 `self.get_plugin_db().session()`（即「自会话管理」）。
+
+        [XxxModel, YyyModel, ...]
+        """
+        return []
+
+    def provides_migration_location(self) -> Optional[Path]:
+        """
+        【可选】声明本插件 Alembic 迁移目录（启用 per-plugin 迁移链而非 create_all）。
+
+        返回包含 env.py（用 app.db.plugin_migration.write_plugin_alembic_env 生成）
+        与 versions/ 迁移脚本的目录路径；框架启动插件时自动 upgrade 到 head。
+        返回 None（默认）则走 create_all 直接建表，适合无需演进表结构的插件。
+        """
+        return None
 
     def get_actions(self) -> List[Dict[str, Any]]:
         """
@@ -265,6 +431,17 @@ class _PluginBase(metaclass=ABCMeta):
         if not data_path.exists():
             data_path.mkdir(parents=True)
         return data_path
+
+    def get_plugin_db(self):
+        """
+        获取本插件【独立】的数据库容器（按插件类名自动注册，幂等）。
+
+        返回 app.db.manager.PluginDatabase（持有插件专属 Engine + ScopedSession，
+        落 PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db）。配合 provides_models()
+        声明的模型，用 `self.get_plugin_db().session()` 进行读写（自会话管理）。
+        """
+        from app.db.manager import db_manager
+        return db_manager.register_plugin(self.__class__.__name__)
 
     def save_data(self, key: str, value: Any, plugin_id: Optional[str] = None):
         """
