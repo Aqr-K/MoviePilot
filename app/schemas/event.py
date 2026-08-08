@@ -230,6 +230,30 @@ class AuthInterceptCredentials(ChainEventData):
     cancel: bool = Field(default=False, description="是否取消认证")
 
 
+class AuthObservationEventData(ChainEventData):
+    """
+    AuthSucceeded / AuthFailed 观测事件数据（fire-and-forget，供审计/风控/行为分析插件）。
+
+    纯观测：监听者不应影响认证结果（认证决策仍由编排器/端点掌握）。
+    """
+
+    username: Optional[str] = Field(default=None, description="用户名")
+    success: bool = Field(default=False, description="认证是否成功")
+    reason: Optional[str] = Field(default=None, description="失败原因（脱敏）")
+    source: str = Field(default="login", description="事件来源")
+    client_ip: Optional[str] = Field(default=None, description="客户端 IP（如可得）")
+
+
+class MfaChallengeEventData(ChainEventData):
+    """
+    MfaChallengeRequired 观测事件数据：携带本次登录可用的第二因子，供风控/自适应 step-up 插件。
+    """
+
+    username: Optional[str] = Field(default=None, description="用户名")
+    factors_available: List[str] = Field(default_factory=list, description="可用 MFA 因子 id 列表")
+    source: str = Field(default="login", description="事件来源")
+
+
 class CommandRegisterEventData(ChainEventData):
     """
     CommandRegister 事件的数据模型
