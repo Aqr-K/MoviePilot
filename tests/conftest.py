@@ -15,6 +15,92 @@ prepare_backend()
 # 复用共享 autouse 网络守卫；同一实现亦供各插件仓 conftest import 复用，避免逐仓维护
 from app.testing.network_guard import block_real_network  # noqa: E402,F401
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture
+def register_demo_step():
+    """注册一枚最小 ``IAuthStep`` 到全局步骤注册表（owner="demo"），fixture 退出后按 owner 卸载。
+
+    供"装配桥读注册表"类测试用：让 ``_build_flow_service`` 能从 ``all_auth_steps()`` 看到一枚真步骤。
+    """
+    from app.core.auth.flow import AuthStepResult
+    from app.core.auth.steps import register_auth_step, unregister_auth_steps
+
+    class _DemoStep:
+        step_id = "demo-cred-step"
+        step_kind = "credential"
+        priority = 50
+
+        def applies_to(self, context):
+            return context.resolved_user_id is None
+
+        def advance(self, context, submission):
+            return AuthStepResult(status="pending")
+
+    step = _DemoStep()
+    register_auth_step(step, owner="demo")
+    try:
+        yield step
+    finally:
+        unregister_auth_steps("demo")
+
+
+@pytest.fixture
+def make_plugin_with_steps():
+    """构造一个仅声明 ``provides_auth_steps()`` 的插件替身，并经**真实** PluginManager 注册管线激活。
+
+    返回工厂 ``make(plugin_id, steps)`` → harness；harness.activate(plugin_id) 把插件注入运行态并驱动
+    ``_register_plugin_modules`` 走单 SPI 接线（register_auth_step(owner=plugin_id)）。fixture 退出时按
+    owner 卸载步骤并移出运行态，避免污染 PluginManager 单例。
+    """
+    from app.helper.plugin_manager import PluginManager
+
+    pm = PluginManager()
+    activated: list = []
+
+    class _StepPlugin:
+        """仅声明统一认证步骤的插件替身（真实类实例，确保 ObjectUtils.check_method 识别钩子）。"""
+
+        def __init__(self, steps):
+            self._steps = steps
+
+        def get_state(self):
+            return True
+
+        def provides_auth_steps(self):
+            return self._steps
+
+    class _Harness:
+        def __init__(self, steps):
+            self._steps = steps
+
+        def activate(self, plugin_id):
+            pm._running_plugins[plugin_id] = _StepPlugin(self._steps)
+            pm._register_plugin_modules(plugin_id)
+            if plugin_id not in activated:
+                activated.append(plugin_id)
+            return self
+
+        def deactivate(self, plugin_id):
+            """手动卸载并从 activated 列表移除，防止 fixture teardown 双重卸载。"""
+            pm._unregister_plugin_modules([plugin_id])
+            pm._running_plugins.pop(plugin_id, None)
+            try:
+                activated.remove(plugin_id)
+            except ValueError:
+                pass
+
+    def _make(plugin_id, steps):
+        return _Harness(steps)
+
+    try:
+        yield _make
+    finally:
+        for plugin_id in activated:
+            pm._unregister_plugin_modules([plugin_id])
+            pm._running_plugins.pop(plugin_id, None)
+
 
 def _report_session_cleanup_error(session, name: str, err: Exception) -> None:
     """记录收尾错误；原测试绿色时将会话标记为失败。"""

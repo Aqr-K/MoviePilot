@@ -1,4 +1,4 @@
-"""多因素认证 API 输出模型。"""
+"""多因素认证 API 输入输出模型。"""
 
 from typing import Optional
 
@@ -40,3 +40,66 @@ class PasskeyInfo(BaseModel):
     last_used_at: Optional[str] = None
     aaguid: Optional[str] = None
     transports: Optional[str] = None
+
+
+class OtpVerifyRequest(BaseModel):
+    """OTP验证请求"""
+
+    uri: str
+    otpPassword: str
+
+
+class OtpDisableRequest(BaseModel):
+    """OTP禁用请求"""
+
+    password: str
+
+
+class PassKeyDeleteRequest(BaseModel):
+    """PassKey删除请求"""
+
+    passkey_id: int
+    password: str
+
+
+class PassKeyRegistrationStart(BaseModel):
+    """PassKey注册开始请求"""
+
+    name: str = "通行密钥"
+
+
+class PassKeyRegistrationFinish(BaseModel):
+    """PassKey注册完成请求"""
+
+    credential: dict
+    transaction_token: str
+    name: str = "通行密钥"
+
+
+class PassKeyAuthenticationStart(BaseModel):
+    """PassKey认证开始请求"""
+
+    username: Optional[str] = None
+
+
+class PassKeyAuthenticationFinish(BaseModel):
+    """PassKey认证完成请求"""
+
+    credential: dict
+    transaction_token: str
+
+
+__all__ = [
+    "PasskeyOptions",
+    "OtpGenerateData",
+    "MfaStatusData",
+    "PasskeyStartData",
+    "PasskeyInfo",
+    "OtpVerifyRequest",
+    "OtpDisableRequest",
+    "PassKeyDeleteRequest",
+    "PassKeyRegistrationStart",
+    "PassKeyRegistrationFinish",
+    "PassKeyAuthenticationStart",
+    "PassKeyAuthenticationFinish",
+]
