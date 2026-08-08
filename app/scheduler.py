@@ -27,7 +27,7 @@ from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
 from app.core.config import settings, global_vars
 from app.core.event import Event, eventmanager
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.db import SessionFactory
 from app.db.agenttask_oper import AgentTaskOper
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
@@ -991,13 +991,17 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 running_loop = None
             target_loop = global_vars.loop
             if running_loop:
+                # 调用方本身就在事件循环内，阻塞等待会自锁，
+                # 交由 __run_coro_job 在协程结束后收敛状态
                 asyncio.create_task(self.__run_coro_job(coro=coro, job_id=job_id, job=job))
                 return True
             if target_loop and target_loop.is_running():
+                # 从非事件循环线程提交：阻塞等待协程真正结束，
+                # 避免 running 标志提前复位导致重入并发、协程异常在事件循环中丢失
                 asyncio.run_coroutine_threadsafe(
                     self.__run_coro_job(coro=coro, job_id=job_id, job=job),
                     target_loop,
-                )
+                ).result()
                 return True
             asyncio.run(coro)
             return False
@@ -1023,7 +1027,8 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             # 是否多进程运行
             run_in_process = job.get("run_in_process", False)
             if inspect.iscoroutinefunction(func):
-                # 协程函数
+                # 协程函数：由 __start_coro 按调用线程选择执行方式，
+                # 返回 True 表示 running 标志与进度由协程回调在其真正结束后自行收敛
                 deferred_finish = __start_coro(func(*args, **kwargs))
             elif run_in_process:
                 # 多进程运行
