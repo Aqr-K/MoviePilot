@@ -194,7 +194,7 @@ class TestAgentInteraction(unittest.TestCase):
         ) as message_add, patch.object(
             chain, "edit_message", return_value=True
         ) as edit_message, patch(
-            "app.chain.message.agent_manager.process_message",
+            "app.agent.agent_manager.process_message",
             new_callable=AsyncMock,
         ) as process_message, patch(
             "app.chain.message.asyncio.run_coroutine_threadsafe",
