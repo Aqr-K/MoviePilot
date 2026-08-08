@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, Index, Integer, String, Text
-from sqlalchemy.orm import Session
+from sqlalchemy import Boolean, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import Base, db_query, db_update, get_id_column
 
@@ -12,34 +12,34 @@ class AgentTask(Base):
     Agent 自主定时任务表。
     """
 
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 任务名称
-    name = Column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
     # 交给 Agent 执行的完整任务内容
-    content = Column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     # 触发类型：date-单次触发，cron-周期触发
-    trigger_type = Column(String, nullable=False)
+    trigger_type: Mapped[str] = mapped_column(String, nullable=False)
     # 标准五段 cron 表达式
-    cron_expression = Column(String)
+    cron_expression: Mapped[Optional[str]] = mapped_column(String)
     # 单次触发时间，使用带时区的 ISO 8601 格式
-    run_at = Column(String)
+    run_at: Mapped[Optional[str]] = mapped_column(String)
     # 是否继续接受调度
-    enabled = Column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # 创建任务的用户与会话上下文
-    user_id = Column(String, nullable=False)
-    username = Column(String)
-    session_id = Column(String, nullable=False)
-    channel = Column(String)
-    source = Column(String)
-    original_chat_id = Column(String)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    username: Mapped[Optional[str]] = mapped_column(String)
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    channel: Mapped[Optional[str]] = mapped_column(String)
+    source: Mapped[Optional[str]] = mapped_column(String)
+    original_chat_id: Mapped[Optional[str]] = mapped_column(String)
     # 最近一次执行状态与结果
-    last_status = Column(String, nullable=False, default="waiting")
-    last_run_at = Column(String)
-    last_result = Column(Text)
+    last_status: Mapped[str] = mapped_column(String, nullable=False, default="waiting")
+    last_run_at: Mapped[Optional[str]] = mapped_column(String)
+    last_result: Mapped[Optional[str]] = mapped_column(Text)
     # 已收口执行次数；进程中断的未完成尝试不计入
-    run_count = Column(Integer, nullable=False, default=0)
-    created_at = Column(String, nullable=False)
-    updated_at = Column(String, nullable=False)
+    run_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
     __table_args__ = (
         Index("ix_agenttask_enabled", "enabled"),

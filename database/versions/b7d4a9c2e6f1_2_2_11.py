@@ -2,7 +2,7 @@
 新增下载失败资源冷却表
 
 Revision ID: b7d4a9c2e6f1
-Revises: 8ab72c49d1e3
+Revises: e1a2b3c4d5e6
 Create Date: 2026-07-07
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "b7d4a9c2e6f1"
-down_revision = "8ab72c49d1e3"
+down_revision = "e1a2b3c4d5e6"
 branch_labels = None
 depends_on = None
 

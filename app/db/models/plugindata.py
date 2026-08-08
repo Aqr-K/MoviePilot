@@ -1,6 +1,8 @@
-from sqlalchemy import Column, String, JSON, Index, select
+from typing import Optional
+
+from sqlalchemy import String, JSON, Index, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import (
     db_query,
@@ -15,10 +17,10 @@ class PluginData(Base):
     """
     插件数据表
     """
-    id = get_id_column()
-    plugin_id = Column(String, nullable=False)
-    key = Column(String, nullable=False)
-    value = Column(JSON)
+    id: Mapped[int] = get_id_column()
+    plugin_id: Mapped[str] = mapped_column(String, nullable=False)
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    value: Mapped[Optional[dict]] = mapped_column(JSON)
 
     __table_args__ = (
         Index('ix_plugindata_plugin_id_key', 'plugin_id', 'key'),

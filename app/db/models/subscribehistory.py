@@ -1,8 +1,8 @@
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Float, JSON, Index, or_, select
+from sqlalchemy import Integer, String, Float, JSON, Index, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db import db_query, Base, get_id_column, async_db_query
 from app.db.models.media_identity import media_identity_constraint
@@ -13,91 +13,91 @@ class SubscribeHistory(Base):
     """
     订阅历史表
     """
-    id = get_id_column()
+    id: Mapped[int] = get_id_column()
     # 标题
-    name = Column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # 年份
-    year = Column(String)
+    year: Mapped[Optional[str]] = mapped_column(String)
     # 类型
-    type = Column(String)
+    type: Mapped[Optional[str]] = mapped_column(String)
     # 搜索关键字
-    keyword = Column(String)
-    media_source = Column(String, index=True)
-    media_id = Column(String, index=True)
+    keyword: Mapped[Optional[str]] = mapped_column(String)
+    media_source: Mapped[Optional[str]] = mapped_column(String, index=True)
+    media_id: Mapped[Optional[str]] = mapped_column(String, index=True)
     # 音乐实体类型：recording 单曲、album 专辑
-    music_type = Column(String)
+    music_type: Mapped[Optional[str]] = mapped_column(String)
     # 专辑预期总曲目数
-    total_tracks = Column(Integer)
+    total_tracks: Mapped[Optional[int]] = mapped_column(Integer)
     # 季号
-    season = Column(Integer)
+    season: Mapped[Optional[int]] = mapped_column(Integer)
     # 海报
-    poster = Column(String)
+    poster: Mapped[Optional[str]] = mapped_column(String)
     # 背景图
-    backdrop = Column(String)
+    backdrop: Mapped[Optional[str]] = mapped_column(String)
     # 评分，float
-    vote = Column(Float)
+    vote: Mapped[Optional[float]] = mapped_column(Float)
     # 简介
-    description = Column(String)
+    description: Mapped[Optional[str]] = mapped_column(String)
     # 过滤规则
-    filter = Column(String)
+    filter: Mapped[Optional[str]] = mapped_column(String)
     # 包含
-    include = Column(String)
+    include: Mapped[Optional[str]] = mapped_column(String)
     # 排除
-    exclude = Column(String)
+    exclude: Mapped[Optional[str]] = mapped_column(String)
     # 质量
-    quality = Column(String)
+    quality: Mapped[Optional[str]] = mapped_column(String)
     # 分辨率
-    resolution = Column(String)
+    resolution: Mapped[Optional[str]] = mapped_column(String)
     # 特效
-    effect = Column(String)
+    effect: Mapped[Optional[str]] = mapped_column(String)
     # 音乐音质等级：hires/lossless/lossy，可用正则组合
-    audio_quality = Column(String)
+    audio_quality: Mapped[Optional[str]] = mapped_column(String)
     # 音频格式，可用正则组合
-    audio_format = Column(String)
+    audio_format: Mapped[Optional[str]] = mapped_column(String)
     # 最低码率（bps）
-    min_bitrate = Column(Integer)
+    min_bitrate: Mapped[Optional[int]] = mapped_column(Integer)
     # 最低位深（bit）
-    min_bit_depth = Column(Integer)
+    min_bit_depth: Mapped[Optional[int]] = mapped_column(Integer)
     # 最低采样率（Hz）
-    min_sample_rate = Column(Integer)
+    min_sample_rate: Mapped[Optional[int]] = mapped_column(Integer)
     # 总集数
-    total_episode = Column(Integer)
+    total_episode: Mapped[Optional[int]] = mapped_column(Integer)
     # 开始集数
-    start_episode = Column(Integer)
+    start_episode: Mapped[Optional[int]] = mapped_column(Integer)
     # 订阅完成时间
-    date = Column(String)
+    date: Mapped[Optional[str]] = mapped_column(String)
     # 订阅用户
-    username = Column(String)
+    username: Mapped[Optional[str]] = mapped_column(String)
     # 订阅站点
-    sites = Column(JSON)
+    sites: Mapped[Optional[dict]] = mapped_column(JSON)
     # 是否洗版
-    best_version = Column(Integer, default=0)
+    best_version: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 是否只洗全集整包，开启后电视剧洗版不按单集下载
-    best_version_full = Column(Integer, default=0)
+    best_version_full: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 完成时的整体优先级
-    current_priority = Column(Integer)
+    current_priority: Mapped[Optional[int]] = mapped_column(Integer)
     # 完成时的音乐格式
-    current_audio_format = Column(String)
+    current_audio_format: Mapped[Optional[str]] = mapped_column(String)
     # 完成时的音乐码率（bps）
-    current_bitrate = Column(Integer)
+    current_bitrate: Mapped[Optional[int]] = mapped_column(Integer)
     # 完成时的音乐位深（bit）
-    current_bit_depth = Column(Integer)
+    current_bit_depth: Mapped[Optional[int]] = mapped_column(Integer)
     # 完成时的音乐采样率（Hz）
-    current_sample_rate = Column(Integer)
+    current_sample_rate: Mapped[Optional[int]] = mapped_column(Integer)
     # 洗版时已下载剧集的优先级状态，格式：{"1": 90, "2": 100}
-    episode_priority = Column(JSON)
+    episode_priority: Mapped[Optional[dict]] = mapped_column(JSON)
     # 保存路径
-    save_path = Column(String)
+    save_path: Mapped[Optional[str]] = mapped_column(String)
     # 是否使用 imdbid 搜索
-    search_imdbid = Column(Integer, default=0)
+    search_imdbid: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     # 自定义识别词
-    custom_words = Column(String)
+    custom_words: Mapped[Optional[str]] = mapped_column(String)
     # 自定义媒体类别
-    media_category = Column(String)
+    media_category: Mapped[Optional[str]] = mapped_column(String)
     # 过滤规则组
-    filter_groups = Column(JSON, default=list)
+    filter_groups: Mapped[Optional[list]] = mapped_column(JSON, default=list)
     # 剧集组
-    episode_group = Column(String)
+    episode_group: Mapped[Optional[str]] = mapped_column(String)
 
     __table_args__ = (
         media_identity_constraint("subscribehistory"),
