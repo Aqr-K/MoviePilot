@@ -1,4 +1,8 @@
-import json
+"""登录接口的 MFA 方法暴露边界。
+
+v3 的密码登录由 ``app/service/auth`` 引擎驱动：凭证校验通过后才进入 MFA 步骤，
+可用因子经 ``factors_available`` 结构化返回；密码未通过时只返回通用失败信息。
+"""
 from types import SimpleNamespace
 
 import pytest
@@ -7,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api.endpoints import login as login_endpoint
-from app.chain.user import MfaRequired, UserChain
+from app.service.auth.builtin_factors import OtpFactor
 
 
 def _request() -> Request:
@@ -27,63 +31,63 @@ def _request() -> Request:
 
 def _form() -> SimpleNamespace:
     """构造密码登录表单契约。"""
-    return SimpleNamespace(username="user", password="password")
+    return SimpleNamespace(username="user", password="password", grant_type="password")
 
 
-def test_verify_mfa_requires_otp_when_enabled():
-    """密码通过后应返回账号已启用的 OTP 二次验证方式。"""
+def _service(result: dict) -> SimpleNamespace:
+    """构造返回固定结果的认证流服务。"""
+    return SimpleNamespace(run_sync=lambda submission: result)
+
+
+def test_otp_factor_is_offered_when_enrolled():
+    """账号启用 OTP 时应作为可用二次验证方式给出挑战提示。"""
     user = SimpleNamespace(id=1, name="user", is_otp=True, otp_secret="")
+    factor = OtpFactor(is_enrolled=lambda _u: True, verify=lambda _u, _c: False)
 
-    result = UserChain._verify_mfa(user=user, mfa_code=None)
+    hint = factor.challenge_hint(user)
 
-    assert isinstance(result, MfaRequired)
-    assert result.methods == ("otp",)
+    assert hint is not None
+    assert hint.factor_id == "otp"
 
 
-def test_verify_mfa_ignores_passkeys_when_otp_is_disabled():
-    """Passkey 独立登录能力不应改变密码登录结果。"""
+def test_factor_not_offered_when_not_enrolled():
+    """未注册的因子不得出现在可用方式中，避免泄露账号安全配置。"""
     user = SimpleNamespace(id=1, name="user", is_otp=False, otp_secret="")
 
-    assert UserChain._verify_mfa(user=user, mfa_code=None) is True
+    assert OtpFactor(is_enrolled=lambda _u: False,
+                     verify=lambda _u, _c: False).challenge_hint(user) is None
 
 
 def test_login_mfa_response_contains_methods_after_password_verification(monkeypatch):
     """MFA 响应应保持旧标记并补充结构化方法列表。"""
-
-    class FakeUserChain:
-        """返回已通过密码校验的 MFA 要求。"""
-
-        def user_authenticate(self, username, password, mfa_code=None):
-            """模拟账号启用了 OTP。"""
-            return False, MfaRequired(methods=("otp",))
-
-    monkeypatch.setattr(login_endpoint, "UserChain", FakeUserChain)
-
-    response = login_endpoint.login_access_token(
-        request=_request(),
-        response=Response(),
-        form_data=_form(),
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        login_endpoint,
+        "_build_flow_service",
+        lambda: _service({"status": "mfa_required", "factors_available": ["otp"]}),
     )
 
-    assert response.status_code == 401
-    assert response.headers["x-mfa-required"] == "true"
-    assert json.loads(response.body) == {
-        "detail": "需要二次验证",
-        "mfa_methods": ["otp"],
-    }
+    with pytest.raises(HTTPException) as exc_info:
+        login_endpoint.login_access_token(
+            request=_request(),
+            response=Response(),
+            form_data=_form(),
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.headers["X-MFA-Required"] == "true"
+    assert exc_info.value.detail["status"] == "mfa_required"
+    assert exc_info.value.detail["factors_available"] == ["otp"]
 
 
 def test_login_invalid_password_does_not_expose_mfa_methods(monkeypatch):
     """密码未通过时不得返回账号的 MFA 能力。"""
-
-    class FakeUserChain:
-        """返回普通认证失败。"""
-
-        def user_authenticate(self, username, password, mfa_code=None):
-            """模拟错误密码。"""
-            return False, "用户名、密码或验证码错误"
-
-    monkeypatch.setattr(login_endpoint, "UserChain", FakeUserChain)
+    monkeypatch.setattr(login_endpoint, "emit_auth_event", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        login_endpoint,
+        "_build_flow_service",
+        lambda: _service({"status": "failure"}),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         login_endpoint.login_access_token(

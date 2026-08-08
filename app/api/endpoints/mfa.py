@@ -4,7 +4,7 @@ MFA (Multi-Factor Authentication) API 端点
 """
 
 from datetime import timedelta
-from typing import Any, Annotated, Optional
+from typing import Any, Annotated
 
 from app.helper.sites import SitesHelper
 from fastapi import APIRouter, Depends, HTTPException, Body, Request, Response
@@ -26,28 +26,19 @@ from app.helper.passkey import (
 )
 from app.log import logger
 from app.schemas.types import SystemConfigKey
+from app.service.auth.passkey_login import (
+    PasskeyLoginError,
+    begin_passkey_login,
+)
+from app.service.mfa import (
+    build_credential_list as _build_credential_list,
+    build_passkey_list as _build_passkey_list,
+)
 from app.utils.otp import OtpUtils
 
 router = APIRouter()
 
 # ==================== 辅助函数 ====================
-
-
-def _build_credential_list(passkeys: list[PassKey]) -> list[dict[str, Any]]:
-    """
-    构建凭证列表
-
-    :param passkeys: PassKey 列表
-    :return: 凭证字典列表
-    """
-    return (
-        [
-            {"credential_id": pk.credential_id, "transports": pk.transports}
-            for pk in passkeys
-        ]
-        if passkeys
-        else []
-    )
 
 
 def _extract_and_standardize_credential_id(credential: dict) -> str:
@@ -88,29 +79,6 @@ def _verify_passkey_and_update(
     return success, new_sign_count
 
 
-# ==================== 请求模型 ====================
-
-
-class OtpVerifyRequest(schemas.BaseModel):
-    """OTP验证请求"""
-
-    uri: str
-    otpPassword: str
-
-
-class OtpDisableRequest(schemas.BaseModel):
-    """OTP禁用请求"""
-
-    password: str
-
-
-class PassKeyDeleteRequest(schemas.BaseModel):
-    """PassKey删除请求"""
-
-    passkey_id: int
-    password: str
-
-
 # ==================== 通用 MFA 接口 ====================
 
 
@@ -149,7 +117,7 @@ def otp_generate(
 
 @router.post("/otp/verify", summary="绑定并验证 OTP", response_model=schemas.Response)
 async def otp_verify(
-    data: OtpVerifyRequest,
+    data: schemas.OtpVerifyRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
@@ -166,7 +134,7 @@ async def otp_verify(
     "/otp/disable", summary="关闭当前用户的 OTP 验证", response_model=schemas.Response
 )
 async def otp_disable(
-    data: OtpDisableRequest,
+    data: schemas.OtpDisableRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
@@ -179,33 +147,6 @@ async def otp_disable(
 
 
 # ==================== PassKey 相关接口 ====================
-
-
-class PassKeyRegistrationStart(schemas.BaseModel):
-    """PassKey注册开始请求"""
-
-    name: str = "通行密钥"
-
-
-class PassKeyRegistrationFinish(schemas.BaseModel):
-    """PassKey注册完成请求"""
-
-    credential: dict
-    transaction_token: str
-    name: str = "通行密钥"
-
-
-class PassKeyAuthenticationStart(schemas.BaseModel):
-    """PassKey认证开始请求"""
-
-    username: Optional[str] = None
-
-
-class PassKeyAuthenticationFinish(schemas.BaseModel):
-    """PassKey认证完成请求"""
-
-    credential: dict
-    transaction_token: str
 
 
 @router.post(
@@ -254,7 +195,7 @@ def passkey_register_start(
     response_model=schemas.Response,
 )
 def passkey_register_finish(
-    passkey_req: PassKeyRegistrationFinish,
+    passkey_req: schemas.PassKeyRegistrationFinish,
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Any:
     """完成注册 PassKey - 验证并保存凭证"""
@@ -321,30 +262,19 @@ def passkey_register_finish(
     response_model=schemas.Response,
 )
 def passkey_authenticate_start(
-    passkey_req: PassKeyAuthenticationStart = Body(...),
+    passkey_req: schemas.PassKeyAuthenticationStart = Body(...),
 ) -> Any:
-    """开始 PassKey 认证 - 生成认证选项"""
+    """开始 PassKey 认证 - 生成认证选项并签发一次性事务令牌（取即销毁，防重放）"""
     try:
-        existing_credentials = None
         user_id = None
-
-        # 如果指定了用户名，只允许该用户的PassKey
+        # 指定用户名时只允许该用户的PassKey，并把挑战绑定到该用户
         if passkey_req.username:
             user = User.get_by_name(db=None, name=passkey_req.username)
-            existing_passkeys = (
-                PassKey.get_by_user_id(db=None, user_id=user.id) if user else None
-            )
-
-            if not user or not existing_passkeys:
+            if not user:
                 return schemas.Response(success=False, message="认证失败")
-
-            existing_credentials = _build_credential_list(existing_passkeys)
             user_id = user.id
 
-        # 生成认证选项
-        options_json, challenge = PassKeyHelper.generate_authentication_options(
-            existing_credentials=existing_credentials
-        )
+        options_json, challenge = begin_passkey_login(passkey_req.username)
 
         transaction_token = PasskeyChallengeStore.issue(
             challenge=challenge,
@@ -355,6 +285,8 @@ def passkey_authenticate_start(
             success=True,
             data={"options": options_json, "transaction_token": transaction_token},
         )
+    except PasskeyLoginError:
+        return schemas.Response(success=False, message="认证失败")
     except Exception as e:
         logger.error(f"生成PassKey认证选项失败: {e}")
         return schemas.Response(success=False, message="认证失败")
@@ -366,9 +298,12 @@ def passkey_authenticate_start(
     response_model=schemas.Token,
 )
 def passkey_authenticate_finish(
-    request: Request, response: Response, passkey_req: PassKeyAuthenticationFinish
+    request: Request, response: Response, passkey_req: schemas.PassKeyAuthenticationFinish
 ) -> Any:
-    """完成 PassKey 认证 - 验证凭证并返回 token"""
+    """完成 PassKey 认证 - 校验断言并返回 token
+
+    挑战态落服务端：以一次性事务令牌 consume（取即销毁），缺失/过期/重放→401。
+    """
     try:
         challenge_state = PasskeyChallengeStore.consume(
             transaction_token=passkey_req.transaction_token,
@@ -462,23 +397,7 @@ def passkey_list(
     try:
         passkeys = PassKey.get_by_user_id(db=None, user_id=current_user.id)
 
-        key_list = (
-            [
-                {
-                    "id": pk.id,
-                    "name": pk.name,
-                    "created_at": pk.created_at.isoformat() if pk.created_at else None,
-                    "last_used_at": pk.last_used_at.isoformat()
-                    if pk.last_used_at
-                    else None,
-                    "aaguid": pk.aaguid,
-                    "transports": pk.transports,
-                }
-                for pk in passkeys
-            ]
-            if passkeys
-            else []
-        )
+        key_list = _build_passkey_list(passkeys)
 
         return schemas.Response(success=True, data=key_list)
     except Exception as e:
@@ -488,7 +407,7 @@ def passkey_list(
 
 @router.post("/passkey/delete", summary="删除 PassKey", response_model=schemas.Response)
 async def passkey_delete(
-    data: PassKeyDeleteRequest,
+    data: schemas.PassKeyDeleteRequest,
     current_user: User = Depends(get_current_active_user_async),
 ) -> Any:
     """删除指定的 PassKey"""
