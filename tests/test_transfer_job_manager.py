@@ -10,145 +10,15 @@ from app.chain.transfer import JobManager, TransferChain
 from app.modules.filemanager.transhandler import TransHandler
 from app.schemas import EpisodeFormat, FileItem, TransferInfo, TransferTask
 from app.schemas.types import EventType, MediaType
-
-
-class FakeMeta:
-    def __init__(self, episode: int, season: int = 1):
-        self.name = "Test Show"
-        self.title = f"Test Show S{season:02d}E{episode:02d}"
-        self.year = "2026"
-        self.type = MediaType.TV
-        self.begin_season = season
-        self.end_season = None
-        self.total_season = 1
-        self.begin_episode = episode
-        self.end_episode = None
-        self.total_episode = 1
-        self.episode_list = [episode]
-        self.season_episode = f"S01E{episode:02d}"
-        self.part = None
-
-    @property
-    def season(self):
-        return f"S{self.begin_season:02d}"
-
-    @property
-    def episode(self):
-        return f"E{self.begin_episode:02d}"
-
-    def to_dict(self):
-        return {
-            "title": self.title,
-            "name": self.name,
-            "year": self.year,
-            "type": self.type.value,
-            "begin_season": self.begin_season,
-            "end_season": self.end_season,
-            "total_season": self.total_season,
-            "begin_episode": self.begin_episode,
-            "end_episode": self.end_episode,
-            "total_episode": self.total_episode,
-            "season_episode": self.season_episode,
-            "episode_list": self.episode_list,
-            "part": self.part,
-        }
-
-
-class FakeMedia:
-    def __init__(self, tmdb_id: int = 12345):
-        """构造与正式 MediaInfo 身份字段一致的测试媒体对象。"""
-        self.tmdb_id = tmdb_id
-        self.douban_id = None
-        self.bangumi_id = None
-        self.anilist_id = None
-        self.source = "themoviedb"
-        self.type = MediaType.TV
-        self.title_year = "Test Show (2026)"
-
-    def clear(self):
-        """模拟正式媒体对象的清理接口。"""
-        pass
-
-    def to_dict(self):
-        """返回测试媒体对象的序列化字段。"""
-        return {
-            "type": MediaType.TV.value,
-            "title": "Test Show",
-            "year": "2026",
-            "title_year": "Test Show (2026)",
-            "tmdb_id": self.tmdb_id,
-            "douban_id": self.douban_id,
-            "bangumi_id": self.bangumi_id,
-            "anilist_id": self.anilist_id,
-        }
-
-
-def make_media_info() -> MediaInfo:
-    media = MediaInfo()
-    media.type = MediaType.TV
-    media.title = "Test Show"
-    media.title_year = "Test Show (2026)"
-    media.year = "2026"
-    media.tmdb_id = 12345
-    media.category = ""
-    media.actors = []
-    media.season_years = {}
-    media.vote_average = 0
-    return media
-
-
-def make_task(episode: int, season: int = 1) -> TransferTask:
-    name = f"Test.Show.S{season:02d}E{episode:02d}.mkv"
-    return TransferTask(
-        fileitem=FileItem(
-            storage="local",
-            path=f"/downloads/Test Show/{name}",
-            type="file",
-            name=name,
-            basename=name.removesuffix(".mkv"),
-            extension="mkv",
-            size=1024,
-        ),
-        meta=FakeMeta(episode),
-    )
-
-
-def make_transfer_chain() -> TransferChain:
-    chain = object.__new__(TransferChain)
-    chain.jobview = JobManager()
-    chain._media_exts = settings.RMT_MEDIAEXT
-    chain._subtitle_exts = settings.RMT_SUBEXT
-    chain._audio_exts = settings.RMT_AUDIOEXT
-    chain._allowed_exts = (
-        chain._media_exts + chain._audio_exts + chain._subtitle_exts
-    )
-    chain._success_target_files = {}
-    chain._scrape_batches = {}
-    return chain
-
-
-def make_fileitem(path: str, size: int = 1024) -> FileItem:
-    file_path = path
-    name = file_path.rsplit("/", 1)[-1]
-    suffix = name.rsplit(".", 1)[-1] if "." in name else ""
-    basename = name[: -(len(suffix) + 1)] if suffix else name
-    return FileItem(
-        storage="local",
-        path=file_path,
-        type="file",
-        name=name,
-        basename=basename,
-        extension=suffix,
-        size=size,
-    )
-
-
-def migrate_to_media_job(jobview: JobManager, task: TransferTask):
-    task.mediainfo = FakeMedia()
-    jobview.migrate_task(task)
-    jobview.running_task(task)
-    jobview.finish_task(task)
-    jobview.try_remove_job(task)
+from tests.transfer_fixtures import (
+    FakeMedia,
+    FakeMeta,
+    make_fileitem,
+    make_media_info,
+    make_task,
+    make_transfer_chain,
+    migrate_to_media_job,
+)
 
 
 class TransferJobManagerTest(unittest.TestCase):
@@ -393,7 +263,7 @@ class TransferJobManagerTest(unittest.TestCase):
             "app.chain.transfer.TransferHistoryOper",
             return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=1)),
         ):
-            state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
+            state, errmsg = chain._result_processor.handle(task, transferinfo)
 
         self.assertTrue(state)
         self.assertEqual("", errmsg)
@@ -1139,7 +1009,7 @@ class TransferJobManagerTest(unittest.TestCase):
         ) as storage_chain_cls:
             storage_chain_cls.return_value.is_bluray_folder.return_value = False
             for task, transferinfo in zip(tasks, transferinfos):
-                chain._TransferChain__default_callback(task, transferinfo)
+                chain._result_processor.handle(task, transferinfo)
                 chain._TransferChain__finish_scrape_batch_task(task)
 
         metadata_calls = [
@@ -1157,7 +1027,7 @@ class TransferJobManagerTest(unittest.TestCase):
             ],
             event_data["file_list"],
         )
-        self.assertEqual({}, chain._scrape_batches)
+        self.assertEqual({}, chain._scrape_coordinator._batches)
 
     def test_scrape_event_keeps_immediate_behavior_without_transfer_batch(self):
         chain = make_transfer_chain()
@@ -1202,7 +1072,7 @@ class TransferJobManagerTest(unittest.TestCase):
             "app.chain.transfer.StorageChain"
         ) as storage_chain_cls:
             storage_chain_cls.return_value.is_bluray_folder.return_value = False
-            chain._TransferChain__default_callback(task, transferinfo)
+            chain._result_processor.handle(task, transferinfo)
 
         metadata_calls = [
             call

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.chain.transfer import TransferChain
+from app.chain.transfer import ScrapeBatchCoordinator, TransferChain
 from app.core.config import settings
 from app.core.context import MediaInfo
 from app.schemas import DownloadHistory, FileItem, TransferTask
@@ -89,6 +89,7 @@ def test_conflicting_download_history_recognizes_movie_by_file_meta(monkeypatch)
         migrate_task=lambda task: False,
         try_remove_job=lambda task: None,
     )
+    chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
     monkeypatch.setattr(
         "app.chain.transfer.TransferHistoryOper",
         lambda: SimpleNamespace(get_by_type_tmdbid=lambda **kwargs: None),

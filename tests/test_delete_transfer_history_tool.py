@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from app.agent.tools.impl.delete_transfer_history import DeleteTransferHistoryTool
-from app.agent.prompt.transfer_redo import build_manual_redo_template_context
+from app.service.history import build_manual_redo_template_context
 
 
 def test_delete_transfer_history_tool_removes_old_dest_file_before_history(monkeypatch):

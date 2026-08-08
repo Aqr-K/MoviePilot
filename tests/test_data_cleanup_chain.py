@@ -184,7 +184,12 @@ class DataCleanupChainTest(unittest.TestCase):
             )
             db.commit()
 
-        with self._cleanup_settings(), patch("app.scheduler.SessionFactory", self.SessionFactory):
+        with self._cleanup_settings(), \
+                patch("app.scheduler.SessionFactory", self.SessionFactory), \
+                patch("app.scheduler.datetime", wraps=datetime) as mock_datetime:
+            # cleanup() 内部另取一次 datetime.now() 作为 started_at；固定为与边界记录
+            # 同一时刻，避免两次取时穿越秒边界导致边界记录被误判为早于 cutoff。
+            mock_datetime.now.return_value = now
             report = SchedulerChain().cleanup(batch_size=10)
 
         self.assertEqual(report["tables"]["transferhistory"]["deleted"], 0)

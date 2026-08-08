@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
-from app.chain.transfer import TransferChain
+from app.chain.transfer import (
+    ScrapeBatchCoordinator,
+    TransferChain,
+    TransferResultProcessor,
+)
 from app.core.context import MediaInfo
 from app.core.metainfo import MetaInfo
 from app.schemas import FileItem, TransferDirectoryConf, TransferTask
@@ -11,6 +15,8 @@ def test_transfer_stops_when_automatic_category_has_no_tmdb_result(monkeypatch) 
     """启用自动类别目录时，缺少 TMDB 分类必须在文件操作前明确失败。"""
     chain = object.__new__(TransferChain)
     chain.jobview = SimpleNamespace(try_remove_job=lambda _task: None)
+    chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
+    chain._result_processor = TransferResultProcessor(chain=chain)
     monkeypatch.setattr(
         "app.chain.transfer.TransferHistoryOper",
         lambda: SimpleNamespace(),
