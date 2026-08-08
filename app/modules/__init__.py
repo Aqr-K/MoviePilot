@@ -1,6 +1,8 @@
 import threading
 from abc import abstractmethod, ABCMeta
-from typing import Generic, Tuple, Union, TypeVar, Type, Dict, Optional, Callable
+from enum import Enum
+from typing import Generic, Tuple, Union, TypeVar, Type, Dict, List, Set, Optional, Callable, \
+    Generator, Protocol, runtime_checkable, TYPE_CHECKING
 from pathlib import Path
 
 from app.helper.service import ServiceConfigHelper
@@ -9,6 +11,20 @@ from app.schemas import Notification, NotificationConf, MediaServerConf, Downloa
 from app.schemas.types import ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
     OtherModulesType, SystemConfigKey, MediaRecognizeType
 from app.utils.mixins import ConfigReloadMixin
+
+if TYPE_CHECKING:
+    # 仅用于类型注解，避免在早期导入的 app.modules 顶层引入 schemas 重负载/潜在环。
+    from app.core.context import MediaInfo
+    from app.schemas import DownloaderTorrent, DownloaderFile, DownloaderInfo, \
+        MediaServerLibrary, MediaServerItem, MediaServerSeasonInfo, MediaServerPlayItem, \
+        ExistMediaInfo, Statistic
+    from app.schemas.types import TorrentStatus
+
+
+# 模块默认优先级：数字越小优先级越高。未显式声明优先级的模块统一回退到此值，
+# 避免 get_priority() 返回 None 在排序/比较时引发 TypeError。
+# 取值约束：必须大于所有内建模块声明的优先级（当前最大为 qqbot=10），以保证“未声明者恒排最后”。
+DEFAULT_MODULE_PRIORITY: int = 9999
 
 
 class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
@@ -73,18 +89,30 @@ class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
         StorageSchema,
         OtherModulesType,
         MediaRecognizeType,
+        str,
     ]:
         """
         获取模块子类型（下载器、媒体服务器、消息通道、存储类型、其他杂项模块类型）
         """
         pass
 
+    def get_subtype_id(self) -> str:
+        """
+        获取模块子类型的字符串标识。默认取 get_subtype().value，使内建模块零改动即具备字符串标识；
+        插件可重写此方法返回封闭枚举之外的任意字符串（如 "aria2"）以新增子类型，
+        无需改动 schemas/types.py 中的封闭枚举。get_subtype() 返回 None 时回退为空串。
+        """
+        subtype = self.get_subtype()
+        if subtype is None:
+            return ""
+        return str(subtype.value) if isinstance(subtype, Enum) else str(subtype)
+
     @staticmethod
     def get_priority() -> int:
         """
         获取模块优先级，数字越小优先级越高，只有同一接口下优先级才生效
         """
-        pass
+        return DEFAULT_MODULE_PRIORITY
 
     @abstractmethod
     def stop(self) -> None:
@@ -251,6 +279,103 @@ class _MessageBase(ServiceBase[TService, NotificationConf]):
         return True
 
 
+@runtime_checkable
+class IDownloader(Protocol):
+    """
+    下载器（Downloader 域）行为接口契约。
+
+    声明下载器后端需实现的操作面，由 app.managers.downloader.DownloaderManager 统一对外暴露并按方法名
+    分发到各后端。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，无需显式继承（亦避免与
+    _ModuleBase/ServiceBase 的元类冲突），对既有 Qbittorrent/Transmission/Rtorrent 模块零改动即兼容。
+    `@runtime_checkable` 允许用 isinstance 在运行期校验方法是否存在（不校验签名）。
+
+    约定：
+    - downloader 参数为具体下载器配置名，None 表示后端面向其全部启用实例，再跨后端按列表合并 / 取首个非空汇总。
+    - torrent_files 统一返回 List[DownloaderFile]。
+    """
+
+    def download(
+            self,
+            content: "Union[Path, str, bytes]",
+            download_dir: Path,
+            cookie: str,
+            episodes: "Set[int]" = None,
+            category: Optional[str] = None,
+            label: Optional[str] = None,
+            downloader: Optional[str] = None,
+    ) -> "Optional[Tuple[Optional[str], Optional[str], Optional[str], str]]":
+        """添加下载任务，返回 (下载器名, 种子Hash, 种子文件布局, 错误原因)。"""
+        ...
+
+    def list_torrents(
+            self,
+            status: "TorrentStatus" = None,
+            hashs: "Union[list, str]" = None,
+            downloader: Optional[str] = None,
+            include_all_tags: bool = False,
+    ) -> "Optional[List[DownloaderTorrent]]":
+        """获取下载器种子列表。"""
+        ...
+
+    def remove_torrents(
+            self,
+            hashs: "Union[str, list]",
+            delete_file: bool = True,
+            downloader: Optional[str] = None,
+    ) -> Optional[bool]:
+        """删除下载器种子。"""
+        ...
+
+    def start_torrents(self, hashs: "Union[list, str]", downloader: Optional[str] = None) -> Optional[bool]:
+        """开始下载。"""
+        ...
+
+    def stop_torrents(self, hashs: "Union[list, str]", downloader: Optional[str] = None) -> Optional[bool]:
+        """停止下载。"""
+        ...
+
+    def set_torrents_tag(
+            self, hashs: "Union[list, str]", tags: list, downloader: Optional[str] = None
+    ) -> Optional[bool]:
+        """设置种子标签。"""
+        ...
+
+    def update_torrent(
+            self,
+            hash_string: str,
+            downloader: Optional[str] = None,
+            download_limit: Optional[float] = None,
+            upload_limit: Optional[float] = None,
+            tracker_list: Optional[list] = None,
+            save_path: Optional[str] = None,
+            category: Optional[str] = None,
+            ratio_limit: Optional[float] = None,
+            seeding_time_limit: Optional[int] = None,
+    ) -> "Optional[Dict[str, bool]]":
+        """修改下载任务属性。"""
+        ...
+
+    def get_torrent_trackers(
+            self, hash_string: str, downloader: Optional[str] = None
+    ) -> "Optional[Dict[str, List[str]]]":
+        """查询下载任务 Tracker 列表。"""
+        ...
+
+    def torrent_files(
+            self, tid: str, downloader: Optional[str] = None
+    ) -> "Optional[List[DownloaderFile]]":
+        """获取种子文件列表。"""
+        ...
+
+    def downloader_info(self, downloader: Optional[str] = None) -> "Optional[List[DownloaderInfo]]":
+        """获取下载器统计信息。"""
+        ...
+
+    def transfer_completed(self, hashs: str, downloader: Optional[str] = None) -> None:
+        """下载器转移完成后的处理。"""
+        ...
+
+
 class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
     """
     下载器基类
@@ -398,3 +523,124 @@ class _MediaServerBase(ServiceBase[TService, MediaServerConf]):
         if not self._service_name:
             return {}
         return {conf.name: conf for conf in configs if conf.type == self._service_name and conf.enabled}
+
+
+@runtime_checkable
+class IMediaServer(Protocol):
+    """
+    媒体服务器（MediaServer 域）行为接口契约。
+
+    声明媒体服务器后端需实现的操作面，由 app.managers.mediaserver.MediaServerManager 统一对外暴露并按
+    方法名分发到各后端。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，无需显式继承，对既有
+    Emby/Jellyfin/Plex/TrimeMedia/Ugreen/ZSpace 模块零改动即兼容。
+
+    约定：
+    - server 参数为具体媒体服务器配置名，None 表示后端面向其全部启用实例，再跨后端按列表合并 / 取首个非空汇总。
+    - 各后端 server 必填性 / username 形参不一，接口统一为最宽松签名（server: Optional[str]）；部分后端
+      （如 Plex/TrimeMedia/Ugreen 对 username）以 **kwargs 吸收并静默忽略该形参。
+    - mediaserver_image_cookies 仅部分后端（TrimeMedia/Ugreen）实现，未实现者不参与分发。
+    """
+
+    def media_exists(self, mediainfo: "MediaInfo", itemid: Optional[str] = None,
+                     server: Optional[str] = None) -> "Optional[ExistMediaInfo]": ...
+
+    def media_statistic(self, server: Optional[str] = None) -> "Optional[List[Statistic]]": ...
+
+    def mediaserver_librarys(self, server: Optional[str] = None, username: Optional[str] = None,
+                             hidden: Optional[bool] = False) -> "Optional[List[MediaServerLibrary]]": ...
+
+    def mediaserver_items(self, server: Optional[str] = None, library_id: Union[str, int] = None,
+                          start_index: Optional[int] = 0, limit: Optional[int] = -1) -> Optional[Generator]: ...
+
+    def mediaserver_iteminfo(self, server: Optional[str] = None,
+                             item_id: Union[str, int] = None) -> "Optional[MediaServerItem]": ...
+
+    def mediaserver_tv_episodes(self, server: Optional[str] = None,
+                                item_id: Union[str, int] = None) -> "Optional[List[MediaServerSeasonInfo]]": ...
+
+    def mediaserver_playing(self, server: Optional[str] = None, count: Optional[int] = 20,
+                            username: Optional[str] = None) -> "List[MediaServerPlayItem]": ...
+
+    def mediaserver_play_url(self, server: Optional[str] = None,
+                             item_id: Union[str, int] = None) -> Optional[str]: ...
+
+    def mediaserver_latest(self, server: Optional[str] = None, count: Optional[int] = 20,
+                           username: Optional[str] = None) -> "List[MediaServerPlayItem]": ...
+
+    def mediaserver_latest_images(self, server: Optional[str] = None, count: Optional[int] = 10,
+                                  username: Optional[str] = None,
+                                  remote: Optional[bool] = False) -> List[str]: ...
+
+    def mediaserver_image_cookies(self, server: Optional[str] = None,
+                                  image_url: Optional[str] = None) -> Optional[Union[str, dict]]: ...
+
+
+@runtime_checkable
+class INotification(Protocol):
+    """
+    消息通知（Notification 域）行为接口契约。
+
+    声明通知后端需实现的消息操作面，由 app.managers.notification.NotificationManager 统一对外暴露并按
+    方法名分发到各通知渠道（内建 Telegram/WeChat/Slack/Discord/VoceChat/... 及插件经
+    provides_notifications() 注册的渠道）。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，
+    无需显式继承。
+
+    通知为广播域：post_* 方法返回 None、不短路，对所有启用渠道广播（各渠道内部经 check_message 自行按
+    渠道/来源/类型过滤）；delete_message/edit_message 返回非空值（bool/响应字典），按取首个非空短路。
+    后端按需实现子集，按方法名分发只命中实现者。
+    """
+
+    def post_message(self, message: "Notification", **kwargs) -> None: ...
+
+    def post_medias_message(self, message: "Notification", medias: "List[MediaInfo]") -> None: ...
+
+    def post_torrents_message(self, message: "Notification", torrents: "List[Context]") -> None: ...
+
+    def delete_message(self, channel: "MessageChannel", source: Optional[str] = None,
+                       message_id: Union[str, int] = None,
+                       chat_id: Optional[Union[str, int]] = None) -> Optional[bool]: ...
+
+    def register_commands(self, commands: Dict[str, dict]) -> None: ...
+
+    def edit_message(self, channel: "MessageChannel", source: Optional[str] = None,
+                     message_id: Union[str, int] = None, chat_id: Union[str, int] = None,
+                     text: Optional[str] = None, title: Optional[str] = None,
+                     buttons: Optional[list] = None, metadata: Optional[dict] = None) -> bool: ...
+
+    def send_direct_message(self, message: "Notification") -> "Optional[MessageResponse]": ...
+
+    def finalize_message(self, response: "MessageResponse") -> Optional[bool]: ...
+
+
+@runtime_checkable
+class IMediaRecognize(Protocol):
+    """
+    媒体识别 / 数据源（MediaRecognize 域）行为接口契约。
+
+    声明数据源后端需实现的识别操作面，由 app.managers.mediarecognize.MediaRecognizeManager 统一对外暴露
+    并按方法名分发到各数据源（内建 TheMovieDb/Douban/Bangumi/TheTvDb 及插件经 provides_data_sources()
+    注册的源）。采用结构化类型（Protocol）：后端实现同名同义方法即满足契约，无需显式继承。
+
+    识别为管道域：recognize_media 等方法的结果在数据源之间流转、逐源精化；search_* 列表方法跨源合并；
+    首个非空非列表结果短路。后端按需实现子集（如 Bangumi 缺 obtain_images、TheTvDb 仅实现 tvdb_info），
+    按方法名分发只命中实现者，故下列方法均非强制实现；异步变体（async_*）与同步同义。
+    """
+
+    def recognize_media(self, meta: "MetaBase" = None, mtype: "MediaType" = None,
+                        tmdbid: Optional[int] = None, doubanid: Optional[str] = None,
+                        bangumiid: Optional[int] = None, **kwargs) -> "Optional[MediaInfo]": ...
+
+    def search_medias(self, meta: "MetaBase") -> "Optional[List[MediaInfo]]": ...
+
+    def search_persons(self, name: str) -> "Optional[List[MediaPerson]]": ...
+
+    def search_collections(self, name: str) -> "Optional[List[MediaInfo]]": ...
+
+    def obtain_images(self, mediainfo: "MediaInfo") -> "Optional[MediaInfo]": ...
+
+    def obtain_specific_image(self, mediaid: Union[str, int], mtype: "MediaType",
+                              **kwargs) -> Optional[str]: ...
+
+    def metadata_nfo(self, meta: "MetaBase", mediainfo: "MediaInfo", **kwargs) -> Optional[str]: ...
+
+    def media_category(self) -> Optional[Dict[str, list]]: ...

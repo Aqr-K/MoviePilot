@@ -2,7 +2,7 @@ import inspect
 import sys
 from typing import Callable
 
-from app.helper.redis import RedisHelper, AsyncRedisHelper
+from app.core.redis import RedisHelper, AsyncRedisHelper
 
 # SitesHelper涉及资源包拉取，提前引入并容错提示
 try:
@@ -18,7 +18,7 @@ from app.log import logger
 from app.core.config import settings
 from app.core.module import ModuleManager
 from app.core.event import EventManager
-from app.helper.thread import ThreadHelper
+from app.core.thread import ThreadHelper
 from app.helper.display import DisplayHelper
 from app.helper.doh import DohHelper
 from app.helper.resource import ResourceHelper
@@ -30,6 +30,7 @@ from app.command import CommandChain
 from app.schemas import Notification, NotificationType
 from app.schemas.types import SystemConfigKey
 from app.startup.agent_initializer import init_agent, stop_agent
+from app.startup.service_registry import service_registry
 
 
 def start_frontend():
@@ -140,10 +141,23 @@ async def stop_modules():
         except Exception as err:
             logger.error(f"关闭{name}失败：{err}")
 
+    def _stop_module_manager() -> None:
+        """从组合根注册表取所拥有的实例，不再重新 X() 取单例"""
+        if (module_manager := service_registry.get("module_manager")) is not None:
+            module_manager.stop()
+
+    def _stop_event_manager() -> None:
+        if (event_manager := service_registry.get("event_manager")) is not None:
+            event_manager.stop()
+
+    def _stop_display() -> None:
+        if (display := service_registry.get("display")) is not None:
+            display.stop()
+
     await run_step("AI智能体", stop_agent)
-    await run_step("模块", lambda: ModuleManager().stop())
-    await run_step("事件消费", lambda: EventManager().stop())
-    await run_step("虚拟显示", lambda: DisplayHelper().stop())
+    await run_step("模块", _stop_module_manager)
+    await run_step("事件消费", _stop_event_manager)
+    await run_step("虚拟显示", _stop_display)
     await run_step("DoH服务", lambda: DohHelper().shutdown())
     await run_step("线程池", lambda: ThreadHelper().shutdown())
     await run_step("消息服务", stop_message)
@@ -158,20 +172,22 @@ def init_modules():
     """
     启动模块
     """
-    # 虚拟显示
-    DisplayHelper()
-    # DoH
+    # 重置组合根注册表（单进程内 init_modules 仅调用一次；防御性清空，避免假想的二次 init 残留旧实例）
+    service_registry.clear()
+    # 虚拟显示（生命周期服务：登记到注册表，stop_modules 取回关闭）
+    service_registry.register("display", DisplayHelper())
+    # DoH（Singleton，stop_modules 直接重取同一实例关闭，不纳入注册表）
     DohHelper()
-    # 站点管理
+    # 站点管理（同上）
     SitesHelper()
-    # 资源包检测
+    # 资源包检测（同上）
     ResourceHelper()
     # 用户认证
     user_auth()
     # 加载模块
-    ModuleManager()
-    # 启动事件消费
-    EventManager().start()
+    service_registry.register("module_manager", ModuleManager())
+    # 启动事件消费（登记后启动同一实例）
+    service_registry.register("event_manager", EventManager()).start()
     # 初始化共享服务端状态
     MoviePilotServerHelper.init_plugin_report()
     MoviePilotServerHelper.init_subscribe_report()
