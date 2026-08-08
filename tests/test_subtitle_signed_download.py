@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import app.api.endpoints.download as download_endpoint
 import app.api.endpoints.search as search_endpoint
+import app.service.download as download_service
 from app import schemas
 from app.core.context import SubtitleInfo
 from app.utils.security import SecurityUtils
@@ -242,7 +243,7 @@ def test_download_subtitle_cleans_url_and_uses_server_site_request_fields(monkey
             captured.update(kwargs)
             return True, "字幕下载成功", ["/downloads/Demo.Movie.2026.zh-cn.srt"]
 
-    monkeypatch.setattr(download_endpoint, "SiteOper", FakeSiteOper, raising=False)
+    monkeypatch.setattr(download_service, "SiteOper", FakeSiteOper)
     monkeypatch.setattr(download_endpoint, "DownloadChain", FakeDownloadChain)
 
     response = download_endpoint.download_subtitle(
