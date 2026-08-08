@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urljoin, urlparse
 
-from app.agent.middleware.skills import _parse_skill_metadata
 from app.core.cache import cached, fresh
 from app.core.config import settings
 from app.log import logger
@@ -31,6 +30,17 @@ _OFFICIAL_SKILL_REPOS = {
     "vercel-labs/agent-skills",
     "NousResearch/hermes-agent",
 }
+
+
+def _parse_skill_metadata(content: str, skill_path: str, skill_id: str):
+    """惰性转发到 agent 层技能元数据解析器。
+
+    helper.skill 不在 import-time 反依赖 app.agent(打断 chain↔agent 循环 S4):
+    chain.skills → helper.skill 不再于导入期拉起整个 agent 栈;
+    解析逻辑仍归 app.agent.middleware.skills 所有(返回其 SkillMetadata 类型)。
+    """
+    from app.agent.middleware.skills import _parse_skill_metadata as _impl
+    return _impl(content, skill_path, skill_id)
 
 
 @dataclass
