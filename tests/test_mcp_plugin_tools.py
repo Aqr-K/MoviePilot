@@ -10,7 +10,7 @@ from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.agent.tools.manager import MoviePilotToolsManager
 from app.api.endpoints import mcp
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.utils.singleton import Singleton
 
 

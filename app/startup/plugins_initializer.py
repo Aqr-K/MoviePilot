@@ -1,5 +1,5 @@
 from app.core.config import global_vars
-from app.core.plugin import PluginManager
+from app.helper.plugin_manager import PluginManager
 from app.log import logger
 
 
