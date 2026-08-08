@@ -19,7 +19,7 @@ def test_scrape_uses_explicit_media_source_and_id() -> None:
     chain.recognize_media.return_value = media_info
 
     scraping_chain = Mock()
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain) as mock_chain, \
+    with patch("app.service.media.MediaChain", return_value=chain) as mock_chain, \
             patch("app.api.endpoints.media.ScrapingChain", return_value=scraping_chain):
         # mkv 非音频文件，需显式关闭 Mock 的 is_audio_path 避免误入音乐分支
         mock_chain.is_audio_path.return_value = False
@@ -55,7 +55,7 @@ def test_scrape_keeps_automatic_recognition_compatible() -> None:
     chain.recognize_by_path.return_value = Context(meta_info=meta_info, media_info=media_info)
 
     scraping_chain = Mock()
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain) as mock_chain, \
+    with patch("app.service.media.MediaChain", return_value=chain) as mock_chain, \
             patch("app.api.endpoints.media.ScrapingChain", return_value=scraping_chain):
         # mkv 非音频文件，需显式关闭 Mock 的 is_audio_path 避免误入音乐分支
         mock_chain.is_audio_path.return_value = False
@@ -166,7 +166,7 @@ def test_scrape_music_uses_musicbrainz_uuid_and_music_scraper() -> None:
     scraping_chain = Mock()
     scraping_chain.scrape_music_metadata.return_value = (True, "已刮削 1 个音频文件")
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=media_chain), \
+    with patch("app.service.media.MediaChain", return_value=media_chain), \
             patch("app.api.endpoints.media.ScrapingChain", return_value=scraping_chain):
         result = scrape(
             fileitem=fileitem,
@@ -232,7 +232,7 @@ def test_scrape_music_album_forwards_album_namespace() -> None:
     scraping_chain = Mock()
     scraping_chain.scrape_music_metadata.return_value = (True, "已刮削专辑")
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=media_chain), \
+    with patch("app.service.media.MusicChain", return_value=media_chain), \
             patch("app.api.endpoints.media.ScrapingChain", return_value=scraping_chain):
         result = scrape(
             fileitem=fileitem,

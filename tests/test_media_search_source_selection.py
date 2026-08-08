@@ -29,7 +29,7 @@ def test_media_search_endpoint_forwards_source(
     search_method = AsyncMock(return_value=[])
     setattr(chain, method_name, search_method)
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         result = asyncio.run(
             search(
                 title="测试",
@@ -203,7 +203,9 @@ def test_chain_forwards_source_to_modules(
 ) -> None:
     """处理链应将人物和合集的请求级数据源传递给媒体模块。"""
     chain = Mock(spec=ChainBase)
-    chain.async_run_module = AsyncMock(return_value=[])
+    manager_method = AsyncMock(return_value=[])
+    chain.mediarecognizemanager = Mock()
+    setattr(chain.mediarecognizemanager, module_method_name, manager_method)
 
     result = asyncio.run(
         getattr(ChainBase, method_name)(
@@ -214,8 +216,7 @@ def test_chain_forwards_source_to_modules(
     )
 
     assert result == []
-    chain.async_run_module.assert_awaited_once_with(
-        module_method_name,
+    manager_method.assert_awaited_once_with(
         name="测试",
         media_source=MediaSource.TMDB,
     )
