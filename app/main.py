@@ -48,6 +48,7 @@ class MoviePilotServer(uvicorn.Server):
 # uvicorn服务
 Server = MoviePilotServer(Config(app, host=settings.HOST, port=settings.PORT,
                                  reload=settings.DEV, workers=multiprocessing.cpu_count() * 2 + 1,
+                                 proxy_headers=True, forwarded_allow_ips=settings.FORWARDED_ALLOW_IPS,
                                  timeout_graceful_shutdown=60))
 
 
