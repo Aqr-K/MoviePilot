@@ -198,39 +198,46 @@ class ZSpace:
                 })
         return libraries
 
-    def __get_library_views(self, username: Optional[str] = None) -> List[dict]:
+    def __get_library_views(self, username: Optional[str] = None) -> Optional[List[dict]]:
         """
         获取极影视媒体库列表
         """
         if not self._host or not self._apikey:
-            return []
+            return None
         if username:
             user = self.get_user(username)
         else:
             user = self.user
         if not user:
-            return []
+            return None
         url = f"{self._host}emby/Users/{user}/Views"
         try:
             res = self.__request_utils().get_res(url)
             if res:
-                return res.json().get("Items")
+                items = res.json().get("Items")
+                return items if isinstance(items, list) else None
             else:
                 logger.error("Users/Views 未获取到返回数据")
-                return []
+                return None
         except Exception as e:
             logger.error(f"连接Users/Views 出错：{e}")
-            return []
+            return None
 
-    def get_librarys(self, username: Optional[str] = None, hidden: Optional[bool] = False) -> List[
-        schemas.MediaServerLibrary]:
+    def get_librarys(
+        self,
+        username: Optional[str] = None,
+        hidden: Optional[bool] = False,
+    ) -> Optional[List[schemas.MediaServerLibrary]]:
         """
         获取媒体服务器所有媒体库列表
         """
         if not self._host or not self._apikey:
-            return []
+            return None
+        source_libraries = self.__get_library_views(username)
+        if source_libraries is None:
+            return None
         libraries = []
-        for library in self.__get_library_views(username) or []:
+        for library in source_libraries:
             if hidden and self._sync_libraries and "all" not in self._sync_libraries \
                     and library.get("Id") not in self._sync_libraries:
                 continue
@@ -248,6 +255,7 @@ class ZSpace:
                     name=library.get("Name"),
                     path=library.get("Path"),
                     type=library_type,
+                    item_count=self.get_items_count(library.get("Id")),
                     image=image,
                     link=f'{self._playhost or self._host}web/index.html'
                          f'#!/videos?serverId={self.serverid}&parentId={library.get("Id")}',
@@ -815,6 +823,32 @@ class ZSpace:
             logger.error(f"连接/Users/{self.user}/Items/{itemid}出错：{e}")
         return None
 
+    def get_items_count(self, parent: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库的媒体条目总数
+
+        极影视当前兼容层会忽略条目类型过滤，因此以递归查询返回的
+        TotalRecordCount 作为同步进度的总数。
+
+        :param parent: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if not parent or not self._host or not self._apikey or not self.user:
+            return None
+        url = f"{self._host}emby/Users/{self.user}/Items"
+        try:
+            res = self.__request_utils().get_res(
+                url,
+                params={"ParentId": parent, "Recursive": "true", "Limit": 0},
+            )
+            if not res or res.status_code != 200:
+                return None
+            total_count = res.json().get("TotalRecordCount")
+            return int(total_count) if total_count is not None else None
+        except Exception as e:
+            logger.error(f"查询媒体库 {parent} 的媒体总数出错：{e}")
+            return None
+
     def get_items(self, parent: Union[str, int], start_index: Optional[int] = 0,
                   limit: Optional[int] = -1) -> Generator[MediaServerItem | None | Any, Any, None]:
         """
@@ -1058,7 +1092,7 @@ class ZSpace:
         else:
             user = self.user
         if not user:
-            return []
+            return None
         url = f"{self._host}emby/Users/{user}/Items/Resume"
         params = {
             "Limit": 100,
@@ -1114,7 +1148,7 @@ class ZSpace:
                 logger.error("Users/Items/Resume 未获取到返回数据")
         except Exception as e:
             logger.error(f"连接Users/Items/Resume出错：{e}")
-        return []
+        return None
 
     def get_latest(self, num: Optional[int] = 20, username: Optional[str] = None) -> Optional[
         List[schemas.MediaServerPlayItem]]:
@@ -1133,7 +1167,7 @@ class ZSpace:
         else:
             user = self.user
         if not user:
-            return []
+            return None
         url = f"{self._host}emby/Users/{user}/Items"
         params = {
             "Recursive": "true",
@@ -1181,7 +1215,7 @@ class ZSpace:
                 logger.debug("Users/Items?SortBy=DateCreated 未获取到返回数据")
         except Exception as e:
             logger.error(f"连接 Users/Items（DateCreated 排序）出错：{e}")
-        return []
+        return None
 
     def get_user_library_folders(self):
         """

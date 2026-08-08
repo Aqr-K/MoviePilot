@@ -3,10 +3,58 @@ from typing import Any, Generator, List, Optional, Self, Tuple, AsyncGenerator, 
 
 from sqlalchemy import NullPool, QueuePool, and_, create_engine, event, inspect, select, delete, Integer, \
     Sequence, Identity
+from sqlalchemy.engine import Engine as SQLAlchemyEngine, ExceptionContext
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, declared_attr, mapped_column, scoped_session, sessionmaker
 
 from app.core.config import settings
+from app.log import logger
+
+
+def _database_error_metadata(error: BaseException) -> Optional[dict[str, Any]]:
+    """提取 SQLite 与 PostgreSQL 驱动提供的稳定错误分类字段。"""
+    metadata = {"error_type": type(error).__name__}
+
+    # DBAPI 驱动字段并不共享统一类型，动态读取可同时兼容 sqlite3、psycopg2 与 asyncpg。
+    sqlite_errorcode = getattr(error, "sqlite_errorcode", None)
+    sqlite_errorname = getattr(error, "sqlite_errorname", None)
+    if sqlite_errorcode is not None or sqlite_errorname:
+        if sqlite_errorcode is not None:
+            metadata["error_code"] = sqlite_errorcode
+        if sqlite_errorname:
+            metadata["error_name"] = sqlite_errorname
+        return metadata
+
+    sqlstate = getattr(error, "sqlstate", None) or getattr(error, "pgcode", None)
+    if not sqlstate:
+        sqlstate = getattr(getattr(error, "diag", None), "sqlstate", None)
+    if sqlstate:
+        metadata["sqlstate"] = sqlstate
+        return metadata
+
+    return None
+
+
+def _log_database_error(exception_context: ExceptionContext) -> None:
+    """记录非敏感驱动错误码，并保持 SQLAlchemy 原有异常传播。"""
+    metadata = _database_error_metadata(exception_context.original_exception)
+    if not metadata:
+        return
+
+    dialect = exception_context.dialect
+    fields = {
+        "database": dialect.name,
+        "driver": dialect.driver,
+        **metadata,
+    }
+    logger.error(
+        "数据库驱动异常：" + ", ".join(f"{key}={value}" for key, value in fields.items())
+    )
+
+
+def _register_database_error_logging(engine: SQLAlchemyEngine) -> None:
+    """为主程序 Engine 注册统一的底层驱动错误诊断。"""
+    event.listen(engine, "handle_error", _log_database_error)
 
 
 def get_id_column():
@@ -96,6 +144,7 @@ def _get_sqlite_engine(is_async: bool = False):
 
         # 创建数据库引擎
         engine = create_engine(**_db_kwargs)
+        _register_database_error_logging(engine)
 
         # 经 connect 事件按连接设置 journal_mode，避免在模块 import 期对引擎产生建连副作用
         _register_sqlite_journal_mode(engine)
@@ -113,6 +162,7 @@ def _get_sqlite_engine(is_async: bool = False):
         }
         # 创建异步数据库引擎
         async_engine = create_async_engine(**_db_kwargs)
+        _register_database_error_logging(async_engine.sync_engine)
 
         # 经底层同步引擎的 connect 事件按连接设置 journal_mode，
         # 取代 import 期 asyncio.run() 起停事件循环的副作用
@@ -155,6 +205,7 @@ def _get_postgresql_engine(is_async: bool = False):
 
         # 创建数据库引擎
         engine = create_engine(**_db_kwargs)
+        _register_database_error_logging(engine)
         print(f"PostgreSQL database connected to {settings.DB_POSTGRESQL_TARGET}/{settings.DB_POSTGRESQL_DATABASE}")
 
         return engine
@@ -172,6 +223,7 @@ def _get_postgresql_engine(is_async: bool = False):
         }
         # 创建异步数据库引擎
         async_engine = create_async_engine(**_db_kwargs)
+        _register_database_error_logging(async_engine.sync_engine)
         print(f"Async PostgreSQL database connected to {settings.DB_POSTGRESQL_TARGET}/{settings.DB_POSTGRESQL_DATABASE}")
 
         return async_engine

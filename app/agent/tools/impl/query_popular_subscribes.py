@@ -18,7 +18,6 @@ MAX_PAGE_SIZE = 50
 
 class QueryPopularSubscribesInput(BaseModel):
     """查询热门订阅工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     media_type: str = Field(..., description="Allowed values: movie, tv")
     page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")
     count: Optional[int] = Field(30, description="Number of items per page (default: 30, max: 50)")
@@ -119,7 +118,7 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                 # 处理标题
                 title = sub.get("name")
                 season = sub.get("season")
-                if season and int(season) > 1 and media.tmdb_id:
+                if season not in (None, "") and int(season) != 1 and media.tmdb_id:
                     # 小写数据转大写
                     season_str = cn2an.an2cn(season, "low")
                     title = f"{title} 第{season_str}季"
@@ -127,6 +126,8 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                 media.year = sub.get("year")
                 media.douban_id = sub.get("doubanid")
                 media.bangumi_id = sub.get("bangumiid")
+                media.anilist_id = sub.get("anilistid")
+                media.source = sub.get("media_source")
                 media.tvdb_id = sub.get("tvdbid")
                 media.imdb_id = sub.get("imdbid")
                 media.season = sub.get("season")
@@ -150,6 +151,9 @@ class QueryPopularSubscribesTool(MoviePilotTool):
                     "tmdb_id": media_dict.get("tmdb_id"),
                     "douban_id": media_dict.get("douban_id"),
                     "bangumi_id": media_dict.get("bangumi_id"),
+                    "anilist_id": media_dict.get("anilist_id"),
+                    "media_source": media_dict.get("source"),
+                    "media_id": media_dict.get("media_id"),
                     "tvdb_id": media_dict.get("tvdb_id"),
                     "imdb_id": media_dict.get("imdb_id"),
                     "season": media_dict.get("season"),

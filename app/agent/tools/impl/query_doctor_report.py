@@ -14,10 +14,6 @@ from app.log import logger
 class QueryDoctorReportInput(BaseModel):
     """查询 Doctor 诊断报告工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(
-        None,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
     deep: Optional[bool] = Field(
         False,
         description=(
@@ -48,7 +44,9 @@ class QueryDoctorReportTool(MoviePilotTool):
     description: str = (
         "Run MoviePilot Doctor in read-only mode and return a structured diagnostic report for troubleshooting. "
         "Use this tool when analyzing startup failures, Docker/runtime issues, port conflicts, dependency problems, "
-        "database health, frontend assets, safe mode, or recent log error clues. This tool never applies fixes."
+        "database health, frontend assets, safe mode, or recent log error clues. Plugin-only log findings remain "
+        "visible with affects_report_status=false and do not downgrade the overall status. This tool never applies "
+        "fixes."
     )
     require_admin: bool = True
     args_schema: Type[BaseModel] = QueryDoctorReportInput
@@ -77,6 +75,7 @@ class QueryDoctorReportTool(MoviePilotTool):
                     "title": item.get("title"),
                     "fixable": item.get("fixable"),
                     "fixed": item.get("fixed"),
+                    "affects_report_status": item.get("affects_report_status", True),
                 }
                 for item in report.get("findings") or []
                 if isinstance(item, dict)

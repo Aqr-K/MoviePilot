@@ -28,7 +28,6 @@ class ToolChain(ChainBase):
 # 单个工具结果的兜底上限。各工具仍应优先在自身逻辑中分页或摘要化；
 # 这里用于拦截遗漏路径，避免超大结果直接进入模型上下文。
 DEFAULT_TOOL_RESULT_MAX_CHARS = 64 * 1024
-MIN_TOOL_RESULT_PREVIEW_CHARS = 512
 
 
 def serialize_tool_result_for_agent(result: Any) -> str:
@@ -59,20 +58,35 @@ def format_tool_result_for_agent(
     if not max_chars or max_chars <= 0 or len(formatted_result) <= max_chars:
         return formatted_result
 
-    preview_limit = max(MIN_TOOL_RESULT_PREVIEW_CHARS, max_chars)
-    preview = formatted_result[:preview_limit]
-    payload = {
-        "tool_result_truncated": True,
-        "tool_name": tool_name,
-        "total_chars": len(formatted_result),
-        "returned_chars": len(preview),
-        "content_preview": preview,
-        "message": (
-            f"工具返回内容超过 {max_chars} 字符，已截断为预览；"
-            "请使用更精确的筛选条件、分页参数或专用查询参数继续获取。"
-        ),
-    }
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    def _dump_preview(preview: str) -> str:
+        """序列化截断结果，并让 returned_chars 与实际预览保持一致。"""
+        payload = {
+            "tool_result_truncated": True,
+            "tool_name": tool_name,
+            "total_chars": len(formatted_result),
+            "returned_chars": len(preview),
+            "content_preview": preview,
+            "message": (
+                f"工具返回内容超过 {max_chars} 字符，已截断为预览；"
+                "请使用更精确的筛选条件、分页参数或专用查询参数继续获取。"
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    # JSON 会转义换行、引号和反斜杠，预览本身等于上限时，最终返回值仍可能
+    # 明显超限。通过二分查找预留包装开销，确保进入模型的最终字符串是硬上限。
+    low = 0
+    high = min(len(formatted_result), max_chars)
+    best_result = _dump_preview("")
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = _dump_preview(formatted_result[:middle])
+        if len(candidate) <= max_chars:
+            best_result = candidate
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best_result
 
 
 # 将常见的阻塞调用按能力域拆分到独立线程池，避免外部慢 IO 抢占同一批 worker。
@@ -113,6 +127,16 @@ def _get_blocking_executor(bucket: str) -> ThreadPoolExecutor:
         )
         _blocking_executors[bucket] = executor
         return executor
+
+
+def shutdown_blocking_executors(*, wait: bool = True, cancel_futures: bool = False) -> None:
+    """关闭 Agent 工具阻塞线程池，释放长期运行进程或测试环境中的 worker。"""
+    with _blocking_executor_lock:
+        executors = list(_blocking_executors.values())
+        _blocking_executors.clear()
+
+    for executor in executors:
+        executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
 
 class ToolExecutionTimeoutError(TimeoutError):
@@ -228,10 +252,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
         # 获取工具执行提示消息
         tool_message = self.get_tool_message(**kwargs)
-        if not tool_message:
-            explanation = kwargs.get("explanation")
-            if explanation:
-                tool_message = explanation
 
         # 发送工具执行过程消息（流式传输且非最后终结工具时）
         if self._stream_handler and self._stream_handler.is_streaming and not self.return_direct:
@@ -315,16 +335,13 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         获取工具执行时的友好提示消息。
 
         子类可以重写此方法，根据实际参数生成个性化的提示消息。
-        如果返回 None 或空字符串，将回退使用 explanation 参数。
-
         Args:
-            **kwargs: 工具的所有参数（包括 explanation）
+            **kwargs: 工具的所有参数
 
         Returns:
-            str: 友好的提示消息，如果返回 None 或空字符串则使用 explanation
+            str: 友好的提示消息
         """
-        explanation = kwargs.get("explanation")
-        return str(explanation) if explanation else None
+        return None
 
     @abstractmethod
     async def run(self, **kwargs) -> str:
@@ -421,7 +438,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         :return: 普通用户允许读写的本地目录列表
         """
         roots = [
-            settings.CONFIG_PATH / "agent"
+            settings.CONFIG_PATH / "agent",
         ]
         resolved_roots = []
         for root in roots:
@@ -457,7 +474,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         allowed_text = "、".join(str(root) for root in allowed_roots)
         return (
             resolved_path,
-            f"抱歉，普通用户只能{operation}配置目录、Agent记忆目录和日志目录内的文件或目录：{allowed_text}",
+            f"抱歉，普通用户只能{operation}Agent配置目录内的文件或目录：{allowed_text}",
         )
 
     async def _check_local_storage_access(
@@ -479,7 +496,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 return None, None
             return (
                 None,
-                f"抱歉，普通用户只能{operation}本地配置目录、Agent记忆目录和日志目录，不能访问远程存储。",
+                f"抱歉，普通用户只能{operation}本地Agent配置目录，不能访问远程存储。",
             )
 
         return await self._check_local_file_access(path=path, operation=operation)
@@ -505,8 +522,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         return (
             "抱歉，您没有执行此工具的权限。"
             "只有渠道管理员或系统管理员才能执行工具操作。"
-            "如需执行工具，请联系渠道管理员将您的用户ID添加到渠道管理员列表中，"
-            "或联系系统管理员为您设置权限。"
+            "如需执行工具，请联系管理员将您的用户ID添加到渠道管理员列表中（设定 -> 通知 -> 对应渠道配置 -> 管理员名单），"
+            "或联系系统管理员为您设置管理员权限。"
         )
 
     async def _has_channel_admin_permission(self) -> bool:
@@ -617,7 +634,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         发送工具通知消息。
 
         WebAgent 渠道没有后端模块实例，前端流式面板通过 Agent 上下文中的
-        回调直接接收通知；其它渠道继续走统一消息链。
+        回调直接接收通知；无渠道的后台任务清空渠道侧定位信息后交由消息链广播，
+        其它渠道继续走统一消息链。
         """
         callback = self._agent_context.get("notification_callback")
         if (
@@ -626,6 +644,20 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
         ):
             callback(notification)
             return
+
+        if not self._channel or not self._source:
+            notification = notification.model_copy(
+                update={
+                    "channel": None,
+                    "source": None,
+                    "userid": None,
+                    "username": notification.username
+                    or self._username
+                    or settings.SUPERUSER,
+                    "original_message_id": None,
+                    "original_chat_id": None,
+                }
+            )
 
         await ToolChain().async_post_message(notification)
 
@@ -645,5 +677,6 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
                 title=title,
                 text=message,
                 image=image,
+                save_history=False,
             )
         )

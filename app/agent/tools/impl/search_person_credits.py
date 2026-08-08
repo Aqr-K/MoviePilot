@@ -11,11 +11,11 @@ from app.chain.douban import DoubanChain
 from app.chain.tmdb import TmdbChain
 from app.chain.bangumi import BangumiChain
 from app.log import logger
+from app.utils.media import resolve_media_identity
 
 
 class SearchPersonCreditsInput(BaseModel):
     """搜索演员参演作品工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     person_id: int = Field(..., description="The ID of the person/actor to search for credits (e.g., 31 for Tom Hanks in TMDB)")
     source: str = Field(..., description="The data source: 'tmdb' for TheMovieDB, 'douban' for Douban, 'bangumi' for Bangumi")
     page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")
@@ -60,6 +60,7 @@ class SearchPersonCreditsTool(MoviePilotTool):
                 # 精简字段，只保留关键信息
                 simplified_results = []
                 for media in limited_medias:
+                    media_source, media_id = resolve_media_identity(media=media)
                     simplified = {
                         "title": media.title,
                         "en_title": media.en_title,
@@ -69,6 +70,10 @@ class SearchPersonCreditsTool(MoviePilotTool):
                         "tmdb_id": media.tmdb_id,
                         "imdb_id": media.imdb_id,
                         "douban_id": media.douban_id,
+                        "bangumi_id": media.bangumi_id,
+                        "anilist_id": media.anilist_id,
+                        "media_source": media_source,
+                        "media_id": media_id,
                         "overview": media.overview[:200] + "..." if media.overview and len(media.overview) > 200 else media.overview,
                         "vote_average": media.vote_average,
                         "poster_path": media.poster_path,

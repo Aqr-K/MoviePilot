@@ -23,6 +23,7 @@ from app.schemas import (
     TransferRenameBuildEventData,
     TransferRenameEventData,
 )
+from app.schemas.exception import StorageQueryError
 from app.schemas.types import MediaType, ChainEventType
 from app.utils.system import SystemUtils
 
@@ -405,8 +406,23 @@ class TransHandler:
                 # 判断是否要覆盖，附加文件强制覆盖
                 overflag = False
                 if not __is_extra_file(fileitem):
-                    # 目标文件
-                    target_item = target_oper.get_item(new_file)
+                    # 目标文件（严格查询：无法确认状态时拒绝覆盖，避免已有文件被误覆盖）
+                    try:
+                        target_item = target_oper.get_item_strict(new_file)
+                    except StorageQueryError as query_err:
+                        errmsg = f"无法确认目标文件状态，已跳过整理以避免误覆盖：{new_file} - {query_err}"
+                        logger.warn(errmsg)
+                        self.__update_result(
+                            result=result,
+                            success=False,
+                            message=errmsg,
+                            fileitem=fileitem,
+                            target_diritem=target_diritem,
+                            fail_list=[fileitem.path],
+                            transfer_type=transfer_type,
+                            need_notify=need_notify,
+                        )
+                        return result
                     if target_item:
                         # 目标文件已存在
                         target_file = new_file
@@ -536,6 +552,7 @@ class TransHandler:
                 # 整理文件
                 new_item, err_msg = self.__transfer_file(
                     fileitem=fileitem,
+                    meta=in_meta,
                     mediainfo=mediainfo,
                     target_storage=target_storage,
                     target_file=new_file,
@@ -962,6 +979,7 @@ class TransHandler:
     def __transfer_file(
         self,
         fileitem: FileItem,
+        meta: Optional[MetaBase],
         mediainfo: MediaInfo,
         source_oper: StorageBase,
         target_oper: StorageBase,
@@ -974,6 +992,7 @@ class TransHandler:
         """
         整理一个文件，同时处理其他相关文件
         :param fileitem: 原文件
+        :param meta: 元数据
         :param mediainfo: 媒体信息
         :param source_oper: 源存储操作对象
         :param target_oper: 目标存储操作对象
@@ -990,6 +1009,7 @@ class TransHandler:
         )
         event_data = TransferInterceptEventData(
             fileitem=fileitem,
+            meta=meta,
             mediainfo=mediainfo,
             target_storage=target_storage,
             target_path=target_file,

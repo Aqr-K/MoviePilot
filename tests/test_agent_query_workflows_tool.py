@@ -7,16 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.agent.tools.impl.query_workflows import QueryWorkflowsTool
 
 
-class _AsyncSessionContext:
-    """为工作流查询工具提供最小异步 DB 上下文。"""
-
-    async def __aenter__(self):
-        return object()
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
 class TestQueryWorkflowsTool(unittest.TestCase):
     def test_query_workflows_omits_large_result_field(self):
         tool = QueryWorkflowsTool(session_id="session-1", user_id="10001")
@@ -38,9 +28,6 @@ class TestQueryWorkflowsTool(unittest.TestCase):
         workflow_oper.async_list = AsyncMock(return_value=[workflow])
 
         with patch(
-            "app.agent.tools.impl.query_workflows.AsyncSessionFactory",
-            return_value=_AsyncSessionContext(),
-        ), patch(
             "app.agent.tools.impl.query_workflows.WorkflowOper",
             return_value=workflow_oper,
         ):

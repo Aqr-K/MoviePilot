@@ -259,9 +259,34 @@ class Qbittorrent:
         """
         if not self.qbc:
             return None
-        # completed会包含移动状态 改为获取seeding状态 包含活动上传, 正在做种, 及强制做种
-        torrents, error = self.get_torrents(status="seeding", ids=ids, tags=tags)
-        return None if error else torrents or []
+        torrents, error = self.get_torrents(status="completed", ids=ids, tags=tags)
+        if error:
+            return None
+        ret_torrents = []
+        for torrent in torrents or []:
+            state = str(torrent.get("state") or "").strip().lower()
+            progress = torrent.get("progress") or 0
+            amount_left = torrent.get("amount_left") or 0
+            if (
+                    progress >= 1
+                    and amount_left <= 0
+                    and state not in {
+                        "allocating",
+                        "checkingdl",
+                        "checkingup",
+                        "downloading",
+                        "error",
+                        "forceddl",
+                        "missingfiles",
+                        "metadl",
+                        "moving",
+                        "queueddl",
+                        "stalleddl",
+                        "unknown",
+                    }
+            ):
+                ret_torrents.append(torrent)
+        return ret_torrents
 
     def get_downloading_torrents(self, ids: Union[str, list] = None,
                                  tags: Union[str, list] = None) -> Optional[List[TorrentDictionary]]:
@@ -278,14 +303,16 @@ class Qbittorrent:
 
     def delete_torrents_tag(self, ids: Union[str, list], tag: Union[str, list]) -> bool:
         """
-        删除Tag
+        从指定种子移除标签，并删除全局标签定义
         :param ids: 种子Hash列表
         :param tag: 标签内容
+        :return: 是否删除成功
         """
         if not self.qbc:
             return False
         try:
-            self.qbc.torrents_delete_tags(torrent_hashes=ids, tags=tag)
+            self.qbc.torrents_remove_tags(torrent_hashes=ids, tags=tag)
+            self.qbc.torrents_delete_tags(tags=tag)
             return True
         except Exception as err:
             logger.error(f"删除种子Tag出错：{str(err)}")
@@ -488,17 +515,30 @@ class Qbittorrent:
             logger.error(f"删除种子出错：{str(err)}")
             return False
 
-    def get_files(self, tid: str) -> Optional[TorrentFilesList]:
+    def get_files(self, tid: str, retry: int = 1, interval: float = 0) -> Optional[TorrentFilesList]:
         """
         获取种子文件清单
+        :param tid: 种子Hash
+        :param retry: 最多尝试次数
+        :param interval: 重试间隔，单位秒
+        :return: 种子文件清单
         """
         if not self.qbc:
             return None
-        try:
-            return self.qbc.torrents_files(torrent_hash=tid)
-        except Exception as err:
-            logger.error(f"获取种子文件列表出错：{str(err)}")
-            return None
+        last_error = None
+        retry_times = max(retry, 1)
+        for index in range(retry_times):
+            try:
+                torrent_files = self.qbc.torrents_files(torrent_hash=tid)
+                if torrent_files:
+                    return torrent_files
+            except Exception as err:
+                last_error = err
+            if index < retry_times - 1 and interval:
+                time.sleep(interval)
+        if last_error:
+            logger.error(f"获取种子文件列表出错：{str(last_error)}")
+        return None
 
     def set_files(self, **kwargs) -> bool:
         """

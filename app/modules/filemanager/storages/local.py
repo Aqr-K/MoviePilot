@@ -1,12 +1,14 @@
+import os
 import shutil
 from pathlib import Path
 from typing import Optional, List
 
 from app import schemas
-from app.core.config import global_vars
+from app.core.config import global_vars, settings
 from app.helper.directory import DirectoryHelper
 from app.log import logger
 from app.modules.filemanager.storages import StorageBase, transfer_process
+from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema
 from app.utils.system import SystemUtils
 
@@ -147,6 +149,23 @@ class LocalStorage(StorageBase):
             return self.__get_fileitem(path)
         return self.__get_diritem(path)
 
+    def get_item_strict(self, path: Path) -> Optional[schemas.FileItem]:
+        """
+        获取文件或目录，无法确认状态时抛出 StorageQueryError。
+        Path.exists() 会把部分 errno（如 EBADF/ELOOP）归入「不存在」，
+        网络/FUSE 挂载抖动时会误判，这里用 stat 显式区分。
+        """
+        try:
+            path.stat()
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        except OSError as e:
+            raise StorageQueryError(f"【本地】读取文件状态失败: {path} - {e}") from e
+        try:
+            return self.get_item(path)
+        except OSError as e:
+            raise StorageQueryError(f"【本地】读取文件信息失败: {path} - {e}") from e
+
     def detail(self, fileitem: schemas.FileItem) -> Optional[schemas.FileItem]:
         """
         获取文件详情
@@ -195,11 +214,31 @@ class LocalStorage(StorageBase):
         """
         return Path(fileitem.path)
 
-    def _copy_with_progress(self, src: Path, dest: Path):
+    @staticmethod
+    def _copy_with_target_permissions(src: Path, dest: Path) -> Path:
+        """
+        复制文件内容和时间戳，并保留目标目录赋予新文件的权限。
+
+        目标目录的默认权限或继承 ACL 应作为媒体库的访问策略，复制完成后不能再用
+        源文件权限覆盖，否则部分文件系统会清除已继承的 ACL。
+
+        :param src: 源文件路径
+        :param dest: 目标文件路径
+        :return: 目标文件路径
+        """
+        src = Path(src)
+        dest = Path(dest)
+        src_stat = src.stat()
+        shutil.copyfile(src, dest)
+        os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        return dest
+
+    def _copy_with_progress(self, src: Path, dest: Path) -> bool:
         """
         分块复制文件并回调进度
         """
-        total_size = src.stat().st_size
+        src_stat = src.stat()
+        total_size = src_stat.st_size
         copied_size = 0
         progress_callback = transfer_process(src.as_posix())
         try:
@@ -217,8 +256,7 @@ class LocalStorage(StorageBase):
                     if progress_callback:
                         percent = copied_size / total_size * 100
                         progress_callback(percent)
-            # 保留文件时间戳、权限等信息
-            shutil.copystat(src, dest)
+            os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
             return True
         except Exception as e:
             logger.error(f"【本地】复制文件 {src} 失败：{e}")
@@ -273,11 +311,8 @@ class LocalStorage(StorageBase):
                 if self._copy_with_progress(src, dest):
                     return True
             else:
-                code, message = SystemUtils.copy(src, dest)
-                if code == 0:
-                    return True
-                else:
-                    logger.error(f"【本地】复制文件失败：{message}")
+                self._copy_with_target_permissions(src, dest)
+                return True
         except Exception as err:
             logger.error(f"【本地】复制文件失败：{err}")
         return False
@@ -303,11 +338,8 @@ class LocalStorage(StorageBase):
                     src.unlink()
                     return True
             else:
-                code, message = SystemUtils.move(src, dest)
-                if code == 0:
-                    return True
-                else:
-                    logger.error(f"【本地】移动文件失败：{message}")
+                shutil.move(src, dest, copy_function=self._copy_with_target_permissions)
+                return True
         except Exception as err:
             logger.error(f"【本地】移动文件失败：{err}")
         return False
@@ -341,7 +373,8 @@ class LocalStorage(StorageBase):
         directory_helper = DirectoryHelper()
         total_storage, free_storage = SystemUtils.space_usage(
             [Path(d.download_path) for d in directory_helper.get_local_download_dirs() if d.download_path] +
-            [Path(d.library_path) for d in directory_helper.get_local_library_dirs() if d.library_path]
+            [Path(d.library_path) for d in directory_helper.get_local_library_dirs() if d.library_path],
+            btrfs_fsid_dedup=settings.BTRFS_FSID_DEDUP,
         )
         return schemas.StorageUsage(
             total=total_storage,

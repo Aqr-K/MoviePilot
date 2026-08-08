@@ -48,8 +48,6 @@ QUERY_SUBSCRIBE_OUTPUT_FIELDS = [
 class QuerySubscribesInput(BaseModel):
     """查询订阅工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     status: Optional[str] = Field(
         "all",
         description="Filter subscriptions by status: 'R' for enabled subscriptions, 'S' for paused ones, 'all' for all subscriptions",
@@ -65,6 +63,10 @@ class QuerySubscribesInput(BaseModel):
         None,
         description="Filter by Douban ID to check if a specific media is already subscribed",
     )
+    bangumi_id: Optional[int] = Field(None, description="Filter by Bangumi ID")
+    anilist_id: Optional[int] = Field(None, description="Filter by AniList ID")
+    media_source: Optional[str] = Field(None, description="Filter by media source")
+    media_id: Optional[str] = Field(None, description="Filter by source-native media ID")
     page: Optional[int] = Field(
         1, description="Page number for pagination (default: 1, 100 items per page)"
     )
@@ -106,6 +108,10 @@ class QuerySubscribesTool(MoviePilotTool):
         media_type: Optional[str] = "all",
         tmdb_id: Optional[int] = None,
         douban_id: Optional[str] = None,
+        bangumi_id: Optional[int] = None,
+        anilist_id: Optional[int] = None,
+        media_source: Optional[str] = None,
+        media_id: Optional[str] = None,
         page: Optional[int] = 1,
         **kwargs,
     ) -> str:
@@ -131,6 +137,14 @@ class QuerySubscribesTool(MoviePilotTool):
                 if tmdb_id is not None and sub.tmdbid != tmdb_id:
                     continue
                 if douban_id is not None and sub.doubanid != douban_id:
+                    continue
+                if bangumi_id is not None and sub.bangumiid != bangumi_id:
+                    continue
+                if anilist_id is not None and sub.anilistid != anilist_id:
+                    continue
+                if media_source is not None and sub.media_source != media_source:
+                    continue
+                if media_id is not None and sub.media_id != media_id:
                     continue
                 filtered_subscribes.append(sub)
             if filtered_subscribes:

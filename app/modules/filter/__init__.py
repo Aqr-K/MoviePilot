@@ -61,6 +61,10 @@ def _parse_publish_time(publish_time: str) -> Tuple[float, ...]:
 
 
 class FilterModule(_ModuleBase):
+    """
+    过滤器模块，负责按内置和自定义规则筛选种子资源。
+    """
+
     CONFIG_WATCH = {
         SystemConfigKey.CustomFilterRules.value,
         SystemConfigKey.CustomIdentifiers.value,
@@ -73,21 +77,20 @@ class FilterModule(_ModuleBase):
     # 运行期规则集 = 内置规则 + 自定义规则覆盖。
     rule_set: Dict[str, dict] = {}
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        初始化过滤器模块依赖的规则仓库。
+        """
         super().__init__()
         self.rulehelper = RuleHelper()
 
     def init_module(self) -> None:
+        """
+        初始化过滤规则集，合并内置规则和用户自定义规则。
+        """
         # 每次重载都先恢复为纯内置规则，避免旧的自定义规则残留在内存里。
         self.rule_set = deepcopy(self.builtin_rule_set)
         self.__init_custom_rules()
-
-    def on_config_changed(self):
-        """
-        自定义过滤或 Meta 识别配置变更后重建规则集并刷新 Rust Meta 配置缓存。
-        """
-        clear_rust_parse_options_cache()
-        self.init_module()
 
     def __init_custom_rules(self):
         """
@@ -100,6 +103,9 @@ class FilterModule(_ModuleBase):
 
     @staticmethod
     def get_name() -> str:
+        """
+        获取模块名称。
+        """
         return "过滤器"
 
     @staticmethod
@@ -123,13 +129,20 @@ class FilterModule(_ModuleBase):
         """
         return 4
 
-    def stop(self):
-        pass
+    def stop(self) -> None:
+        """停止模块"""
+        clear_rust_parse_options_cache()
 
-    def test(self):
+    def test(self) -> None:
+        """
+        测试过滤器模块状态。
+        """
         pass
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
+        """
+        返回过滤器模块启用配置。
+        """
         pass
 
     def filter_torrents(self, rule_groups: List[str],
@@ -161,6 +174,8 @@ class FilterModule(_ModuleBase):
                     torrent_list=torrent_list,
                     mediainfo=mediainfo
                 )
+            matched_orders, traces = self.__parse_rust_filter_result(matched_orders)
+            self.__log_rust_filter_traces(traces)
             ret_torrents = []
             for index, pri_order in matched_orders:
                 torrent = torrent_list[index]
@@ -168,6 +183,27 @@ class FilterModule(_ModuleBase):
                 ret_torrents.append(torrent)
             return ret_torrents
         return torrent_list
+
+    @staticmethod
+    def __parse_rust_filter_result(result) -> Tuple[list, list]:
+        """
+        兼容新旧 Rust 过滤返回值，统一拆出匹配结果和调试日志。
+        """
+        if (
+                isinstance(result, tuple)
+                and len(result) == 2
+                and isinstance(result[1], list)
+        ):
+            return result
+        return result, []
+
+    @staticmethod
+    def __log_rust_filter_traces(traces: list) -> None:
+        """
+        输出 Rust 过滤路径返回的规则级调试日志。
+        """
+        for trace in traces:
+            logger.debug(trace)
 
     def __filter_torrents_with_python(self, groups: List[dict],
                                       torrent_list: List[TorrentInfo],

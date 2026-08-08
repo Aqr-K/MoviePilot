@@ -5,7 +5,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 import lark_oapi as lark
@@ -96,6 +96,7 @@ class Feishu:
         self._stop_event = threading.Event()
         self._ws_thread: Optional[threading.Thread] = None
         self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._ws_tasks: Set[asyncio.Task] = set()
         self._user_chat_mapping: Dict[str, str] = {}
         self._user_receive_id_type_mapping: Dict[str, str] = {}
         self._chat_open_mapping: Dict[str, str] = {}
@@ -161,15 +162,31 @@ class Feishu:
         original_select = lark_ws_client_module._select
         original_loop = lark_ws_client_module.loop
         loop = asyncio.new_event_loop()
+        original_create_task = loop.create_task
         self._ws_loop = loop
         asyncio.set_event_loop(loop)
         lark_ws_client_module.loop = loop
 
         async def _wait_for_stop() -> None:
+            """等待停止信号，让 SDK 的阻塞 select 可被本地生命周期控制。"""
             while not self._stop_event.is_set():
                 await asyncio.sleep(1)
 
+        def _create_tracked_task(coro, *args, **kwargs) -> asyncio.Task:
+            """跟踪 SDK 后台任务，避免关闭时产生未取回的任务异常。"""
+            task = original_create_task(coro, *args, **kwargs)
+            coro_name = getattr(coro, "__qualname__", "")
+            if coro_name in {
+                "Client._ping_loop",
+                "Client._receive_message_loop",
+                "Client._handle_message",
+            }:
+                self._ws_tasks.add(task)
+                task.add_done_callback(self._consume_ws_task_result)
+            return task
+
         lark_ws_client_module._select = _wait_for_stop
+        loop.create_task = _create_tracked_task
         try:
             self._ws_client = lark.ws.Client(
                 self._app_id,
@@ -187,8 +204,11 @@ class Feishu:
             if not self._stop_event.is_set():
                 logger.error(f"飞书长连接服务启动失败：{err}")
         finally:
+            if not loop.is_closed():
+                loop.run_until_complete(self._shutdown_ws_client())
             lark_ws_client_module._select = original_select
             lark_ws_client_module.loop = original_loop
+            loop.create_task = original_create_task
             pending_tasks = [
                 task
                 for task in asyncio.all_tasks(loop)
@@ -203,6 +223,62 @@ class Feishu:
             loop.close()
             asyncio.set_event_loop(None)
             self._ws_loop = None
+
+    def _consume_ws_task_result(self, task: asyncio.Task) -> None:
+        """取回飞书 SDK 后台任务结果，防止 asyncio 在关机时输出未消费异常。"""
+        self._ws_tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            err = task.exception()
+        except asyncio.CancelledError:
+            return
+        if not err:
+            return
+        if self._stop_event.is_set():
+            logger.debug(f"飞书长连接后台任务已随停止退出：{err}")
+            return
+        logger.error(f"飞书长连接后台任务异常：{err}")
+
+    async def _shutdown_ws_client(self) -> None:
+        """在飞书长连接线程内有序取消后台任务并关闭 WebSocket。"""
+        ws_client = self._ws_client
+        if ws_client:
+            ws_client._auto_reconnect = False
+        current_task = asyncio.current_task()
+        running_tasks = [
+            task
+            for task in list(self._ws_tasks)
+            if task is not current_task and not task.done()
+        ]
+        for task in running_tasks:
+            task.cancel()
+        if running_tasks:
+            await asyncio.gather(*running_tasks, return_exceptions=True)
+        if ws_client:
+            try:
+                await self._disconnect_ws_client_quietly(ws_client)
+            except Exception as err:
+                logger.debug(f"关闭飞书长连接失败：{err}")
+
+    @staticmethod
+    async def _disconnect_ws_client_quietly(ws_client: lark.ws.Client) -> None:
+        """静默关闭飞书 WebSocket，避免 SDK 在关机时打印带敏感参数的连接地址。"""
+        if ws_client._conn is None:
+            ws_client._conn_url = ""
+            ws_client._conn_id = ""
+            ws_client._service_id = ""
+            return
+        await ws_client._lock.acquire()
+        try:
+            if ws_client._conn is not None:
+                await ws_client._conn.close()
+        finally:
+            ws_client._conn = None
+            ws_client._conn_url = ""
+            ws_client._conn_id = ""
+            ws_client._service_id = ""
+            ws_client._lock.release()
 
     def _forward_to_message_chain(self, payload: dict) -> None:
         """将飞书入站消息转发到统一消息入口，复用现有交互主链。"""
@@ -234,6 +310,7 @@ class Feishu:
             return "", None, None, None
 
         message_type = getattr(message, "message_type", None)
+        message_id = str(getattr(message, "message_id", None) or "").strip()
         text = content.get("text", "").strip() if isinstance(content.get("text"), str) else ""
         images = None
         audio_refs = None
@@ -241,7 +318,6 @@ class Feishu:
 
         if message_type == "image":
             image_key = str(content.get("image_key") or "").strip()
-            message_id = str(getattr(message, "message_id", None) or "").strip()
             if image_key:
                 if message_id:
                     images = [CommingMessage.MessageImage(ref=f"feishu://image/{message_id}/{image_key}")]
@@ -250,7 +326,6 @@ class Feishu:
         elif message_type in {"audio", "media", "file"}:
             file_key = str(content.get("file_key") or "").strip()
             file_name = str(content.get("file_name") or "").strip() or None
-            message_id = str(getattr(message, "message_id", None) or "").strip()
             if file_key:
                 if message_type == "audio":
                     resource_path = f"{message_id}/{file_key}" if message_id else file_key
@@ -263,8 +338,98 @@ class Feishu:
                             name=file_name,
                         )
                     ]
+        elif message_type == "post" and not text:
+            text, images = Feishu._parse_post_message_content(
+                content=content,
+                message_id=message_id,
+            )
 
         return text, images, audio_refs, files
+
+    @staticmethod
+    def _resolve_post_message_body(content: dict) -> Optional[dict]:
+        """解析飞书富文本消息在事件和 webhook 结构中的正文节点。"""
+        if isinstance(content.get("content"), list):
+            return content
+
+        post = content.get("post")
+        if isinstance(post, dict):
+            preferred_locales = ("zh_cn", "en_us", "ja_jp")
+            for locale in preferred_locales:
+                locale_body = post.get(locale)
+                if isinstance(locale_body, dict):
+                    return locale_body
+            for locale_body in post.values():
+                if isinstance(locale_body, dict):
+                    return locale_body
+
+        return None
+
+    @staticmethod
+    def _parse_post_element_text(element: dict) -> str:
+        """将飞书富文本元素转换为消息链可消费的纯文本片段。"""
+        tag = str(element.get("tag") or "").strip()
+        if tag in {"text", "plain_text"}:
+            return str(element.get("text") or element.get("content") or "")
+        if tag == "a":
+            link_text = str(element.get("text") or "").strip()
+            href = str(element.get("href") or element.get("url") or "").strip()
+            if link_text and href and link_text != href:
+                return f"{link_text} {href}"
+            return link_text or href
+        if tag == "at":
+            user_name = str(element.get("user_name") or element.get("name") or "").strip()
+            user_id = str(element.get("user_id") or "").strip()
+            target = user_name or user_id
+            return f" @{target}" if target else ""
+        if tag in {"code_block", "pre"}:
+            code = str(element.get("text") or element.get("content") or "").strip()
+            language = str(element.get("language") or "").strip()
+            if not code:
+                return ""
+            return f"```{language}\n{code}\n```" if language else f"```\n{code}\n```"
+        return str(element.get("text") or element.get("content") or "")
+
+    @staticmethod
+    def _parse_post_message_content(
+            content: dict,
+            message_id: Optional[str] = None,
+    ) -> Tuple[str, Optional[List[CommingMessage.MessageImage]]]:
+        """从飞书富文本消息中提取可转发的文本和图片引用。"""
+        post_body = Feishu._resolve_post_message_body(content)
+        if not post_body:
+            return "", None
+
+        lines = []
+        title = str(post_body.get("title") or "").strip()
+        if title:
+            lines.append(title)
+
+        images = []
+        post_content = post_body.get("content")
+        if isinstance(post_content, list):
+            for row in post_content:
+                if not isinstance(row, list):
+                    continue
+                row_parts = []
+                for element in row:
+                    if not isinstance(element, dict):
+                        continue
+                    image_key = str(element.get("image_key") or "").strip()
+                    if element.get("tag") == "img" and image_key:
+                        if message_id:
+                            images.append(CommingMessage.MessageImage(ref=f"feishu://image/{message_id}/{image_key}"))
+                        else:
+                            images.append(CommingMessage.MessageImage(ref=f"feishu://image/{image_key}"))
+                    element_text = Feishu._parse_post_element_text(element)
+                    if element_text:
+                        row_parts.append(element_text)
+                row_text = "".join(row_parts).strip()
+                if row_text:
+                    lines.append(row_text)
+
+        text = "\n".join(lines).strip()
+        return text, images or None
 
     def _remember_target(self, userid: Optional[str], chat_id: Optional[str]) -> None:
         """记录最近互动的用户与会话映射，便于后续主动回复。"""
@@ -470,11 +635,11 @@ class Feishu:
             try:
                 ws_client._auto_reconnect = False
                 if ws_loop and ws_loop.is_running():
-                    disconnect_future = asyncio.run_coroutine_threadsafe(
-                        ws_client._disconnect(),
+                    shutdown_future = asyncio.run_coroutine_threadsafe(
+                        self._shutdown_ws_client(),
                         ws_loop,
                     )
-                    disconnect_future.result(timeout=5)
+                    shutdown_future.result(timeout=5)
             except Exception as err:
                 logger.debug(f"停止飞书客户端失败：{err}")
         if self._ws_thread and self._ws_thread.is_alive():
@@ -1744,12 +1909,16 @@ class Feishu:
     ) -> Optional[dict]:
         """发送媒体列表消息，复用通知发送链路。"""
         lines = []
+        image = message.image
         for index, media in enumerate(medias[:10], start=1):
+            if not image:
+                image = media.get_message_image()
             title = getattr(media, "title_year", None) or getattr(media, "title", None) or "未知媒体"
             lines.append(f"{index}. {title}")
         proxy_message = Notification(
             title=message.title,
             text="\n".join(lines),
+            image=image,
             link=message.link,
             buttons=message.buttons,
             userid=message.userid,

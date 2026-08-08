@@ -1,14 +1,17 @@
 import asyncio
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+from app.api.endpoints import plugin as plugin_endpoint
 from app import schemas
 from app.api.endpoints.plugin import plugin_history
 from app.api.endpoints.plugin import plugin_releases
 from app.api.endpoints.plugin import reset_plugin
 from app.api.endpoints.system import sync_plugin_market_from_wiki
 from app.core.config import settings
+from app.helper.plugin_manager import PluginManager
 from app.schemas.event import PluginDataResetEventData
 from app.schemas.types import ChainEventType
+from app.utils.singleton import Singleton
 
 
 def test_plugin_history_merges_remote_metadata():
@@ -64,6 +67,38 @@ def test_plugin_history_returns_installed_plugin_when_remote_missing():
 
     assert result.id == "DemoPlugin"
     assert result.history == {}
+
+
+def test_plugin_history_uses_installed_repo_without_refreshing_all_markets():
+    """
+    已安装插件记录了来源仓库时，更新说明只刷新该仓库，避免弹窗触发全市场慢刷新。
+    """
+    installed_plugin = schemas.Plugin(
+        id="DemoPlugin",
+        plugin_name="Demo Plugin",
+        plugin_version="1.0.0",
+        repo_url="https://github.com/demo/plugins",
+        installed=True,
+    )
+    market_plugin = schemas.Plugin(
+        id="DemoPlugin",
+        repo_url="https://github.com/demo/plugins",
+        history={"v1.1.0": "- 新增更新说明"},
+    )
+    plugin_manager = MagicMock()
+    plugin_manager.get_local_plugins.return_value = [installed_plugin]
+    plugin_manager.get_local_repo_plugins.return_value = []
+    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
+    plugin_manager.async_get_online_plugins = AsyncMock(return_value=[])
+
+    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+        result = asyncio.run(plugin_history("DemoPlugin", None, True))
+
+    assert result.history == {"v1.1.0": "- 新增更新说明"}
+    plugin_manager.async_get_plugins_from_market.assert_awaited_once_with(
+        "https://github.com/demo/plugins", settings.VERSION_FLAG, True
+    )
+    plugin_manager.async_get_online_plugins.assert_not_awaited()
 
 
 def test_plugin_releases_returns_supported_versions_with_latest_and_current(monkeypatch):
@@ -152,6 +187,7 @@ def test_plugin_releases_falls_back_to_compatible_base_package(monkeypatch):
     )
     plugin_manager.get_local_plugin_version.return_value = None
     plugin_helper = MagicMock()
+    plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=False)
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[])
 
     with (
@@ -183,6 +219,7 @@ def test_plugin_releases_uses_force_refresh_for_market_metadata(monkeypatch):
     plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = None
     plugin_helper = MagicMock()
+    plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=False)
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[])
 
     with (
@@ -198,6 +235,100 @@ def test_plugin_releases_uses_force_refresh_for_market_metadata(monkeypatch):
     assert plugin_helper.async_get_plugin_release_versions.await_args.args == (
         "DemoPlugin",
         "https://github.com/demo/plugins",
+    )
+
+
+def test_plugin_releases_force_uses_cached_release_response_and_schedules_refresh(monkeypatch):
+    """
+    手动刷新时 package 元数据仍强刷，但 Release 明细先读缓存并后台刷新，避免弹窗阻塞。
+    """
+    from app.core.cache import is_fresh
+
+    market_plugin = schemas.Plugin(
+        id="DemoPlugin",
+        plugin_version="1.2.3",
+        repo_url="https://github.com/demo/plugins",
+        release=True,
+    )
+    plugin_manager = MagicMock()
+    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
+    plugin_manager.get_local_plugin_version.return_value = None
+    fresh_states = []
+    plugin_helper = MagicMock()
+    plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=True)
+
+    async def fake_releases(*_args):
+        fresh_states.append(is_fresh())
+        return [
+            {
+                "version": "1.2.3",
+                "tag_name": "DemoPlugin_v1.2.3",
+                "asset_name": "demoplugin_v1.2.3.zip",
+            }
+        ]
+
+    plugin_helper.async_get_plugin_release_versions = fake_releases
+    scheduled = []
+
+    def fake_schedule(plugin_id, repo_url):
+        scheduled.append((plugin_id, repo_url))
+
+    with (
+        patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
+        patch.object(plugin_endpoint, "_schedule_plugin_release_refresh", fake_schedule),
+    ):
+        result = asyncio.run(plugin_releases("DemoPlugin", None, "https://github.com/demo/plugins", True))
+
+    assert result["release_supported"] is True
+    assert fresh_states == [False]
+    assert scheduled == [("DemoPlugin", "https://github.com/demo/plugins")]
+    plugin_helper.async_has_plugin_release_cache.assert_awaited_once_with(
+        "https://github.com/demo/plugins"
+    )
+    plugin_manager.async_get_plugins_from_market.assert_awaited_once_with(
+        "https://github.com/demo/plugins", settings.VERSION_FLAG, True
+    )
+
+
+def test_plugin_releases_force_skips_background_refresh_without_release_cache(monkeypatch):
+    """
+    冷缓存 force 请求已在响应路径读取 Release，不能马上再启动一次重复强刷。
+    """
+    market_plugin = schemas.Plugin(
+        id="DemoPlugin",
+        plugin_version="1.2.3",
+        repo_url="https://github.com/demo/plugins",
+        release=True,
+    )
+    plugin_manager = MagicMock()
+    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
+    plugin_manager.get_local_plugin_version.return_value = None
+    plugin_helper = MagicMock()
+    plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=False)
+    plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[
+        {
+            "version": "1.2.3",
+            "tag_name": "DemoPlugin_v1.2.3",
+            "asset_name": "demoplugin_v1.2.3.zip",
+        }
+    ])
+    scheduled = []
+
+    def fake_schedule(plugin_id, repo_url):
+        scheduled.append((plugin_id, repo_url))
+
+    with (
+        patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
+        patch.object(plugin_endpoint, "_schedule_plugin_release_refresh", fake_schedule),
+    ):
+        result = asyncio.run(plugin_releases("DemoPlugin", None, "https://github.com/demo/plugins", True))
+
+    assert result["release_supported"] is True
+    assert scheduled == []
+    plugin_helper.async_has_plugin_release_cache.assert_awaited_once_with(
+        "https://github.com/demo/plugins"
     )
 
 
@@ -279,12 +410,12 @@ def test_reset_plugin_sends_pre_reset_chain_event_before_deleting_data():
     plugin_manager = MagicMock()
     calls = []
 
-    def delete_config(plugin_id):
-        calls.append(("delete_config", plugin_id))
+    def delete_config(plugin_id, force=False):
+        calls.append(("delete_config", plugin_id, force))
         return True
 
-    def delete_data(plugin_id):
-        calls.append(("delete_data", plugin_id))
+    def delete_data(plugin_id, force=False):
+        calls.append(("delete_data", plugin_id, force))
         return True
 
     def stop_plugin(plugin_id):
@@ -314,7 +445,38 @@ def test_reset_plugin_sends_pre_reset_chain_event_before_deleting_data():
     assert event_call[2].reset_data is True
     assert calls[1:] == [
         ("stop", "SubscribeAssistantEnhanced"),
-        ("delete_config", "SubscribeAssistantEnhanced"),
-        ("delete_data", "SubscribeAssistantEnhanced"),
+        ("delete_config", "SubscribeAssistantEnhanced", True),
+        ("delete_data", "SubscribeAssistantEnhanced", True),
     ]
     reload_plugin_mock.assert_called_once_with("SubscribeAssistantEnhanced")
+
+
+def test_delete_plugin_config_can_force_delete_after_plugin_is_stopped():
+    """
+    重置入口会先停止插件；配置删除需要能处理运行态注册已清理的插件 ID。
+    """
+    Singleton._instances.pop((PluginManager, (), frozenset()), None)
+    manager = PluginManager()
+
+    with patch("app.helper.plugin_manager.SystemConfigOper") as system_config_oper:
+        system_config_oper.return_value.delete.return_value = True
+        assert manager.delete_plugin_config("DemoPlugin", force=True) is True
+
+    system_config_oper.return_value.delete.assert_called_once_with("plugin.DemoPlugin")
+    Singleton._instances.pop((PluginManager, (), frozenset()), None)
+
+
+def test_delete_plugin_data_can_force_delete_after_plugin_is_stopped():
+    """
+    重置入口会先停止插件；插件数据删除不能依赖运行态注册仍存在。
+    """
+    Singleton._instances.pop((PluginManager, (), frozenset()), None)
+    manager = PluginManager()
+    calls = []
+
+    with patch("app.helper.plugin_manager.PluginDataOper") as plugin_data_oper:
+        plugin_data_oper.return_value.del_data.side_effect = lambda pid: calls.append(pid)
+        assert manager.delete_plugin_data("DemoPlugin", force=True) is True
+
+    assert calls == ["DemoPlugin"]
+    Singleton._instances.pop((PluginManager, (), frozenset()), None)

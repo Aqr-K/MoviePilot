@@ -171,6 +171,15 @@ def set_or_refresh_resource_token_cookie(
                 # 根据剩余时长提前刷新令牌
                 if remaining_time < timedelta(seconds=(settings.RESOURCE_ACCESS_TOKEN_EXPIRE_SECONDS / 3)):
                     raise jwt.ExpiredSignatureError
+            expected_claims = {
+                "sub": str(payload.sub),
+                "username": payload.username,
+                "super_user": payload.super_user,
+                "level": payload.level,
+                "purpose": "resource",
+            }
+            if any(decoded_token.get(claim) != value for claim, value in expected_claims.items()):
+                raise jwt.InvalidTokenError("资源令牌身份或权限上下文不匹配")
         except jwt.PyJWTError:
             logger.debug(f"Token error occurred. refreshing token")
         except Exception as e:
@@ -190,12 +199,19 @@ def set_or_refresh_resource_token_cookie(
         purpose="resource"
     )
 
+    # 判断请求是否为 HTTPS：直连协议为 https，或经反向代理转发时携带 X-Forwarded-Proto: https。
+    # 无法确认为明文 HTTP 时按 fail-safe 默认设置 secure=True，避免代理终止 HTTPS 后以 HTTP 转发导致 Cookie 明文传输。
+    is_https = (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    )
+
     # 设置会话级别的 HttpOnly Cookie
     response.set_cookie(
         key=settings.PROJECT_NAME,
         value=resource_token,
         httponly=True,
-        secure=request.url.scheme == "https",  # 根据当前请求的协议设置 secure 属性
+        secure=is_https,  # 根据当前请求协议（含反向代理转发标识）设置 secure 属性
         samesite="lax"  # 不同浏览器对 "Strict" 的处理可能不同，设置 SameSite 为 "Lax"，以平衡安全性和兼容性
     )
 
@@ -324,7 +340,9 @@ def __verify_key(key: str | None, expected_key: str, key_type: str) -> str:
 
 def verify_apitoken(token: Annotated[str | None, Security(__get_api_token)]) -> str:
     """
-    使用 API Token 进行身份认证
+    使用 API Token 进行受信第三方集成认证。
+
+    校验值来自 settings.API_TOKEN；通过后只确认集成凭据有效，不生成 per-user 权限上下文。
     :param token: API Token，从 URL 查询参数中获取 token=xxx
     :return: 返回校验通过的 API Token
     """
@@ -333,7 +351,9 @@ def verify_apitoken(token: Annotated[str | None, Security(__get_api_token)]) -> 
 
 def verify_apikey(apikey: Annotated[str | None, Security(__get_api_key)]) -> str:
     """
-    使用 API Key 进行身份认证
+    使用 API Key 形式进行受信第三方集成认证。
+
+    请求字段名兼容 API Key，实际校验值来自 settings.API_TOKEN，不生成 per-user 权限上下文。
     :param apikey: API Key，从 URL 查询参数中获取 apikey=xxx，或请求头中获取 X-API-KEY=xxx
     :return: 返回校验通过的 API Key
     """

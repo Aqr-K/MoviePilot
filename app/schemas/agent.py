@@ -1,7 +1,7 @@
 """AI智能体相关数据模型"""
 
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
@@ -57,6 +57,58 @@ class ToolResult(BaseModel):
     error: Optional[str] = Field(default=None, description="错误信息")
 
 
+class AgentMcpServerConfig(BaseModel):
+    """Agent 外部 MCP 服务器配置。"""
+
+    id: str = Field(..., description="服务器唯一 ID")
+    name: str = Field(..., description="服务器显示名称")
+    enabled: bool = Field(default=True, description="是否启用")
+    transport: Literal["stdio", "sse", "http", "streamable_http"] = Field(
+        default="stdio", description="MCP 传输协议"
+    )
+    description: Optional[str] = Field(None, description="服务器说明")
+    command: Optional[str] = Field(None, description="stdio 启动命令")
+    args: list[str] = Field(default_factory=list, description="stdio 启动参数")
+    env: dict[str, str] = Field(default_factory=dict, description="stdio 环境变量")
+    url: Optional[str] = Field(None, description="HTTP/SSE MCP 入口地址")
+    headers: dict[str, str] = Field(default_factory=dict, description="HTTP 请求头")
+    timeout: int = Field(default=30, description="连接和调用超时时间（秒）")
+    tool_prefix: Optional[str] = Field(None, description="注入 Agent 的工具名前缀")
+    require_admin: bool = Field(default=True, description="是否仅管理员可调用")
+
+
+class AgentMcpServersSaveRequest(BaseModel):
+    """Agent 外部 MCP 服务器保存请求。"""
+
+    servers: list[AgentMcpServerConfig] = Field(
+        default_factory=list, description="MCP 服务器配置列表"
+    )
+
+
+class AgentMcpServerTestRequest(BaseModel):
+    """Agent 外部 MCP 服务器测试请求。"""
+
+    server: AgentMcpServerConfig = Field(..., description="待测试的 MCP 服务器配置")
+
+
+class AgentMcpServerToolInfo(BaseModel):
+    """Agent 外部 MCP 工具摘要。"""
+
+    name: str = Field(..., description="原始 MCP 工具名称")
+    agent_tool_name: str = Field(..., description="注入 Agent 后的工具名称")
+    description: str = Field(default="", description="工具说明")
+    input_schema: dict[str, Any] = Field(default_factory=dict, description="工具参数 Schema")
+
+
+class AgentMcpServerTestResult(BaseModel):
+    """Agent 外部 MCP 服务器测试结果。"""
+
+    success: bool = Field(..., description="测试是否成功")
+    message: str = Field(default="", description="测试消息")
+    tools: list[AgentMcpServerToolInfo] = Field(default_factory=list, description="工具列表")
+    tool_count: int = Field(default=0, description="工具数量")
+
+
 class AgentChatAttachment(BaseModel):
     """
     Agent 会话展示附件。
@@ -81,6 +133,16 @@ class AgentChatToolCall(BaseModel):
     status: str = Field(default="done", description="工具状态")
 
 
+class AgentChatMessageSegment(BaseModel):
+    """
+    Agent 会话消息中的有序展示片段。
+    """
+
+    type: str = Field(..., description="片段类型")
+    content: str = Field(default="", description="文本片段内容")
+    toolIndex: Optional[int] = Field(None, description="工具提示索引")
+
+
 class AgentChatChoiceButton(BaseModel):
     """
     Agent 会话选择按钮。
@@ -88,6 +150,22 @@ class AgentChatChoiceButton(BaseModel):
 
     label: str = Field(..., description="按钮文案")
     callback_data: str = Field(..., description="回调数据")
+    description: Optional[str] = Field(None, description="选项描述")
+
+
+class AgentChatChoiceSelection(BaseModel):
+    """
+    Agent 会话中用户选择的展示快照。
+    """
+
+    choice_id: str = Field(..., description="选择卡片 ID")
+    title: Optional[str] = Field(None, description="标题")
+    prompt: str = Field(default="", description="提示语")
+    buttons: list[AgentChatChoiceButton] = Field(default_factory=list, description="按钮列表")
+    button_rows: list[list[AgentChatChoiceButton]] = Field(default_factory=list, description="按钮行")
+    selected_label: Optional[str] = Field(None, description="已选择文案")
+    selected_value: Optional[str] = Field(None, description="已选择值")
+    selected_description: Optional[str] = Field(None, description="已选择描述")
 
 
 class AgentChatChoiceCard(BaseModel):
@@ -99,9 +177,11 @@ class AgentChatChoiceCard(BaseModel):
     title: Optional[str] = Field(None, description="标题")
     prompt: str = Field(default="", description="提示语")
     buttons: list[AgentChatChoiceButton] = Field(default_factory=list, description="按钮列表")
+    button_rows: list[list[AgentChatChoiceButton]] = Field(default_factory=list, description="按钮行")
     status: str = Field(default="pending", description="选择状态")
     selected_label: Optional[str] = Field(None, description="已选择文案")
     selected_value: Optional[str] = Field(None, description="已选择值")
+    selected_description: Optional[str] = Field(None, description="已选择描述")
 
 
 class AgentChatMessage(BaseModel):
@@ -115,8 +195,10 @@ class AgentChatMessage(BaseModel):
     createdAt: Union[int, float] = Field(..., description="创建时间戳")
     status: str = Field(default="done", description="消息状态")
     tools: list[AgentChatToolCall] = Field(default_factory=list, description="工具提示列表")
+    segments: list[AgentChatMessageSegment] = Field(default_factory=list, description="有序展示片段")
     attachments: list[AgentChatAttachment] = Field(default_factory=list, description="附件列表")
     choices: list[AgentChatChoiceCard] = Field(default_factory=list, description="选择卡片列表")
+    choice_selection: Optional[AgentChatChoiceSelection] = Field(None, description="用户选择项快照")
 
 
 class AgentChatSession(BaseModel):

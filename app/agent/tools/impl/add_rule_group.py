@@ -24,8 +24,6 @@ from app.schemas.types import SystemConfigKey
 class AddRuleGroupInput(BaseModel):
     """新增过滤规则组工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     name: str = Field(..., description="New rule group name.")
     rule_string: str = Field(
         ...,

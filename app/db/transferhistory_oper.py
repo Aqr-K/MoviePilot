@@ -26,6 +26,51 @@ class TransferHistoryOper(DbOper):
         """
         return await TransferHistory.async_get(self._db, historyid)
 
+    async def async_list_by_title(
+        self,
+        title: str,
+        page: Optional[int] = 1,
+        count: Optional[int] = 30,
+        status: Optional[bool] = None,
+    ) -> List[TransferHistory]:
+        """
+        异步按标题分页查询转移记录。
+        """
+        return await TransferHistory.async_list_by_title(
+            self._db, title=title, page=page, count=count, status=status
+        )
+
+    async def async_list_by_page(
+        self,
+        page: Optional[int] = 1,
+        count: Optional[int] = 30,
+        status: Optional[bool] = None,
+    ) -> List[TransferHistory]:
+        """
+        异步分页查询转移记录。
+        """
+        return await TransferHistory.async_list_by_page(
+            self._db, page=page, count=count, status=status
+        )
+
+    async def async_count(self, status: Optional[bool] = None) -> int:
+        """
+        异步统计转移记录数量。
+        """
+        return await TransferHistory.async_count(self._db, status=status)
+
+    async def async_count_by_title(
+        self,
+        title: str,
+        status: Optional[bool] = None,
+    ) -> int:
+        """
+        异步按标题统计转移记录数量。
+        """
+        return await TransferHistory.async_count_by_title(
+            self._db, title=title, status=status
+        )
+
     def get_by_title(self, title: str) -> List[TransferHistory]:
         """
         按标题查询转移记录
@@ -33,20 +78,68 @@ class TransferHistoryOper(DbOper):
         """
         return TransferHistory.list_by_title(self._db, title)
 
-    def get_by_src(self, src: str, storage: Optional[str] = None) -> TransferHistory:
+    def get_by_src(
+            self, src: str, storage: Optional[str] = None
+    ) -> Optional[TransferHistory]:
         """
         按源查询转移记录
         :param src: 数据key
         :param storage: 存储类型
+        :return: 命中的整理记录，未命中时返回 None
         """
         return TransferHistory.get_by_src(self._db, src, storage)
 
-    def get_by_dest(self, dest: str) -> TransferHistory:
+    def get_by_dest(
+            self, dest: str, storage: Optional[str] = None
+    ) -> Optional[TransferHistory]:
         """
         按转移路径查询转移记录
         :param dest: 数据key
+        :param storage: 存储类型
         """
-        return TransferHistory.get_by_dest(self._db, dest)
+        return TransferHistory.get_by_dest(self._db, dest, storage)
+
+    def list_success_by_src(
+            self,
+            src: str,
+            storage: Optional[str] = None,
+            recursive: bool = False,
+    ) -> List[TransferHistory]:
+        """
+        按源路径查询成功整理记录。
+
+        :param src: 源路径
+        :param storage: 源存储类型
+        :param recursive: 是否递归匹配目录子项
+        :return: 命中的成功整理记录
+        """
+        return TransferHistory.list_success_by_src(
+            self._db,
+            src=src,
+            storage=storage,
+            recursive=recursive,
+        )
+
+    def list_success_move_by_dest(
+            self,
+            dest: str,
+            storage: Optional[str] = None,
+            recursive: bool = False,
+    ) -> List[TransferHistory]:
+        """
+        按目标路径查询成功移动记录。
+
+        :param dest: 目标路径
+        :param storage: 目标存储类型
+        :param recursive: 是否递归匹配目录子项
+        :return: 命中的成功移动记录
+        """
+        return TransferHistory.list_success_move_by_dest(
+            self._db,
+            dest=dest,
+            storage=storage,
+            recursive=recursive,
+        )
 
     def list_by_hash(self, download_hash: str) -> List[TransferHistory]:
         """
@@ -153,6 +246,10 @@ class TransferHistoryOper(DbOper):
             imdbid=mediainfo.imdb_id,
             tvdbid=mediainfo.tvdb_id,
             doubanid=mediainfo.douban_id,
+            bangumiid=mediainfo.bangumi_id,
+            anilistid=mediainfo.anilist_id,
+            media_source=mediainfo.source,
+            media_id=mediainfo.to_dict().get("media_id"),
             seasons=meta.season,
             episodes=meta.episode,
             image=mediainfo.get_poster_image(),
@@ -184,6 +281,10 @@ class TransferHistoryOper(DbOper):
                 imdbid=mediainfo.imdb_id,
                 tvdbid=mediainfo.tvdb_id,
                 doubanid=mediainfo.douban_id,
+                bangumiid=mediainfo.bangumi_id,
+                anilistid=mediainfo.anilist_id,
+                media_source=mediainfo.source,
+                media_id=mediainfo.to_dict().get("media_id"),
                 seasons=meta.season,
                 episodes=meta.episode,
                 image=mediainfo.get_poster_image(),
@@ -198,6 +299,12 @@ class TransferHistoryOper(DbOper):
             his = self.add_force(
                 title=meta.name,
                 year=meta.year,
+                tmdbid=meta.tmdbid,
+                doubanid=meta.doubanid,
+                bangumiid=meta.bangumiid,
+                anilistid=meta.anilistid,
+                media_source=meta.media_source,
+                media_id=meta.media_id,
                 src=fileitem.path,
                 src_storage=fileitem.storage,
                 src_fileitem=fileitem.model_dump(),

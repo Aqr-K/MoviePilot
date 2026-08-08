@@ -1,11 +1,55 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, ClassVar
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 from app.schemas.types import MediaType
 
 
+def compute_subscribe_completed_episode(subscribe: "Subscribe") -> Optional[int]:
+    """
+    计算订阅"已完成"集数派生值，仅用于响应填充，不入库。
+
+    普通电视剧按 ``total_episode - lack_episode`` 计算；分集洗版按订阅目标范围内
+    priority==100 的分集数量计算；全集洗版按整包准入基线是否达到 100 计算。
+    """
+    total_episode = subscribe.total_episode or 0
+    if subscribe.type != MediaType.TV.value or not total_episode:
+        return None
+
+    start_episode = subscribe.start_episode or 1
+    if not subscribe.best_version:
+        lack = subscribe.lack_episode or 0
+        return max(total_episode - lack, 0)
+
+    if subscribe.best_version_full:
+        completed_targets = max(total_episode - start_episode + 1, 0) \
+            if subscribe.current_priority == 100 else 0
+        return min(min(max(start_episode - 1, 0), total_episode) + completed_targets, total_episode)
+
+    episode_priority = subscribe.episode_priority or {}
+    if not episode_priority and subscribe.current_priority is not None:
+        # 兼容只有整体优先级的洗版快照，响应派生值需与链路侧按集口径保持一致。
+        episode_priority = {
+            str(episode): int(subscribe.current_priority)
+            for episode in range(start_episode, total_episode + 1)
+        }
+    priority_completed = sum(
+        1
+        for ep_key, priority in episode_priority.items()
+        if str(ep_key).isdigit()
+        and start_episode <= int(ep_key) <= total_episode
+        and priority == 100
+    )
+    return min(max(start_episode - 1, 0), total_episode) + priority_completed
+
+
 class Subscribe(BaseModel):
+    # 公共创建和更新接口不得接收系统字段和运行事实；其余字段默认作为订阅输入透传。
+    PUBLIC_WRITE_EXCLUDED_FIELDS: ClassVar[frozenset[str]] = frozenset({
+        "id", "poster", "backdrop", "vote", "description", "lack_episode", "completed_episode",
+        "note", "state", "last_update", "username", "current_priority", "episode_priority", "date",
+    })
+
     id: Optional[int] = None
     # 订阅名称
     name: Optional[str] = None
@@ -18,7 +62,10 @@ class Subscribe(BaseModel):
     tmdbid: Optional[int] = None
     doubanid: Optional[str] = None
     bangumiid: Optional[int] = None
+    anilistid: Optional[int] = None
     mediaid: Optional[str] = None
+    media_source: Optional[str] = None
+    media_id: Optional[str] = None
     # 季号
     season: Optional[int] = None
     # 海报
@@ -62,9 +109,9 @@ class Subscribe(BaseModel):
     # 下载器
     downloader: Optional[str] = None
     # 是否洗版
-    best_version: Optional[int] = 0
+    best_version: Optional[int] = None
     # 是否只洗全集整包
-    best_version_full: Optional[int] = 0
+    best_version_full: Optional[int] = None
     # 当前优先级
     current_priority: Optional[int] = None
     # 洗版时已下载剧集的优先级状态
@@ -95,27 +142,12 @@ class Subscribe(BaseModel):
         if self.completed_episode is not None:
             # 调用方显式提供过的值不覆盖
             return self
-        total_episode = self.total_episode or 0
-        if self.type != MediaType.TV.value or not total_episode:
-            return self
-        start_episode = self.start_episode or 1
-        if not self.best_version:
-            lack = self.lack_episode or 0
-            self.completed_episode = max(total_episode - lack, 0)
-            return self
-        # 洗版口径：起始集前视为逻辑完成 + [start, total] 范围内 priority==100 命中。
-        # ``start_episode > total_episode`` 属于异常配置，需把 "起始集前" 偏移截断到 total，
-        # 防止 completed_episode 越过分母 total_episode。
-        episode_priority = self.episode_priority or {}
-        priority_completed = sum(
-            1
-            for ep_key, priority in episode_priority.items()
-            if str(ep_key).isdigit()
-            and start_episode <= int(ep_key) <= total_episode
-            and priority == 100
-        )
-        self.completed_episode = min(max(start_episode - 1, 0), total_episode) + priority_completed
+        self.completed_episode = compute_subscribe_completed_episode(self)
         return self
+
+    def to_public_write_payload(self) -> Dict[str, Any]:
+        """裁剪公共订阅写入字段，避免请求体覆盖下载事实和运行状态。"""
+        return self.model_dump(exclude=self.PUBLIC_WRITE_EXCLUDED_FIELDS)
 
 
 class SubscribeShare(BaseModel):
@@ -142,6 +174,9 @@ class SubscribeShare(BaseModel):
     tmdbid: Optional[int] = None
     doubanid: Optional[str] = None
     bangumiid: Optional[int] = None
+    anilistid: Optional[int] = None
+    media_source: Optional[str] = None
+    media_id: Optional[str] = None
     # 季号
     season: Optional[int] = None
     # 海报
@@ -203,6 +238,12 @@ class SubscribeLibraryFileInfo(BaseModel):
     storage: Optional[str] = "local"
     # 文件路径
     file_path: Optional[str] = None
+    # 媒体服务器名称
+    server: Optional[str] = None
+    # 媒体服务器类型：emby、jellyfin、plex 等
+    server_type: Optional[str] = None
+    # 媒体服务器条目 ID
+    itemid: Optional[str] = None
 
 
 class SubscribeEpisodeInfo(BaseModel):

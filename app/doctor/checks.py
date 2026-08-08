@@ -9,6 +9,7 @@ import socket
 import sqlite3
 import sys
 from collections import deque
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.error import HTTPError, URLError
@@ -44,6 +45,19 @@ LOG_ERROR_PATTERNS = (
     re.compile(r"\b(error|critical|exception)\b", re.IGNORECASE),
     re.compile(r"加载插件.+出错"),
     re.compile(r"数据库更新失败"),
+)
+LOG_RECORD_PATTERN = re.compile(
+    r"(?:【(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)】|(?:DEBUG|INFO|WARNING|ERROR|CRITICAL):)"
+)
+LOG_TIMESTAMP_PATTERN = re.compile(
+    r"(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})"
+)
+LOG_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOG_LOOKBACK_HOURS = 24
+CONSOLE_LOGGER_PATTERN = re.compile(r"\[([^\]]+)]")
+PLUGIN_ERROR_PATTERNS = (
+    re.compile(r"(?:^|\s-\s)plugin\.py\s+-\s", re.IGNORECASE),
+    re.compile(r"插件.+(?:出错|失败|异常|错误)"),
 )
 SENSITIVE_PATTERNS = (
     re.compile(r"(?i)(api[_-]?token|token|password|secret|cookie)(\s*[:=]\s*)[^\s&]+"),
@@ -92,10 +106,23 @@ class DoctorRunnerProtocol:
         recommendation: str,
         fixable: bool = False,
         fixed: bool = False,
+        affects_report_status: bool = True,
         context: Optional[dict[str, Any]] = None,
     ) -> DoctorFinding:
         """
         添加诊断发现。
+
+        :param finding_id: 诊断项稳定标识
+        :param severity: 诊断严重级别
+        :param status: 单项诊断状态
+        :param title: 诊断项标题
+        :param detail: 诊断详情
+        :param recommendation: 处理建议
+        :param fixable: 是否支持 Doctor 自动修复
+        :param fixed: 本次运行是否已修复
+        :param affects_report_status: 是否参与整体报告状态聚合
+        :param context: 可选结构化上下文
+        :return: 新增的诊断发现
         """
         raise NotImplementedError
 
@@ -131,7 +158,7 @@ def _read_json(path: Path) -> Optional[dict[str, Any]]:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
@@ -249,7 +276,7 @@ def _backend_health_payload(port: int, timeout: float = BACKEND_HEALTH_TIMEOUT) 
         with urlopen(request, timeout=timeout) as response:
             if response.status != 200:
                 return None
-            raw = response.read().decode("utf-8", errors="ignore")
+            raw = response.read().decode("utf-8", errors="replace")
     except (HTTPError, URLError):
         return None
     except OSError:
@@ -274,12 +301,118 @@ def _tail_lines(path: Path, max_lines: int = 120, max_bytes: int = 256 * 1024) -
     return list(deque((_mask_text(line) for line in text.splitlines()), maxlen=max_lines))
 
 
+def _parse_log_timestamp(line: str) -> Optional[datetime]:
+    """解析日志行中的时间戳。"""
+    match = LOG_TIMESTAMP_PATTERN.search(line[:96])
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), LOG_TIMESTAMP_FORMAT)
+    except ValueError:
+        return None
+
+
+def _recent_log_lines(
+    lines: list[str],
+    now: Optional[datetime] = None,
+) -> list[str]:
+    """按日志记录边界保留诊断时间窗内的日志。"""
+    if not lines:
+        return []
+    timestamps = [_parse_log_timestamp(line) for line in lines]
+    if not any(timestamps):
+        return lines
+
+    cutoff = (now or datetime.now()) - timedelta(hours=LOG_LOOKBACK_HOURS)
+    recent: list[str] = []
+    include_record = False
+    for line, timestamp in zip(lines, timestamps):
+        if timestamp is not None:
+            include_record = timestamp >= cutoff
+        if include_record:
+            recent.append(line)
+    return recent
+
+
+def _error_fingerprint(line: str) -> str:
+    """生成跨主日志、控制台镜像和插件独立日志可比较的错误指纹。"""
+    normalized = LOG_TIMESTAMP_PATTERN.sub("<time>", line.strip())
+    if " - " in normalized:
+        normalized = normalized.rsplit(" - ", 1)[-1]
+    normalized = re.sub(
+        r"^(?:【(?:ERROR|CRITICAL|WARNING)】|(?:ERROR|CRITICAL|WARNING):)\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", normalized).strip().lower()
+
+
+def _aggregate_log_entries(
+    entries: list[tuple[Path, str]],
+    max_matches: int = 12,
+) -> tuple[list[str], list[str]]:
+    """合并跨日志的重复错误，并返回详情行和来源文件。"""
+    unique_entries: dict[str, dict[str, Any]] = {}
+    log_files: list[str] = []
+    for path, line in entries:
+        path_text = str(path)
+        if path_text not in log_files:
+            log_files.append(path_text)
+        fingerprint = _error_fingerprint(line)
+        if fingerprint not in unique_entries:
+            unique_entries[fingerprint] = {"line": line, "sources": []}
+        sources = unique_entries[fingerprint]["sources"]
+        if path.name not in sources:
+            sources.append(path.name)
+
+    details = [
+        f"[{', '.join(item['sources'])}] {item['line']}"
+        for item in list(unique_entries.values())[-max_matches:]
+    ]
+    return details, log_files
+
+
 def _find_error_lines(lines: list[str], max_matches: int = 12) -> list[str]:
+    """从近期日志中提取错误关键词命中的行。"""
     matches: list[str] = []
     for line in lines:
         if any(pattern.search(line) for pattern in LOG_ERROR_PATTERNS):
             matches.append(line)
     return matches[-max_matches:]
+
+
+def _partition_error_lines(
+    lines: list[str],
+    plugin_logger_names: set[str],
+    max_matches: int = 12,
+) -> tuple[list[str], list[str]]:
+    """
+    将主日志错误线索拆分为核心错误和插件子系统错误。
+
+    :param lines: 近期日志行
+    :param plugin_logger_names: 已发现的插件控制台 logger 名称
+    :param max_matches: 每类最多保留的错误行数
+    :return: 核心错误行和插件错误行
+    """
+    core_matches: list[str] = []
+    plugin_matches: list[str] = []
+    plugin_context = False
+    for line in lines:
+        if LOG_RECORD_PATTERN.search(line):
+            logger_match = CONSOLE_LOGGER_PATTERN.search(line)
+            console_logger = logger_match.group(1).strip().lower() if logger_match else ""
+            plugin_context = (
+                console_logger in plugin_logger_names
+                or any(pattern.search(line) for pattern in PLUGIN_ERROR_PATTERNS)
+            )
+        if not any(pattern.search(line) for pattern in LOG_ERROR_PATTERNS):
+            continue
+        if plugin_context or any(pattern.search(line) for pattern in PLUGIN_ERROR_PATTERNS):
+            plugin_matches.append(line)
+        else:
+            core_matches.append(line)
+    return core_matches[-max_matches:], plugin_matches[-max_matches:]
 
 
 def _frontend_dir() -> Path:
@@ -375,13 +508,13 @@ def _check_config(runner: DoctorRunnerProtocol) -> None:
         )
 
     proxy_host = (settings.PROXY_HOST or "").strip()
-    if proxy_host and not re.match(r"^https?://", proxy_host, re.IGNORECASE):
+    if proxy_host and not re.match(r"^(https?|socks5h?)://", proxy_host, re.IGNORECASE):
         runner.add(
             finding_id="config.proxy_format",
             severity=DoctorSeverity.Warn,
             status=DoctorFindingStatus.Degraded,
             title="代理地址格式可能不完整",
-            detail=f"PROXY_HOST={proxy_host} 未包含 http:// 或 https:// 前缀。",
+            detail=f"PROXY_HOST={proxy_host} 未包含 http:// 或 https:// 或 socks5:// 或 socks5h:// 前缀。",
             recommendation="如果外部访问异常，请把 PROXY_HOST 调整为完整 URL。",
         )
 
@@ -672,7 +805,7 @@ def _check_frontend_assets(runner: DoctorRunnerProtocol) -> None:
 
     version = ""
     try:
-        version = (frontend_dir / "version.txt").read_text(encoding="utf-8").strip()
+        version = (frontend_dir / "version.txt").read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         version = "unknown"
     runner.add(
@@ -687,38 +820,41 @@ def _check_frontend_assets(runner: DoctorRunnerProtocol) -> None:
 
 
 def _check_logs(runner: DoctorRunnerProtocol) -> None:
+    """扫描近期日志，并区分核心运行异常与插件扩展异常。"""
     log_files = [
         _backend_app_log_file(),
         _backend_stdio_log_file(),
         _frontend_stdio_log_file(),
     ]
     plugin_log_dir = settings.LOG_PATH / "plugins"
+    plugin_logger_names: set[str] = set()
     if plugin_log_dir.exists():
-        log_files.extend(sorted(plugin_log_dir.rglob("*.log"))[:20])
+        plugin_log_files = sorted(plugin_log_dir.rglob("*.log"))
+        plugin_logger_names = {path.stem.lower() for path in plugin_log_files}
+        log_files.extend(plugin_log_files[:20])
 
     found_any = False
+    entries: dict[str, list[tuple[Path, str]]] = {
+        "core": [],
+        "plugin": [],
+    }
     for path in log_files:
         if not path.exists() or not path.is_file():
             continue
         found_any = True
-        lines = _tail_lines(path)
-        errors = _find_error_lines(lines)
-        if not errors:
-            continue
-        is_plugin = plugin_log_dir in path.parents
-        runner.add(
-            finding_id=f"logs.{path.stem}.recent_errors",
-            severity=DoctorSeverity.Warn,
-            status=DoctorFindingStatus.Degraded,
-            title="最近日志存在插件异常" if is_plugin else "最近日志存在错误线索",
-            detail="\n".join(errors),
-            recommendation=(
-                "可使用安全模式启动后检查插件配置。"
-                if is_plugin
-                else "结合前后的启动日志定位异常；必要时执行 `moviepilot doctor --json` 交给 Agent 或 Issue 流程。"
-            ),
-            context={"log_file": str(path), "matches": len(errors)},
-        )
+        lines = _recent_log_lines(_tail_lines(path))
+        is_plugin_log = plugin_log_dir in path.parents
+        if is_plugin_log:
+            scoped_errors = [(True, _find_error_lines(lines))]
+        else:
+            core_errors, plugin_errors = _partition_error_lines(
+                lines,
+                plugin_logger_names,
+            )
+            scoped_errors = [(False, core_errors), (True, plugin_errors)]
+        for is_plugin_error, errors in scoped_errors:
+            component = "plugin" if is_plugin_error else "core"
+            entries[component].extend((path, error) for error in errors)
 
     if not found_any:
         runner.add(
@@ -731,13 +867,50 @@ def _check_logs(runner: DoctorRunnerProtocol) -> None:
         )
         return
 
-    if not any(finding.id.startswith("logs.") and finding.id.endswith("recent_errors") for finding in runner.report.findings):
+    core_first_path = entries["core"][0][0] if entries["core"] else None
+    for component in ("core", "plugin"):
+        component_entries = entries[component]
+        if not component_entries:
+            continue
+        first_path = component_entries[0][0]
+        finding_suffix = (
+            "plugin_errors"
+            if component == "plugin" and first_path == core_first_path
+            else "recent_errors"
+        )
+        detail_lines, source_files = _aggregate_log_entries(component_entries)
+        runner.add(
+            finding_id=f"logs.{first_path.stem}.{finding_suffix}",
+            severity=DoctorSeverity.Warn,
+            status=DoctorFindingStatus.Degraded,
+            title="最近日志存在插件异常" if component == "plugin" else "最近日志存在错误线索",
+            detail="\n".join(detail_lines),
+            recommendation=(
+                "可使用安全模式启动后检查插件配置。"
+                if component == "plugin"
+                else "结合前后的启动日志定位异常；必要时执行 `moviepilot doctor --json` 交给 Agent 或 Issue 流程。"
+            ),
+            affects_report_status=component == "core",
+            context={
+                "log_file": str(first_path),
+                "log_files": source_files,
+                "matches": len(component_entries),
+                "unique_matches": len(detail_lines),
+                "component": component,
+                "lookback_hours": LOG_LOOKBACK_HOURS,
+            },
+        )
+
+    if not entries["core"]:
         runner.add(
             finding_id="logs.recent",
             severity=DoctorSeverity.Info,
             status=DoctorFindingStatus.Ok,
             title="最近日志未发现明显错误关键词",
-            detail=f"已扫描 {settings.LOG_PATH} 下的主日志、启动日志和插件日志。",
+            detail=(
+                f"已扫描 {settings.LOG_PATH} 下最近 {LOG_LOOKBACK_HOURS} 小时的主日志、"
+                "启动日志和插件日志；插件扩展告警不参与核心健康状态。"
+            ),
             recommendation="如果问题仍存在，请结合具体操作时间扩大日志范围排查。",
         )
 

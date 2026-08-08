@@ -4,21 +4,40 @@ import os
 import platform
 import re
 import shutil
+import socket
+import struct
 import subprocess
 import sys
+import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 import psutil
 
 from app import schemas
+from version import APP_VERSION
+
+
+# Linux amd64/arm64 UAPI: _IOR(BTRFS_IOCTL_MAGIC, 31, struct btrfs_ioctl_fs_info_args)
+_BTRFS_IOC_FS_INFO = 0x8400941F
+_BTRFS_FS_INFO_SIZE = 1024
+_BTRFS_FSID_OFFSET = 16
+_BTRFS_FSID_SIZE = 16
 
 
 class SystemUtils:
     """
     系统工具类，提供系统相关的操作和信息获取方法。
     """
+
+    _URL_WITH_USERINFO_PATTERN = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://[^\s]+)")
 
     @staticmethod
     def execute(cmd: str) -> str:
@@ -33,22 +52,69 @@ class SystemUtils:
             return ""
 
     @staticmethod
-    def execute_with_subprocess(pip_command: list) -> Tuple[bool, str]:
+    def redact_url_userinfo(value: str) -> str:
+        """
+        脱敏 URL 中的 userinfo，避免命令输出泄露镜像源或代理凭据。
+        """
+        def replace(match: re.Match[str]) -> str:
+            candidate = match.group(1)
+            trailing = ""
+            while candidate and candidate[-1] in ".,;:)":
+                trailing = candidate[-1] + trailing
+                candidate = candidate[:-1]
+            parsed = urllib.parse.urlsplit(candidate)
+            if not parsed.username and not parsed.password:
+                return match.group(1)
+            host = parsed.netloc.rsplit("@", 1)[-1]
+            redacted = urllib.parse.urlunsplit((
+                parsed.scheme,
+                host,
+                parsed.path,
+                parsed.query,
+                parsed.fragment,
+            ))
+            return f"{redacted}{trailing}"
+
+        return SystemUtils._URL_WITH_USERINFO_PATTERN.sub(replace, value or "")
+
+    @staticmethod
+    def redact_command_url_userinfo(command: list[str]) -> List[str]:
+        """
+        脱敏命令参数中的 URL userinfo，供错误信息展示。
+        """
+        return [SystemUtils.redact_url_userinfo(str(item)) for item in command]
+
+    @staticmethod
+    def execute_with_subprocess(
+            pip_command: list,
+            env: Optional[dict[str, str]] = None,
+            safe_command: Optional[list[str]] = None,
+    ) -> Tuple[bool, str]:
         """
         执行命令并捕获标准输出和错误输出，记录日志。
 
         :param pip_command: 要执行的命令，以列表形式提供
+        :param env: 传递给子进程的环境变量
+        :param safe_command: 用于错误信息展示的脱敏命令
         :return: (命令是否成功, 输出信息或错误信息)
         """
+        display_command = safe_command or pip_command
         try:
             # 使用 subprocess.run 捕获标准输出和标准错误
-            result = subprocess.run(pip_command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = subprocess.run(
+                pip_command,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
             # 合并 stdout 和 stderr
-            output = result.stdout + result.stderr
+            output = SystemUtils.redact_url_userinfo(result.stdout + result.stderr)
             return True, output
         except subprocess.CalledProcessError as e:
-            stdout = (e.stdout or "").strip()
-            stderr = (e.stderr or "").strip()
+            stdout = SystemUtils.redact_url_userinfo((e.stdout or "").strip())
+            stderr = SystemUtils.redact_url_userinfo((e.stderr or "").strip())
             # 不同命令/兼容层可能把失败原因写入 stdout，失败时需要同时保留两路输出。
             output_parts = []
             if stdout:
@@ -58,12 +124,15 @@ class SystemUtils:
             if not output_parts:
                 output_parts.append("无标准输出或错误输出")
             error_message = (
-                f"命令：{' '.join(pip_command)}，执行失败，"
+                f"命令：{' '.join(SystemUtils.redact_command_url_userinfo(display_command))}，执行失败，"
                 f"返回码：{e.returncode}，{'; '.join(output_parts)}"
             )
             return False, error_message
         except Exception as e:
-            error_message = f"未知错误，命令：{' '.join(pip_command)}，错误：{str(e)}"
+            error_message = (
+                f"未知错误，命令：{' '.join(SystemUtils.redact_command_url_userinfo(display_command))}，"
+                f"错误：{SystemUtils.redact_url_userinfo(str(e))}"
+            )
             return False, error_message
 
     @staticmethod
@@ -511,31 +580,92 @@ class SystemUtils:
         return _calc_dir_size(path) if path.is_dir() else path.stat().st_size
 
     @staticmethod
-    def space_usage(dir_list: Union[Path, List[Path]]) -> Tuple[float, float]:
+    def _get_btrfs_fsid(dir_path: Path) -> Optional[bytes]:
+        """读取目录所属 Btrfs 文件系统的 FSID，无法确认时返回 None。"""
+        if not sys.platform.startswith("linux") or fcntl is None \
+                or not (SystemUtils.is_x86_64() or SystemUtils.is_aarch64()):
+            return None
+
+        fd = None
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+            fd = os.open(dir_path, flags)
+            fs_info = bytearray(_BTRFS_FS_INFO_SIZE)
+            fcntl.ioctl(fd, _BTRFS_IOC_FS_INFO, fs_info, True)
+            if len(fs_info) != _BTRFS_FS_INFO_SIZE:
+                return None
+            num_devices = struct.unpack_from("=Q", fs_info, 8)[0]
+            fsid = bytes(fs_info[_BTRFS_FSID_OFFSET:_BTRFS_FSID_OFFSET + _BTRFS_FSID_SIZE])
+            if num_devices == 0 or fsid == bytes(_BTRFS_FSID_SIZE):
+                return None
+            return fsid
+        except (OSError, OverflowError, ValueError, struct.error):
+            return None
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def space_usage(dir_list: Union[Path, List[Path]], btrfs_fsid_dedup: bool = False) -> Tuple[float, float]:
         """
         计算多个目录的总可用空间/剩余空间（单位：Byte），并去除重复磁盘
+
+        :param dir_list: 待统计的目录或目录列表
+        :param btrfs_fsid_dedup: 是否在 Linux amd64/arm64 下以 Btrfs FSID 辅助去重
+
+        默认保持原有的驱动器号/st_dev 去重。显式启用后，st_dev 仍作为基础依据，
+        FSID 仅用于合并同一 Btrfs 文件系统中的不同子卷；证据缺失或冲突时
+        保守回退 st_dev，允许多计而不猜测合并独立存储。
         """
         if not dir_list:
             return 0.0, 0.0
         if not isinstance(dir_list, list):
             dir_list = [dir_list]
-        # 存储不重复的磁盘
-        disk_set = set()
-        # 存储总剩余空间
+
+        use_btrfs_fsid = btrfs_fsid_dedup and sys.platform.startswith("linux") \
+            and (SystemUtils.is_x86_64() or SystemUtils.is_aarch64())
+        if not use_btrfs_fsid:
+            # 默认分支保留原有行为，不打开目录或调用 ioctl。
+            disk_set = set()
+            total_free_space = 0.0
+            total_space = 0.0
+            for dir_path in dir_list:
+                if not dir_path:
+                    continue
+                if not dir_path.exists():
+                    continue
+                if os.name == "nt":
+                    disk = dir_path.drive
+                else:
+                    disk = os.stat(dir_path).st_dev
+                if disk not in disk_set:
+                    disk_set.add(disk)
+                    total_space += SystemUtils.total_space(dir_path)
+                    total_free_space += SystemUtils.free_space(dir_path)
+            return total_space, total_free_space
+
         total_free_space = 0.0
-        # 存储总空间
         total_space = 0.0
+        # 先按 st_dev 恢复原有去重语义，再用组内唯一可信的 FSID 合并 Btrfs 子卷。
+        disk_groups = {}
         for dir_path in dir_list:
-            if not dir_path:
+            if not dir_path or not dir_path.exists():
                 continue
-            if not dir_path.exists():
-                continue
-            # 获取目录所在磁盘
-            if os.name == "nt":
-                disk = dir_path.drive
-            else:
-                disk = os.stat(dir_path).st_dev
-            # 如果磁盘未出现过，则计算其剩余空间并加入总剩余空间中
+            st_dev = os.stat(dir_path).st_dev
+            if st_dev not in disk_groups:
+                disk_groups[st_dev] = (dir_path, set())
+            btrfs_fsid = SystemUtils._get_btrfs_fsid(dir_path)
+            if btrfs_fsid:
+                disk_groups[st_dev][1].add(btrfs_fsid)
+
+        disk_set = set()
+        for st_dev, (dir_path, fsids) in disk_groups.items():
+            # 同一 st_dev 出现冲突 FSID 可能是挂载变化导致的不一致快照，
+            # 此时禁止跨 st_dev 合并，避免少计独立存储。
+            disk = ("btrfs_fsid", next(iter(fsids))) if len(fsids) == 1 else ("st_dev", st_dev)
             if disk not in disk_set:
                 disk_set.add(disk)
                 total_space += SystemUtils.total_space(dir_path)
@@ -582,6 +712,36 @@ class SystemUtils:
         return processes
 
     @staticmethod
+    def dashboard_system_info() -> schemas.DashboardSystemInfo:
+        """
+        获取仪表板展示所需的系统摘要信息。
+
+        运行时间以当前 MoviePilot 进程为基准，避免宿主机或容器长期运行时间
+        掩盖服务最近一次重启。
+        """
+        return schemas.DashboardSystemInfo(
+            hostname=socket.gethostname(),
+            operating_system=SystemUtils._operating_system_name(),
+            runtime=max(0, int(time.time() - psutil.Process().create_time())),
+            version=APP_VERSION,
+        )
+
+    @staticmethod
+    def _operating_system_name() -> str:
+        """返回适合在仪表板展示的操作系统名称。"""
+        if SystemUtils.is_windows():
+            return platform.platform()
+        if SystemUtils.is_macos():
+            version = platform.mac_ver()[0]
+            return f"macOS {version}".strip()
+
+        try:
+            operating_system = platform.freedesktop_os_release()
+            return operating_system.get("PRETTY_NAME") or operating_system.get("NAME") or platform.platform()
+        except OSError:
+            return platform.platform()
+
+    @staticmethod
     def is_bluray_dir(dir_path: Path) -> bool:
         """
         判断是否为蓝光原盘目录
@@ -618,15 +778,27 @@ class SystemUtils:
         return psutil.cpu_percent()
 
     @staticmethod
-    def memory_usage() -> List[int]:
+    def memory_usage() -> schemas.DashboardMemoryInfo:
         """
-        获取当前程序的内存使用量和使用率
+        获取当前 MoviePilot 进程内存与系统缓存、可用和总内存信息。
         """
-        current_process = psutil.Process()
-        process_memory = current_process.memory_info().rss
-        system_memory = psutil.virtual_memory().total
-        process_memory_percent = (process_memory / system_memory) * 100
-        return [process_memory, int(process_memory_percent)]
+        memory = psutil.virtual_memory()
+        total = max(0, int(memory.total))
+        used = max(0, int(psutil.Process().memory_info().rss))
+        cached = max(
+            0,
+            int(getattr(memory, "cached", 0) or 0)
+            + int(getattr(memory, "buffers", 0) or 0),
+        )
+        available = max(0, int(memory.available))
+        usage = used / total * 100 if total else 0.0
+        return schemas.DashboardMemoryInfo(
+            total=total,
+            used=used,
+            cached=cached,
+            available=available,
+            usage=usage,
+        )
 
     @staticmethod
     def network_usage() -> List[int]:
@@ -673,10 +845,13 @@ class SystemUtils:
             return False
 
     @staticmethod
-    def is_network_filesystem(directory: Path) -> bool:
+    def is_network_filesystem(
+            directory: Path, include_local_fuse: bool = False
+    ) -> bool:
         """
         检测是否为网络文件系统
         :param directory: 目录路径
+        :param include_local_fuse: 是否将本地 FUSE 挂载视为挂载文件系统
         :return: 是否为网络文件系统
         """
         try:
@@ -694,7 +869,10 @@ class SystemUtils:
                         "fuseblk",
                         # TBD
                     ]
-                    if any(fs in output for fs in local_fs):
+                    if (
+                            not include_local_fuse
+                            and any(fs in output for fs in local_fs)
+                    ):
                         return False
                     network_fs = ['nfs', 'cifs', 'smbfs', 'fuse', 'sshfs', 'ftpfs']
                     return any(fs in output for fs in network_fs)
@@ -704,7 +882,11 @@ class SystemUtils:
                                         capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     output = result.stdout.lower()
-                    return 'nfs' in output or 'smbfs' in output
+                    return (
+                            'nfs' in output
+                            or 'smbfs' in output
+                            or (include_local_fuse and 'fuse' in output)
+                    )
             elif system == 'Windows':
                 # Windows 检查网络驱动器
                 return str(directory).startswith('\\\\')

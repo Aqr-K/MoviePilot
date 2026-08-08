@@ -15,7 +15,6 @@ from app.schemas.types import media_type_to_agent
 
 class SearchSubscribeInput(BaseModel):
     """搜索订阅缺失剧集工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     subscribe_id: int = Field(..., description="The ID of the subscription to search for missing episodes (can be obtained from query_subscribes tool)")
     manual: Optional[bool] = Field(False, description="Whether this is a manual search (default: False)")
     filter_groups: Optional[List[str]] = Field(None,
@@ -71,7 +70,11 @@ class SearchSubscribeTool(MoviePilotTool):
                 "total_episode": subscribe.total_episode,
                 "lack_episode": subscribe.lack_episode,
                 "tmdbid": subscribe.tmdbid,
-                "doubanid": subscribe.doubanid
+                "doubanid": subscribe.doubanid,
+                "bangumiid": subscribe.bangumiid,
+                "anilistid": subscribe.anilistid,
+                "media_source": subscribe.media_source,
+                "media_id": subscribe.media_id,
             }
 
             # 检查订阅状态

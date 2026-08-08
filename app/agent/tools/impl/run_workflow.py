@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.chain.workflow import WorkflowChain
-from app.db import AsyncSessionFactory
 from app.db.workflow_oper import WorkflowOper
 from app.log import logger
 
@@ -15,8 +14,6 @@ from app.log import logger
 class RunWorkflowInput(BaseModel):
     """执行工作流工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     workflow_id: int = Field(
         ..., description="Workflow ID (can be obtained from query_workflows tool)"
     )
@@ -65,26 +62,23 @@ class RunWorkflowTool(MoviePilotTool):
         )
 
         try:
-            # 获取数据库会话
-            async with AsyncSessionFactory() as db:
-                workflow_oper = WorkflowOper(db)
-                workflow = await workflow_oper.async_get(workflow_id)
+            workflow = await WorkflowOper().async_get(workflow_id)
 
-                if not workflow:
-                    return f"未找到工作流：{workflow_id}，请使用 query_workflows 工具查询可用的工作流"
+            if not workflow:
+                return f"未找到工作流：{workflow_id}，请使用 query_workflows 工具查询可用的工作流"
 
-                # 工作流执行链路包含大量同步步骤，统一放到 workflow 线程池。
-                state, errmsg = await self.run_blocking(
-                    "workflow",
-                    self._run_workflow_sync,
-                    workflow.id,
-                    from_begin,
-                )
+            # 工作流执行链路包含大量同步步骤，统一放到 workflow 线程池。
+            state, errmsg = await self.run_blocking(
+                "workflow",
+                self._run_workflow_sync,
+                workflow.id,
+                from_begin,
+            )
 
-                if not state:
-                    return f"执行工作流失败：{workflow.name} (ID: {workflow.id})\n错误原因：{errmsg}"
-                else:
-                    return f"工作流执行成功：{workflow.name} (ID: {workflow.id})"
+            if not state:
+                return f"执行工作流失败：{workflow.name} (ID: {workflow.id})\n错误原因：{errmsg}"
+            else:
+                return f"工作流执行成功：{workflow.name} (ID: {workflow.id})"
         except Exception as e:
             logger.error(f"执行工作流失败: {e}", exc_info=True)
             return f"执行工作流时发生错误: {str(e)}"

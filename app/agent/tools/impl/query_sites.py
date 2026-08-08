@@ -14,8 +14,6 @@ from app.log import logger
 class QuerySitesInput(BaseModel):
     """查询站点工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     status: Optional[str] = Field(
         "all",
         description="Filter sites by status: 'active' for enabled sites, 'inactive' for disabled sites, 'all' for all sites",

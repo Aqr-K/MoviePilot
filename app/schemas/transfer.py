@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, List, Any, Callable
+from typing import Any, Callable, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ class DownloaderTorrent(BaseModel):
     downloader: Optional[str] = None
     hash: Optional[str] = None
     title: Optional[str] = None
+    site_name: Optional[str] = None
     name: Optional[str] = None
     year: Optional[str] = None
     season_episode: Optional[str] = None
@@ -76,6 +77,7 @@ class TransferTask(BaseModel):
     fileitem: FileItem
     meta: Optional[Any] = None
     mediainfo: Optional[Any] = None
+    media_source: Optional[str] = None
     target_directory: Optional[TransferDirectoryConf] = None
     target_storage: Optional[str] = None
     target_path: Optional[Path] = None
@@ -208,6 +210,10 @@ class EpisodeFormatRecommendItem(BaseModel):
 
 
 class ManualTransferItem(BaseModel):
+    """
+    手动整理请求，兼容历史数据源ID字段并支持统一来源与原生ID
+    """
+
     # 文件项
     fileitem: FileItem = None
     # 文件项列表（前端多选时传入）
@@ -224,6 +230,14 @@ class ManualTransferItem(BaseModel):
     tmdbid: Optional[int] = None
     # 豆瓣ID
     doubanid: Optional[str] = None
+    # Bangumi ID
+    bangumiid: Optional[int] = None
+    # AniList ID
+    anilistid: Optional[int] = None
+    # 媒体数据源
+    media_source: Optional[str] = None
+    # 数据源原生ID
+    media_id: Optional[str] = None
     # 类型
     type_name: Optional[str] = None
     # 季号
@@ -252,6 +266,19 @@ class ManualTransferItem(BaseModel):
     episode_group: Optional[str] = None
     # 仅预览，不执行整理
     preview: Optional[bool] = False
+    # 重新整理，清理命中的成功历史及其旧目标
+    reorganize: Optional[bool] = False
+
+
+class ManualTransferHistoryInfo(BaseModel):
+    """
+    手动整理命中的成功历史摘要
+    """
+
+    # 是否应显示重新整理操作
+    reorganize: bool = False
+    # 命中的成功历史数量
+    history_count: int = 0
 
 
 class ManualTransferTargetPath(BaseModel):

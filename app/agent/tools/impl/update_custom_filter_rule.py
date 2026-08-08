@@ -23,8 +23,6 @@ from app.schemas.types import SystemConfigKey
 class UpdateCustomFilterRuleInput(BaseModel):
     """更新自定义过滤规则工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     current_rule_id: str = Field(
         ..., description="Existing custom rule ID to update."
     )

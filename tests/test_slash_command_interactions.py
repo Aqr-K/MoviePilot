@@ -1,23 +1,14 @@
-import sys
 import unittest
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import patch
 
-sys.modules.setdefault("qbittorrentapi", ModuleType("qbittorrentapi"))
-setattr(sys.modules["qbittorrentapi"], "TorrentFilesList", list)
-sys.modules.setdefault("transmission_rpc", ModuleType("transmission_rpc"))
-setattr(sys.modules["transmission_rpc"], "File", object)
-sys.modules.setdefault("psutil", ModuleType("psutil"))
-sys.modules.setdefault("aioshutil", ModuleType("aioshutil"))
-sys.modules.setdefault("pyquery", ModuleType("pyquery"))
-setattr(sys.modules["pyquery"], "PyQuery", object)
-sys.modules.setdefault("dateparser", ModuleType("dateparser"))
-setattr(sys.modules["dateparser"], "parse", lambda *args, **kwargs: None)
-sys.modules.setdefault("dateutil", ModuleType("dateutil"))
-dateutil_parser = ModuleType("dateutil.parser")
-setattr(dateutil_parser, "parse", lambda *args, **kwargs: None)
-sys.modules.setdefault("dateutil.parser", dateutil_parser)
-setattr(sys.modules["dateutil"], "parser", dateutil_parser)
+from app.testing.bootstrap import ensure_optional_stub
+
+ensure_optional_stub("qbittorrentapi", TorrentFilesList=list)
+ensure_optional_stub("transmission_rpc", File=object)
+ensure_optional_stub("psutil")
+ensure_optional_stub("aioshutil")
+ensure_optional_stub("pyquery", PyQuery=object)
 
 from app.chain.message import MessageChain
 from app.chain.site import SiteChain, site_interaction_manager
@@ -146,6 +137,56 @@ class TestSlashCommandInteractions(unittest.TestCase):
             )
 
         handle_callback.assert_called_once()
+
+    def test_sites_text_exit_skips_notification_history(self):
+        chain = SiteChain()
+        site_interaction_manager.create_or_replace(
+            user_id="10001",
+            command="/sites",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain, "post_message") as post_message:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="退出",
+            )
+
+        self.assertTrue(handled)
+        notification = post_message.call_args.args[0]
+        self.assertEqual(notification.title, "站点交互已结束")
+        self.assertFalse(notification.save_history)
+        self.assertIsNone(site_interaction_manager.get_by_user("10001"))
+
+    def test_subscribes_text_exit_skips_notification_history(self):
+        chain = SubscribeChain()
+        subscribe_interaction_manager.create_or_replace(
+            user_id="10001",
+            command="/subscribes",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain, "post_message") as post_message:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="退出",
+            )
+
+        self.assertTrue(handled)
+        notification = post_message.call_args.args[0]
+        self.assertEqual(notification.title, "订阅交互已结束")
+        self.assertFalse(notification.save_history)
+        self.assertIsNone(subscribe_interaction_manager.get_by_user("10001"))
 
     def test_sites_renders_markdown_table_when_channel_supports_markdown(self):
         chain = SiteChain()

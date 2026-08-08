@@ -2,12 +2,19 @@
 """
 Telegram 模块单元测试（pytest 原生）。
 """
+import json
+import warnings
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from app.core.context import MediaInfo, Context, TorrentInfo
 from app.core.metainfo import MetaInfo
+from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
+from app.schemas import Notification
+from app.schemas.types import MessageChannel
 from app.schemas.types import MediaType
 
 
@@ -25,9 +32,14 @@ def telegram():
         bot_instance = MagicMock()
         # get_me 用于初始化 bot 用户名，需返回带 username 的对象
         bot_instance.get_me.return_value = MagicMock(username="test_bot")
+        # polling/stop 使用普通函数，避免后台线程执行 MagicMock 时在退出阶段产生锁竞争。
+        bot_instance.infinity_polling = lambda *args, **kwargs: None
+        bot_instance.stop_polling = lambda *args, **kwargs: None
         mock_telebot_cls.return_value = bot_instance
         mock_image_cls.return_value.fetch_image.return_value = b"fake-image-bytes"
-        yield Telegram(TELEGRAM_TOKEN="fake_token", TELEGRAM_CHAT_ID="fake_chat_id")
+        telegram = Telegram(TELEGRAM_TOKEN="fake_token", TELEGRAM_CHAT_ID="fake_chat_id")
+        yield telegram
+        telegram.stop()
 
 
 def test_send_msg_success(telegram):
@@ -40,6 +52,38 @@ def test_send_msg_success(telegram):
 
     # 验证返回值：send_msg 失败时返回 {"success": False}（非空字典，仅 truthy 检查会漏判），故显式断言 success
     assert result and result.get("success")
+
+
+def test_telegram_parser_preserves_reply_to_message_id():
+    """Telegram ForceReply 回复应保留来源消息和被回复消息的 message_id。"""
+    module = TelegramModule()
+    client_config = SimpleNamespace(name="telegram-test", config={})
+    client = SimpleNamespace(bot_username="mp_bot")
+    payload = {
+        "update_id": 1,
+        "message": {
+            "message_id": 101,
+            "from": {"id": 10001, "username": "tester"},
+            "chat": {"id": 10001, "type": "private"},
+            "text": "东张西望",
+            "reply_to_message": {"message_id": 99, "text": "请输入节目关键词"},
+        },
+    }
+
+    with patch.object(module, "get_config", return_value=client_config), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        message = module.message_parser(
+            source="telegram-test",
+            body=json.dumps(payload),
+            form=None,
+            args={},
+        )
+
+    assert message.text == "东张西望"
+    assert message.message_id == 101
+    assert message.chat_id == "10001"
+    assert message.reply_to_message_id == 99
 
 def test_send_msg_with_longtext(telegram):
     """测试发送长消息"""
@@ -238,6 +282,368 @@ def test_send_msg_markdown_escaping(telegram):
 
     # 验证返回值：send_msg 失败时返回 {"success": False}（非空字典），故显式断言 success
     assert result and result.get("success")
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    assert send_kwargs["parse_mode"] == "MarkdownV2"
+    assert send_kwargs["text"].startswith("*测试标题*\n")
+
+
+def test_telegramify_current_fields_are_used_directly():
+    """telegramify 对象直接使用当前 MarkdownV2 字段"""
+    from telegramify_markdown.content import ContentTrace, File, Text
+
+    text_item = Text(
+        text="已转义_文本",
+        entities=[],
+        content_trace=ContentTrace(source_type="test"),
+    )
+    file_item = File(
+        file_name="test.txt",
+        file_data=b"test",
+        caption_text="已转义_说明",
+        caption_entities=[],
+        content_trace=ContentTrace(source_type="test"),
+    )
+
+    with warnings.catch_warnings(record=True) as warning_records:
+        warnings.simplefilter("always")
+        assert Telegram._telegramify_item_text(text_item) == "已转义\\_文本"
+        assert Telegram._telegramify_item_caption(file_item) == "已转义\\_说明"
+
+    assert not warning_records
+
+
+def test_send_msg_with_html_parse_mode_keeps_html(telegram):
+    """HTML模式发送时应保留调用方传入的HTML内容"""
+    result = telegram.send_msg(
+        title="测试 <标题>",
+        text="<blockquote>第一行</blockquote><b>加粗</b>",
+        link="https://example.com/?a=1&b=2",
+        parse_mode="HTML",
+    )
+
+    assert result and result.get("success")
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    assert send_kwargs["parse_mode"] == "HTML"
+    assert send_kwargs["text"] == (
+        '<b>测试 &lt;标题&gt;</b>\n'
+        '<blockquote>第一行</blockquote><b>加粗</b>\n'
+        '<a href="https://example.com/?a=1&amp;b=2">查看详情</a>'
+    )
+
+
+def test_telegram_module_passes_parse_mode_to_client():
+    """模块发送通知时应透传消息指定的parse_mode"""
+    module = TelegramModule()
+    client = Mock()
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        module.post_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="HTML",
+                text="<b>正文</b>",
+                parse_mode="HTML",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    assert client.send_msg.call_args.kwargs["parse_mode"] == "HTML"
+
+
+def test_telegram_module_plain_post_message_keeps_chat_without_editing_source_message():
+    """普通通知应保留原会话目标，同时避免把来源消息 ID 当成编辑目标。"""
+    module = TelegramModule()
+    client = Mock()
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        module.post_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="Agent 回复",
+                text="处理完成",
+                original_message_id=123,
+                original_chat_id="chat-a",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    kwargs = client.send_msg.call_args.kwargs
+    assert kwargs["original_message_id"] is None
+    assert kwargs["original_chat_id"] == "chat-a"
+
+
+def test_telegram_module_passes_force_reply_to_client():
+    """模块发送通知时应透传交互消息参数"""
+    module = TelegramModule()
+    client = Mock()
+    buttons = [[{"text": "取消", "callback_data": "cancel"}]]
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        module.post_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="请输入目录",
+                text="回复目录路径",
+                force_reply=True,
+                buttons=buttons,
+                original_message_id=123,
+                original_chat_id="chat-a",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    kwargs = client.send_msg.call_args.kwargs
+    assert kwargs["force_reply"] is True
+    assert kwargs["buttons"] == buttons
+    assert kwargs["original_message_id"] == 123
+    assert kwargs["original_chat_id"] == "chat-a"
+
+
+def test_telegram_module_force_reply_sends_new_prompt_message():
+    """无按钮 ForceReply 应保留原消息 ID，让 client 发新提示并 reply_to 原消息。"""
+    module = TelegramModule()
+    client = Mock()
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        module.post_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="请输入目录",
+                text="回复目录路径",
+                force_reply=True,
+                original_message_id=123,
+                original_chat_id="chat-a",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    kwargs = client.send_msg.call_args.kwargs
+    assert kwargs["force_reply"] is True
+    assert kwargs["buttons"] is None
+    assert kwargs["original_message_id"] == 123
+    assert kwargs["original_chat_id"] == "chat-a"
+
+
+def test_telegram_module_direct_force_reply_sends_new_prompt_message():
+    """direct message 的无按钮 ForceReply 同样保留原消息 ID，交给 client 发送新提示。"""
+    module = TelegramModule()
+    client = Mock()
+    client.send_msg.return_value = {
+        "success": True,
+        "message_id": 456,
+        "chat_id": "chat-a",
+    }
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        response = module.send_direct_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="请输入目录",
+                text="回复目录路径",
+                force_reply=True,
+                original_message_id=123,
+                original_chat_id="chat-a",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    kwargs = client.send_msg.call_args.kwargs
+    assert kwargs["force_reply"] is True
+    assert "buttons" not in kwargs
+    assert kwargs["original_message_id"] == 123
+    assert kwargs["original_chat_id"] == "chat-a"
+    assert response.message_id == 456
+
+
+def test_telegram_module_direct_buttons_keep_new_message_behavior():
+    """direct message 不透传原消息上下文，避免从发新消息变成编辑旧消息。"""
+    module = TelegramModule()
+    client = Mock()
+    buttons = [[{"text": "确认", "callback_data": "confirm"}]]
+    client.send_msg.return_value = {
+        "success": True,
+        "message_id": 456,
+        "chat_id": "chat-a",
+    }
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        response = module.send_direct_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                title="请选择",
+                text="请选择一个操作",
+                buttons=buttons,
+                original_message_id=123,
+                original_chat_id="chat-a",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    kwargs = client.send_msg.call_args.kwargs
+    assert "buttons" not in kwargs
+    assert kwargs["original_message_id"] is None
+    assert kwargs["original_chat_id"] is None
+    assert response.message_id == 456
+
+
+def test_telegram_module_plain_direct_message_keeps_userid_target():
+    """普通 direct message 不使用 original_chat_id，避免把私聊消息发回原群聊。"""
+    module = TelegramModule()
+    client = Mock()
+    client.send_msg.return_value = {
+        "success": True,
+        "message_id": 456,
+        "chat_id": "10001",
+    }
+
+    with patch.object(
+        module,
+        "get_configs",
+        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+    ), patch.object(
+        module, "check_message", return_value=True
+    ), patch.object(
+        module, "get_instance", return_value=client
+    ):
+        response = module.send_direct_message(
+            Notification(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                title="普通通知",
+                text="只发给用户",
+                original_chat_id="group-1",
+            )
+        )
+
+    client.send_msg.assert_called_once()
+    kwargs = client.send_msg.call_args.kwargs
+    assert kwargs["userid"] == "10001"
+    assert kwargs["original_message_id"] is None
+    assert kwargs["original_chat_id"] is None
+    assert response.message_id == 456
+
+
+def test_send_msg_with_force_reply_uses_force_reply_when_no_buttons(telegram):
+    """无按钮时force_reply应生成Telegram ForceReply标记"""
+    result = telegram.send_msg(
+        title="请输入目录",
+        text="回复目录路径",
+        force_reply=True,
+    )
+
+    assert result and result.get("success")
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    reply_markup = send_kwargs["reply_markup"]
+    assert reply_markup.__class__.__name__ == "ForceReply"
+    if hasattr(reply_markup, "to_dict"):
+        assert reply_markup.to_dict()["force_reply"] is True
+        assert reply_markup.to_dict().get("selective") is True
+    else:
+        assert getattr(reply_markup, "selective", None) is True
+
+
+def test_send_msg_with_force_reply_keeps_inline_keyboard_when_buttons_exist(telegram):
+    """按钮存在时force_reply不能覆盖InlineKeyboardMarkup"""
+    result = telegram.send_msg(
+        title="请选择目录",
+        text="点击按钮选择",
+        buttons=[[{"text": "默认", "callback_data": "default"}]],
+        force_reply=True,
+    )
+
+    assert result and result.get("success")
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    reply_markup = send_kwargs["reply_markup"]
+    assert reply_markup.__class__.__name__ == "InlineKeyboardMarkup"
+
+
+def test_send_msg_with_force_reply_and_original_message_sends_new_prompt(telegram):
+    """编辑消息场景不能带ForceReply，应改为发送新的回复提示。"""
+    result = telegram.send_msg(
+        title="请输入关键词",
+        text="回复节目关键词",
+        force_reply=True,
+        original_message_id=123,
+        original_chat_id="group-1",
+    )
+
+    assert result and result.get("success")
+    telegram.bot.edit_message_text.assert_not_called()
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    assert send_kwargs["chat_id"] == "group-1"
+    assert send_kwargs["reply_to_message_id"] == 123
+    assert send_kwargs["reply_markup"].__class__.__name__ == "ForceReply"
+
+
+def test_send_msg_new_direct_context_message_prefers_original_chat(telegram):
+    """不编辑旧消息时，original_chat_id 仍用于把新消息发回原交互会话。"""
+    result = telegram.send_msg(
+        title="请输入关键词",
+        text="回复节目关键词",
+        userid="10001",
+        original_chat_id="group-1",
+    )
+
+    assert result and result.get("success")
+    telegram.bot.edit_message_text.assert_not_called()
+    send_kwargs = telegram.bot.send_message.call_args.kwargs
+    assert send_kwargs["chat_id"] == "group-1"
+    assert "reply_to_message_id" not in send_kwargs
 
 
 def test_edit_msg_falls_back_to_caption_when_original_message_has_no_text(telegram):
@@ -269,8 +675,24 @@ def test_edit_msg_falls_back_to_caption_when_original_message_has_no_text(telegr
     assert caption_kwargs["reply_markup"] is not None
 
 
-def test_edit_msg_keeps_other_edit_errors_failed(telegram):
-    """非图片 caption 场景的编辑错误不应被错误标记为成功。"""
+def test_edit_msg_with_html_parse_mode_keeps_html(telegram):
+    """HTML模式编辑消息时应保留HTML内容"""
+    result = telegram.edit_msg(
+        chat_id="1051253579",
+        message_id="110502",
+        title="标题",
+        text="<blockquote>请选择</blockquote>",
+        parse_mode="HTML",
+    )
+
+    assert result is True
+    edit_kwargs = telegram.bot.edit_message_text.call_args.kwargs
+    assert edit_kwargs["parse_mode"] == "HTML"
+    assert edit_kwargs["text"] == "<b>标题</b>\n<blockquote>请选择</blockquote>"
+
+
+def test_edit_msg_treats_message_not_modified_as_success(telegram):
+    """重复编辑相同内容时应视为成功，避免记录错误日志。"""
     telegram.bot.edit_message_text.side_effect = Exception(
         "Bad Request: message is not modified"
     )
@@ -282,6 +704,36 @@ def test_edit_msg_keeps_other_edit_errors_failed(telegram):
         text="测试内容",
     )
 
-    assert result is False
+    assert result is True
     telegram.bot.edit_message_text.assert_called_once()
     telegram.bot.edit_message_caption.assert_not_called()
+
+
+def test_send_msg_edit_with_image_falls_back_to_text_when_image_url_unavailable(telegram):
+    """编辑图片消息失败时应去掉图片并降级为文本编辑。"""
+    telegram.bot.edit_message_media.side_effect = Exception(
+        "Bad Request: failed to get HTTP URL content"
+    )
+
+    result = telegram.send_msg(
+        title="测试标题",
+        text="测试内容",
+        image="https://example.com/poster.jpg",
+        buttons=[[{"text": "确认", "callback_data": "confirm"}]],
+        original_chat_id="1051253579",
+        original_message_id=110502,
+    )
+
+    assert result == {
+        "success": True,
+        "message_id": 110502,
+        "chat_id": "1051253579",
+    }
+    telegram.bot.edit_message_media.assert_called_once()
+    telegram.bot.edit_message_text.assert_called_once()
+    edit_kwargs = telegram.bot.edit_message_text.call_args.kwargs
+    assert edit_kwargs["chat_id"] == "1051253579"
+    assert edit_kwargs["message_id"] == 110502
+    assert "测试标题" in edit_kwargs["text"]
+    assert "测试内容" in edit_kwargs["text"]
+    assert edit_kwargs["reply_markup"] is not None

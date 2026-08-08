@@ -266,6 +266,7 @@ class SkillsChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="技能交互已结束",
+                    save_history=False,
                 )
             )
             return True
@@ -721,7 +722,7 @@ class SkillsChain(ChainBase):
         buttons = None
         if self._supports_interactive_buttons(request.channel):
             buttons = []
-            for index, skill in enumerate(page_items, start=1):
+            for index, skill in enumerate(items, start=1):
                 if not skill.removable:
                     continue
                 buttons.append(

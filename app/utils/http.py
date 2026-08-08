@@ -3,10 +3,11 @@ import collections
 import re
 import sys
 import threading
+import time
 import weakref
 from contextlib import AsyncExitStack, contextmanager, asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import chardet
 import httpx
@@ -71,8 +72,63 @@ _DEFAULT_MAX_CONNECTIONS = 40
 _DEFAULT_KEEPALIVE_EXPIRY = 30
 # 同步 requests.Session 复用连接时，遇到对端或代理关闭 keep-alive 后允许重试的方法
 _REQUESTS_RETRY_IDEMPOTENT_METHODS = ("GET", "HEAD", "OPTIONS")
+
+# 代理走 CONNECT 隧道时，httpx 默认开启的 HTTP/2 多路复用会把并发请求叠加到极少数隧道上；
+# 隧道被代理节点切换或空闲回收打断后，复用其上的所有请求会同时失败。按 (proxy, host) 熔断：
+# 命中一次连接层失败就记录下次允许再尝试 h2 的时间戳（time.monotonic 基准），冷却期内该
+# (proxy, host) 的请求直接退化为 http1.1；冷却期结束后自动恢复尝试 h2。
+_H2_PROXY_BREAKER_COOLDOWN = 1800  # 30 分钟
+_h2_proxy_breaker_lock = threading.Lock()
+_h2_proxy_retry_at: Dict[Tuple[str, str], float] = {}
+# 只有这些错误是"h2 隧道被打断"的特征（对应实测日志里的 SEND_HEADERS in CLOSED、
+# EndOfStream 等）；超时、连接失败、代理不可达等错误换 h1 一样会发生，
+# 不应触发熔断，也不值得付出一次注定同样失败的 h1 重试
+_H2_TUNNEL_BREAK_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.LocalProtocolError,
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.CloseError,
+)
+
+
+def _h2_proxy_breaker_key(proxy: str, url: str) -> Tuple[str, str]:
+    try:
+        host = httpx.URL(url).host or ""
+    except Exception:
+        host = url
+    return proxy, host
+
+
+def _h2_proxy_allowed(proxy: Optional[str], url: str) -> bool:
+    """判断给定代理 + 目标 host 当前是否允许尝试 h2（未处于熔断冷却期）"""
+    if not proxy:
+        return True
+    with _h2_proxy_breaker_lock:
+        retry_at = _h2_proxy_retry_at.get(_h2_proxy_breaker_key(proxy, url), 0.0)
+    return time.monotonic() >= retry_at
+
+
+def _trip_h2_proxy_breaker(proxy: str, url: str) -> None:
+    """记录一次 h2 连接层失败，熔断该 (proxy, host) 冷却期内的 h2 尝试"""
+    now = time.monotonic()
+    with _h2_proxy_breaker_lock:
+        # 顺手清掉已过冷却期的条目，防止长期运行下字典无限增长
+        for key in [k for k, retry_at in _h2_proxy_retry_at.items() if now >= retry_at]:
+            del _h2_proxy_retry_at[key]
+        _h2_proxy_retry_at[_h2_proxy_breaker_key(proxy, url)] = now + _H2_PROXY_BREAKER_COOLDOWN
+
+
 # 持有 LRU 淘汰后正在异步关闭的 transport task，避免 fire-and-forget 被 GC 警告
 _pending_eviction_tasks: set[asyncio.Task] = set()
+
+
+def _discard_pending_eviction_task(task: asyncio.Task) -> None:
+    """从跨线程共享集合移除已完成的 transport 关闭任务"""
+    with _shared_async_transports_lock:
+        _pending_eviction_tasks.discard(task)
+    if not task.cancelled() and (error := task.exception()):
+        logger.debug(f"LRU 淘汰共享 transport 时关闭失败: {error!r}")
 
 
 def _get_shared_async_transport(
@@ -139,8 +195,9 @@ def _get_shared_async_transport(
         try:
             task = loop.create_task(evicted_transport.aclose())
             # 强引用避免 task 仅被 loop 弱持有而触发 "Task was destroyed but pending"
-            _pending_eviction_tasks.add(task)
-            task.add_done_callback(_pending_eviction_tasks.discard)
+            with _shared_async_transports_lock:
+                _pending_eviction_tasks.add(task)
+            task.add_done_callback(_discard_pending_eviction_task)
         except Exception as e:  # pragma: no cover - 防御性
             logger.debug(f"LRU 淘汰共享 transport 时调度关闭失败: {e!r}")
 
@@ -159,17 +216,27 @@ async def aclose_shared_async_transports() -> None:
     # 弹出而非 get+clear，避免外层 dict 残留空 OrderedDict 占位
     with _shared_async_transports_lock:
         per_loop = _shared_async_transports.pop(loop, None)
-    if not per_loop:
+        pending_evictions = [
+            task
+            for task in _pending_eviction_tasks
+            if task.get_loop() is loop
+        ]
+    transports = list(per_loop.values()) if per_loop else []
+    if per_loop:
+        per_loop.clear()
+    if not transports and not pending_evictions:
         return
-    transports = list(per_loop.values())
-    per_loop.clear()
     # 并行关闭：每个 transport 的 TLS close_notify 各占一个 RTT，
     # 顺序等待会线性放大 shutdown 耗时；return_exceptions 让单点失败
     # 不影响其他 transport 的释放
     results = await asyncio.gather(
-        *(t.aclose() for t in transports), return_exceptions=True
+        *pending_evictions,
+        *(t.aclose() for t in transports),
+        return_exceptions=True,
     )
-    for result in results:
+    with _shared_async_transports_lock:
+        _pending_eviction_tasks.difference_update(pending_evictions)
+    for result in results[len(pending_evictions):]:
         if isinstance(result, BaseException):
             logger.debug(f"关闭共享 AsyncHTTPTransport 失败: {result!r}")
 
@@ -770,6 +837,112 @@ class RequestUtils:
             return fallback_encoding or "utf-8"
 
     @staticmethod
+    def detect_xml_declared_encoding(raw_data: bytes) -> Optional[str]:
+        """
+        从 XML 声明中读取字符集，适用于 RSS/Atom 等 XML 响应的 bytes 级解码。
+        """
+        if not raw_data:
+            return None
+        xml_head = raw_data[:512].decode("ascii", errors="ignore")
+        match = re.search(
+            r"^\s*(?:\ufeff)?<\?xml[^>]*encoding\s*=\s*[\"']([^\"']+)[\"']",
+            xml_head,
+            re.IGNORECASE,
+        )
+        return match.group(1).strip() if match else None
+
+    @staticmethod
+    def is_low_confidence_http_encoding(encoding: Optional[str]) -> bool:
+        """
+        判断 HTTP 客户端默认编码是否低可信，避免 latin1 类默认值吞掉 UTF-8 内容。
+        """
+        if not encoding:
+            return False
+        normalized = encoding.strip().lower().replace("_", "-")
+        return normalized in {"iso-8859-1", "latin-1", "latin1"}
+
+    @staticmethod
+    def get_decoded_xml_content(
+        response: Response,
+        performance_mode: bool = False,
+        confidence_threshold: float = 0.8,
+    ) -> str:
+        """
+        获取 XML 响应的解码文本内容，优先尊重 XML 声明并避免低可信 HTTP 默认编码。
+
+        :param response: HTTP 响应对象
+        :param performance_mode: 是否优先使用轻量规则，默认为 False (兼容模式)
+        :param confidence_threshold: chardet 检测置信度阈值，默认为 0.8
+        :return: 解码后的 XML 文本
+        """
+        if not response:
+            return ""
+        raw_data = getattr(response, "content", None)
+        if not raw_data:
+            return getattr(response, "text", "") or ""
+
+        def _try_decode(encodings):
+            seen_encodings = set()
+            for encoding in encodings:
+                if not encoding:
+                    continue
+                normalized = str(encoding).strip()
+                if not normalized or normalized.lower() in seen_encodings:
+                    continue
+                seen_encodings.add(normalized.lower())
+                try:
+                    return raw_data.decode(normalized)
+                except (LookupError, UnicodeDecodeError):
+                    continue
+            return None
+
+        xml_encoding = RequestUtils.detect_xml_declared_encoding(raw_data)
+        if xml_encoding:
+            decoded = _try_decode([xml_encoding])
+            if decoded is not None:
+                return decoded
+
+        response_encoding = getattr(response, "encoding", None)
+        trusted_response_encoding = (
+            response_encoding
+            if not RequestUtils.is_low_confidence_http_encoding(response_encoding)
+            else None
+        )
+        apparent_encoding = getattr(response, "apparent_encoding", None)
+        trusted_apparent_encoding = (
+            apparent_encoding
+            if not RequestUtils.is_low_confidence_http_encoding(apparent_encoding)
+            else None
+        )
+
+        fallback_encoding = None
+        try:
+            if performance_mode:
+                decoded = _try_decode(["utf-8", trusted_response_encoding, trusted_apparent_encoding])
+                if decoded is not None:
+                    return decoded
+
+            detection = chardet.detect(raw_data)
+            if detection.get("confidence", 0) > confidence_threshold:
+                decoded = _try_decode([detection.get("encoding")])
+                if decoded is not None:
+                    return decoded
+            fallback_encoding = detection.get("encoding")
+
+            if not performance_mode:
+                decoded = _try_decode(["utf-8", trusted_response_encoding, trusted_apparent_encoding])
+                if decoded is not None:
+                    return decoded
+
+            decoded = _try_decode([fallback_encoding, "utf-8", apparent_encoding, response_encoding])
+            if decoded is not None:
+                return decoded
+        except Exception as e:
+            logger.debug(f"Error when getting decoded XML content: {str(e)}")
+
+        return raw_data.decode("utf-8", errors="replace")
+
+    @staticmethod
     def get_decoded_html_content(
         response: Response,
         performance_mode: bool = False,
@@ -963,13 +1136,48 @@ class AsyncRequestUtils:
                 self._client, method, url, raise_exception, **kwargs
             )
 
+        # 代理走 CONNECT 隧道时 h2 多路复用容易被隧道打断放大成批量失败（见
+        # _h2_proxy_allowed 处注释）；仅对幂等方法做"h2 失败就地降级 h1 重试"，
+        # 避免非幂等请求在服务端可能已收到数据的情况下重复产生副作用
+        http2 = self._http2 and _h2_proxy_allowed(self._proxies, url)
+        if not (http2 and self._proxies and method.upper() in _REQUESTS_RETRY_IDEMPOTENT_METHODS):
+            return await self._dispatch_request(
+                http2, cookies_dict, method, url, raise_exception, **kwargs
+            )
+
+        try:
+            return await self._dispatch_request(
+                True, cookies_dict, method, url, True, **kwargs
+            )
+        except _H2_TUNNEL_BREAK_ERRORS as e:
+            logger.debug(f"h2 代理连接层失败，熔断 {url} 所在 host 并降级 h1 重试: {e!r}")
+            _trip_h2_proxy_breaker(self._proxies, url)
+            return await self._dispatch_request(
+                False, cookies_dict, method, url, raise_exception, **kwargs
+            )
+        except httpx.RequestError as e:
+            # 与 h2 隧道无关的失败（超时、连接失败等）：不熔断也不重试，
+            # 恢复调用方原本的 raise_exception 语义
+            if raise_exception:
+                raise
+            error_msg = str(e) or f"未知网络错误 (URL: {url}, Method: {method.upper()})"
+            logger.debug(f"异步请求失败: {error_msg}")
+            return None
+
+    async def _dispatch_request(
+        self, http2: bool, cookies_dict: Optional[dict], method: str, url: str,
+        raise_exception: bool, **kwargs
+    ) -> Optional[httpx.Response]:
+        """
+        按给定 http2 开关构建/复用底层连接并发起请求，供 request() 的 h2/h1 熔断切换复用
+        """
         # 共享底层 transport（连接池+TLS 复用），每次请求创建轻量 AsyncClient。
         # AsyncClient 持有的 cookie jar 仅存活于本次请求 lifecycle，
         # 既复用握手又彻底避免 jar 跨调用累积。
         transport = _get_shared_async_transport(
             proxy=self._proxies,
             verify=self._verify,
-            http2=self._http2,
+            http2=http2,
             max_keepalive_connections=self._max_keepalive_connections,
             max_connections=self._max_connections,
             keepalive_expiry=self._keepalive_expiry,
@@ -989,7 +1197,7 @@ class AsyncRequestUtils:
 
         # 兜底：没有运行中的事件循环时，临时客户端走完即关
         async with httpx.AsyncClient(
-            http2=self._http2,
+            http2=http2,
             proxy=self._proxies,
             timeout=self._timeout,
             verify=self._verify,

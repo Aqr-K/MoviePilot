@@ -14,7 +14,7 @@ Authentication:
     It can also fall back to ``?token=`` for endpoints that require it.
 
 Configuration priority:
-    CLI flags  >  Environment variables (MP_HOST / MP_API_KEY)  >  Config file
+    CLI flags > Environment variables > local MoviePilot settings > Config file
 
 Config file location: ~/.config/moviepilot_api/config
 """
@@ -23,17 +23,20 @@ from __future__ import annotations
 
 import json
 import os
-import sys
+import ssl
 import stat
-import urllib.request
+import sys
 import urllib.error
 import urllib.parse
-import ssl
+import urllib.request
 from pathlib import Path
 
 SCRIPT_NAME = os.path.basename(sys.argv[0]) if sys.argv else "mp-api.py"
+SCRIPT_PATH = Path(__file__).resolve()
+PROJECT_ROOT = SCRIPT_PATH.parents[3]
 CONFIG_DIR = Path.home() / ".config" / "moviepilot_api"
 CONFIG_FILE = CONFIG_DIR / "config"
+LOCAL_HOSTS = {"0.0.0.0", "::", "::1", "", "localhost"}
 
 # ---------------------------------------------------------------------------
 # Configuration helpers
@@ -63,19 +66,53 @@ def read_config() -> tuple[str, str]:
 
 
 def save_config(host: str, apikey: str) -> None:
+    """Persist host and API key to the legacy config file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(f"MP_HOST={host}\nMP_API_KEY={apikey}\n", encoding="utf-8")
     CONFIG_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _ensure_project_import() -> None:
+    """Add the MoviePilot project root to sys.path for local auto-configuration."""
+    project_path = str(PROJECT_ROOT)
+    if project_path not in sys.path:
+        sys.path.insert(0, project_path)
+
+
+def _client_host(host: str) -> str:
+    """Return a loopback host usable by local clients."""
+    host = (host or "").strip()
+    if host in LOCAL_HOSTS:
+        return "127.0.0.1"
+    return host
+
+
+def read_local_config() -> tuple[str, str]:
+    """Return host and key from local MoviePilot settings when available."""
+    try:
+        _ensure_project_import()
+        from app.core.config import settings  # pylint: disable=import-outside-toplevel
+    except Exception:
+        return "", ""
+
+    host = str(settings.HOST or "")
+    port = settings.PORT
+    apikey = str(settings.API_TOKEN or "")
+    if host and port:
+        return f"http://{_client_host(host)}:{port}", apikey
+
+    return "", apikey
 
 
 def resolve_config(
     cli_host: str = "",
     cli_key: str = "",
 ) -> tuple[str, str]:
-    """Resolve effective host & key using priority: CLI > env > file."""
+    """Resolve effective host and key without requiring prompt-visible secrets."""
+    local_host, local_key = read_local_config()
     cfg_host, cfg_key = read_config()
-    host = cli_host or os.environ.get("MP_HOST", "") or cfg_host
-    apikey = cli_key or os.environ.get("MP_API_KEY", "") or cfg_key
+    host = cli_host or os.environ.get("MP_HOST", "") or local_host or cfg_host
+    apikey = cli_key or os.environ.get("MP_API_KEY", "") or local_key or cfg_key
     return host, apikey
 
 
@@ -199,11 +236,11 @@ def print_json(obj: object) -> None:
 
 def print_usage() -> None:
     print(f"""Usage: python {SCRIPT_NAME} [options] <METHOD> <PATH> [key=value ...] [--json '<body>']
-       python {SCRIPT_NAME} configure --host <HOST> --apikey <KEY>
+       python {SCRIPT_NAME} configure --host <HOST> --apikey <KEY>  # legacy fallback
 
 Options:
-    --host HOST       MoviePilot backend URL
-    --apikey KEY      API key (API_TOKEN)
+    --host HOST       MoviePilot backend URL (auto-read locally when omitted)
+    --apikey KEY      API key (auto-read locally when omitted)
     --token-param     Send key as ?token= query param instead of X-API-KEY header
     --timeout SECS    Request timeout (default: 120)
     --help            Show this help message
@@ -211,8 +248,6 @@ Options:
 Methods: GET  POST  PUT  DELETE
 
 Examples:
-    python {SCRIPT_NAME} configure --host http://localhost:3000 --apikey mytoken123
-
     python {SCRIPT_NAME} GET /api/v1/media/search title="Avatar" type="movie"
     python {SCRIPT_NAME} GET /api/v1/subscribe/
     python {SCRIPT_NAME} POST /api/v1/download/add --json '{{"torrent_url":"abc:1"}}'

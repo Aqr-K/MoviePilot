@@ -14,8 +14,6 @@ from app.schemas import FileItem, MediaType
 class TransferFileInput(BaseModel):
     """整理文件或目录工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     file_path: str = Field(
         ...,
         description="Path to the file or directory to transfer (e.g., '/path/to/file.mkv' or '/path/to/directory')",
@@ -40,6 +38,10 @@ class TransferFileInput(BaseModel):
     doubanid: Optional[str] = Field(
         None, description="Douban ID for media identification (optional)"
     )
+    bangumiid: Optional[int] = Field(None, description="Bangumi media ID")
+    anilistid: Optional[int] = Field(None, description="AniList media ID")
+    media_source: Optional[str] = Field(None, description="Media metadata source")
+    media_id: Optional[str] = Field(None, description="Native ID for media_source")
     season: Optional[int] = Field(
         None, description="Season number for TV shows (optional)"
     )
@@ -111,6 +113,10 @@ class TransferFileTool(MoviePilotTool):
         media_type: Optional[str] = None,
         tmdbid: Optional[int] = None,
         doubanid: Optional[str] = None,
+        bangumiid: Optional[int] = None,
+        anilistid: Optional[int] = None,
+        media_source: Optional[str] = None,
+        media_id: Optional[str] = None,
         season: Optional[int] = None,
         transfer_type: Optional[str] = None,
         background: Optional[bool] = False,
@@ -150,6 +156,10 @@ class TransferFileTool(MoviePilotTool):
             target_path=target_path_obj,
             tmdbid=tmdbid,
             doubanid=doubanid,
+            bangumiid=bangumiid,
+            anilistid=anilistid,
+            media_source=media_source,
+            media_id=media_id,
             mtype=media_type_enum,
             season=season,
             transfer_type=transfer_type,
@@ -180,6 +190,10 @@ class TransferFileTool(MoviePilotTool):
         media_type: Optional[str] = None,
         tmdbid: Optional[int] = None,
         doubanid: Optional[str] = None,
+        bangumiid: Optional[int] = None,
+        anilistid: Optional[int] = None,
+        media_source: Optional[str] = None,
+        media_id: Optional[str] = None,
         season: Optional[int] = None,
         transfer_type: Optional[str] = None,
         background: Optional[bool] = False,
@@ -202,6 +216,10 @@ class TransferFileTool(MoviePilotTool):
                 media_type,
                 tmdbid,
                 doubanid,
+                bangumiid,
+                anilistid,
+                media_source,
+                media_id,
                 season,
                 transfer_type,
                 background,

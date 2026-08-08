@@ -8,16 +8,13 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.chain.download import DownloadChain
+from app.helper.directory import validate_download_save_path
 from app.log import logger
 
 
 class UpdateDownloadTasksInput(BaseModel):
     """更新下载任务工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(
-        None,
-        description="Clear explanation of why this tool is being used in the current context",
-    )
     hash: str = Field(
         ..., description="Task hash (can be obtained from query_download_tasks tool)"
     )
@@ -153,6 +150,18 @@ class UpdateDownloadTasksTool(MoviePilotTool):
                     cls._build_result("resolve_downloader", False, "未找到下载任务或下载器不可用")
                 ],
             }
+
+        if save_path is not None:
+            try:
+                save_path = validate_download_save_path(save_path)
+            except ValueError:
+                return {
+                    "hash": hash_value,
+                    "downloader": resolved_downloader,
+                    "results": [
+                        cls._build_result("save_path", False, "保存目录不在允许的下载目录范围内")
+                    ],
+                }
 
         results = []
         if tags:

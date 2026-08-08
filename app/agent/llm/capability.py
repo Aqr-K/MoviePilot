@@ -691,7 +691,9 @@ class AgentCapabilityManager:
     @staticmethod
     def supports_image_input() -> bool:
         """当前 Agent 是否启用图片输入能力。"""
-        return bool(settings.LLM_SUPPORT_IMAGE_INPUT)
+        from app.agent.llm.helper import LLMHelper
+
+        return LLMHelper.supports_image_input()
 
     @staticmethod
     def supports_audio_input() -> bool:

@@ -10,6 +10,7 @@ from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import (
     DEFAULT_PLUGIN_CANDIDATE_LIMIT,
     MAX_PLUGIN_CANDIDATE_LIMIT,
+    enrich_installed_plugin_sources,
     list_installed_plugins,
     search_plugin_candidates,
     summarize_candidates,
@@ -21,8 +22,6 @@ from app.log import logger
 class QueryInstalledPluginsInput(BaseModel):
     """查询已安装插件工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     query: Optional[str] = Field(
         None,
         description="Optional keyword to filter installed plugins by plugin ID, name, description, or author.",
@@ -31,9 +30,15 @@ class QueryInstalledPluginsInput(BaseModel):
         DEFAULT_PLUGIN_CANDIDATE_LIMIT,
         description="Maximum number of plugins to return. Defaults to 50, capped at 200.",
     )
+    force_refresh_market: bool = Field(
+        False,
+        description="Whether to refresh plugin market caches before completing missing repo_url values.",
+    )
 
 
 class QueryInstalledPluginsTool(MoviePilotTool):
+    """查询已安装插件并返回 Agent 可消费的摘要信息。"""
+
     name: str = "query_installed_plugins"
     tags: list[str] = [
         ToolTag.Read,
@@ -67,9 +72,15 @@ class QueryInstalledPluginsTool(MoviePilotTool):
         self,
         query: Optional[str] = None,
         max_results: Optional[int] = DEFAULT_PLUGIN_CANDIDATE_LIMIT,
+        force_refresh_market: bool = False,
         **kwargs,
     ) -> str:
-        logger.info(f"执行工具: {self.name}, 参数: query={query}")
+        """
+        查询已安装插件列表，并在可能时补齐插件来源仓库地址。
+        """
+        logger.info(
+            f"执行工具: {self.name}, 参数: query={query}, force_refresh_market={force_refresh_market}"
+        )
         try:
             installed_plugins = list_installed_plugins()
             if not installed_plugins:
@@ -77,6 +88,10 @@ class QueryInstalledPluginsTool(MoviePilotTool):
                     {"success": False, "message": "当前没有已安装的插件"},
                     ensure_ascii=False,
                 )
+            installed_plugins = await enrich_installed_plugin_sources(
+                installed_plugins,
+                force_refresh=force_refresh_market,
+            )
 
             limit = self._clamp_results(max_results)
             if query:

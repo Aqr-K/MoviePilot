@@ -15,6 +15,7 @@ from app.db.workflow_oper import WorkflowOper
 from app.log import logger
 from app.schemas.types import MediaType, SystemConfigKey, media_type_to_agent
 from app.utils.http import AsyncRequestUtils, RequestUtils
+from app.utils.media import resolve_media_identity
 from app.utils.system import SystemUtils
 from version import APP_VERSION, FRONTEND_VERSION
 
@@ -28,6 +29,7 @@ class MoviePilotServerHelper:
     _USAGE_REPORT_PATH = "/usage/report"
     _USAGE_STATISTIC_PATH = "/usage/statistic"
     _PLUGIN_INSTALL_PATH = "/plugin/install"
+    _PLUGIN_RATING_PATH = "/plugin/rating"
     _PLUGIN_STATISTIC_PATH = "/plugin/statistic"
     _SUBSCRIBE_ADD_PATH = "/subscribe/add"
     _SUBSCRIBE_DONE_PATH = "/subscribe/done"
@@ -238,7 +240,7 @@ class MoviePilotServerHelper:
             version_file = Path(settings.FRONTEND_PATH) / "version.txt"
         if version_file.exists():
             try:
-                with open(version_file, "r") as file:
+                with open(version_file, "r", encoding="utf-8", errors="replace") as file:
                     version = str(file.read()).strip()
                 return version or FRONTEND_VERSION
             except Exception as err:
@@ -398,6 +400,39 @@ class MoviePilotServerHelper:
         return await cls._async_get(cls._server_url(cls._PLUGIN_STATISTIC_PATH), timeout=10)
 
     @classmethod
+    async def async_plugin_ratings(cls, plugin_ids: Optional[List[str]] = None):
+        """
+        异步批量查询中心端插件评分。
+        """
+        params = {"plugin_ids": ",".join(plugin_ids)} if plugin_ids is not None else None
+        return await cls._async_get(
+            cls._server_url(cls._PLUGIN_RATING_PATH),
+            params=params,
+            timeout=10,
+        )
+
+    @classmethod
+    async def async_plugin_rating(cls, plugin_id: str):
+        """
+        异步查询中心端单个插件评分。
+        """
+        return await cls._async_get(
+            f"{cls._server_url(cls._PLUGIN_RATING_PATH)}/{quote(plugin_id, safe='')}",
+            timeout=10,
+        )
+
+    @classmethod
+    async def async_rate_plugin(cls, plugin_id: str, rating: float):
+        """
+        异步提交当前安装实例的插件评分。
+        """
+        return await cls._async_post_json(
+            f"{cls._server_url(cls._PLUGIN_RATING_PATH)}/{quote(plugin_id, safe='')}",
+            {"rating": rating},
+            timeout=10,
+        )
+
+    @classmethod
     def plugin_install(cls, plugin_id: str, payload: Dict[str, Any]):
         """
         上报单个插件安装统计。
@@ -457,6 +492,58 @@ class MoviePilotServerHelper:
         if res is not None and res.status_code == 200:
             return res.json()
         return {}
+
+    @classmethod
+    async def async_get_plugin_ratings(
+            cls,
+            plugin_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        批量获取插件评分，中心端不可用时返回空结果。
+        """
+        try:
+            res = await cls.async_plugin_ratings(plugin_ids)
+            if res is not None and res.status_code == 200:
+                return res.json()
+        except Exception as err:
+            logger.debug(f"批量获取插件评分失败：{str(err)}")
+        return {}
+
+    @classmethod
+    async def async_get_plugin_rating(cls, plugin_id: str) -> Dict[str, Any]:
+        """
+        获取单个插件评分，中心端不可用时返回零评分。
+        """
+        empty_rating = {
+            "plugin_id": plugin_id,
+            "average_rating": 0.0,
+            "rating_count": 0,
+            "user_rating": None,
+        }
+        try:
+            res = await cls.async_plugin_rating(plugin_id)
+            if res is not None and res.status_code == 200:
+                return res.json()
+        except Exception as err:
+            logger.debug(f"获取插件 {plugin_id} 评分失败：{str(err)}")
+        return empty_rating
+
+    @classmethod
+    async def async_submit_plugin_rating(
+            cls,
+            plugin_id: str,
+            rating: float,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        提交插件评分，成功时返回最新评分结果。
+        """
+        try:
+            res = await cls.async_rate_plugin(plugin_id, rating)
+            if res is not None and res.status_code == 200:
+                return res.json()
+        except Exception as err:
+            logger.debug(f"提交插件 {plugin_id} 评分失败：{str(err)}")
+        return None
 
     @classmethod
     def install_plugin_reg(cls, plugin_id: str, repo_url: Optional[str] = None) -> bool:
@@ -667,7 +754,7 @@ class MoviePilotServerHelper:
         return params
 
     @classmethod
-    @cached(region="subscribe_share", maxsize=5, ttl=1800, skip_empty=True)
+    @cached(region="subscribe_share", maxsize=32, ttl=1800, skip_empty=True)
     def get_subscribe_statistic(
             cls,
             stype: str,
@@ -695,7 +782,7 @@ class MoviePilotServerHelper:
         return cls._handle_list_response(cls.subscribe_statistic(params))
 
     @classmethod
-    @cached(region="subscribe_share", maxsize=5, ttl=1800, skip_empty=True)
+    @cached(region="subscribe_share", maxsize=32, ttl=1800, skip_empty=True)
     async def async_get_subscribe_statistic(
             cls,
             stype: str,
@@ -881,7 +968,7 @@ class MoviePilotServerHelper:
         return cls._handle_response(await cls.async_subscribe_fork(share_id))
 
     @classmethod
-    @cached(region="subscribe_share", maxsize=1, ttl=1800, skip_empty=True)
+    @cached(region="subscribe_share", maxsize=32, ttl=1800, skip_empty=True)
     def get_subscribe_shares(
             cls,
             name: Optional[str] = None,
@@ -909,7 +996,7 @@ class MoviePilotServerHelper:
         return cls._handle_list_response(cls.subscribe_shares(params))
 
     @classmethod
-    @cached(region="subscribe_share", maxsize=1, ttl=1800, skip_empty=True)
+    @cached(region="subscribe_share", maxsize=32, ttl=1800, skip_empty=True)
     async def async_get_subscribe_shares(
             cls,
             name: Optional[str] = None,
@@ -937,7 +1024,7 @@ class MoviePilotServerHelper:
         return cls._handle_list_response(await cls.async_subscribe_shares(params))
 
     @classmethod
-    @cached(region="subscribe_share", maxsize=1, ttl=1800, skip_empty=True)
+    @cached(region="subscribe_share", maxsize=32, ttl=1800, skip_empty=True)
     def get_subscribe_share_statistics(cls) -> List[dict]:
         """
         获取订阅分享统计数据。
@@ -947,7 +1034,7 @@ class MoviePilotServerHelper:
         return cls._handle_list_response(cls.subscribe_share_statistics())
 
     @classmethod
-    @cached(region="subscribe_share", maxsize=1, ttl=1800, skip_empty=True)
+    @cached(region="subscribe_share", maxsize=32, ttl=1800, skip_empty=True)
     async def async_get_subscribe_share_statistics(cls) -> List[dict]:
         """
         异步获取订阅分享统计数据。
@@ -1332,7 +1419,10 @@ class MoviePilotServerHelper:
         tmdbid = item.get("tmdbid")
         doubanid = item.get("doubanid")
         bangumiid = item.get("bangumiid")
-        if not any([tmdbid, doubanid, bangumiid]):
+        anilistid = item.get("anilistid")
+        media_source = item.get("media_source")
+        media_id = item.get("media_id")
+        if not any([tmdbid, doubanid, bangumiid, anilistid, media_id]):
             return None
 
         return {
@@ -1340,6 +1430,9 @@ class MoviePilotServerHelper:
             "tmdbid": tmdbid,
             "doubanid": doubanid,
             "bangumiid": bangumiid,
+            "anilistid": anilistid,
+            "source": media_source,
+            "mediaid": media_id,
             "season": item.get("season"),
         }
 
@@ -1464,7 +1557,8 @@ class MoviePilotServerHelper:
             params["type"] = media_type
         if year := cls._extract_year(meta=meta):
             params["year"] = year
-        if season := cls._extract_season(media_type=media_type, meta=meta):
+        season = cls._extract_season(media_type=media_type, meta=meta)
+        if season is not None:
             params["season"] = season
         return params
 
@@ -1485,7 +1579,8 @@ class MoviePilotServerHelper:
         media_type = cls._extract_media_type(meta=meta, mediainfo=mediainfo)
         if not keyword or not media_type:
             return None
-        if not any([mediainfo.tmdb_id, mediainfo.douban_id, mediainfo.bangumi_id]):
+        media_source, media_id = resolve_media_identity(media=mediainfo)
+        if not media_id:
             return None
 
         return {
@@ -1501,6 +1596,9 @@ class MoviePilotServerHelper:
             "tmdbid": mediainfo.tmdb_id,
             "doubanid": mediainfo.douban_id,
             "bangumiid": mediainfo.bangumi_id,
+            "anilistid": mediainfo.anilist_id,
+            "media_source": media_source,
+            "media_id": media_id,
         }
 
     @classmethod

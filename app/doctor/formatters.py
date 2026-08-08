@@ -38,7 +38,9 @@ def format_text_report(report: DoctorReport) -> str:
     summary = report.summary
     lines.extend([
         "",
-        f"汇总: total={summary['total']} error={summary['error']} warn={summary['warn']} fixed={summary['fixed']}",
+        f"汇总: total={summary['total']} error={summary['error']} "
+        f"warn={summary['warn']} advisory={summary['advisory']} "
+        f"fixed={summary['fixed']}",
     ])
     return "\n".join(lines)
 
@@ -47,6 +49,8 @@ def _format_finding(finding: DoctorFinding) -> list[str]:
     marker = finding.severity.value.upper()
     if finding.fixed:
         marker = "FIXED"
+    elif not finding.affects_report_status:
+        marker = f"{marker}/ADVISORY"
     lines = [f"[{marker}] {finding.title}", f"ID: {finding.id}"]
     if finding.detail:
         lines.append(f"原因: {finding.detail}")

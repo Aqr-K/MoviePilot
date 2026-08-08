@@ -38,6 +38,8 @@ class SystemConfModel(BaseModel):
     douban: int = 0
     # Bangumi请求缓存数量
     bangumi: int = 0
+    # AniList请求缓存数量
+    anilist: int = 0
     # Fanart请求缓存数量
     fanart: int = 0
     # 元数据缓存过期时间（秒）
@@ -76,6 +78,8 @@ class ConfigModel(BaseModel):
     CONFIG_DIR: Optional[str] = None
     # 安全模式，仅保留核心 API，跳过插件、调度器、监控、命令和工作流等扩展启动项
     MOVIEPILOT_SAFE_MODE: bool = False
+    # 是否启用 Btrfs FSID 子卷容量去重（仅 Linux amd64/arm64）
+    BTRFS_FSID_DEDUP: bool = False
     # 是否调试模式
     DEBUG: bool = False
     # 是否开发模式
@@ -174,7 +178,11 @@ class ConfigModel(BaseModel):
     GLOBAL_IMAGE_CACHE_DAYS: int = 7
     # 临时文件保留天数
     TEMP_FILE_DAYS: int = 3
-    # 元数据识别缓存过期时间（小时），0为自动
+    # pip/uv 包下载缓存保留天数
+    PACKAGE_CACHE_DAYS: int = 90
+    # pip/uv 包下载缓存根目录，留空时使用配置目录下的 .cache
+    PACKAGE_CACHE_ROOT: Optional[str] = None
+    # 单条元数据识别缓存有效期（小时），0为自动
     META_CACHE_EXPIRE: int = 0
 
     # ==================== 网络代理配置 ====================
@@ -197,11 +205,11 @@ class ConfigModel(BaseModel):
     DOH_RESOLVERS: str = "1.0.0.1,1.1.1.1,9.9.9.9,149.112.112.112"
 
     # ==================== 媒体元数据配置 ====================
-    # 媒体搜索来源 themoviedb/douban/bangumi，多个用,分隔
+    # 媒体搜索来源 themoviedb/douban/bangumi/anilist，多个用,分隔
     SEARCH_SOURCE: str = "themoviedb"
-    # 媒体识别来源 themoviedb/douban
+    # 媒体识别来源 themoviedb/douban/bangumi/anilist
     RECOGNIZE_SOURCE: str = "themoviedb"
-    # 刮削来源 themoviedb/douban
+    # 刮削来源 themoviedb/douban/bangumi/anilist
     SCRAP_SOURCE: str = "themoviedb"
     # 电视剧动漫的分类genre_ids
     ANIME_GENREIDS: List[int] = Field(default=[16])
@@ -377,6 +385,8 @@ class ConfigModel(BaseModel):
     COOKIECLOUD_KEY: Optional[str] = None
     # CookieCloud端对端加密密码
     COOKIECLOUD_PASSWORD: Optional[str] = None
+    # CookieCloud本地上传接口的X-CookieCloud-Auth期望值，留空表示不校验
+    COOKIECLOUD_AUTH_HEADER: Optional[str] = None
     # CookieCloud同步间隔（分钟）
     COOKIECLOUD_INTERVAL: Optional[int] = 60 * 24
     # CookieCloud同步黑名单，多个域名,分割
@@ -385,6 +395,8 @@ class ConfigModel(BaseModel):
     # ==================== 整理配置 ====================
     # 文件整理线程数
     TRANSFER_THREADS: int = 1
+    # 外部接管的运行中整理任务无状态心跳超时（分钟），0 表示禁用
+    TRANSFER_TASK_TIMEOUT: int = 120
     # 电影重命名格式
     MOVIE_RENAME_FORMAT: str = (
         "{{title}}{% if year %} ({{year}}){% endif %}"
@@ -424,26 +436,7 @@ class ConfigModel(BaseModel):
     # ==================== 插件配置 ====================
     # 插件市场仓库地址，多个地址使用,分隔，地址以/结尾
     PLUGIN_MARKET: str = (
-        "https://github.com/jxxghp/MoviePilot-Plugins,"
-        "https://github.com/thsrite/MoviePilot-Plugins,"
-        "https://github.com/honue/MoviePilot-Plugins,"
-        "https://github.com/InfinityPacer/MoviePilot-Plugins,"
-        "https://github.com/DDSRem-Dev/MoviePilot-Plugins,"
-        "https://github.com/madrays/MoviePilot-Plugins,"
-        "https://github.com/justzerock/MoviePilot-Plugins,"
-        "https://github.com/KoWming/MoviePilot-Plugins,"
-        "https://github.com/wikrin/MoviePilot-Plugins,"
-        "https://github.com/HankunYu/MoviePilot-Plugins,"
-        "https://github.com/baozaodetudou/MoviePilot-Plugins,"
-        "https://github.com/Aqr-K/MoviePilot-Plugins,"
-        "https://github.com/hotlcc/MoviePilot-Plugins-Third,"
-        "https://github.com/gxterry/MoviePilot-Plugins,"
-        "https://github.com/DzAvril/MoviePilot-Plugins,"
-        "https://github.com/mrtian2016/MoviePilot-Plugins,"
-        "https://github.com/Hqyel/MoviePilot-Plugins-Third,"
-        "https://github.com/xijin285/MoviePilot-Plugins,"
-        "https://github.com/Seed680/MoviePilot-Plugins,"
-        "https://github.com/imaliang/MoviePilot-Plugins"
+        "https://github.com/jxxghp/MoviePilot-Plugins"
     )
     # 插件安装数据共享
     PLUGIN_STATISTIC_SHARE: bool = True
@@ -520,6 +513,7 @@ class ConfigModel(BaseModel):
             "cmvideo.cn",
             "ykimg.com",
             "qpic.cn",
+            "anilist.co",
         ]
     )
     # 图片代理允许访问的非公网 IP/CIDR，默认不放行任何非公网解析结果
@@ -530,8 +524,6 @@ class ConfigModel(BaseModel):
     )
     # PassKey 是否强制用户验证（生物识别等）
     PASSKEY_REQUIRE_UV: bool = True
-    # 允许在未启用 OTP 时直接注册 PassKey
-    PASSKEY_ALLOW_REGISTER_WITHOUT_OTP: bool = False
 
     # ==================== 工作流配置 ====================
     # 工作流数据共享
@@ -564,6 +556,10 @@ class ConfigModel(BaseModel):
     LLM_MODEL: str = "deepseek-chat"
     # 思考模式/深度配置：off/auto/minimal/low/medium/high/max/xhigh
     LLM_THINKING_LEVEL: Optional[str] = "off"
+    # OpenAI兼容接口API协议：auto（自动）/ chat_completions / responses
+    LLM_API_PROTOCOL: str = "auto"
+    # 联网搜索模式：local（本地）/ builtin（模型服务端）/ auto（自动）/ disabled（关闭）
+    LLM_WEB_SEARCH_MODE: str = "local"
     # LLM是否支持图片输入，开启后消息图片会按多模态输入发送给模型
     LLM_SUPPORT_IMAGE_INPUT: bool = True
     # 是否启用音频输入，开启后用户语音会先转写为文本再进入 Agent
@@ -578,8 +574,8 @@ class ConfigModel(BaseModel):
     LLM_USE_PROXY: bool = True
     # LLM Base URL 预设标识，用于区分同一 Base URL 下的不同模型目录
     LLM_BASE_URL_PRESET: Optional[str] = None
-    # LLM最大上下文Token数量（K）
-    LLM_MAX_CONTEXT_TOKENS: int = 128
+    # LLM最大上下文Token数量（K），仅在模型目录未提供规格时作为回退值
+    LLM_MAX_CONTEXT_TOKENS: int = 256
     # LLM OpenAI兼容接口请求User-Agent
     LLM_USER_AGENT: Optional[str] = None
     # LLM温度参数
@@ -600,7 +596,7 @@ class ConfigModel(BaseModel):
     # AI推荐条目数量限制
     AI_RECOMMEND_MAX_ITEMS: int = 50
     # LLM工具选择中间件最大工具数量，0为不启用工具选择中间件
-    LLM_MAX_TOOLS: int = 20
+    LLM_MAX_TOOLS: int = 0
     # AI智能体定时任务检查间隔（小时），0为不启用，默认24小时
     AI_AGENT_JOB_INTERVAL: int = 0
     # AI智能体啰嗦模式，开启后会回复工具调用过程
@@ -744,8 +740,9 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                     converted = int(value)
                     return converted, str(converted) != str(original_value)
             elif expected_type is float:
-                if isinstance(value, float):
-                    return value, str(value) != str(original_value)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    converted = float(value)
+                    return converted, str(converted) != str(original_value)
                 if isinstance(value, str):
                     converted = float(value)
                     return converted, str(converted) != str(original_value)
@@ -945,6 +942,12 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
     @property
     def CACHE_PATH(self):
         return self.CONFIG_PATH / "cache"
+
+    @property
+    def PACKAGE_CACHE_PATH(self):
+        if self.PACKAGE_CACHE_ROOT and self.PACKAGE_CACHE_ROOT.strip():
+            return Path(self.PACKAGE_CACHE_ROOT).expanduser()
+        return self.CONFIG_PATH / ".cache"
 
     @property
     def ROOT_PATH(self):
@@ -1205,7 +1208,7 @@ class GlobalVar(object):
 
     def resume_system(self):
         """
-        恢复系统运行标记。
+        恢复系统运行标记
         """
         self.STOP_EVENT.clear()
 

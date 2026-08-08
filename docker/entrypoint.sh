@@ -20,12 +20,80 @@ function WARN() {
     echo -e "${WARN} ${1}"
 }
 
+ENTRYPOINT_START_TIME="$(date +%s)"
+
+function normalize_env_value() {
+    printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'
+}
+
+function is_truthy_value() {
+    local value
+    value="$(normalize_env_value "${1:-}")"
+    [ "${value}" = "true" ] || [ "${value}" = "1" ] || [ "${value}" = "yes" ]
+}
+
 # 设置虚拟环境路径（兼容群晖等系统必须这样配置）
 VENV_PATH="${VENV_PATH:-/opt/venv}"
 export PATH="${VENV_PATH}/bin:$PATH"
 
 # 校正设置目录
 CONFIG_DIR="${CONFIG_DIR:-/config}"
+
+function apply_package_cache_env() {
+    PACKAGE_CACHE_ROOT="${PACKAGE_CACHE_ROOT:-${CONFIG_DIR}/.cache}"
+    export PACKAGE_CACHE_ROOT
+    export PIP_CACHE_DIR="${PIP_CACHE_DIR:-${PACKAGE_CACHE_ROOT}/pip}"
+    export UV_CACHE_DIR="${UV_CACHE_DIR:-${PACKAGE_CACHE_ROOT}/uv}"
+    mkdir -p "${PIP_CACHE_DIR}" "${UV_CACHE_DIR}"
+}
+
+function run_package_command() {
+    if [ -n "${PROXY_HOST}" ]; then
+        HTTP_PROXY="${PROXY_HOST}" \
+            HTTPS_PROXY="${PROXY_HOST}" \
+            http_proxy="${PROXY_HOST}" \
+            https_proxy="${PROXY_HOST}" \
+            "$@"
+    else
+        "$@"
+    fi
+}
+
+function wait_backend_ready() {
+    local entrypoint_start_time="${1:-$(date +%s)}"
+    local backend_start_time="${2:-$(date +%s)}"
+    local python_pid="${3:-}"
+    local backend_port="${PORT:-3001}"
+    local web_port="${NGINX_PORT:-3000}"
+    local timeout="${MOVIEPILOT_BACKEND_READY_TIMEOUT:-300}"
+    local ready_url="http://127.0.0.1:${backend_port}/api/v1/system/global?token=moviepilot"
+    local deadline
+    if ! [[ "${timeout}" =~ ^[0-9]+$ ]] || [ "$((10#${timeout}))" -le 0 ]; then
+        WARN "→ MOVIEPILOT_BACKEND_READY_TIMEOUT=${timeout} 无效，使用默认 300 秒。"
+        timeout=300
+    else
+        timeout=$((10#${timeout}))
+    fi
+    deadline=$(( $(date +%s) + timeout ))
+
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+        if [ -n "${python_pid}" ] && ! kill -0 "${python_pid}" >/dev/null 2>&1; then
+            WARN "→ 后端服务启动完成探测已停止：后端进程已退出。"
+            return 1
+        fi
+
+        if curl -fsS --max-time 2 "${ready_url}" >/dev/null 2>&1; then
+            local now
+            now="$(date +%s)"
+            INFO "→ MoviePilot Web 已可访问，启动总耗时 $(( now - entrypoint_start_time )) 秒，后端就绪耗时 $(( now - backend_start_time )) 秒，后端端口 ${backend_port}，前端端口 ${web_port}。"
+            return 0
+        fi
+        sleep 1
+    done
+
+    WARN "→ 后端服务启动完成探测超时，已等待 ${timeout} 秒，后端端口 ${backend_port}，继续等待进程日志..."
+    return 1
+}
 
 # 环境变量补全
 # 优先级: 系统环境变量 -> .env 文件 (即使为空字符串) -> 预设默认值
@@ -39,11 +107,13 @@ function load_config_from_app_env() {
     declare -A vars_and_default_values=(
         # update.sh
         ["PIP_PROXY"]=""
+        ["PACKAGE_CACHE_ROOT"]=""
         ["GITHUB_PROXY"]=""
         ["PROXY_HOST"]=""
         ["GITHUB_TOKEN"]=""
         ["MOVIEPILOT_AUTO_UPDATE"]="release"
         ["MOVIEPILOT_DOCKER_KEEPALIVE_ON_FAILURE"]="true"
+        ["MOVIEPILOT_FORCE_CHOWN"]="false"
         ["MOVIEPILOT_SAFE_MODE"]="false"
         ["BROWSER_EMULATION"]="cloakbrowser"
 
@@ -240,8 +310,8 @@ function graceful_exit() {
 # 后端异常退出时默认保留容器，避免无法 docker exec 进入容器运行 doctor。
 function diagnostic_keepalive() {
     local exit_code=${1:-1}
-    local keepalive="${MOVIEPILOT_DOCKER_KEEPALIVE_ON_FAILURE:-true}"
-    keepalive="${keepalive,,}"
+    local keepalive
+    keepalive="$(normalize_env_value "${MOVIEPILOT_DOCKER_KEEPALIVE_ON_FAILURE:-true}")"
 
     if [ "${keepalive}" = "false" ] || [ "${keepalive}" = "0" ] || [ "${keepalive}" = "no" ]; then
         graceful_exit "$exit_code" "python_exit"
@@ -279,11 +349,9 @@ function ensure_backend_runtime_dependencies() {
     local -a pip_cmd=("${VENV_PATH}/bin/pip" "install" "-r" "/app/requirements.txt")
     if [ -n "${PIP_PROXY}" ]; then
         pip_cmd+=("-i" "${PIP_PROXY}")
-    elif [ -n "${PROXY_HOST}" ]; then
-        pip_cmd+=("--proxy" "${PROXY_HOST}")
     fi
 
-    if ! "${pip_cmd[@]}" > /dev/stdout 2> /dev/stderr; then
+    if ! run_package_command "${pip_cmd[@]}" > /dev/stdout 2> /dev/stderr; then
         ERROR "→ 自动恢复主程序依赖失败，后端无法启动。"
         diagnostic_keepalive 1
     fi
@@ -296,8 +364,82 @@ function ensure_backend_runtime_dependencies() {
     INFO "→ 已自动恢复主程序依赖，继续启动后端。"
 }
 
+function path_owner_id() {
+    local target="${1:-}"
+    [ -n "${target}" ] || return 0
+    stat -c '%u:%g' "${target}" 2>/dev/null || stat -f '%u:%g' "${target}" 2>/dev/null || true
+}
+
+function force_chown_image_paths_if_requested() {
+    if ! is_truthy_value "${MOVIEPILOT_FORCE_CHOWN:-false}"; then
+        return 0
+    fi
+
+    WARN "→ MOVIEPILOT_FORCE_CHOWN 已启用，将递归修复 /app、/public 权限，可能显著增加启动耗时。"
+
+    local path
+    for path in "$@"; do
+        [ -e "${path}" ] || continue
+        chown -R moviepilot:moviepilot "${path}"
+    done
+}
+
+function correct_home_permissions() {
+    [ -e "${HOME}" ] || return 0
+
+    chown moviepilot:moviepilot "${HOME}"
+    [ -e "${HOME}/.cloakbrowser" ] && chown -h moviepilot:moviepilot "${HOME}/.cloakbrowser"
+
+    if is_truthy_value "${MOVIEPILOT_FORCE_CHOWN:-false}"; then
+        [ -e "${HOME}/.cloakbrowser" ] && chown -R moviepilot:moviepilot "${HOME}/.cloakbrowser"
+    elif [ -e "${HOME}/.cloakbrowser" ]; then
+        INFO "→ 默认跳过 ${HOME}/.cloakbrowser 递归权限校正，如遇浏览器缓存权限错误可设置 MOVIEPILOT_FORCE_CHOWN=true 后重启一次。"
+    fi
+
+    find "${HOME}" -mindepth 1 -maxdepth 1 ! -name ".cloakbrowser" -exec chown -R moviepilot:moviepilot {} +
+}
+
+function chown_plugin_runtime_path() {
+    local plugin_path="${1:-}"
+    [ -n "${plugin_path}" ] || return 0
+    [ -e "${plugin_path}" ] || return 0
+    local current_owner
+    current_owner="$(path_owner_id "${plugin_path}")"
+    [ "${current_owner}" = "${PUID}:${PGID}" ] && return 0
+    chown -h moviepilot:moviepilot "${plugin_path}"
+}
+
+function correct_helper_resource_permissions() {
+    local helper_dir="${IMAGE_HELPER_DIR:-/app/app/helper}"
+    [ -e "${helper_dir}" ] || return 0
+
+    INFO "→ 正在修复资源包目录权限：${helper_dir}"
+    chown -R moviepilot:moviepilot "${helper_dir}"
+}
+
+function correct_file_permissions() {
+    local chown_start
+    local chown_end
+    chown_start=$(date +%s)
+
+    INFO "→ 正在校正文件权限..."
+    force_chown_image_paths_if_requested /app /public
+    correct_helper_resource_permissions
+    chown_plugin_runtime_path /app/app/plugins
+    correct_home_permissions
+    chown -R moviepilot:moviepilot \
+        "${CONFIG_DIR}" \
+        /var/lib/nginx \
+        /var/log/nginx
+    chown moviepilot:moviepilot /etc/hosts /tmp
+
+    chown_end=$(date +%s)
+    INFO "→ 文件权限校正完成，耗时 $(( chown_end - chown_start )) 秒。"
+}
+
 # 使用env配置
 load_config_from_app_env
+apply_package_cache_env
 
 # 一次性升级标记仅影响本次启动，避免把临时升级模式带入运行中的 Python 进程
 ONE_SHOT_UPDATE_FLAG="${CONFIG_DIR}/temp/moviepilot.pending_update"
@@ -334,14 +476,7 @@ groupmod -o -g "${PGID}" moviepilot
 usermod -o -u "${PUID}" moviepilot
 
 # 更改文件权限
-chown -R moviepilot:moviepilot \
-    "${HOME}" \
-    /app \
-    /public \
-    "${CONFIG_DIR}" \
-    /var/lib/nginx \
-    /var/log/nginx
-chown moviepilot:moviepilot /etc/hosts /tmp
+correct_file_permissions
 
 # 启动前优先确认主运行环境仍然健康，避免插件依赖污染导致服务直接起不来。
 ensure_backend_runtime_dependencies
@@ -349,7 +484,7 @@ ensure_backend_runtime_dependencies
 # 下载浏览器内核
 function install_browser_kernel() {
   local emulation="${BROWSER_EMULATION:-cloakbrowser}"
-  emulation="${emulation,,}"
+  emulation="$(normalize_env_value "${emulation}")"
   local proxy="${HTTPS_PROXY:-${https_proxy:-$PROXY_HOST}}"
 
   if [ "${emulation}" != "cloakbrowser" ] && [ "${emulation}" != "flaresolverr" ] && [ -n "${emulation}" ]; then
@@ -392,12 +527,14 @@ umask "${UMASK}"
 
 # 启动后端服务
 INFO "→ 启动后端服务..."
+BACKEND_START_TIME="$(date +%s)"
 if [ "${START_NOGOSU:-false}" = "true" ]; then
     "${VENV_PATH}/bin/python3" app/main.py > /dev/stdout 2> /dev/stderr &
 else
     gosu moviepilot:moviepilot "${VENV_PATH}/bin/python3" app/main.py > /dev/stdout 2> /dev/stderr &
 fi
 PYTHON_PID=$!
+wait_backend_ready "${ENTRYPOINT_START_TIME}" "${BACKEND_START_TIME}" "${PYTHON_PID}" &
 
 # 等待 Python 进程退出。
 # 如果收到信号，trap 会中断 wait，并执行 graceful_exit。

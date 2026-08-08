@@ -16,8 +16,6 @@ from app.schemas.types import EventType
 class DeleteSubscribeInput(BaseModel):
     """删除订阅工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     subscribe_id: int = Field(
         ...,
         description="The ID of the subscription to delete (can be obtained from query_subscribes tool)",
@@ -56,7 +54,15 @@ class DeleteSubscribeTool(MoviePilotTool):
             await subscribe_oper.async_delete(subscribe_id)
             # 分享订阅统计刷新本身已异步化，这里只需要在删除后触发即可。
             MoviePilotServerHelper.sub_done_async(
-                {"tmdbid": subscribe.tmdbid, "doubanid": subscribe.doubanid}
+                {
+                    "tmdbid": subscribe.tmdbid,
+                    "doubanid": subscribe.doubanid,
+                    "bangumiid": subscribe.bangumiid,
+                    "anilistid": subscribe.anilistid,
+                    "media_source": subscribe.media_source,
+                    "media_id": subscribe.media_id,
+                    "season": subscribe.season,
+                }
             )
 
             # 发送事件

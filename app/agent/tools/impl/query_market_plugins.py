@@ -21,8 +21,6 @@ from app.log import logger
 class QueryMarketPluginsInput(BaseModel):
     """查询插件市场工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     query: Optional[str] = Field(
         None,
         description="Optional keyword to filter plugin market results by plugin ID, name, description, or author.",

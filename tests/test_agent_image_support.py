@@ -563,7 +563,6 @@ class AgentImageSupportTest(unittest.TestCase):
 
     def test_send_message_input_accepts_image_only_payload(self):
         payload = SendMessageInput(
-            explanation="send poster image",
             image_url="https://example.com/poster.png",
         )
 
@@ -601,10 +600,64 @@ class AgentImageSupportTest(unittest.TestCase):
         self.assertEqual(notification.title, "智能体通知")
         self.assertEqual(notification.text, "处理完成")
         self.assertEqual(notification.image, "https://example.com/poster.png")
+        self.assertIsNone(notification.parse_mode)
+
+    def test_send_message_tool_ignores_parse_mode_argument(self):
+        """发送消息工具不再支持由 Agent 指定 Telegram parse_mode。"""
+
+        async def _run():
+            tool = SendMessageTool(session_id="session-1", user_id="10001")
+            tool.set_message_attr(
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                username="tester",
+            )
+
+            with patch(
+                "app.agent.tools.base.ToolChain.async_post_message",
+                new_callable=AsyncMock,
+            ) as async_post_message:
+                result = await tool.run(
+                    message="<b>处理完成</b>",
+                    parse_mode="HTML",
+                )
+            return result, async_post_message
+
+        result, async_post_message = asyncio.run(_run())
+        notification = async_post_message.await_args.args[0]
+
+        self.assertEqual(result, "消息已发送")
+        self.assertEqual(notification.text, "<b>处理完成</b>")
+        self.assertIsNone(notification.parse_mode)
+
+    def test_send_message_tool_marks_reply_sent_after_dispatch(self):
+        """发送消息工具成功发送后应终止本轮回复。"""
+
+        async def _run():
+            tool = SendMessageTool(session_id="session-1", user_id="10001")
+            agent_context = {}
+            tool.set_agent_context(agent_context)
+            tool.set_message_attr(
+                channel=MessageChannel.Telegram.value,
+                source="telegram-test",
+                username="tester",
+            )
+
+            with patch(
+                "app.agent.tools.base.ToolChain.async_post_message",
+                new_callable=AsyncMock,
+            ):
+                result = await tool.run(message="处理完成")
+            return result, agent_context
+
+        result, agent_context = asyncio.run(_run())
+
+        self.assertEqual(result, "消息已发送")
+        self.assertTrue(agent_context["user_reply_sent"])
+        self.assertEqual(agent_context["reply_mode"], "send_message")
 
     def test_send_local_file_input_accepts_file_payload(self):
         payload = SendLocalFileInput(
-            explanation="send generated report",
             file_path="/tmp/report.txt",
             message="请下载查看",
         )

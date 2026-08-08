@@ -23,7 +23,6 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
 
     def init_module(self) -> None:
         """初始化模块。"""
-        self.stop()
         super().init_service(
             service_name=WechatClawBot.__name__.lower(), service_type=WechatClawBot
         )
@@ -49,14 +48,13 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
         """获取模块优先级。"""
         return 2
 
-    def stop(self):
-        """停止模块。"""
+    def stop(self) -> None:
+        """停止模块"""
         for client in self.get_instances().values():
-            if hasattr(client, "stop"):
-                try:
-                    client.stop()
-                except Exception as err:
-                    logger.error(f"停止微信 ClawBot 模块实例失败：{err}")
+            try:
+                client.stop()
+            except Exception as err:
+                logger.error(f"停止微信 ClawBot 模块实例失败：{err}")
 
     def test(self) -> Optional[Tuple[bool, str]]:
         """测试模块连接性。"""
@@ -78,7 +76,7 @@ class WechatClawBotModule(_ModuleBase, _MessageBase[WechatClawBot]):
         if isinstance(body, dict):
             payload = body
         elif isinstance(body, bytes):
-            payload = json.loads(body.decode("utf-8", errors="ignore"))
+            payload = json.loads(body.decode("utf-8", errors="replace"))
         else:
             payload = json.loads(body)
         while isinstance(payload, str):

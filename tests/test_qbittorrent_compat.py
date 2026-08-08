@@ -3,7 +3,7 @@ import sys
 import types
 from enum import Enum
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import call, MagicMock, patch
 
 
 def _load_qbittorrent_modules():
@@ -317,6 +317,53 @@ def test_completed_status_includes_qbittorrent_finished_upload_states():
     server.get_torrents.assert_called_once_with(tags="moviepilot-tag")
 
 
+def test_get_completed_torrents_includes_finished_stopped_tasks():
+    """
+    已完成但不再做种的 qBittorrent 任务仍应进入待整理列表。
+    """
+    fake_client = MagicMock()
+    fake_client.torrents_info.return_value = [
+        {
+            "hash": "hash-stalled-up",
+            "progress": 1,
+            "amount_left": 0,
+            "state": "stalledUP",
+        },
+        {
+            "hash": "hash-stopped-up",
+            "progress": 1,
+            "amount_left": 0,
+            "state": "stoppedUP",
+        },
+        {
+            "hash": "hash-moving",
+            "progress": 1,
+            "amount_left": 0,
+            "state": "moving",
+        },
+        {
+            "hash": "hash-metadata",
+            "progress": 0,
+            "amount_left": 0,
+            "state": "metaDL",
+        },
+        {
+            "hash": "hash-download-left",
+            "progress": 0.9,
+            "amount_left": 1024,
+            "state": "stalledDL",
+        },
+    ]
+
+    with patch.object(Qbittorrent, "_Qbittorrent__login_qbittorrent", return_value=fake_client):
+        downloader = Qbittorrent(host="http://127.0.0.1", port=8080, username="admin", password="adminadmin")
+
+    torrents = downloader.get_completed_torrents()
+
+    assert [torrent["hash"] for torrent in torrents] == ["hash-stalled-up", "hash-stopped-up"]
+    fake_client.torrents_info.assert_called_once_with(torrent_hashes=None, status_filter="completed")
+
+
 def test_list_torrents_include_all_tags_removes_builtin_tag_filter():
     """
     智能体扩大查询范围时，qBittorrent 查询应取消内置标签过滤。
@@ -471,6 +518,9 @@ def test_download_prefers_added_torrent_ids_before_tag_lookup():
     fake_server.delete_torrents_tag.assert_called_once_with("abc123", "tmp-tag-01")
     fake_server.get_torrent_id_by_tag.assert_not_called()
     assert fake_server.add_torrent.call_args.kwargs["tag"] == ["tmp-tag-01", "moviepilot-tag"]
+    assert fake_server.mock_calls.index(
+        call.delete_torrents_tag("abc123", "tmp-tag-01")
+    ) < fake_server.mock_calls.index(call.get_content_layout())
 
 
 def test_download_falls_back_to_tag_lookup_when_added_ids_missing():
@@ -492,6 +542,102 @@ def test_download_falls_back_to_tag_lookup_when_added_ids_missing():
     assert result == ("qb", "def456", "Original", "添加下载成功")
     fake_server.delete_torrents_tag.assert_not_called()
     fake_server.get_torrent_id_by_tag.assert_called_once_with(tags="tmp-tag-01")
+
+
+def test_download_removes_temporary_tag_from_existing_torrent():
+    """重复添加任务时应从已存在的种子中删除本次临时标签。"""
+    fake_server = MagicMock()
+    fake_server.add_torrent.return_value = (False, [])
+    fake_server.get_content_layout.return_value = "Original"
+    fake_server.get_torrents.return_value = ([{
+        "name": "test",
+        "total_size": len(b"torrent-content"),
+        "hash": "existing123",
+        "tags": None,
+    }], None)
+
+    module = _build_module(fake_server)
+    result = module.download(
+        content=b"torrent-content",
+        download_dir=Path("/downloads"),
+        cookie="",
+        downloader="qb",
+    )
+
+    assert result == ("qb", "existing123", "Original", "下载任务已存在")
+    fake_server.delete_torrents_tag.assert_called_once_with("existing123", "tmp-tag-01")
+    assert fake_server.mock_calls.index(
+        call.delete_torrents_tag("existing123", "tmp-tag-01")
+    ) < fake_server.mock_calls.index(call.get_content_layout())
+
+
+def test_delete_torrents_tag_uses_supported_qbittorrent_api_arguments():
+    """删除标签时应分别调用任务移除接口和全局标签删除接口。"""
+    fake_client = MagicMock()
+    downloader = Qbittorrent.__new__(Qbittorrent)
+    downloader.qbc = fake_client
+
+    assert downloader.delete_torrents_tag("abc123", "tmp-tag-01")
+    fake_client.torrents_remove_tags.assert_called_once_with(
+        torrent_hashes="abc123",
+        tags="tmp-tag-01",
+    )
+    fake_client.torrents_delete_tags.assert_called_once_with(tags="tmp-tag-01")
+
+
+def test_get_files_retries_until_qbittorrent_files_available():
+    """qBittorrent 添加任务后文件列表短暂未就绪时应重试。"""
+    torrent_files = [{"id": 12, "name": "Show.S01E12.mkv"}]
+    fake_client = MagicMock()
+    fake_client.torrents_files.side_effect = [
+        Exception("Torrent hash(es): abc123"),
+        torrent_files,
+    ]
+
+    with patch.object(Qbittorrent, "_Qbittorrent__login_qbittorrent", return_value=fake_client):
+        downloader = Qbittorrent(host="http://127.0.0.1", port=8080, username="admin", password="adminadmin")
+
+    with patch.object(qbittorrent_module.time, "sleep") as sleep:
+        result = downloader.get_files("abc123", retry=2, interval=1)
+
+    assert result == torrent_files
+    assert fake_client.torrents_files.call_count == 2
+    fake_client.torrents_files.assert_called_with(torrent_hash="abc123")
+    sleep.assert_called_once_with(1)
+
+
+def test_download_episode_selection_retries_file_list_after_add():
+    """按集选择下载时应等待 qBittorrent 刚添加的任务文件列表。"""
+
+    class _EpisodeMetaInfo:
+        """测试用集数识别对象。"""
+
+        def __init__(self, name):
+            self.episode_list = [12] if "E12" in name else [1]
+
+    fake_server = MagicMock()
+    fake_server.add_torrent.return_value = (True, ["abc123"])
+    fake_server.get_content_layout.return_value = "Original"
+    fake_server.get_files.return_value = [
+        {"id": 1, "name": "Show.S01E01.mkv"},
+        {"id": 12, "name": "Show.S01E12.mkv"},
+    ]
+    fake_server.is_force_resume.return_value = False
+
+    module = _build_module(fake_server)
+    with patch.object(qbittorrent_package_module, "MetaInfo", _EpisodeMetaInfo):
+        result = module.download(
+            content=b"torrent-content",
+            download_dir=Path("/downloads"),
+            cookie="",
+            episodes={12},
+            downloader="qb",
+        )
+
+    assert result == ("qb", "abc123", "Original", "添加下载成功，已选择集数：[12]")
+    fake_server.get_files.assert_called_once_with("abc123", retry=5, interval=1)
+    fake_server.set_files.assert_called_once_with(torrent_hash="abc123", file_ids=[1], priority=0)
+    fake_server.start_torrents.assert_called_once_with("abc123")
 
 
 def test_set_speed_limit_allows_single_direction_limit():

@@ -14,8 +14,6 @@ from app.log import logger
 class UpdatePersonaDefinitionInput(BaseModel):
     """更新人格定义工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     persona_id: str = Field(
         ...,
         description=(

@@ -18,8 +18,9 @@ from app.db.models import User
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.transferhistory import TransferHistory
 from app.db.user_oper import (
-    get_current_active_superuser_async,
+    get_current_active_manage_user,
     get_current_active_superuser,
+    get_current_active_superuser_async,
 )
 from app.helper.progress import ProgressHelper
 from app.schemas.types import EventType
@@ -149,7 +150,7 @@ async def download_history(
     _: schemas.TokenPayload = Depends(verify_token),
 ) -> Any:
     """
-    查询下载历史记录
+    按下载时间倒序查询下载历史记录
     """
     return await DownloadHistory.async_list_by_page(db, page, count)
 
@@ -225,7 +226,7 @@ def delete_transfer_history(
     deletesrc: Optional[bool] = False,
     deletedest: Optional[bool] = False,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_active_superuser),
+    _: User = Depends(get_current_active_manage_user),
 ) -> Any:
     """
     删除整理记录
@@ -266,7 +267,7 @@ def delete_transfer_history(
 def ai_redo_transfer_history(
     history_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_active_superuser),
+    _: User = Depends(get_current_active_manage_user),
 ) -> Any:
     """
     手动触发单条历史记录的 AI 重新整理，并返回进度键。
@@ -295,7 +296,7 @@ def ai_redo_transfer_history(
 def batch_ai_redo_transfer_history(
     payload: schemas.BatchTransferHistoryRedoRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_active_superuser),
+    _: User = Depends(get_current_active_manage_user),
 ) -> Any:
     """
     手动触发多条历史记录的 AI 批量重新整理，并返回进度键。

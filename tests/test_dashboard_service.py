@@ -13,6 +13,15 @@ from app.service import dashboard as svc
 
 # ---------- build_statistic ----------
 
+def _patch_monthly_statistics(monkeypatch, result=(0, 0, 0)):
+    """把当月整理统计固定为给定值，隔离 DB 依赖。"""
+    monkeypatch.setattr(
+        svc.TransferHistory,
+        "monthly_media_statistics",
+        staticmethod(lambda db: result),
+    )
+
+
 def test_build_statistic_aggregates_counts(monkeypatch):
     stats = [
         schemas.Statistic(movie_count=10, tv_count=20, episode_count=3, user_count=2),
@@ -21,11 +30,15 @@ def test_build_statistic_aggregates_counts(monkeypatch):
     monkeypatch.setattr(
         svc, "DashboardChain", lambda: SimpleNamespace(media_statistic=lambda name: stats)
     )
-    ret = svc.build_statistic()
+    _patch_monthly_statistics(monkeypatch, (4, 5, 6))
+    ret = svc.build_statistic(db=None)
     assert ret.movie_count == 11
     assert ret.tv_count == 22
     assert ret.user_count == 3
     assert ret.episode_count == 9
+    assert ret.movie_count_month == 4
+    assert ret.tv_count_month == 5
+    assert ret.episode_count_month == 6
 
 
 def test_build_statistic_episode_none_when_all_missing(monkeypatch):
@@ -36,7 +49,8 @@ def test_build_statistic_episode_none_when_all_missing(monkeypatch):
     monkeypatch.setattr(
         svc, "DashboardChain", lambda: SimpleNamespace(media_statistic=lambda name: stats)
     )
-    ret = svc.build_statistic()
+    _patch_monthly_statistics(monkeypatch)
+    ret = svc.build_statistic(db=None)
     assert ret.movie_count == 11
     assert ret.episode_count is None
 
@@ -45,7 +59,8 @@ def test_build_statistic_empty_returns_blank(monkeypatch):
     monkeypatch.setattr(
         svc, "DashboardChain", lambda: SimpleNamespace(media_statistic=lambda name: None)
     )
-    assert svc.build_statistic() == schemas.Statistic()
+    _patch_monthly_statistics(monkeypatch)
+    assert svc.build_statistic(db=None) == schemas.Statistic()
 
 
 # ---------- build_storage ----------
@@ -95,7 +110,7 @@ def test_build_downloader_aggregates(monkeypatch):
     monkeypatch.setattr(
         svc, "DashboardChain", lambda: SimpleNamespace(downloader_info=lambda name: infos)
     )
-    monkeypatch.setattr(svc.SystemUtils, "space_usage", staticmethod(lambda paths: (0, 999)))
+    monkeypatch.setattr(svc.SystemUtils, "space_usage", staticmethod(lambda paths, **kw: (0, 999)))
     ret = svc.build_downloader()
     assert ret.download_speed == 4.0
     assert ret.upload_speed == 6.0

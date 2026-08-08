@@ -1,6 +1,8 @@
-from typing import List, Optional
+import logging
+from functools import lru_cache
+from typing import List, Optional, Tuple
 
-from app.log import logger
+from app.log import logger, log_settings
 
 try:
     import moviepilot_rust as _moviepilot_rust
@@ -71,24 +73,38 @@ def filter_torrents(
         rule_set: dict,
         mediainfo=None,
         metainfo_options: Optional[dict] = None,
-) -> Optional[list]:
+) -> Optional[Tuple[list, list]]:
     """
-    使用 Rust 执行完整种子过滤入口，返回原列表下标和优先级。
+    使用 Rust 执行完整种子过滤入口，返回原列表下标、优先级和可选调试日志。
     """
     if not is_enabled():
         return None
     try:
-        return _moviepilot_rust.filter_torrents_fast(
+        args = (
             groups,
             torrent_list,
             rule_set,
             mediainfo,
             metainfo_options or {},
         )
+        if is_debug_log_enabled() and hasattr(_moviepilot_rust, "filter_torrents_with_trace_fast"):
+            matched_orders, traces = _moviepilot_rust.filter_torrents_with_trace_fast(*args)
+            return matched_orders, traces
+        return _moviepilot_rust.filter_torrents_fast(*args), []
     except BaseException as err:
         _raise_non_rust_panic(err)
         logger.debug(f"Rust 种子过滤失败，回退 Python：{err}")
         return None
+
+
+def is_debug_log_enabled() -> bool:
+    """
+    判断当前日志配置是否会实际输出 debug 日志。
+    """
+    if log_settings.DEBUG:
+        return True
+    return getattr(logging, log_settings.LOG_LEVEL.upper(), logging.INFO) <= logging.DEBUG
+
 
 def parse_indexer_torrents(
         html_text: str,
@@ -198,6 +214,29 @@ def find_metainfo(title: str) -> Optional[dict]:
         _raise_non_rust_panic(err)
         logger.debug(f"Rust 显式媒体标签解析失败，使用 Python 解析兜底：{err}")
         return None
+
+
+@lru_cache(maxsize=1)
+def supports_extended_media_ids() -> bool:
+    """
+    判断当前 Rust 扩展是否支持 Bangumi 与 AniList 显式媒体标签。
+
+    :return: 是否支持扩展数据源ID字段
+    """
+    if not is_enabled():
+        return False
+    try:
+        result = _moviepilot_rust.find_metainfo_fast("test [anilist=1]")
+    except BaseException as err:
+        _raise_non_rust_panic(err)
+        logger.debug(f"检测 Rust 扩展数据源ID能力失败：{err}")
+        return False
+    metainfo = result.get("metainfo") if isinstance(result, dict) else None
+    return bool(
+        metainfo
+        and metainfo.get("media_source") == "anilist"
+        and metainfo.get("media_id") == "1"
+    )
 
 
 def _raise_non_rust_panic(err: BaseException) -> None:

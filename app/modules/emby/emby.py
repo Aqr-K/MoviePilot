@@ -118,38 +118,47 @@ class Emby:
             logger.error(f"连接Library/VirtualFolders/Query 出错：" + str(e))
             return []
 
-    def __get_emby_librarys(self, username: Optional[str] = None) -> List[dict]:
+    def __get_emby_librarys(self, username: Optional[str] = None) -> Optional[List[dict]]:
         """
         获取Emby媒体库列表
         """
         if not self._host or not self._apikey:
-            return []
+            return None
         if username:
             user = self.get_user(username)
         else:
             user = self.user
+        if not user:
+            return None
         url = f"{self._host}emby/Users/{user}/Views"
         params = {"api_key": self._apikey}
         try:
             res = RequestUtils().get_res(url, params)
             if res:
-                return res.json().get("Items")
+                items = res.json().get("Items")
+                return items if isinstance(items, list) else None
             else:
                 logger.error(f"User/Views 未获取到返回数据")
-                return []
+                return None
         except Exception as e:
             logger.error(f"连接User/Views 出错：" + str(e))
-            return []
+            return None
 
-    def get_librarys(self, username: Optional[str] = None, hidden: Optional[bool] = False) -> List[
-        schemas.MediaServerLibrary]:
+    def get_librarys(
+        self,
+        username: Optional[str] = None,
+        hidden: Optional[bool] = False,
+    ) -> Optional[List[schemas.MediaServerLibrary]]:
         """
         获取媒体服务器所有媒体库列表
         """
         if not self._host or not self._apikey:
-            return []
+            return None
+        source_libraries = self.__get_emby_librarys(username)
+        if source_libraries is None:
+            return None
         libraries = []
-        for library in self.__get_emby_librarys(username) or []:
+        for library in source_libraries:
             if hidden and self._sync_libraries and "all" not in self._sync_libraries \
                     and library.get("Id") not in self._sync_libraries:
                 continue
@@ -171,6 +180,7 @@ class Emby:
                     name=library.get("Name"),
                     path=library.get("Path"),
                     type=library_type,
+                    item_count=self.get_items_count(library.get("Id")),
                     image=image,
                     link=f'{self._playhost or self._host}web/index.html'
                          f'#!/videos?{server_query}parentId={library.get("Id")}',
@@ -181,7 +191,12 @@ class Emby:
 
     def get_user(self, user_name: Optional[str] = None) -> Optional[Union[str, int]]:
         """
-        获得管理员用户
+        获取用于查询用户范围数据的用户ID
+
+        优先匹配指定用户名，其次匹配媒体服务器配置用户名，最后回退管理员。
+
+        :param user_name: 优先匹配的用户名
+        :return: 匹配到的用户ID，未找到可用用户时返回None
         """
         if not self._host or not self._apikey:
             return None
@@ -193,15 +208,18 @@ class Emby:
             res = RequestUtils().get_res(url, params)
             if res:
                 users = res.json()
-                # 先查询是否有与当前用户名称匹配的
-                if user_name:
-                    for user in users:
-                        if user.get("Name") == user_name:
-                            return user.get("Id")
+                candidate_usernames = []
+                for candidate_username in (user_name, self._username):
+                    if candidate_username and candidate_username not in candidate_usernames:
+                        candidate_usernames.append(candidate_username)
+                for candidate_username in candidate_usernames:
+                    for emby_user in users:
+                        if emby_user.get("Name") == candidate_username:
+                            return emby_user.get("Id")
                 # 查询管理员
-                for user in users:
-                    if user.get("Policy", {}).get("IsAdministrator"):
-                        return user.get("Id")
+                for emby_user in users:
+                    if emby_user.get("Policy", {}).get("IsAdministrator"):
+                        return emby_user.get("Id")
             else:
                 logger.error(f"Users 未获取到返回数据")
         except Exception as e:
@@ -473,6 +491,37 @@ class Emby:
             return None, None
         return None, {}
 
+    def get_season_episode_ids(self, item_id: str, season: int) -> Dict[int, str]:
+        """
+        获取指定季的集号到媒体服务器条目 ID 映射
+        :param item_id: 剧集在 Emby 中的 ID
+        :param season: 季号
+        :return: {集号: episode_item_id}
+        """
+        if not item_id or not self._host or not self._apikey:
+            return {}
+        try:
+            url = f"{self._host}emby/Shows/{item_id}/Episodes"
+            params = {
+                "Season": season,
+                "IsMissing": "false",
+                "api_key": self._apikey
+            }
+            res_json = RequestUtils().get_res(url, params)
+            if not res_json:
+                return {}
+            episode_ids: Dict[int, str] = {}
+            for res_item in res_json.json().get("Items") or []:
+                episode_index = res_item.get("IndexNumber")
+                episode_id = res_item.get("Id")
+                if episode_index is None or not episode_id:
+                    continue
+                episode_ids[int(episode_index)] = str(episode_id)
+            return episode_ids
+        except Exception as e:
+            logger.error(f"获取 Emby 季集条目 ID 出错：{str(e)}")
+            return {}
+
     def get_remote_image_by_id(self, item_id: str, image_type: str) -> Optional[str]:
         """
         根据ItemId从Emby查询TMDB的图片地址
@@ -692,6 +741,33 @@ class Emby:
         except Exception as e:
             logger.error(f"连接/Users/{self.user}/Items/{itemid}出错：" + str(e))
         return None
+
+    def get_items_count(self, parent: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的电影和剧集总数
+
+        :param parent: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if not parent or not self._host or not self._apikey:
+            return None
+        url = f"{self._host}emby/Users/{self.user}/Items"
+        params = {
+            "ParentId": parent,
+            "Recursive": "true",
+            "IncludeItemTypes": "Movie,Series",
+            "Limit": 0,
+            "api_key": self._apikey,
+        }
+        try:
+            res = RequestUtils().get_res(url, params)
+            if not res or res.status_code != 200:
+                return None
+            total_count = res.json().get("TotalRecordCount")
+            return int(total_count) if total_count is not None else None
+        except Exception as e:
+            logger.error(f"查询媒体库 {parent} 的媒体总数出错：{str(e)}")
+            return None
 
     def get_items(self, parent: Union[str, int], start_index: Optional[int] = 0,
                   limit: Optional[int] = -1) -> Generator[MediaServerItem | None | Any, Any, None]:
@@ -1147,6 +1223,8 @@ class Emby:
             user = self.get_user(username)
         else:
             user = self.user
+        if not user:
+            return None
         url = f"{self._host}Users/{user}/Items/Resume"
         params = {
             "Limit": 100,
@@ -1207,7 +1285,7 @@ class Emby:
                 logger.error(f"Users/Items/Resume 未获取到返回数据")
         except Exception as e:
             logger.error(f"连接Users/Items/Resume出错：" + str(e))
-        return []
+        return None
 
     def get_latest(self, num: Optional[int] = 20, username: Optional[str] = None) -> Optional[
         List[schemas.MediaServerPlayItem]]:
@@ -1220,6 +1298,8 @@ class Emby:
             user = self.get_user(username)
         else:
             user = self.user
+        if not user:
+            return None
         url = f"{self._host}Users/{user}/Items/Latest"
         params = {
             "Limit": 100,
@@ -1264,7 +1344,7 @@ class Emby:
                 logger.error(f"Users/Items/Latest 未获取到返回数据")
         except Exception as e:
             logger.error(f"连接Users/Items/Latest出错：" + str(e))
-        return []
+        return None
 
     def get_user_library_folders(self):
         """

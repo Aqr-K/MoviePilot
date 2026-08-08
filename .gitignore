@@ -16,7 +16,7 @@ app/helper/*.pyd
 app/helper/*.bin
 app/plugins/**
 !app/plugins/__init__.py
-config/cookies/**
+config/cookies/
 config/app.env
 config/user.db*
 config/sites/**
@@ -25,14 +25,19 @@ config/logs/
 config/plugins/
 config/temp/
 config/cache/
+config/.cache/
 .runtime/
 public/
 .moviepilot.env
 *.pyc
 *.log
 .coverage
+coverage.xml
+coverage.json
+htmlcov/
 .vscode
 venv
+moviepilot-site-capture-*.zip
 
 # Pylint
 pylint-report.json

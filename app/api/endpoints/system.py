@@ -35,10 +35,17 @@ from app.db.user_oper import (
     get_current_active_user_async,
 )
 from app.helper.image import ImageHelper
+from app.helper.locale import LocaleHelper
+from app.helper.market import (
+    PLUGIN_MARKET_WIKI_URL,
+    extract_plugin_market_repos_from_wiki,
+    merge_plugin_market_repos,
+    split_plugin_market_repo_urls,
+)
 from app.helper.message import MessageHelper
-from app.helper.server import MoviePilotServerHelper
 from app.helper.progress import ProgressHelper
 from app.helper.rule import RuleHelper
+from app.helper.server import MoviePilotServerHelper
 from app.helper.system import SystemHelper
 from app.log import logger
 from app.scheduler import Scheduler
@@ -69,32 +76,47 @@ _PUBLIC_SYSTEM_CONFIG_KEYS = {
 _PUBLIC_SETTINGS_KEYS = {"PLUGIN_MARKET"}
 _LOG_DOWNLOAD_LIMIT = 10
 _LOG_DOWNLOAD_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-_PLUGIN_MARKET_WIKI_START = "<!-- plugin-market-repos:start -->"
-_PLUGIN_MARKET_WIKI_END = "<!-- plugin-market-repos:end -->"
-_PLUGIN_MARKET_WIKI_URL = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Wiki/main/plugin.md"
-_PLUGIN_MARKET_REPO_PATTERN = re.compile(
-    r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?/?",
-    re.IGNORECASE,
-)
 
 
-def _normalize_plugin_market_repo_url(repo_url: str) -> Optional[str]:
-    """
-    规范化插件仓库地址，便于跨来源合并去重。
-    """
-    repo_url = (repo_url or "").strip().rstrip("/")
-    if not repo_url:
+def _validate_llm_server_tool_config(env: dict) -> Optional[str]:
+    """校验强制服务端联网搜索配置，返回用户可读错误信息。"""
+    from app.agent.llm.server_tools import (
+        ServerToolRegistry,
+        ServerToolUnavailableError,
+    )
+
+    mode = ServerToolRegistry.normalize_web_search_mode(
+        env.get(
+            "LLM_WEB_SEARCH_MODE",
+            getattr(settings, "LLM_WEB_SEARCH_MODE", "local"),
+        )
+    )
+    if mode != "builtin":
         return None
-    repo_url = repo_url.removesuffix(".git")
-    parsed_url = urlparse(repo_url)
-    if parsed_url.scheme not in {"http", "https"}:
+
+    provider = str(
+        env.get("LLM_PROVIDER", getattr(settings, "LLM_PROVIDER", "")) or ""
+    ).strip()
+    model = str(
+        env.get("LLM_MODEL", getattr(settings, "LLM_MODEL", "")) or ""
+    ).strip()
+    base_url = env.get("LLM_BASE_URL", getattr(settings, "LLM_BASE_URL", None))
+    capability = ServerToolRegistry.get_capability(
+        provider=provider,
+        model=model,
+        base_url=str(base_url or "").strip() or None,
+        tool_id="web_search",
+    )
+    if capability:
         return None
-    if (parsed_url.hostname or "").lower() != "github.com":
-        return None
-    paths = [item for item in parsed_url.path.split("/") if item]
-    if len(paths) < 2:
-        return None
-    return f"https://github.com/{paths[0]}/{paths[1]}"
+
+    return str(
+        ServerToolUnavailableError(
+            provider=provider,
+            model=model,
+            tool_id="web_search",
+        )
+    )
 
 
 def _is_allowed_plugin_market_wiki_url(wiki_url: str) -> bool:
@@ -112,55 +134,6 @@ def _is_allowed_plugin_market_wiki_url(wiki_url: str) -> bool:
             parsed_url.path,
         )
     )
-
-
-def _split_plugin_market_repo_urls(value: Optional[str]) -> list[str]:
-    """
-    拆分插件市场仓库配置并保持原有顺序去重。
-    """
-    repos: list[str] = []
-    seen_repos = set()
-    for item in re.split(r"[\n,，]+", value or ""):
-        normalized_repo = _normalize_plugin_market_repo_url(item)
-        if not normalized_repo or normalized_repo.lower() in seen_repos:
-            continue
-        repos.append(normalized_repo)
-        seen_repos.add(normalized_repo.lower())
-    return repos
-
-
-def _extract_plugin_market_repos_from_wiki(markdown: str) -> list[str]:
-    """
-    从 Wiki 插件文档中提取插件仓库地址。
-    """
-    content = markdown or ""
-    if _PLUGIN_MARKET_WIKI_START in content and _PLUGIN_MARKET_WIKI_END in content:
-        content = content.split(_PLUGIN_MARKET_WIKI_START, 1)[1].split(_PLUGIN_MARKET_WIKI_END, 1)[0]
-
-    repos: list[str] = []
-    seen_repos = set()
-    for item in _PLUGIN_MARKET_REPO_PATTERN.findall(content):
-        normalized_repo = _normalize_plugin_market_repo_url(item)
-        if not normalized_repo or normalized_repo.lower() in seen_repos:
-            continue
-        repos.append(normalized_repo)
-        seen_repos.add(normalized_repo.lower())
-    return repos
-
-
-def _merge_plugin_market_repos(local_repos: list[str], wiki_repos: list[str]) -> list[str]:
-    """
-    合并本地与 Wiki 插件仓库地址，保留本地顺序并追加 Wiki 新地址。
-    """
-    merged_repos: list[str] = []
-    seen_repos = set()
-    for repo in local_repos + wiki_repos:
-        normalized_repo = _normalize_plugin_market_repo_url(repo)
-        if not normalized_repo or normalized_repo.lower() in seen_repos:
-            continue
-        merged_repos.append(normalized_repo)
-        seen_repos.add(normalized_repo.lower())
-    return merged_repos
 
 
 def _match_nettest_prefix(url: str, prefix: str) -> bool:
@@ -581,23 +554,27 @@ async def fetch_image(
     ):
         return None
 
-    content = await ImageHelper().async_fetch_image(
+    image_result = await ImageHelper().async_fetch_image_with_mime_type(
         url=fetch_url,
         proxy=proxy,
         use_cache=use_cache,
         cookies=cookies,
     )
 
-    if content:
+    if image_result:
+        content, media_type = image_result
+
         # 检查 If-None-Match
         etag = HashUtils.md5(content)
         headers = RequestUtils.generate_cache_headers(etag, max_age=86400 * 7)
+        headers["Content-Type"] = media_type
+        headers["X-Content-Type-Options"] = "nosniff"
         if if_none_match == etag:
             return Response(status_code=304, headers=headers)
         # 返回缓存图片
         return Response(
             content=content,
-            media_type=UrlUtils.get_mime_type(fetch_url, "image/jpeg"),
+            media_type=media_type,
             headers=headers,
         )
     return None
@@ -694,7 +671,6 @@ async def get_user_global_setting(_: User = Depends(get_current_active_user_asyn
             "RECOGNIZE_SOURCE",
             "SEARCH_SOURCE",
             "AI_RECOMMEND_ENABLED",
-            "PASSKEY_ALLOW_REGISTER_WITHOUT_OTP",
         }
     )
     # 智能助手总开关未开启，智能推荐状态强制返回False
@@ -759,6 +735,10 @@ async def set_env_setting(
     """
     更新系统环境变量（仅管理员）
     """
+    validation_error = _validate_llm_server_tool_config(env)
+    if validation_error:
+        return schemas.Response(success=False, message=validation_error)
+
     result = settings.update_settings(env=env)
     # 统计成功和失败的结果
     success_updates = {k: v for k, v in result.items() if v[0]}
@@ -797,13 +777,14 @@ async def get_progress(
     实时获取处理进度，返回格式为SSE
     """
     progress = ProgressHelper(process_type)
+    locale = LocaleHelper.get_current_locale()
 
     async def event_generator():
         try:
             while not global_vars.is_system_stopped:
                 if await request.is_disconnected():
                     break
-                detail = progress.get()
+                detail = progress.get(locale=locale)
                 yield f"data: {json.dumps(detail)}\n\n"
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
@@ -839,7 +820,7 @@ async def sync_plugin_market_from_wiki(
     """
     从 Wiki 插件文档同步插件市场仓库地址。
     """
-    wiki_url = (request.wiki_url if request else None) or _PLUGIN_MARKET_WIKI_URL
+    wiki_url = (request.wiki_url if request else None) or PLUGIN_MARKET_WIKI_URL
     wiki_url = wiki_url.strip()
     if not _is_allowed_plugin_market_wiki_url(wiki_url):
         return schemas.Response(success=False, message="不支持的 Wiki 同步地址")
@@ -859,14 +840,14 @@ async def sync_plugin_market_from_wiki(
             message=f"访问 Wiki 插件仓库清单失败，状态码：{res.status_code}",
         )
 
-    wiki_repos = _extract_plugin_market_repos_from_wiki(res.text)
+    wiki_repos = extract_plugin_market_repos_from_wiki(res.text)
     if not wiki_repos:
         return schemas.Response(success=False, message="未在 Wiki 中识别到插件仓库地址")
 
-    local_repos = _split_plugin_market_repo_urls(settings.PLUGIN_MARKET)
+    local_repos = split_plugin_market_repo_urls(settings.PLUGIN_MARKET)
     local_repo_keys = {repo.lower() for repo in local_repos}
     added_count = len([repo for repo in wiki_repos if repo.lower() not in local_repo_keys])
-    merged_repos = _merge_plugin_market_repos(local_repos, wiki_repos)
+    merged_repos = merge_plugin_market_repos(local_repos, wiki_repos)
     merged_value = ",".join(merged_repos)
 
     success, message = settings.update_setting("PLUGIN_MARKET", merged_value)
@@ -1002,7 +983,7 @@ async def get_logging(
 
             # 读取历史日志
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                log_path, mode="r", encoding="utf-8", errors="replace"
             ) as f:
                 # 优化大文件读取策略
                 if file_size > 100 * 1024:
@@ -1031,7 +1012,7 @@ async def get_logging(
 
             # 实时监听新日志
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                log_path, mode="r", encoding="utf-8", errors="replace"
             ) as f:
                 # 移动文件指针到文件末尾，继续监听新增内容
                 await f.seek(0, 2)
@@ -1070,7 +1051,7 @@ async def get_logging(
         try:
             # 使用 aiofiles 异步读取文件
             async with aiofiles.open(
-                log_path, mode="r", encoding="utf-8", errors="ignore"
+                log_path, mode="r", encoding="utf-8", errors="replace"
             ) as file:
                 text = await file.read()
             # 倒序输出
@@ -1121,33 +1102,64 @@ def ruletest(
     """
     过滤规则测试，规则类型 1-订阅，2-洗版，3-搜索
     """
+    metainfo = MetaInfo(title=title, subtitle=subtitle)
     torrent = schemas.TorrentInfo(
         title=title,
         description=subtitle,
     )
     # 查询规则组详情
     rulegroup = RuleHelper().get_rule_group(rulegroup_name)
+    result_data = {
+        "title": title,
+        "subtitle": subtitle,
+        "rulegroup_name": rulegroup_name,
+        "rulegroup": rulegroup.model_dump() if rulegroup else None,
+        "meta_info": metainfo.to_dict(),
+        "media_info": None,
+        "torrent_info": torrent.model_dump(),
+        "priority": None,
+        "matched": False,
+    }
     if not rulegroup:
         return schemas.Response(
-            success=False, message=f"过滤规则组 {rulegroup_name} 不存在！"
+            success=False,
+            message=f"过滤规则组 {rulegroup_name} 不存在！",
+            data=result_data,
         )
 
     # 根据标题查询媒体信息
     media_info = MediaChain().recognize_by_meta(
-        MetaInfo(title=title, subtitle=subtitle),
+        metainfo,
         obtain_images=False,
     )
+    result_data["media_info"] = media_info.to_dict() if media_info else None
     if not media_info:
-        return schemas.Response(success=False, message="未识别到媒体信息！")
+        return schemas.Response(
+            success=False,
+            message="未识别到媒体信息！",
+            data=result_data,
+        )
 
     # 过滤
     result = SearchChain().filter_torrents(
         rule_groups=[rulegroup.name], torrent_list=[torrent], mediainfo=media_info
     )
     if not result:
-        return schemas.Response(success=False, message="不符合过滤规则！")
+        return schemas.Response(
+            success=False,
+            message="不符合过滤规则！",
+            data=result_data,
+        )
+    result_data.update(
+        {
+            "matched": True,
+            "priority": 100 - result[0].pri_order + 1,
+            "torrent_info": result[0].model_dump(),
+        }
+    )
     return schemas.Response(
-        success=True, data={"priority": 100 - result[0].pri_order + 1}
+        success=True,
+        data=result_data,
     )
 
 
@@ -1271,13 +1283,20 @@ def modulelist(_: schemas.TokenPayload = Depends(verify_token)):
     """
     查询已加载的模块ID列表
     """
-    modules = [
-        {
-            "id": k,
-            "name": v.get_name(),
-        }
-        for k, v in ModuleManager().get_modules().items()
-    ]
+    modules = []
+    for module_id, module in ModuleManager().get_modules().items():
+        name = module.get_name()
+        modules.append(
+            {
+                "id": module_id,
+                "name": name,
+                "name_i18n": LocaleHelper.translate(
+                    f"system.modules.{module_id}.name",
+                    default=name,
+                ),
+                "name_key": f"system.modules.{module_id}.name",
+            }
+        )
     return schemas.Response(success=True, data={"modules": modules})
 
 
@@ -1299,12 +1318,7 @@ def restart_system(_: User = Depends(get_current_active_superuser)):
     """
     if not SystemHelper.can_restart():
         return schemas.Response(success=False, message="当前运行环境不支持重启操作！")
-    # 标识停止事件
-    global_vars.stop_system()
-    # 执行重启
     ret, msg = SystemHelper.restart()
-    if not ret:
-        global_vars.resume_system()
     return schemas.Response(success=ret, message=msg)
 
 
@@ -1322,11 +1336,7 @@ def upgrade_system(
     if not SystemHelper.can_restart():
         return schemas.Response(success=False, message="当前运行环境不支持升级操作！")
 
-    # 标识停止事件
-    global_vars.stop_system()
     ret, msg = SystemHelper.upgrade(mode=mode or "release")
-    if not ret:
-        global_vars.resume_system()
     return schemas.Response(success=ret, message=msg)
 
 

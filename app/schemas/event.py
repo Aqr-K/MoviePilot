@@ -94,6 +94,8 @@ class AgentLLMProviderEventData(ChainEventData):
     user_agent: Optional[str] = Field(default=None, description="OpenAI兼容接口User-Agent")
     use_proxy: Optional[bool] = Field(default=None, description="是否使用系统代理")
     thinking_level: Optional[str] = Field(default=None, description="思考模式级别")
+    api_protocol: Optional[str] = Field(default=None, description="OpenAI兼容接口API协议：auto/chat_completions/responses")
+    web_search_mode: Optional[str] = Field(default=None, description="联网搜索模式：local/builtin/auto/disabled")
     selected_provider_id: Optional[str] = Field(default=None, description="插件侧供应商ID")
     selected_provider_name: Optional[str] = Field(default=None, description="插件侧供应商名称")
     source: Optional[str] = Field(default=None, description="选择来源")
@@ -117,6 +119,11 @@ class AgentTokensUsageEventData(BaseEventData):
     input_tokens: int = Field(default=0, description="输入 tokens")
     output_tokens: int = Field(default=0, description="输出 tokens")
     total_tokens: int = Field(default=0, description="总 tokens")
+    cache_read_input_tokens: int = Field(default=0, description="从提示词缓存读取的输入 tokens")
+    cache_write_input_tokens: int = Field(default=0, description="写入提示词缓存的输入 tokens")
+    uncached_input_tokens: int = Field(default=0, description="未命中缓存的输入 tokens")
+    cache_hit_ratio: Optional[float] = Field(default=None, description="提示词缓存命中率")
+    cache_usage_available: bool = Field(default=False, description="供应商是否返回缓存用量明细")
     model_call_count: int = Field(default=0, description="模型调用次数")
     success: bool = Field(default=False, description="Agent 执行是否成功")
     error: Optional[str] = Field(default=None, description="失败原因")
@@ -412,6 +419,7 @@ class TransferInterceptEventData(ChainEventData):
     Attributes:
         # 输入参数
         fileitem (FileItem): 源文件
+        meta (Any): 元数据
         target_storage (str): 目标存储
         target_path (Path): 目标路径
         transfer_type (str): 整理方式（copy、move、link、softlink等）
@@ -425,6 +433,7 @@ class TransferInterceptEventData(ChainEventData):
 
     # 输入参数
     fileitem: FileItem = Field(..., description="源文件")
+    meta: Optional[Any] = Field(default=None, description="元数据")
     mediainfo: Any = Field(..., description="媒体信息")
     target_storage: str = Field(..., description="目标存储")
     target_path: Path = Field(..., description="目标路径")
@@ -592,7 +601,8 @@ class SubscribeEpisodesRefreshEventData(ChainEventData):
     """
     SubscribeEpisodesRefresh 事件的数据模型
 
-    主程序在推算订阅某季总集数时发出，携带按 TMDB 季集数算出的默认值，外部可据自身策略覆盖total_episode（如待定集数）
+    主程序在推算订阅某季总集数时发出，携带主程序本次识别到的 TMDB 当前季总集数；
+    外部可据自身策略向上覆盖 total_episode（如待定集数），低于 current_total_episode 的覆盖值会被主程序钳制。
 
     Attributes:
         # 输入参数
@@ -600,13 +610,13 @@ class SubscribeEpisodesRefreshEventData(ChainEventData):
         doubanid (Optional[str]): 豆瓣 ID
         season (Optional[int]): 季号
         mediainfo (Any): 媒体信息
-        current_total_episode (int): 主程序按 TMDB 季集数算出的默认总集数
+        current_total_episode (int): 主程序本次识别到的 TMDB 当前季总集数
         subscribe_id (Optional[int]): 订阅 ID；订阅创建场景下尚未入库，为空
         scene (Optional[str]): 触发场景，create/refresh/precheck
 
         # 输出参数
         updated (bool): 外部是否覆盖了总集数，默认 False
-        total_episode (Optional[int]): 覆盖后的总集数，仅在 updated=True 时生效
+        total_episode (Optional[int]): 覆盖后的总集数，仅在 updated=True 时生效；低于 current_total_episode 时由主程序钳制
         source (str): 覆盖来源
         reason (str): 覆盖原因
     """
@@ -614,17 +624,63 @@ class SubscribeEpisodesRefreshEventData(ChainEventData):
     # 输入参数
     tmdbid: Optional[int] = Field(default=None, description="TMDB ID")
     doubanid: Optional[str] = Field(default=None, description="豆瓣 ID")
+    bangumiid: Optional[int] = Field(default=None, description="Bangumi ID")
+    anilistid: Optional[int] = Field(default=None, description="AniList ID")
+    media_source: Optional[str] = Field(default=None, description="媒体数据源")
+    media_id: Optional[str] = Field(default=None, description="数据源原生 ID")
     season: Optional[int] = Field(default=None, description="季号")
     mediainfo: Any = Field(default=None, description="媒体信息")
-    current_total_episode: int = Field(default=0, description="按 TMDB 季集数算出的默认总集数")
+    current_total_episode: int = Field(default=0, description="主程序本次识别到的 TMDB 当前季总集数")
     subscribe_id: Optional[int] = Field(default=None, description="订阅 ID；创建场景为空")
     scene: Optional[str] = Field(default=None, description="触发场景：create/refresh/precheck")
 
     # 输出参数
     updated: bool = Field(default=False, description="外部是否覆盖了总集数")
-    total_episode: Optional[int] = Field(default=None, description="覆盖后的总集数")
+    total_episode: Optional[int] = Field(default=None, description="覆盖后的总集数；低于主程序本次识别到的 TMDB 当前季总集数时由主程序钳制")
     source: str = Field(default="未知来源", description="覆盖来源")
     reason: str = Field(default="", description="覆盖原因")
+
+
+class SubscribeModifiedEventData(BaseEventData):
+    """
+    SubscribeModified 广播事件数据。
+
+    主程序在订阅字段被普通更新、状态入口、重置或 Agent 更新后发出。payload
+    继续保持 dict 形态，scene 用于表达操作场景，fields 表达最终快照里的真实字段差异。
+    """
+
+    subscribe_id: int = Field(description="订阅 ID")
+    old_subscribe_info: Dict[str, Any] = Field(default_factory=dict, description="更新前订阅快照")
+    subscribe_info: Dict[str, Any] = Field(default_factory=dict, description="更新后订阅快照")
+    scene: str = Field(default="update", description="触发场景：update/status/reset/agent_update")
+    fields: List[str] = Field(default_factory=list, description="真实变更字段")
+
+    @model_validator(mode="after")
+    def compute_fields(self):
+        self.fields = self._diff_fields(self.old_subscribe_info, self.subscribe_info)
+        return self
+
+    @staticmethod
+    def _diff_fields(old_info: Dict[str, Any], new_info: Dict[str, Any]) -> List[str]:
+        """
+        按 old/new 快照并集计算真实字段差异；缺失 key 按 None 参与比较。
+        """
+        old_info = old_info or {}
+        new_info = new_info or {}
+        keys = set(old_info) | set(new_info)
+        return sorted(key for key in keys if old_info.get(key) != new_info.get(key))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        输出公开事件 payload，避免内部属性被未来扩展意外暴露。
+        """
+        return {
+            "subscribe_id": self.subscribe_id,
+            "old_subscribe_info": self.old_subscribe_info,
+            "subscribe_info": self.subscribe_info,
+            "scene": self.scene,
+            "fields": list(self.fields),
+        }
 
 
 class SubscribeCompletionCheckEventData(ChainEventData):

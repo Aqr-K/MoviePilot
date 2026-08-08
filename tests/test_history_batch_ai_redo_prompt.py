@@ -20,9 +20,14 @@ def test_batch_manual_redo_prompt_requires_plain_text_result():
         src_storage="local",
         dest="/media/a.mkv",
         dest_storage="local",
+        dest_fileitem=None,
         mode="copy",
         tmdbid=123,
         doubanid=None,
+        bangumiid=None,
+        anilistid=None,
+        media_source="themoviedb",
+        media_id="123",
         errmsg="识别失败",
     )
 

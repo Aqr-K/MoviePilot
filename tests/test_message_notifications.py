@@ -1,15 +1,18 @@
+import asyncio
 import json
 from unittest.mock import Mock
 
-from app.db import SessionFactory
-from app.db.message_oper import MessageOper
-from app.db.models.message import Message
+from app.api.endpoints.message import clear_notification_message, get_notification_message
 from app.chain import ChainBase
 from app.core.context import Context, MediaInfo, TorrentInfo
 from app.core.meta import MetaBase
+from app.db import AsyncSessionFactory, SessionFactory
+from app.db.message_oper import MessageOper
+from app.db.models.message import Message
+from app.db.systemconfig_oper import SystemConfigOper
 from app.helper.message import MessageHelper
-from app.schemas import Notification
-from app.schemas.types import MediaType, NotificationType
+from app.schemas import Notification, NotificationClearScope
+from app.schemas.types import MediaType, NotificationType, SystemConfigKey
 
 
 def _clear_messages() -> None:
@@ -19,6 +22,7 @@ def _clear_messages() -> None:
     with SessionFactory() as db:
         db.query(Message).delete()
         db.commit()
+    SystemConfigOper().delete(SystemConfigKey.NotificationClearBefore)
 
 
 def _reset_message_helper(helper: MessageHelper) -> None:
@@ -28,6 +32,15 @@ def _reset_message_helper(helper: MessageHelper) -> None:
     while helper.get() is not None:
         pass
     helper._recent_notification_keys.clear()
+
+
+def _set_message_time(title: str, reg_time: str) -> None:
+    """
+    调整测试消息时间，避免消息写入时的当前秒影响清理边界断言。
+    """
+    with SessionFactory() as db:
+        db.query(Message).filter(Message.title == title).update({"reg_time": reg_time})
+        db.commit()
 
 
 def test_notification_history_only_lists_sent_messages() -> None:
@@ -56,6 +69,48 @@ def test_web_message_history_returns_all_messages() -> None:
 
     messages = MessageOper().list_by_page(page=1, count=10)
     assert [message.title for message in messages] == ["普通通知", "用户消息", "智能体回复"]
+
+
+def test_notification_clear_marker_filters_history_across_requests() -> None:
+    """
+    通知清理时间写入后端后，后续通知历史查询应直接返回过滤后的结果。
+    """
+    _clear_messages()
+    oper = MessageOper()
+    oper.add(
+        title="旧系统通知",
+        text="任务失败",
+        action=1,
+        mtype=NotificationType.Other,
+    )
+    oper.add(
+        title="旧媒体通知",
+        text="影片入库",
+        image="https://example.com/poster.jpg",
+        action=1,
+    )
+    _set_message_time("旧系统通知", "2026-01-01 00:00:00")
+    _set_message_time("旧媒体通知", "2026-01-01 00:00:00")
+
+    asyncio.run(clear_notification_message(scope=NotificationClearScope.Media))
+
+    oper.add(
+        title="新媒体通知",
+        text="影片入库",
+        image="https://example.com/new.jpg",
+        action=1,
+    )
+    _set_message_time("新媒体通知", "2999-01-01 00:00:00")
+
+    async def _load_titles() -> list[str]:
+        """
+        通过异步接口读取通知标题。
+        """
+        async with AsyncSessionFactory() as db:
+            messages = await get_notification_message(db=db)
+        return [message.title for message in messages]
+
+    assert asyncio.run(_load_titles()) == ["新媒体通知", "旧系统通知"]
 
 
 def test_system_helper_message_only_enters_sse_queue() -> None:

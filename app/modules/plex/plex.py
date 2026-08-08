@@ -122,17 +122,17 @@ class Plex:
         return [f"{self._host.rstrip('/') + url}?X-Plex-Token={self._token}" for url in
                 list(poster_urls.keys())[:total_size]]
 
-    def get_librarys(self, hidden: Optional[bool] = False) -> List[schemas.MediaServerLibrary]:
+    def get_librarys(self, hidden: Optional[bool] = False) -> Optional[List[schemas.MediaServerLibrary]]:
         """
         获取媒体服务器所有媒体库列表
         """
         if not self._plex:
-            return []
+            return None
         try:
             self._libraries = self._plex.library.sections()
         except Exception as err:
             logger.error(f"获取媒体服务器所有媒体库列表出错：{str(err)}")
-            return []
+            return None
         libraries = []
         for library in self._libraries:
             if hidden and self._sync_libraries and "all" not in self._sync_libraries \
@@ -152,6 +152,7 @@ class Plex:
                     name=library.title,
                     path=library.locations,
                     type=library_type,
+                    item_count=self.get_items_count(library.key),
                     image_list=image_list,
                     link=f"{self._playhost or self._host}web/index.html#!/media/{self._plex.machineIdentifier}"
                          f"/com.plexapp.plugins.library?source={library.key}&X-Plex-Token={self._token}",
@@ -170,7 +171,7 @@ class Plex:
         sections = self._plex.library.sections()
         movie_count = tv_count = episode_count = 0
         # 媒体库白名单
-        allow_library = [str(lib.id) for lib in self.get_librarys(hidden=True)]
+        allow_library = [str(lib.id) for lib in self.get_librarys(hidden=True) or []]
         for sec in sections:
             if str(sec.key) not in allow_library:
                 continue
@@ -291,6 +292,31 @@ class Plex:
                 season_episodes[episode.seasonNumber] = []
             season_episodes[episode.seasonNumber].append(episode.index)
         return videos.key, season_episodes
+
+    def get_season_episode_ids(self, item_id: str, season: int) -> Dict[int, str]:
+        """
+        获取指定季的集号到媒体服务器条目 ID 映射
+        :param item_id: 剧集在 Plex 中的 ID / key
+        :param season: 季号
+        :return: {集号: episode_item_key}
+        """
+        if not self._plex or not item_id:
+            return {}
+        try:
+            videos = self.__fetch_item(item_id)
+            if not videos:
+                return {}
+            episode_ids: Dict[int, str] = {}
+            for episode in videos.episodes():
+                if episode.seasonNumber != int(season):
+                    continue
+                if episode.index is None or not episode.key:
+                    continue
+                episode_ids[int(episode.index)] = str(episode.key)
+            return episode_ids
+        except Exception as e:
+            logger.error(f"获取 Plex 季集条目 ID 出错：{str(e)}")
+            return {}
 
     def __search_show(self,
                       title: Optional[str] = None,
@@ -575,6 +601,22 @@ class Plex:
             user_state=user_state,
         )
 
+    def get_items_count(self, parent: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的媒体条目总数
+
+        :param parent: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if not parent or not self._plex:
+            return None
+        try:
+            section = self._plex.library.sectionByID(int(parent))
+            return int(section.totalSize) if section else None
+        except Exception as err:
+            logger.error(f"查询媒体库 {parent} 的媒体总数出错：{str(err)}")
+            return None
+
     def get_items(self, parent: Union[str, int], start_index: Optional[int] = 0, limit: Optional[int] = -1) \
             -> Generator[MediaServerItem | None, Any, None]:
         """
@@ -790,9 +832,12 @@ class Plex:
         获取继续观看的媒体
         """
         if not self._plex:
-            return []
+            return None
         # 媒体库白名单
-        allow_library = ",".join(map(str, (lib.id for lib in self.get_librarys(hidden=True))))
+        libraries = self.get_librarys(hidden=True)
+        if libraries is None:
+            return None
+        allow_library = ",".join(map(str, (lib.id for lib in libraries)))
         params = {"contentDirectoryID": allow_library}
         items = self._plex.fetchItems("/hubs/continueWatching/items",
                                       container_start=0,
@@ -829,7 +874,10 @@ class Plex:
         if not self._plex:
             return None
         # 请求参数（除黑名单）
-        allow_library = ",".join(map(str, (lib.id for lib in self.get_librarys(hidden=True))))
+        libraries = self.get_librarys(hidden=True)
+        if libraries is None:
+            return None
+        allow_library = ",".join(map(str, (lib.id for lib in libraries)))
         params = {
             "contentDirectoryID": allow_library,
             "count": num,

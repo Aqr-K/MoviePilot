@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from unittest.mock import patch
 
@@ -45,6 +47,7 @@ class _FakePage:
         self.clicks = []
         self.fills = []
         self.selects = []
+        self.close_thread_id = None
 
     def set_extra_http_headers(self, headers: dict[str, str]) -> None:
         """记录额外请求头。"""
@@ -124,6 +127,7 @@ class _FakePage:
 
     def close(self) -> None:
         """记录页面关闭状态。"""
+        self.close_thread_id = threading.get_ident()
         self.closed = True
 
 
@@ -133,6 +137,7 @@ class _FakeContext:
     def __init__(self, pages: Optional[list[_FakePage]] = None) -> None:
         self.pages = pages or [_FakePage()]
         self.closed = False
+        self.close_thread_id = None
 
     def new_page(self) -> _FakePage:
         """返回或创建模拟页面。"""
@@ -146,6 +151,7 @@ class _FakeContext:
 
     def close(self) -> None:
         """记录上下文关闭状态。"""
+        self.close_thread_id = threading.get_ident()
         self.closed = True
 
 
@@ -248,6 +254,55 @@ def test_browser_session_helper_reuses_page_within_session():
     assert first == second
     assert not page.closed
     assert not context.closed
+
+
+def test_browser_session_helper_runs_same_session_on_one_worker_thread():
+    """同一 session_key 的浏览器操作应固定在同一个工作线程。"""
+    page = _FakePage()
+    context = _FakeContext([page])
+    helper = BrowserSessionHelper()
+    caller_thread_ids = set()
+    session_thread_ids = []
+    barrier = threading.Barrier(2)
+
+    def _run_from_caller_thread() -> int:
+        """从外部调用线程进入同一个浏览器会话。"""
+        caller_thread_ids.add(threading.get_ident())
+        barrier.wait(timeout=1)
+        return helper.with_session(
+            "session-1",
+            lambda _session: threading.get_ident(),
+        )
+
+    with patch.object(BrowserSessionHelper, "_launch_context", return_value=context):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(_run_from_caller_thread),
+                executor.submit(_run_from_caller_thread),
+            ]
+            session_thread_ids = [future.result(timeout=1) for future in futures]
+
+    assert len(caller_thread_ids) == 2
+    assert len(set(session_thread_ids)) == 1
+    assert session_thread_ids[0] not in caller_thread_ids
+
+
+def test_browser_session_helper_closes_session_on_worker_thread():
+    """关闭会话时应在创建浏览器对象的工作线程内释放资源。"""
+    page = _FakePage()
+    context = _FakeContext([page])
+    helper = BrowserSessionHelper()
+
+    with patch.object(BrowserSessionHelper, "_launch_context", return_value=context):
+        session_thread_id = helper.with_session(
+            "session-1",
+            lambda _session: threading.get_ident(),
+        )
+        closed = BrowserSessionHelper.close_session("session-1")
+
+    assert closed is True
+    assert page.close_thread_id == session_thread_id
+    assert context.close_thread_id == session_thread_id
 
 
 def test_browse_webpage_returns_snapshot_with_refs_after_goto():

@@ -20,7 +20,15 @@ def normalize_history_ids(history_ids: list[int]) -> list[int]:
 def build_manual_redo_template_context(history: Any) -> dict[str, int | str]:
     """仅负责把整理历史对象映射成 System Tasks 需要的模板变量。"""
     src_fileitem = history.src_fileitem or {}
+    dest_fileitem = history.dest_fileitem or {}
     source_path = src_fileitem.get("path") if isinstance(src_fileitem, dict) else ""
+    source_storage = history.src_storage or "local"
+    # 移动模式下整理成功后源文件已不存在，改以目的文件作为重新整理的输入
+    if history.status and history.mode == "move":
+        dest_path = dest_fileitem.get("path") if isinstance(dest_fileitem, dict) else ""
+        if dest_path:
+            source_path = dest_path
+            source_storage = history.dest_storage or "local"
     source_path = source_path or history.src or ""
     season_episode = f"{history.seasons or ''}{history.episodes or ''}".strip()
     return {
@@ -32,12 +40,16 @@ def build_manual_redo_template_context(history: Any) -> dict[str, int | str]:
         "year": history.year or "unknown",
         "season_episode": season_episode or "unknown",
         "source_path": source_path or "unknown",
-        "source_storage": history.src_storage or "local",
+        "source_storage": source_storage,
         "destination_path": history.dest or "unknown",
         "destination_storage": history.dest_storage or "unknown",
         "transfer_mode": history.mode or "unknown",
         "tmdbid": history.tmdbid or "none",
         "doubanid": history.doubanid or "none",
+        "bangumiid": history.bangumiid or "none",
+        "anilistid": history.anilistid or "none",
+        "media_source": history.media_source or "none",
+        "media_id": history.media_id or "none",
         "error_message": history.errmsg or "none",
     }
 
@@ -61,6 +73,10 @@ def format_manual_redo_record_context(history: Any) -> str:
             f"- Transfer mode: {context['transfer_mode']}",
             f"- Current TMDB ID: {context['tmdbid']}",
             f"- Current Douban ID: {context['doubanid']}",
+            f"- Current Bangumi ID: {context['bangumiid']}",
+            f"- Current AniList ID: {context['anilistid']}",
+            f"- Current media source: {context['media_source']}",
+            f"- Current source-native ID: {context['media_id']}",
             f"- Error message: {context['error_message']}",
         ]
     )

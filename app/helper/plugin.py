@@ -5,13 +5,14 @@ import io
 import json
 import shutil
 import site
+import stat
 import sys
 import tempfile
 import threading
 import time
 import traceback
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, List, Optional, Tuple, Set, Callable, Awaitable
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
@@ -29,6 +30,7 @@ from requests import Response
 from app.core.cache import cached, is_fresh
 from app.core.config import settings
 from app.db.systemconfig_oper import SystemConfigOper
+from app.helper.package import PackageInstallRequest, build_package_install_strategies
 from app.log import logger
 from app.schemas.types import SystemConfigKey
 from app.utils.http import RequestUtils, AsyncRequestUtils
@@ -262,7 +264,7 @@ class PluginHelper(metaclass=WeakSingleton):
         if not package_file.exists():
             return {}
         try:
-            content = package_file.read_text(encoding="utf-8")
+            content = package_file.read_text(encoding="utf-8", errors="replace")
             payload = json.loads(content)
         except Exception as e:
             logger.warn(f"读取本地插件包 {package_file} 失败：{e}")
@@ -786,7 +788,7 @@ class PluginHelper(metaclass=WeakSingleton):
                     source_dir,
                     dest_dir,
                     dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "node_modules")
                 )
                 return True, ""
             except Exception as e:
@@ -1044,19 +1046,6 @@ class PluginHelper(metaclass=WeakSingleton):
         return list(dict.fromkeys(wheels_dirs))
 
     @staticmethod
-    def __build_pip_install_strategies(base_cmd: List[str]) -> List[Tuple[str, List[str]]]:
-        """
-        为 pip 命令构建统一的网络降级策略，避免不同安装路径各自拼接参数。
-        """
-        strategies = []
-        if settings.PIP_PROXY:
-            strategies.append(("镜像站", base_cmd + ["-i", settings.PIP_PROXY]))
-        if settings.PROXY_HOST:
-            strategies.append(("代理", base_cmd + ["--proxy", settings.PROXY_HOST]))
-        strategies.append(("直连", base_cmd))
-        return strategies
-
-    @staticmethod
     def __build_runtime_pip_command(*args: str) -> List[str]:
         """
         优先使用当前解释器同目录的 pip 入口，以便 uv-pip-compat 能接管兼容命令。
@@ -1117,7 +1106,7 @@ class PluginHelper(metaclass=WeakSingleton):
             return roots
 
         try:
-            with open(requirements_file, "r", encoding="utf-8") as f:
+            with open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line or line.startswith("#"):
@@ -1319,7 +1308,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         conflicts = []
         try:
-            with open(requirements_file, "r", encoding="utf-8") as f:
+            with open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line or line.startswith("#"):
@@ -1419,19 +1408,85 @@ class PluginHelper(metaclass=WeakSingleton):
         importlib.invalidate_caches()
 
     @classmethod
-    def __run_runtime_healthcheck(cls) -> Tuple[bool, str]:
+    def __build_package_install_request(
+            cls,
+            requirements_file: Path,
+            find_links_dirs: Optional[List[Path]] = None,
+            constraints_file: Optional[Path] = None,
+            purpose: str = "plugin",
+    ) -> PackageInstallRequest:
         """
-        安装完成后立即执行运行环境自检，尽量在插件加载前发现依赖图已被污染。
+        将 MoviePilot 运行配置转换为 pip/uv 安装请求，统一缓存、镜像和代理语义。
+        """
+        return PackageInstallRequest(
+            requirements_file=requirements_file,
+            python_bin=Path(sys.executable),
+            find_links_dirs=find_links_dirs or [],
+            constraints_file=constraints_file,
+            config_dir=settings.CONFIG_PATH,
+            package_cache_root=settings.PACKAGE_CACHE_PATH,
+            pip_index_url=settings.PIP_PROXY or None,
+            proxy_url=settings.PROXY_HOST or None,
+            purpose=purpose,
+        )
+
+    @classmethod
+    def __repair_if_runtime_broken(
+            cls,
+            snapshot_file: Optional[Path] = None,
+            baseline_health: Optional[Dict[str, Tuple[bool, str]]] = None
+    ) -> Tuple[bool, str]:
+        """
+        安装失败后检查主运行环境；若相对安装前新增异常，先恢复主程序依赖再返回。
+        """
+        current_health = cls.__run_runtime_healthcheck()
+        health_message = cls.__runtime_health_regression_message(
+            baseline_health or {},
+            current_health
+        )
+        if not health_message:
+            return True, ""
+        repair_ok, repair_message = cls.__repair_main_runtime_dependencies(snapshot_file)
+        if not repair_ok:
+            return False, f"插件依赖安装失败后主运行环境异常，且恢复失败：{health_message}; {repair_message}"
+        restored_health = cls.__run_runtime_healthcheck()
+        restored_message = cls.__runtime_health_regression_message(
+            baseline_health or {},
+            restored_health
+        )
+        if restored_message:
+            return False, f"插件依赖安装失败后主运行环境异常，恢复后仍异常：{restored_message}"
+        return True, "主运行环境已恢复"
+
+    @classmethod
+    def __run_runtime_healthcheck(cls) -> Dict[str, Tuple[bool, str]]:
+        """
+        执行全部运行环境自检并返回逐项结果，避免前一项失败遮蔽后续异常。
         """
         checks = [
             ("pip check", cls.__build_runtime_pip_command("check")),
             ("核心依赖导入检查", [sys.executable, "-c", cls._runtime_import_probe]),
         ]
+        health_snapshot = {}
         for check_name, command in checks:
             success, message = SystemUtils.execute_with_subprocess(command)
-            if not success:
-                return False, f"{check_name}失败：{message}"
-        return True, ""
+            health_snapshot[check_name] = (success, message)
+        return health_snapshot
+
+    @staticmethod
+    def __runtime_health_regression_message(
+            baseline_health: Dict[str, Tuple[bool, str]],
+            current_health: Dict[str, Tuple[bool, str]]
+    ) -> str:
+        """
+        汇总相对基线从正常变为异常的检查项，不解析第三方工具的错误文本。
+        """
+        regressions = []
+        for check_name, (success, message) in current_health.items():
+            baseline_success = baseline_health.get(check_name, (True, ""))[0]
+            if baseline_success and not success:
+                regressions.append(f"{check_name}失败：{message}")
+        return "；".join(regressions)
 
     @classmethod
     def __repair_main_runtime_dependencies(cls, snapshot_file: Optional[Path] = None) -> Tuple[bool, str]:
@@ -1450,15 +1505,19 @@ class PluginHelper(metaclass=WeakSingleton):
             return False, f"恢复依赖文件不存在：{repair_target}"
 
         last_error = ""
-        base_cmd = [sys.executable, "-m", "pip", "install", "-r", str(repair_target)]
-        for strategy_name, pip_command in cls.__build_pip_install_strategies(base_cmd):
-            logger.warning(f"[PIP] 运行环境异常，尝试使用策略：{strategy_name} 恢复{repair_desc}")
-            success, message = SystemUtils.execute_with_subprocess(pip_command)
+        request = cls.__build_package_install_request(repair_target, purpose="runtime-repair")
+        for strategy in build_package_install_strategies(request):
+            logger.warning(f"[PIP] 运行环境异常，尝试使用策略：{strategy.strategy_name} 恢复{repair_desc}")
+            success, message = SystemUtils.execute_with_subprocess(
+                strategy.command,
+                env=strategy.env,
+                safe_command=strategy.safe_log_command,
+            )
             if success:
                 cls.__refresh_import_system()
                 return True, message
             last_error = message
-            logger.error(f"[PIP] 使用策略：{strategy_name} 恢复{repair_desc}失败：{message}")
+            logger.error(f"[PIP] 使用策略：{strategy.strategy_name} 恢复{repair_desc}失败：{message}")
         return False, last_error or f"恢复{repair_desc}失败"
 
     @classmethod
@@ -1491,11 +1550,9 @@ class PluginHelper(metaclass=WeakSingleton):
             seen_dirs.add(candidate_key)
             resolved_dirs.append(candidate_path)
 
-        find_links_option = []
         if resolved_dirs:
             for local_wheels_dir in resolved_dirs:
                 logger.debug(f"[PIP] 发现可用的 wheels 目录: {local_wheels_dir}，将优先从本地安装。")
-                find_links_option.extend(["--find-links", str(local_wheels_dir)])
         else:
             logger.debug(f"[PIP] 未发现可用的 wheels 目录，将仅使用在线源。")
 
@@ -1514,32 +1571,55 @@ class PluginHelper(metaclass=WeakSingleton):
                 logger.error(f"[PIP] 创建运行环境约束文件失败：{e}")
                 return False, f"创建运行环境约束文件失败：{e}"
 
-        base_cmd = [sys.executable, "-m", "pip", "install"] + find_links_option
-        if constraints_file:
-            # 这里固定约束到主程序依赖的当前版本，避免共享 venv 被插件改写核心运行环境。
-            base_cmd.extend(["-c", str(constraints_file)])
-        base_cmd.extend(["-r", str(requirements_file)])
-        strategies = cls.__build_pip_install_strategies(base_cmd)
+        request = cls.__build_package_install_request(
+            requirements_file,
+            find_links_dirs=resolved_dirs,
+            constraints_file=constraints_file,
+            purpose="plugin",
+        )
+        strategies = build_package_install_strategies(request)
 
         try:
             # pip 会修改当前解释器的 site-packages，安装与缓存刷新必须串行，避免运行态模块被并发安装窗口污染。
             with cls._pip_install_lock:
                 loaded_modules_before_install = set(sys.modules.keys())
+                baseline_health = cls.__run_runtime_healthcheck()
+                baseline_health_message = cls.__runtime_health_regression_message({}, baseline_health)
+                if baseline_health_message:
+                    logger.warning(
+                        f"[PIP] 安装前运行环境已存在异常，本次安装仅拦截新增异常：{baseline_health_message}"
+                    )
                 # 遍历策略进行安装
-                for strategy_name, pip_command in strategies:
-                    logger.debug(f"[PIP] 尝试使用策略：{strategy_name} 安装依赖，命令：{' '.join(pip_command)}")
-                    success, message = SystemUtils.execute_with_subprocess(pip_command)
+                last_error = ""
+                for strategy in strategies:
+                    logger.debug(
+                        f"[PIP] 尝试使用策略：{strategy.strategy_name} 安装依赖，"
+                        f"命令：{' '.join(strategy.safe_log_command)}"
+                    )
+                    success, message = SystemUtils.execute_with_subprocess(
+                        strategy.command,
+                        env=strategy.env,
+                        safe_command=strategy.safe_log_command,
+                    )
                     if success:
-                        logger.debug(f"[PIP] 策略：{strategy_name} 安装依赖成功，输出：{message}")
-                        health_ok, health_message = cls.__run_runtime_healthcheck()
-                        if not health_ok:
+                        logger.debug(f"[PIP] 策略：{strategy.strategy_name} 安装依赖成功，输出：{message}")
+                        current_health = cls.__run_runtime_healthcheck()
+                        health_message = cls.__runtime_health_regression_message(
+                            baseline_health,
+                            current_health
+                        )
+                        if health_message:
                             logger.error(f"[PIP] 依赖安装后运行环境自检失败：{health_message}")
                             repair_ok, repair_message = cls.__repair_main_runtime_dependencies(
                                 constraints_file if protected_packages else None
                             )
                             if repair_ok:
-                                health_restored, restored_message = cls.__run_runtime_healthcheck()
-                                if health_restored:
+                                restored_health = cls.__run_runtime_healthcheck()
+                                restored_message = cls.__runtime_health_regression_message(
+                                    baseline_health,
+                                    restored_health
+                                )
+                                if not restored_message:
                                     cls.__refresh_import_system()
                                     return False, (
                                         f"依赖安装后运行环境自检失败，已自动恢复主程序依赖：{health_message}"
@@ -1556,17 +1636,36 @@ class PluginHelper(metaclass=WeakSingleton):
                                 f"{repair_message}"
                             )
 
+                        remaining_health_message = cls.__runtime_health_regression_message({}, current_health)
+                        if remaining_health_message:
+                            logger.warning(
+                                f"[PIP] 依赖安装成功，安装前已有的运行环境异常仍然存在："
+                                f"{remaining_health_message}"
+                            )
+
                         cls.__refresh_import_system()
                         loaded_modules_after_install = set(sys.modules.keys())
                         loaded_modules_during_install = loaded_modules_after_install - loaded_modules_before_install
                         logger.debug(f"[PIP] 已刷新导入系统，新加载的模块: {loaded_modules_during_install}")
                         return True, message
 
-                    logger.error(f"[PIP] 策略：{strategy_name} 安装依赖失败，错误信息：{message}")
+                    last_error = message
+                    repair_ok, repair_message = cls.__repair_if_runtime_broken(
+                        constraints_file if protected_packages else None,
+                        baseline_health
+                    )
+                    logger.error(f"[PIP] 策略：{strategy.strategy_name} 安装依赖失败，错误信息：{message}")
+                    if not repair_ok or repair_message:
+                        return False, (
+                            f"策略 {strategy.strategy_name} 安装依赖失败：{message}；"
+                            f"{repair_message}"
+                        )
         finally:
             if constraints_file:
                 constraints_file.unlink(missing_ok=True)
 
+        if last_error:
+            return False, f"[PIP] 所有策略均安装依赖失败：{last_error}"
         return False, "[PIP] 所有策略均安装依赖失败，请检查网络连接、PIP 配置或插件依赖约束"
 
     @staticmethod
@@ -1704,6 +1803,93 @@ class PluginHelper(metaclass=WeakSingleton):
         self.refresh_persistent_plugin_backup(pid)
         return True, ""
 
+    @staticmethod
+    def __validate_release_zip_name(name: str) -> None:
+        """
+        校验 release zip 成员名在 POSIX 与 Windows 语义下都只能表示相对路径。
+        """
+        if not name:
+            raise ValueError("非法 Release 压缩包成员：成员名为空")
+        if "\x00" in name:
+            raise ValueError(f"非法 Release 压缩包成员：{name}")
+        if "\\" in name:
+            raise ValueError(f"非法 Release 压缩包成员：{name}")
+
+        posix_path = PurePosixPath(name)
+        windows_path = PureWindowsPath(name)
+        if (
+            name.startswith("//")
+            or posix_path.is_absolute()
+            or windows_path.is_absolute()
+            or windows_path.drive
+        ):
+            raise ValueError(f"非法 Release 压缩包成员：{name}")
+
+        parts = [part for part in posix_path.parts if part not in ("", ".")]
+        if not parts:
+            raise ValueError(f"非法 Release 压缩包成员：{name}")
+        if ".." in parts:
+            raise ValueError(f"非法 Release 压缩包成员：{name}")
+
+    @staticmethod
+    def __validate_release_zip_type(info: zipfile.ZipInfo) -> None:
+        """
+        release zip 只接受普通文件和目录，避免归档内的符号链接或设备文件影响安装边界。
+        """
+        mode = info.external_attr >> 16
+        file_type = stat.S_IFMT(mode)
+        if not file_type:
+            return
+        if stat.S_ISREG(mode) or stat.S_ISDIR(mode):
+            return
+        raise ValueError(f"非法 Release 压缩包成员：{info.filename}")
+
+    @staticmethod
+    def __get_release_zip_base_prefix(infos: List[zipfile.ZipInfo]) -> str:
+        """
+        识别 release zip 的单一顶层目录，用于保持插件包根目录剥离行为。
+        """
+        names = [info.filename for info in infos]
+        names_with_slash = [name for name in names if "/" in name]
+        if names_with_slash and len(names_with_slash) == len(names):
+            first_seg = names_with_slash[0].split("/", 1)[0]
+            if first_seg and all(name.startswith(first_seg + "/") for name in names):
+                return first_seg + "/"
+        return ""
+
+    @classmethod
+    def __iter_release_zip_targets(
+        cls, zf: zipfile.ZipFile, dest_base: Path
+    ) -> List[Tuple[zipfile.ZipInfo, Path, bool]]:
+        """
+        将 release zip 成员解析为安装目标路径，并保证目标路径不会逃逸插件目录。
+        """
+        infos = zf.infolist()
+        for info in infos:
+            cls.__validate_release_zip_type(info)
+            cls.__validate_release_zip_name(info.filename)
+
+        base_prefix = cls.__get_release_zip_base_prefix(infos)
+        dest_root = dest_base.resolve()
+        targets = []
+        for info in infos:
+            raw_name = info.filename
+            rel_name = raw_name[len(base_prefix):] if base_prefix else raw_name
+            if not rel_name:
+                if base_prefix and raw_name == base_prefix:
+                    continue
+                raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
+
+            cls.__validate_release_zip_name(rel_name)
+            rel_parts = [part for part in PurePosixPath(rel_name).parts if part not in ("", ".")]
+            if not rel_parts:
+                raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
+            dest_path = (dest_root / Path(*rel_parts)).resolve()
+            if not SystemUtils.is_within(dest_root, dest_path):
+                raise ValueError(f"非法 Release 压缩包成员：{raw_name}")
+            targets.append((info, dest_path, info.is_dir()))
+        return targets
+
     def __install_from_release(self, pid: str, user_repo: str, release_tag: str) -> Tuple[bool, str]:
         """
         通过 GitHub Release 资产文件安装插件。
@@ -1747,18 +1933,22 @@ class PluginHelper(metaclass=WeakSingleton):
 
         try:
             with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
+                infos = zf.infolist()
+                if not infos:
+                    return False, "压缩包内容为空"
                 dest_base = Path(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
-                planned, err = plan_release_zip_extraction(zf.namelist(), dest_base)
-                if err:
-                    return False, err
-                for name, rel_path in planned:
-                    if rel_path.endswith('/'):
-                        (dest_base / rel_path.rstrip('/')).mkdir(parents=True, exist_ok=True)
+                targets = self.__iter_release_zip_targets(zf, dest_base)
+                wrote_any = False
+                for info, dest_path, is_dir in targets:
+                    if is_dir:
+                        dest_path.mkdir(parents=True, exist_ok=True)
                         continue
-                    dest_path = dest_base / rel_path
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(name, 'r') as src, open(dest_path, 'wb') as dst:
+                    with zf.open(info, 'r') as src, open(dest_path, 'wb') as dst:
                         dst.write(src.read())
+                    wrote_any = True
+                if not wrote_any:
+                    return False, "压缩包中无可写入文件"
             return True, ""
         except Exception as e:
             logger.error(f"解压 Release 压缩包失败：{e}")
@@ -1905,7 +2095,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         dependencies = {}
         try:
-            with open(requirements_file, "r", encoding="utf-8") as f:
+            with open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#'):
@@ -2105,34 +2295,47 @@ class PluginHelper(metaclass=WeakSingleton):
         normal_task_key = (loop, normalized_repo_url, False)
         force_task_key = (loop, normalized_repo_url, True)
         with self._release_task_lock:
-            force_task = self._release_tasks.get(force_task_key)
-            if force_task and not force_task.done():
-                task_key = force_task_key
-                task = force_task
-            elif is_fresh():
-                pending_normal_task = self._release_tasks.get(normal_task_key)
-                if pending_normal_task and pending_normal_task.done():
-                    pending_normal_task = None
-                task_key = force_task_key
-                task = loop.create_task(
-                    self._async_refresh_plugin_repo_releases(normalized_repo_url, pending_normal_task)
-                )
-                self._release_tasks[task_key] = task
-                task.add_done_callback(
-                    lambda completed_task: self._remove_release_task(task_key, completed_task)
-                )
+            if is_fresh():
+                force_task = self._release_tasks.get(force_task_key)
+                if force_task and not force_task.done():
+                    task_key = force_task_key
+                    task = force_task
+                else:
+                    pending_normal_task = self._release_tasks.get(normal_task_key)
+                    if pending_normal_task and pending_normal_task.done():
+                        pending_normal_task = None
+                    task_key = force_task_key
+                    task = loop.create_task(
+                        self._async_refresh_plugin_repo_releases(normalized_repo_url, pending_normal_task)
+                    )
+                    self._release_tasks[task_key] = task
+                    task.add_done_callback(
+                        lambda completed_task: self._remove_release_task(task_key, completed_task)
+                    )
             else:
                 task_key = normal_task_key
-                task = self._release_tasks.get(task_key)
-                if task is None or task.done():
+                pending_normal_task = self._release_tasks.get(normal_task_key)
+                if pending_normal_task is None or pending_normal_task.done():
                     task = loop.create_task(self._async_get_plugin_repo_releases(normalized_repo_url))
                     self._release_tasks[task_key] = task
                     task.add_done_callback(
                         lambda completed_task: self._remove_release_task(task_key, completed_task)
                     )
+                else:
+                    task = pending_normal_task
 
         payload = await asyncio.shield(task)
         return self.__parse_plugin_release_response(pid, payload)
+
+    async def async_has_plugin_release_cache(self, repo_url: str) -> bool:
+        """
+        判断指定仓库的 Release 列表缓存是否已经存在。
+        """
+        if not repo_url:
+            return False
+        return await self._async_get_plugin_repo_releases.cache_exists(
+            self, repo_url.rstrip("/")
+        )
 
     async def _async_refresh_plugin_repo_releases(
         self,
@@ -2455,7 +2658,7 @@ class PluginHelper(metaclass=WeakSingleton):
         """
         dependencies = {}
         try:
-            async with aiofiles.open(requirements_file, "r", encoding="utf-8") as f:
+            async with aiofiles.open(requirements_file, "r", encoding="utf-8", errors="replace") as f:
                 async for line in f:
                     line = str(line).strip()
                     if line and not line.startswith('#'):
@@ -2749,22 +2952,25 @@ class PluginHelper(metaclass=WeakSingleton):
 
         try:
             with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
-                dest_base = AsyncPath(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
-                planned, err = plan_release_zip_extraction(
-                    zf.namelist(), Path(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
-                )
-                if err:
-                    return False, err
-                for name, rel_path in planned:
-                    if rel_path.endswith('/'):
-                        await (dest_base / rel_path.rstrip('/')).mkdir(parents=True, exist_ok=True)
+                infos = zf.infolist()
+                if not infos:
+                    return False, "压缩包内容为空"
+                dest_base = Path(settings.ROOT_PATH) / "app" / "plugins" / pid.lower()
+                targets = self.__iter_release_zip_targets(zf, dest_base)
+                wrote_any = False
+                for info, dest_path, is_dir in targets:
+                    async_dest_path = AsyncPath(dest_path)
+                    if is_dir:
+                        await async_dest_path.mkdir(parents=True, exist_ok=True)
                         continue
-                    dest_path = dest_base / rel_path
-                    await dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(name, 'r') as src:
+                    await async_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info, 'r') as src:
                         data = src.read()
                     async with aiofiles.open(dest_path, 'wb') as dst:
                         await dst.write(data)
+                    wrote_any = True
+                if not wrote_any:
+                    return False, "压缩包中无可写入文件"
             return True, ""
         except Exception as e:
             logger.error(f"解压 Release 压缩包失败：{e}")

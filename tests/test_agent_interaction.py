@@ -8,6 +8,7 @@ from app.agent.tools.impl.ask_user_choice import (
     AskUserChoiceTool,
     UserChoiceOptionInput,
 )
+from app.agent.tools.impl.send_message import SendMessageTool
 from app.helper.interaction import (
     AgentInteractionOption,
     agent_interaction_manager,
@@ -37,6 +38,18 @@ class TestAgentInteraction(unittest.TestCase):
         self.assertIn("terminal interaction tool", telegram_prompt)
         self.assertIn("do not write a final text reply after it", telegram_prompt)
         self.assertNotIn("ask_user_choice", wechat_prompt)
+
+    def test_prompt_does_not_inject_send_message_html_hint(self):
+        telegram_prompt = prompt_manager.get_agent_prompt(
+            channel=MessageChannel.Telegram.value
+        )
+        wechat_prompt = prompt_manager.get_agent_prompt(
+            channel=MessageChannel.Wechat.value
+        )
+
+        self.assertNotIn("parse_mode=\"HTML\"", telegram_prompt)
+        self.assertNotIn("Telegram-supported HTML tags", telegram_prompt)
+        self.assertNotIn("parse_mode=\"HTML\"", wechat_prompt)
 
     def test_factory_injects_choice_tool_only_for_button_channels(self):
         with patch(
@@ -76,6 +89,13 @@ class TestAgentInteraction(unittest.TestCase):
         self.assertTrue(tool.return_direct)
         self.assertIn("terminal interaction tool", tool.description)
 
+    def test_send_message_tool_returns_direct_after_sending_message(self):
+        """发送消息工具发出用户可见消息后应结束当前 Agent 轮次。"""
+        tool = SendMessageTool(session_id="session-1", user_id="10001")
+
+        self.assertTrue(tool.return_direct)
+        self.assertIn("terminal response tool", tool.description)
+
     def test_choice_tool_sends_buttons_and_registers_pending_request(self):
         tool = AskUserChoiceTool(session_id="session-1", user_id="10001")
         tool.set_message_attr(
@@ -105,6 +125,7 @@ class TestAgentInteraction(unittest.TestCase):
         notification = async_post_message.await_args.args[0]
         self.assertEqual(notification.text, "请选择要执行的操作")
         self.assertEqual(sum(len(row) for row in notification.buttons), 2)
+        self.assertNotIn("description", notification.buttons[0][0])
 
         callback_data = notification.buttons[0][0]["callback_data"]
         _, _, request_id, option_index = callback_data.split(":")

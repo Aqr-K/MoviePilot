@@ -49,14 +49,14 @@ class MetaVideo(MetaBase):
     _part_re = r"(^PART[0-9ABI]{0,2}$|^CD[0-9]{0,2}$|^DVD[0-9]{0,2}$|^DISK[0-9]{0,2}$|^DISC[0-9]{0,2}$)"
     _roman_numerals = r"^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$"
     _source_re = r"^BLURAY$|^HDTV$|^UHDTV$|^HDDVD$|^WEBRIP$|^DVDRIP$|^BDRIP$|^BLU$|^WEB$|^BD$|^HDRip$|^REMUX$|^UHD$"
-    _effect_re = r"^SDR$|^HDR\d*$|^DOLBY$|^DOVI$|^DV$|^3D$|^REPACK$|^HLG$|^HDR10(\+|Plus)$|^HDR10P$|^VIVID$|^EDR$|^HQ$"
+    _effect_re = r"^SDR$|^HDR\d*$|^HDRVIVID$|^DOLBY$|^DOVI$|^DV$|^3D$|^REPACK$|^HLG$|^HDR10(\+|Plus)$|^HDR10P$|^VIVID$|^EDR$|^HQ$"
     _resources_type_re = r"%s|%s" % (_source_re, _effect_re)
     _name_no_begin_re = r"^[\[【].+?[\]】]"
     _name_no_chinese_re = r".*版|.*字幕"
     _name_se_words = ['共', '第', '季', '集', '话', '話', '期']
     _name_movie_words = ['剧场版', '劇場版', '电影版', '電影版']
     _name_nostring_re = r"^PTS|^JADE|^AOD|^CHC|^[A-Z]{1,4}TV[\-0-9UVHDK]*" \
-                        r"|\d{1,2}th|\d{1,2}bit|IMAX|^3D|\s+3D|XXX|\s+DC$" \
+                        r"|\d{1,2}th|\d{1,2}bit|IMAX|^3D|\s+3D|\s+DC$" \
                         r"|[第\s共]+[0-9一二三四五六七八九十\-\s]+季" \
                         r"|[第\s共]+[0-9一二三四五六七八九十百零\-\s]+[集话話]" \
                         r"|连载|日剧|美剧|电视剧|动画片|动漫|欧美|西德|日韩|超高清|高清|无水印|下载|蓝光|翡翠台|梦幻天堂·龙网|★?\d*月?新番" \
@@ -251,7 +251,7 @@ class MetaVideo(MetaBase):
         if name.isdecimal() \
                 and int(name) < 1800 \
                 and not self.year \
-                and not self.begin_season \
+                and self.begin_season is None \
                 and not self.resource_pix \
                 and not self.resource_type \
                 and not self.audio_encode \
@@ -259,7 +259,7 @@ class MetaVideo(MetaBase):
             if self.begin_episode is None:
                 self.begin_episode = int(name)
                 name = None
-            elif self.is_in_episode(int(name)) and not self.begin_season:
+            elif self.is_in_episode(int(name)) and self.begin_season is None:
                 name = None
         return name
 
@@ -366,7 +366,7 @@ class MetaVideo(MetaBase):
         if not self.name:
             return
         if not self.year \
-                and not self.begin_season \
+                and self.begin_season is None \
                 and not self.begin_episode \
                 and not self.resource_pix \
                 and not self.resource_type:
@@ -690,7 +690,7 @@ class MetaVideo(MetaBase):
         if not self.year \
                 and not self.resource_pix \
                 and not self.resource_type \
-                and not self.begin_season \
+                and self.begin_season is None \
                 and not self.begin_episode:
             return
         re_res = self._video_encode_pattern.search(token)
@@ -738,7 +738,7 @@ class MetaVideo(MetaBase):
         if not self.year \
                 and not self.resource_pix \
                 and not self.resource_type \
-                and not self.begin_season \
+                and self.begin_season is None \
                 and not self.begin_episode:
             return
         video_bit = self.extract_video_bit(token)
@@ -759,7 +759,7 @@ class MetaVideo(MetaBase):
         if not self.year \
                 and not self.resource_pix \
                 and not self.resource_type \
-                and not self.begin_season \
+                and self.begin_season is None \
                 and not self.begin_episode:
             return
         re_res = self._audio_encode_pattern.search(token)

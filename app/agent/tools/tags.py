@@ -25,6 +25,7 @@ class ToolTag(str, Enum):
     Plugin = "plugin"
     Workflow = "workflow"
     Scheduler = "scheduler"
+    AgentTask = "agent_task"
     File = "file"
     Directory = "directory"
     Web = "web"
@@ -34,6 +35,7 @@ class ToolTag(str, Enum):
     SlashCommand = "slash_command"
     Recommendation = "recommendation"
     Metadata = "metadata"
+    Skill = "skill"
 
 
 __all__ = ["ToolTag"]

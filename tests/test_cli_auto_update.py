@@ -32,10 +32,12 @@ def load_cli_module():
             ROOT_PATH=root,
             FRONTEND_PATH=str(root / "public"),
             CONFIG_PATH=root / "config",
+            PACKAGE_CACHE_PATH=root / "custom-package-cache",
             HOST="127.0.0.1",
             PORT=3001,
             NGINX_PORT=3000,
             PROXY_HOST="",
+            PIP_PROXY="",
             GITHUB_TOKEN="",
             PROXY={},
             REPO_GITHUB_HEADERS=lambda _repo: {},
@@ -110,3 +112,48 @@ class CliAutoUpdateTests(unittest.TestCase):
         command = run_mock.call_args.args[0]
         self.assertEqual(command[1:5], [str(module._repo_root() / "scripts" / "local_setup.py"), "update", "all", "--ref"])
         self.assertNotIn("--frontend-version", command)
+
+    def test_best_effort_auto_update_passes_package_env_and_overrides_proxy(self):
+        module = load_cli_module()
+        module.settings.PROXY_HOST = "http://proxy.example:7890"
+        module.settings.PIP_PROXY = "https://mirror.example/simple"
+        run_result = SimpleNamespace(returncode=0, stdout="ok")
+
+        with patch.dict(module.os.environ, {"HTTPS_PROXY": "http://old.example:8080"}, clear=False), patch.object(
+            module, "_auto_update_mode", return_value="release"
+        ), patch.object(module, "_resolve_auto_update_targets", return_value="v2.10.12"), patch.object(
+            module.subprocess, "run", return_value=run_result
+        ) as run_mock, patch.object(
+            module.click, "echo"
+        ):
+            module._best_effort_auto_update()
+
+        env = run_mock.call_args.kwargs["env"]
+        self.assertEqual(env["HTTPS_PROXY"], "http://proxy.example:7890")
+        self.assertEqual(env["PIP_PROXY"], "https://mirror.example/simple")
+        self.assertEqual(env["PACKAGE_CACHE_ROOT"], str(module.settings.PACKAGE_CACHE_PATH))
+        self.assertEqual(env["PIP_CACHE_DIR"], str(module.settings.PACKAGE_CACHE_PATH / "pip"))
+        self.assertEqual(env["UV_CACHE_DIR"], str(module.settings.PACKAGE_CACHE_PATH / "uv"))
+
+    def test_best_effort_auto_update_derives_tool_cache_from_existing_root(self):
+        module = load_cli_module()
+        run_result = SimpleNamespace(returncode=0, stdout="ok")
+        package_cache_root = Path("/custom/package-cache-root")
+
+        with patch.dict(
+            module.os.environ,
+            {
+                "PACKAGE_CACHE_ROOT": str(package_cache_root),
+            },
+            clear=False,
+        ), patch.object(module, "_auto_update_mode", return_value="release"), patch.object(
+            module, "_resolve_auto_update_targets", return_value="v2.10.12"
+        ), patch.object(module.subprocess, "run", return_value=run_result) as run_mock, patch.object(
+            module.click, "echo"
+        ):
+            module._best_effort_auto_update()
+
+        env = run_mock.call_args.kwargs["env"]
+        self.assertEqual(env["PACKAGE_CACHE_ROOT"], str(package_cache_root))
+        self.assertEqual(env["PIP_CACHE_DIR"], str(package_cache_root / "pip"))
+        self.assertEqual(env["UV_CACHE_DIR"], str(package_cache_root / "uv"))

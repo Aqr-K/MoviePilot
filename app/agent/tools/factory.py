@@ -42,8 +42,13 @@ from app.agent.tools.impl.send_message import SendMessageTool
 from app.agent.tools.impl.ask_user_choice import AskUserChoiceTool
 from app.agent.tools.impl.send_local_file import SendLocalFileTool
 from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
+from app.agent.tools.impl.create_agent_task import CreateAgentTaskTool
+from app.agent.tools.impl.delete_agent_task import DeleteAgentTaskTool
+from app.agent.tools.impl.query_agent_tasks import QueryAgentTasksTool
 from app.agent.tools.impl.query_schedulers import QuerySchedulersTool
+from app.agent.tools.impl.run_agent_task import RunAgentTaskTool
 from app.agent.tools.impl.run_scheduler import RunSchedulerTool
+from app.agent.tools.impl.update_agent_task import UpdateAgentTaskTool
 from app.agent.tools.impl.query_workflows import QueryWorkflowsTool
 from app.agent.tools.impl.run_workflow import RunWorkflowTool
 from app.agent.tools.impl.query_personas import QueryPersonasTool
@@ -75,7 +80,6 @@ from app.agent.tools.impl.uninstall_plugin import UninstallPluginTool
 from app.agent.tools.impl.run_slash_command import RunSlashCommandTool
 from app.agent.tools.impl.list_slash_commands import ListSlashCommandsTool
 from app.agent.tools.impl.query_custom_identifiers import QueryCustomIdentifiersTool
-from app.agent.tools.impl.query_activity_log import QueryActivityLogTool
 from app.agent.tools.impl.query_doctor_report import QueryDoctorReportTool
 from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifiersTool
 from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
@@ -142,6 +146,11 @@ class MoviePilotToolFactory:
         QueryTransferHistoryTool,
         TransferFileTool,
         SendMessageTool,
+        CreateAgentTaskTool,
+        QueryAgentTasksTool,
+        UpdateAgentTaskTool,
+        RunAgentTaskTool,
+        DeleteAgentTaskTool,
         QuerySchedulersTool,
         RunSchedulerTool,
         QueryWorkflowsTool,
@@ -165,7 +174,6 @@ class MoviePilotToolFactory:
         UninstallPluginTool,
         RunSlashCommandTool,
         ListSlashCommandsTool,
-        QueryActivityLogTool,
         QueryDoctorReportTool,
         QueryCustomIdentifiersTool,
         UpdateCustomIdentifiersTool,
@@ -182,8 +190,9 @@ class MoviePilotToolFactory:
         "read_file",
         "edit_file",
         "execute_command",
-        "query_activity_log",
         "ask_user_choice",
+        "create_agent_task",
+        "query_agent_tasks",
     )
 
     @staticmethod

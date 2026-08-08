@@ -15,8 +15,6 @@ from app.schemas.types import MediaType, media_type_to_agent
 class GetRecommendationsInput(BaseModel):
     """获取推荐工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     source: Optional[str] = Field(
         "tmdb_trending",
         description="Recommendation source: "
@@ -212,6 +210,10 @@ class GetRecommendationsTool(MoviePilotTool):
                         "tmdb_id": r.get("tmdb_id"),
                         "imdb_id": r.get("imdb_id"),
                         "douban_id": r.get("douban_id"),
+                        "bangumi_id": r.get("bangumi_id"),
+                        "anilist_id": r.get("anilist_id"),
+                        "media_source": r.get("source"),
+                        "media_id": r.get("media_id"),
                         "vote_average": r.get("vote_average"),
                         "poster_path": r.get("poster_path"),
                         "detail_link": r.get("detail_link"),

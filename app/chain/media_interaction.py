@@ -22,7 +22,9 @@ from app.helper.torrent import TorrentHelper
 from app.log import logger
 from app.schemas import DownloadDirectory, FileURI, NotExistMediaInfo, Notification
 from app.schemas.message import ChannelCapabilityManager
+from app.schemas.system import TransferDirectoryConf
 from app.schemas.types import MessageChannel, MediaType
+from app.utils.media import build_media_key, resolve_media_identity
 from app.utils.string import StringUtils
 
 
@@ -33,6 +35,7 @@ class MediaInteractionChain(ChainBase):
 
     _button_page_size = 8
     _text_page_size = 8
+    _auto_download_dir_name = "自动匹配目录"
 
     @staticmethod
     def has_pending_interaction(user_id: Union[str, int]) -> bool:
@@ -54,6 +57,10 @@ class MediaInteractionChain(ChainBase):
                     mtype=mediainfo.type,
                     tmdbid=mediainfo.tmdb_id,
                     doubanid=mediainfo.douban_id,
+                    bangumiid=mediainfo.bangumi_id,
+                    anilistid=mediainfo.anilist_id,
+                    source=resolve_media_identity(media=mediainfo)[0],
+                    mediaid=resolve_media_identity(media=mediainfo)[1],
                     cache=False,
                 )
                 if not mediainfo:
@@ -68,9 +75,10 @@ class MediaInteractionChain(ChainBase):
                     )
                     return {}
 
-            mediakey = mediainfo.tmdb_id or mediainfo.douban_id
+            media_source, media_id = resolve_media_identity(media=mediainfo)
+            mediakey = build_media_key(media_source, media_id)
             no_exists = {mediakey: {}}
-            if meta.begin_season:
+            if meta.begin_season is not None:
                 episodes = mediainfo.seasons.get(meta.begin_season)
                 if not episodes:
                     return {}
@@ -771,8 +779,11 @@ class MediaInteractionChain(ChainBase):
         """
         在下载前进入目录选择阶段；没有配置下载目录时保持原下载流程。
         """
-        download_dirs = self._get_download_dirs()
+        media_info = context.media_info if context else request.current_media
+        download_dirs = self._get_download_dirs(media_info)
         if not download_dirs:
+            return False
+        if len(download_dirs) == 1 and not self._is_auto_download_dir(download_dirs[0]):
             return False
 
         request.pending_torrent_page = request.page
@@ -829,6 +840,17 @@ class MediaInteractionChain(ChainBase):
             return
 
         download_dir = page_items[page_index - 1]
+        if self._is_auto_download_dir(download_dir):
+            self._execute_pending_download(
+                request=request,
+                channel=channel,
+                source=source,
+                userid=userid,
+                username=username,
+                save_path=None,
+            )
+            return
+
         save_path = download_dir.save_path or download_dir.download_path
         if not save_path:
             self._post_invalid_input(
@@ -855,7 +877,7 @@ class MediaInteractionChain(ChainBase):
             source: str,
             userid: Union[str, int],
             username: str,
-            save_path: str,
+            save_path: Optional[str],
     ) -> None:
         """
         使用用户确认的下载目录执行单资源下载或自动择优下载。
@@ -1375,12 +1397,17 @@ class MediaInteractionChain(ChainBase):
         end = start + page_size
         return items[start:end], page, total_pages
 
-    @staticmethod
-    def _get_download_dirs() -> List[DownloadDirectory]:
+    @classmethod
+    def _get_download_dirs(cls, media_info: Optional[MediaInfo] = None) -> List[DownloadDirectory]:
         """
         获取可供消息交互选择的下载目录。
         """
-        return [
+        dir_infos = [
+            dir_info
+            for dir_info in DirectoryHelper().get_download_dirs()
+            if dir_info.download_path
+        ]
+        download_dirs = [
             DownloadDirectory(
                 name=dir_info.name,
                 storage=dir_info.storage or "local",
@@ -1393,9 +1420,61 @@ class MediaInteractionChain(ChainBase):
                 media_type=dir_info.media_type,
                 media_category=dir_info.media_category,
             )
-            for dir_info in DirectoryHelper().get_download_dirs()
-            if dir_info.download_path
+            for dir_info in dir_infos
+            if cls._match_download_dir_media(dir_info, media_info)
         ]
+        if not download_dirs:
+            return []
+        if len(download_dirs) == 1:
+            return download_dirs
+        return [cls._build_auto_download_dir(), *download_dirs]
+
+    @classmethod
+    def _build_auto_download_dir(cls) -> DownloadDirectory:
+        """
+        构造自动匹配下载目录选项。
+        """
+        return DownloadDirectory(
+            name=cls._auto_download_dir_name,
+            storage="local",
+            priority=-1,
+        )
+
+    @classmethod
+    def _is_auto_download_dir(cls, download_dir: DownloadDirectory) -> bool:
+        """
+        判断是否为自动匹配下载目录选项。
+        """
+        return (
+                download_dir.name == cls._auto_download_dir_name
+                and not download_dir.download_path
+                and not download_dir.save_path
+        )
+
+    @staticmethod
+    def _match_download_dir_media(
+            dir_info: TransferDirectoryConf,
+            media_info: Optional[MediaInfo],
+    ) -> bool:
+        """
+        判断下载目录是否适用于当前媒体。
+        """
+        if not media_info or not media_info.type:
+            return True
+
+        if dir_info.media_type:
+            media_type_values = (
+                {media_info.type.value, media_info.type.to_agent()}
+                if isinstance(media_info.type, MediaType)
+                else {str(media_info.type)}
+            )
+            if dir_info.media_type not in media_type_values:
+                return False
+
+        if dir_info.media_category and dir_info.media_category != media_info.category:
+            return False
+
+        return True
 
     @staticmethod
     def _format_download_dir_label(download_dir: DownloadDirectory) -> str:
@@ -1440,7 +1519,8 @@ class MediaInteractionChain(ChainBase):
         """
         if not no_exists:
             return []
-        mediakey = mediainfo.tmdb_id or mediainfo.douban_id
+        media_source, media_id = resolve_media_identity(media=mediainfo)
+        mediakey = build_media_key(media_source, media_id)
         season_map = no_exists.get(mediakey) or {}
         if show_missing_only:
             return [

@@ -12,8 +12,8 @@ from app.agent.tools.tags import ToolTag
 from app.helper.browser import BrowserSessionHelper
 from app.log import logger
 
-# 页面内容最大长度
-MAX_CONTENT_LENGTH = 8000
+# 页面内容最大长度；保留在全局工具结果兜底上限以内。
+MAX_CONTENT_LENGTH = 12_000
 # 默认超时时间（秒）
 DEFAULT_TIMEOUT = 30
 # 截图最大宽度
@@ -47,8 +47,6 @@ class BrowserAction(str, Enum):
 class BrowseWebpageInput(BaseModel):
     """浏览器操作工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this browser action is being performed",)
     action: str = Field(
         ...,
         description=(
@@ -228,6 +226,11 @@ class BrowseWebpageTool(MoviePilotTool):
                 return "错误: 'fill_ref' 操作需要提供 value 参数"
             if browser_action == BrowserAction.EVALUATE and not script:
                 return "错误: 'evaluate' 操作需要提供 script 参数"
+            if (
+                browser_action == BrowserAction.EVALUATE
+                and not await self.is_admin_user()
+            ):
+                return "错误: 'evaluate' 操作仅允许管理员使用"
             if (
                 browser_action in (BrowserAction.FOCUS_TAB, BrowserAction.CLOSE_TAB)
                 and tab_index is None

@@ -130,6 +130,7 @@ _config_stub.settings = SimpleNamespace(
     LLM_BASE_URL_PRESET=None,
     LLM_USER_AGENT=None,
     LLM_THINKING_LEVEL=None,
+    LLM_API_PROTOCOL="auto",
     LLM_TEMPERATURE=0.1,
     LLM_MAX_CONTEXT_TOKENS=64,
     LLM_USE_PROXY=True,
@@ -214,7 +215,7 @@ class LlmHelperTestCallTest(unittest.TestCase):
             {"type": "text", "text": "OK"},
         ]
 
-        result = llm_module.LLMHelper._extract_text_content(content)
+        result = llm_module.LLMHelper.extract_text_content(content)
 
         self.assertEqual(result, "OK")
 
@@ -243,6 +244,8 @@ class LlmHelperTestCallTest(unittest.TestCase):
             base_url_preset="deepseek-default",
             user_agent=None,
             use_proxy=None,
+            api_protocol=None,
+            web_search_mode=None,
         )
         self.assertEqual(result["provider"], "deepseek")
         self.assertEqual(result["model"], "deepseek-chat")
@@ -437,8 +440,8 @@ class LlmHelperTestCallTest(unittest.TestCase):
             {"langchain_deepseek": SimpleNamespace(ChatDeepSeek=_FakeChatDeepSeek)},
         ), patch.object(
             llm_module,
-            "_patch_deepseek_reasoning_content_support",
-            side_effect=lambda: patch_calls.append(True),
+            "_patch_interleaved_reasoning_request_support",
+            side_effect=lambda *args, **kwargs: patch_calls.append((args, kwargs)),
         ):
             asyncio.run(
                 llm_module.LLMHelper.get_llm(
@@ -455,7 +458,8 @@ class LlmHelperTestCallTest(unittest.TestCase):
             calls[0].get("extra_body"),
             {"thinking": {"type": "enabled"}},
         )
-        self.assertEqual(patch_calls, [True])
+        self.assertEqual(patch_calls[0][0][0], _FakeChatDeepSeek)
+        self.assertTrue(patch_calls[0][1]["normalize_deepseek_messages"])
         self.assertEqual(calls[0].get("reasoning_effort"), "max")
         self.assertEqual(calls[0].get("api_base"), "https://api.deepseek.com")
 
@@ -474,8 +478,8 @@ class LlmHelperTestCallTest(unittest.TestCase):
             {"langchain_deepseek": SimpleNamespace(ChatDeepSeek=_FakeChatDeepSeek)},
         ), patch.object(
             llm_module,
-            "_patch_deepseek_reasoning_content_support",
-            side_effect=lambda: patch_calls.append(True),
+            "_patch_interleaved_reasoning_request_support",
+            side_effect=lambda *args, **kwargs: patch_calls.append((args, kwargs)),
         ):
             asyncio.run(
                 llm_module.LLMHelper.get_llm(
@@ -492,9 +496,64 @@ class LlmHelperTestCallTest(unittest.TestCase):
             calls[0].get("extra_body"),
             {"thinking": {"type": "disabled"}},
         )
-        self.assertEqual(patch_calls, [True])
+        self.assertEqual(patch_calls[0][0][0], _FakeChatDeepSeek)
+        self.assertTrue(patch_calls[0][1]["normalize_deepseek_messages"])
         self.assertIsNone(calls[0].get("reasoning_effort"))
         self.assertEqual(calls[0].get("api_base"), "https://proxy.example.com")
+
+    def test_get_llm_uses_common_responses_adapter_for_deepseek_web_search(self):
+        """DeepSeek 服务端搜索应走通用 ChatOpenAI Responses 适配器。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        openai_module = ModuleType("langchain_openai")
+        openai_module.ChatOpenAI = _FakeChatOpenAI
+
+        with patch.dict(sys.modules, {"langchain_openai": openai_module}), patch.object(
+            llm_module,
+            "_patch_openai_responses_instructions_support",
+        ):
+            model = asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="deepseek",
+                    model="deepseek-v4-flash",
+                    thinking_level="off",
+                    api_key="sk-test",
+                    base_url="https://api.deepseek.com",
+                    api_protocol="auto",
+                    web_search_mode="builtin",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["base_url"], "https://api.deepseek.com")
+        self.assertTrue(calls[0]["use_responses_api"])
+        self.assertEqual(calls[0]["output_version"], "responses/v1")
+        self.assertEqual(
+            llm_module.LLMHelper.get_server_tools(model),
+            [{"type": "web_search"}],
+        )
+        self.assertFalse(llm_module.LLMHelper.should_use_local_web_search(model))
+
+    def test_get_llm_rejects_unsupported_builtin_web_search(self):
+        """强制服务端搜索不可用时应在构造模型前显式失败。"""
+        with self.assertRaisesRegex(ValueError, "不支持服务端联网搜索"):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="deepseek",
+                    model="deepseek-chat",
+                    thinking_level="off",
+                    api_key="sk-test",
+                    base_url="https://api.deepseek.com",
+                    api_protocol="auto",
+                    web_search_mode="builtin",
+                )
+            )
 
     def test_get_llm_uses_openai_reasoning_effort_none_for_off(self):
         calls = []
@@ -588,6 +647,59 @@ class LlmHelperTestCallTest(unittest.TestCase):
             "https://updated.example.com/v1",
         )
         self.assertEqual(llm_calls[0].get("default_headers"), {"X-Test": "1"})
+
+    def test_get_llm_attaches_runtime_metadata(self):
+        """LLM 实例应带上内部 runtime 元数据，供 Agent 中间件判断兼容分支。"""
+
+        class _FakeProviderManager:
+            async def resolve_runtime(self, **kwargs):
+                return {
+                    "provider_id": kwargs["provider_id"],
+                    "runtime": "anthropic_compatible",
+                    "model_id": kwargs["model"],
+                    "api_key": kwargs["api_key"],
+                    "base_url": kwargs["base_url"],
+                    "default_headers": None,
+                    "use_responses_api": None,
+                    "model_record": None,
+                    "model_metadata": None,
+                }
+
+        class _FakeChatAnthropic:
+            def __init__(self, **kwargs):
+                self.model = kwargs["model"]
+                self.profile = None
+
+        provider_module = ModuleType("app.agent.llm.provider")
+        provider_module.LLMProviderManager = _FakeProviderManager
+        anthropic_module = ModuleType("langchain_anthropic")
+        anthropic_module.ChatAnthropic = _FakeChatAnthropic
+
+        with patch.dict(
+            sys.modules,
+            {
+                "app.agent.llm.provider": provider_module,
+                "langchain_anthropic": anthropic_module,
+            },
+        ):
+            model = asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="minimax",
+                    model="MiniMax-M2.7",
+                    api_key="sk-test",
+                    base_url="https://api.minimaxi.com/anthropic/v1",
+                )
+            )
+
+        self.assertEqual(
+            getattr(model, "_moviepilot_llm_runtime"),
+            "anthropic_compatible",
+        )
+        self.assertEqual(getattr(model, "_moviepilot_llm_provider_id"), "minimax")
+        self.assertEqual(
+            getattr(model, "_moviepilot_llm_base_url"),
+            "https://api.minimaxi.com/anthropic/v1",
+        )
 
     def test_get_llm_applies_proxy_only_when_enabled(self):
         """LLM 构造时应按独立开关决定是否传入系统代理。"""
@@ -817,3 +929,178 @@ class LlmHelperTestCallTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("thinking_level"), "high")
         self.assertFalse(calls[0].get("include_thoughts"))
+
+    def test_get_llm_responses_protocol_forces_responses_api(self):
+        """显式 responses 协议应让通用 OpenAI 兼容入口走 Responses API。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5.6-terra",
+                    api_key="sk-test",
+                    base_url="https://example.com/v1",
+                    api_protocol="responses",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].get("use_responses_api"))
+
+    def test_get_llm_chat_completions_protocol_overrides_chatgpt_auto(self):
+        """显式 chat_completions 应覆盖 ChatGPT 官方推理模型的自动 Responses 切换。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="chatgpt",
+                    model="gpt-5.4",
+                    api_key="sk-test",
+                    base_url="https://api.openai.com/v1",
+                    api_protocol="chat_completions",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(calls[0].get("use_responses_api"))
+
+    def test_get_llm_auto_protocol_keeps_chat_completions_for_compatible(self):
+        """auto 协议下通用 OpenAI 兼容入口应保持默认 Chat Completions（None）。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-4o",
+                    api_key="sk-test",
+                    base_url="https://example.com/v1",
+                    api_protocol="auto",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(calls[0].get("use_responses_api"))
+
+    def test_get_llm_runtime_override_beats_chat_completions_protocol(self):
+        """运行时强制 Responses（OAuth/Codex）应优先于用户 chat_completions 设置。"""
+        calls = []
+
+        class _FakeProviderManager:
+            async def resolve_runtime(self, **kwargs):
+                return {
+                    "provider_id": kwargs["provider_id"],
+                    "runtime": "openai_compatible",
+                    "model_id": kwargs["model"],
+                    "api_key": kwargs["api_key"],
+                    "base_url": kwargs["base_url"],
+                    "default_headers": None,
+                    "use_responses_api": True,
+                    "model_record": None,
+                    "model_metadata": None,
+                }
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        provider_module = ModuleType("app.agent.llm.provider")
+        provider_module.LLMProviderManager = _FakeProviderManager
+
+        with patch.dict(
+            sys.modules,
+            {
+                "app.agent.llm.provider": provider_module,
+                "langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI),
+            },
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="chatgpt",
+                    model="gpt-5.4",
+                    api_key="sk-test",
+                    base_url="https://api.openai.com/v1",
+                    api_protocol="chat_completions",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].get("use_responses_api"))
+
+    def test_get_llm_reads_api_protocol_from_settings_when_omitted(self):
+        """未显式传入协议时应读取 LLM_API_PROTOCOL 配置。"""
+        calls = []
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.model = kwargs["model"]
+                self.profile = None
+
+        with patch.object(
+            llm_module.settings, "LLM_API_PROTOCOL", "responses"
+        ), patch.dict(
+            sys.modules,
+            {"langchain_openai": SimpleNamespace(ChatOpenAI=_FakeChatOpenAI)},
+        ):
+            asyncio.run(
+                llm_module.LLMHelper.get_llm(
+                    provider="openai",
+                    model="gpt-5.6-terra",
+                    api_key="sk-test",
+                    base_url="https://example.com/v1",
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].get("use_responses_api"))
+
+    def test_normalize_api_protocol_accepts_known_and_falls_back(self):
+        """_normalize_api_protocol 应大小写不敏感识别已知值，未知值回退 auto。"""
+        self.assertEqual(
+            llm_module.LLMHelper._normalize_api_protocol("Responses"), "responses"
+        )
+        self.assertEqual(
+            llm_module.LLMHelper._normalize_api_protocol("CHAT_COMPLETIONS"),
+            "chat_completions",
+        )
+        self.assertEqual(
+            llm_module.LLMHelper._normalize_api_protocol("auto"), "auto"
+        )
+        self.assertEqual(
+            llm_module.LLMHelper._normalize_api_protocol(None), "auto"
+        )
+        self.assertEqual(
+            llm_module.LLMHelper._normalize_api_protocol("weird"), "auto"
+        )

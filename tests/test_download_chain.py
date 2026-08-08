@@ -2,13 +2,30 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import app.chain.download as download_module
 from app.chain.download import DownloadChain
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.metainfo import MetaInfo
-from app.schemas import FileItem, NotExistMediaInfo
+from app.schemas import DownloaderTorrent, FileItem, NotExistMediaInfo, TransferDirectoryConf
 from app.schemas.types import MediaType
+
+
+@pytest.fixture(autouse=True)
+def _mock_tmdb_supplement(monkeypatch):
+    """隔离下载用例中的 TMDB 辅助识别外部边界。"""
+
+    class _NoopMediaChain:
+        """保持原媒体对象不变的 TMDB 辅助识别替身。"""
+
+        @staticmethod
+        def supplement_tmdb_info(media, _meta):
+            """返回原媒体对象。"""
+            return media
+
+    monkeypatch.setattr(download_module, "MediaChain", _NoopMediaChain)
 
 
 class _FakeDownloadHistoryOper:
@@ -41,6 +58,20 @@ class _FakeThreadHelper:
 
     def submit(self, func, *args, **kwargs):
         self.submitted.append((func, args, kwargs))
+
+
+def _download_dirs():
+    """
+    构造下载成功路径测试使用的允许下载目录配置。
+    """
+    return [
+        TransferDirectoryConf(
+            name="本地下载",
+            priority=1,
+            storage="local",
+            download_path="/downloads",
+        ),
+    ]
 
 
 class _FakeSubtitleStorageChain:
@@ -106,6 +137,10 @@ def test_download_single_submits_download_added_to_background(monkeypatch):
     添加下载成功后，站点字幕等后处理应提交到后台，不能阻塞下载接口返回。
     """
     _FakeThreadHelper.submitted = []
+    monkeypatch.setattr(
+        "app.helper.directory.DirectoryHelper.get_download_dirs",
+        lambda _self: _download_dirs(),
+    )
     monkeypatch.setattr(download_module, "DownloadHistoryOper", _FakeDownloadHistoryOper)
     monkeypatch.setattr(download_module, "TorrentHelper", _FakeTorrentHelper)
 
@@ -157,6 +192,119 @@ def test_download_single_submits_download_added_to_background(monkeypatch):
         download_dir=Path("/downloads"),
         torrent_content=b"torrent-content",
     )
+
+
+def test_download_single_supplements_category_before_download_event(monkeypatch):
+    """下载事件和目录选择前应已有 TMDB 分类，同时保留原识别源身份。"""
+    captured = {}
+
+    class _FakeMediaChain:
+        """模拟 TMDB 辅助识别并记录调用。"""
+
+        @staticmethod
+        def supplement_tmdb_info(media, _meta):
+            """给原媒体对象补充下载分类。"""
+            media.tmdb_id = 12345
+            media.category = "日本动画"
+            return media
+
+    def cancel_download(_event_type, event_data):
+        """捕获下载事件后取消，避免进入真实下载流程。"""
+        captured["event_data"] = event_data
+        event_data.cancel = True
+        return SimpleNamespace(event_data=event_data)
+
+    monkeypatch.setattr(download_module, "MediaChain", _FakeMediaChain)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", cancel_download)
+    media = MediaInfo(
+        source="bangumi",
+        media_id="40000",
+        bangumi_id=40000,
+        type=MediaType.TV,
+        title="测试动画",
+    )
+    context = Context(
+        meta_info=MetaInfo("测试动画 S01"),
+        media_info=media,
+        torrent_info=TorrentInfo(title="测试动画 S01"),
+    )
+
+    result = DownloadChain.__new__(DownloadChain).download_single(
+        context=context,
+        torrent_content="magnet:?xt=urn:btih:test",
+        return_detail=True,
+    )
+
+    assert result == (None, "下载被事件取消")
+    assert captured["event_data"].options["media_category"] == "日本动画"
+    assert context.media_info.source == "bangumi"
+    assert context.media_info.media_id == "40000"
+    assert context.media_info.tmdb_id == 12345
+
+
+def test_download_single_persists_custom_words_snapshot(monkeypatch):
+    """下载成功登记历史时，应把传入的订阅识别词原样存入快照，供整理时原样复现识别。"""
+    captured = {}
+
+    class _CapturingDownloadHistoryOper:
+        """捕获写入下载历史的字段，验证识别词快照确实落库。"""
+
+        def add(self, **kwargs):
+            """捕获下载历史字段。"""
+            captured.update(kwargs)
+
+        def add_files(self, _files):
+            """忽略与当前断言无关的下载文件记录。"""
+            pass
+
+    _FakeThreadHelper.submitted = []
+    monkeypatch.setattr(
+        "app.helper.directory.DirectoryHelper.get_download_dirs",
+        lambda _self: _download_dirs(),
+    )
+    monkeypatch.setattr(download_module, "ThreadHelper", _FakeThreadHelper)
+    monkeypatch.setattr(download_module, "DownloadHistoryOper", _CapturingDownloadHistoryOper)
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeTorrentHelper)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download = MagicMock(return_value=("qb", "hash123", "Original", "添加下载成功"))
+    chain.download_added = MagicMock()
+    chain.eventmanager = MagicMock()
+    chain.eventmanager.send_event.return_value = None
+    chain.post_message = MagicMock()
+
+    context = Context(
+        meta_info=MetaInfo("Demo Show 2024"),
+        media_info=MediaInfo(
+            type=MediaType.TV,
+            title="Demo Show",
+            year="2024",
+            tmdb_id=1,
+            genre_ids=[18],
+            poster_path="https://images.example.com/original/poster.jpg",
+            backdrop_path="https://images.example.com/original/backdrop.jpg",
+        ),
+        torrent_info=TorrentInfo(
+            title="Demo Show 2024",
+            enclosure="https://example.com/demo.torrent",
+            site_cookie="uid=1",
+            site_name="TestSite",
+        ),
+    )
+
+    custom_words = "S04 => S01\n第 <> 集 >> EP+66"
+    result = chain.download_single(
+        context=context,
+        torrent_content=b"torrent-content",
+        save_path="/downloads",
+        username="tester",
+        custom_words=custom_words,
+    )
+
+    assert result == "hash123"
+    assert captured["custom_words"] == custom_words
+    assert captured["poster"] == "https://images.example.com/w500/poster.jpg"
+    assert captured["image"] == "https://images.example.com/w500/backdrop.jpg"
 
 
 def test_save_subtitle_response_creates_missing_temp_directory(monkeypatch, tmp_path):
@@ -320,6 +468,8 @@ def _build_tv_context(episode_list=None):
             title_year="Test Show (2026)",
             tmdb_id=1,
             douban_id=None,
+            bangumi_id=None,
+            anilist_id=None,
         ),
         meta_info=SimpleNamespace(
             season_list=[1],
@@ -331,6 +481,7 @@ def _build_tv_context(episode_list=None):
         ),
         torrent_info=SimpleNamespace(title="Test Show S01 2160p", site_name="TestSite"),
         allowed_episodes=None,
+        confirmed_full_coverage=False,
     )
 
 
@@ -363,6 +514,74 @@ def test_batch_download_rejects_complete_coverage_when_files_do_not_cover_target
 
     assert downloads == []
     assert lefts == no_exists
+    assert context.confirmed_full_coverage is False
+    chain.download_single.assert_not_called()
+
+
+def test_batch_download_preserves_special_season_zero(monkeypatch):
+    """特别季整季需求必须以季 0 匹配候选，不能回退成第 1 季。"""
+    _FakeBatchTorrentHelper.episodes = list(range(1, 7))
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_torrent = MagicMock(return_value=(b"torrent-content", "", ["demo.mkv"]))
+    chain.download_single = MagicMock(return_value="hash")
+
+    context = _build_tv_context()
+    context.meta_info.season_list = [0]
+    context.meta_info.season_episode = "S00"
+    context.meta_info.org_string = "Test Show S00 2160p"
+    context.torrent_info.title = "Test Show S00 2160p"
+    no_exists = {
+        1: {
+            0: NotExistMediaInfo(
+                season=0,
+                episodes=[],
+                total_episode=6,
+                start_episode=1,
+                require_complete_coverage=True,
+            )
+        }
+    }
+
+    downloads, lefts = chain.batch_download(contexts=[context], no_exists=no_exists)
+
+    assert downloads == [context]
+    assert lefts == {}
+    chain.download_single.assert_called_once()
+
+
+def test_batch_download_rejects_complete_coverage_when_only_missing_episodes_match(monkeypatch):
+    """
+    完整覆盖要求目标范围全集，不能只覆盖当前缺口集。
+    """
+    _FakeBatchTorrentHelper.episodes = [4, 5]
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_torrent = MagicMock(return_value=(b"torrent-content", "", ["demo.mkv"]))
+    chain.download_single = MagicMock(return_value="hash")
+
+    context = _build_tv_context()
+    no_exists = {
+        1: {
+            1: NotExistMediaInfo(
+                season=1,
+                episodes=[4, 5],
+                total_episode=5,
+                start_episode=1,
+                require_complete_coverage=True,
+            )
+        }
+    }
+
+    downloads, lefts = chain.batch_download(contexts=[context], no_exists=no_exists)
+
+    assert downloads == []
+    assert lefts == no_exists
+    assert context.confirmed_full_coverage is False
     chain.download_single.assert_not_called()
 
 
@@ -434,6 +653,197 @@ def test_batch_download_does_not_download_duplicate_movie_after_success(monkeypa
     assert chain.download_single.call_args.args[0] is first_context
 
 
+def test_batch_download_threads_custom_words_to_download_single(monkeypatch):
+    """订阅识别词须经 batch_download 透传到 download_single，作为整理快照随下载存档。"""
+    _FakeBatchTorrentHelper.episodes = []
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_single = MagicMock(return_value="hash")
+
+    context = SimpleNamespace(
+        media_info=SimpleNamespace(type=MediaType.MOVIE, title_year="Demo Movie (2026)"),
+        meta_info=SimpleNamespace(season_episode=""),
+        torrent_info=SimpleNamespace(title="Demo Movie"),
+    )
+
+    custom_words = "S04 => S01\n第 <> 集 >> EP+66"
+    downloads, _lefts = chain.batch_download(contexts=[context], custom_words=custom_words)
+
+    assert downloads == [context]
+    chain.download_single.assert_called_once()
+    assert chain.download_single.call_args.kwargs["custom_words"] == custom_words
+
+
+def test_download_single_records_failure_cooldown_when_downloader_rejects(monkeypatch):
+    """
+    下载器拒绝种子且没有返回 hash 时，应记录资源级失败冷却。
+    """
+    captured = {}
+
+    class _CapturingDownloadFailureOper:
+        """
+        捕获下载失败冷却记录，避免测试写入数据库。
+        """
+
+        def record_failure(self, **kwargs: object) -> SimpleNamespace:
+            """
+            保存写入字段供断言使用。
+            """
+            captured.update(kwargs)
+            return SimpleNamespace(id=1)
+
+    monkeypatch.setattr(
+        "app.helper.directory.DirectoryHelper.get_download_dirs",
+        lambda _self: _download_dirs(),
+    )
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeTorrentHelper)
+    monkeypatch.setattr(download_module, "DownloadFailureOper", _CapturingDownloadFailureOper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    error_msg = "添加种子任务失败：无法读取种子文件"
+    chain.download = MagicMock(return_value=("qb", None, "Original", error_msg))
+    chain.post_message = MagicMock()
+
+    context = Context(
+        meta_info=MetaInfo("Demo Movie 2026"),
+        media_info=MediaInfo(
+            type=MediaType.MOVIE,
+            title="Demo Movie",
+            year="2026",
+            tmdb_id=1,
+            genre_ids=[18],
+        ),
+        torrent_info=TorrentInfo(
+            site=12,
+            site_name="AGSVPT",
+            title="Demo Movie 2026 1080p",
+            enclosure="https://example.com/download.php?id=484660",
+            size=1024,
+        ),
+    )
+
+    download_id, returned_error = chain.download_single(
+        context=context,
+        torrent_content=b"torrent-content",
+        save_path="/downloads",
+        source="Subscribe|{}",
+        return_detail=True,
+    )
+
+    assert download_id is None
+    assert returned_error == error_msg
+    assert captured["fingerprint"] == DownloadChain._build_download_failure_fingerprint(context)
+    assert captured["torrent_id"] == "example.com:id=484660"
+    assert captured["site"] == 12
+    assert captured["error_message"] == error_msg
+    assert captured["next_retry_at"] > captured["now_time"]
+
+
+def test_download_failure_fingerprint_distinguishes_special_season_zero():
+    """失败冷却指纹应区分特别季与未指定季，避免错误共享冷却状态。"""
+    def build_context(season):
+        return SimpleNamespace(
+            media_info=SimpleNamespace(
+                type=MediaType.TV,
+                title="Demo Show",
+                year="2026",
+                tmdb_id=1,
+                season=None,
+            ),
+            meta_info=SimpleNamespace(season=season, episode=None, episode_list=[]),
+            torrent_info=SimpleNamespace(
+                site=12,
+                title="Demo Show Specials",
+                torrent_id="484660",
+            ),
+        )
+
+    special_fingerprint = DownloadChain._build_download_failure_fingerprint(build_context(0))
+    unspecified_fingerprint = DownloadChain._build_download_failure_fingerprint(build_context(None))
+
+    assert special_fingerprint
+    assert unspecified_fingerprint
+    assert special_fingerprint != unspecified_fingerprint
+
+
+def test_batch_download_skips_failed_subscription_resource_and_tries_next(monkeypatch):
+    """
+    订阅自动下载应跳过冷却中的失败资源，但继续尝试同媒体的后续候选。
+    """
+    _FakeBatchTorrentHelper.episodes = []
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    first_context = SimpleNamespace(
+        media_info=SimpleNamespace(
+            type=MediaType.MOVIE,
+            title="Demo Movie",
+            year="2026",
+            title_year="Demo Movie (2026)",
+            tmdb_id=1,
+            douban_id=None,
+        ),
+        meta_info=SimpleNamespace(season=None, episode=None, episode_list=[], season_episode=""),
+        torrent_info=SimpleNamespace(
+            site=12,
+            site_name="AGSVPT",
+            title="Demo Movie Bad",
+            torrent_id="484660",
+            size=1024,
+        ),
+    )
+    second_context = SimpleNamespace(
+        media_info=SimpleNamespace(
+            type=MediaType.MOVIE,
+            title="Demo Movie",
+            year="2026",
+            title_year="Demo Movie (2026)",
+            tmdb_id=1,
+            douban_id=None,
+        ),
+        meta_info=SimpleNamespace(season=None, episode=None, episode_list=[], season_episode=""),
+        torrent_info=SimpleNamespace(
+            site=13,
+            site_name="OtherSite",
+            title="Demo Movie Good",
+            torrent_id="999999",
+            size=2048,
+        ),
+    )
+    failed_fingerprint = DownloadChain._build_download_failure_fingerprint(first_context)
+
+    class _ActiveDownloadFailureOper:
+        """
+        返回第一个候选的活跃失败冷却记录。
+        """
+
+        def get_active_by_fingerprints(self, fingerprints: list[str], now_time: str) -> dict:
+            """
+            模拟数据库批量查询活跃失败记录。
+            """
+            assert now_time
+            assert failed_fingerprint in fingerprints
+            return {failed_fingerprint: SimpleNamespace(fingerprint=failed_fingerprint)}
+
+    monkeypatch.setattr(download_module, "DownloadFailureOper", _ActiveDownloadFailureOper)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_single = MagicMock(return_value="hash")
+
+    downloads, lefts = chain.batch_download(
+        contexts=[first_context, second_context],
+        source="Subscribe|{}",
+    )
+
+    assert downloads == [second_context]
+    assert lefts is None
+    chain.download_single.assert_called_once()
+    assert chain.download_single.call_args.args[0] is second_context
+
+
 def test_batch_download_accepts_complete_coverage_when_files_cover_target_range(monkeypatch):
     """
     自定义起始集场景按目标范围覆盖判断，100-143 可满足 start=100、total=143。
@@ -463,7 +873,41 @@ def test_batch_download_accepts_complete_coverage_when_files_cover_target_range(
 
     assert downloads == [context]
     assert lefts == {}
+    assert context.confirmed_full_coverage is True
     chain.download_single.assert_called_once()
+
+
+def test_batch_download_rejects_complete_coverage_when_files_have_same_count_but_wrong_range(monkeypatch):
+    """
+    完整覆盖按目标集号集合判断，不能让同数量的偏移局部包通过。
+    """
+    _FakeBatchTorrentHelper.episodes = list(range(1, 45))
+    monkeypatch.setattr(download_module, "TorrentHelper", _FakeBatchTorrentHelper)
+    monkeypatch.setattr(download_module.eventmanager, "send_event", lambda *args, **kwargs: None)
+
+    chain = DownloadChain.__new__(DownloadChain)
+    chain.download_torrent = MagicMock(return_value=(b"torrent-content", "", ["demo.mkv"]))
+    chain.download_single = MagicMock(return_value="hash")
+
+    context = _build_tv_context()
+    no_exists = {
+        1: {
+            1: NotExistMediaInfo(
+                season=1,
+                episodes=[],
+                total_episode=143,
+                start_episode=100,
+                require_complete_coverage=True,
+            )
+        }
+    }
+
+    downloads, lefts = chain.batch_download(contexts=[context], no_exists=no_exists)
+
+    assert downloads == []
+    assert lefts == no_exists
+    assert context.confirmed_full_coverage is False
+    chain.download_single.assert_not_called()
 
 
 def test_batch_download_accepts_complete_coverage_when_title_episodes_cover_target(monkeypatch):
@@ -495,6 +939,7 @@ def test_batch_download_accepts_complete_coverage_when_title_episodes_cover_targ
 
     assert downloads == [context]
     assert lefts == {}
+    assert context.confirmed_full_coverage is True
     chain.download_torrent.assert_not_called()
     chain.download_single.assert_called_once()
 
@@ -528,6 +973,7 @@ def test_batch_download_rejects_complete_coverage_when_title_episodes_are_partia
 
     assert downloads == []
     assert lefts == no_exists
+    assert context.confirmed_full_coverage is False
     chain.download_torrent.assert_not_called()
     chain.download_single.assert_not_called()
 
@@ -562,6 +1008,7 @@ def test_batch_download_complete_coverage_ignores_allowed_episode_narrowing(monk
 
     assert downloads == []
     assert lefts == no_exists
+    assert context.confirmed_full_coverage is False
     chain.download_torrent.assert_not_called()
     chain.download_single.assert_not_called()
 
@@ -594,4 +1041,42 @@ def test_batch_download_keeps_count_check_without_complete_coverage(monkeypatch)
 
     assert downloads == [context]
     assert lefts == {}
+    assert context.confirmed_full_coverage is False
     chain.download_single.assert_called_once()
+
+
+def test_downloading_includes_media_type_and_source_site(monkeypatch):
+    """
+    正在下载任务应从下载历史回填媒体类型和来源站点。
+    """
+    torrent = DownloaderTorrent(hash="download-hash", title="Demo.Release")
+    history = SimpleNamespace(
+        episodes="E02",
+        image="https://images.example.com/backdrop.jpg",
+        poster="https://images.example.com/poster.jpg",
+        seasons="S01",
+        title="示例剧集",
+        tmdbid=1001,
+        torrent_site="示例站点",
+        type="电视剧",
+        userid="user-1",
+        username="tester",
+    )
+    chain = DownloadChain.__new__(DownloadChain)
+    monkeypatch.setattr(chain, "list_torrents", lambda **_kwargs: [torrent])
+    monkeypatch.setattr(
+        download_module,
+        "DownloadHistoryOper",
+        lambda: SimpleNamespace(get_by_hashes=lambda _hashes: {torrent.hash: history}),
+    )
+
+    result = chain.downloading(name="qb-main")
+
+    assert result == [torrent]
+    assert torrent.media["type"] == "电视剧"
+    assert torrent.media["image"] == "https://images.example.com/poster.jpg"
+    assert torrent.media["poster"] == "https://images.example.com/poster.jpg"
+    assert torrent.media["backdrop"] == "https://images.example.com/backdrop.jpg"
+    assert torrent.site_name == "示例站点"
+    assert torrent.userid == "user-1"
+    assert torrent.username == "tester"

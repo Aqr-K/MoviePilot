@@ -1,6 +1,7 @@
+import asyncio
 import mimetypes
 import shutil
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import aiofiles
 from anyio import Path as AsyncPath
@@ -10,6 +11,7 @@ from starlette import status
 from starlette.responses import StreamingResponse
 
 from app import schemas
+from app.api.apiv2_utils import API_V2_STR, OPENAPI_V2_PATH
 from app.command import Command
 from app.core.cache import async_fresh
 from app.core.config import settings
@@ -35,10 +37,78 @@ from app.scheduler import Scheduler
 from app.schemas.event import PluginDataResetEventData
 from app.schemas.types import ChainEventType, SystemConfigKey
 
-PROTECTED_ROUTES = {"/api/v1/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+PROTECTED_ROUTES = {
+    "/api/v1/openapi.json",
+    OPENAPI_V2_PATH,
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+}
 PLUGIN_PREFIX = f"{settings.API_V1_STR}/plugin"
+PLUGIN_V2_PREFIX = f"{API_V2_STR}/plugin"
 
 router = APIRouter()
+_plugin_release_refresh_tasks: set[asyncio.Task] = set()
+
+
+async def _get_market_plugin_from_repo(
+    plugin_manager: PluginManager,
+    plugin_id: str,
+    repo_url: str,
+    force: bool,
+) -> Optional[schemas.Plugin]:
+    """
+    只读取指定插件仓库的市场元数据，避免单插件详情触发全部市场刷新。
+    """
+    market_plugins = await plugin_manager.async_get_plugins_from_market(
+        repo_url, settings.VERSION_FLAG, force
+    )
+    market_plugin = next(
+        (
+            plugin
+            for plugin in market_plugins or []
+            if plugin.id == plugin_id
+        ),
+        None,
+    )
+    if market_plugin or not settings.VERSION_FLAG:
+        return market_plugin
+
+    compatible_plugins = await plugin_manager.async_get_plugins_from_market(
+        repo_url, None, force
+    )
+    return next(
+        (
+            plugin
+            for plugin in compatible_plugins or []
+            if plugin.id == plugin_id
+        ),
+        None,
+    )
+
+
+async def _refresh_plugin_release_versions(plugin_id: str, repo_url: str) -> None:
+    """
+    后台强制刷新 Release 缓存，接口响应路径优先返回已有缓存。
+    """
+    try:
+        async with async_fresh(True):
+            await PluginHelper().async_get_plugin_release_versions(plugin_id, repo_url)
+    except Exception as e:
+        logger.warning(f"后台刷新插件 {plugin_id} Release 列表失败：{e}")
+
+
+def _schedule_plugin_release_refresh(plugin_id: str, repo_url: str) -> None:
+    """
+    保留后台任务引用，避免任务被回收，同时让 helper 负责同仓库强刷合并。
+    """
+    task = asyncio.create_task(_refresh_plugin_release_versions(plugin_id, repo_url))
+    _plugin_release_refresh_tasks.add(task)
+
+    def _discard_task(completed_task: asyncio.Task) -> None:
+        _plugin_release_refresh_tasks.discard(completed_task)
+
+    task.add_done_callback(_discard_task)
 
 
 def register_plugin_api(plugin_id: Optional[str] = None):
@@ -96,8 +166,11 @@ def _update_plugin_api_routes(plugin_id: Optional[str], action: str):
                     elif Depends(verify_apikey) not in dependencies:
                         dependencies.append(Depends(verify_apikey))
                 app.add_api_route(**api, tags=["plugin"])
+                v2_api = api.copy()
+                v2_api["path"] = api_path.replace(PLUGIN_PREFIX, PLUGIN_V2_PREFIX, 1)
+                app.add_api_route(**v2_api, tags=["plugin"])
                 is_modified = True
-                logger.debug(f"Added plugin route: {api_path}")
+                logger.debug(f"Added plugin routes: {api_path}, {v2_api['path']}")
             except Exception as e:
                 logger.error(f"Error adding plugin route {api_path}: {str(e)}")
 
@@ -115,8 +188,13 @@ def _remove_routes(plugin_id: str) -> bool:
     """
     if not plugin_id:
         return False
-    prefix = f"{PLUGIN_PREFIX}/{plugin_id}/"
-    routes_to_remove = [route for route in app.routes if route.path.startswith(prefix)]
+    prefixes = {
+        f"{PLUGIN_PREFIX}/{plugin_id}/",
+        f"{PLUGIN_V2_PREFIX}/{plugin_id}/",
+    }
+    routes_to_remove = [
+        route for route in app.routes if any(route.path.startswith(prefix) for prefix in prefixes)
+    ]
     removed = False
     for route in routes_to_remove:
         try:
@@ -239,6 +317,15 @@ async def _get_plugin_history_detail(
     if local_repo_plugin:
         return _merge_plugin_market_metadata(installed_plugin, local_repo_plugin)
 
+    if installed_plugin.repo_url:
+        market_plugin = await _get_market_plugin_from_repo(
+            plugin_manager, plugin_id, installed_plugin.repo_url, force
+        )
+        if not market_plugin:
+            logger.debug(f"插件 {plugin_id} 未从来源仓库获取到更新说明，返回本地插件信息")
+            return installed_plugin
+        return _merge_plugin_market_metadata(installed_plugin, market_plugin)
+
     market_plugin = next(
         (
             plugin
@@ -359,30 +446,9 @@ async def plugin_releases(
         }
 
     plugin_manager = PluginManager()
-    market_plugins = await plugin_manager.async_get_plugins_from_market(
-        repo_url, settings.VERSION_FLAG, force
+    market_plugin = await _get_market_plugin_from_repo(
+        plugin_manager, plugin_id, repo_url, force
     )
-    market_plugin = next(
-        (
-            plugin
-            for plugin in market_plugins or []
-            if plugin.id == plugin_id
-        ),
-        None,
-    )
-    if not market_plugin and settings.VERSION_FLAG:
-        compatible_plugins = await plugin_manager.async_get_plugins_from_market(
-            repo_url, None, force
-        )
-        market_plugin = next(
-            (
-                plugin
-                for plugin in compatible_plugins or []
-                if plugin.id == plugin_id
-            ),
-            None,
-        )
-
     latest_version = market_plugin.plugin_version if market_plugin else None
     current_version = plugin_manager.get_local_plugin_version(plugin_id)
     if not getattr(market_plugin, "release", False):
@@ -393,8 +459,15 @@ async def plugin_releases(
             "items": [],
         }
 
-    async with async_fresh(force):
-        release_items = await PluginHelper().async_get_plugin_release_versions(plugin_id, repo_url)
+    plugin_helper = PluginHelper()
+    has_release_cache = (
+        await plugin_helper.async_has_plugin_release_cache(repo_url)
+        if force
+        else False
+    )
+    release_items = await plugin_helper.async_get_plugin_release_versions(plugin_id, repo_url)
+    if force and has_release_cache:
+        _schedule_plugin_release_refresh(plugin_id, repo_url)
     items = []
     for item in release_items:
         version = item.get("version")
@@ -417,6 +490,71 @@ async def statistic(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     插件安装统计
     """
     return await MoviePilotServerHelper.async_get_plugin_statistic()
+
+
+@router.get(
+    "/rating",
+    summary="批量查询插件评分",
+    response_model=Dict[str, schemas.PluginRating],
+)
+async def plugin_ratings(
+    plugin_ids: Optional[str] = None,
+    _: User = Depends(get_current_active_superuser_async),
+) -> Dict[str, schemas.PluginRating]:
+    """
+    批量查询插件平均分、评分人数和当前安装实例评分。
+    """
+    requested_ids = plugin_ids.split(",") if plugin_ids is not None else None
+    ratings = await MoviePilotServerHelper.async_get_plugin_ratings(requested_ids)
+    return {
+        plugin_id: schemas.PluginRating.model_validate(rating)
+        for plugin_id, rating in ratings.items()
+    }
+
+
+@router.get(
+    "/rating/{plugin_id}",
+    summary="查询插件评分",
+    response_model=schemas.PluginRating,
+)
+async def plugin_rating(
+    plugin_id: str,
+    _: User = Depends(get_current_active_superuser_async),
+) -> schemas.PluginRating:
+    """
+    查询单个插件平均分、评分人数和当前安装实例评分。
+    """
+    rating = await MoviePilotServerHelper.async_get_plugin_rating(plugin_id)
+    return schemas.PluginRating.model_validate(rating)
+
+
+@router.post(
+    "/rating/{plugin_id}",
+    summary="提交插件评分",
+    response_model=schemas.Response,
+)
+async def rate_plugin(
+    plugin_id: str,
+    payload: schemas.PluginRatingRequest,
+    _: User = Depends(get_current_active_superuser_async),
+) -> schemas.Response:
+    """
+    为已安装插件新增或更新当前安装实例评分。
+    """
+    installed_plugins = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+    if plugin_id not in installed_plugins:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"插件 {plugin_id} 未安装，无法评分",
+        )
+
+    rating = await MoviePilotServerHelper.async_submit_plugin_rating(
+        plugin_id,
+        payload.rating,
+    )
+    if rating is None:
+        return schemas.Response(success=False, message="连接MoviePilot服务器失败")
+    return schemas.Response(success=True, data=rating)
 
 
 @router.get(
@@ -613,9 +751,9 @@ def reset_plugin(
     # 事件处理器需要运行中插件完成补偿；补偿后先停止插件，避免删除数据时仍有任务读写旧状态。
     plugin_manager.stop(plugin_id)
     # 删除配置
-    plugin_manager.delete_plugin_config(plugin_id)
+    plugin_manager.delete_plugin_config(plugin_id, force=True)
     # 删除插件所有数据
-    plugin_manager.delete_plugin_data(plugin_id)
+    plugin_manager.delete_plugin_data(plugin_id, force=True)
     # 重新加载插件
     reload_plugin(plugin_id)
     return schemas.Response(success=True)

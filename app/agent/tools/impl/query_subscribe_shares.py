@@ -15,7 +15,6 @@ MAX_PAGE_SIZE = 50
 
 class QuerySubscribeSharesInput(BaseModel):
     """查询订阅分享工具的输入参数模型"""
-    explanation: Optional[str] = Field(None, description="Clear explanation of why this tool is being used in the current context")
     name: Optional[str] = Field(None, description="Filter shares by media name (partial match, optional)")
     page: Optional[int] = Field(1, description="Page number for pagination (default: 1)")
     count: Optional[int] = Field(30, description="Number of items per page (default: 30, max: 50)")
@@ -98,6 +97,9 @@ class QuerySubscribeSharesTool(MoviePilotTool):
                     "tmdbid": share.get("tmdbid"),
                     "doubanid": share.get("doubanid"),
                     "bangumiid": share.get("bangumiid"),
+                    "anilistid": share.get("anilistid"),
+                    "media_source": share.get("media_source"),
+                    "media_id": share.get("media_id"),
                     "poster": share.get("poster"),
                     "vote": share.get("vote"),
                     "share_title": share.get("share_title"),

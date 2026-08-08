@@ -12,11 +12,13 @@ from app.core import metainfo as metainfo_module
 from app.core.config import settings
 from app.core.meta.customization import CustomizationMatcher
 from app.core.meta.releasegroup import ReleaseGroupsMatcher
+from app.core.meta.streamingplatform import StreamingPlatforms
 from app.db.systemconfig_oper import SystemConfigOper
 from app.modules.indexer.spider import SiteSpider
 from app.schemas.types import SystemConfigKey
 from app.schemas.types import MediaType
 from app.utils import rust_accel
+from app.utils.http import RequestUtils
 
 
 pytestmark = pytest.mark.skipif(
@@ -153,6 +155,8 @@ def test_rss_helper_parse_uses_rust_parser(monkeypatch):
         测试用 RequestUtils，避免真实网络请求。
         """
 
+        get_decoded_xml_content = staticmethod(RequestUtils.get_decoded_xml_content)
+
         def __init__(self, **_kwargs):
             """
             保存构造参数占位，兼容 RssHelper 的调用方式。
@@ -185,13 +189,8 @@ def _metainfo_options(custom_words=None):
     构造 Rust MetaInfo 测试所需的配置，保持和生产入口一致。
     """
     systemconfig = SystemConfigOper()
-    custom_release_groups = systemconfig.get(SystemConfigKey.CustomReleaseGroups)
-    if isinstance(custom_release_groups, list):
-        custom_release_groups = list(filter(None, custom_release_groups))
-    release_groups = ReleaseGroupsMatcher()._ReleaseGroupsMatcher__release_groups
-    if custom_release_groups:
-        release_groups = f"{release_groups}|{'|'.join(custom_release_groups)}"
-    customization = CustomizationMatcher._normalize_customization(
+    release_groups = ReleaseGroupsMatcher().get_release_groups()
+    customization = CustomizationMatcher.normalize_customization(
         systemconfig.get(SystemConfigKey.Customization)
     )
     return {
@@ -199,7 +198,7 @@ def _metainfo_options(custom_words=None):
         "media_exts": settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT,
         "release_groups": release_groups,
         "customization": customization,
-        "streaming_platforms": metainfo_module._rust_parse_options()["streaming_platforms"],
+        "streaming_platforms": StreamingPlatforms().get_lookup_cache(),
     }
 
 
@@ -256,6 +255,23 @@ def test_rust_metainfo_parser_handles_episode_group():
     assert result["type"] == MediaType.TV.value
     assert result["episode_group"] == group_id
     assert result["begin_season"] == 1
+
+
+def test_rust_metainfo_parser_handles_subtitle_episode_range_fin():
+    """
+    Rust MetaInfo 入口应识别副标题中的数字范围完结标记。
+    """
+    result = rust_accel.parse_metainfo(
+        "JoJos Bizarre Adventure S01 2012 1080i BluRay x264 FLAC 2.0-AnimeF@ADE",
+        subtitle="JOJO的奇妙冒险 第一季 / JoJo's Bizarre Adventure [01-26Fin] [简繁字幕]",
+        options=_metainfo_options(),
+    )
+
+    assert result["type"] == MediaType.TV.value
+    assert result["begin_season"] == 1
+    assert result["begin_episode"] == 1
+    assert result["end_episode"] == 26
+    assert result["total_episode"] == 26
 
 
 def test_rust_metainfo_path_parser_merges_parent_title():

@@ -7,6 +7,7 @@ from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
 from app.agent.tools.impl.update_system_settings import UpdateSystemSettingsTool
 from app.agent.tools.manager import MoviePilotToolsManager
 from app.core.config import settings
+from app.schemas.types import SystemConfigKey
 
 
 class TestAgentSystemSettingsTools(unittest.TestCase):
@@ -24,6 +25,63 @@ class TestAgentSystemSettingsTools(unittest.TestCase):
         self.assertEqual(payload["matched_count"], 1)
         self.assertEqual(payload["settings"][0]["setting_key"], "Downloaders")
         self.assertEqual(payload["settings"][0]["value"][0]["name"], "qb")
+        system_config_oper.return_value.get.assert_called_once_with(
+            SystemConfigKey.Downloaders
+        )
+
+    def test_query_system_settings_redacts_secret_values_by_default(self):
+        """查询系统设置默认应脱敏 API Key、Token、Cookie 等敏感字段。"""
+        tool = QuerySystemSettingsTool(session_id="session-1", user_id="10001")
+
+        with patch(
+            "app.agent.tools.impl.query_system_settings.SystemConfigOper"
+        ) as system_config_oper:
+            system_config_oper.return_value.get.return_value = [
+                {
+                    "name": "site-a",
+                    "apikey": "site-api-key",
+                    "token": "site-token",
+                    "cookie": "uid=1; passkey=secret",
+                    "url": "https://example.com",
+                }
+            ]
+            result = asyncio.run(
+                tool.run(setting_key="UserSiteAuthParams", include_values=True)
+            )
+
+        payload = json.loads(result)
+        item = payload["settings"][0]
+        self.assertTrue(item["redacted"])
+        self.assertFalse(payload["show_secrets"])
+        self.assertEqual("***", item["value"][0]["apikey"])
+        self.assertEqual("***", item["value"][0]["token"])
+        self.assertEqual("***", item["value"][0]["cookie"])
+        self.assertEqual("https://example.com", item["value"][0]["url"])
+
+    def test_query_system_settings_show_secrets_requires_admin_context(self):
+        """只有管理员显式请求 show_secrets 时才返回敏感配置原值。"""
+        tool = QuerySystemSettingsTool(session_id="session-1", user_id="admin")
+        tool.set_agent_context({"is_admin": True})
+
+        with patch(
+            "app.agent.tools.impl.query_system_settings.SystemConfigOper"
+        ) as system_config_oper:
+            system_config_oper.return_value.get.return_value = [
+                {"name": "site-a", "apikey": "site-api-key"}
+            ]
+            result = asyncio.run(
+                tool.run(
+                    setting_key="UserSiteAuthParams",
+                    include_values=True,
+                    show_secrets=True,
+                )
+            )
+
+        payload = json.loads(result)
+        item = payload["settings"][0]
+        self.assertTrue(payload["show_secrets"])
+        self.assertFalse(item["redacted"])
+        self.assertEqual("site-api-key", item["value"][0]["apikey"])
 
     def test_query_system_settings_group_defaults_to_summary_for_multiple_items(self):
         tool = QuerySystemSettingsTool(session_id="session-1", user_id="10001")
@@ -67,7 +125,7 @@ class TestAgentSystemSettingsTools(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertTrue(payload["changed"])
         config_oper.async_set.assert_awaited_once_with(
-            "AIAgentConfig",
+            SystemConfigKey.AIAgentConfig,
             {"chatgpt": {"enabled": False}, "gemini": {"enabled": True}},
         )
         send_event.assert_awaited_once()
@@ -99,6 +157,42 @@ class TestAgentSystemSettingsTools(unittest.TestCase):
         payload = json.loads(result)
         self.assertTrue(payload["success"])
         self.assertEqual(payload["saved_value"], [{"name": "qb", "enabled": True}])
+        config_oper.async_set.assert_awaited_once_with(
+            SystemConfigKey.Downloaders,
+            [{"name": "qb", "enabled": True}],
+        )
+
+    def test_update_system_settings_redacts_secret_values_in_response(self):
+        """更新敏感系统设置后响应不应回显旧值和新值中的密钥。"""
+        tool = UpdateSystemSettingsTool(session_id="session-1", user_id="10001")
+        config_oper = MagicMock()
+        config_oper.get.side_effect = [
+            [{"name": "site-a", "apikey": "old-key"}],
+            [{"name": "site-a", "apikey": "new-key"}],
+        ]
+        config_oper.async_set = AsyncMock(return_value=True)
+
+        with patch(
+            "app.agent.tools.impl.update_system_settings.SystemConfigOper",
+            return_value=config_oper,
+        ), patch(
+            "app.agent.tools.impl.update_system_settings.eventmanager.async_send_event",
+            new=AsyncMock(),
+        ):
+            result = asyncio.run(
+                tool.run(
+                    setting_key="UserSiteAuthParams",
+                    operation="upsert_list_item",
+                    value={"name": "site-a", "apikey": "new-key"},
+                    match_field="name",
+                )
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["values_redacted"])
+        self.assertEqual("***", payload["previous_value"][0]["apikey"])
+        self.assertEqual("***", payload["saved_value"][0]["apikey"])
 
     def test_update_system_settings_updates_basic_settings(self):
         tool = UpdateSystemSettingsTool(session_id="session-1", user_id="10001")

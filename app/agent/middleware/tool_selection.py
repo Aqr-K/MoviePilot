@@ -1,6 +1,6 @@
 """MoviePilot 自定义工具筛选中间件。"""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, NotRequired
@@ -20,12 +20,13 @@ from langchain.agents.middleware.tool_selection import (
     LLMToolSelectorMiddleware,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict  # noqa
 
+from app.agent.llm import LLMHelper
 from app.agent.tools.tags import ToolTag
 from app.log import logger
 
@@ -67,19 +68,25 @@ class ToolSelectionStateUpdate(TypedDict):
     selected_tool_names: list[str] | None
 
 
+@dataclass(frozen=True)
+class _ToolSelectionAttempt:
+    """工具筛选尝试结果，用于统一记录最终日志。"""
+
+    request: ModelRequest
+    selected_tool_names: list[str]
+    status: str
+    detail: str = ""
+
+
 class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
     """
-    为 DeepSeek 兼容端点提供更稳妥的工具筛选实现。
+    使用 provider-neutral JSON 提示执行工具筛选。
 
-    LangChain 默认会通过 `with_structured_output()` 走 OpenAI 的
-    `response_format=json_schema` 路径，但 DeepSeek 官方 OpenAI 兼容端点公开文档
-    仅保证 `json_object` 模式可用。对于 `deepseek-reasoner`，这会在工具筛选阶段
-    提前触发 400，导致 Agent 还没真正开始执行工具就失败。
-
-    因此这里仅在识别到 DeepSeek 模型/端点时，退回到显式 JSON 输出模式：
-    1. 使用 `response_format={"type": "json_object"}`；
-    2. 在提示词中明确约束返回 JSON 结构；
-    3. 手动解析 `{"tools": [...]}`，其余模型继续沿用 LangChain 默认实现。
+    LangChain 默认会通过 `with_structured_output()` 走 provider-specific 的
+    结构化输出能力，不同 OpenAI/Anthropic 兼容端点对 `response_format`、
+    JSON schema 和工具绑定的支持并不一致。工具筛选只是 Agent 执行前的
+    辅助优化，失败时也会恢复使用全部工具，因此这里统一使用文本提示约束
+    模型返回 `{"tools": [...]}` 并手动解析，避免在筛选阶段引入额外兼容分支。
 
     另外，LangChain 原生工具筛选挂在 `wrap_model_call` 上，会在同一条用户请求
     的每次“模型回合”前都重新筛选一次工具。对于会多轮调用工具的复杂任务，
@@ -121,7 +128,7 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             else:
                 continue
 
-            content = cls._extract_text_content(message.content).strip()
+            content = LLMHelper.extract_text_content(message.content).strip()
             if not content:
                 continue
             rendered_messages.append(f"{role}: {content}")
@@ -321,21 +328,16 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             request: ModelRequest[ContextT],
     ) -> ModelRequest[ContextT]:
         """
-        处理工具筛选响应，并保留空结果回退所有工具的 MoviePilot 策略。
+        处理工具筛选响应，并在正常空结果时禁用可筛选工具。
         """
         if response.get("tools") == []:
-            logger.warning("工具筛选结果为空，将恢复使用所有工具。")
-
             always_included_tools: list[BaseTool] = [
                 tool
                 for tool in request.tools
                 if not isinstance(tool, dict) and tool.name in self.always_include
             ]
             provider_tools = [tool for tool in request.tools if isinstance(tool, dict)]
-
-            return request.override(
-                tools=[*available_tools, *always_included_tools, *provider_tools]
-            )
+            return request.override(tools=[*always_included_tools, *provider_tools])
 
         response["tools"] = self._complete_low_count_selection(
             selected_tool_names=[
@@ -346,80 +348,21 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             valid_tool_names=valid_tool_names,
             available_tools=available_tools,
         )
-        return super()._process_selection_response(
+        modified_request = super()._process_selection_response(
             response,
             available_tools,
             valid_tool_names,
             request,
         )
-
-    @staticmethod
-    def _is_deepseek_compatible_model(model: BaseChatModel) -> bool:
-        """
-        判断当前模型是否应当走 DeepSeek JSON 兼容分支。
-
-        除了官方 `langchain_deepseek`，用户也可能通过 OpenAI-compatible
-        配置把 DeepSeek 端点接到 `ChatOpenAI`。因此这里同时检查模块名、模型名
-        和 Base URL，避免只靠单一条件漏判。
-        """
-        module_name = type(model).__module__.lower()
-        model_name = (
-            str(getattr(model, "model_name", "") or getattr(model, "model", ""))
-            .strip()
-            .lower()
-        )
-        base_url = (
-            str(getattr(model, "openai_api_base", "") or getattr(model, "api_base", ""))
-            .strip()
-            .lower()
-        )
-
-        return (
-                "deepseek" in module_name
-                or model_name.startswith("deepseek-")
-                or "api.deepseek.com" in base_url
-        )
-
-    @staticmethod
-    def _extract_text_content(content: Any) -> str:
-        """
-        从模型响应中提取纯文本。
-
-        这里不依赖上层 LLMHelper，避免中间件与 LLM 构造逻辑互相耦合。
-        """
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            text_parts: list[str] = []
-            for block in content:
-                if isinstance(block, str):
-                    text_parts.append(block)
-                    continue
-                if isinstance(block, dict):
-                    if block.get("type") == "text" and isinstance(
-                            block.get("text"), str
-                    ):
-                        text_parts.append(block["text"])
-                        continue
-                    if not block.get("type") and isinstance(block.get("text"), str):
-                        text_parts.append(block["text"])
-            return "".join(text_parts)
-        if isinstance(content, dict):
-            if content.get("type") == "text" and isinstance(content.get("text"), str):
-                return content["text"]
-            if not content.get("type") and isinstance(content.get("text"), str):
-                return content["text"]
-        return ""
+        return modified_request
 
     @staticmethod
     def _parse_json_object(text: str) -> dict[str, Any]:
         """
         解析模型返回的 JSON。
 
-        DeepSeek 在 JSON 模式下通常会返回纯 JSON，但这里仍做一层兜底，
-        兼容模型偶发输出围栏或前后说明文本的情况。
+        不同模型可能偶发输出 Markdown 围栏或前后说明文本，因此这里从
+        响应中提取第一个 JSON 对象作为兜底。
         """
         stripped_text = text.strip()
         if not stripped_text:
@@ -472,16 +415,16 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         )
         return f"Capability groups from tool tags:\n{rendered_groups}\n\n"
 
-    def _build_deepseek_selection_prompt(self, selection_request: Any) -> str:
+    def _build_json_selection_prompt(self, selection_request: Any) -> str:
         """
-        为 DeepSeek 生成显式 JSON 输出提示。
+        生成显式 JSON 输出提示。
 
-        DeepSeek 官方文档要求在 JSON 输出模式下，提示词中必须明确包含 JSON
-        约束，否则兼容端点可能返回空内容或无意义输出。
+        使用纯提示约束可覆盖更多兼容端点，避免在工具筛选阶段依赖某个
+        provider 专属的 `response_format` 或 schema 能力。
         """
         limit_instruction = ""
         if self.max_tools:
-            limit_instruction = f"- Select up to {self.max_tools} tools. IF NO TOOLS ARE RELEVANT, DO NOT RETURN AN EMPTY ARRAY. SELECT THE MOST APPLICABLE ONES TO ENSURE THE REQUEST IS HANDLED."
+            limit_instruction = f"- Select up to {self.max_tools} tools. Return an empty array if no tools are relevant."
 
         return (
             f"{selection_request.system_message}\n\n"
@@ -501,10 +444,10 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
 
     def _normalize_selection_response(self, response: Any) -> dict[str, list[str]]:
         """
-        解析并标准化 DeepSeek JSON 模式的工具筛选结果。
+        解析并标准化显式 JSON 模式的工具筛选结果。
         """
         content = getattr(response, "content", response)
-        text = self._extract_text_content(content)
+        text = LLMHelper.extract_text_content(content)
         logger.debug(f"工具筛选原始响应: {text}")
         payload = self._parse_json_object(text)
 
@@ -518,22 +461,21 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         logger.debug(f"工具筛选标准化结果: {normalized_tools}")
         return {"tools": normalized_tools}
 
-    async def _aselect_tools_with_deepseek(
+    async def _aselect_tools_with_json_prompt(
             self, selection_request: Any
     ) -> dict[str, list[str]]:
         """
-        使用 DeepSeek 兼容的 JSON 输出模式执行异步工具筛选。
+        使用 JSON 提示执行异步工具筛选。
+
+        :param selection_request: LangChain 工具筛选请求
+        :return: 标准化后的工具名列表
         """
-        logger.debug("工具筛选走 DeepSeek JSON 兼容分支")
-        structured_model = selection_request.model.bind(
-            response_format={"type": "json_object"}
-        )
-        response = await structured_model.ainvoke(
+        logger.debug("工具筛选走 JSON 提示分支")
+        response = await selection_request.model.ainvoke(
             [
-                {
-                    "role": "system",
-                    "content": self._build_deepseek_selection_prompt(selection_request),
-                },
+                SystemMessage(
+                    content=self._build_json_selection_prompt(selection_request)
+                ),
                 selection_request.last_user_message,
             ]
         )
@@ -543,6 +485,31 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
     def _extract_selected_tool_names(request: ModelRequest) -> list[str]:
         """从已筛选后的请求中提取最终工具名，保留原有顺序。"""
         return [tool.name for tool in request.tools if not isinstance(tool, dict)]
+
+    @staticmethod
+    def _count_request_tools(request: ModelRequest) -> int:
+        """统计当前请求中的 LangChain 工具数量，不包含 provider 原生工具字典。"""
+        return len([tool for tool in request.tools if not isinstance(tool, dict)])
+
+    @classmethod
+    def _log_selection_attempt(cls, attempt: _ToolSelectionAttempt) -> None:
+        """按工具筛选最终状态记录稳定日志。"""
+        tool_count = cls._count_request_tools(attempt.request)
+        if attempt.status == "selected":
+            selected_text = ", ".join(attempt.selected_tool_names) or "无有效工具"
+            logger.info(f"工具筛选结果: {selected_text}")
+            return
+        if attempt.status == "failed_fallback":
+            logger.warning(
+                f"工具筛选失败，将恢复使用所有工具（共 {tool_count} 个）: {attempt.detail}"
+            )
+            return
+        if attempt.status == "skipped":
+            logger.info(f"工具筛选跳过: {attempt.detail}。")
+            return
+        if attempt.status == "reused":
+            selected_text = ", ".join(attempt.selected_tool_names) or "无有效工具"
+            logger.info(f"工具筛选复用已有结果: {selected_text}")
 
     @staticmethod
     def _apply_selected_tools(
@@ -555,9 +522,6 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         这里只复用首次筛选出的客户端工具名；provider-specific 的 dict 工具仍然
         原样保留，避免破坏 LangChain/provider 自身的工具绑定约定。
         """
-        if not selected_tool_names:
-            return request
-
         current_tools_by_name = {
             tool.name: tool for tool in request.tools if not isinstance(tool, dict)
         }
@@ -578,30 +542,43 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         这里单独抽成 helper，便于首次筛选后缓存结果，也便于测试覆盖
         “首轮筛选，后续复用”的行为。
         """
+        return (await self._aselect_request_once_with_status(request)).request
+
+    async def _aselect_request_once_with_status(
+            self, request: ModelRequest[ContextT]
+    ) -> _ToolSelectionAttempt:
+        """
+        执行一次真实工具筛选，并携带最终状态供调用方统一记录日志。
+        """
         selection_request = self._prepare_selection_request(request)
         if selection_request is None:
-            return request
+            return _ToolSelectionAttempt(
+                request=request,
+                selected_tool_names=self._extract_selected_tool_names(request),
+                status="skipped",
+                detail="没有需要筛选的工具",
+            )
 
-        if not self._is_deepseek_compatible_model(selection_request.model):
-            captured_request: ModelRequest[ContextT] = request
-
-            async def _capture_handler(
-                    updated_request: ModelRequest[ContextT],
-            ) -> ModelRequest[ContextT]:
-                nonlocal captured_request
-                captured_request = updated_request
-                return updated_request
-
-            await super().awrap_model_call(request, _capture_handler)
-            return captured_request
-
-        response = await self._aselect_tools_with_deepseek(selection_request)
-        return self._process_selection_response(
-            response,
-            selection_request.available_tools,
-            selection_request.valid_tool_names,
-            request,
-        )
+        try:
+            response = await self._aselect_tools_with_json_prompt(selection_request)
+            modified_request = self._process_selection_response(
+                response,
+                selection_request.available_tools,
+                selection_request.valid_tool_names,
+                request,
+            )
+            return _ToolSelectionAttempt(
+                request=modified_request,
+                selected_tool_names=self._extract_selected_tool_names(modified_request),
+                status="selected",
+            )
+        except Exception as err:
+            return _ToolSelectionAttempt(
+                request=request,
+                selected_tool_names=self._extract_selected_tool_names(request),
+                status="failed_fallback",
+                detail=str(err),
+            )
 
     async def abefore_agent(  # noqa
             self,
@@ -615,10 +592,22 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
         这样后续多轮 `model -> tools -> model` 循环都只复用这一次结果，
         不会为每次模型回合重复追加一笔 selector LLM 开销。
         """
-        if "selected_tool_names" in state:
-            return None
-
         if not self.selection_tools or self.model is None:
+            detail = "没有可筛选工具" if not self.selection_tools else "未配置筛选模型"
+            self._log_selection_attempt(
+                _ToolSelectionAttempt(
+                    request=ModelRequest(
+                        model=self.model,
+                        tools=list(self.selection_tools),
+                        messages=state["messages"],
+                        state=state,
+                        runtime=runtime,
+                    ),
+                    selected_tool_names=[],
+                    status="skipped",
+                    detail=detail,
+                )
+            )
             return ToolSelectionStateUpdate(selected_tool_names=None)
 
         selection_request = ModelRequest(
@@ -628,9 +617,10 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
             state=state,
             runtime=runtime,
         )
-        modified_request = await self._aselect_request_once(selection_request)
-        selected_tool_names = self._extract_selected_tool_names(modified_request)
-        return ToolSelectionStateUpdate(selected_tool_names=selected_tool_names or None)
+        attempt = await self._aselect_request_once_with_status(selection_request)
+        self._log_selection_attempt(attempt)
+        selected_tool_names = attempt.selected_tool_names
+        return ToolSelectionStateUpdate(selected_tool_names=selected_tool_names)
 
     async def awrap_model_call(
             self,
@@ -651,11 +641,13 @@ class ToolSelectorMiddleware(LLMToolSelectorMiddleware):
                 and self.selection_tools
                 and self.model is not None
         ):
-            request = await self._aselect_request_once(request)
-            selected_tool_names = self._extract_selected_tool_names(request) or None
+            attempt = await self._aselect_request_once_with_status(request)
+            self._log_selection_attempt(attempt)
+            request = attempt.request
+            selected_tool_names = attempt.selected_tool_names
             request.state["selected_tool_names"] = selected_tool_names  # noqa
 
-        if selected_tool_names:
+        if selected_tool_names is not None:
             request = self._apply_selected_tools(request, selected_tool_names)
 
         return await handler(request)

@@ -53,7 +53,7 @@ def _read_json_file(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -158,7 +158,7 @@ def _http_request(
                 "text": raw,
             }
     except HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="ignore")
+        raw = exc.read().decode("utf-8", errors="replace")
         try:
             data = json.loads(raw) if raw else None
         except json.JSONDecodeError:
@@ -198,7 +198,7 @@ def _frontend_health(runtime: Optional[Dict[str, Any]] = None, timeout: float = 
     request = Request(url=url, headers={"Accept": "text/plain"}, method="GET")
     try:
         with urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8", errors="ignore").strip()
+            raw = response.read().decode("utf-8", errors="replace").strip()
             return response.status == 200, {"version": raw}
     except (HTTPError, URLError):
         return False, None
@@ -233,7 +233,7 @@ def _github_api_json(url: str, *, repo: str) -> Any:
         with opener.open(request, timeout=10.0) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
+        detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"访问 GitHub API 失败（HTTP {exc.code}）: {detail or url}") from exc
     except URLError as exc:
         raise RuntimeError(f"访问 GitHub API 失败：{exc.reason}") from exc
@@ -325,11 +325,16 @@ def _best_effort_auto_update() -> None:
     ]
 
     update_env = os.environ.copy()
+    package_cache_root = Path(update_env.get("PACKAGE_CACHE_ROOT", "").strip() or settings.PACKAGE_CACHE_PATH)
+    update_env.setdefault("PACKAGE_CACHE_ROOT", str(package_cache_root))
+    update_env.setdefault("PIP_CACHE_DIR", str(package_cache_root / "pip"))
+    update_env.setdefault("UV_CACHE_DIR", str(package_cache_root / "uv"))
+    if settings.PIP_PROXY:
+        update_env["PIP_PROXY"] = settings.PIP_PROXY
     if settings.PROXY_HOST:
-        update_env.setdefault("http_proxy", settings.PROXY_HOST)
-        update_env.setdefault("https_proxy", settings.PROXY_HOST)
-        update_env.setdefault("HTTP_PROXY", settings.PROXY_HOST)
-        update_env.setdefault("HTTPS_PROXY", settings.PROXY_HOST)
+        update_env["PROXY_HOST"] = settings.PROXY_HOST
+        for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+            update_env[key] = settings.PROXY_HOST
     if settings.GITHUB_TOKEN:
         update_env.setdefault("GITHUB_TOKEN", settings.GITHUB_TOKEN)
 
@@ -342,7 +347,7 @@ def _best_effort_auto_update() -> None:
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
-        errors="ignore",
+        errors="replace",
         check=False,
     )
     if result.returncode == 0:
@@ -451,7 +456,7 @@ def _annotation_name(annotation: Any) -> str:
 def _tail_lines(path: Path, count: int) -> list[str]:
     if not path.exists():
         raise click.ClickException(f"日志文件不存在：{path}")
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         return [line.rstrip("\n") for line in deque(handle, maxlen=count)]
 
 
@@ -459,7 +464,7 @@ def _follow_file(path: Path) -> None:
     if not path.exists():
         raise click.ClickException(f"日志文件不存在：{path}")
 
-    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         handle.seek(0, os.SEEK_END)
         while True:
             line = handle.readline()
@@ -554,8 +559,6 @@ def _format_tool_detail(tool: Dict[str, Any]) -> None:
     required = set((tool.get("inputSchema") or {}).get("required") or [])
     fields = []
     for name, schema in properties.items():
-        if name == "explanation":
-            continue
         fields.append(
             (
                 f"{name}*" if name in required else name,
@@ -826,7 +829,7 @@ def _installed_frontend_version() -> Optional[str]:
     if not FRONTEND_VERSION_FILE.exists():
         return None
     try:
-        return FRONTEND_VERSION_FILE.read_text(encoding="utf-8").strip() or None
+        return FRONTEND_VERSION_FILE.read_text(encoding="utf-8", errors="replace").strip() or None
     except OSError:
         return None
 
@@ -985,7 +988,7 @@ def logs(lines: int, follow: bool, stdio: bool, frontend_log: bool) -> None:
 @click.option("--fix", is_flag=True, help="执行白名单安全修复")
 @click.option("--deep", is_flag=True, help="执行可能较慢的深度检查")
 def doctor(json_output: bool, fix: bool, deep: bool) -> None:
-    """离线诊断本地 MoviePilot 运行环境"""
+    """离线诊断本地 MoviePilot 运行环境，插件日志告警不影响整体状态"""
     from app.doctor import run_doctor
     from app.doctor.formatters import format_json_report, format_text_report
 
@@ -1128,8 +1131,7 @@ def tool_show(tool_name: str) -> None:
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def tool_run(tool_name: str, args: tuple[str, ...]) -> None:
     """运行指定工具"""
-    arguments = {"explanation": "CLI invocation"}
-    arguments.update(_parse_key_value_pairs(args))
+    arguments = _parse_key_value_pairs(args)
     result = _call_tool(tool_name, arguments, runtime=_backend_runtime())
     if isinstance(result, (dict, list)):
         _print_json(result)
@@ -1147,7 +1149,7 @@ def scheduler_list() -> None:
     """列出调度任务"""
     result = _call_tool(
         "query_schedulers",
-        {"explanation": "List scheduler jobs from local CLI"},
+        {},
         runtime=_backend_runtime(),
     )
     if isinstance(result, list):
@@ -1163,10 +1165,7 @@ def scheduler_run(job_id: str) -> None:
     """立即执行某个调度任务"""
     result = _call_tool(
         "run_scheduler",
-        {
-            "explanation": "Run a scheduler job from local CLI",
-            "job_id": job_id,
-        },
+        {"job_id": job_id},
         runtime=_backend_runtime(),
     )
     if isinstance(result, (dict, list)):

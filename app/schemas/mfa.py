@@ -34,7 +34,7 @@ class PassKeyRegistrationFinish(BaseModel):
     """PassKey注册完成请求"""
 
     credential: dict
-    challenge: str
+    transaction_token: str
     name: str = "通行密钥"
 
 
@@ -48,7 +48,7 @@ class PassKeyAuthenticationFinish(BaseModel):
     """PassKey认证完成请求"""
 
     credential: dict
-    challenge: str
+    transaction_token: str
 
 
 __all__ = [

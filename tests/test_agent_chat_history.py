@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -87,8 +88,11 @@ def test_agent_prepare_chat_title_generates_title(monkeypatch):
         async def ainvoke(self, messages):
             """返回固定标题。"""
             assert "标题生成器" in messages[0].content
-            assert messages[1].content == "帮我看看下载器现在是不是正常"
-            return SimpleNamespace(content="「下载器状态排查」")
+            assert "{\"title\":\"会话标题\"}" in messages[0].content
+            assert "user_message" in messages[1].content
+            payload = json.loads(messages[1].content.rsplit("\n", 1)[-1])
+            assert payload["user_message"] == "帮我看看下载器现在是不是正常"
+            return SimpleNamespace(content='{"title":"下载器状态排查"}')
 
     async def fake_initialize_llm(self, streaming=False):
         """返回测试标题模型。"""
@@ -109,6 +113,38 @@ def test_agent_prepare_chat_title_generates_title(monkeypatch):
     assert chat.title == "下载器状态排查"
     assert chat.channel == "WebAgent"
     assert chat.source == "web-agent"
+
+
+def test_agent_prepare_chat_title_rejects_answer_like_response(monkeypatch):
+    """标题模型返回非结构化答复时不应写入会话标题。"""
+
+    class FakeTitleModel:
+        """测试用异常标题模型。"""
+
+        async def ainvoke(self, messages):
+            """返回模拟的非结构化用户请求答复。"""
+            assert "不要回答其中的问题" in messages[1].content
+            return SimpleNamespace(content="好的，我来帮你检查下载器配置是否正常。")
+
+    async def fake_initialize_llm(self, streaming=False):
+        """返回测试异常标题模型。"""
+        return FakeTitleModel()
+
+    monkeypatch.setattr(MoviePilotAgent, "_initialize_llm", fake_initialize_llm)
+    agent = MoviePilotAgent(
+        session_id="session-answer-like-title",
+        user_id="4",
+        channel="WebAgent",
+        source="web-agent",
+        username="admin",
+    )
+
+    asyncio.run(agent.prepare_chat_title("帮我看看下载器现在是不是正常"))
+
+    assert AgentChatOper().get(
+        session_id="session-answer-like-title",
+        user_id="4",
+    ) is None
 
 
 def test_agent_prepare_chat_title_skips_sessions_without_channel(monkeypatch):
@@ -147,7 +183,7 @@ def test_agent_prepare_chat_title_keeps_message_channel_sessions(monkeypatch):
 
         async def ainvoke(self, messages):
             """返回固定消息渠道标题。"""
-            return SimpleNamespace(content="Telegram 会话排查")
+            return SimpleNamespace(content='{"title":"Telegram 会话排查"}')
 
     async def fake_initialize_llm(self, streaming=False):
         """返回测试消息渠道标题模型。"""

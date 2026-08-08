@@ -1,4 +1,4 @@
-from typing import Any, Generator, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 from app import schemas
 from app.core.context import MediaInfo
@@ -242,6 +242,19 @@ class JellyfinModule(_ModuleBase, _MediaServerBase[Jellyfin]):
             return server_obj.get_items(library_id, start_index, limit)
         return None
 
+    def mediaserver_items_count(self, server: str, library_id: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的媒体条目总数
+
+        :param server: 媒体服务器名称
+        :param library_id: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        server_obj: Jellyfin = self.get_instance(server)
+        if server_obj:
+            return server_obj.get_items_count(library_id)
+        return None
+
     def mediaserver_iteminfo(self, server: str, item_id: str) -> Optional[schemas.MediaServerItem]:
         """
         媒体库项目详情
@@ -268,13 +281,14 @@ class JellyfinModule(_ModuleBase, _MediaServerBase[Jellyfin]):
         ) for season, episodes in seasoninfo.items()]
 
     def mediaserver_playing(self, server: str,
-                            count: Optional[int] = 20, username: Optional[str] = None) -> List[schemas.MediaServerPlayItem]:
+                            count: Optional[int] = 20,
+                            username: Optional[str] = None) -> Optional[List[schemas.MediaServerPlayItem]]:
         """
         获取媒体服务器正在播放信息
         """
         server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
-            return []
+            return None
         return server_obj.get_resume(num=count, username=username)
 
     def mediaserver_play_url(self, server: str, item_id: Union[str, int]) -> Optional[str]:
@@ -286,14 +300,29 @@ class JellyfinModule(_ModuleBase, _MediaServerBase[Jellyfin]):
             return None
         return server_obj.get_play_url(item_id)
 
+    def mediaserver_season_episode_ids(self, server: str, item_id: Union[str, int],
+                                       season: int) -> Optional[Dict[int, str]]:
+        """
+        获取指定季的集号到条目 ID 映射
+
+        :param server: Jellyfin 媒体服务器名称
+        :param item_id: 剧集在 Jellyfin 中的条目 ID
+        :param season: 季号
+        :return: 集号到条目 ID 的映射，服务器不可用或无数据时返回 None
+        """
+        server_obj: Jellyfin = self.get_instance(server)
+        if not server_obj:
+            return None
+        return server_obj.get_season_episode_ids(str(item_id), season)
+
     def mediaserver_latest(self, server: Optional[str] = None, count: Optional[int] = 20,
-                           username: Optional[str] = None) -> List[schemas.MediaServerPlayItem]:
+                           username: Optional[str] = None) -> Optional[List[schemas.MediaServerPlayItem]]:
         """
         获取媒体服务器最新入库条目
         """
         server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
-            return []
+            return None
         return server_obj.get_latest(num=count, username=username)
 
     def mediaserver_latest_images(self,
@@ -316,8 +345,7 @@ class JellyfinModule(_ModuleBase, _MediaServerBase[Jellyfin]):
             return []
 
         links = []
-        items: List[schemas.MediaServerPlayItem] = self.mediaserver_latest(server=server, count=count,
-                                                                           username=username)
+        items = self.mediaserver_latest(server=server, count=count, username=username) or []
         for item in items:
             if item.BackdropImageTags:
                 image_url = server_obj.get_backdrop_url(item_id=item.id,

@@ -1,7 +1,7 @@
 import base64
 import re
 from datetime import datetime
-from typing import List, Optional, Tuple, Union, Dict
+from typing import Callable, List, Optional, Tuple, Union, Dict
 from urllib.parse import urljoin
 
 from app.helper.sites import SitesHelper  # noqa
@@ -46,6 +46,7 @@ class SiteChain(ChainBase):
     _text_page_size = 10
 
     def __init__(self):
+        """初始化站点管理处理链及特殊站点测试器"""
         super().__init__()
 
         # 特殊站点登录验证
@@ -59,6 +60,7 @@ class SiteChain(ChainBase):
             "yemapt.org": self.__yema_test,
             "hddolby.com": self.__hddolby_test,
             "rousi.pro": self.__rousi_test,
+            "sunnypt.top": self.__sunnypt_test,
         }
 
     def refresh_userdata(self, site: dict = None) -> Optional[SiteUserData]:
@@ -76,23 +78,7 @@ class SiteChain(ChainBase):
             eventmanager.send_event(EventType.SiteRefreshed, {
                 "site_id": site.get("id")
             })
-            # 发送站点消息
-            if userdata.message_unread:
-                if userdata.message_unread_contents and len(userdata.message_unread_contents) > 0:
-                    for head, date, content in userdata.message_unread_contents:
-                        msg_title = f"【站点 {site.get('name')} 消息】"
-                        msg_text = f"时间：{date}\n标题：{head}\n内容：\n{content}"
-                        self.post_message(Notification(
-                            mtype=NotificationType.SiteMessage,
-                            title=msg_title, text=msg_text, link=site.get("url")
-                        ))
-                else:
-                    self.post_message(Notification(
-                        mtype=NotificationType.SiteMessage,
-                        title=f"站点 {site.get('name')} 收到 "
-                              f"{userdata.message_unread} 条新消息，请登陆查看",
-                        link=site.get("url")
-                    ))
+            self._post_site_messages(site=site, userdata=userdata)
             # 低分享率警告
             if userdata.ratio and float(userdata.ratio) < 1 and not bool(
                     re.search(r"(贵宾|VIP?)", userdata.user_level or "", re.IGNORECASE)):
@@ -103,24 +89,86 @@ class SiteChain(ChainBase):
                 ))
         return userdata
 
-    def refresh_userdatas(self) -> Optional[Dict[str, SiteUserData]]:
+    def _post_site_messages(self, site: dict, userdata: SiteUserData) -> None:
+        """
+        发送站点未读消息，并按解析器提供的来源标识做持久化去重。
+
+        :param site: 站点索引配置
+        :param userdata: 本次刷新的站点用户数据
+        """
+        if not userdata.message_unread:
+            return
+        if not userdata.message_unread_contents:
+            self.post_message(Notification(
+                mtype=NotificationType.SiteMessage,
+                title=f"站点 {site.get('name')} 收到 "
+                      f"{userdata.message_unread} 条新消息，请登陆查看",
+                link=site.get("url")
+            ))
+            return
+        for message in userdata.message_unread_contents:
+            head, date, content, *metadata = message
+            message_source = metadata[0] if metadata else None
+            if message_source and self.messageoper.exists_by_source(message_source):
+                continue
+            msg_title = f"【站点 {site.get('name')} 消息】"
+            msg_text = f"时间：{date}\n标题：{head}\n内容：\n{content}"
+            self.post_message(Notification(
+                source=message_source,
+                mtype=NotificationType.SiteMessage,
+                title=msg_title,
+                text=msg_text,
+                link=site.get("url")
+            ))
+
+    def refresh_userdatas(
+            self,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> Optional[Dict[str, SiteUserData]]:
         """
         刷新所有站点的用户数据
+
+        :param progress_callback: 定时服务进度更新回调
         """
         any_site_updated = False
         result = {}
-        for site in SitesHelper().get_indexers():
+        sites = [site for site in SitesHelper().get_indexers() if site.get("is_active")]
+        total_num = len(sites)
+        if progress_callback:
+            progress_callback(
+                value=0,
+                text=f"开始刷新站点数据，共 {total_num} 个站点 ...",
+                data={"total": total_num, "finished": 0},
+            )
+        for index, site in enumerate(sites, start=1):
             if global_vars.is_system_stopped:
                 return None
-            if site.get("is_active"):
-                userdata = self.refresh_userdata(site)
-                if userdata:
-                    any_site_updated = True
-                    result[site.get("name")] = userdata
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在刷新站点数据（{index}/{total_num}）{site.get('name')} ...",
+                    data={
+                        "total": total_num,
+                        "finished": index - 1,
+                        "current": site.get("id"),
+                    },
+                )
+            userdata = self.refresh_userdata(site)
+            if userdata:
+                any_site_updated = True
+                result[site.get("name")] = userdata
+            if progress_callback:
+                progress_callback(
+                    value=index / total_num * 100 if total_num else 100,
+                    text=f"站点数据（{index}/{total_num}）刷新完成",
+                    data={"total": total_num, "finished": index},
+                )
         if any_site_updated:
             eventmanager.send_event(EventType.SiteRefreshed, {
                 "site_id": "*"
             })
+        if progress_callback:
+            progress_callback(value=100, text="站点数据刷新完成")
 
         return result
 
@@ -202,6 +250,41 @@ class SiteChain(ChainBase):
             return False, user_info.get("message", "鉴权已过期或无效")
         else:
             return False, f"错误：{res.status_code} {res.reason}"
+
+    @staticmethod
+    def __sunnypt_test(site: Site) -> Tuple[bool, str]:
+        """
+        通过 profile 接口测试 SunnyPT API Key 和下载权限
+
+        :param site: SunnyPT 站点配置
+        :return: 是否可用及状态信息
+        """
+        indexer = SitesHelper().get_indexer(site.domain) or {}
+        api_url = str(
+            indexer.get("api_url") or "https://api.sunnypt.top/api/v1/mp"
+        ).rstrip("/")
+        res = RequestUtils(
+            headers={
+                "Accept": "application/json",
+                "User-Agent": site.ua or settings.USER_AGENT,
+                "X-API-Key": site.apikey,
+            },
+            proxies=settings.PROXY if site.proxy else None,
+            timeout=site.timeout or 15,
+        ).get_res(url=f"{api_url}/profile")
+        if res is None:
+            return False, "无法连接 SunnyPT API 服务"
+        if res.status_code != 200:
+            return False, f"错误：{res.status_code} {res.reason}"
+        try:
+            payload = res.json() or {}
+        except (TypeError, ValueError):
+            return False, "SunnyPT API 响应不是有效 JSON"
+        if str(payload.get("code")) != "0" or not isinstance(payload.get("data"), dict):
+            return False, payload.get("msg") or "API Key 已过期或无效"
+        if payload["data"].get("download_allowed") is False:
+            return False, "当前账号没有下载权限"
+        return True, "连接成功"
 
     @staticmethod
     def __yema_test(site: Site) -> Tuple[bool, str]:
@@ -323,9 +406,16 @@ class SiteChain(ChainBase):
                 del html
         return favicon_url, None
 
-    def sync_cookies(self, manual=False) -> Tuple[bool, str]:
+    def sync_cookies(
+            self,
+            manual: bool = False,
+            progress_callback: Optional[Callable[..., None]] = None,
+    ) -> Tuple[bool, str]:
         """
         通过CookieCloud同步站点Cookie
+
+        :param manual: 是否手动同步
+        :param progress_callback: 定时服务进度更新回调
         """
 
         def __indexer_domain(inx: dict, sub_domain: str) -> str:
@@ -340,9 +430,13 @@ class SiteChain(ChainBase):
             return sub_domain
 
         logger.info("开始同步CookieCloud站点 ...")
+        if progress_callback:
+            progress_callback(value=0, text="开始下载 CookieCloud 数据 ...")
         cookies, msg = CookieCloudHelper().download()
         if not cookies:
             logger.error(f"CookieCloud同步失败：{msg}")
+            if progress_callback:
+                progress_callback(value=100, text=f"CookieCloud同步失败：{msg}")
             if manual:
                 self.messagehelper.put(msg, title="CookieCloud同步失败", role="system")
             return False, msg
@@ -353,11 +447,22 @@ class SiteChain(ChainBase):
         siteshelper = SitesHelper()
         siteoper = SiteOper()
         rsshelper = RssHelper()
-        for domain, cookie in cookies.items():
+        total_num = len(cookies)
+        for index, (domain, cookie) in enumerate(cookies.items(), start=1):
             # 检查系统是否停止
             if global_vars.is_system_stopped:
                 logger.info("系统正在停止，中断CookieCloud同步")
                 return False, "系统正在停止，同步被中断"
+            if progress_callback:
+                progress_callback(
+                    value=(index - 1) / total_num * 100 if total_num else 100,
+                    text=f"正在同步 CookieCloud 站点（{index}/{total_num}）{domain} ...",
+                    data={
+                        "total": total_num,
+                        "finished": index - 1,
+                        "current": domain,
+                    },
+                )
 
             # 索引器信息
             indexer = siteshelper.get_indexer(domain)
@@ -465,6 +570,12 @@ class SiteChain(ChainBase):
                 eventmanager.send_event(EventType.SiteUpdated, {
                     "domain": domain,
                 })
+            if progress_callback:
+                progress_callback(
+                    value=index / total_num * 100 if total_num else 100,
+                    text=f"CookieCloud 站点（{index}/{total_num}）同步完成",
+                    data={"total": total_num, "finished": index},
+                )
         # 处理完成
         ret_msg = f"更新了{_update_count}个站点，新增了{_add_count}个站点"
         if _fail_count > 0:
@@ -472,6 +583,8 @@ class SiteChain(ChainBase):
         if manual:
             self.messagehelper.put(ret_msg, title="CookieCloud同步成功", role="system")
         logger.info(f"CookieCloud同步成功：{ret_msg}")
+        if progress_callback:
+            progress_callback(value=100, text=f"CookieCloud同步成功：{ret_msg}")
         return True, ret_msg
 
     @eventmanager.register(EventType.SiteUpdated)
@@ -789,6 +902,7 @@ class SiteChain(ChainBase):
                     userid=userid,
                     username=username,
                     title="站点交互已结束",
+                    save_history=False,
                 )
             )
             return True

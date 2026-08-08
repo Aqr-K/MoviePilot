@@ -10,8 +10,10 @@ from typing import Optional, Tuple
 from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
-from app.core.context import Context, MediaInfo, TorrentInfo
+from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.metainfo import MetaInfo
+from app.db.site_oper import SiteOper
+from app.utils.security import SecurityUtils
 
 
 def add_download_with_media(
@@ -53,24 +55,37 @@ def recognize_and_download(
     downloader: Optional[str],
     save_path: Optional[str],
     username: str,
+    media_source: Optional[str] = None,
+    media_id: Optional[str] = None,
+    bangumiid: Optional[int] = None,
+    anilistid: Optional[int] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     添加下载（不含媒体信息）：识别媒体 → 构建上下文 → 提交 DownloadChain。
 
-    返回 (recognized, download_id)；recognized=False 表示识别失败。
+    :param media_source: 请求级识别数据源
+    :param media_id: 与 media_source 配套的数据源原生ID
+    :param bangumiid: Bangumi 兼容ID
+    :param anilistid: AniList 兼容ID
+    :return: (recognized, download_id)；recognized=False 表示识别失败
     """
     # 元数据
     metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
     # 媒体信息
-    if tmdbid or doubanid:
+    if tmdbid or doubanid or bangumiid or anilistid or media_id:
         mediainfo = MediaChain().recognize_media(
             meta=metainfo,
+            source=media_source,
+            mediaid=media_id,
             tmdbid=tmdbid,
             doubanid=doubanid,
+            bangumiid=bangumiid,
+            anilistid=anilistid,
         )
     else:
         mediainfo = MediaChain().recognize_by_meta(
             metainfo,
+            source=media_source,
             obtain_images=False,
         )
     if not mediainfo:
@@ -90,3 +105,28 @@ def recognize_and_download(
         source="Manual",
     )
     return True, did
+
+
+def prepare_subtitle_download(subtitle: SubtitleInfo) -> Tuple[bool, str]:
+    """
+    校验字幕下载签名，并用服务端站点配置覆盖请求凭据。
+    """
+    if subtitle.site is None:
+        return False, "字幕站点信息为空"
+
+    clean_url = SecurityUtils.verify_signed_url(
+        subtitle.enclosure,
+        purpose=SecurityUtils.subtitle_download_purpose(subtitle.site),
+    )
+    if not clean_url:
+        return False, "字幕下载链接签名无效"
+
+    site = SiteOper().get(subtitle.site)
+    if not site:
+        return False, "字幕站点信息不存在"
+
+    subtitle.enclosure = clean_url
+    subtitle.site_cookie = site.cookie
+    subtitle.site_ua = site.ua
+    subtitle.site_proxy = bool(site.proxy)
+    return True, ""

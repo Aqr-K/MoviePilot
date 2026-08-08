@@ -105,17 +105,19 @@ except:
 
 - One primary class per file is the norm for chains, modules, and helpers.
 - Private helper functions in the same file are preferable to extracting a new helper for single-use logic.
+- Under `app/api/endpoints/`, `app/chain/`, `app/helper/`, and `app/utils/`, add code to an existing domain file whenever the domain already exists.
+- New files under those directories must use a single noun filename such as `package.py`; avoid role-suffix names such as `package_installer.py` unless an established framework convention requires it.
 - Keep files focused on one domain concern.
 
 ---
 
 ## What Not To Do
 
-- Do not introduce new third-party libraries without updating `requirements.in` and running `pip-compile`.
+- Do not introduce new third-party libraries without placing them in the correct dependency entry: runtime packages in `requirements.in`, test/lint/build tooling in `requirements-dev.in`.
 - Do not use `requests` or `httpx` directly for external HTTP calls — use `RequestUtils` from `app/utils/http.py`.
 - Do not issue raw SQLAlchemy queries from chains, modules, or endpoints — use the `*_oper.py` classes.
 - Do not add TODO or FIXME without context. Only keep one if it is genuinely deferred and cannot be addressed in the current task.
 - Do not add noisy markers like `# change starts here`, `# important`, or `# this is a fix`.
 - Do not write comments that restate what the code already clearly says.
 
-*Last Updated: 2026-05-25*
+*Last Updated: 2026-06-23*

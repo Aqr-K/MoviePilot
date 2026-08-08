@@ -18,8 +18,6 @@ from app.log import logger
 class UninstallPluginInput(BaseModel):
     """卸载插件工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     plugin_id: str = Field(
         ...,
         description="Exact plugin ID to uninstall. Use query_installed_plugins first to find the correct plugin_id.",

@@ -66,15 +66,19 @@ class Ugreen:
 
     @property
     def api(self) -> Optional[Api]:
+        """获取当前绿联影视 API 客户端"""
         return self._api
 
     def close(self):
+        """关闭绿联影视连接"""
         self.disconnect()
 
     def is_configured(self) -> bool:
+        """检查绿联影视连接配置是否完整"""
         return bool(self._host and self._username and self._password)
 
     def is_authenticated(self) -> bool:
+        """检查绿联影视会话是否已认证"""
         return (
             self.is_configured()
             and self._api is not None
@@ -83,6 +87,7 @@ class Ugreen:
         )
 
     def is_inactive(self) -> bool:
+        """检查绿联影视会话是否已失效"""
         if not self.is_authenticated():
             return True
         self._userinfo = self._api.current_user() if self._api else None
@@ -515,11 +520,19 @@ class Ugreen:
 
         return paths
 
-    def get_librarys(self, hidden: Optional[bool] = False) -> List[schemas.MediaServerLibrary]:
+    def get_librarys(self, hidden: Optional[bool] = False) -> Optional[List[schemas.MediaServerLibrary]]:
+        """
+        获取绿联影视媒体库列表
+
+        :param hidden: 是否过滤未启用同步的媒体库
+        :return: 媒体库列表
+        """
         if not self.is_authenticated() or not self._api:
-            return []
+            return None
 
         media_libs = self._api.media_list()
+        if media_libs is None:
+            return None
         self._library_paths = self.__load_library_paths()
         libraries = []
         self._libraries = {}
@@ -557,6 +570,7 @@ class Ugreen:
                     name=lib_name,
                     type=library_type,
                     path=lib_path,
+                    item_count=lib.get("video_count") or 0,
                     image_list=image_list,
                     link=self.__build_root_url(),
                     server_type="ugreen",
@@ -567,12 +581,14 @@ class Ugreen:
         return libraries
 
     def get_user_count(self) -> int:
+        """获取绿联影视媒体库用户数量"""
         if not self.is_authenticated() or not self._api:
             return 0
         users = self._api.media_lib_users()
         return len(users)
 
     def get_medias_count(self) -> schemas.Statistic:
+        """获取绿联影视的电影和电视剧数量统计"""
         if not self.is_authenticated() or not self._api:
             return schemas.Statistic()
 
@@ -856,12 +872,36 @@ class Ugreen:
                     break
                 page += 1
 
+    def get_items_count(self, parent: Union[str, int]) -> Optional[int]:
+        """
+        获取指定媒体库可同步的媒体条目总数
+
+        :param parent: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        if not self.is_authenticated() or not self._api:
+            return None
+        if not self._libraries:
+            self.get_librarys()
+        library = self._libraries.get(str(parent))
+        if not library:
+            return None
+        return int(library.get("video_count") or 0)
+
     def get_items(
         self,
         parent: Union[str, int],
         start_index: Optional[int] = 0,
         limit: Optional[int] = -1,
     ) -> Generator[schemas.MediaServerItem | None | Any, Any, None]:
+        """
+        获取指定绿联影视媒体库的可同步条目
+
+        :param parent: 媒体库ID
+        :param start_index: 起始条目索引
+        :param limit: 最大返回条目数，-1表示不限制
+        :return: 媒体条目生成器
+        """
         if not self.is_authenticated() or not self._api:
             return None
 
@@ -919,8 +959,8 @@ class Ugreen:
 
         page_size = max(1, num or 12)
         data = self._api.recently_played(page=1, page_size=page_size)
-        if not data:
-            return []
+        if data is None:
+            return None
 
         ret_resume = []
         for item in data.get("video_arr") or []:
@@ -944,8 +984,8 @@ class Ugreen:
 
         page_size = max(1, num)
         data = self._api.recently_updated(page=1, page_size=page_size)
-        if not data:
-            return []
+        if data is None:
+            return None
 
         latest = []
         for item in data.get("video_arr") or []:

@@ -42,6 +42,9 @@ def error_response(
 def check_auth(
     credentials: Optional[HTTPAuthorizationCredentials],
 ) -> Optional[JSONResponse]:
+    """
+    OpenAI 兼容接口以 API_TOKEN 认证受信客户端，认证通过即按管理员级 Agent 集成处理。
+    """
     if not credentials or credentials.scheme.lower() != "bearer":
         return error_response(
             "Invalid bearer token.",

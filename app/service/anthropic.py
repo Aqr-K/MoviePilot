@@ -27,6 +27,9 @@ def anthropic_error_response(
 
 
 def check_auth(api_key: Optional[str]) -> Optional[JSONResponse]:
+    """
+    Anthropic 兼容接口以 API_TOKEN 认证受信客户端，认证通过即按管理员级 Agent 集成处理。
+    """
     if not compare_secret(api_key, settings.API_TOKEN):
         return anthropic_error_response(
             "invalid x-api-key",

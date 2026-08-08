@@ -17,6 +17,7 @@ from app.core.config import settings, global_vars
 from app.log import logger
 from app.modules.filemanager import StorageBase
 from app.modules.filemanager.storages import transfer_process
+from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema
 from app.utils.singleton import WeakSingleton
 from app.utils.string import StringUtils
@@ -28,6 +29,8 @@ lock = Lock()
 
 MIN_U115_UPLOAD_PART_SIZE = 1 * 1024 * 1024
 U115_UPLOAD_PART_COUNT_TARGET = 96
+U115_DEFAULT_ACCEPTED_CODES = (0, 20004)
+U115_GET_INFO_ACCEPTED_CODES = (*U115_DEFAULT_ACCEPTED_CODES, 430004)
 U115_UPLOAD_PART_SIZE_STEPS = (
     10 * 1024 * 1024,
     16 * 1024 * 1024,
@@ -297,10 +300,18 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
         return result.get("data")
 
     def _request_api(
-        self, method: str, endpoint: str, result_key: Optional[str] = None, **kwargs
+        self,
+        method: str,
+        endpoint: str,
+        result_key: Optional[str] = None,
+        *,
+        accepted_codes: Tuple[int, ...] = U115_DEFAULT_ACCEPTED_CODES,
+        **kwargs,
     ) -> Optional[Union[dict, list]]:
         """
         带错误处理和速率限制的API请求
+
+        :param accepted_codes: 当前接口可确认处理的业务码
         """
         # 检查会话
         self._check_session()
@@ -357,7 +368,13 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
             time.sleep(self.limit_sleep_seconds)
             kwargs["retry_limit"] = retry_times - 1
             kwargs["no_error_log"] = no_error_log
-            return self._request_api(method, endpoint, result_key, **kwargs)
+            return self._request_api(
+                method,
+                endpoint,
+                result_key,
+                accepted_codes=accepted_codes,
+                **kwargs,
+            )
 
         # 处理请求错误
         try:
@@ -375,11 +392,17 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
                 f"【115】{method} 请求 {endpoint} 错误 {e}，等待 {sleep_duration} 秒后重试..."
             )
             time.sleep(sleep_duration)
-            return self._request_api(method, endpoint, result_key, **kwargs)
+            return self._request_api(
+                method,
+                endpoint,
+                result_key,
+                accepted_codes=accepted_codes,
+                **kwargs,
+            )
 
         # 返回数据
         ret_data = resp.json()
-        if ret_data.get("code") not in (0, 20004):
+        if ret_data.get("code") not in accepted_codes:
             error_msg = ret_data.get("message", "")
             if not no_error_log:
                 logger.warn(f"【115】{method} 请求 {endpoint} 出错：{error_msg}")
@@ -401,7 +424,13 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
                 time.sleep(self.limit_sleep_seconds)
                 kwargs["retry_limit"] = retry_times - 1
                 kwargs["no_error_log"] = no_error_log
-                return self._request_api(method, endpoint, result_key, **kwargs)
+                return self._request_api(
+                    method,
+                    endpoint,
+                    result_key,
+                    accepted_codes=accepted_codes,
+                    **kwargs,
+                )
             return None
 
         if result_key:
@@ -906,37 +935,61 @@ class U115Pan(StorageBase, metaclass=WeakSingleton):
             return True
         return False
 
+    def __get_info_item(self, path: Path) -> Optional[schemas.FileItem]:
+        """
+        查询指定路径的文件/目录项，无法确认状态时抛出 StorageQueryError。
+        接口业务码 20004（记录不存在）、430004（路径不存在）与 0 一样
+        视为确认结果，其余错误（网络失败、限流重试用尽、未知业务错误）
+        均无法确认目标状态。
+        """
+        resp = self._request_api(
+            "POST",
+            "/open/folder/get_info",
+            data={"path": path.as_posix()},
+            no_error_log=True,
+            accepted_codes=U115_GET_INFO_ACCEPTED_CODES,
+        )
+        if resp is None:
+            raise StorageQueryError(f"【115】无法确认文件状态（请求失败或接口错误）: {path}")
+        data = resp.get("data") if isinstance(resp, dict) else None
+        if not data or not data.get("file_id"):
+            # 115 对记录不存在和路径不存在返回不同业务码，两者都可确认目标不存在
+            return None
+        return schemas.FileItem(
+            storage=self.schema.value,
+            fileid=str(data["file_id"]),
+            path=path.as_posix() + ("/" if data["file_category"] == "0" else ""),
+            type="file" if data["file_category"] == "1" else "dir",
+            name=data["file_name"],
+            basename=Path(data["file_name"]).stem,
+            extension=Path(data["file_name"]).suffix[1:]
+            if data["file_category"] == "1"
+            else None,
+            pickcode=data["pick_code"],
+            size=data["size_byte"] if data["file_category"] == "1" else None,
+            modify_time=data["utime"],
+        )
+
     def get_item(self, path: Path) -> Optional[schemas.FileItem]:
         """
         获取指定路径的文件/目录项
         """
         try:
-            resp = self._request_api(
-                "POST",
-                "/open/folder/get_info",
-                "data",
-                data={"path": path.as_posix()},
-                no_error_log=True,
-            )
-            if not resp:
-                return None
-            return schemas.FileItem(
-                storage=self.schema.value,
-                fileid=str(resp["file_id"]),
-                path=path.as_posix() + ("/" if resp["file_category"] == "0" else ""),
-                type="file" if resp["file_category"] == "1" else "dir",
-                name=resp["file_name"],
-                basename=Path(resp["file_name"]).stem,
-                extension=Path(resp["file_name"]).suffix[1:]
-                if resp["file_category"] == "1"
-                else None,
-                pickcode=resp["pick_code"],
-                size=resp["size_byte"] if resp["file_category"] == "1" else None,
-                modify_time=resp["utime"],
-            )
+            return self.__get_info_item(path)
         except Exception as e:
             logger.debug(f"【115】获取文件信息失败: {str(e)}")
             return None
+
+    def get_item_strict(self, path: Path) -> Optional[schemas.FileItem]:
+        """
+        获取指定路径的文件/目录项，无法确认状态时抛出 StorageQueryError。
+        """
+        try:
+            return self.__get_info_item(path)
+        except StorageQueryError:
+            raise
+        except Exception as e:
+            raise StorageQueryError(f"【115】查询文件信息失败: {path} - {e}") from e
 
     def get_folder(self, path: Path) -> Optional[schemas.FileItem]:
         """

@@ -16,8 +16,6 @@ from app.schemas.types import MessageChannel
 class SendLocalFileInput(BaseModel):
     """发送本地附件工具输入。"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why sending this local file helps the user",)
     file_path: str = Field(
         ...,
         description="Absolute path to the local image or file to send to the user",
@@ -107,6 +105,7 @@ class SendLocalFileTool(MoviePilotTool):
                 text=message,
                 file_path=str(resolved_path),
                 file_name=file_name or resolved_path.name,
+                save_history=False,
             )
         )
         return "本地附件已发送"

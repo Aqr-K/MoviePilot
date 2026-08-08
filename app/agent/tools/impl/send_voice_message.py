@@ -14,10 +14,6 @@ from app.schemas import Notification, NotificationType
 class SendVoiceMessageInput(BaseModel):
     """发送语音消息工具输入。"""
 
-    explanation: Optional[str] = Field(
-        None,
-        description="Clear explanation of why a voice reply is the best fit in the current context",
-    )
     message: str = Field(
         ...,
         description="The spoken content to send back to the user",
@@ -100,6 +96,7 @@ class SendVoiceMessageTool(MoviePilotTool):
                     if voice_path and settings.AUDIO_OUTPUT_INCLUDE_TEXT
                     else None
                 ),
+                save_history=False,
             )
         )
         self._agent_context["user_reply_sent"] = True

@@ -92,6 +92,17 @@ class TemplateContextBuilder:
         if not mediainfo:
             return
         season_fmt = f"S{mediainfo.season:02d}" if mediainfo.season is not None else None
+        source_ids = {
+            "themoviedb": mediainfo.tmdb_id,
+            "douban": mediainfo.douban_id,
+            "bangumi": mediainfo.bangumi_id,
+            "anilist": mediainfo.anilist_id,
+        }
+        media_source = mediainfo.source or next(
+            (source for source, media_id in source_ids.items() if media_id is not None),
+            None,
+        )
+        media_id = mediainfo.media_id or source_ids.get(media_source)
         base_info = {
             # 标题
             "title": cls.__convert_invalid_characters(mediainfo.title),
@@ -135,6 +146,14 @@ class TemplateContextBuilder:
             "imdbid": mediainfo.imdb_id,
             # 豆瓣ID
             "doubanid": mediainfo.douban_id,
+            # Bangumi ID
+            "bangumiid": mediainfo.bangumi_id,
+            # AniList ID
+            "anilistid": mediainfo.anilist_id,
+            # 当前媒体数据源
+            "media_source": media_source,
+            # 当前数据源原生ID
+            "media_id": str(media_id) if media_id is not None else None,
         }
         context.update({**base_info, **media_info})
 
@@ -180,6 +199,8 @@ class TemplateContextBuilder:
             "season_fmt": meta.season,
             # 集号
             "episode": meta.episode_seqs,
+            # 当前季总集数
+            "total_episodes": len(episodes) if episodes else 0,
             # 季集 SxxExx
             "season_episode": "%s%s" % (meta.season, meta.episode),
             # 段/节
@@ -603,6 +624,7 @@ class MessageQueueManager(metaclass=SingletonClass):
         self.check_interval = check_interval
 
         self._running = True
+        self._stop_event = threading.Event()
         self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.thread.start()
 
@@ -750,13 +772,15 @@ class MessageQueueManager(metaclass=SingletonClass):
                         logger.info(f"队列剩余消息：{self.queue.qsize()}")
                     except queue.Empty:
                         break
-            time.sleep(self.check_interval)
+            if self._stop_event.wait(self.check_interval):
+                break
 
     def stop(self) -> None:
         """
         停止队列管理器
         """
         self._running = False
+        self._stop_event.set()
         logger.info("正在停止消息队列...")
         self.thread.join()
         logger.info("消息队列已停止")
@@ -839,7 +863,8 @@ def stop_message():
     """
     停止消息服务
     """
-    # 停止消息队列
-    MessageQueueManager().stop()
-    # 关闭消息演染器
-    TemplateHelper().close()
+    # 只关闭已启动的服务，避免清理路径反向创建后台线程和缓存
+    if queue_manager := MessageQueueManager.get_existing_instance():
+        queue_manager.stop()
+    if template_helper := TemplateHelper.get_existing_instance():
+        template_helper.close()

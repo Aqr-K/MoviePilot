@@ -72,6 +72,8 @@ class MediaServerLibrary(BaseModel):
     path: Optional[Union[str, list]] = None
     # 类型
     type: Optional[str] = None
+    # 媒体库内媒体数量
+    item_count: Optional[int] = None
     # 封面图
     image: Optional[str] = None
     # 封面图列表

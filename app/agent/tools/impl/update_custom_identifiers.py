@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
+from app.core.metainfo import clear_rust_parse_options_cache
 from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.schemas.types import SystemConfigKey
@@ -15,8 +16,6 @@ from app.schemas.types import SystemConfigKey
 class UpdateCustomIdentifiersInput(BaseModel):
     """更新自定义识别词工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     identifiers: List[str] = Field(
         ...,
         description=(
@@ -87,6 +86,7 @@ class UpdateCustomIdentifiersTool(MoviePilotTool):
                 SystemConfigKey.CustomIdentifiers, value
             )
             if success:
+                clear_rust_parse_options_cache()
                 return json.dumps(
                     {
                         "success": True,

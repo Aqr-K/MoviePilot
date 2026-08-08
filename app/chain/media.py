@@ -592,14 +592,21 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     def recognize_by_meta(
             self,
             metainfo: MetaBase,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
             obtain_images: bool = False,
     ) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息
+
+        :param metainfo: 标题解析元数据
+        :param source: 请求级识别数据源
+        :param episode_group: 剧集组
+        :param obtain_images: 是否补充图片
         """
         mediainfo = self._recognize_with_fallback_by_meta(
             metainfo=metainfo,
+            source=source,
             episode_group=episode_group,
             obtain_images=obtain_images,
         )
@@ -607,14 +614,128 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             logger.warn(f"{metainfo.title} 未识别到媒体信息")
         return mediainfo
 
+    @staticmethod
+    def _build_tmdb_supplement_meta(
+            mediainfo: MediaInfo,
+            metainfo: Optional[MetaBase] = None,
+    ) -> MetaBase:
+        """
+        根据主识别结果构造 TMDB 辅助识别参数。
+
+        :param mediainfo: 主识别源返回的媒体信息
+        :param metainfo: 原始标题解析信息
+        :return: 不携带主识别源身份的 TMDB 查询参数
+        """
+        title = mediainfo.title or getattr(metainfo, "name", None) or ""
+        tmdb_meta = MetaInfo(title)
+        if not tmdb_meta.cn_name and getattr(metainfo, "cn_name", None):
+            tmdb_meta.cn_name = metainfo.cn_name
+        if not tmdb_meta.en_name:
+            tmdb_meta.en_name = mediainfo.en_title or (
+                getattr(metainfo, "en_name", None)
+            )
+        tmdb_meta.type = mediainfo.type or (
+            getattr(metainfo, "type", None) or MediaType.UNKNOWN
+        )
+        season = (
+            mediainfo.season
+            if mediainfo.season is not None
+            else getattr(metainfo, "begin_season", None)
+        )
+        tmdb_meta.begin_season = season
+        season_year = None
+        if season is not None and mediainfo.season_years:
+            season_year = (
+                mediainfo.season_years.get(season)
+                or mediainfo.season_years.get(str(season))
+            )
+        tmdb_meta.year = (
+            season_year
+            or mediainfo.year
+            or getattr(metainfo, "year", None)
+        )
+        return tmdb_meta
+
+    @staticmethod
+    def _merge_tmdb_auxiliary(
+            mediainfo: MediaInfo,
+            tmdb_media: MediaInfo,
+    ) -> MediaInfo:
+        """
+        将 TMDB 兼容字段合并到主识别结果，不改变主数据源身份和展示信息。
+
+        :param mediainfo: 主识别源返回的媒体信息
+        :param tmdb_media: TMDB 辅助识别结果
+        :return: 已补充 TMDB 兼容字段的主媒体信息
+        """
+        if not tmdb_media or tmdb_media.source != "themoviedb" or not tmdb_media.tmdb_id:
+            return mediainfo
+
+        mediainfo.tmdb_id = tmdb_media.tmdb_id
+        mediainfo.tmdb_info = tmdb_media.tmdb_info or mediainfo.tmdb_info
+        if not mediainfo.category:
+            mediainfo.category = tmdb_media.category
+        if not mediainfo.genre_ids:
+            mediainfo.genre_ids = list(tmdb_media.genre_ids or [])
+        for field in ("imdb_id", "tvdb_id", "collection_id"):
+            if not getattr(mediainfo, field, None):
+                setattr(mediainfo, field, getattr(tmdb_media, field, None))
+        return mediainfo
+
+    def supplement_tmdb_info(
+            self,
+            mediainfo: Optional[MediaInfo],
+            metainfo: Optional[MetaBase] = None,
+    ) -> Optional[MediaInfo]:
+        """
+        为任意主识别源补充 TMDB 辅助信息，同时保留原始媒体身份。
+
+        :param mediainfo: 主识别源返回的媒体信息
+        :param metainfo: 原始标题解析信息
+        :return: 已补充 TMDB 辅助字段的原媒体对象
+        """
+        if not mediainfo:
+            return None
+        if mediainfo.tmdb_id and mediainfo.tmdb_info and mediainfo.genre_ids:
+            return mediainfo
+        tmdb_meta = self._build_tmdb_supplement_meta(mediainfo, metainfo)
+        tmdb_module = self.modulemanager.get_running_module("TheMovieDbModule")
+        if not tmdb_module:
+            logger.warn("TMDB 模块未启用，无法补充 TMDB 辅助信息")
+            return mediainfo
+        try:
+            tmdb_media = tmdb_module.recognize_media(
+                meta=tmdb_meta,
+                mtype=mediainfo.type,
+                source="themoviedb",
+                mediaid=str(mediainfo.tmdb_id) if mediainfo.tmdb_id else None,
+                tmdbid=mediainfo.tmdb_id,
+                episode_group=mediainfo.episode_group,
+                cache=True,
+            )
+        except Exception as err:
+            logger.warn(f"{mediainfo.title_year} 补充 TMDB 辅助信息失败：{err}")
+            return mediainfo
+        if not tmdb_media:
+            logger.warn(f"{mediainfo.title_year} 未匹配到 TMDB 辅助信息")
+            return mediainfo
+        return self._merge_tmdb_auxiliary(mediainfo, tmdb_media)
+
     def _recognize_with_fallback_by_meta(
             self,
             metainfo: MetaBase,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
             obtain_images: bool = False,
     ) -> Optional[MediaInfo]:
         """
         根据标题识别媒体信息，必要时回退到辅助识别。
+
+        :param metainfo: 标题解析元数据
+        :param source: 请求级识别数据源
+        :param episode_group: 剧集组
+        :param obtain_images: 是否补充图片
+        :return: 统一媒体信息
         """
         if not metainfo:
             return None
@@ -622,17 +743,21 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         share_meta = deepcopy(metainfo)
 
         def native_recognize() -> Optional[MediaInfo]:
+            """使用请求级数据源执行原生识别。"""
             return self.recognize_media(
                 meta=metainfo,
+                source=source,
                 share_meta=share_meta,
                 episode_group=episode_group,
             )
 
         def plugin_recognize() -> Optional[MediaInfo]:
+            """执行辅助识别并保持请求级数据源约束。"""
             return self.recognize_help(
                 title=title,
                 org_meta=metainfo,
                 share_meta=share_meta,
+                source=source,
                 episode_group=episode_group,
             )
 
@@ -653,11 +778,22 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             self.obtain_images(mediainfo=mediainfo)
         return mediainfo
 
+    @staticmethod
+    def _parse_recognize_event_number(value) -> Optional[int]:
+        """
+        解析辅助识别返回的季集号，兼容整数和数字字符串并保留数值 0。
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        return int(text) if text.isdigit() else None
+
     def recognize_help(
             self,
             title: str,
             org_meta: MetaBase,
             share_meta: MetaBase = None,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
     ) -> Optional[MediaInfo]:
         """
@@ -666,6 +802,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param title: 标题
         :param org_meta: 原始元数据
         :param share_meta: 共享识别查询/上报使用的原始元数据
+        :param source: 请求级识别数据源
         :param episode_group: 剧集组
         """
         # 发送请求事件，等待结果
@@ -686,10 +823,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             title = str(event_data["name"]).split("/")[0].strip().replace(".", " ")
         if event_data.get("year"):
             year = str(event_data["year"]).split("/")[0].strip()
-        if event_data.get("season") and str(event_data["season"]).isdigit():
-            season_number = int(event_data["season"])
-        if event_data.get("episode") and str(event_data["episode"]).isdigit():
-            episode_number = int(event_data["episode"])
+        season_number = self._parse_recognize_event_number(event_data.get("season"))
+        episode_number = self._parse_recognize_event_number(event_data.get("episode"))
         if not title:
             return None
         if title == "Unknown":
@@ -710,6 +845,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 重新识别
         return self.recognize_media(
             meta=org_meta,
+            source=source,
             share_meta=share_meta,
             episode_group=episode_group,
         )
@@ -717,11 +853,18 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     def recognize_by_path(
             self,
             path: str,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
             obtain_images: bool = False,
     ) -> Optional[Context]:
         """
         根据文件路径识别媒体信息
+
+        :param path: 文件路径
+        :param source: 请求级识别数据源
+        :param episode_group: 剧集组
+        :param obtain_images: 是否补充图片
+        :return: 识别上下文
         """
         logger.info(f"开始识别媒体信息，文件：{path} ...")
         file_path = Path(path)
@@ -729,6 +872,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         file_meta = MetaInfoPath(file_path)
         mediainfo = self._recognize_with_fallback_by_meta(
             metainfo=file_meta,
+            source=source,
             episode_group=episode_group,
             obtain_images=obtain_images,
         )
@@ -738,11 +882,14 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         # 返回上下文
         return Context(meta_info=file_meta, media_info=mediainfo)
 
-    def search(self, title: str) -> Tuple[Optional[MetaBase], List[MediaInfo]]:
+    def search(
+        self, title: str, source: Optional[str] = None
+    ) -> Tuple[Optional[MetaBase], List[MediaInfo]]:
         """
         搜索媒体/人物信息
 
         :param title: 搜索内容
+        :param source: 请求级搜索数据源
         :return: 识别元数据，媒体信息列表
         """
         # 提取要素
@@ -764,7 +911,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             meta.year = year
         # 开始搜索
         logger.info(f"开始搜索媒体信息：{meta.name}")
-        medias: Optional[List[MediaInfo]] = self.search_medias(meta=meta)
+        medias: Optional[List[MediaInfo]] = self.search_medias(meta=meta, source=source)
         if not medias:
             logger.warn(f"{meta.name} 没有找到对应的媒体信息！")
             return meta, []
@@ -837,7 +984,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             tmdbinfo = self._match_tmdb_with_names(
                 meta_names=meta_names,
                 year=year,
-                mtype=MediaType.TV,
+                mtype=MediaInfo.get_bangumi_media_type(bangumiinfo),
                 season=meta.begin_season,
             )
             return tmdbinfo
@@ -877,7 +1024,10 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             year = self._extract_year_from_bangumi(bangumiinfo)
             # 使用名称识别豆瓣媒体信息
             return self.match_doubaninfo(
-                name=meta.name, year=year, mtype=MediaType.TV, season=meta.begin_season
+                name=meta.name,
+                year=year,
+                mtype=MediaInfo.get_bangumi_media_type(bangumiinfo),
+                season=meta.begin_season,
             )
         return None
 
@@ -1542,14 +1692,22 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     async def async_recognize_by_meta(
             self,
             metainfo: MetaBase,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
             obtain_images: bool = False,
     ) -> Optional[MediaInfo]:
         """
         根据主副标题识别媒体信息（异步版本）
+
+        :param metainfo: 标题解析元数据
+        :param source: 请求级识别数据源
+        :param episode_group: 剧集组
+        :param obtain_images: 是否补充图片
+        :return: 统一媒体信息
         """
         mediainfo = await self._async_recognize_with_fallback_by_meta(
             metainfo=metainfo,
+            source=source,
             episode_group=episode_group,
             obtain_images=obtain_images,
         )
@@ -1560,29 +1718,40 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     async def _async_recognize_with_fallback_by_meta(
             self,
             metainfo: MetaBase,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
             obtain_images: bool = False,
     ) -> Optional[MediaInfo]:
         """
         异步根据标题识别媒体信息，必要时回退到辅助识别。
+
+        :param metainfo: 标题解析元数据
+        :param source: 请求级识别数据源
+        :param episode_group: 剧集组
+        :param obtain_images: 是否补充图片
+        :return: 统一媒体信息
         """
         if not metainfo:
             return None
         title = metainfo.title
         share_meta = deepcopy(metainfo)
 
-        async def native_recognize():
+        async def native_recognize() -> Optional[MediaInfo]:
+            """异步使用请求级数据源执行原生识别。"""
             return await self.async_recognize_media(
                 meta=metainfo,
+                source=source,
                 share_meta=share_meta,
                 episode_group=episode_group,
             )
 
-        async def plugin_recognize():
+        async def plugin_recognize() -> Optional[MediaInfo]:
+            """异步执行辅助识别并保持请求级数据源约束。"""
             return await self.async_recognize_help(
                 title=title,
                 org_meta=metainfo,
                 share_meta=share_meta,
+                source=source,
                 episode_group=episode_group,
             )
 
@@ -1607,6 +1776,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             title: str,
             org_meta: MetaBase,
             share_meta: MetaBase = None,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
     ) -> Optional[MediaInfo]:
         """
@@ -1615,6 +1785,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param title: 标题
         :param org_meta: 原始元数据
         :param share_meta: 共享识别查询/上报使用的原始元数据
+        :param source: 请求级识别数据源
         :param episode_group: 剧集组
         """
         # 发送请求事件，等待结果
@@ -1635,10 +1806,8 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             title = str(event_data["name"]).split("/")[0].strip().replace(".", " ")
         if event_data.get("year"):
             year = str(event_data["year"]).split("/")[0].strip()
-        if event_data.get("season") and str(event_data["season"]).isdigit():
-            season_number = int(event_data["season"])
-        if event_data.get("episode") and str(event_data["episode"]).isdigit():
-            episode_number = int(event_data["episode"])
+        season_number = self._parse_recognize_event_number(event_data.get("season"))
+        episode_number = self._parse_recognize_event_number(event_data.get("episode"))
         if not title:
             return None
         if title == "Unknown":
@@ -1654,11 +1823,12 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         org_meta.year = year
         org_meta.begin_season = season_number
         org_meta.begin_episode = episode_number
-        if org_meta.begin_season or org_meta.begin_episode:
+        if org_meta.begin_season is not None or org_meta.begin_episode is not None:
             org_meta.type = MediaType.TV
         # 重新识别
         return await self.async_recognize_media(
             meta=org_meta,
+            source=source,
             share_meta=share_meta,
             episode_group=episode_group,
         )
@@ -1666,11 +1836,18 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
     async def async_recognize_by_path(
             self,
             path: str,
+            source: Optional[str] = None,
             episode_group: Optional[str] = None,
             obtain_images: bool = False,
     ) -> Optional[Context]:
         """
         根据文件路径识别媒体信息（异步版本）
+
+        :param path: 文件路径
+        :param source: 请求级识别数据源
+        :param episode_group: 剧集组
+        :param obtain_images: 是否补充图片
+        :return: 识别上下文
         """
         logger.info(f"开始识别媒体信息，文件：{path} ...")
         file_path = Path(path)
@@ -1678,6 +1855,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         file_meta = MetaInfoPath(file_path)
         mediainfo = await self._async_recognize_with_fallback_by_meta(
             metainfo=file_meta,
+            source=source,
             episode_group=episode_group,
             obtain_images=obtain_images,
         )
@@ -1688,12 +1866,13 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         return Context(meta_info=file_meta, media_info=mediainfo)
 
     async def async_search(
-            self, title: str
+            self, title: str, source: Optional[str] = None
     ) -> Tuple[Optional[MetaBase], List[MediaInfo]]:
         """
         搜索媒体/人物信息（异步版本）
 
         :param title: 搜索内容
+        :param source: 请求级搜索数据源
         :return: 识别元数据，媒体信息列表
         """
         # 提取要素
@@ -1715,7 +1894,9 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             meta.year = year
         # 开始搜索
         logger.info(f"开始搜索媒体信息：{meta.name}")
-        medias: Optional[List[MediaInfo]] = await self.async_search_medias(meta=meta)
+        medias: Optional[List[MediaInfo]] = await self.async_search_medias(
+            meta=meta, source=source
+        )
         if not medias:
             logger.warn(f"{meta.name} 没有找到对应的媒体信息！")
             return meta, []
@@ -1855,7 +2036,7 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             tmdbinfo = await self._async_match_tmdb_with_names(
                 meta_names=meta_names,
                 year=year,
-                mtype=MediaType.TV,
+                mtype=MediaInfo.get_bangumi_media_type(bangumiinfo),
                 season=meta.begin_season,
             )
             return tmdbinfo
@@ -1895,6 +2076,9 @@ class MediaChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
             year = self._extract_year_from_bangumi(bangumiinfo)
             # 使用名称识别豆瓣媒体信息
             return await self.async_match_doubaninfo(
-                name=meta.name, year=year, mtype=MediaType.TV, season=meta.begin_season
+                name=meta.name,
+                year=year,
+                mtype=MediaInfo.get_bangumi_media_type(bangumiinfo),
+                season=meta.begin_season,
             )
         return None

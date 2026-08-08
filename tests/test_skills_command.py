@@ -1,27 +1,17 @@
 import io
-import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import patch
 
-sys.modules.setdefault("qbittorrentapi", ModuleType("qbittorrentapi"))
-setattr(sys.modules["qbittorrentapi"], "TorrentFilesList", list)
-sys.modules.setdefault("transmission_rpc", ModuleType("transmission_rpc"))
-setattr(sys.modules["transmission_rpc"], "File", object)
-sys.modules.setdefault("psutil", ModuleType("psutil"))
-sys.modules.setdefault("aioshutil", ModuleType("aioshutil"))
-sys.modules.setdefault("pyquery", ModuleType("pyquery"))
-setattr(sys.modules["pyquery"], "PyQuery", object)
-sys.modules.setdefault("dateparser", ModuleType("dateparser"))
-setattr(sys.modules["dateparser"], "parse", lambda *args, **kwargs: None)
-sys.modules.setdefault("dateutil", ModuleType("dateutil"))
-dateutil_parser = ModuleType("dateutil.parser")
-setattr(dateutil_parser, "parse", lambda *args, **kwargs: None)
-sys.modules.setdefault("dateutil.parser", dateutil_parser)
-setattr(sys.modules["dateutil"], "parser", dateutil_parser)
+from app.testing.bootstrap import ensure_optional_stub
+
+ensure_optional_stub("qbittorrentapi", TorrentFilesList=list)
+ensure_optional_stub("transmission_rpc", File=object)
+ensure_optional_stub("psutil")
+ensure_optional_stub("aioshutil")
+ensure_optional_stub("pyquery", PyQuery=object)
 
 from app.chain.message import MessageChain
 from app.chain.skills import SkillsChain, skills_interaction_manager
@@ -89,6 +79,30 @@ class TestSkillsCommand(unittest.TestCase):
 
         handle_text.assert_called_once()
         handle_ai.assert_not_called()
+
+    def test_skills_text_exit_skips_notification_history(self):
+        chain = SkillsChain()
+        skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.Telegram,
+            source="telegram-test",
+            username="tester",
+        )
+
+        with patch.object(chain, "post_message") as post_message:
+            handled = chain.handle_text_interaction(
+                channel=MessageChannel.Telegram,
+                source="telegram-test",
+                userid="10001",
+                username="tester",
+                text="退出",
+            )
+
+        self.assertTrue(handled)
+        notification = post_message.call_args.args[0]
+        self.assertEqual(notification.title, "技能交互已结束")
+        self.assertFalse(notification.save_history)
+        self.assertIsNone(skills_interaction_manager.get_by_user("10001"))
 
     def test_callback_routes_to_skills_chain(self):
         chain = MessageChain()
@@ -487,6 +501,48 @@ class TestSkillsCommand(unittest.TestCase):
         self.assertIn("官方仓库 · openai/skills", text)
         self.assertIn("仓库来源 · acme/custom-skills", text)
         self.assertIn("3. 管理技能源", text)
+
+    def test_skills_chain_installed_view_builds_remove_buttons(self):
+        chain = SkillsChain()
+        request = skills_interaction_manager.create_or_replace(
+            user_id="10001",
+            channel=MessageChannel.WebAgent,
+            source="web-agent",
+            username="tester",
+        )
+
+        with patch.object(
+            chain.skillhelper,
+            "list_local_skills",
+            return_value=[
+                SkillInfo(
+                    id="builtin",
+                    name="Builtin",
+                    description="Built in skill",
+                    source_type="builtin",
+                    source_label="内置",
+                    removable=False,
+                ),
+                SkillInfo(
+                    id="custom",
+                    name="Custom",
+                    description="Custom skill",
+                    source_type="local",
+                    source_label="本地",
+                    removable=True,
+                ),
+            ],
+        ):
+            title, text, buttons = chain._build_installed_view(request=request)
+
+        self.assertEqual(title, "已安装技能")
+        self.assertIn("builtin", text)
+        self.assertIn("custom", text)
+        self.assertTrue(buttons)
+        self.assertIn(
+            {"text": "删除 2", "callback_data": f"skills:{request.request_id}:remove:2"},
+            [button for row in buttons for button in row],
+        )
 
     def test_skills_chain_callback_enters_search_input_mode(self):
         chain = SkillsChain()

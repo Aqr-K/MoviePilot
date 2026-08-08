@@ -352,6 +352,14 @@ class Command(metaclass=Singleton):
         """
         获取命令列表
         """
+        if not self._commands:
+            with self._rlock:
+                if not self._commands:
+                    self._commands = {
+                        **self._preset_commands,
+                        **self._plugin_commands,
+                        **self._other_commands,
+                    }
         return self._commands
 
     def get(self, cmd: str) -> Any:

@@ -1,5 +1,7 @@
 """文件读取工具"""
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Optional, Type
 
@@ -12,22 +14,40 @@ from app.log import logger
 
 # 最大读取大小 50KB
 MAX_READ_SIZE = 50 * 1024
+READ_FILE_TRUNCATION_MESSAGE = (
+    "文件内容超过50KB，本次结果已截断。"
+    "请使用 start_line 和 end_line 参数指定行号范围分段读取。"
+)
 
 
 class ReadFileInput(BaseModel):
-    """Input parameters for read file tool"""
+    """文件读取工具的输入参数模型。"""
+
     file_path: str = Field(..., description="The absolute path of the file to read")
     start_line: Optional[int] = Field(None, description="The starting line number (1-based, inclusive). If not provided, reading starts from the beginning of the file.")
     end_line: Optional[int] = Field(None, description="The ending line number (1-based, inclusive). If not provided, reading goes until the end of the file.")
+    include_metadata: bool = Field(
+        False,
+        description=(
+            "Return structured JSON containing content, size, truncation state, "
+            "and SHA-256. Use before a guarded full-file overwrite."
+        ),
+    )
 
 
 class ReadFileTool(MoviePilotTool):
+    """按行范围读取本地文本文件，并可返回文件版本元数据。"""
+
     name: str = "read_file"
     tags: list[str] = [
         ToolTag.Read,
         ToolTag.File,
     ]
-    description: str = "Read the content of a text file. Supports reading by line range. Each read is limited to 50KB; content exceeding this limit will be truncated."
+    description: str = (
+        "Read the content of a text file. Supports reading by line range. Each "
+        "read is limited to 50KB; when content is truncated, continue with "
+        "smaller start_line and end_line ranges."
+    )
     args_schema: Type[BaseModel] = ReadFileInput
 
     def get_tool_message(self, **kwargs) -> Optional[str]:
@@ -36,8 +56,15 @@ class ReadFileTool(MoviePilotTool):
         file_name = Path(file_path).name if file_path else "未知文件"
         return f"读取文件: {file_name}"
 
-    async def run(self, file_path: str, start_line: Optional[int] = None,
-                  end_line: Optional[int] = None, **kwargs) -> str:
+    async def run(
+        self,
+        file_path: str,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+        include_metadata: bool = False,
+        **kwargs,
+    ) -> str:
+        """读取指定文本范围，必要时附带完整文件的 SHA-256 元数据。"""
         logger.info(f"执行工具: {self.name}, 参数: file_path={file_path}, start_line={start_line}, end_line={end_line}")
 
         try:
@@ -55,7 +82,8 @@ class ReadFileTool(MoviePilotTool):
             if not await path.is_file():
                 return f"错误：{resolved_path} 不是一个文件"
 
-            content = await path.read_text(encoding="utf-8")
+            raw_content = await path.read_bytes()
+            content = raw_content.decode("utf-8", errors="replace")
             truncated = False
 
             if start_line is not None or end_line is not None:
@@ -75,11 +103,25 @@ class ReadFileTool(MoviePilotTool):
             # 检查大小限制
             content_bytes = content.encode("utf-8")
             if len(content_bytes) > MAX_READ_SIZE:
-                content = content_bytes[:MAX_READ_SIZE].decode("utf-8", errors="ignore")
+                content = content_bytes[:MAX_READ_SIZE].decode("utf-8", errors="replace")
                 truncated = True
 
+            if include_metadata:
+                payload = {
+                    "file_path": str(resolved_path),
+                    "sha256": hashlib.sha256(raw_content).hexdigest(),
+                    "size_bytes": len(raw_content),
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "truncated": truncated,
+                }
+                if truncated:
+                    payload["truncation_message"] = READ_FILE_TRUNCATION_MESSAGE
+                payload["content"] = content
+                return json.dumps(payload, ensure_ascii=False, indent=2)
+
             if truncated:
-                return f"{content}\n\n[警告：文件内容已超过50KB限制，以上内容已被截断。请使用 start_line/end_line 参数分段读取。]"
+                return f"{content}\n\n[警告：{READ_FILE_TRUNCATION_MESSAGE}]"
 
             return content
 

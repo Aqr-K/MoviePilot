@@ -15,8 +15,6 @@ from app.schemas.types import MediaType, MessageChannel
 class AddSubscribeInput(BaseModel):
     """添加订阅工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     title: str = Field(
         ...,
         description="The title of the media to subscribe to (e.g., 'The Matrix', 'Breaking Bad')",
@@ -41,6 +39,10 @@ class AddSubscribeInput(BaseModel):
         None,
         description="Douban ID for precise media identification (optional, alternative to tmdb_id)",
     )
+    bangumi_id: Optional[int] = Field(None, description="Bangumi media ID")
+    anilist_id: Optional[int] = Field(None, description="AniList media ID")
+    media_source: Optional[str] = Field(None, description="Media metadata source")
+    media_id: Optional[str] = Field(None, description="Native ID for media_source")
     start_episode: Optional[int] = Field(
         None,
         description="Starting episode number for TV shows (optional, defaults to 1 if not specified)",
@@ -99,7 +101,7 @@ class AddSubscribeTool(MoviePilotTool):
             message += f" ({year})"
         if media_type:
             message += f" [{media_type}]"
-        if season:
+        if season is not None:
             message += f" 第{season}季"
         elif media_type == "tv":
             message += " 第1季(默认)"
@@ -146,6 +148,10 @@ class AddSubscribeTool(MoviePilotTool):
         season: Optional[int] = None,
         tmdb_id: Optional[int] = None,
         douban_id: Optional[str] = None,
+        bangumi_id: Optional[int] = None,
+        anilist_id: Optional[int] = None,
+        media_source: Optional[str] = None,
+        media_id: Optional[str] = None,
         start_episode: Optional[int] = None,
         total_episode: Optional[int] = None,
         quality: Optional[str] = None,
@@ -199,6 +205,10 @@ class AddSubscribeTool(MoviePilotTool):
                 year=year,
                 tmdbid=tmdb_id,
                 doubanid=douban_id,
+                bangumiid=bangumi_id,
+                anilistid=anilist_id,
+                media_source=media_source,
+                media_id=media_id,
                 season=season,
                 username=subscribe_username,
                 **subscribe_kwargs,

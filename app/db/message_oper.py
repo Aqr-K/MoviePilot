@@ -105,6 +105,15 @@ class MessageOper(DbOper):
         """
         return Message.list_by_page(self._db, page, count)
 
+    def exists_by_source(self, source: str) -> bool:
+        """
+        判断指定来源标识的消息记录是否存在。
+
+        :param source: 消息来源唯一标识
+        :return: 是否存在匹配记录
+        """
+        return Message.exists_by_source(self._db, source)
+
     async def async_list_by_page(
             self, page: Optional[int] = 1, count: Optional[int] = 30
     ) -> list[Message]:
@@ -114,9 +123,21 @@ class MessageOper(DbOper):
         return await Message.async_list_by_page(self._db, page, count)
 
     async def async_list_sent_by_page(
-            self, page: Optional[int] = 1, count: Optional[int] = 30
+            self,
+            page: Optional[int] = 1,
+            count: Optional[int] = 30,
+            all_clear_before: Optional[str] = None,
+            system_clear_before: Optional[str] = None,
+            media_clear_before: Optional[str] = None,
     ) -> list[Message]:
         """
         分页获取系统发送的通知消息。
         """
-        return await Message.async_list_sent_by_page(self._db, page, count)
+        return await Message.async_list_sent_by_page(
+            self._db,
+            page,
+            count,
+            all_clear_before=all_clear_before,
+            system_clear_before=system_clear_before,
+            media_clear_before=media_clear_before,
+        )

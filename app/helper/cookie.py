@@ -1,4 +1,5 @@
 import base64
+import time
 from typing import Tuple, Optional
 
 from lxml import etree
@@ -19,6 +20,7 @@ class CookieHelper:
             '//input[@name="username"]',
             '//input[@id="form_item_username"]',
             '//input[@id="username"]',
+            '//input[contains(@placeholder,"用户名")]',
         ],
         "password": [
             '//input[@name="password"]',
@@ -50,12 +52,46 @@ class CookieHelper:
         "error": [
             "//table[@class='main']//td[@class='text']/text()",
         ],
+        "remember": [
+            '//input[@type="checkbox"][contains(@name,"remember") or contains(@id,"remember")]',
+            '//*[@role="checkbox"][contains(.,"保持登录") or contains(.,"记住我") or contains(.,"自动登录")]',
+        ],
         "twostep": [
             '//input[@name="two_step_code"]',
             '//input[@name="2fa_secret"]',
             '//input[@name="otp"]',
         ]
     }
+
+    @staticmethod
+    def get_page_content(page: BrowserPage, retries: int = 3, interval: float = 1.0) -> Optional[str]:
+        """
+        获取页面源码，页面跳转中（如登录前后的重定向）会导致 page.content() 抛出
+        "Unable to retrieve content because the page is navigating" 异常，等待加载完成后重试
+        :param page: 浏览器页面
+        :param retries: 最大重试次数
+        :param interval: 重试间隔（秒）
+        :return: 页面源码
+        """
+        for i in range(retries):
+            # 等待加载失败不代表源码不可读取，最后一次等待失败时仍尝试直接获取源码
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=10 * 1000)
+            except Exception as e:
+                if i < retries - 1:
+                    logger.warning(f"等待页面加载完成失败：{str(e)}，{interval}秒后重试 ({i + 1}/{retries - 1})")
+                    time.sleep(interval)
+                    continue
+                logger.warning(f"等待页面加载完成失败：{str(e)}，尝试直接获取源码")
+            try:
+                return page.content()
+            except Exception as e:
+                if i >= retries - 1:
+                    logger.error(f"获取页面源码失败：{str(e)}")
+                    return None
+                logger.warning(f"获取页面源码失败：{str(e)}，{interval}秒后重试 ({i + 1}/{retries - 1})")
+                time.sleep(interval)
+        return None
 
     @staticmethod
     def parse_cookies(cookies: list) -> str:
@@ -93,17 +129,34 @@ class CookieHelper:
             :return: Cookie和UA
             """
             # 登录页面代码
-            html_text = page.content()
+            html_text = self.get_page_content(page)
             if not html_text:
                 return None, None, "获取源码失败"
             # 查找用户名输入框
             html = etree.HTML(html_text)
+            if html is None:
+                return None, None, "解析网页源码失败"
             try:
                 username_xpath = None
                 for xpath in self._SITE_LOGIN_XPATH.get("username"):
                     if html.xpath(xpath):
                         username_xpath = xpath
                         break
+                if not username_xpath:
+                    # 登录页可能为JS动态渲染（如SPA），等待用户名输入框出现后重试
+                    try:
+                        username_union_xpath = " | ".join(self._SITE_LOGIN_XPATH.get("username"))
+                        page.wait_for_selector(f"xpath={username_union_xpath}", timeout=5000)
+                    except Exception:
+                        pass
+                    html_text = self.get_page_content(page)
+                    html = etree.HTML(html_text) if html_text else None
+                    if html is None:
+                        return None, None, "解析网页源码失败"
+                    for xpath in self._SITE_LOGIN_XPATH.get("username"):
+                        if html.xpath(xpath):
+                            username_xpath = xpath
+                            break
                 if not username_xpath:
                     return None, None, "未找到用户名输入框"
                 # 查找密码输入框
@@ -155,6 +208,22 @@ class CookieHelper:
                     page.fill(username_xpath, username)
                     # 输入密码
                     page.fill(password_xpath, password)
+                    # 勾选“记住我/保持登录”等选项，获取长期会话（部分站点默认发放短期会话）
+                    for xpath in self._SITE_LOGIN_XPATH.get("remember"):
+                        remember_element = page.query_selector(xpath)
+                        if not remember_element:
+                            continue
+                        try:
+                            checked = remember_element.get_attribute("aria-checked")
+                            if checked is None:
+                                checked = "true" if remember_element.is_checked() else "false"
+                            if checked != "true":
+                                remember_element.click(timeout=3000)
+                            break
+                        except Exception as e:
+                            # 当前候选不可操作（如隐藏元素）时继续尝试后续候选
+                            logger.warning(f"勾选记住登录选项失败：{str(e)}，尝试下一候选")
+                            continue
                     # 输入二步验证码
                     if twostep_xpath:
                         page.fill(twostep_xpath, otp_code)
@@ -189,7 +258,12 @@ class CookieHelper:
                 if "verify" in page.url:
                     if not otp_code:
                         return None, None, "需要二次验证码"
-                    html = etree.HTML(page.content())
+                    html_text = self.get_page_content(page)
+                    if not html_text:
+                        return None, None, "获取网页源码失败"
+                    html = etree.HTML(html_text)
+                    if html is None:
+                        return None, None, "解析网页源码失败"
                     for xpath in self._SITE_LOGIN_XPATH.get("twostep"):
                         if html.xpath(xpath):
                             try:
@@ -204,15 +278,33 @@ class CookieHelper:
                                 return None, None, f"二次验证码输入失败：{str(e)}"
                             break
 
-                # 登录后的源码
-                html_text = page.content()
+                # 登录后的源码（部分站点登录成功后由前端脚本延迟跳转，等待并重试判定）
+                html_text = None
+                for i in range(3):
+                    if i:
+                        time.sleep(2)
+                    latest_text = self.get_page_content(page)
+                    if not latest_text:
+                        continue
+                    if SiteUtils.is_logged_in(latest_text):
+                        return self.parse_cookies(page.context.cookies()), \
+                            page.evaluate("() => window.navigator.userAgent"), ""
+                    # 保留首个快照用于失败时解析错误信息，避免提示被后续跳转或自动消失覆盖
+                    if html_text is None:
+                        html_text = latest_text
+                    # 页面已出现明确的登录错误信息时，以该快照为准并提前结束重试
+                    latest_html = etree.HTML(latest_text)
+                    if latest_html is not None and \
+                            any(latest_html.xpath(x) for x in self._SITE_LOGIN_XPATH.get("error")):
+                        html_text = latest_text
+                        break
                 if not html_text:
                     return None, None, "获取网页源码失败"
-                if SiteUtils.is_logged_in(html_text):
-                    return self.parse_cookies(page.context.cookies()), \
-                        page.evaluate("() => window.navigator.userAgent"), ""
                 else:
-                    # 读取错误信息
+                    # 从登录后的页面读取错误信息
+                    html = etree.HTML(html_text)
+                    if html is None:
+                        return None, None, "登录失败"
                     error_xpath = None
                     for xpath in self._SITE_LOGIN_XPATH.get("error"):
                         if html.xpath(xpath):

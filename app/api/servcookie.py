@@ -1,10 +1,11 @@
 import gzip
+import hmac
 import json
 from typing import Annotated, Callable, Any, Dict, Optional
 
 import aiofiles
 from anyio import Path as AsyncPath
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Request, Response
 from fastapi.responses import PlainTextResponse
 from fastapi.routing import APIRoute
 
@@ -44,6 +45,24 @@ async def verify_server_enabled():
     return True
 
 
+async def verify_update_auth(
+    x_cookiecloud_auth: Annotated[
+        Optional[str], Header(alias="X-CookieCloud-Auth")
+    ] = None,
+):
+    """
+    校验CookieCloud上传接口的可选共享认证头。
+    """
+    expected_header = (settings.COOKIECLOUD_AUTH_HEADER or "").strip()
+    if not expected_header:
+        return True
+
+    provided_header = (x_cookiecloud_auth or "").strip()
+    if not hmac.compare_digest(provided_header, expected_header):
+        raise HTTPException(status_code=403, detail="CookieCloud认证失败")
+    return True
+
+
 cookie_router = APIRouter(
     route_class=GzipRoute,
     tags=["servcookie"],
@@ -61,7 +80,7 @@ async def post_root():
     return "Hello MoviePilot! COOKIECLOUD API ROOT = /cookiecloud"
 
 
-@cookie_router.post("/update")
+@cookie_router.post("/update", dependencies=[Depends(verify_update_auth)])
 async def update_cookie(req: schemas.CookieData):
     """
     上传Cookie数据
@@ -70,7 +89,7 @@ async def update_cookie(req: schemas.CookieData):
     content = json.dumps({"encrypted": req.encrypted})
     async with aiofiles.open(file_path, encoding="utf-8", mode="w") as file:
         await file.write(content)
-    async with aiofiles.open(file_path, encoding="utf-8", mode="r") as file:
+    async with aiofiles.open(file_path, encoding="utf-8", errors="replace", mode="r") as file:
         read_content = await file.read()
     if read_content == content:
         return {"action": "done"}
@@ -89,7 +108,7 @@ async def load_encrypt_data(uuid: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Item not found")
 
     # 读取文件
-    async with aiofiles.open(file_path, encoding="utf-8", mode="r") as file:
+    async with aiofiles.open(file_path, encoding="utf-8", errors="replace", mode="r") as file:
         read_content = await file.read()
     data = json.loads(read_content.encode("utf-8"))
     return data

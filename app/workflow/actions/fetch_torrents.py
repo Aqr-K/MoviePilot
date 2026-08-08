@@ -74,7 +74,7 @@ class FetchTorrentsAction(BaseAction):
                     continue
                 if params.type and torrent.media_info and torrent.media_info.type != MediaType(params.type):
                     continue
-                if params.season and torrent.meta_info.begin_season != params.season:
+                if params.season is not None and torrent.meta_info.begin_season != params.season:
                     continue
                 # 识别媒体信息
                 if params.match_media:
@@ -93,6 +93,10 @@ class FetchTorrentsAction(BaseAction):
                     break
                 torrents = searchchain.search_by_id(tmdbid=media.tmdb_id,
                                                     doubanid=media.douban_id,
+                                                    bangumiid=media.bangumi_id,
+                                                    anilistid=media.anilist_id,
+                                                    source=media.source,
+                                                    mediaid=media.media_id,
                                                     mtype=MediaType(media.type),
                                                     sites=params.sites)
                 for torrent in torrents:

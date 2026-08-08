@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from functools import lru_cache
 from typing import Tuple, List, Optional
@@ -28,6 +29,8 @@ _ANIME_SQUARE_BRACKET_RE = re.compile(r'\[[+0-9XVPI-]+]\s*\[', re.IGNORECASE)
 _BRACED_METAINFO_RE = re.compile(r'(?<={\[)[\W\w]+(?=]})')
 _BRACED_TMDBID_RE = re.compile(r'(?<=tmdbid=)\d+')
 _BRACED_DOUBANID_RE = re.compile(r'(?<=doubanid=)\d+')
+_BRACED_BANGUMIID_RE = re.compile(r'(?<=bangumiid=)\d+')
+_BRACED_ANILISTID_RE = re.compile(r'(?<=anilistid=)\d+')
 _BRACED_TYPE_RE = re.compile(r'(?<=type=)\w+')
 _BRACED_EPISODE_GROUP_RE = re.compile(r'(?:^|;)g=([0-9a-fA-F]+)(?=;|$)')
 _BRACED_BEGIN_SEASON_RE = re.compile(r'(?<=s=)\d+')
@@ -40,6 +43,25 @@ _EMBY_TMDB_RE_LIST = (
     re.compile(r'\{tmdbid[=\-](\d+)\}'),
     re.compile(r'\{tmdb[=\-](\d+)\}'),
 )
+_EXTENDED_MEDIA_ID_RE_LIST = {
+    "bangumi": (
+        re.compile(r'\[bangumiid[=\-](\d+)\]'),
+        re.compile(r'\[bangumi[=\-](\d+)\]'),
+        re.compile(r'\{bangumiid[=\-](\d+)\}'),
+        re.compile(r'\{bangumi[=\-](\d+)\}'),
+    ),
+    "anilist": (
+        re.compile(r'\[anilistid[=\-](\d+)\]'),
+        re.compile(r'\[anilist[=\-](\d+)\]'),
+        re.compile(r'\{anilistid[=\-](\d+)\}'),
+        re.compile(r'\{anilist[=\-](\d+)\}'),
+    ),
+}
+_EXTENDED_MEDIA_ID_TAG_RE = re.compile(
+    r'(?:bangumi(?:id)?|anilist(?:id)?)[=\-]\d+',
+    re.IGNORECASE,
+)
+_RUST_PARSE_OPTIONS_CACHE_KEY = "_cache_key"
 
 
 def _empty_metainfo() -> dict:
@@ -49,6 +71,10 @@ def _empty_metainfo() -> dict:
     return {
         'tmdbid': None,
         'doubanid': None,
+        'bangumiid': None,
+        'anilistid': None,
+        'media_source': None,
+        'media_id': None,
         'type': None,
         'episode_group': None,
         'begin_season': None,
@@ -72,6 +98,28 @@ def _apply_range_total(metainfo: dict, begin_key: str, end_key: str, total_key: 
         metainfo[total_key] = 1
 
 
+def _rust_parse_options_cache_key(options: dict) -> str:
+    """
+    生成 Rust Meta 配置缓存键，避免扩展层每次重新展开大配置。
+    """
+    digest = hashlib.blake2b(digest_size=16)
+
+    def update(value) -> None:
+        digest.update(repr(value).encode("utf-8"))
+        digest.update(b"\0")
+
+    streaming_platforms = options.get("streaming_platforms") or {}
+    update(tuple(options.get("custom_words") or []))
+    update(tuple(options.get("media_exts") or []))
+    update(options.get("release_groups") or "")
+    update(tuple(options.get("customization") or []))
+    update(tuple(sorted(
+        (str(key), str(value))
+        for key, value in streaming_platforms.items()
+    )))
+    return digest.hexdigest()
+
+
 def _find_metainfo_python(title: str) -> Tuple[str, dict]:
     """
     使用 Python 解析标题中的显式媒体标签，作为 Rust 入口不可用时的兜底。
@@ -91,6 +139,14 @@ def _find_metainfo_python(title: str) -> Tuple[str, dict]:
             doubanid = _BRACED_DOUBANID_RE.search(result)
             if doubanid and doubanid.group(0).isdigit():
                 metainfo['doubanid'] = doubanid.group(0)
+            # 查找Bangumi ID信息
+            bangumiid = _BRACED_BANGUMIID_RE.search(result)
+            if bangumiid and bangumiid.group(0).isdigit():
+                metainfo['bangumiid'] = bangumiid.group(0)
+            # 查找AniList ID信息
+            anilistid = _BRACED_ANILISTID_RE.search(result)
+            if anilistid and anilistid.group(0).isdigit():
+                metainfo['anilistid'] = anilistid.group(0)
             # 查找媒体类型
             mtype = _BRACED_TYPE_RE.search(result)
             if mtype:
@@ -118,7 +174,18 @@ def _find_metainfo_python(title: str) -> Tuple[str, dict]:
             if end_episode and end_episode.group(0).isdigit():
                 metainfo['end_episode'] = int(end_episode.group(0))
             # 去除title中该部分
-            if tmdbid or mtype or episode_group or begin_season or end_season or begin_episode or end_episode:
+            if (
+                tmdbid
+                or doubanid
+                or bangumiid
+                or anilistid
+                or mtype
+                or episode_group
+                or begin_season
+                or end_season
+                or begin_episode
+                or end_episode
+            ):
                 title = title.replace(f"{{[{result}]}}", '')
 
     # 支持Emby格式的ID标签；第一个 [tmdbid] 历史上始终优先处理，用于覆盖前面 {[...]} 中的旧标签。
@@ -134,6 +201,31 @@ def _find_metainfo_python(title: str) -> Tuple[str, dict]:
                 metainfo['tmdbid'] = tmdb_match.group(1)
                 title = tmdb_re.sub('', title).strip()
                 break
+
+    for source, patterns in _EXTENDED_MEDIA_ID_RE_LIST.items():
+        key = f"{source}id"
+        if metainfo.get(key):
+            continue
+        for media_id_re in patterns:
+            media_id_match = media_id_re.search(title)
+            if not media_id_match:
+                continue
+            metainfo[key] = media_id_match.group(1)
+            title = media_id_re.sub('', title).strip()
+            break
+
+    if metainfo.get('tmdbid'):
+        metainfo['media_source'] = 'themoviedb'
+        metainfo['media_id'] = metainfo['tmdbid']
+    elif metainfo.get('doubanid'):
+        metainfo['media_source'] = 'douban'
+        metainfo['media_id'] = metainfo['doubanid']
+    elif metainfo.get('bangumiid'):
+        metainfo['media_source'] = 'bangumi'
+        metainfo['media_id'] = metainfo['bangumiid']
+    elif metainfo.get('anilistid'):
+        metainfo['media_source'] = 'anilist'
+        metainfo['media_id'] = metainfo['anilistid']
 
     # 计算季集总数
     _apply_range_total(metainfo, 'begin_season', 'end_season', 'total_season')
@@ -178,21 +270,25 @@ def _build_meta_info(
             logger.warn("tmdbid 必须是数字")
     if metainfo.get('doubanid'):
         meta.doubanid = metainfo['doubanid']
+    if metainfo.get('media_source'):
+        meta.media_source = metainfo['media_source']
+    if metainfo.get('media_id'):
+        meta.media_id = str(metainfo['media_id'])
     if metainfo.get('type'):
-        meta.type = metainfo['type']
+        meta.type = MediaType(metainfo['type']) if isinstance(metainfo['type'], str) else metainfo['type']
     if metainfo.get('episode_group'):
         meta.episode_group = metainfo['episode_group']
-    if metainfo.get('begin_season'):
+    if metainfo.get('begin_season') is not None:
         meta.begin_season = metainfo['begin_season']
-    if metainfo.get('end_season'):
+    if metainfo.get('end_season') is not None:
         meta.end_season = metainfo['end_season']
-    if metainfo.get('total_season'):
+    if metainfo.get('total_season') is not None:
         meta.total_season = metainfo['total_season']
-    if metainfo.get('begin_episode'):
+    if metainfo.get('begin_episode') is not None:
         meta.begin_episode = metainfo['begin_episode']
-    if metainfo.get('end_episode'):
+    if metainfo.get('end_episode') is not None:
         meta.end_episode = metainfo['end_episode']
-    if metainfo.get('total_episode'):
+    if metainfo.get('total_episode') is not None:
         meta.total_episode = metainfo['total_episode']
     return meta
 
@@ -209,24 +305,20 @@ def _rust_default_parse_options() -> dict:
     from app.schemas.types import SystemConfigKey
 
     systemconfig = SystemConfigOper()
-    custom_release_groups = systemconfig.get(SystemConfigKey.CustomReleaseGroups)
-    if isinstance(custom_release_groups, list):
-        custom_release_groups = list(filter(None, custom_release_groups))
-    release_matcher = ReleaseGroupsMatcher()
-    release_groups = release_matcher._ReleaseGroupsMatcher__release_groups
-    if custom_release_groups:
-        release_groups = f"{release_groups}|{'|'.join(custom_release_groups)}"
+    release_groups = ReleaseGroupsMatcher().get_release_groups()
 
-    customization = CustomizationMatcher._normalize_customization(
+    customization = CustomizationMatcher.normalize_customization(
         systemconfig.get(SystemConfigKey.Customization)
     )
-    return {
+    options = {
         "custom_words": systemconfig.get(SystemConfigKey.CustomIdentifiers) or [],
         "media_exts": settings.RMT_MEDIAEXT + settings.RMT_SUBEXT + settings.RMT_AUDIOEXT,
         "release_groups": release_groups,
         "customization": customization,
-        "streaming_platforms": StreamingPlatforms()._lookup_cache,
+        "streaming_platforms": StreamingPlatforms().get_lookup_cache(),
     }
+    options[_RUST_PARSE_OPTIONS_CACHE_KEY] = _rust_parse_options_cache_key(options)
+    return options
 
 
 @lru_cache(maxsize=256)
@@ -236,6 +328,7 @@ def _rust_custom_parse_options(custom_words: Tuple[str, ...]) -> dict:
     """
     options = dict(_rust_default_parse_options())
     options["custom_words"] = list(custom_words)
+    options[_RUST_PARSE_OPTIONS_CACHE_KEY] = _rust_parse_options_cache_key(options)
     return options
 
 
@@ -298,12 +391,32 @@ def _meta_from_rust(parsed: dict) -> Optional[MetaBase]:
         "apply_words": parsed.get("apply_words") or [],
         "tmdbid": parsed.get("tmdbid"),
         "doubanid": parsed.get("doubanid"),
+        "media_source": parsed.get("media_source"),
+        "media_id": parsed.get("media_id"),
         "episode_group": parsed.get("episode_group"),
         "fps": parsed.get("fps"),
     }
     for key, value in fields.items():
         setattr(meta, key, value)
     return meta
+
+
+def _requires_python_metainfo(
+    title: str,
+    custom_words: Optional[List[str]] = None,
+) -> bool:
+    """
+    判断标题或临时识别词是否包含当前Rust扩展尚未支持的数据源ID标签。
+
+    :param title: 原始标题
+    :param custom_words: 临时识别词
+    :return: 是否必须使用Python解析器
+    """
+    candidates = [title or "", *(custom_words or [])]
+    contains_extended_id = any(
+        _EXTENDED_MEDIA_ID_TAG_RE.search(candidate) for candidate in candidates
+    )
+    return contains_extended_id and not rust_accel.supports_extended_media_ids()
 
 
 def MetaInfo(title: str, subtitle: Optional[str] = None, custom_words: List[str] = None) -> MetaBase:
@@ -314,9 +427,11 @@ def MetaInfo(title: str, subtitle: Optional[str] = None, custom_words: List[str]
     :param custom_words: 自定义识别词列表
     :return: MetaAnime、MetaVideo
     """
-    rust_meta = _meta_from_rust(
-        rust_accel.parse_metainfo(title, subtitle, _rust_parse_options(custom_words))
-    )
+    rust_meta = None
+    if not _requires_python_metainfo(title, custom_words):
+        rust_meta = _meta_from_rust(
+            rust_accel.parse_metainfo(title, subtitle, _rust_parse_options(custom_words))
+        )
     if rust_meta:
         return rust_meta
     meta = _build_meta_info(title=title, subtitle=subtitle, custom_words=custom_words)
@@ -334,9 +449,14 @@ def MetaInfoPath(path: Path, custom_words: List[str] = None) -> MetaBase:
     :param path: 路径
     :param custom_words: 自定义识别词列表
     """
-    rust_meta = _meta_from_rust(
-        rust_accel.parse_metainfo_path(str(path), _rust_parse_options(custom_words))
+    path_context = " ".join(
+        [path.name, path.parent.name, path.parent.parent.name]
     )
+    rust_meta = None
+    if not _requires_python_metainfo(path_context, custom_words):
+        rust_meta = _meta_from_rust(
+            rust_accel.parse_metainfo_path(str(path), _rust_parse_options(custom_words))
+        )
     if rust_meta:
         return rust_meta
     # 文件元数据，不包含后缀
@@ -379,7 +499,9 @@ def find_metainfo(title: str) -> Tuple[str, dict]:
     """
     从标题中提取媒体信息
     """
-    rust_result = rust_accel.find_metainfo(title)
+    rust_result = None
+    if not _requires_python_metainfo(title):
+        rust_result = rust_accel.find_metainfo(title)
     if rust_result:
         return rust_result["title"], rust_result["metainfo"]
     return _find_metainfo_python(title)

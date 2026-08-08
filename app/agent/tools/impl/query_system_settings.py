@@ -9,8 +9,11 @@ from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._system_setting_utils import (
     SettingSpec,
+    is_secret_setting_key,
     list_setting_specs,
+    redact_secret_value,
     resolve_setting_spec,
+    should_redact_setting,
 )
 from app.core.config import settings
 from app.db.systemconfig_oper import SystemConfigOper
@@ -20,8 +23,6 @@ from app.log import logger
 class QuerySystemSettingsInput(BaseModel):
     """查询系统设置工具的输入参数模型。"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     setting_key: Optional[str] = Field(
         None,
         description=(
@@ -51,6 +52,13 @@ class QuerySystemSettingsInput(BaseModel):
         description=(
             "Whether to include full setting values. Default behavior: when a single setting is matched it returns the full value; "
             "when multiple settings are matched it returns summaries only unless this is explicitly set to true."
+        ),
+    )
+    show_secrets: Optional[bool] = Field(
+        False,
+        description=(
+            "Whether to return raw secret values such as API keys, tokens, cookies, and passwords. "
+            "Defaults to false; secret-like fields are redacted in returned values and previews."
         ),
     )
 
@@ -85,15 +93,18 @@ class QuerySystemSettingsTool(MoviePilotTool):
 
     @staticmethod
     def _load_setting_value(spec: SettingSpec):
+        """读取指定设置项的当前值。"""
         if spec.source == "settings":
             return getattr(settings, spec.key)
-        return SystemConfigOper().get(spec.key)
+        return SystemConfigOper().get(spec.systemconfig_key)
 
     @staticmethod
-    def _summarize_value(value) -> dict:
+    def _summarize_value(value, *, redacted: bool = False) -> dict:
+        """生成设置值摘要，避免列表和字典默认输出过长。"""
         summary = {
             "has_value": value is not None,
             "value_type": type(value).__name__,
+            "redacted": redacted,
         }
         if isinstance(value, list):
             summary["item_count"] = len(value)
@@ -122,14 +133,12 @@ class QuerySystemSettingsTool(MoviePilotTool):
         group: Optional[str] = "all",
         keyword: Optional[str] = None,
         include_values: Optional[bool] = None,
+        show_secrets: Optional[bool] = False,
         **kwargs,
     ) -> str:
         logger.info(
-            "执行工具: %s, setting_key=%s, group=%s, keyword=%s",
-            self.name,
-            setting_key,
-            group,
-            keyword,
+            f"执行工具: {self.name}, setting_key={setting_key}, "
+            f"group={group}, keyword={keyword}"
         )
 
         try:
@@ -158,18 +167,30 @@ class QuerySystemSettingsTool(MoviePilotTool):
             should_include_values = (
                 include_values if include_values is not None else len(specs) == 1
             )
+            allow_secret_values = bool(show_secrets) and await self.is_admin_user()
             settings_payload = []
             for spec in specs:
                 value = self._load_setting_value(spec)
+                should_redact = (
+                    should_redact_setting(spec, value) and not allow_secret_values
+                )
+                response_value = (
+                    redact_secret_value(
+                        value,
+                        redact_scalar=is_secret_setting_key(spec.key),
+                    )
+                    if should_redact
+                    else value
+                )
                 item = {
                     "setting_key": spec.key,
                     "source": spec.source,
                     "group": spec.group,
                     "label": spec.label,
                 }
-                item.update(self._summarize_value(value))
+                item.update(self._summarize_value(response_value, redacted=should_redact))
                 if should_include_values:
-                    item["value"] = value
+                    item["value"] = response_value
                 settings_payload.append(item)
 
             return json.dumps(
@@ -177,6 +198,7 @@ class QuerySystemSettingsTool(MoviePilotTool):
                     "success": True,
                     "matched_count": len(settings_payload),
                     "include_values": should_include_values,
+                    "show_secrets": allow_secret_values,
                     "settings": settings_payload,
                 },
                 ensure_ascii=False,

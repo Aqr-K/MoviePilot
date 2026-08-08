@@ -7,6 +7,7 @@ import langchain.agents as langchain_agents
 if not hasattr(langchain_agents, "create_agent"):
     langchain_agents.create_agent = lambda *args, **kwargs: None
 
+from app.agent import _ThinkTagStripper
 from app.agent.callback import StreamingHandler
 from app.agent.middleware.subagents import is_subagent_stream_metadata
 from app.agent.tools.base import MoviePilotTool
@@ -17,11 +18,40 @@ from app.schemas.message import MessageResponse
 from app.schemas.types import MessageChannel, NotificationType
 
 
+def test_think_tag_stripper_waits_for_partial_open_tag():
+    """普通文本后出现不完整 think 开始标签时不应进入死循环。"""
+    stripper = _ThinkTagStripper()
+    outputs = []
+
+    emitted = stripper.process("你好<", outputs.append)
+    emitted_next = stripper.process("世界", outputs.append)
+
+    assert emitted is True
+    assert emitted_next is True
+    assert outputs == ["你好", "<世界"]
+
+
+def test_think_tag_stripper_hides_split_think_tag_content():
+    """think 标签被拆分到多个 token 时应继续隐藏思考内容。"""
+    stripper = _ThinkTagStripper()
+    outputs = []
+
+    stripper.process("回答前<", outputs.append)
+    stripper.process("thi", outputs.append)
+    stripper.process("nk>隐藏内容</think>回答后", outputs.append)
+
+    assert outputs == ["回答前", "回答后"]
+
+
 class DummyTool(MoviePilotTool):
     """用于流式输出测试的固定结果工具。"""
 
     name: str = "dummy_tool"
     description: str = "Dummy tool for streaming tests."
+
+    def get_tool_message(self, **kwargs) -> str:
+        """返回固定工具执行提示。"""
+        return "run test tool"
 
     async def run(self, **kwargs) -> str:
         """返回固定工具执行结果。"""
@@ -41,7 +71,7 @@ class TestAgentToolStreaming:
         tool.set_stream_handler(handler)
 
         with patch.object(settings, "AI_AGENT_VERBOSE", False):
-            result = await tool._arun(explanation="run test tool")
+            result = await tool._arun()
 
         buffered_message = await handler.take()
         return result, buffered_message
@@ -77,7 +107,7 @@ class TestAgentToolStreaming:
             tool.set_stream_handler(handler)
 
             with patch.object(settings, "AI_AGENT_VERBOSE", False):
-                await tool._arun(explanation="run test tool")
+                await tool._arun()
 
             handler.emit("已经拿到结果")
             return await handler.take()
@@ -134,6 +164,56 @@ class TestAgentToolStreaming:
                 tool_name="task",
                 tool_message="Subagent invoked",
                 tool_kwargs={"subagent_type": "resource-searcher"},
+            )
+            return await handler.take()
+
+        buffered_message = asyncio.run(_run())
+
+        assert buffered_message == "处理中：\n\n（已调用 2 个子代理）\n\n"
+
+    def test_non_verbose_tool_summary_describes_skill_lookup(self):
+        """校验非详细模式单独描述 Skill 说明查询。"""
+        async def _run():
+            handler = StreamingHandler()
+            await handler.start_streaming()
+            handler.emit("处理中：")
+            handler.record_tool_call(
+                tool_name="skill",
+                tool_message="Loads the full instructions for a MoviePilot skill",
+                tool_kwargs={"name": "moviepilot-cli"},
+            )
+            handler.record_tool_call(
+                tool_name="skill",
+                tool_message="Loads the full instructions for a MoviePilot skill",
+                tool_kwargs={"name": "moviepilot-cli"},
+            )
+            handler.record_tool_call(
+                tool_name="query_activity_log",
+                tool_message="Query recent MoviePilot Agent activity logs",
+                tool_kwargs={"keyword": "整理"},
+            )
+            return await handler.take()
+
+        buffered_message = asyncio.run(_run())
+
+        assert buffered_message == "处理中：\n\n（查询了 1 个技能说明，查询了 1 次活动日志）\n\n"
+
+    def test_non_verbose_tool_summary_counts_subagent_batch_tasks(self):
+        """校验批量子代理控制工具按子任务数统计。"""
+        async def _run():
+            handler = StreamingHandler()
+            await handler.start_streaming()
+            handler.emit("处理中：")
+            handler.record_tool_call(
+                tool_name="subagent_task",
+                tool_message="Start and manage multiple MoviePilot subagent tasks",
+                tool_kwargs={
+                    "action": "start",
+                    "tasks": [
+                        {"subagent_type": "media-researcher"},
+                        {"subagent_type": "download-diagnostician"},
+                    ],
+                },
             )
             return await handler.take()
 
@@ -394,7 +474,7 @@ class TestAgentToolStreaming:
                     DummyTool, "send_tool_message", new_callable=AsyncMock
                 ) as send_tool_message,
             ):
-                result = await tool._arun(explanation="run test tool")
+                result = await tool._arun()
                 buffered_message = await handler.take()
                 return result, buffered_message, send_tool_message
 
@@ -421,7 +501,7 @@ class TestAgentToolStreaming:
                     DummyTool, "send_tool_message", new_callable=AsyncMock
                 ) as send_tool_message,
             ):
-                result = await tool._arun(explanation="run test tool")
+                result = await tool._arun()
                 buffered_message = await handler.take()
                 return result, buffered_message, send_tool_message
 

@@ -1,11 +1,11 @@
 ---
 name: feedback-issue
-version: 7
+version: 8
 description: >-
   Use this skill ONLY when the user EXPLICITLY requests filing an
   upstream issue for MoviePilot core, frontend, or an installed plugin,
   for example "反馈 issue", "提 issue", "报 bug", "给 MP 提 issue",
-  "让上游修一下", "提交错误报告", "提需求", "功能请求",
+  "让上游修一下", "提交错误报告", "提问题", "提需求", "功能请求",
   or English "file an issue / report a bug / open an upstream issue /
   feature request".
   A bare problem report is not enough: diagnose locally first. This
@@ -92,6 +92,9 @@ Log relevance rules:
   then applies a recent time window, removes Agent/tool dispatch noise,
   and keeps only timestamped log blocks whose first line contains a
   normalized keyword.
+- Consecutive log records with the same template are compacted to the
+  first record, a repetition count, and the last record. Verify the
+  retained boundary records before treating the excerpt as evidence.
 - If no specific keyword survives normalization, the script records the
   doctor report and log-selection metadata but does not include recent
   log lines. This avoids attaching unrelated noise.
@@ -120,7 +123,9 @@ you need to show the preview generated in the next step.
 The collect script also runs `moviepilot doctor --json` or falls back to
 `python -m app.cli doctor --json`, stores the structured doctor report
 inside `diagnostics_file`, and later preview/submit steps include a
-short doctor summary automatically.
+short doctor summary automatically. Plugin-only log findings remain in
+the report as diagnostic evidence with `affects_report_status=false`, so
+they do not by themselves downgrade the overall MoviePilot status.
 
 If `success=false` with `no_explicit_feedback_intent`, stop this skill
 and return to local diagnosis.
@@ -242,9 +247,15 @@ python <skill_dir>/scripts/submit_feedback_issue.py \
   --username "<current admin username if known>"
 ```
 
-The script creates the GitHub issue through `GITHUB_TOKEN` when the
-token is configured and has permission. Otherwise it returns a
-`prefill_url`. Relay the result:
+The script automatically imports MoviePilot's `app.core.config.settings`
+and reads the system-configured `GITHUB_TOKEN` / `settings.GITHUB_HEADERS`
+from the running MoviePilot environment. Do not ask the user to provide
+a GitHub token in chat, and never accept or echo a token from the user.
+When that configured token exists and has permission, the script creates
+the GitHub issue through the GitHub API. Otherwise it returns a
+`prefill_url`. 
+
+Relay the result:
 
 - `success=true`: tell the user the issue was submitted and include
   `issue_url` if present.

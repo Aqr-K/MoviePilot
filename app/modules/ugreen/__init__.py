@@ -60,10 +60,14 @@ class UgreenModule(_ModuleBase, _MediaServerBase[Ugreen]):
                 logger.info(f"绿联影视 {name} 连接断开，尝试重连 ...")
                 server.reconnect()
 
-    def stop(self):
+    def stop(self) -> None:
+        """停止模块"""
         for server in self.get_instances().values():
-            if server.is_authenticated():
-                server.disconnect()
+            try:
+                if server.is_authenticated():
+                    server.disconnect()
+            except Exception as err:
+                logger.error(f"停止绿联影视模块实例失败：{err}")
 
     def test(self) -> Optional[Tuple[bool, str]]:
         """
@@ -253,6 +257,21 @@ class UgreenModule(_ModuleBase, _MediaServerBase[Ugreen]):
             return server_obj.get_items(library_id, start_index, limit)
         return None
 
+    def mediaserver_items_count(
+        self, server: str, library_id: Union[str, int]
+    ) -> Optional[int]:
+        """
+        获取指定媒体库可同步的媒体条目总数
+
+        :param server: 媒体服务器名称
+        :param library_id: 媒体库ID
+        :return: 媒体条目总数，查询失败时返回None
+        """
+        server_obj: Optional[Ugreen] = self.get_instance(server)
+        if server_obj:
+            return server_obj.get_items_count(library_id)
+        return None
+
     def mediaserver_iteminfo(
         self, server: str, item_id: str
     ) -> Optional[schemas.MediaServerItem]:
@@ -285,14 +304,14 @@ class UgreenModule(_ModuleBase, _MediaServerBase[Ugreen]):
 
     def mediaserver_playing(
         self, server: str, count: Optional[int] = 20, **kwargs
-    ) -> List[schemas.MediaServerPlayItem]:
+    ) -> Optional[List[schemas.MediaServerPlayItem]]:
         """
         获取媒体服务器正在播放信息
         """
         server_obj: Optional[Ugreen] = self.get_instance(server)
         if not server_obj:
-            return []
-        return server_obj.get_resume(num=count) or []
+            return None
+        return server_obj.get_resume(num=count)
 
     def mediaserver_play_url(
         self, server: str, item_id: Union[str, int]
@@ -312,14 +331,14 @@ class UgreenModule(_ModuleBase, _MediaServerBase[Ugreen]):
         server: Optional[str] = None,
         count: Optional[int] = 20,
         **kwargs,
-    ) -> List[schemas.MediaServerPlayItem]:
+    ) -> Optional[List[schemas.MediaServerPlayItem]]:
         """
         获取媒体服务器最新入库条目
         """
         server_obj: Optional[Ugreen] = self.get_instance(server)
         if not server_obj:
-            return []
-        return server_obj.get_latest(num=count) or []
+            return None
+        return server_obj.get_latest(num=count)
 
     def mediaserver_latest_images(
         self,

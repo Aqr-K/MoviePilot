@@ -1,7 +1,6 @@
 """提示词管理器"""
 
 import shutil
-import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from string import Formatter
@@ -24,9 +23,8 @@ from app.utils.system import SystemUtils
 SYSTEM_TASKS_FILE = "System Tasks.yaml"
 SYSTEM_TASKS_SCHEMA_VERSION = 2
 COMMON_SHELL_COMMANDS = (
-    # 只探测会明显改变 Agent 执行策略的可选能力。基础命令、语言运行时、
-    # 包管理器、服务管理器和数据库客户端默认不做启动探测，减少 which 扫描量。
     "ssh",
+    "sshpass",
     "scp",
     "sftp",
     "git",
@@ -91,7 +89,7 @@ class PromptManager:
         self.prompts_cache: Dict[str, str] = {}
         self._system_tasks_cache: Optional[SystemTasksDefinition] = None
         self._system_tasks_signature: Optional[tuple[int, int]] = None
-        self._available_shell_commands_cache: Optional[list[tuple[str, str]]] = None
+        self._available_shell_command_names_cache: Optional[list[str]] = None
 
     def load_prompt(self, prompt_name: str) -> str:
         """
@@ -102,7 +100,7 @@ class PromptManager:
 
         prompt_file = self.prompts_dir / prompt_name
         try:
-            with open(prompt_file, "r", encoding="utf-8") as f:
+            with open(prompt_file, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read().strip()
             # 缓存提示词
             self.prompts_cache[prompt_name] = content
@@ -142,19 +140,6 @@ class PromptManager:
                 markdown_spec = self._generate_formatting_instructions(caps)
         button_choice_spec = self._generate_button_choice_instructions(msg_channel)
 
-        # 啰嗦模式
-        verbose_spec = ""
-        if not settings.AI_AGENT_VERBOSE:
-            verbose_spec = (
-                "\n\n[Important Instruction] STRICTLY ENFORCED: "
-                "If tools are needed, DO NOT output any conversational text, explanations, progress updates, "
-                "or acknowledgements before the first tool call or between tool calls. "
-                "Call tools directly without any transitional phrases. "
-                "You MUST remain completely silent until all required tools have finished and you have the final result. "
-                "Only then may you send one final user-facing reply. "
-                "DO NOT output any intermediate content whatsoever."
-            )
-
         # MoviePilot系统信息
         moviepilot_info = self._get_moviepilot_info()
         voice_reply_spec = self._generate_voice_reply_instructions()
@@ -162,7 +147,6 @@ class PromptManager:
         # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
         base_prompt = base_prompt.format(
             markdown_spec=markdown_spec,
-            verbose_spec=verbose_spec,
             moviepilot_info=moviepilot_info,
             voice_reply_spec=voice_reply_spec,
             button_choice_spec=button_choice_spec,
@@ -187,7 +171,7 @@ class PromptManager:
             return self._system_tasks_cache
 
         try:
-            content = system_tasks_path.read_text(encoding="utf-8")
+            content = system_tasks_path.read_text(encoding="utf-8", errors="replace")
         except Exception as err:  # noqa: BLE001
             logger.error(f"读取系统任务定义失败: {system_tasks_path}, 错误: {err}")
             raise PromptConfigError(
@@ -281,94 +265,60 @@ class PromptManager:
 
     def _get_moviepilot_info(self) -> str:
         """
-        获取MoviePilot系统信息，用于注入到系统提示词中
+        获取需要常驻注入的最小 MoviePilot 运行信息。
         """
-        # 获取主机名和IP地址
-        try:
-            hostname = socket.gethostname()
-            ip_address = socket.gethostbyname(hostname)
-        except Exception:  # noqa
-            hostname = "localhost"
-            ip_address = "127.0.0.1"
-
-        # 配置文件和日志文件目录
-        config_path = str(settings.CONFIG_PATH)
-        log_path = str(settings.LOG_PATH)
-
-        # API地址构建
-        api_port = settings.PORT
-        api_path = settings.API_V1_STR
-
-        # API令牌
-        api_token = settings.API_TOKEN or "未设置"
-
-        # 数据库信息
-        db_type = settings.DB_TYPE
-        if db_type == "sqlite":
-            db_info = f"SQLite ({settings.CONFIG_PATH / 'db' / 'moviepilot.db'})"
-        else:
-            db_password = settings.DB_POSTGRESQL_PASSWORD or ""
-            db_info = (
-                f"PostgreSQL ({settings.DB_POSTGRESQL_USERNAME}:{db_password}@"
-                f"{settings.DB_POSTGRESQL_TARGET}/{settings.DB_POSTGRESQL_DATABASE})"
-            )
-
         # 保留日期用于提供“今天是哪天”的稳定上下文，但不再注入秒级时间，
         # 避免每次请求都生成不同的 system prompt，影响 provider 侧 cache 命中率。
         info_lines = [
             f"- 当前日期: {strftime('%Y-%m-%d')}",
             f"- 运行环境: {SystemUtils.platform} {'docker' if SystemUtils.is_docker() else ''}",
-            f"- 主机名: {hostname}",
-            f"- IP地址: {ip_address}",
-            f"- API端口: {api_port}",
-            f"- API路径: {api_path}",
-            f"- API令牌: {api_token}",
-            f"- 外网域名: {settings.APP_DOMAIN or '未设置'}",
-            f"- 数据库类型: {db_type}",
-            f"- 数据库: {db_info}",
-            f"- 配置文件目录: {config_path}",
-            f"- 日志文件目录: {log_path}",
-            f"- 系统安装目录: {settings.ROOT_PATH}",
-            f"- 插件安装目录: {settings.ROOT_PATH / 'app' / 'plugins'}",
+            "- 详细运行状态、数据库、API 和配置值需要时通过 `query_doctor_report`、`query_system_settings` 或 `execute_command` 查询。",
         ]
-
-        available_commands = self._get_available_shell_commands()
-        if available_commands:
-            info_lines.append("- 可用系统命令（可通过 `execute_command` 调用）:")
+        path_lines = self._get_runtime_path_lines()
+        if path_lines:
             info_lines.extend(
-                f"  - {command}: {path}" for command, path in available_commands
+                [
+                    "- 关键运行路径（必要时可用文件/命令工具读取，避免扫描无关目录）:",
+                    *path_lines,
+                ]
             )
-            # `rg` 同时覆盖文件枚举和文本检索，且比通用 shell 查找更适合
-            # Agent 的代码阅读与定位场景；只有在它不可用或不适合时才退回其他工具。
-            if any(command == "rg" for command, _ in available_commands):
+        available_commands = self._get_available_shell_command_names()
+        if available_commands:
+            info_lines.append(
+                "- 已安装的常用系统命令（仅列命令名，可通过 `execute_command` 调用）: "
+                + ", ".join(f"`{command}`" for command in available_commands)
+            )
+            if "rg" in available_commands:
                 info_lines.append(
-                    "- When searching files or text, prefer `rg` / `rg --files`. Only fall back to other search tools when `rg` is unavailable or unsuitable."
+                    "- 搜索文件或文本时优先使用 `rg` / `rg --files`，不适合或不可用时再使用其他命令。"
                 )
 
         return "\n".join(info_lines)
 
-    def _get_available_shell_commands(self) -> list[tuple[str, str]]:
-        """
-        探测 PATH 中已经安装的常用命令。
+    @staticmethod
+    def _get_runtime_path_lines() -> list[str]:
+        """返回基础系统提示词需要常驻注入的全局运行路径。"""
+        paths = {
+            "项目根目录": settings.ROOT_PATH,
+            "配置目录": settings.CONFIG_PATH,
+            "临时目录": settings.TEMP_PATH,
+        }
+        return [f"  - {label}: `{path}`" for label, path in paths.items()]
 
-        这里只使用 shutil.which 做无副作用查找，不实际执行命令；执行权限、
-        高风险操作确认和输出限制仍由 execute_command 工具负责。探测结果
-        在进程内缓存，避免每次组装提示词都重复扫描 PATH。
-        """
-        if self._available_shell_commands_cache is not None:
-            return self._available_shell_commands_cache
+    def _get_available_shell_command_names(self) -> list[str]:
+        """探测 PATH 中可用的常用命令名称，不把绝对路径注入提示词。"""
+        if self._available_shell_command_names_cache is not None:
+            return self._available_shell_command_names_cache
 
-        available_commands: list[tuple[str, str]] = []
-        for command in COMMON_SHELL_COMMANDS:
-            command_path = shutil.which(command)
-            if command_path:
-                available_commands.append((command, command_path))
-        self._available_shell_commands_cache = available_commands
+        available_commands = [
+            command for command in COMMON_SHELL_COMMANDS if shutil.which(command)
+        ]
+        self._available_shell_command_names_cache = available_commands
         return available_commands
 
-    def clear_available_shell_commands_cache(self) -> None:
-        """清理可用系统命令缓存，供测试或运行时手动刷新使用。"""
-        self._available_shell_commands_cache = None
+    def clear_available_shell_command_names_cache(self) -> None:
+        """清理可用命令名称缓存，供测试或运行时手动刷新使用。"""
+        self._available_shell_command_names_cache = None
 
     @staticmethod
     def _generate_formatting_instructions(caps: ChannelCapabilities) -> str:

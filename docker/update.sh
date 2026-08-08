@@ -24,6 +24,32 @@ function WARN() {
 VENV_PATH="${VENV_PATH:-/opt/venv}"
 export PATH="${VENV_PATH}/bin:$PATH"
 
+CONFIG_DIR="${CONFIG_DIR:-/config}"
+
+function apply_package_cache_env() {
+    PACKAGE_CACHE_ROOT="${PACKAGE_CACHE_ROOT:-${CONFIG_DIR}/.cache}"
+    export PACKAGE_CACHE_ROOT
+    export PIP_CACHE_DIR="${PIP_CACHE_DIR:-${PACKAGE_CACHE_ROOT}/pip}"
+    export UV_CACHE_DIR="${UV_CACHE_DIR:-${PACKAGE_CACHE_ROOT}/uv}"
+    mkdir -p "${PIP_CACHE_DIR}" "${UV_CACHE_DIR}"
+}
+
+apply_package_cache_env
+
+PIP_ENV=()
+
+function set_package_proxy_env() {
+    PIP_ENV=()
+    if [[ -n "${PROXY_HOST}" ]]; then
+        PIP_ENV=(
+            "HTTP_PROXY=${PROXY_HOST}"
+            "HTTPS_PROXY=${PROXY_HOST}"
+            "http_proxy=${PROXY_HOST}"
+            "https_proxy=${PROXY_HOST}"
+        )
+    fi
+}
+
 # 下载及解压
 function download_and_unzip() {
     local retries=0
@@ -69,13 +95,13 @@ function install_backend_and_download_resources() {
             # 复制新的requirements.in
             cp "${TMP_PATH}/App/requirements.in" /app/requirements.in
             # 重新编译依赖
-            if ! ${VENV_PATH}/bin/pip-compile /app/requirements.in -o /app/requirements.txt; then
+            if ! env "${PIP_ENV[@]}" ${VENV_PATH}/bin/pip-compile /app/requirements.in -o /app/requirements.txt; then
                 ERROR "依赖编译失败，恢复原依赖"
                 cp /tmp/requirements.txt.backup /app/requirements.txt
                 return 1
             fi
             # 安装新依赖
-            if ! ${VENV_PATH}/bin/pip install ${PIP_OPTIONS} -r /app/requirements.txt; then
+            if ! env "${PIP_ENV[@]}" ${VENV_PATH}/bin/pip install ${PIP_OPTIONS} -r /app/requirements.txt; then
                 ERROR "依赖安装失败，恢复原依赖"
                 cp /tmp/requirements.txt.backup /app/requirements.txt
                 return 1
@@ -176,9 +202,16 @@ function test_connectivity_pip() {
     case "$1" in
     0)
         if [[ -n "${PIP_PROXY}" ]]; then
-            if ${VENV_PATH}/bin/pip install -i ${PIP_PROXY} pip-hello-world > /dev/null 2>&1; then
+            if [[ -n "${PROXY_HOST}" ]]; then
+                HTTP_PROXY="${PROXY_HOST}" HTTPS_PROXY="${PROXY_HOST}" http_proxy="${PROXY_HOST}" https_proxy="${PROXY_HOST}" \
+                    ${VENV_PATH}/bin/pip install -i ${PIP_PROXY} pip-hello-world > /dev/null 2>&1
+            else
+                ${VENV_PATH}/bin/pip install -i ${PIP_PROXY} pip-hello-world > /dev/null 2>&1
+            fi
+            if [[ $? -eq 0 ]]; then
                 PIP_OPTIONS="-i ${PIP_PROXY}"
                 PIP_LOG="镜像代理模式"
+                set_package_proxy_env
                 return 0
             fi
         fi
@@ -186,15 +219,18 @@ function test_connectivity_pip() {
         ;;
     1)
         if [[ -n "${PROXY_HOST}" ]]; then
-            if ${VENV_PATH}/bin/pip install --proxy=${PROXY_HOST} pip-hello-world > /dev/null 2>&1; then
-                PIP_OPTIONS="--proxy=${PROXY_HOST}"
+            if HTTP_PROXY="${PROXY_HOST}" HTTPS_PROXY="${PROXY_HOST}" http_proxy="${PROXY_HOST}" https_proxy="${PROXY_HOST}" \
+                ${VENV_PATH}/bin/pip install pip-hello-world > /dev/null 2>&1; then
+                PIP_OPTIONS=""
                 PIP_LOG="全局代理模式"
+                set_package_proxy_env
                 return 0
             fi
         fi
         return 1
         ;;
     2)
+        PIP_ENV=()
         PIP_OPTIONS=""
         PIP_LOG="不使用代理"
         return 0

@@ -8,8 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.core.event import eventmanager
-from app.db import AsyncSessionFactory
-from app.db.models.site import Site
+from app.db.site_oper import SiteOper
 from app.log import logger
 from app.schemas.types import EventType
 from app.utils.string import StringUtils
@@ -18,8 +17,6 @@ from app.utils.string import StringUtils
 class UpdateSiteInput(BaseModel):
     """更新站点工具的输入参数模型"""
 
-    explanation: Optional[str] = Field(None,
-        description="Clear explanation of why this tool is being used in the current context",)
     site_id: int = Field(
         ...,
         description="The ID of the site to update (can be obtained from query_sites tool)",
@@ -127,108 +124,106 @@ class UpdateSiteTool(MoviePilotTool):
         logger.info(f"执行工具: {self.name}, 参数: site_id={site_id}")
 
         try:
-            # 获取数据库会话
-            async with AsyncSessionFactory() as db:
-                # 获取站点
-                site = await Site.async_get(db, site_id)
-                if not site:
-                    return json.dumps(
-                        {"success": False, "message": f"站点不存在: {site_id}"},
-                        ensure_ascii=False,
-                    )
-
-                # 构建更新字典
-                site_dict = {}
-
-                # 基本信息
-                if name is not None:
-                    site_dict["name"] = name
-
-                # URL处理（需要校正格式）
-                if url is not None:
-                    _scheme, _netloc = StringUtils.get_url_netloc(url)
-                    site_dict["url"] = f"{_scheme}://{_netloc}/"
-
-                if pri is not None:
-                    site_dict["pri"] = pri
-                if rss is not None:
-                    site_dict["rss"] = rss
-
-                # 认证信息
-                if cookie is not None:
-                    site_dict["cookie"] = cookie
-                if ua is not None:
-                    site_dict["ua"] = ua
-                if apikey is not None:
-                    site_dict["apikey"] = apikey
-                if token is not None:
-                    site_dict["token"] = token
-
-                # 配置选项
-                if proxy is not None:
-                    site_dict["proxy"] = proxy
-                if filter is not None:
-                    site_dict["filter"] = filter
-                if note is not None:
-                    site_dict["note"] = note
-                if timeout is not None:
-                    site_dict["timeout"] = timeout
-
-                # 流控设置
-                if limit_interval is not None:
-                    site_dict["limit_interval"] = limit_interval
-                if limit_count is not None:
-                    site_dict["limit_count"] = limit_count
-                if limit_seconds is not None:
-                    site_dict["limit_seconds"] = limit_seconds
-
-                # 状态和下载器
-                if is_active is not None:
-                    site_dict["is_active"] = is_active
-                if downloader is not None:
-                    site_dict["downloader"] = downloader
-
-                # 如果没有要更新的字段
-                if not site_dict:
-                    return json.dumps(
-                        {"success": False, "message": "没有提供要更新的字段"},
-                        ensure_ascii=False,
-                    )
-
-                # 更新站点
-                await site.async_update(db, site_dict)
-
-                # 重新获取更新后的站点数据
-                updated_site = await Site.async_get(db, site_id)
-
-                # 发送站点更新事件
-                await eventmanager.async_send_event(
-                    EventType.SiteUpdated,
-                    {"domain": updated_site.domain if updated_site else site.domain},
+            site_oper = SiteOper()
+            site = await site_oper.async_get(site_id)
+            if not site:
+                return json.dumps(
+                    {"success": False, "message": f"站点不存在: {site_id}"},
+                    ensure_ascii=False,
                 )
 
-                # 构建返回结果
-                result = {
-                    "success": True,
-                    "message": f"站点 #{site_id} 更新成功",
-                    "site_id": site_id,
-                    "updated_fields": list(site_dict.keys()),
+            # 构建更新字典
+            site_dict = {}
+
+            # 基本信息
+            if name is not None:
+                site_dict["name"] = name
+
+            # URL处理（需要校正格式）
+            if url is not None:
+                _scheme, _netloc = StringUtils.get_url_netloc(url)
+                site_dict["url"] = f"{_scheme}://{_netloc}/"
+
+            if pri is not None:
+                site_dict["pri"] = pri
+            if rss is not None:
+                site_dict["rss"] = rss
+
+            # 认证信息
+            if cookie is not None:
+                site_dict["cookie"] = cookie
+            if ua is not None:
+                site_dict["ua"] = ua
+            if apikey is not None:
+                site_dict["apikey"] = apikey
+            if token is not None:
+                site_dict["token"] = token
+
+            # 配置选项
+            if proxy is not None:
+                site_dict["proxy"] = proxy
+            if filter is not None:
+                site_dict["filter"] = filter
+            if note is not None:
+                site_dict["note"] = note
+            if timeout is not None:
+                site_dict["timeout"] = timeout
+
+            # 流控设置
+            if limit_interval is not None:
+                site_dict["limit_interval"] = limit_interval
+            if limit_count is not None:
+                site_dict["limit_count"] = limit_count
+            if limit_seconds is not None:
+                site_dict["limit_seconds"] = limit_seconds
+
+            # 状态和下载器
+            if is_active is not None:
+                site_dict["is_active"] = is_active
+            if downloader is not None:
+                site_dict["downloader"] = downloader
+
+            # 如果没有要更新的字段
+            if not site_dict:
+                return json.dumps(
+                    {"success": False, "message": "没有提供要更新的字段"},
+                    ensure_ascii=False,
+                )
+
+            # 更新站点
+            await site_oper.async_update(site_id, site_dict)
+
+            # 重新获取更新后的站点数据
+            updated_site = await site_oper.async_get(site_id)
+
+            # 发送站点更新事件
+            await eventmanager.async_send_event(
+                EventType.SiteUpdated,
+                {"domain": updated_site.domain if updated_site else site.domain},
+            )
+
+            # 构建返回结果
+            result = {
+                "success": True,
+                "message": f"站点 #{site_id} 更新成功",
+                "site_id": site_id,
+                "updated_fields": list(site_dict.keys()),
+            }
+
+            if updated_site:
+                result["site"] = {
+                    "id": updated_site.id,
+                    "name": updated_site.name,
+                    "domain": updated_site.domain,
+                    "url": updated_site.url,
+                    "pri": updated_site.pri,
+                    "is_active": updated_site.is_active,
+                    "downloader": updated_site.downloader,
+                    "proxy": updated_site.proxy,
+                    "timeout": updated_site.timeout,
                 }
 
-                if updated_site:
-                    result["site"] = {
-                        "id": updated_site.id,
-                        "name": updated_site.name,
-                        "domain": updated_site.domain,
-                        "url": updated_site.url,
-                        "pri": updated_site.pri,
-                        "is_active": updated_site.is_active,
-                        "downloader": updated_site.downloader,
-                        "proxy": updated_site.proxy,
-                        "timeout": updated_site.timeout,
-                    }
-
-                return json.dumps(result, ensure_ascii=False, indent=2)
+            return json.dumps(result, ensure_ascii=False, indent=2)
 
         except Exception as e:
             error_message = f"更新站点失败: {str(e)}"

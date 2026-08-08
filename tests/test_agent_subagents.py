@@ -11,7 +11,6 @@ from app.agent.middleware.subagents import (
     MoviePilotSubAgentMiddleware,
     SUBAGENT_CONTROL_TOOL_NAME,
     SUBAGENT_TASK_TOOL_NAME,
-    SubAgentCallSummaryMiddleware,
     SubAgentTaskControlMiddleware,
     create_subagent_middlewares,
 )
@@ -28,7 +27,9 @@ def test_create_subagent_middlewares_registers_task_tool():
         stream_handler=None,
     )
 
-    assert len(middlewares) == 3
+    assert len(middlewares) == 2
+    assert isinstance(middlewares[0], MoviePilotSubAgentMiddleware)
+    assert isinstance(middlewares[1], SubAgentTaskControlMiddleware)
     assert [tool.name for tool in task_tools] == [
         SUBAGENT_TASK_TOOL_NAME,
         SUBAGENT_CONTROL_TOOL_NAME,
@@ -140,17 +141,27 @@ def test_builtin_tools_declare_tags_in_implementation():
     assert missing_tools == []
 
 
-def test_call_summary_middleware_logs_subagent_tool_operations():
-    """子代理工具包装层应记录工具执行开始和完成日志。"""
+def test_task_tool_call_records_streaming_summary():
+    """task 子代理工具执行时应记录流式聚合摘要。"""
 
     async def _run_test():
-        middleware = SubAgentCallSummaryMiddleware()
+        calls = []
+        stream_handler = SimpleNamespace(
+            is_streaming=True,
+            record_tool_call=lambda **kwargs: calls.append(kwargs),
+        )
+        middleware = MoviePilotSubAgentMiddleware(
+            model=FakeListChatModel(responses=["ok"]),
+            profiles=subagent_module._builtin_subagent_profiles(),
+            tools=[],
+            stream_handler=stream_handler,
+        )
         request = SimpleNamespace(
-            tool=SimpleNamespace(name=SUBAGENT_CONTROL_TOOL_NAME),
+            tool=SimpleNamespace(name=SUBAGENT_TASK_TOOL_NAME),
             tool_call={
                 "args": {
-                    "action": "status",
-                    "subagent_type": "general-purpose",
+                    "description": "检查媒体信息",
+                    "subagent_type": "media-researcher",
                 }
             },
         )
@@ -158,15 +169,74 @@ def test_call_summary_middleware_logs_subagent_tool_operations():
         async def _fake_handler(_request):
             return "ok"
 
-        with patch.object(subagent_module.logger, "info") as log_info:
-            result = await middleware.awrap_tool_call(request, _fake_handler)
+        result = await middleware.awrap_tool_call(request, _fake_handler)
+        return result, calls
 
-        messages = [call.args[0] for call in log_info.call_args_list]
-        assert result == "ok"
-        assert any("开始执行子代理工具" in message for message in messages)
-        assert any("子代理工具执行完成" in message for message in messages)
+    result, calls = asyncio.run(_run_test())
 
-    asyncio.run(_run_test())
+    assert result == "ok"
+    assert calls == [
+        {
+            "tool_name": SUBAGENT_TASK_TOOL_NAME,
+            "tool_message": "Subagent invoked",
+            "tool_kwargs": {
+                "description": "检查媒体信息",
+                "subagent_type": "media-researcher",
+            },
+        }
+    ]
+
+
+def test_control_tool_call_records_streaming_summary():
+    """subagent_task 子代理工具执行时应记录流式聚合摘要。"""
+
+    async def _run_test():
+        calls = []
+        stream_handler = SimpleNamespace(
+            is_streaming=True,
+            record_tool_call=lambda **kwargs: calls.append(kwargs),
+        )
+        middleware = SubAgentTaskControlMiddleware(
+            model=FakeListChatModel(responses=["ok"]),
+            profiles=subagent_module._builtin_subagent_profiles(),
+            tools=[],
+            stream_handler=stream_handler,
+        )
+        request = SimpleNamespace(
+            tool=SimpleNamespace(name=SUBAGENT_CONTROL_TOOL_NAME),
+            tool_call={
+                "args": {
+                    "action": "start",
+                    "tasks": [
+                        {"subagent_type": "media-researcher"},
+                        {"subagent_type": "download-diagnostician"},
+                    ],
+                }
+            },
+        )
+
+        async def _fake_handler(_request):
+            return "ok"
+
+        result = await middleware.awrap_tool_call(request, _fake_handler)
+        return result, calls
+
+    result, calls = asyncio.run(_run_test())
+
+    assert result == "ok"
+    assert calls == [
+        {
+            "tool_name": SUBAGENT_CONTROL_TOOL_NAME,
+            "tool_message": "Subagent invoked",
+            "tool_kwargs": {
+                "action": "start",
+                "tasks": [
+                    {"subagent_type": "media-researcher"},
+                    {"subagent_type": "download-diagnostician"},
+                ],
+            },
+        }
+    ]
 
 
 def test_control_tool_starts_tasks_concurrently_and_waits():
@@ -396,14 +466,16 @@ def test_after_agent_cancels_unfinished_tasks():
                 )
             )
             await asyncio.wait_for(task_started.wait(), timeout=1)
+            task_id = start_payload["tasks"][0]["task_id"]
             await middleware.aafter_agent({}, None)
             status_payload = json.loads(
                 await middleware._control_task(
                     action="status",
-                    task_ids=[start_payload["tasks"][0]["task_id"]],
+                    task_ids=[task_id],
                 )
             )
 
-        assert status_payload["tasks"][0]["status"] == "cancelled"
+        assert status_payload["tasks"] == []
+        assert status_payload["missing_task_ids"] == [task_id]
 
     asyncio.run(_run_test())

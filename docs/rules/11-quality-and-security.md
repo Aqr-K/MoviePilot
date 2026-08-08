@@ -57,7 +57,7 @@ pylint app/
 safety check -r requirements.txt --policy-file=safety.policy.yml
 ```
 
-- Run after every change to `requirements.txt`.
+- Run after runtime dependency changes; scan the development dependency entry as well when `requirements-dev.in` changes.
 - No new high-severity vulnerabilities may be introduced.
 - If a vulnerability cannot be patched immediately, document it explicitly in the PR description.
 
@@ -78,6 +78,8 @@ The `API_TOKEN` value in `settings` is the source of truth. It is set at initial
 
 ### Endpoint Authorization
 
+- API-token authenticated integration endpoints are administrator-level surfaces unless a specific endpoint documents a narrower contract.
+- Do not infer user-scoped authorization from a valid `API_TOKEN`; use an explicit user identity dependency when behavior must be scoped to a logged-in user.
 - Use the existing FastAPI dependency functions (e.g., `get_current_user`, `get_current_active_superuser`) — check `app/api/endpoints/` for usage patterns.
 - Do not add manual token parsing inside endpoint functions. Always use the project's dependency injection.
 - Superuser-only operations must explicitly require the superuser dependency.
@@ -129,7 +131,7 @@ Before marking any task as complete:
 
 - [ ] Related pytest tests pass
 - [ ] No new pylint error-level issues in `pylint app/`
-- [ ] If dependencies changed: `pip-compile requirements.in` was run and `safety check` passes
+- [ ] If dependencies changed: the package is in the correct runtime or dev dependency entry, and `safety check` passes for the affected entry
 - [ ] If CLI behavior changed: `docs/cli.md` and related tests are updated
 - [ ] If MCP/API behavior changed: `docs/mcp-api.md` and related skill files are updated
 - [ ] If database schema changed: a new Alembic migration exists under `database/versions/`
