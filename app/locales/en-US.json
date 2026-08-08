@@ -278,6 +278,10 @@
     "字幕站点信息不存在": "Subtitle site information does not exist",
     "附件不存在或已过期": "Attachment does not exist or has expired",
     "附件超过 32MB，无法发送给智能助手": "The attachment exceeds 32MB and cannot be sent to the assistant",
+    "验证请求已失效": "The verification request has expired",
+    "通行密钥不存在或不属于当前用户": "The passkey does not exist or does not belong to the current user",
+    "通行密钥验证失败": "Passkey verification failed",
+    "二次验证成功": "Two-factor verification succeeded",
     "附件保存失败": "Failed to save attachment",
     "认证票据无效或已过期": "Authentication ticket is invalid or has expired",
     "用户不存在或已禁用": "The user does not exist or has been disabled",
@@ -397,7 +401,8 @@
     "订阅资源匹配完成": "Subscription resource matching completed",
     "订阅元数据更新完成": "Subscription metadata update completed",
     "未配置 Follow 订阅用户，跳过刷新": "No Follow subscription users configured, skipping refresh",
-    "订阅日历预缓存完成": "Subscription calendar precache completed"
+    "订阅日历预缓存完成": "Subscription calendar precache completed",
+    "尝试过于频繁，请稍后再试": "Too many attempts, please try again later"
   },
   "message_patterns": [
     {

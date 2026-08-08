@@ -65,7 +65,7 @@ def test_explicit_ai_message_is_not_recorded_to_message_history():
     with patch.object(settings, "AI_AGENT_ENABLE", True), patch.object(
         chain, "_record_user_message"
     ) as record_user_message, patch(
-        "app.chain.message.agent_manager.process_message",
+        "app.agent.agent_manager.process_message",
         new_callable=AsyncMock,
     ) as process_message, patch(
         "app.chain.message.asyncio.run_coroutine_threadsafe",
@@ -188,7 +188,7 @@ def test_agent_choice_callback_is_not_recorded_to_message_history():
         ) as record_user_message, patch.object(
             chain, "edit_message", return_value=True
         ), patch(
-            "app.chain.message.agent_manager.process_message",
+            "app.agent.agent_manager.process_message",
             new_callable=AsyncMock,
         ) as process_message, patch(
             "app.chain.message.asyncio.run_coroutine_threadsafe",
