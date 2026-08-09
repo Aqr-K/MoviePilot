@@ -1,6 +1,6 @@
 ---
 name: moviepilot-api
-version: 6
+version: 9
 description: >-
   Use this skill when you need to call MoviePilot REST API endpoints directly
   with the bundled Python client. Covers MoviePilot HTTP endpoints across media
@@ -65,6 +65,25 @@ python scripts/mp-api.py <METHOD> <PATH> [key=value ...] [--json '<body>']
 - Both methods validate against the same `API_TOKEN` value.
 - Never print, summarize, or ask the user to paste the API key unless the script is being used outside the local project and no safer configuration source is available.
 
+### API versions and response envelopes
+
+- `/api/v1` preserves the existing endpoint-specific response shapes by
+  default; the login wallpaper URL is now returned in `data`.
+- `/api/v2` reuses the same routes, parameters, authentication dependencies,
+  and business handlers, but wraps ordinary JSON responses in the shared
+  `Response` envelope.
+- A successful raw v1 payload becomes
+  `{"success":true,"message":"","data":<original payload>}` in v2.
+- Existing `Response` payloads are not wrapped again. HTTP errors on both v1
+  and v2 keep their original status code and expose the error text in
+  `message` with `data={}`. Non-business HTTP exceptions are not translated.
+- SSE, files, images, empty responses, and OpenAI, Anthropic, or MCP protocol
+  endpoints keep their protocol-native response body.
+
+Use `/api/v2` for app clients that require one JSON envelope. Any ordinary
+REST path listed below can switch from `/api/v1/...` to `/api/v2/...` without
+changing its method, parameters, request body, or authentication.
+
 ### Examples
 
 ```bash
@@ -79,6 +98,9 @@ python scripts/mp-api.py DELETE /api/v1/subscribe/123
 
 # Endpoints that require ?token= auth
 python scripts/mp-api.py GET /api/v1/dashboard/statistic2 --token-param
+
+# Uniform v2 JSON response envelope
+python scripts/mp-api.py GET /api/v2/dashboard/cpu
 ```
 
 ## Complete API Reference
@@ -92,8 +114,8 @@ All endpoints are under the base URL `{MP_HOST}`. Path parameters are shown as `
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/media/search` | Search media, collections, or people by title. Params: `title` (required), `type`, `page`, `count`, optional `source`. Supported sources: `media` = `themoviedb`, `douban`, `bangumi`, `anilist`; `collection` = `themoviedb`; `person` = `themoviedb`, `douban` |
-| GET | `/api/v1/media/recognize` | Recognize media from torrent title. Params: `title` (required), `subtitle`, `custom_words`, optional `source` |
-| GET | `/api/v1/media/recognize2` | Recognize media (API_TOKEN auth, use `--token-param`). Params: `title`, `subtitle`, `custom_words`, optional `source` |
+| GET | `/api/v1/media/recognize` | Recognize media from a torrent title or a media file path. Params: `title` (required), `subtitle`, `custom_words`, optional `source`; media file paths also use parent-directory metadata such as title and year |
+| GET | `/api/v1/media/recognize2` | Recognize media from a torrent title or media file path (API_TOKEN auth, use `--token-param`). Params: `title`, `subtitle`, `custom_words`, optional `source`; media file paths also use parent-directory metadata |
 | GET | `/api/v1/media/recognize_file` | Recognize media from file path. Params: `path` (required), optional `source` |
 | GET | `/api/v1/media/recognize_file2` | Recognize file (API_TOKEN auth). Params: `path`, optional `source` |
 | POST | `/api/v1/media/scrape/{storage}` | Scrape media metadata. Body: FileItem JSON. Optional params: `media_source`, `media_id`, `type_name` (`电影`/`电视剧`) |
@@ -175,7 +197,7 @@ Streaming search sends `{"type":"heartbeat"}` every 15 seconds without business 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/download/` | List active downloads. Params: `name` (downloader name) |
+| GET | `/api/v1/download/` | List active downloads. Params: `name` (downloader name); linked history adds media type and source `site_name` |
 | POST | `/api/v1/download/` | Add download (with media info). Body: JSON |
 | POST | `/api/v1/download/add` | Add download without media info. Body: `torrent_in`, optional `media_source` + `media_id` (all four dedicated IDs remain supported), `downloader`, `save_path` |
 | POST | `/api/v1/download/subtitle` | Download subtitle file to the recognized media download directory. Body: `subtitle_in`, optional `media_source` + `media_id` (all four dedicated IDs remain supported), `save_path` |
@@ -251,7 +273,7 @@ Streaming search sends `{"type":"heartbeat"}` every 15 seconds without business 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/history/download` | Download history. Params: `page`, `count` |
+| GET | `/api/v1/history/download` | Download history, newest first. Params: `page`, `count`. `poster` is the poster image; legacy `image` is the backdrop image. |
 | DELETE | `/api/v1/history/download` | Delete download history. Body: DownloadHistory JSON |
 | GET | `/api/v1/history/transfer` | Transfer history. Params: `title`, `page`, `count`, `status` |
 | DELETE | `/api/v1/history/transfer` | Delete transfer history. Params: `deletesrc`, `deletedest`. Body: TransferHistory |
@@ -444,9 +466,9 @@ Streaming search sends `{"type":"heartbeat"}` every 15 seconds without business 
 | POST | `/api/v1/torrent/cache/refresh` | Refresh torrent cache |
 | POST | `/api/v1/torrent/cache/reidentify/{domain}/{torrent_hash}` | Re-identify torrent. Params: `tmdbid`, `doubanid` |
 
-### Recognition Cache (6 endpoints)
+### Recognition Cache (3 endpoints)
 
-The two list endpoints return local cache totals plus `shared_recognized` and
+The list endpoint returns local cache totals plus `shared_recognized` and
 `shared_recognize_enabled` for the persisted successful shared-recognition count.
 
 | Method | Path | Description |
@@ -454,9 +476,6 @@ The two list endpoints return local cache totals plus `shared_recognized` and
 | GET | `/api/v1/tmdb/cache` | Get TheMovieDb recognition cache statistics |
 | DELETE | `/api/v1/tmdb/cache/{cache_key}` | Delete one URL-encoded TheMovieDb recognition cache key |
 | DELETE | `/api/v1/tmdb/cache` | Clear TheMovieDb recognition cache |
-| GET | `/api/v1/douban/cache` | Get Douban recognition cache statistics |
-| DELETE | `/api/v1/douban/cache/{cache_key}` | Delete one URL-encoded Douban recognition cache key |
-| DELETE | `/api/v1/douban/cache` | Clear Douban recognition cache |
 
 ### Message (8 endpoints)
 
@@ -482,7 +501,7 @@ The two list endpoints return local cache totals plus `shared_recognized` and
 | GET | `/api/v1/user/{username}` | User detail |
 | DELETE | `/api/v1/user/id/{user_id}` | Delete user by ID |
 | DELETE | `/api/v1/user/name/{user_name}` | Delete user by username |
-| POST | `/api/v1/user/avatar/{user_id}` | Upload avatar. Body: multipart/form-data |
+| POST | `/api/v1/user/avatar/{user_id}` | Upload avatar. Body: multipart/form-data; original filename is returned in `data.filename` |
 | GET | `/api/v1/user/config/{key}` | Get user config |
 | POST | `/api/v1/user/config/{key}` | Update user config |
 
@@ -491,7 +510,7 @@ The two list endpoints return local cache totals plus `shared_recognized` and
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/login/access-token` | Get JWT access token. Body: form (username, password) |
-| GET | `/api/v1/login/wallpaper` | Login page wallpaper |
+| GET | `/api/v1/login/wallpaper` | Login page wallpaper; URL is returned in `data` |
 | GET | `/api/v1/login/wallpapers` | Login page wallpaper list |
 
 ### MCP Tools (6 endpoints)

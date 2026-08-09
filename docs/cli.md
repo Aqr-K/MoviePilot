@@ -238,6 +238,10 @@ moviepilot setup --config-dir /path/to/moviepilot-config
 - 默认下载目录与媒体库目录
 - AI Agent
   可按需启用，并配置 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL`
+  与 `LLM_WEB_SEARCH_MODE`。联网搜索支持 MoviePilot 本地搜索、模型服务端搜索、
+  服务端优先自动回退与完全关闭；服务端模式仅在当前模型目录声明支持时生效。
+  当前可识别 OpenAI、Anthropic Claude、Google Gemini、xAI Grok 与 DeepSeek
+  官方端点已公布的服务端联网搜索能力，第三方兼容端点不会被自动误判。
 - 用户站点认证
   可按需选择认证站点，并按站点要求填写用户名、UID、Passkey 等参数
 - 开机自启
@@ -374,6 +378,7 @@ moviepilot version
 - 通过系统内置的重启入口触发重启时，本地 CLI 安装模式也会复用同一套前后端进程管理完成重启
 - 前端默认监听 `NGINX_PORT`，默认值 `3000`
 - 后端默认监听 `PORT`，默认值 `3001`
+- `TRANSFER_TASK_TIMEOUT` 控制外部异步接管的运行中整理任务失活超时，单位为分钟，默认 `120`，设为 `0` 可禁用；主程序整理线程仍在直接执行的任务不受此项清理
 - 前端通过 `service.js` 代理 `/api` 与 `/cookiecloud` 到后端
 - 本地前端代理在启动时会先确认后端可用；如果后端长时间不可用，前端也会自动退出，避免只剩半套服务
 
@@ -392,7 +397,8 @@ moviepilot doctor --deep
 - `--json` 输出稳定 JSON，可供 Agent、脚本或 Issue 流程收集
 - `--fix` 只执行白名单安全修复，例如清理过期 runtime 文件或补齐不合法的 `API_TOKEN`
 - `--deep` 执行可能较慢的深度探测，例如 PostgreSQL TCP 连通性检查
-- 插件日志异常会保留为诊断告警并标记 `affects_report_status=false`，但不会单独降低系统整体状态；核心错误仍正常参与状态聚合
+- Doctor 只分析最近 24 小时日志，并跨主日志、控制台镜像和插件独立日志聚合相同错误
+- 插件日志异常会保留为诊断告警并标记 `affects_report_status=false`，但不会单独降低系统整体状态；`summary.advisory` 单独统计这类建议项，核心错误仍正常参与状态聚合
 - Docker 环境可使用 `docker exec <container> moviepilot doctor`；如果容器已退出，也可用镜像挂载同一配置目录运行 `python -m app.cli doctor`
 
 日志：
@@ -481,6 +487,11 @@ moviepilot tool run search_torrents media_type=movie tmdb_id=12345
 - `tool list` 用于动态发现当前服务可调用的工具
 - `tool show` 会输出参数名、类型和描述
 - `tool run` 参数格式固定为 `key=value`
+- `read_file`、`write_file`、`edit_file` 和 `execute_command`
+  属于内置 Agent 的本地敏感能力，不通过 MCP/`moviepilot tool` 暴露；插件开发时
+  由 Agent 按当前用户权限直接调用这些工具。
+- `read_file` 单次最多返回 50KB 文件内容；超出时会截断并提示 Agent 使用
+  `start_line`、`end_line` 指定更小的行号范围继续读取。
 
 ## Scheduler 命令
 

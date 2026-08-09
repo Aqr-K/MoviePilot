@@ -1,11 +1,11 @@
 import pickle
-import time
 import traceback
-from pathlib import Path
+from math import ceil
 from threading import RLock
-from typing import Any, Optional
+from time import time
+from typing import Any
 
-from app.core.cache import TTLCache
+from app.core.cache import FileCache, TTLCache
 from app.core.config import settings
 from app.core.meta import MetaBase
 from app.log import logger
@@ -13,6 +13,9 @@ from app.schemas.types import MediaType
 from app.utils.singleton import WeakSingleton
 
 lock = RLock()
+PERSISTENCE_VERSION = 1
+PERSISTENCE_REGION = "recognize"
+PERSISTENCE_KEY = "tmdb"
 
 
 class TmdbCache(metaclass=WeakSingleton):
@@ -25,41 +28,78 @@ class TmdbCache(metaclass=WeakSingleton):
         "type": MediaType
     }
     """
-    # TMDB缓存过期
-    _tmdb_cache_expire: bool = True
-    # 条目写入时间字段，用于重启后按剩余时间恢复 TTL 而不是重新计时
-    WRITE_TIME_FIELD = "__cached_at__"
-
     def __init__(self):
-        """初始化 TMDB 识别缓存并恢复本地持久化数据。"""
-        self.maxsize = settings.CONF.douban
+        """初始化 TMDB 识别缓存并恢复未过期的持久化数据。"""
+        self.maxsize = settings.CONF.tmdb
         self.ttl = settings.CONF.meta
         self.region = "__tmdb_cache__"
-        self._meta_filepath = settings.TEMP_PATH / self.region
-        # 初始化缓存
         self._cache = TTLCache(region=self.region, maxsize=self.maxsize, ttl=self.ttl)
-        # 非Redis加载本地缓存数据
+        self._expires_at: dict[str, float] = {}
+        self._dirty = False
+        self._file_cache = None
+        self._legacy_file_cache = None
+        self._legacy_cache_found = False
         if not self._cache.is_redis():
-            for key, value in self.__load(self._meta_filepath).items():
-                # 按写入时间扣减剩余存活时间，否则落盘条目每次重启都会重新计时，
-                # 相当于永不过期
-                remaining = self.__remaining_ttl(value)
-                if remaining is not None and remaining <= 0:
-                    continue
-                self._cache.set(key, value, ttl=remaining)
+            self._file_cache = FileCache(base=settings.CACHE_PATH, ttl=self.ttl)
+            self._legacy_file_cache = FileCache(base=settings.TEMP_PATH.parent, ttl=self.ttl)
+            self._restore()
 
-    def __remaining_ttl(self, value: Any) -> Optional[int]:
-        """
-        计算落盘条目的剩余存活时间。
-        :param value: 缓存值
-        :return: 剩余秒数；条目没有写入时间戳（旧版本落盘数据）时返回 None，按默认 TTL 处理
-        """
-        if not isinstance(value, dict):
-            return None
-        cached_at = value.get(self.WRITE_TIME_FIELD)
-        if not cached_at:
-            return None
-        return int(self.ttl - (time.time() - cached_at))
+    def _restore(self) -> None:
+        """从统一文件缓存恢复仍在有效期内的 TMDB 识别数据。"""
+        try:
+            content = self._file_cache.get(PERSISTENCE_KEY, region=PERSISTENCE_REGION)
+            if not content:
+                content = self._legacy_file_cache.get(
+                    self.region,
+                    region=settings.TEMP_PATH.name,
+                )
+                if content:
+                    self._legacy_cache_found = True
+                    self._dirty = True
+            if not content:
+                return
+            payload = pickle.loads(content)
+            now = time()
+            if (
+                    isinstance(payload, dict)
+                    and payload.get("version") == PERSISTENCE_VERSION
+                    and isinstance(payload.get("items"), dict)
+            ):
+                items = payload["items"]
+            elif isinstance(payload, dict):
+                # 旧版缓存没有保存过期时间，迁移时从当前时刻重新计算一次有效期。
+                items = {
+                    key: {"value": value, "expires_at": now + self.ttl}
+                    for key, value in payload.items()
+                }
+                self._dirty = True
+            else:
+                return
+
+            for key, item in items.items():
+                if not isinstance(item, dict):
+                    self._dirty = True
+                    continue
+                value = item.get("value")
+                expires_at = item.get("expires_at")
+                if not isinstance(value, dict) or not isinstance(expires_at, (int, float)):
+                    self._dirty = True
+                    continue
+                remaining_ttl = expires_at - now
+                if remaining_ttl <= 0:
+                    self._dirty = True
+                    continue
+                self._cache.set(key, value, ttl=ceil(remaining_ttl))
+                self._expires_at[key] = expires_at
+        except Exception as err:
+            logger.error(f"加载TMDB识别缓存失败：{str(err)} - {traceback.format_exc()}")
+
+    def _set(self, key: str, value: dict) -> None:
+        """写入单条 TMDB 识别缓存并记录其独立过期时间。"""
+        self._cache.set(key, value)
+        if not self._cache.is_redis():
+            self._expires_at[key] = time() + self.ttl
+            self._dirty = True
 
     def clear(self):
         """
@@ -67,6 +107,8 @@ class TmdbCache(metaclass=WeakSingleton):
         """
         with lock:
             self._cache.clear()
+            self._expires_at.clear()
+            self._dirty = True
             self.save(force=True)
 
     def list_items(self) -> list[dict]:
@@ -133,16 +175,20 @@ class TmdbCache(metaclass=WeakSingleton):
         key = self.__get_key(meta)
 
         with lock:
-            cache_value = self._cache.get(key)
-            if not cache_value or not isinstance(cache_value, dict):
+            cache_data = self._cache.get(key)
+            if not cache_data and self._expires_at.pop(key, None) is not None:
+                self._dirty = True
+            if not cache_data or not isinstance(cache_data, dict):
                 return {}
-            if self.__is_type_conflicted(meta, cache_value.get("type"), cache_value.get("id")):
+            if self.__is_type_conflicted(meta, cache_data.get("type"), cache_data.get("id")):
                 # 脏条目不丢弃就会被无限期沿用，正确的识别逻辑永远没有执行机会
                 logger.warn(f"识别缓存类型与元数据冲突，已丢弃并重新识别：{key} -> "
-                            f"{cache_value.get('title')}({cache_value.get('type')})")
+                            f"{cache_data.get('title')}({cache_data.get('type')})")
                 self._cache.delete(key)
+                self._expires_at.pop(key, None)
+                self._dirty = True
                 return {}
-            return cache_value
+            return cache_data
 
     def delete(self, key: str) -> dict:
         """
@@ -154,6 +200,8 @@ class TmdbCache(metaclass=WeakSingleton):
             redis_data = self._cache.get(key)
             if redis_data:
                 self._cache.delete(key)
+                self._expires_at.pop(key, None)
+                self._dirty = True
                 self.save(force=True)
                 return redis_data
             return {}
@@ -169,23 +217,9 @@ class TmdbCache(metaclass=WeakSingleton):
             redis_data = self._cache.get(key)
             if redis_data:
                 redis_data['title'] = title
-                self._cache.set(key, redis_data)
+                self._set(key, redis_data)
                 return redis_data
             return {}
-
-    @staticmethod
-    def __load(path: Path) -> dict:
-        """
-        从文件中加载缓存
-        """
-        try:
-            if path.exists():
-                with open(path, 'rb') as f:
-                    data = pickle.load(f)
-                return data
-        except Exception as e:
-            logger.error(f'加载缓存失败：{str(e)} - {traceback.format_exc()}')
-        return {}
 
     def update(self, meta: MetaBase, info: dict) -> None:
         """
@@ -215,35 +249,70 @@ class TmdbCache(metaclass=WeakSingleton):
                     "year": cache_year,
                     "title": cache_title,
                     "poster_path": info.get("poster_path"),
-                    "backdrop_path": info.get("backdrop_path"),
-                    self.WRITE_TIME_FIELD: time.time()
+                    "backdrop_path": info.get("backdrop_path")
                 }
-                self._cache.set(key, cache_data)
+                self._set(key, cache_data)
 
         elif info is not None:
             # None时不缓存，此时代表网络错误，允许重复请求
             with lock:
-                self._cache.set(key, {"id": 0})
+                self._set(key, {"id": 0})
 
     def save(self, force: bool = False) -> None:
         """
-        保存缓存数据到文件
+        使用统一文件缓存保存未过期的 TMDB 识别数据。
         """
-        # Redis不需要保存到本地文件
         if self._cache.is_redis():
             return
+        with lock:
+            now = time()
+            cache_items = dict(self._cache.items())
+            active_keys = set(cache_items)
+            stale_keys = set(self._expires_at) - active_keys
+            if stale_keys:
+                for key in stale_keys:
+                    self._expires_at.pop(key, None)
+                self._dirty = True
 
-        # Redis不可用时，保存到本地文件
-        meta_data = self.__load(self._meta_filepath)
-        # 当前缓存，去除无法识别
-        new_meta_data = {k: v for k, v in self._cache.items() if v.get("id")}
+            persisted_items = {}
+            for key, value in cache_items.items():
+                expires_at = self._expires_at.get(key)
+                if expires_at is None:
+                    expires_at = now + self.ttl
+                    self._expires_at[key] = expires_at
+                    self._dirty = True
+                if expires_at <= now or not value.get("id"):
+                    continue
+                persisted_items[key] = {
+                    "value": value,
+                    "expires_at": expires_at,
+                }
 
-        if not force \
-                and meta_data.keys() == new_meta_data.keys():
-            return
+            if not force and not self._dirty:
+                return
 
-        with open(self._meta_filepath, 'wb') as f:
-            pickle.dump(new_meta_data, f, pickle.HIGHEST_PROTOCOL)  # type: ignore
+            try:
+                if persisted_items:
+                    payload = {
+                        "version": PERSISTENCE_VERSION,
+                        "items": persisted_items,
+                    }
+                    self._file_cache.set(
+                        PERSISTENCE_KEY,
+                        pickle.dumps(payload, pickle.HIGHEST_PROTOCOL),
+                        region=PERSISTENCE_REGION,
+                    )
+                else:
+                    self._file_cache.delete(PERSISTENCE_KEY, region=PERSISTENCE_REGION)
+                if self._legacy_cache_found:
+                    self._legacy_file_cache.delete(
+                        self.region,
+                        region=settings.TEMP_PATH.name,
+                    )
+                    self._legacy_cache_found = False
+                self._dirty = False
+            except Exception as err:
+                logger.error(f"保存TMDB识别缓存失败：{str(err)} - {traceback.format_exc()}")
 
     def __del__(self):
         """实例释放前保存非 Redis 缓存。"""

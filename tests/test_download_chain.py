@@ -9,7 +9,7 @@ from app.chain.download import DownloadChain
 from app.core.config import settings
 from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.metainfo import MetaInfo
-from app.schemas import FileItem, NotExistMediaInfo, TransferDirectoryConf
+from app.schemas import DownloaderTorrent, FileItem, NotExistMediaInfo, TransferDirectoryConf
 from app.schemas.types import MediaType
 
 
@@ -249,9 +249,11 @@ def test_download_single_persists_custom_words_snapshot(monkeypatch):
         """捕获写入下载历史的字段，验证识别词快照确实落库。"""
 
         def add(self, **kwargs):
+            """捕获下载历史字段。"""
             captured.update(kwargs)
 
         def add_files(self, _files):
+            """忽略与当前断言无关的下载文件记录。"""
             pass
 
     _FakeThreadHelper.submitted = []
@@ -278,6 +280,8 @@ def test_download_single_persists_custom_words_snapshot(monkeypatch):
             year="2024",
             tmdb_id=1,
             genre_ids=[18],
+            poster_path="https://images.example.com/original/poster.jpg",
+            backdrop_path="https://images.example.com/original/backdrop.jpg",
         ),
         torrent_info=TorrentInfo(
             title="Demo Show 2024",
@@ -298,6 +302,8 @@ def test_download_single_persists_custom_words_snapshot(monkeypatch):
 
     assert result == "hash123"
     assert captured["custom_words"] == custom_words
+    assert captured["poster"] == "https://images.example.com/w500/poster.jpg"
+    assert captured["image"] == "https://images.example.com/w500/backdrop.jpg"
 
 
 def test_save_subtitle_response_creates_missing_temp_directory(monkeypatch, tmp_path):
@@ -1036,3 +1042,40 @@ def test_batch_download_keeps_count_check_without_complete_coverage(monkeypatch)
     assert lefts == {}
     assert context.confirmed_full_coverage is False
     chain.download_single.assert_called_once()
+
+
+def test_downloading_includes_media_type_and_source_site(monkeypatch):
+    """
+    正在下载任务应从下载历史回填媒体类型和来源站点。
+    """
+    torrent = DownloaderTorrent(hash="download-hash", title="Demo.Release")
+    history = SimpleNamespace(
+        episodes="E02",
+        image="https://images.example.com/backdrop.jpg",
+        poster="https://images.example.com/poster.jpg",
+        seasons="S01",
+        title="示例剧集",
+        tmdbid=1001,
+        torrent_site="示例站点",
+        type="电视剧",
+        userid="user-1",
+        username="tester",
+    )
+    chain = DownloadChain.__new__(DownloadChain)
+    monkeypatch.setattr(chain, "list_torrents", lambda **_kwargs: [torrent])
+    monkeypatch.setattr(
+        download_module,
+        "DownloadHistoryOper",
+        lambda: SimpleNamespace(get_by_hashes=lambda _hashes: {torrent.hash: history}),
+    )
+
+    result = chain.downloading(name="qb-main")
+
+    assert result == [torrent]
+    assert torrent.media["type"] == "电视剧"
+    assert torrent.media["image"] == "https://images.example.com/poster.jpg"
+    assert torrent.media["poster"] == "https://images.example.com/poster.jpg"
+    assert torrent.media["backdrop"] == "https://images.example.com/backdrop.jpg"
+    assert torrent.site_name == "示例站点"
+    assert torrent.userid == "user-1"
+    assert torrent.username == "tester"

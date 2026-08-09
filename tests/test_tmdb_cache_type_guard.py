@@ -1,4 +1,3 @@
-import time
 from types import SimpleNamespace
 
 from app.core.config import settings
@@ -42,6 +41,8 @@ def _build_cache(data: dict = None) -> TmdbCache:
     cache = object.__new__(TmdbCache)
     cache._cache = _MemoryCacheStub(data)
     cache.ttl = 43200
+    cache._expires_at = {}
+    cache._dirty = False
     cache.save = lambda force=False: None
     return cache
 
@@ -116,32 +117,3 @@ def test_update_caches_tv_result_for_movie_meta():
     stored = cache._cache.get(_key("电影", begin_season=None))
     assert stored["type"] == MediaType.TV
     assert stored["title"] == "某剧"
-
-
-def test_update_stamps_write_time_for_ttl_recovery():
-    """写入条目要带上时间戳，重启恢复时才能算出剩余存活时间。"""
-    meta = _build_meta(MediaType.TV)
-    cache = _build_cache()
-
-    cache.update(meta, {"id": 329809, "media_type": MediaType.TV,
-                        "name": "死神", "first_air_date": "2022-10-11"})
-
-    stored = cache._cache.get(_key("电视剧"))
-    assert stored[TmdbCache.WRITE_TIME_FIELD] > 0
-
-
-def test_remaining_ttl_deducts_elapsed_time():
-    """落盘条目恢复时应扣减已经过去的时间，而不是重新计时。"""
-    cache = _build_cache()
-    value = {"id": 1, TmdbCache.WRITE_TIME_FIELD: time.time() - 3600}
-
-    remaining = cache._TmdbCache__remaining_ttl(value)
-
-    assert 43200 - 3700 < remaining <= 43200 - 3600
-
-
-def test_remaining_ttl_is_none_for_legacy_entries():
-    """旧版本落盘数据没有写入时间戳，按默认 TTL 处理保持兼容。"""
-    cache = _build_cache()
-
-    assert cache._TmdbCache__remaining_ttl({"id": 1}) is None

@@ -9,6 +9,7 @@ from app.chain.tmdb import TmdbChain
 from app.core.config import settings
 from app.core.context import Context
 from app.core.event import eventmanager
+from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfo, MetaInfoPath
 from app.core.security import verify_token, verify_apitoken
 from app.db.models import User
@@ -16,10 +17,33 @@ from app.db.user_oper import get_current_active_user, get_current_active_superus
 from app.schemas import MediaType, MediaRecognizeConvertEventData
 from app.schemas.category import CategoryConfig
 from app.schemas.types import ChainEventType
-from app.utils.media import parse_media_key
+from app.utils.media import MEDIA_SOURCE_ID_FIELDS, parse_media_key
 
 router = APIRouter()
 MediaSource = str
+
+
+def _build_recognize_metainfo(
+        title: str,
+        subtitle: Optional[str] = None,
+        custom_words: Optional[str] = None,
+) -> MetaBase:
+    """构造标题识别元数据，并兼容第三方客户端传入媒体文件路径。"""
+    custom_word_list = custom_words.split("\n") if custom_words else None
+    normalized_title = title.replace("\\", "/")
+    title_path = Path(normalized_title)
+    if (
+        ("/" in title or "\\" in title)
+        and "://" not in title
+        and title_path.suffix.lower() in settings.RMT_MEDIAEXT
+    ):
+        metainfo = MetaInfoPath(
+            title_path,
+            custom_words=custom_word_list,
+        )
+        metainfo.title = title
+        return metainfo
+    return MetaInfo(title, subtitle, custom_words=custom_word_list)
 
 
 def _build_media_seasons(
@@ -84,9 +108,7 @@ async def recognize(
     :param _:
     """
     # 识别媒体信息，传入临时识别词时优先于系统配置的识别词生效
-    metainfo = MetaInfo(
-        title, subtitle, custom_words=custom_words.split("\n") if custom_words else None
-    )
+    metainfo = _build_recognize_metainfo(title, subtitle, custom_words)
     mediainfo = await MediaChain().async_recognize_by_meta(
         metainfo,
         source=source,
@@ -414,8 +436,10 @@ async def detail(
             mediaid=source_media_id,
             mtype=mtype,
         )
-    else:
-        # 广播事件解析媒体信息
+    if not mediainfo and (
+        not media_source or media_source not in MEDIA_SOURCE_ID_FIELDS
+    ):
+        # 旧探索插件可能只提供列表或转换事件，原生 ID 直识别失败后需保留原有兼容链路。
         event_data = MediaRecognizeConvertEventData(
             mediaid=mediaid, convert_type=settings.RECOGNIZE_SOURCE
         )
@@ -432,7 +456,7 @@ async def detail(
                     mediaid=str(new_id),
                     mtype=mtype,
                 )
-        elif title:
+        if not mediainfo and title:
             # 使用名称识别兜底
             meta = MetaInfo(title)
             if year:

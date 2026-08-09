@@ -24,6 +24,7 @@ SYSTEM_TASKS_FILE = "System Tasks.yaml"
 SYSTEM_TASKS_SCHEMA_VERSION = 2
 COMMON_SHELL_COMMANDS = (
     "ssh",
+    "sshpass",
     "scp",
     "sftp",
     "git",
@@ -139,19 +140,6 @@ class PromptManager:
                 markdown_spec = self._generate_formatting_instructions(caps)
         button_choice_spec = self._generate_button_choice_instructions(msg_channel)
 
-        # 啰嗦模式
-        verbose_spec = ""
-        if not settings.AI_AGENT_VERBOSE:
-            verbose_spec = (
-                "\n\n[Important Instruction] STRICTLY ENFORCED: "
-                "If tools are needed, DO NOT output any conversational text, explanations, progress updates, "
-                "or acknowledgements before the first tool call or between tool calls. "
-                "Call tools directly without any transitional phrases. "
-                "You MUST remain completely silent until all required tools have finished and you have the final result. "
-                "Only then may you send one final user-facing reply. "
-                "DO NOT output any intermediate content whatsoever."
-            )
-
         # MoviePilot系统信息
         moviepilot_info = self._get_moviepilot_info()
         voice_reply_spec = self._generate_voice_reply_instructions()
@@ -159,7 +147,6 @@ class PromptManager:
         # 始终替换占位符，避免后续 .format() 时因残留花括号报 KeyError
         base_prompt = base_prompt.format(
             markdown_spec=markdown_spec,
-            verbose_spec=verbose_spec,
             moviepilot_info=moviepilot_info,
             voice_reply_spec=voice_reply_spec,
             button_choice_spec=button_choice_spec,
