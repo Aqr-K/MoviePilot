@@ -7,7 +7,7 @@ import shutil
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple, Set, Dict, Union
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 from app import schemas
 from app.chain import ChainBase
@@ -713,10 +713,21 @@ class DownloadChain(ChainBase):
                     return res.text
                 else:
                     data = res.json()
+                    success_key = req_params.get('success')
+                    if success_key and not data.get(success_key):
+                        return None
                     for key in str(req_params.get('result')).split("."):
                         data = data.get(key)
                         if not data:
                             return None
+                    result_path = req_params.get('result_path')
+                    result_query_param = req_params.get('result_query_param')
+                    if result_path and result_query_param:
+                        result_url = urljoin(
+                            f"{str(req_params.get('result_base_url')).rstrip('/')}/",
+                            str(result_path).lstrip('/'),
+                        )
+                        return f"{result_url}?{urlencode({result_query_param: data})}"
                     data = self._normalize_indirect_download_url(
                         url=data,
                         base_url=req_params.get('result_base_url'),
@@ -940,6 +951,7 @@ class DownloadChain(ChainBase):
                 seasons=_meta.season,
                 episodes=download_episodes or _meta.episode,
                 image=_media.get_backdrop_image(),
+                poster=_media.get_poster_image(),
                 downloader=_downloader,
                 download_hash=_hash,
                 torrent_name=_torrent.title,
@@ -1766,8 +1778,11 @@ class DownloadChain(ChainBase):
                     "title": history.title,
                     "season": history.seasons,
                     "episode": history.episodes,
-                    "image": history.image,
+                    "image": history.poster,
+                    "poster": history.poster,
+                    "backdrop": history.image,
                 }
+                torrent.site_name = history.torrent_site
                 # 下载用户
                 torrent.userid = history.userid
                 torrent.username = history.username

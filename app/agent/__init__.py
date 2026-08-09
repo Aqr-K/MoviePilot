@@ -129,9 +129,18 @@ class _SessionUsageSnapshot:
     last_output_tokens: int = 0
     last_total_tokens: int = 0
     last_context_usage_ratio: Optional[float] = None
+    last_cache_usage_available: bool = False
+    last_cache_read_input_tokens: int = 0
+    last_cache_write_input_tokens: int = 0
+    last_uncached_input_tokens: int = 0
+    last_cache_hit_ratio: Optional[float] = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_tokens: int = 0
+    total_cache_read_input_tokens: int = 0
+    total_cache_write_input_tokens: int = 0
+    total_uncached_input_tokens: int = 0
+    cache_usage_available: bool = False
     model_call_count: int = 0
     last_updated_at: Optional[datetime] = None
 
@@ -144,9 +153,23 @@ class _SessionUsageSnapshot:
             "last_output_tokens": self.last_output_tokens,
             "last_total_tokens": self.last_total_tokens,
             "last_context_usage_ratio": self.last_context_usage_ratio,
+            "last_cache_usage_available": self.last_cache_usage_available,
+            "last_cache_read_input_tokens": self.last_cache_read_input_tokens,
+            "last_cache_write_input_tokens": self.last_cache_write_input_tokens,
+            "last_uncached_input_tokens": self.last_uncached_input_tokens,
+            "last_cache_hit_ratio": self.last_cache_hit_ratio,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "total_tokens": self.total_tokens,
+            "total_cache_read_input_tokens": self.total_cache_read_input_tokens,
+            "total_cache_write_input_tokens": self.total_cache_write_input_tokens,
+            "total_uncached_input_tokens": self.total_uncached_input_tokens,
+            "cache_usage_available": self.cache_usage_available,
+            "total_cache_hit_ratio": (
+                self.total_cache_read_input_tokens / self.total_input_tokens
+                if self.cache_usage_available and self.total_input_tokens
+                else None
+            ),
             "model_call_count": self.model_call_count,
             "last_updated_at": self.last_updated_at.strftime("%Y-%m-%d %H:%M:%S")
             if self.last_updated_at
@@ -318,13 +341,19 @@ class MoviePilotAgent:
         """
         构造可展示的 Agent 会话消息。
         """
+        normalized_content = content or ""
         return {
             "id": f"{role}-{uuid.uuid4().hex}",
             "role": role,
-            "content": content or "",
+            "content": normalized_content,
             "createdAt": cls._current_timestamp_ms(),
             "status": status,
             "tools": [],
+            "segments": (
+                [{"type": "text", "content": normalized_content}]
+                if normalized_content
+                else []
+            ),
             "attachments": attachments or [],
             "choices": [],
         }
@@ -548,9 +577,33 @@ class MoviePilotAgent:
         self._session_usage.last_output_tokens = output_tokens
         self._session_usage.last_total_tokens = total_tokens
         self._session_usage.last_context_usage_ratio = usage.get("context_usage_ratio")
+        cache_usage_available = bool(usage.get("cache_usage_available"))
+        cache_read_input_tokens = self._coerce_int(
+            usage.get("cache_read_input_tokens")
+        ) or 0
+        cache_write_input_tokens = self._coerce_int(
+            usage.get("cache_write_input_tokens")
+        ) or 0
+        uncached_input_tokens = self._coerce_int(
+            usage.get("uncached_input_tokens")
+        )
+        if uncached_input_tokens is None:
+            uncached_input_tokens = max(
+                input_tokens - cache_read_input_tokens - cache_write_input_tokens,
+                0,
+            )
+        self._session_usage.last_cache_usage_available = cache_usage_available
+        self._session_usage.last_cache_read_input_tokens = cache_read_input_tokens
+        self._session_usage.last_cache_write_input_tokens = cache_write_input_tokens
+        self._session_usage.last_uncached_input_tokens = uncached_input_tokens
+        self._session_usage.last_cache_hit_ratio = usage.get("cache_hit_ratio")
         self._session_usage.total_input_tokens += input_tokens
         self._session_usage.total_output_tokens += output_tokens
         self._session_usage.total_tokens += total_tokens
+        self._session_usage.total_cache_read_input_tokens += cache_read_input_tokens
+        self._session_usage.total_cache_write_input_tokens += cache_write_input_tokens
+        self._session_usage.total_uncached_input_tokens += uncached_input_tokens
+        self._session_usage.cache_usage_available |= cache_usage_available
 
     def get_session_status(self) -> dict[str, Any]:
         if not self._session_usage.model:
@@ -584,6 +637,17 @@ class MoviePilotAgent:
                 input_tokens=self._session_usage.total_input_tokens,
                 output_tokens=self._session_usage.total_output_tokens,
                 total_tokens=self._session_usage.total_tokens,
+                cache_read_input_tokens=self._session_usage.total_cache_read_input_tokens,
+                cache_write_input_tokens=self._session_usage.total_cache_write_input_tokens,
+                uncached_input_tokens=self._session_usage.total_uncached_input_tokens,
+                cache_hit_ratio=(
+                    self._session_usage.total_cache_read_input_tokens
+                    / self._session_usage.total_input_tokens
+                    if self._session_usage.cache_usage_available
+                    and self._session_usage.total_input_tokens
+                    else None
+                ),
+                cache_usage_available=self._session_usage.cache_usage_available,
                 model_call_count=self._session_usage.model_call_count,
                 success=success,
                 error=error,
@@ -730,6 +794,7 @@ class MoviePilotAgent:
             use_proxy=settings.LLM_USE_PROXY,
             thinking_level=settings.LLM_THINKING_LEVEL,
             api_protocol=settings.LLM_API_PROTOCOL,
+            web_search_mode=settings.LLM_WEB_SEARCH_MODE,
         )
         selected_event = await eventmanager.async_send_event(
             ChainEventType.AgentLLMProvider,
@@ -773,6 +838,9 @@ class MoviePilotAgent:
         api_protocol = self._clean_optional_text(
             self._get_event_value(resolved_data, "api_protocol")
         ) or settings.LLM_API_PROTOCOL
+        web_search_mode = self._clean_optional_text(
+            self._get_event_value(resolved_data, "web_search_mode")
+        ) or settings.LLM_WEB_SEARCH_MODE
         selected_provider_id = self._clean_optional_text(
             self._get_event_value(resolved_data, "selected_provider_id")
         )
@@ -799,6 +867,7 @@ class MoviePilotAgent:
             "use_proxy": bool(use_proxy),
             "thinking_level": thinking_level,
             "api_protocol": api_protocol,
+            "web_search_mode": web_search_mode,
         }
         return self._llm_runtime_config
 
@@ -808,7 +877,17 @@ class MoviePilotAgent:
         :param streaming: 是否启用流式输出
         """
         runtime_config = await self._resolve_llm_runtime_config()
-        return await LLMHelper.get_llm(streaming=streaming, **runtime_config)
+        return await LLMHelper.get_llm(
+            streaming=streaming,
+            prompt_cache_key=self._build_prompt_cache_key(),
+            **runtime_config,
+        )
+
+    def _build_prompt_cache_key(self) -> str:
+        """生成不暴露用户标识、且在同一会话内稳定的提示词缓存键。"""
+        cache_identity = f"{self.user_id or ''}\x00{self.session_id}"
+        digest = hashlib.sha256(cache_identity.encode("utf-8")).hexdigest()[:32]
+        return f"moviepilot-agent-{digest}"
 
     @classmethod
     def _has_image_input_content(cls, content: Any) -> bool:
@@ -1006,6 +1085,13 @@ class MoviePilotAgent:
             allow_message_tools=self.allow_message_tools,
         )
 
+    @staticmethod
+    def _filter_local_web_search_tools(tools: List, enabled: bool) -> List:
+        """按联网搜索策略保留或移除本地 search_web 工具。"""
+        if enabled:
+            return tools
+        return [tool for tool in tools if getattr(tool, "name", None) != "search_web"]
+
     def _refresh_tool_context(self, values: Dict[str, object]) -> None:
         """
         刷新本轮工具共享上下文。
@@ -1035,6 +1121,7 @@ class MoviePilotAgent:
             bool(runtime_config.get("use_proxy")),
             runtime_config.get("thinking_level"),
             runtime_config.get("api_protocol"),
+            runtime_config.get("web_search_mode"),
         )
 
     async def _agent_bundle_signature(self, streaming: bool) -> tuple[Any, ...]:
@@ -1165,6 +1252,8 @@ class MoviePilotAgent:
             # LLM 模型（用于 agent 执行）
             agent_model = await self._initialize_llm(streaming=streaming)
             self._sync_model_profile(agent_model)
+            server_tools = LLMHelper.get_server_tools(agent_model)
+            use_local_web_search = LLMHelper.should_use_local_web_search(agent_model)
 
             # 为内部模型调用准备非流式 LLM，避免与用户流式回复复用同一实例。
             non_streaming_model = (
@@ -1174,7 +1263,10 @@ class MoviePilotAgent:
             )
 
             # 工具列表
-            tools = self._initialize_tools()
+            tools = self._filter_local_web_search_tools(
+                self._initialize_tools(),
+                enabled=use_local_web_search,
+            )
             tools.extend(await self._initialize_mcp_tools())
             skills_middleware = SkillsMiddleware(
                 sources=[str(agent_runtime_manager.skills_dir)],
@@ -1192,11 +1284,15 @@ class MoviePilotAgent:
                 activity_log_tools = list(
                     getattr(activity_log_middleware, "tools", []) or []
                 )
-            subagent_tools = self._initialize_subagent_tools()
+            subagent_tools = self._filter_local_web_search_tools(
+                self._initialize_subagent_tools(),
+                enabled=use_local_web_search,
+            )
             subagent_tools.extend(await self._initialize_subagent_mcp_tools())
             subagent_middlewares, subagent_task_tools = create_subagent_middlewares(
                 model=non_streaming_model,
                 tools=subagent_tools,
+                server_tools=server_tools,
                 stream_handler=self.stream_handler,
             )
             max_tools = settings.LLM_MAX_TOOLS
@@ -1271,7 +1367,7 @@ class MoviePilotAgent:
 
             agent = create_agent(
                 model=agent_model,
-                tools=[*tools, *skill_tools, *activity_log_tools],
+                tools=[*tools, *skill_tools, *activity_log_tools, *server_tools],
                 system_prompt=system_prompt,
                 middleware=middlewares,
                 checkpointer=InMemorySaver(),

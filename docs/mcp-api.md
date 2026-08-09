@@ -112,9 +112,23 @@ MoviePilot 的内置 Agent 也可以作为 MCP Client 连接外部 MCP 服务器
 
 MoviePilot 也提供普通 REST API 给前端和自动化客户端使用。所有接口同样需要 API KEY 认证，在请求头中添加 `X-API-KEY: <api_key>` 或在查询参数中添加 `apikey=<api_key>`。
 
-标准 REST 响应包含 `success`、`message`、`message_i18n`、`data` 字段。为兼容 App 和第三方客户端，`message` 继续保留原中文或原始后端文本；新版前端可发送 `X-MoviePilot-Locale: zh-CN|zh-TW|en-US` 或 `Accept-Language`，并优先展示 `message_i18n`。未提供语言头或翻译缺失时，`message_i18n` 会回退为原文本。
+#### REST API 版本
 
-FastAPI 异常响应保留 `detail` 字段，并在错误详情为文本时返回 `detail_i18n`；新版前端优先展示 `detail_i18n`，缺失时回退 `detail`。
+- `/api/v1` 默认保持原有响应结构，已有客户端无需迁移；登录壁纸接口的 URL 已统一放入 `data`。
+- `/api/v2` 复用 `/api/v1` 的同一套路由、请求参数、鉴权依赖和业务实现，只统一普通 JSON 响应结构。
+- v1 中已经使用通用 `Response` 的接口在 v2 中保持原样；其他成功 JSON 响应转换为 `{"success": true, "message": "", "data": <原响应>}`。
+- HTTP 错误保留原状态码，并统一返回 `{"success": false, "message": <错误详情>, "data": {}}`；非业务异常不做多语言翻译。
+- SSE、文件、图片、空响应，以及 OpenAI、Anthropic、MCP 等标准协议接口保持原始响应格式，不进行通用封装。
+
+因此，普通 REST 接口可将文档中的 `/api/v1/...` 路径直接替换为 `/api/v2/...`。例如 `/api/v1/download/` 对应 `/api/v2/download/`。
+
+通用 REST 响应包含 `success`、`message`、`message_i18n`、`data` 字段。为兼容 App 和第三方客户端，`message` 继续保留原中文或原始后端文本；新版前端可发送 `X-MoviePilot-Locale: zh-CN|zh-TW|en-US` 或 `Accept-Language`，并优先展示 `message_i18n`。未提供语言头或翻译缺失时，`message_i18n` 会回退为原文本。
+
+`GET /api/v1/login/wallpaper` 及对应的 v2 路径会将壁纸 URL 放在 `data` 字段中。`POST /api/v1/user/avatar/{user_id}` 及对应的 v2 路径会以 `data.filename` 返回原始文件名。上述接口的 `message` 均不再承载业务数据。
+
+FastAPI 的 HTTP 异常在 v1、v2 均统一使用 `message`，不再返回顶层 `detail` / `detail_i18n`。
+
+交互式接口文档 `/docs` 默认读取 `/api/v2/openapi.json`，页面版本号直接使用 `version.py` 中的后端 `APP_VERSION`。旧地址 `/api/v1/openapi.json` 继续保留并返回同一份完整接口文档。
 
 #### 媒体识别 / 整理
 
@@ -125,7 +139,7 @@ FastAPI 异常响应保留 `detail` 字段，并在错误详情为文本时返�
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
 | GET | `/api/v1/media/search` | 按标题搜索媒体、合集或人物，参数：`title`、`type`、`page`、`count`，可选 `source`；`media` 支持 `themoviedb`、`douban`、`bangumi`、`anilist`，`collection` 支持 `themoviedb`，`person` 支持 `themoviedb`、`douban` |
-| GET | `/api/v1/media/recognize` | 识别标题，参数：`title`、`subtitle`、`custom_words`，可选 `source` |
+| GET | `/api/v1/media/recognize` | 识别标题，参数：`title`、`subtitle`、`custom_words`，可选 `source`；当 `title` 为含目录的媒体文件路径时，会合并父目录中的名称、年份等信息 |
 | GET | `/api/v1/media/recognize_file` | 识别文件路径，参数：`path`，可选 `source` |
 | GET | `/api/v1/media/{mediaid}` | 查询媒体详情，`mediaid` 支持 `tmdb:`、`douban:`、`bangumi:`、`anilist:` 及插件自定义来源前缀 |
 | POST | `/api/v1/media/scrape/{storage}` | 刮削媒体元数据；请求体为 `FileItem`，可选查询参数 `media_source`、`media_id`、`type_name`（电影/电视剧）可指定本次刮削媒体 |
@@ -170,7 +184,7 @@ AniList 榜单、探索、详情、人物和推荐接口优先通过 `anilist-ch
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
-| GET | `/api/v1/download/` | 查询正在下载的任务，参数：`name` |
+| GET | `/api/v1/download/` | 查询正在下载的任务，参数：`name`；关联下载历史时返回媒体类型、来源站点 `site_name`，以及 `media.poster` 海报和 `media.backdrop` 背景图；兼容字段 `media.image` 与 `media.poster` 相同 |
 | POST | `/api/v1/download/` | 添加含媒体信息的下载任务，请求体包含媒体信息和种子信息 |
 | POST | `/api/v1/download/add` | 添加不含媒体信息的下载任务，请求体包含 `torrent_in`，可选 `media_source` + `media_id`；继续兼容四种专用 ID，并支持 `downloader`、`save_path` |
 | POST | `/api/v1/download/subtitle` | 下载字幕到识别出的媒体下载目录，请求体包含 `subtitle_in`，可选 `media_source` + `media_id`；继续兼容四种专用 ID，并支持 `save_path` |
@@ -179,6 +193,13 @@ AniList 榜单、探索、详情、人物和推荐接口优先通过 `anilist-ch
 | GET | `/api/v1/download/clients` | 查询可用下载器 |
 | GET | `/api/v1/download/paths` | 查询可用于下载接口 `save_path` 参数的下载路径 |
 | DELETE | `/api/v1/download/{hashString}` | 删除下载任务，参数：`name` |
+
+#### 历史
+
+| 方法 | 路径 | 说明 |
+| :--- | :--- | :--- |
+| GET | `/api/v1/history/download` | 按下载时间倒序查询下载历史，参数：`page`、`count`；`poster` 为海报，兼容字段 `image` 为背景图 |
+| DELETE | `/api/v1/history/download` | 删除下载历史，请求体为下载历史记录 |
 
 #### 系统
 
@@ -206,11 +227,8 @@ AniList 榜单、探索、详情、人物和推荐接口优先通过 `anilist-ch
 | GET | `/api/v1/tmdb/cache` | 查询 TheMovieDb 识别缓存统计、共享识别累计成功命中次数及开关状态 |
 | DELETE | `/api/v1/tmdb/cache/{cache_key}` | 按缓存键删除单条 TheMovieDb 识别缓存，缓存键需要进行 URL 编码 |
 | DELETE | `/api/v1/tmdb/cache` | 清空全部 TheMovieDb 识别缓存 |
-| GET | `/api/v1/douban/cache` | 查询豆瓣识别缓存统计、共享识别累计成功命中次数及开关状态 |
-| DELETE | `/api/v1/douban/cache/{cache_key}` | 按缓存键删除单条豆瓣识别缓存，缓存键需要进行 URL 编码 |
-| DELETE | `/api/v1/douban/cache` | 清空全部豆瓣识别缓存 |
 
-缓存查询响应的 `data` 包含 `count`、`recognized`、`unrecognized`、`data`，以及共享识别统计字段
+TMDB 缓存查询响应的 `data` 包含 `count`、`recognized`、`unrecognized`、`data`，以及共享识别统计字段
 `shared_recognized` 和开关字段 `shared_recognize_enabled`。共享命中次数仅在共享结果驱动的二次媒体识别成功后累计。
 
 ### 插件补充接口
@@ -238,6 +256,12 @@ AniList 榜单、探索、详情、人物和推荐接口优先通过 `anilist-ch
 获取所有可用的MCP工具列表。
 
 内置工具的 `inputSchema` 只包含实际执行业务所需的参数，不包含用于解释调用原因的通用 `explanation` 参数，以减少 Agent 上下文消耗。插件工具的参数结构由插件自身声明。
+
+内置 Agent 的本地文件与命令工具 `read_file`、`write_file`、`edit_file`、
+`execute_command` 不通过 MCP 暴露。这些工具在 Agent 运行时执行独立的
+用户权限与路径边界检查；MCP 隐藏列表只负责收敛接口暴露面，不替代权限控制。
+其中 `read_file` 单次最多返回 50KB 文件内容；超出时会截断并提示 Agent 使用
+`start_line`、`end_line` 指定更小的行号范围继续读取。
 
 媒体相关 MCP 工具（如 `query_media_detail`、`search_torrents`、`query_library_exists`、`add_subscribe`、`transfer_file`）接受 `tmdb_id`/`tmdbid`、`douban_id`/`doubanid`、`bangumi_id`/`bangumiid`、`anilist_id`/`anilistid`，也接受 `media_source` + `media_id`。工具返回的媒体、订阅、下载和整理记录会同步带回可用的四种专用 ID 及通用主身份。
 
