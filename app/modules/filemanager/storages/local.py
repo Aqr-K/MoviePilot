@@ -287,18 +287,30 @@ class LocalStorage(StorageBase):
         """
         self._cleanup_stale_partials(dest.parent)
         partial = self._partial_path(dest)
+        # 进度只在需要展示时才回调 UI，但代理内部始终按固定间隔上报——那是判定
+        # 「传输是否还在推进」的心跳，不能因为不展示进度就关掉
+        progress_callback = (
+            transfer_process(src.as_posix())
+            if self.__should_show_progress(src, dest) else None
+        )
         try:
-            if self.__should_show_progress(src, dest):
-                if not self._copy_with_progress(src, partial):
-                    return False
-            else:
-                self._copy_with_target_permissions(src, partial)
+            copied = fsproxy.copy(
+                src, partial,
+                progress_cb=progress_callback,
+                cancel_cb=lambda: global_vars.is_transfer_stopped(src.as_posix()),
+                chunk_size=self.chunk_size,
+            )
+            if not copied:
+                logger.info(f"【本地】{src} 复制未完成")
+                return False
             os.replace(partial, dest)
             return True
         except Exception as err:
             logger.error(f"【本地】复制文件失败：{err}")
             return False
         finally:
+            if progress_callback:
+                progress_callback(100)
             # 失败路径留下的临时文件就地清掉；成功时 replace 已经把它移走
             try:
                 if partial.exists():

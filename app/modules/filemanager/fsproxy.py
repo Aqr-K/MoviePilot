@@ -25,7 +25,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.core.config import settings
 from app.log import logger
@@ -33,8 +33,12 @@ from app.log import logger
 # worker 脚本路径。用绝对路径直接执行，而不是 -m 或 import：
 # 直接执行文件不会触发 app/__init__.py 的导入链，代理启动才是毫秒级的
 _WORKER_PATH = Path(__file__).parent / "fsworker.py"
-# 单次操作的默认超时秒数
+# 单次快操作（stat/listdir/rename/unlink 等）的默认超时秒数
 DEFAULT_TIMEOUT = 30
+# 长耗时操作（复制）两次进度上报之间的最长间隔秒数。
+# worker 每秒上报一次心跳，因此这个阈值判定的是「传输完全没有推进」，
+# 而不是「传输很慢」——大文件复制几小时也不会误杀
+DEFAULT_STALL_TIMEOUT = 120
 # 强杀代理后等待它消失的宽限秒数，不能无限等待
 _KILL_GRACE = 5
 
@@ -56,11 +60,14 @@ class FileSystemProxy:
     下一次请求自动重启一个新的——启动成本是毫秒级，因为 worker 只依赖标准库。
     """
 
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, timeout: float = DEFAULT_TIMEOUT,
+                 stall_timeout: float = DEFAULT_STALL_TIMEOUT):
         """
-        :param timeout: 单次操作超时秒数
+        :param timeout: 单次快操作的超时秒数
+        :param stall_timeout: 长耗时操作两次进度上报之间的最长间隔秒数
         """
         self._timeout = timeout
+        self._stall_timeout = stall_timeout
         self._process: Optional[subprocess.Popen] = None
         self._selector: Optional[selectors.BaseSelector] = None
         self._lock = threading.Lock()
@@ -108,6 +115,99 @@ class FileSystemProxy:
         :return: 是否成功
         """
         return self._call("rename", src=str(src), dst=str(dst))
+
+    def copy(self, src: Path, dst: Path,
+             progress_cb: Optional[Callable[[float], None]] = None,
+             cancel_cb: Optional[Callable[[], bool]] = None,
+             chunk_size: Optional[int] = None) -> Any:
+        """
+        复制文件内容并保留时间戳，按「进度无推进」判定挂死。
+
+        复制大文件可能持续几小时，固定超时无法区分「正常但慢」和「已经挂死」。
+        worker 每秒上报一次进度作为心跳，这里判定的是**两次上报之间的间隔**：
+        超过 stall 阈值收不到任何一行，才认定挂载无响应并强杀 worker。
+
+        取消检查放在父进程：worker 里读不到 global_vars 的传输取消标记，而父进程
+        每收到一次进度就能检查一次，要取消直接杀掉 worker 即可，比在子进程里
+        轮询标记更干净。
+        :param src: 源文件
+        :param dst: 目标文件（调用方应传临时名，完成后自行原子替换）
+        :param progress_cb: 进度回调，入参为百分比
+        :param cancel_cb: 取消检查回调，返回 True 表示应中止
+        :param chunk_size: 分块大小
+        :return: 成功时为 {"copied", "total"}，被取消或通信失败时为 False
+        """
+        payload = {"src": str(src), "dst": str(dst)}
+        if chunk_size:
+            payload["chunk_size"] = chunk_size
+        if not self._enabled():
+            return self._direct_copy(src, dst, progress_cb, cancel_cb, chunk_size)
+        with self._lock:
+            try:
+                return self._request_stream(payload, progress_cb, cancel_cb)
+            except FileSystemTimeout:
+                raise
+            except (BrokenPipeError, ConnectionError, json.JSONDecodeError, ValueError) as err:
+                logger.error(f"文件系统代理复制通信异常: {src} -> {dst} - {err}")
+                self._shutdown()
+                return False
+
+    def _request_stream(self, payload: Dict[str, Any],
+                        progress_cb: Optional[Callable[[float], None]],
+                        cancel_cb: Optional[Callable[[], bool]]) -> Any:
+        """
+        发起一次流式请求，逐行消费进度直到终态。
+        :param payload: 请求参数
+        :param progress_cb: 进度回调
+        :param cancel_cb: 取消检查回调
+        :return: 操作结果
+        """
+        self._ensure_worker()
+        message = json.dumps({"op": "copy", **payload}) + "\n"
+        self._process.stdin.write(message.encode("utf-8"))
+        self._process.stdin.flush()
+
+        while True:
+            response = json.loads(self._read_line(timeout=self._stall_timeout).decode("utf-8"))
+            progress = response.get("progress")
+            if progress is not None:
+                if cancel_cb is not None and cancel_cb():
+                    logger.info(f"复制已取消: {payload.get('src')}")
+                    # 取消就地生效：杀掉 worker 立刻中断传输，不必等它读完整个文件
+                    self._shutdown()
+                    return False
+                if progress_cb is not None:
+                    total = progress.get("total") or 0
+                    progress_cb(progress.get("copied", 0) / total * 100 if total else 0)
+                continue
+            if response.get("ok"):
+                return response.get("result")
+            raise OSError(response.get("errno") or 0, response.get("error") or "unknown error")
+
+    @staticmethod
+    def _direct_copy(src: Path, dst: Path,
+                     progress_cb: Optional[Callable[[float], None]],
+                     cancel_cb: Optional[Callable[[], bool]],
+                     chunk_size: Optional[int]) -> bool:
+        """
+        不经代理直接复制，供代理关闭时使用。
+        """
+        info = os.stat(src)
+        total = info.st_size
+        copied = 0
+        with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+            while True:
+                if cancel_cb is not None and cancel_cb():
+                    return False
+                buf = fsrc.read(chunk_size or 1024 * 1024)
+                if not buf:
+                    break
+                fdst.write(buf)
+                copied += len(buf)
+                if progress_cb is not None and total:
+                    progress_cb(copied / total * 100)
+        os.utime(dst, ns=(info.st_atime_ns, info.st_mtime_ns))
+        return True
 
     def unlink(self, path: Path) -> bool:
         """
@@ -216,17 +316,19 @@ class FileSystemProxy:
         # 调用方沿用原有的异常分支即可，无需感知代理的存在
         raise OSError(response.get("errno") or 0, response.get("error") or "unknown error")
 
-    def _read_line(self) -> bytes:
+    def _read_line(self, timeout: Optional[float] = None) -> bytes:
         """
         读取一行响应，超时即强杀代理。
+        :param timeout: 本次读取的超时秒数，默认用单次操作超时
         :return: 响应行
         """
-        if not self._selector.select(timeout=self._timeout):
-            logger.error(f"文件系统操作 {self._timeout} 秒无响应，判定挂载挂死，正在回收代理进程")
+        timeout = self._timeout if timeout is None else timeout
+        if not self._selector.select(timeout=timeout):
+            logger.error(f"文件系统操作 {timeout} 秒无响应，判定挂载挂死，正在回收代理进程")
             self._shutdown()
             raise FileSystemTimeout(
                 errno_module.ETIMEDOUT,
-                f"文件系统操作超过 {self._timeout} 秒无响应，挂载可能已无响应"
+                f"文件系统操作超过 {timeout} 秒无响应，挂载可能已无响应"
             )
         line = self._process.stdout.readline()
         if not line:
@@ -283,4 +385,7 @@ class FileSystemProxy:
 
 
 # 全局单例：local 存储本身是单例，代理也只需要一个
-fsproxy = FileSystemProxy(timeout=getattr(settings, "FS_PROXY_TIMEOUT", DEFAULT_TIMEOUT))
+fsproxy = FileSystemProxy(
+    timeout=getattr(settings, "FS_PROXY_TIMEOUT", DEFAULT_TIMEOUT),
+    stall_timeout=getattr(settings, "FS_PROXY_STALL_TIMEOUT", DEFAULT_STALL_TIMEOUT),
+)
