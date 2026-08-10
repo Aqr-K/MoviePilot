@@ -25,6 +25,7 @@ from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
 from app.db.models.transferhistory import TransferHistory
 from app.db.systemconfig_oper import SystemConfigOper
+from app.db.transferpending_oper import TransferPendingOper
 from app.db.transferhistory_oper import TransferHistoryOper
 from app.helper.directory import DirectoryHelper
 from app.helper.format import EpisodeFormatRuleHelper, FormatParser
@@ -966,6 +967,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.jobview = JobManager()
         # Agent重试管理器
         self.retry_scheduler = FailedRetryScheduler()
+        # 待整理文件落盘登记，用于进程重启后回放内存队列里未完成的任务
+        self._pendingoper = TransferPendingOper()
         # 转移成功的文件清单
         self._success_target_files: Dict[str, List[str]] = {}
         # 批次级刮削缓冲，避免同一批多文件入库重复触发目录刮削
@@ -1490,7 +1493,125 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         self.__register_scrape_batch_task(task)
         # 添加到队列
         self._queue.put(TransferQueue(task=task, callback=self.__default_callback))
+        # 落盘登记：队列是纯内存的，进程重启（挂载挂死后的人工重启、升级、OOM）
+        # 会让队列连同「这些文件还没整理」这个事实一起蒸发，而已稳定落地的文件
+        # 不会再产生任何监控事件，等于永久漏件。登记放在入队之后，宁可多留一条
+        # 由回放时的整理历史查重挡掉，也不制造「已入队但未登记」的窗口
+        self.__register_pending(task)
         return True
+
+    def replay_pending(self):
+        """
+        回放上次进程退出时仍未整理完的文件。
+
+        在后台线程执行：回放要 stat 源文件，而启动期挂载可能尚未就绪甚至处于
+        挂死状态，同步执行会把整个启动流程堵住。
+        """
+        threading.Thread(
+            target=self.__replay_pending,
+            name="MoviePilot-TransferReplay",
+            daemon=True
+        ).start()
+
+    def __replay_pending(self):
+        """
+        把落盘登记的待整理文件重新送回整理入口。
+
+        只回放「存储 + 源路径」这一最小事实，重新走完整的识别与整理流程，
+        已经整理完成的由整理历史查重挡掉，因此不存在重复整理的问题。
+        """
+        try:
+            pendings = self._pendingoper.list_all()
+        except Exception as err:
+            logger.error(f"读取待整理文件登记失败：{err}")
+            return
+        if not pendings:
+            return
+        logger.info(f"发现 {len(pendings)} 个上次未整理完的文件，正在重新送入整理链 ...")
+        replayed = 0
+        for storage, src_path in pendings:
+            try:
+                fileitem, should_discard = self.__build_replay_fileitem(storage, src_path)
+                if not fileitem:
+                    if should_discard:
+                        # 源文件确认已消失，注销登记避免每次启动重复回放
+                        self._pendingoper.discard(storage=storage, src_path=src_path)
+                    continue
+                self.do_transfer(fileitem=fileitem)
+                replayed += 1
+            except Exception as err:
+                logger.error(f"回放待整理文件失败：{storage}:{src_path} - {err}")
+        logger.info(f"✓ 待整理文件回放完成，{replayed} 个文件已重新送入整理链")
+
+    @staticmethod
+    def __build_replay_fileitem(storage: str, src_path: str) -> Tuple[Optional[FileItem], bool]:
+        """
+        为回放构造文件项。
+
+        必须用 stat 的异常类型区分「文件真的没了」和「挂载暂时读不到」，不能用
+        Path.exists()：它在任何 OSError 下都返回 False，会把挂载抖动
+        （Transport endpoint is not connected）误判成文件消失，进而注销登记
+        ——那等于在故障期间主动丢件，正是本表要防的事。
+        :param storage: 存储
+        :param src_path: 源文件路径，以 / 结尾表示蓝光原盘目录
+        :return: (文件项, 是否应注销登记)。文件项为 None 表示本次不回放；
+                 只有确认源文件已经消失时才注销登记
+        """
+        # 蓝光原盘目录在登记时保留了尾部斜杠，这里据此还原类型
+        is_dir = src_path.endswith("/")
+        path = Path(src_path)
+        size, modify_time = None, None
+        if storage == "local":
+            try:
+                file_stat = path.stat()
+                size, modify_time = file_stat.st_size, file_stat.st_mtime
+            except FileNotFoundError:
+                logger.info(f"待整理文件已不存在，注销登记：{src_path}")
+                return None, True
+            except OSError as err:
+                # 挂载未就绪或无响应属于暂时性故障，保留登记等下次启动再回放
+                logger.warn(f"读取待整理文件失败，保留登记等待下次回放：{src_path} - {err}")
+                return None, False
+        return FileItem(
+            storage=storage,
+            path=src_path if is_dir else path.as_posix(),
+            type="dir" if is_dir else "file",
+            name=path.name,
+            basename=path.stem,
+            extension=path.suffix[1:] if not is_dir else None,
+            size=size,
+            modify_time=modify_time,
+        ), False
+
+    def __register_pending(self, task: TransferTask):
+        """
+        落盘登记一个待整理文件，登记失败不影响正常入队。
+        :param task: 任务信息
+        """
+        fileitem = task.fileitem if task else None
+        if not fileitem or not fileitem.path:
+            return
+        try:
+            self._pendingoper.register(storage=fileitem.storage, src_path=fileitem.path)
+        except Exception as err:
+            # 登记只是重启后的补救手段，失败不能阻断正常整理
+            logger.debug(f"登记待整理文件失败: {fileitem.path} - {err}")
+
+    def __discard_pending(self, task: TransferTask):
+        """
+        注销一个待整理文件登记，整理到达终态（成功或失败）时调用。
+
+        失败的文件不靠本表回放：整理历史里已有失败记录，分发器的历史门控会按
+        重试预算重新送入整理链；留在本表反而会每次重启都重复回放。
+        :param task: 任务信息
+        """
+        fileitem = task.fileitem if task else None
+        if not fileitem or not fileitem.path:
+            return
+        try:
+            self._pendingoper.discard(storage=fileitem.storage, src_path=fileitem.path)
+        except Exception as err:
+            logger.debug(f"注销待整理文件登记失败: {fileitem.path} - {err}")
 
     def __put_to_jobview(self, task: TransferTask) -> bool:
         """
@@ -1721,6 +1842,8 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         marker = getattr(self.jobview, "finish_execution", None)
         if marker:
             marker(task)
+        # 任务已到终态，落盘登记到此作废（未登记过的实时整理路径为无害空操作）
+        self.__discard_pending(task)
 
     def __expire_stale_transfer_tasks(self):
         """清理外部接管后失去状态心跳的运行中整理任务。"""
