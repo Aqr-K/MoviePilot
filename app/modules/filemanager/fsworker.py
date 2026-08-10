@@ -19,6 +19,7 @@
 """
 import json
 import os
+import shutil
 import sys
 
 
@@ -69,11 +70,33 @@ def _rename(payload):
     return True
 
 
+def _unlink(payload):
+    """
+    删除单个文件。unlink 是原子操作，强杀后要么删掉了要么没删，没有中间状态。
+    """
+    os.unlink(payload["path"])
+    return True
+
+
+def _rmtree(payload):
+    """
+    递归删除目录。
+
+    这一项不是原子的，强杀可能只删掉一部分。放行的理由是：删除被中断的后果
+    （残留若干文件）远轻于写入被中断（留下叫最终文件名的半成品），而且调用方
+    本来就以 ignore_errors 容忍部分失败、可以重复执行直到成功。
+    """
+    shutil.rmtree(payload["path"], ignore_errors=True)
+    return True
+
+
 _HANDLERS = {
     "stat": _stat,
     "exists": _exists,
     "listdir": _listdir,
     "rename": _rename,
+    "unlink": _unlink,
+    "rmtree": _rmtree,
     "ping": lambda _payload: True,
 }
 

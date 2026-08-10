@@ -20,6 +20,7 @@ import errno as errno_module
 import json
 import os
 import selectors
+import shutil
 import subprocess
 import sys
 import threading
@@ -108,6 +109,22 @@ class FileSystemProxy:
         """
         return self._call("rename", src=str(src), dst=str(dst))
 
+    def unlink(self, path: Path) -> bool:
+        """
+        删除单个文件。unlink 是原子操作，强杀后没有中间状态。
+        :param path: 目标文件
+        :return: 是否成功
+        """
+        return self._call("unlink", path=str(path))
+
+    def rmtree(self, path: Path) -> bool:
+        """
+        递归删除目录，容忍部分失败（可重复执行直到成功）。
+        :param path: 目标目录
+        :return: 是否成功
+        """
+        return self._call("rmtree", path=str(path))
+
     def close(self):
         """
         关闭代理进程。
@@ -150,6 +167,12 @@ class FileSystemProxy:
             return sorted(os.listdir(payload["path"]))
         if op == "rename":
             os.rename(payload["src"], payload["dst"])
+            return True
+        if op == "unlink":
+            os.unlink(payload["path"])
+            return True
+        if op == "rmtree":
+            shutil.rmtree(payload["path"], ignore_errors=True)
             return True
         raise ValueError(f"unknown op: {op}")
 
