@@ -88,13 +88,17 @@ def test_local_strict_raises_on_stat_error(tmp_path, monkeypatch):
     """
     target = tmp_path / "movie.mkv"
 
-    def raise_stat_error(self, *args, **kwargs):
+    def raise_stat_error(*_args, **_kwargs):
         """
         模拟 CloudDrive FUSE 挂载返回 ENOTRECOVERABLE。
         """
         raise OSError(131, "State not recoverable")
 
-    monkeypatch.setattr(Path, "stat", raise_stat_error)
+    # 文件系统边界已下移到代理子进程，patch Path.stat 影响不到那里，
+    # 必须在代理这一层注入故障
+    monkeypatch.setattr(
+        "app.modules.filemanager.storages.local.fsproxy.stat", raise_stat_error
+    )
 
     with pytest.raises(StorageQueryError):
         _local().get_item_strict(target)
