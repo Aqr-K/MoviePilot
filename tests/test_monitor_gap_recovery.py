@@ -7,6 +7,7 @@ from watchfiles import Change
 from app.core.config import settings
 from app.monitor import LocalDirectoryWatcher, Monitor
 from app.monitor.dispatcher import TransferDispatcher
+from app.monitor.recovery import RecoveryExecutor
 from app.monitor.syslimits import decide_monitor_mode
 from app.utils.system import SystemUtils
 
@@ -25,9 +26,11 @@ def _build_monitor(handle_file: MagicMock = None):
     monitor._dispatcher = dispatcher
     monitor._watchers = []
     monitor._watcher_lock = Lock()
-    monitor._alerted_paths = set()
+    monitor._alerted_paths = {}
     monitor._restart_marks = {}
     monitor._stable_cycles = {}
+    monitor._isolated = {}
+    monitor._recovery = RecoveryExecutor()
     return monitor, dispatcher
 
 
