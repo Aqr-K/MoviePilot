@@ -267,86 +267,97 @@ class TransferDispatcher:
         :param fileid: 文件唯一标识
         :return: 是否进入整理链
         """
-        with self._lock:
-            # 登记重试用原始事件路径，蓝光目录解析在重试时重新执行
-            origin_path = event_path
-            is_bluray_folder = False
-            # 蓝光原盘文件处理
-            if self._is_bluray_sub(event_path):
-                event_path = self._get_bluray_dir(event_path)
-                if not event_path:
-                    return False
-                is_bluray_folder = True
-            elif not self.is_transfer_candidate_path(event_path):
+        # 登记重试用原始事件路径，蓝光目录解析在重试时重新执行
+        origin_path = event_path
+        is_bluray_folder = False
+        # 蓝光原盘文件处理
+        if self._is_bluray_sub(event_path):
+            event_path = self._get_bluray_dir(event_path)
+            if not event_path:
                 return False
+            is_bluray_folder = True
+        elif not self.is_transfer_candidate_path(event_path):
+            return False
 
-            # TTL缓存控重
+        # TTL 缓存控重。这是本方法唯一需要互斥的临界区，锁只保护「查缓存 + 写缓存」
+        # 这一步的原子性。
+        #
+        # 锁的范围绝不能扩大到下面的历史查询与整理调用：整理的规划阶段会访问挂载
+        # （do_transfer 内的 get_parent_item / list_files），FUSE 进入「请求永不
+        # 返回」状态时这些调用永远不返回，持锁线程就把这把锁永久攥在手里，连带
+        # 锁死所有 watcher 线程的事件派发、监控恢复后的补偿扫描和重试队列——监控层
+        # 即使完成自愈也送不进任何文件，漏件永远补不回来。
+        #
+        # 并发是安全的：TTL 去重保证同一路径不会并发进入；TransferChain 是单例，
+        # 内部用 job_lock/task_lock 保护共享状态、入队走线程安全的 queue.Queue，
+        # 本来就被下载完成事件、定时任务与工作流并发调用。
+        with self._lock:
             if self._cache.get(str(event_path)):
                 return False
             self._cache[str(event_path)] = True
 
-            src_path = self._build_transfer_src_path(
-                event_path=event_path,
-                is_bluray_folder=is_bluray_folder,
-            )
-            skip_by_history = self._should_skip_by_history(
+        src_path = self._build_transfer_src_path(
+            event_path=event_path,
+            is_bluray_folder=is_bluray_folder,
+        )
+        skip_by_history = self._should_skip_by_history(
+            storage=storage,
+            src_path=src_path,
+            file_size=file_size,
+            file_modify_time=file_modify_time,
+            fileid=fileid,
+        )
+        if skip_by_history is None:
+            # 查询失败是暂时故障，登记待重试（由健康检查周期驱动），不能永久跳过
+            self._register_pending(
                 storage=storage,
-                src_path=src_path,
+                event_path=origin_path,
                 file_size=file_size,
                 file_modify_time=file_modify_time,
                 fileid=fileid,
             )
-            if skip_by_history is None:
-                # 查询失败是暂时故障，登记待重试（由健康检查周期驱动），不能永久跳过
-                self._register_pending(
+            return False
+        if skip_by_history:
+            self._discard_pending(storage=storage, event_path=origin_path)
+            return False
+
+        try:
+            if is_bluray_folder:
+                logger.info(f"开始整理蓝光原盘: {event_path}")
+            else:
+                logger.info(f"开始整理文件: {event_path}")
+            # 开始整理
+            TransferChain().do_transfer(
+                fileitem=FileItem(
                     storage=storage,
-                    event_path=origin_path,
-                    file_size=file_size,
-                    file_modify_time=file_modify_time,
+                    path=src_path,
+                    type="file" if not is_bluray_folder else "dir",
+                    name=event_path.name,
+                    basename=event_path.stem,
+                    extension=event_path.suffix[1:],
+                    size=file_size,
+                    modify_time=file_modify_time,
                     fileid=fileid,
                 )
-                return False
-            if skip_by_history:
-                self._discard_pending(storage=storage, event_path=origin_path)
-                return False
-
-            try:
-                if is_bluray_folder:
-                    logger.info(f"开始整理蓝光原盘: {event_path}")
-                else:
-                    logger.info(f"开始整理文件: {event_path}")
-                # 开始整理
-                TransferChain().do_transfer(
-                    fileitem=FileItem(
-                        storage=storage,
-                        path=src_path,
-                        type="file" if not is_bluray_folder else "dir",
-                        name=event_path.name,
-                        basename=event_path.stem,
-                        extension=event_path.suffix[1:],
-                        size=file_size,
-                        modify_time=file_modify_time,
-                        fileid=fileid,
-                    )
-                )
-                # 整理已执行完毕，此前因暂时性故障登记的重试条目到此作废
-                self._discard_pending(storage=storage, event_path=origin_path)
-                return True
-            except Exception as e:
-                logger.error("目录监控整理文件发生错误：%s - %s" % (str(e), traceback.format_exc()))
-                # 去重缓存在入口已写入，整理抛异常时必须失效，否则 TTL 窗口内该文件的
-                # 后续事件会被静默吞掉，等于一次异常就丢一个文件
-                self._invalidate_cache(str(event_path))
-                # 已稳定落地的文件不会再产生任何事件，批量整理期间撞上一次 DB/网络瞬断
-                # 就是永久丢件，因此与历史查询失败同样登记待重试；登记用原始事件路径，
-                # 重试时重新解析蓝光目录并重走完整流程。异常未清空登记，重试次数会持续
-                # 累计，达到上限后由 _register_pending 放弃，不会无限重试
-                self._register_pending(storage=storage, event_path=origin_path,
-                                       file_size=file_size,
-                                       file_modify_time=file_modify_time,
-                                       fileid=fileid,
-                                       reason="整理执行异常")
-                return False
+            )
+            # 整理已执行完毕，此前因暂时性故障登记的重试条目到此作废
+            self._discard_pending(storage=storage, event_path=origin_path)
+            return True
+        except Exception as e:
+            logger.error("目录监控整理文件发生错误：%s - %s" % (str(e), traceback.format_exc()))
+            # 去重缓存在入口已写入，整理抛异常时必须失效，否则 TTL 窗口内该文件的
+            # 后续事件会被静默吞掉，等于一次异常就丢一个文件
+            self._invalidate_cache(str(event_path))
+            # 已稳定落地的文件不会再产生任何事件，批量整理期间撞上一次 DB/网络瞬断
+            # 就是永久丢件，因此与历史查询失败同样登记待重试；登记用原始事件路径，
+            # 重试时重新解析蓝光目录并重走完整流程。异常未清空登记，重试次数会持续
+            # 累计，达到上限后由 _register_pending 放弃，不会无限重试
+            self._register_pending(storage=storage, event_path=origin_path,
+                                   file_size=file_size,
+                                   file_modify_time=file_modify_time,
+                                   fileid=fileid,
+                                   reason="整理执行异常")
+            return False
 
     def _invalidate_cache(self, key: str):
         """

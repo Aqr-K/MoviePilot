@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from app.monitor import LocalDirectoryWatcher, Monitor
+from app.monitor.recovery import RecoveryExecutor
 
 
 def _build_watcher(tmp_path, force_polling):
@@ -135,9 +136,11 @@ def _build_monitor(monkeypatch, put_recorder):
     monitor._watchers = []
     monitor._watcher_lock = Lock()
     monitor._pending_locals = []
-    monitor._alerted_paths = set()
+    monitor._alerted_paths = {}
     monitor._restart_marks = {}
     monitor._stable_cycles = {}
+    monitor._isolated = {}
+    monitor._recovery = RecoveryExecutor()
     return monitor
 
 
@@ -160,35 +163,31 @@ def _fake_watcher(mon_path, alive=True, stalled=False, restart_count=0):
 
 def test_watchdog_rebuilds_dead_watcher(tmp_path, monkeypatch):
     """
-    监控线程退出后健康检查应重建线程并告警。
+    监控线程退出后健康检查应判定为待重建并告警。
+
+    重建本身会触碰挂载，已移出看门狗线程，因此检测环节只负责判定与告警，
+    真正的重建由 __drive_recovery 派发到一次性工作线程执行。
     """
     put_recorder = MagicMock()
     monitor = _build_monitor(monkeypatch, put_recorder)
     watcher = _fake_watcher(tmp_path, alive=False)
     monitor._watchers = [watcher]
-    rebuild = MagicMock()
-    setattr(monitor, "_Monitor__rebuild_watcher", rebuild)
 
-    monitor._Monitor__check_watchers()
+    assert monitor._Monitor__check_watchers() == [watcher]
 
-    rebuild.assert_called_once_with(watcher)
     put_recorder.put.assert_called_once()
 
 
 def test_watchdog_rebuilds_stalled_watcher(tmp_path, monkeypatch):
     """
-    静默失效的监控线程也应被健康检查重建。
+    静默失效的监控线程也应被健康检查判定为待重建。
     """
     put_recorder = MagicMock()
     monitor = _build_monitor(monkeypatch, put_recorder)
     watcher = _fake_watcher(tmp_path, alive=True, stalled=True)
     monitor._watchers = [watcher]
-    rebuild = MagicMock()
-    setattr(monitor, "_Monitor__rebuild_watcher", rebuild)
 
-    monitor._Monitor__check_watchers()
-
-    rebuild.assert_called_once_with(watcher)
+    assert monitor._Monitor__check_watchers() == [watcher]
 
 
 def test_watchdog_alerts_on_restart_and_recovers_after_stable_window(tmp_path, monkeypatch):
