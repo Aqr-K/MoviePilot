@@ -60,14 +60,15 @@ class FileSystemProxy:
     下一次请求自动重启一个新的——启动成本是毫秒级，因为 worker 只依赖标准库。
     """
 
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT,
-                 stall_timeout: float = DEFAULT_STALL_TIMEOUT):
+    def __init__(self, timeout: Optional[float] = None,
+                 stall_timeout: Optional[float] = None):
         """
-        :param timeout: 单次快操作的超时秒数
-        :param stall_timeout: 长耗时操作两次进度上报之间的最长间隔秒数
+        :param timeout: 单次快操作的超时秒数，None 表示实时跟随系统设置
+        :param stall_timeout: 长耗时操作两次进度上报之间的最长间隔秒数，
+                              None 表示实时跟随系统设置
         """
-        self._timeout = timeout
-        self._stall_timeout = stall_timeout
+        self._timeout_override = timeout
+        self._stall_timeout_override = stall_timeout
         self._process: Optional[subprocess.Popen] = None
         self._selector: Optional[selectors.BaseSelector] = None
         self._lock = threading.Lock()
@@ -236,6 +237,27 @@ class FileSystemProxy:
     # 内部实现
     # ------------------------------------------------------------------ #
 
+    @property
+    def _timeout(self) -> float:
+        """
+        单次快操作的超时秒数。
+
+        实时读取而不是构造时固定：这三项都暴露在前端设置里，用户改完保存后
+        必须立刻生效，否则会出现「改了没反应」的困惑。
+        """
+        if self._timeout_override is not None:
+            return self._timeout_override
+        return float(getattr(settings, "FS_PROXY_TIMEOUT", DEFAULT_TIMEOUT))
+
+    @property
+    def _stall_timeout(self) -> float:
+        """
+        长耗时操作两次进度上报之间的最长间隔秒数，同样实时跟随系统设置。
+        """
+        if self._stall_timeout_override is not None:
+            return self._stall_timeout_override
+        return float(getattr(settings, "FS_PROXY_STALL_TIMEOUT", DEFAULT_STALL_TIMEOUT))
+
     @staticmethod
     def _enabled() -> bool:
         """
@@ -385,7 +407,5 @@ class FileSystemProxy:
 
 
 # 全局单例：local 存储本身是单例，代理也只需要一个
-fsproxy = FileSystemProxy(
-    timeout=getattr(settings, "FS_PROXY_TIMEOUT", DEFAULT_TIMEOUT),
-    stall_timeout=getattr(settings, "FS_PROXY_STALL_TIMEOUT", DEFAULT_STALL_TIMEOUT),
-)
+# 不传超时参数：让它实时跟随系统设置，前端改完保存即刻生效
+fsproxy = FileSystemProxy()
