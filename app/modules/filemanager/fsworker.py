@@ -21,9 +21,10 @@ import json
 import os
 import shutil
 import sys
+import time
 
 
-def _stat(payload):
+def _stat(payload, _emit):
     """
     读取路径的基本属性。
     """
@@ -37,7 +38,7 @@ def _stat(payload):
     }
 
 
-def _exists(payload):
+def _exists(payload, _emit):
     """
     判断路径是否存在。
 
@@ -48,14 +49,52 @@ def _exists(payload):
     return True
 
 
-def _listdir(payload):
+def _listdir(payload, _emit):
     """
     列出目录下的条目名。
     """
     return sorted(os.listdir(payload["path"]))
 
 
-def _rename(payload):
+def _copy(payload, emit):
+    """
+    分块复制文件内容并周期上报进度。
+
+    进度上报同时充当心跳：复制大文件可能持续几小时，父进程无法用固定超时判断
+    挂死，只能看「两次上报之间隔了多久」。因此这里按固定时间间隔上报，即使
+    某一秒没读到数据也照常发——一旦挂载卡住，read/write 不返回，上报自然断流，
+    父进程据此判定并强杀本进程。
+
+    只复制内容和时间戳，不复制权限：目标目录的默认权限与继承 ACL 是媒体库的
+    访问策略，用源文件权限覆盖会清除已继承的 ACL。
+    """
+    src, dst = payload["src"], payload["dst"]
+    chunk_size = payload.get("chunk_size") or 1024 * 1024
+    interval = payload.get("progress_interval") or 1.0
+
+    info = os.stat(src)
+    total = info.st_size
+    copied = 0
+    # 先发一次 0%：既让心跳立刻开始，也保证父进程在传输开始前就有一次检查
+    # 取消的机会——否则小文件会在首次定时上报之前就复制完，取消形同虚设
+    emit({"ok": True, "progress": {"copied": 0, "total": total}})
+    last_emit = time.monotonic()
+    with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+        while True:
+            buf = fsrc.read(chunk_size)
+            if not buf:
+                break
+            fdst.write(buf)
+            copied += len(buf)
+            now = time.monotonic()
+            if now - last_emit >= interval:
+                last_emit = now
+                emit({"ok": True, "progress": {"copied": copied, "total": total}})
+    os.utime(dst, ns=(info.st_atime_ns, info.st_mtime_ns))
+    return {"copied": copied, "total": total}
+
+
+def _rename(payload, _emit):
     """
     同一存储内重命名/移动。
 
@@ -70,7 +109,7 @@ def _rename(payload):
     return True
 
 
-def _unlink(payload):
+def _unlink(payload, _emit):
     """
     删除单个文件。unlink 是原子操作，强杀后要么删掉了要么没删，没有中间状态。
     """
@@ -78,7 +117,7 @@ def _unlink(payload):
     return True
 
 
-def _rmtree(payload):
+def _rmtree(payload, _emit):
     """
     递归删除目录。
 
@@ -94,16 +133,28 @@ _HANDLERS = {
     "stat": _stat,
     "exists": _exists,
     "listdir": _listdir,
+    "copy": _copy,
     "rename": _rename,
     "unlink": _unlink,
     "rmtree": _rmtree,
-    "ping": lambda _payload: True,
+    "ping": lambda _payload, _emit: True,
 }
+
+
+def _write(message):
+    """
+    输出一行响应。
+    """
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
 
 
 def main():
     """
     请求循环：每读一行处理一个请求，直到 stdin 关闭。
+
+    一个请求可能对应多行响应：长耗时操作先流式发若干 progress 行，最后发一行
+    终态（result 或 error）。父进程据此区分「还在推进」和「已经挂死」。
     """
     for line in sys.stdin:
         line = line.strip()
@@ -116,14 +167,13 @@ def main():
                 response = {"ok": False, "errno": 0,
                             "error": f"unknown op: {payload.get('op')}"}
             else:
-                response = {"ok": True, "result": handler(payload)}
+                response = {"ok": True, "result": handler(payload, _write)}
         except OSError as err:
             response = {"ok": False, "errno": err.errno or 0,
                         "error": err.strerror or str(err)}
         except Exception as err:  # noqa: BLE001 - worker 不能因任何异常退出
             response = {"ok": False, "errno": 0, "error": str(err)}
-        sys.stdout.write(json.dumps(response) + "\n")
-        sys.stdout.flush()
+        _write(response)
 
 
 if __name__ == "__main__":
