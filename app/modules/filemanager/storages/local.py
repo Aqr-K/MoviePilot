@@ -7,6 +7,7 @@ from app import schemas
 from app.core.config import global_vars, settings
 from app.helper.directory import DirectoryHelper
 from app.log import logger
+from app.modules.filemanager.fsproxy import fsproxy
 from app.modules.filemanager.storages import StorageBase, transfer_process
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema
@@ -47,6 +48,10 @@ class LocalStorage(StorageBase):
         """
         获取文件项
         """
+        # 走代理读取：挂载挂死时这一步会在超时后抛 OSError，而不是永久悬挂线程。
+        # 顺带只 stat 一次——原先 size 与 modify_time 各 stat 一次，在网络挂载上
+        # 等于把这个热点路径的开销翻倍
+        info = fsproxy.stat(path)
         return schemas.FileItem(
             storage=self.schema.value,
             type="file",
@@ -54,8 +59,8 @@ class LocalStorage(StorageBase):
             name=path.name,
             basename=path.stem,
             extension=path.suffix[1:],
-            size=path.stat().st_size,
-            modify_time=path.stat().st_mtime,
+            size=info["size"],
+            modify_time=info["mtime"],
         )
 
     def __get_diritem(self, path: Path) -> schemas.FileItem:
@@ -68,7 +73,7 @@ class LocalStorage(StorageBase):
             path=path.as_posix() + "/",
             name=path.name,
             basename=path.stem,
-            modify_time=path.stat().st_mtime,
+            modify_time=fsproxy.stat(path)["mtime"],
         )
 
     def list(self, fileitem: schemas.FileItem) -> List[schemas.FileItem]:
@@ -100,12 +105,14 @@ class LocalStorage(StorageBase):
 
         # 遍历目录
         path_obj = Path(path)
-        if not path_obj.exists():
+        try:
+            info = fsproxy.stat(path_obj)
+        except (FileNotFoundError, NotADirectoryError):
             logger.warn(f"【本地】目录不存在：{path}")
             return []
 
         # 如果是文件
-        if path_obj.is_file():
+        if info["is_file"]:
             ret_items.append(self.__get_fileitem(path_obj))
             return ret_items
 
@@ -143,9 +150,11 @@ class LocalStorage(StorageBase):
         """
         获取文件或目录，不存在返回None
         """
-        if not path.exists():
+        try:
+            info = fsproxy.stat(path)
+        except (FileNotFoundError, NotADirectoryError):
             return None
-        if path.is_file():
+        if info["is_file"]:
             return self.__get_fileitem(path)
         return self.__get_diritem(path)
 
@@ -154,9 +163,11 @@ class LocalStorage(StorageBase):
         获取文件或目录，无法确认状态时抛出 StorageQueryError。
         Path.exists() 会把部分 errno（如 EBADF/ELOOP）归入「不存在」，
         网络/FUSE 挂载抖动时会误判，这里用 stat 显式区分。
+        挂载完全无响应时代理会超时并抛 FileSystemTimeout（OSError 子类），
+        同样落入下面的分支，转化成调用方能处理的查询失败。
         """
         try:
-            path.stat()
+            fsproxy.stat(path)
         except (FileNotFoundError, NotADirectoryError):
             return None
         except OSError as e:
