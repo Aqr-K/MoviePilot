@@ -6,7 +6,7 @@
 漏件。该表只登记「存储 + 源文件路径」这一最小事实，供启动时回放。
 
 Revision ID: e3d9f4b7c806
-Revises: c1a7b93e5d24
+Revises: 7f5c1d2e3a4b
 Create Date: 2026-08-10
 """
 
@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "e3d9f4b7c806"
-down_revision = "c1a7b93e5d24"
+down_revision = "7f5c1d2e3a4b"
 branch_labels = None
 depends_on = None
 
