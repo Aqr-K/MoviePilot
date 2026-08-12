@@ -2,7 +2,7 @@
 整理历史按源存储与源路径唯一
 
 Revision ID: 7f5c1d2e3a4b
-Revises: f7b2d5c9a301
+Revises: a8c4e2f6b1d9
 Create Date: 2026-08-04
 """
 

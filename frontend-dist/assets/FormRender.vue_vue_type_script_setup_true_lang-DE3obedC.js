@@ -1,0 +1,9 @@
+import{b as e,__mp_tla as __mp_tla_0}from"./date-OIgW8uJy.js";let i;let __mp_tla=Promise.all([(()=>{try{return __mp_tla_0}catch{}})()]).then(async()=>{let t,n,o,s,r,l;({defineComponent:t}=await e("vue"));({resolveDynamicComponent:n,openBlock:o,createBlock:s}=await e("vue"));({resolveComponent:r,h:l}=await e("vue"));i=t({__name:"FormRender",props:{config:{},model:{}},setup(e){const t=(e,t,n)=>Array.isArray(e)?e.map((e=>i(e,t,n))):i(e,t,n),i=(e,n,o={})=>{const{component:s,props:a={},content:c=[],slots:m={},html:d,text:p}=e,u=r(s),f=((e,t)=>{const n={},o=e=>e.startsWith("{{")&&e.endsWith("}}"),s=e=>e.slice(2,-2).trim();for(const[r,l]of Object.entries(e))if("modelvalue"===r)n.value=t[l],n["onUpdate:value"]=e=>{t[l]=e};else if(["model","v-model"].includes(r))n.modelValue=t[l],n["onUpdate:modelValue"]=e=>{t[l]=e};else if(["show","v-show"].includes(r)){const e=o(l)?s(l):l,r=new Function("model",`with(model) { return ${e} }`)(t);n.style||(n.style={}),n.style.display=r?"":"none"}else if(r.startsWith("model:")||r.startsWith("v-model:")){const e=r.split(":")[1];n[e]=t[l],n[`onUpdate:${e}`]=e=>{t[l]=e}}else if(r.startsWith("on")){if("string"==typeof l){const e=new Function("model","event",`
+            try {
+              with(model) {
+                return (${l})(event);
+              }
+            } catch(e) {
+              console.error('事件处理函数执行错误:', e);
+            }
+          `);n[r]=(...n)=>{const[o]=n;return e(t,o)}}}else if("string"==typeof l&&o(l)){const e=s(l);n[r]=new Function("model",`with(model) { return ${e} }`)(t)}else n[r]="string"==typeof l&&l in t?t[l]:l;return n})(a,n),y={};for(const[r,l]of Object.entries(m))y[r]=e=>t(l,n,{...o,...e});return l(u,f,{...y,default:()=>d?l(u,{innerHTML:"string"==typeof d?d:n[d]}):p?"string"==typeof p?p:n[p]:Array.isArray(c)?c.map((e=>i(e,n,o))):null})};return(e,t)=>(o(),s(n(i(e.config,e.model))))}})});export{i as _,__mp_tla};

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>MoviePilot - 离线</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root {
+      --primary-color: #8D51F9;
+      --surface-color: #FFFFFF;
+      --text-color: #333333;
+      --border-color: rgba(0, 0, 0, 0.12);
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface-color: #0E1116;
+        --text-color: #FFFFFF;
+        --border-color: rgba(255, 255, 255, 0.12);
+      }
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--surface-color);
+      color: var(--text-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .offline-container {
+      text-align: center;
+      max-width: 400px;
+      width: 100%;
+      padding: 40px;
+      background: var(--surface-color);
+      border-radius: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1), 0 0 0 1px var(--border-color);
+    }
+    
+    .icon-wrapper {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 32px;
+      background: rgba(141, 81, 249, 0.1);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .icon {
+      width: 64px;
+      height: 64px;
+      fill: var(--primary-color);
+    }
+    
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    
+    p {
+      font-size: 1.1rem;
+      line-height: 1.6;
+      opacity: 0.7;
+      margin-bottom: 32px;
+    }
+    
+    .retry-button {
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 12px 32px;
+      font-size: 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: opacity 0.2s;
+    }
+    
+    .retry-button:hover {
+      opacity: 0.9;
+    }
+    
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 24px;
+      padding: 8px 16px;
+      background: rgba(141, 81, 249, 0.1);
+      border-radius: 20px;
+      font-size: 0.875rem;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #EF5350;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="offline-container">
+    <div class="icon-wrapper">
+      <svg class="icon" viewBox="0 0 24 24">
+        <path d="M12,2.03C17.73,2.5 22,7.08 22,12.75C22,13.84 21.79,14.89 21.4,15.86L19.53,14C19.5,13.83 19.5,13.67 19.5,13.5A2.5,2.5 0 0,0 17,11A2.5,2.5 0 0,0 14.5,13.5A2.5,2.5 0 0,0 17,16A2.5,2.5 0 0,0 19.5,13.5C19.5,13.67 19.5,13.83 19.53,14L21.4,15.86C20.04,19.09 16.9,21.47 13.19,21.97L11.75,20.53C11.83,20.5 11.92,20.5 12,20.5A2.5,2.5 0 0,0 14.5,18A2.5,2.5 0 0,0 12,15.5A2.5,2.5 0 0,0 9.5,18C9.5,18.08 9.5,18.17 9.53,18.25L7.66,16.38C7.25,15.96 6.86,15.5 6.5,15H8.17C8.06,14.7 8,14.35 8,14A3,3 0 0,1 11,11A3,3 0 0,1 14,14C14,14.35 13.94,14.7 13.83,15H15.5C15.14,15.5 14.75,15.96 14.34,16.38L12.47,14.5C12.5,14.42 12.5,14.33 12.47,14.25L10.6,12.38C10.18,11.97 9.72,11.59 9.23,11.25L7.36,9.38C6.94,8.96 6.5,8.61 6,8.31V6.64L4.14,4.78C3.6,5.55 3.17,6.4 2.86,7.31L1,5.45V4.46L2.05,3.41C2.5,2.86 3.05,2.41 3.66,2.06L20,18.4L18.73,19.67L12.47,13.41L11.75,20.53C11.83,20.5 11.92,20.5 12,20.5A2.5,2.5 0 0,0 14.5,18A2.5,2.5 0 0,0 12,15.5A2.5,2.5 0 0,0 9.5,18C9.5,18.08 9.5,18.17 9.53,18.25L7.66,16.38C7.25,15.96 6.86,15.5 6.5,15H8.17C8.06,14.7 8,14.35 8,14A3,3 0 0,1 11,11A3,3 0 0,1 14,14C14,14.35 13.94,14.7 13.83,15H15.5C15.14,15.5 14.75,15.96 14.34,16.38L2.46,4.5C3.5,3.17 4.9,2.15 6.5,1.58V3.25C5.43,3.7 4.47,4.33 3.66,5.11L2.61,6.16V8.03C3.16,7.33 3.82,6.73 4.57,6.25V8.31C3.57,9.14 2.75,10.19 2.21,11.39L1,10.18V8.65C1.5,6.16 3.03,4.03 5.11,2.71L6.39,4C8.97,2.73 12.03,2.24 14.97,3.03L16.84,4.9C18.17,5.86 19.25,7.16 19.94,8.68L18.07,6.81C17.07,5.5 15.66,4.5 14,4.04V5.71C15.93,6.17 17.5,7.53 18.33,9.3L16.46,7.43C15.46,6.61 14.2,6.08 12.82,6V7.67C13.69,7.79 14.47,8.11 15.14,8.58L13.27,6.71C12.94,6.66 12.6,6.63 12.25,6.63L10.38,4.76C10.87,4.66 11.37,4.59 11.88,4.56L10,2.68C10.66,2.56 11.33,2.5 12,2.5V2.03Z" />
+      </svg>
+    </div>
+    
+    <h1>您当前处于离线状态</h1>
+    <p>无法连接到 MoviePilot 服务器。请检查您的网络连接后重试。</p>
+    
+    <button class="retry-button" onclick="window.location.reload()">
+      重新加载
+    </button>
+    
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      <span>离线状态</span>
+    </div>
+  </div>
+  
+  <script>
+    // 监听网络状态变化
+    window.addEventListener('online', function() {
+      window.location.reload();
+    });
+    
+    // Service Worker 消息处理
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'OFFLINE_STATUS' && !event.data.offline) {
+          window.location.reload();
+        }
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+const e=new Map,t=new Map;async function n(n,r){const i=String(n),o=function(t){const n=e.get(t);if(n){if(!(n.expiresAt<=Date.now()))return n.value;e.delete(t)}}(i);if(void 0!==o)return o;const s=t.get(i);if(s)return s;const a=r().then((t=>(e.set(i,{expiresAt:Date.now()+6e5,value:t}),t))).finally((()=>{t.delete(i)}));return t.set(i,a),a}export{n as g};
