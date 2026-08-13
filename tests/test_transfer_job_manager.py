@@ -702,7 +702,7 @@ class TransferJobManagerTest(unittest.TestCase):
             ), patch(
                 "app.chain.transfer.settings.AI_AGENT_RETRY_TRANSFER", False
             ):
-                state, _ = chain._TransferChain__default_callback(task, failed_transferinfo)
+                state, _ = chain._result_processor.handle(task, failed_transferinfo)
 
             self.assertFalse(state)
             self.assertEqual(1, failed_retry_count(src_path, storage))
@@ -735,7 +735,7 @@ class TransferJobManagerTest(unittest.TestCase):
                 "app.chain.transfer.TransferHistoryOper",
                 return_value=SimpleNamespace(add_success=lambda **kwargs: SimpleNamespace(id=2)),
             ):
-                state, _ = chain._TransferChain__default_callback(task, success_transferinfo)
+                state, _ = chain._result_processor.handle(task, success_transferinfo)
 
             self.assertTrue(state)
             self.assertEqual(0, failed_retry_count(src_path, storage))

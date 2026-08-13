@@ -9,7 +9,7 @@ __is_overwrite_declined 用于识别这一场景，__default_callback 失败分�
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.chain.transfer import TransferChain
+from app.chain.transfer import TransferChain, TransferResultProcessor
 from app.schemas import TransferInfo
 from app.schemas.types import EventType
 from tests.test_transfer_job_manager import FakeMedia, make_task, make_transfer_chain
@@ -50,7 +50,7 @@ def test_overwrite_declined_false_when_flag_not_set():
     transferinfo = TransferInfo(success=False, overwrite_skipped=False)
     transferhis = make_history_oper(raise_on_query=True)
 
-    result = TransferChain._TransferChain__is_overwrite_declined(
+    result = TransferResultProcessor._TransferResultProcessor__is_overwrite_declined(
         task, transferinfo, transferhis
     )
 
@@ -64,7 +64,7 @@ def test_overwrite_declined_true_when_success_history_exists():
     transferinfo = TransferInfo(success=False, overwrite_skipped=True)
     transferhis = make_history_oper(history=success_history)
 
-    result = TransferChain._TransferChain__is_overwrite_declined(
+    result = TransferResultProcessor._TransferResultProcessor__is_overwrite_declined(
         task, transferinfo, transferhis
     )
 
@@ -77,7 +77,7 @@ def test_overwrite_declined_false_when_no_history():
     transferinfo = TransferInfo(success=False, overwrite_skipped=True)
     transferhis = make_history_oper(history=None)
 
-    result = TransferChain._TransferChain__is_overwrite_declined(
+    result = TransferResultProcessor._TransferResultProcessor__is_overwrite_declined(
         task, transferinfo, transferhis
     )
 
@@ -91,7 +91,7 @@ def test_overwrite_declined_false_when_only_failed_history():
     transferinfo = TransferInfo(success=False, overwrite_skipped=True)
     transferhis = make_history_oper(history=failed_history, success_history=None)
 
-    result = TransferChain._TransferChain__is_overwrite_declined(
+    result = TransferResultProcessor._TransferResultProcessor__is_overwrite_declined(
         task, transferinfo, transferhis
     )
 
@@ -104,7 +104,7 @@ def test_overwrite_declined_false_when_query_raises():
     transferinfo = TransferInfo(success=False, overwrite_skipped=True)
     transferhis = make_history_oper(raise_on_query=True)
 
-    result = TransferChain._TransferChain__is_overwrite_declined(
+    result = TransferResultProcessor._TransferResultProcessor__is_overwrite_declined(
         task, transferinfo, transferhis
     )
 
@@ -159,7 +159,7 @@ def test_default_callback_skips_history_and_notification_when_overwrite_declined
     ), patch(
         "app.chain.transfer.settings.AI_AGENT_RETRY_TRANSFER", False
     ):
-        state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
+        state, errmsg = chain._result_processor.handle(task, transferinfo)
 
     assert state is False
     assert errmsg == transferinfo.message
@@ -204,7 +204,7 @@ def test_default_callback_keeps_original_failure_semantics_without_success_histo
     ), patch(
         "app.chain.transfer.settings.AI_AGENT_RETRY_TRANSFER", False
     ):
-        state, errmsg = chain._TransferChain__default_callback(task, transferinfo)
+        state, errmsg = chain._result_processor.handle(task, transferinfo)
 
     assert state is False
     assert errmsg == transferinfo.message

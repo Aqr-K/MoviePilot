@@ -71,7 +71,7 @@ class PassKeyRegistrationStart(BaseModel):
 class PassKeyRegistrationFinish(BaseModel):
     """PassKey注册完成请求"""
 
-    credential: dict
+    credential: dict[str, JsonData]
     transaction_token: str
     name: str = "通行密钥"
 
@@ -85,7 +85,7 @@ class PassKeyAuthenticationStart(BaseModel):
 class PassKeyAuthenticationFinish(BaseModel):
     """PassKey认证完成请求"""
 
-    credential: dict
+    credential: dict[str, JsonData]
     transaction_token: str
 
 

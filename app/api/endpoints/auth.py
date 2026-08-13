@@ -261,7 +261,11 @@ def _check_flow_rate_limit(request: Request, username: Optional[str]) -> None:
         raise HTTPException(status_code=429, detail="尝试过于频繁，请稍后再试")
 
 
-@router.post("/flow/begin", summary="开始多步登录流程")
+@router.post(
+    "/flow/begin",
+    summary="开始多步登录流程",
+    response_model=schemas.Response[schemas.FlowStateData],
+)
 def flow_begin(body: schemas.FlowBeginRequest, request: Request, response: Response = None) -> dict:
     """开始一条可组合、可多轮的登录流程。返回 ``status``：success（带 token）/ mfa_required /
     challenge / continue。后续以返回的 ``flow_token`` 调用 ``/auth/flow/advance`` 推进。
@@ -276,7 +280,11 @@ def flow_begin(body: schemas.FlowBeginRequest, request: Request, response: Respo
     return _flow_http(result, body.username, request, response)
 
 
-@router.post("/flow/advance", summary="推进多步登录流程")
+@router.post(
+    "/flow/advance",
+    summary="推进多步登录流程",
+    response_model=schemas.Response[schemas.FlowStateData],
+)
 def flow_advance(body: schemas.FlowAdvanceRequest, request: Request, response: Response = None) -> dict:
     """凭 ``flow_token`` 推进下一步（提交因子码 / 挑战应答 / 后补凭证）。
 

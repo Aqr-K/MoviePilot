@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.schemas.common import JsonData
+from app.schemas.token import Token
 
 
 class AuthExchangeRequest(BaseModel):
@@ -29,10 +32,32 @@ class FlowAdvanceRequest(BaseModel):
     flow_token: str
     step_id: Optional[str] = None
     code: Optional[str] = None
-    response: Optional[dict] = None
+    response: Optional[dict[str, JsonData]] = None
     username: Optional[str] = None
     password: Optional[str] = None
     grant_type: str = "password"
 
 
-__all__ = ["AuthExchangeRequest", "FlowBeginRequest", "FlowAdvanceRequest"]
+class FlowStateData(BaseModel):
+    """多步登录流程的状态应答（begin / advance 共用）。"""
+
+    # success / mfa_required / challenge / continue
+    status: str
+    # status 为 success 时携带的访问令牌
+    token: Optional[Token] = None
+    # 后续调用 /auth/flow/advance 推进所用的流程令牌
+    flow_token: Optional[str] = None
+    # 当前可用的第二因子标识
+    factors_available: list[str] = Field(default_factory=list)
+    # 待应答的挑战内容（如 SSO 的 authorize_url、WebAuthn 选项）
+    challenge: Optional[dict[str, JsonData]] = None
+    # 失败原因（已按白名单脱敏）
+    error: Optional[str] = None
+
+
+__all__ = [
+    "AuthExchangeRequest",
+    "FlowBeginRequest",
+    "FlowAdvanceRequest",
+    "FlowStateData",
+]

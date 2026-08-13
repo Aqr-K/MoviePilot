@@ -29,3 +29,14 @@ def get_plugin_source() -> Any:
     # 默认:懒加载真实 PluginHelper（WeakSingleton），避免在 core 顶层 import helper
     from app.helper.plugin import PluginHelper
     return PluginHelper()
+
+
+def get_version_backward_compatible_flags() -> dict:
+    """
+    获取可向后扫描的插件索引版本标记表。
+
+    延迟取自插件来源实现，避免 core 顶层产生对 helper 的依赖。
+    """
+    from app.helper.plugin import VERSION_BACKWARD_COMPATIBLE_FLAGS
+
+    return VERSION_BACKWARD_COMPATIBLE_FLAGS

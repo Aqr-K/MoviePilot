@@ -5,7 +5,7 @@ from unittest.mock import Mock
 from jinja2 import Template
 
 from app.chain.media import MediaChain
-from app.chain.transfer import JobManager, TransferChain
+from app.chain.transfer import JobManager, TransferChain, ScrapeBatchCoordinator, TransferResultProcessor
 from app.core.config import settings
 from app.core.meta import MetaMusic
 from app.core.context import MusicInfo
@@ -158,7 +158,8 @@ def test_music_scrape_batch_event_preserves_each_track_context():
     chain = object.__new__(TransferChain)
     chain._audio_exts = settings.RMT_AUDIOEXT
     chain._media_exts = settings.RMT_MEDIAEXT
-    chain._scrape_batches = {}
+    chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
+    chain._result_processor = TransferResultProcessor(chain=chain)
     chain.eventmanager = Mock()
     batch_id = "music-scrape-batch"
     target_dir = FileItem(storage="local", path="/library/Album", type="dir")
@@ -188,7 +189,7 @@ def test_music_scrape_batch_event_preserves_each_track_context():
         tasks.append(task)
         target_paths.append(target_path)
         chain._TransferChain__register_scrape_batch_task(task)
-        chain._TransferChain__record_scrape_target(
+        chain._scrape_coordinator.record_target(
             task,
             TransferInfo(
                 success=True,
@@ -486,7 +487,8 @@ def test_success_file_aggregation_is_isolated_between_music_jobs_in_same_directo
     chain = object.__new__(TransferChain)
     chain.jobview = JobManager()
     chain._success_target_files = {}
-    chain._scrape_batches = {}
+    chain._scrape_coordinator = ScrapeBatchCoordinator(chain=chain)
+    chain._result_processor = TransferResultProcessor(chain=chain)
     chain._media_exts = settings.RMT_MEDIAEXT
     chain._audio_exts = settings.RMT_AUDIOEXT
     chain.eventmanager = Mock()
@@ -538,7 +540,7 @@ def test_success_file_aggregation_is_isolated_between_music_jobs_in_same_directo
     )
 
     for task in tasks:
-        chain._TransferChain__default_callback(task, transfer_info(task))
+        chain._result_processor.handle(task, transfer_info(task))
 
     notified_lists = [
         call.kwargs["transferinfo"].file_list_new

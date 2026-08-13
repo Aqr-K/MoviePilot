@@ -710,12 +710,12 @@ class TestPluginHelper:
         monkeypatch.setattr(plugin_manager, "_plugins", {})
         monkeypatch.setattr(plugin_manager, "_running_plugins", {})
         monkeypatch.setattr(
-            "app.core.plugin.settings",
+            "app.helper.plugin_manager.settings",
             SimpleNamespace(VERSION_FLAG="v3", PLUGIN_MARKET=REPO_URL),
         )
         monkeypatch.setattr("app.helper.plugin.settings", SimpleNamespace(VERSION_FLAG="v3"))
-        monkeypatch.setattr("app.core.plugin.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
-        monkeypatch.setattr("app.core.plugin.SitesHelper", lambda: SimpleNamespace(auth_level=1))
+        monkeypatch.setattr("app.helper.plugin_manager.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
+        monkeypatch.setattr("app.helper.plugin_manager.get_auth_level", lambda: 1)
         monkeypatch.setattr(PluginHelper, "get_plugins", fake_get_plugins)
 
         plugins = plugin_manager.get_online_plugins(force=False)

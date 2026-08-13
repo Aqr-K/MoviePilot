@@ -50,7 +50,7 @@ def test_media_search_endpoint_forwards_multi_source() -> None:
     chain = Mock()
     chain.async_search = AsyncMock(return_value=(Mock(), []))
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         result = asyncio.run(
             search(
                 title="测试",
@@ -76,7 +76,7 @@ async def test_media_search_route_accepts_comma_separated_music_sources() -> Non
     app.include_router(media_endpoints.router, prefix="/api/v1/media")
     app.dependency_overrides[verify_token] = lambda: Mock()
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
@@ -113,7 +113,7 @@ async def test_media_search_route_accepts_repeated_enum_sources() -> None:
     app.include_router(media_endpoints.router, prefix="/api/v1/media")
     app.dependency_overrides[verify_token] = lambda: Mock()
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
@@ -143,7 +143,7 @@ async def test_media_search_route_deduplicates_repeated_sources() -> None:
     app.include_router(media_endpoints.router, prefix="/api/v1/media")
     app.dependency_overrides[verify_token] = lambda: Mock()
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
@@ -174,7 +174,7 @@ async def test_media_search_route_forwards_plugin_source() -> None:
     app.include_router(media_endpoints.router, prefix="/api/v1/media")
     app.dependency_overrides[verify_token] = lambda: Mock()
 
-    with patch("app.api.endpoints.media.MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",

@@ -7,6 +7,8 @@ service 后，通过 monkeypatch MediaChain/DownloadChain 即可在 venv 内单�
 """
 from types import SimpleNamespace
 
+from app.schemas.types import MediaSource
+
 from app import schemas
 from app.core.context import MediaInfo
 from app.service import download as svc
@@ -76,19 +78,18 @@ def test_recognize_and_download_recognize_fail(monkeypatch):
         svc,
         "MediaChain",
         lambda: SimpleNamespace(
-            recognize_by_meta=lambda meta, source=None, obtain_images=False: None,
+            recognize_by_meta=lambda meta, **kw: None,
             recognize_media=lambda **kw: None,
         ),
     )
     monkeypatch.setattr(svc, "DownloadChain", fake_dl)
-    recognized, did = svc.recognize_and_download(
+    recognized, did, error = svc.recognize_and_download(
         torrent_in=_torrent(),
-        tmdbid=None,
-        doubanid=None,
         downloader=None,
         save_path=None,
         username="u",
     )
+    assert error is None
     assert recognized is False
     assert did is None
     assert called["dl"] is False  # 识别失败时不应提交下载
@@ -99,30 +100,30 @@ def test_recognize_and_download_by_meta_success(monkeypatch):
         svc,
         "MediaChain",
         lambda: SimpleNamespace(
-            recognize_by_meta=lambda meta, source=None, obtain_images=False: _truthy_media(),
+            recognize_by_meta=lambda meta, **kw: _truthy_media(),
             recognize_media=lambda **kw: None,
         ),
     )
     monkeypatch.setattr(
         svc, "DownloadChain", lambda: SimpleNamespace(download_single=lambda **kw: "did-abc")
     )
-    recognized, did = svc.recognize_and_download(
+    recognized, did, error = svc.recognize_and_download(
         torrent_in=_torrent(),
-        tmdbid=None,
-        doubanid=None,
         downloader="tr",
         save_path="/x",
         username="u",
     )
+    assert error is None
     assert recognized is True
     assert did == "did-abc"
 
 
-def test_recognize_and_download_by_tmdbid_uses_recognize_media(monkeypatch):
+def test_recognize_and_download_by_media_identity_uses_recognize_media(monkeypatch):
     calls = {}
 
-    def fake_recognize_media(meta, tmdbid=None, doubanid=None, **kwargs):
-        calls["tmdbid"] = tmdbid
+    def fake_recognize_media(meta, media_source=None, media_id=None, **kwargs):
+        calls["media_source"] = media_source
+        calls["media_id"] = media_id
         return _truthy_media()
 
     monkeypatch.setattr(
@@ -136,14 +137,17 @@ def test_recognize_and_download_by_tmdbid_uses_recognize_media(monkeypatch):
     monkeypatch.setattr(
         svc, "DownloadChain", lambda: SimpleNamespace(download_single=lambda **kw: "did-tmdb")
     )
-    recognized, did = svc.recognize_and_download(
+    recognized, did, error = svc.recognize_and_download(
         torrent_in=_torrent(),
-        tmdbid=123,
-        doubanid=None,
+        media_source=MediaSource.TMDB,
+        media_id="123",
         downloader=None,
         save_path=None,
         username="u",
     )
+    assert error is None
     assert recognized is True
     assert did == "did-tmdb"
-    assert calls["tmdbid"] == 123  # tmdbid/doubanid 分支走 recognize_media
+    # 显式媒体身份分支走 recognize_media
+    assert calls["media_source"] == MediaSource.TMDB
+    assert calls["media_id"] == "123"

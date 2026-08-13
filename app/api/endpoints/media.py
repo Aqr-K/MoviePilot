@@ -21,14 +21,27 @@ from app.db.models import User
 from app.db.user_oper import get_current_active_user, get_current_active_superuser
 from app.schemas import MediaType
 from app.schemas.category import CategoryConfig
-from app.schemas.types import ChainEventType
+from app.schemas.types import ChainEventType, MediaSource
 from app.service.media import (
+    _is_valid_source_media_id,
+    _split_media_source_query,
     scrape_path as _scrape_path,
     search_media as _search_media,
 )
-from app.utils.media import MEDIA_SOURCE_ID_FIELDS, parse_media_key
+from app.utils.media import (
+    is_music_media_source,
+    parse_media_key,
+    resolve_media_identity,
+)
 
 router = ResponseAPIRouter()
+
+# 来源查询参数：支持重复与逗号分隔写法，校验前先按 service 层规则规范历史别名
+MediaSourceQuery = Annotated[
+    tuple[MediaSource, ...],
+    BeforeValidator(_split_media_source_query),
+    Query(),
+]
 
 
 
@@ -210,7 +223,7 @@ async def search(
     :param _: Token校验
     :return: 搜索结果列表
     """
-    return await _search_media(title=title, type=type, page=page, count=count, source=source)
+    return await _search_media(title=title, type=type, page=page, count=count, media_source=media_source)
 
 
 @router.post(
@@ -242,6 +255,7 @@ def scrape(
         media_source=media_source,
         media_id=media_id,
         type_name=type_name,
+        music_type=music_type,
     )
     return schemas.Response(success=success, message=message)
 

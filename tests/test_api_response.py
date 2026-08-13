@@ -353,6 +353,7 @@ def test_v1_model_free_routes_match_audited_native_allowlist():
     from app.api.apiv1 import api_router
 
     expected_routes = {
+        ("/auth/flow/callback", "flow_callback"),
         ("/message/", "incoming_verify"),
         ("/message/agent/file/{file_id}", "download_web_agent_file"),
         ("/message/agent/stream", "web_agent_stream"),

@@ -263,7 +263,7 @@ class TestAgentInteraction(unittest.TestCase):
         try:
             for channel in (MessageChannel.Telegram, MessageChannel.Feishu):
                 with patch(
-                    "app.chain.message.agent_manager.matches_secret_confirmation",
+                    "app.agent.agent_manager.matches_secret_confirmation",
                     return_value=True,
                 ), patch.object(
                     chain,

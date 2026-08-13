@@ -14,8 +14,12 @@ from app.core.event import eventmanager
 from app.core.metainfo import MetaInfo
 from app.helper.locale import LocaleHelper
 from app.schemas import MediaRecognizeConvertEventData
-from app.schemas.types import ChainEventType, MediaType
-from app.utils.media import parse_media_key, resolve_media_identity
+from app.schemas.types import ChainEventType, MediaSource, MediaType
+from app.utils.media import (
+    normalize_music_type,
+    parse_media_key,
+    resolve_media_identity,
+)
 from app.utils.security import SecurityUtils
 
 
@@ -46,66 +50,41 @@ def resolve_media_season(
 
 
 async def resolve_media_search_params(
-        mediaid: str,
+        media_source: MediaSource,
+        media_id: str,
         media_type: Optional[MediaType] = None,
-        title: Optional[str] = None,
-        year: Optional[str] = None,
-        media_season: Optional[int] = None,
+        music_type: Optional[str] = None,
 ) -> Tuple[Optional[dict], str]:
     """
-    将任意来源媒体键解析为 SearchChain 可直接使用的识别参数。
+    校验统一媒体身份并构造 SearchChain 精确搜索参数。
 
-    :param mediaid: 带来源前缀的媒体键
+    :param media_source: 媒体数据源
+    :param media_id: 数据源原生ID
     :param media_type: 媒体类型
-    :param title: 名称兜底识别用标题
-    :param year: 名称兜底识别用年份
-    :param media_season: 名称兜底识别用季号
-    :return: (识别参数, 错误信息)；识别参数为 None 时错误信息非空
+    :param music_type: 音乐实体类型，仅支持 recording 或 album
+    :return: (识别参数, 错误消息)
     """
-    source, source_media_id = parse_media_key(mediaid)
-    if source and source_media_id:
-        if source in {"themoviedb", "bangumi", "anilist"} \
-                and not source_media_id.isdigit():
-            return None, "媒体ID格式错误"
-        return {"source": source, "mediaid": source_media_id}, ""
-
-    event_data = MediaRecognizeConvertEventData(
-        mediaid=mediaid, convert_type=settings.RECOGNIZE_SOURCE
+    normalized_source, normalized_media_id = resolve_media_identity(
+        media_source=media_source,
+        media_id=media_id,
     )
-    event = await eventmanager.async_send_event(
-        ChainEventType.MediaRecognizeConvert, event_data
-    )
-    if event and event.event_data and event.event_data.media_dict:
-        event_data = event.event_data
-        search_id = event_data.media_dict.get("id")
-        if search_id is not None:
-            return {
-                "source": event_data.convert_type,
-                "mediaid": str(search_id),
-            }, ""
+    if not normalized_source or not normalized_media_id:
+        return None, "媒体ID格式无效"
+    normalized_music_type = None
+    if music_type:
+        normalized_music_type = normalize_music_type(music_type, allow_artist=False)
+        if not normalized_music_type:
+            return None, "音乐实体类型无效，仅支持 recording 或 album"
+        if media_type != MediaType.MUSIC:
+            return None, "music_type 仅能用于音乐资源搜索"
 
-    if not title:
-        return None, "未知的媒体ID"
-
-    meta = MetaInfo(title)
-    if year:
-        meta.year = year
-    if media_type:
-        meta.type = media_type
-    if media_season is not None:
-        meta.type = MediaType.TV
-        meta.begin_season = media_season
-    mediainfo = await MediaChain().async_recognize_by_meta(
-        meta,
-        obtain_images=False,
-    )
-    if not mediainfo:
-        return None, "未识别到媒体信息"
-    source, source_media_id = resolve_media_identity(media=mediainfo)
-    if not source or not source_media_id:
-        return None, "媒体信息缺少有效ID"
-    return {"source": source, "mediaid": source_media_id}, ""
-
+    params = {
+        "media_source": normalized_source,
+        "media_id": normalized_media_id,
+    }
+    if normalized_music_type:
+        params["music_type"] = normalized_music_type
+    return params, ""
 
 def sse_event(data: dict, locale: Optional[str] = None) -> str:
     """
