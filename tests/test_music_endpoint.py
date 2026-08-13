@@ -73,7 +73,7 @@ def test_media_search_routes_music_queries_with_query_kwarg():
     )
 
     with (
-        patch.object(media_endpoints, "MediaChain", return_value=chain) as media_chain,
+        patch("app.service.media.MediaChain", return_value=chain) as media_chain,
     ):
         result = asyncio.run(
             media_endpoints.search(
@@ -97,7 +97,7 @@ def test_media_search_forwards_explicit_music_source():
     chain = Mock()
     chain.async_search_music = AsyncMock(return_value=[])
 
-    with patch.object(media_endpoints, "MediaChain", return_value=chain):
+    with patch("app.service.media.MediaChain", return_value=chain):
         result = asyncio.run(
             media_endpoints.search(
                 title="Coldplay",

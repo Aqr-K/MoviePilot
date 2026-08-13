@@ -27,11 +27,10 @@ from app.core.config import settings
 from app.core.event import eventmanager
 from app.core.module import ModuleManager
 from app.core.plugin_reporter import report_plugin_install
-from app.core.plugin_source import get_plugin_source
+from app.core.plugin_source import get_plugin_source, get_version_backward_compatible_flags
 from app.helper import plugin_market, plugin_metadata
 from app.db.plugindata_oper import PluginDataOper
 from app.db.systemconfig_oper import SystemConfigOper
-from app.helper.plugin import VERSION_BACKWARD_COMPATIBLE_FLAGS
 from app.log import logger
 from app.schemas.types import EventType, SystemConfigKey
 from app.utils.crypto import RSAUtils
@@ -1254,7 +1253,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         # 拉取当前索引及可扫描的旧索引；旧条目可用当前版本 false 显式排除。
         compatible_flags = (
-            [settings.VERSION_FLAG] + VERSION_BACKWARD_COMPATIBLE_FLAGS.get(settings.VERSION_FLAG, [])
+            [settings.VERSION_FLAG] + get_version_backward_compatible_flags().get(settings.VERSION_FLAG, [])
             if settings.VERSION_FLAG else []
         )
         markets = [m for m in settings.PLUGIN_MARKET.split(",") if m]
@@ -1630,7 +1629,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         # 拉取当前索引及可扫描的旧索引；旧条目可用当前版本 false 显式排除。
         compatible_flags = (
-            [settings.VERSION_FLAG] + VERSION_BACKWARD_COMPATIBLE_FLAGS.get(settings.VERSION_FLAG, [])
+            [settings.VERSION_FLAG] + get_version_backward_compatible_flags().get(settings.VERSION_FLAG, [])
             if settings.VERSION_FLAG else []
         )
         for market in settings.PLUGIN_MARKET.split(","):

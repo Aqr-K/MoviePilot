@@ -139,7 +139,7 @@ def test_passkey_authentication_start_returns_object_options(monkeypatch):
     )
 
     response = mfa_endpoint.passkey_authenticate_start(
-        mfa_endpoint.PassKeyAuthenticationStart()
+        schemas.PassKeyAuthenticationStart()
     )
     payload = schemas.PasskeyStartData.model_validate(response.data)
 

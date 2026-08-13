@@ -88,7 +88,7 @@ def test_message_chain_passes_stable_channel_admin_principal_to_agent():
     chain = MessageChain()
 
     with patch.object(settings, "AI_AGENT_ENABLE", True), patch(
-        "app.chain.message.agent_manager.process_message",
+        "app.agent.agent_manager.process_message",
         new_callable=AsyncMock,
     ) as process_message, patch(
         "app.chain.message.asyncio.run_coroutine_threadsafe",
@@ -111,7 +111,7 @@ def test_message_chain_does_not_trust_channel_display_username():
     chain = MessageChain()
 
     with patch.object(settings, "AI_AGENT_ENABLE", True), patch(
-        "app.chain.message.agent_manager.process_message",
+        "app.agent.agent_manager.process_message",
         new_callable=AsyncMock,
     ) as process_message, patch(
         "app.chain.message.asyncio.run_coroutine_threadsafe",
@@ -134,7 +134,7 @@ def test_message_chain_uses_same_admin_contract_for_slack():
     chain = MessageChain()
 
     with patch.object(settings, "AI_AGENT_ENABLE", True), patch(
-        "app.chain.message.agent_manager.process_message",
+        "app.agent.agent_manager.process_message",
         new_callable=AsyncMock,
     ) as process_message, patch(
         "app.chain.message.asyncio.run_coroutine_threadsafe",

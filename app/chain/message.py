@@ -319,7 +319,7 @@ class MessageChain(ChainBase):
         if not session_info:
             return False
         session_id, _ = session_info
-        if not agent_manager.matches_secret_confirmation(
+        if not get_agent_manager().matches_secret_confirmation(
             session_id,
             str(userid),
             channel=channel.value,

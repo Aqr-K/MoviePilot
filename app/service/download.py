@@ -10,10 +10,12 @@ from typing import Optional, Tuple, Union
 from app import schemas
 from app.chain.download import DownloadChain
 from app.chain.media import MediaChain
-from app.chain.music import MusicChain
+from app.core.meta import MetaMusic
+from app.utils.media import is_music_media_source, normalize_music_type
+from app.schemas.types import MUSIC_ENTITY_RECORDING, MediaSource, MediaType
 from app.core.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.core.metainfo import MetaInfo
-from app.core.music import MusicInfo
+from app.core.context import MusicInfo
 from app.db.site_oper import SiteOper
 from app.utils.security import SecurityUtils
 
@@ -27,11 +29,11 @@ def add_download_with_media(
 ) -> Optional[str]:
     """
     添加下载（含媒体信息）：构建上下文并提交 DownloadChain，返回 download_id 或 None。
-    音乐信息由 MusicChain 构造元数据，其它类型走 MetaInfo 解析种子标题。
+    音乐信息由 MetaMusic 构造元数据，其它类型走 MetaInfo 解析种子标题。
     """
     if isinstance(media_in, schemas.MusicInfo):
         mediainfo = MusicInfo.from_dict(media_in.model_dump())
-        metainfo = MusicChain.to_meta(mediainfo)
+        metainfo = MetaMusic.from_music_info(mediainfo)
         metainfo.org_string = torrent_in.title
     else:
         # 元数据
@@ -58,46 +60,64 @@ def add_download_with_media(
 
 def recognize_and_download(
     torrent_in: schemas.TorrentInfo,
-    tmdbid: Optional[int],
-    doubanid: Optional[str],
     downloader: Optional[str],
     save_path: Optional[str],
     username: str,
-    media_source: Optional[str] = None,
+    media_source: Optional[MediaSource] = None,
     media_id: Optional[str] = None,
-    bangumiid: Optional[int] = None,
-    anilistid: Optional[int] = None,
-) -> Tuple[bool, Optional[str]]:
+    music_type: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
     """
-    添加下载（不含媒体信息）：识别媒体 → 构建上下文 → 提交 DownloadChain。
+    添加下载（不含媒体信息）：校验媒体身份 → 识别媒体 → 构建上下文 → 提交 DownloadChain。
 
+    :param torrent_in: 种子信息
+    :param downloader: 指定下载器
+    :param save_path: 保存路径
+    :param username: 操作用户
     :param media_source: 请求级识别数据源
     :param media_id: 与 media_source 配套的数据源原生ID
-    :param bangumiid: Bangumi 兼容ID
-    :param anilistid: AniList 兼容ID
-    :return: (recognized, download_id)；recognized=False 表示识别失败
+    :param music_type: 音乐实体类型，仅支持 recording 或 album
+    :return: (recognized, download_id, error)；error 非空表示参数校验未通过
     """
+    normalized_music_type = normalize_music_type(music_type, allow_artist=False)
+    if music_type is not None and not normalized_music_type:
+        return False, None, "音乐实体类型无效，仅支持 recording 或 album"
+    if (media_source is None) != (media_id is None):
+        return False, None, "媒体来源和媒体 ID 必须同时提供"
+    is_music = (
+        torrent_in.category in (MediaType.MUSIC, MediaType.MUSIC.value, "music")
+        or is_music_media_source(media_source)
+        or normalized_music_type is not None
+    )
+    if is_music and media_source and not is_music_media_source(media_source):
+        return False, None, "音乐下载只能使用音乐元数据源"
+    if is_music and not normalized_music_type:
+        normalized_music_type = MUSIC_ENTITY_RECORDING
     # 元数据
-    metainfo = MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
+    metainfo = (
+        MetaMusic.parse_query(torrent_in.title)
+        if is_music
+        else MetaInfo(title=torrent_in.title, subtitle=torrent_in.description)
+    )
     # 媒体信息
-    if tmdbid or doubanid or bangumiid or anilistid or media_id:
+    if media_source and media_id:
         mediainfo = MediaChain().recognize_media(
             meta=metainfo,
-            source=media_source,
-            mediaid=media_id,
-            tmdbid=tmdbid,
-            doubanid=doubanid,
-            bangumiid=bangumiid,
-            anilistid=anilistid,
+            media_source=media_source,
+            media_id=media_id,
+            mtype=MediaType.MUSIC if is_music else None,
+            music_type=normalized_music_type,
         )
     else:
         mediainfo = MediaChain().recognize_by_meta(
             metainfo,
-            source=media_source,
+            media_source=media_source,
             obtain_images=False,
+            mtype=MediaType.MUSIC if is_music else None,
+            music_type=normalized_music_type,
         )
     if not mediainfo:
-        return False, None
+        return False, None, None
     # 种子信息
     torrentinfo = TorrentInfo()
     torrentinfo.from_dict(torrent_in.model_dump())
@@ -112,8 +132,7 @@ def recognize_and_download(
         save_path=save_path,
         source="Manual",
     )
-    return True, did
-
+    return True, did, None
 
 def prepare_subtitle_download(subtitle: SubtitleInfo) -> Tuple[bool, str]:
     """

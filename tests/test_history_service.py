@@ -89,12 +89,13 @@ def test_build_manual_redo_template_context_failed_move_keeps_source():
 
 
 def test_build_manual_redo_template_context_failed_and_defaults():
-    h = _h(status=False, title=None, type=None, tmdbid=None, errmsg="boom")
+    h = _h(status=False, title=None, type=None, media_source=None, media_id=None, errmsg="boom")
     ctx = svc.build_manual_redo_template_context(h)
     assert ctx["current_status"] == "failed"
     assert ctx["recognized_title"] == "unknown"
     assert ctx["media_type"] == "unknown"
-    assert ctx["tmdbid"] == "none"
+    assert ctx["media_source"] == "none"
+    assert ctx["media_id"] == "none"
     assert ctx["error_message"] == "boom"
 
 

@@ -11,20 +11,33 @@ from types import SimpleNamespace
 from app.service import media as svc
 
 
+def _chain_stub(**attrs):
+    """构造 MediaChain 桩：既可实例化，也提供类级 is_audio_path（音乐判定走类方法）。"""
+    class _Stub(SimpleNamespace):
+        is_audio_path = staticmethod(lambda path: False)
+
+        def __init__(self):
+            super().__init__(**attrs)
+
+    return _Stub
+
+
+
+
 class _Media:
     def __init__(self, source, key):
-        self.source = source
+        self.media_source = source
         self._key = key
 
     def to_dict(self):
-        return {"source": self.source, "key": self._key}
+        return {"media_source": self.media_source, "key": self._key}
 
 
 def test_search_media_sort_by_search_source_and_paginate(monkeypatch):
-    async def fake_search(title, source=None):
+    async def fake_search(title, media_source=None):
         return None, [_Media("douban", 1), _Media("themoviedb", 2), _Media("douban", 3)]
 
-    monkeypatch.setattr(svc, "MediaChain", lambda: SimpleNamespace(async_search=fake_search))
+    monkeypatch.setattr(svc, "MediaChain", _chain_stub(async_search=fake_search))
     monkeypatch.setattr(svc.settings, "SEARCH_SOURCE", "themoviedb,douban", raising=False)
 
     out = asyncio.run(svc.search_media(title="x", type="media", page=1, count=2))
@@ -33,10 +46,10 @@ def test_search_media_sort_by_search_source_and_paginate(monkeypatch):
 
 
 def test_search_media_page_2(monkeypatch):
-    async def fake_search(title, source=None):
+    async def fake_search(title, media_source=None):
         return None, [_Media("douban", 1), _Media("themoviedb", 2), _Media("douban", 3)]
 
-    monkeypatch.setattr(svc, "MediaChain", lambda: SimpleNamespace(async_search=fake_search))
+    monkeypatch.setattr(svc, "MediaChain", _chain_stub(async_search=fake_search))
     monkeypatch.setattr(svc.settings, "SEARCH_SOURCE", "themoviedb,douban", raising=False)
 
     out = asyncio.run(svc.search_media(title="x", type="media", page=2, count=2))
@@ -45,27 +58,27 @@ def test_search_media_page_2(monkeypatch):
 
 
 def test_search_media_empty(monkeypatch):
-    async def fake_search(title, source=None):
+    async def fake_search(title, media_source=None):
         return None, []
 
-    monkeypatch.setattr(svc, "MediaChain", lambda: SimpleNamespace(async_search=fake_search))
+    monkeypatch.setattr(svc, "MediaChain", _chain_stub(async_search=fake_search))
     monkeypatch.setattr(svc.settings, "SEARCH_SOURCE", "", raising=False)
     out = asyncio.run(svc.search_media(title="x", type="media"))
     assert out == []
 
 
 def test_search_media_person_uses_model_dump(monkeypatch):
-    person = SimpleNamespace(model_dump=lambda: {"source": "themoviedb", "name": "P"})
+    person = SimpleNamespace(model_dump=lambda: {"media_source": "themoviedb", "name": "P"})
 
-    async def fake_persons(name, source=None):
+    async def fake_persons(name, media_source=None):
         return [person]
 
     monkeypatch.setattr(
-        svc, "MediaChain", lambda: SimpleNamespace(async_search_persons=fake_persons)
+        svc, "MediaChain", _chain_stub(async_search_persons=fake_persons)
     )
     monkeypatch.setattr(svc.settings, "SEARCH_SOURCE", "themoviedb", raising=False)
     out = asyncio.run(svc.search_media(title="p", type="person"))
-    assert out == [{"source": "themoviedb", "name": "P"}]
+    assert out == [{"media_source": "themoviedb", "name": "P"}]
 
 
 # ---------- scrape_path ----------
@@ -81,7 +94,7 @@ def test_scrape_path_recognize_fail(monkeypatch):
     fi = SimpleNamespace(path="/x/m.mkv")
     monkeypatch.setattr(
         svc, "MediaChain",
-        lambda: SimpleNamespace(recognize_by_path=lambda p, source=None, obtain_images=False: None),
+        _chain_stub(recognize_by_path=lambda p, media_source=None, obtain_images=False: None),
     )
     ok, msg = svc.scrape_path(fi, storage="rclone")  # 非 local 跳过 Path.exists
     assert ok is False
@@ -93,10 +106,10 @@ def test_scrape_path_local_not_exist(monkeypatch):
     ctx = SimpleNamespace(media_info=SimpleNamespace(), meta_info=SimpleNamespace())
     monkeypatch.setattr(
         svc, "MediaChain",
-        lambda: SimpleNamespace(
-            recognize_by_path=lambda p, source=None, obtain_images=False: ctx,
-            scrape_metadata=lambda **k: None,
-        ),
+        _chain_stub(recognize_by_path=lambda p, media_source=None, obtain_images=False: ctx),
+    )
+    monkeypatch.setattr(
+        svc, "ScrapingChain", lambda: SimpleNamespace(scrape_metadata=lambda **k: None)
     )
     ok, msg = svc.scrape_path(fi, storage="local")
     assert ok is False
@@ -115,10 +128,10 @@ def test_scrape_path_success(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         svc, "MediaChain",
-        lambda: SimpleNamespace(
-            recognize_by_path=lambda p, source=None, obtain_images=False: ctx,
-            scrape_metadata=fake_scrape,
-        ),
+        _chain_stub(recognize_by_path=lambda p, media_source=None, obtain_images=False: ctx),
+    )
+    monkeypatch.setattr(
+        svc, "ScrapingChain", lambda: SimpleNamespace(scrape_metadata=fake_scrape)
     )
     ok, msg = svc.scrape_path(fi, storage="local")
     assert ok is True

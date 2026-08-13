@@ -12,7 +12,13 @@ from app.db.models.user import User
 from app.db.systemconfig_oper import SystemConfigOper
 from app.db.user_oper import get_current_active_user
 from app.helper.directory import DirectoryHelper
-from app.schemas.types import SystemConfigKey
+from app.schemas.types import (
+    MUSIC_ENTITY_RECORDING,
+    MediaSource,
+    MediaType,
+    MusicTargetEntityType,
+    SystemConfigKey,
+)
 from app.service.download import (
     add_download_with_media as _add_download_with_media,
     prepare_subtitle_download as _prepare_subtitle_download,
@@ -77,18 +83,17 @@ def add(
     """
     添加下载任务（不含媒体信息）
     """
-    recognized, did = _recognize_and_download(
+    recognized, did, error = _recognize_and_download(
         torrent_in=torrent_in,
-        tmdbid=tmdbid,
-        doubanid=doubanid,
-        bangumiid=bangumiid,
-        anilistid=anilistid,
         media_source=media_source,
         media_id=media_id,
+        music_type=music_type,
         downloader=downloader,
         save_path=save_path,
         username=current_user.name,
     )
+    if error:
+        return schemas.Response(success=False, message=error)
     if not recognized:
         return schemas.Response(success=False, message="无法识别媒体信息")
     if not did:

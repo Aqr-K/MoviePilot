@@ -52,7 +52,11 @@ class LlmProviderAuthStartRequest(BaseModel):
     method: str
 
 
-@router.get("/models", summary="获取LLM模型列表", response_model=schemas.Response)
+@router.get(
+    "/models",
+    summary="获取LLM模型列表",
+    response_model=schemas.Response[schemas.LLMModelCatalogData],
+)
 async def get_llm_models(
     provider: str,
     api_key: Optional[str] = None,

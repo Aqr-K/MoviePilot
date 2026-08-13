@@ -13,7 +13,7 @@ from app.service import dashboard as svc
 
 # ---------- build_statistic ----------
 
-def _patch_monthly_statistics(monkeypatch, result=(0, 0, 0)):
+def _patch_monthly_statistics(monkeypatch, result=(0, 0, 0, 0)):
     """把当月整理统计固定为给定值，隔离 DB 依赖。"""
     monkeypatch.setattr(
         svc.TransferHistory,
@@ -30,7 +30,7 @@ def test_build_statistic_aggregates_counts(monkeypatch):
     monkeypatch.setattr(
         svc, "DashboardChain", lambda: SimpleNamespace(media_statistic=lambda name: stats)
     )
-    _patch_monthly_statistics(monkeypatch, (4, 5, 6))
+    _patch_monthly_statistics(monkeypatch, (4, 5, 6, 7))
     ret = svc.build_statistic(db=None)
     assert ret.movie_count == 11
     assert ret.tv_count == 22

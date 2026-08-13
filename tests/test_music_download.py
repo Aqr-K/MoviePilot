@@ -178,8 +178,8 @@ def test_download_add_forwards_album_namespace_to_media_chain():
     download_chain = Mock()
     download_chain.download_single.return_value = "hash-album"
 
-    with patch("app.api.endpoints.download.MediaChain", return_value=media_chain), patch(
-        "app.api.endpoints.download.DownloadChain", return_value=download_chain
+    with patch("app.service.download.MediaChain", return_value=media_chain), patch(
+        "app.service.download.DownloadChain", return_value=download_chain
     ):
         response = add(
             torrent_in=TorrentInfo(

@@ -184,6 +184,8 @@ class TransferHandleRecognitionPathTest(unittest.TestCase):
             "app.chain.transfer.MediaChain",
             return_value=SimpleNamespace(
                 supplement_tmdb_info=lambda media, _meta: media,
+                recognize_media=lambda **kw: recognized,
+                recognize_by_meta=lambda *a, **kw: recognized,
             ),
         ):
             result = chain._TransferChain__handle_transfer(task)

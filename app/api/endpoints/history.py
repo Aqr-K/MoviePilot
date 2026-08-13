@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.api.response import ResponseAPIRouter
 from app.agent import ReplyMode, prompt_manager, agent_manager
 from app.chain.storage import StorageChain
 from app.core.config import settings, global_vars
@@ -173,7 +174,11 @@ async def delete_download_history(
     return schemas.Response(success=True)
 
 
-@router.get("/transfer", summary="查询整理记录", response_model=schemas.Response)
+@router.get(
+    "/transfer",
+    summary="查询整理记录",
+    response_model=schemas.Response[schemas.TransferHistoryPage],
+)
 async def transfer_history(
     title: Optional[str] = None,
     page: Optional[int] = 1,
