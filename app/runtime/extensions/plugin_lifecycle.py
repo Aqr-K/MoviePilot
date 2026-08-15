@@ -42,7 +42,8 @@ def register_plugin_storages(running_plugins: Dict[str, Any],
     """
     把插件经 provides_storages() 声明的存储实现注册进存储注册表
 
-    无插件声明存储时不触碰存储层，避免提前触发存储驱动装载。
+    无插件声明存储时不触碰存储层，避免提前触发存储驱动装载。逐条隔离，单条声明异常
+    不影响同一趟里的其余声明。
 
     :param running_plugins: 运行态插件表 {实例键: 插件实例}
     :param pid: 插件ID或实例键，为空时处理全部运行态实例
@@ -53,13 +54,19 @@ def register_plugin_storages(running_plugins: Dict[str, Any],
     from app.adapters.storage.registry import register_storage
     for key, storages in provided.items():
         for storage in storages:
-            register_storage(storage, owner=key)
+            try:
+                register_storage(storage, owner=key)
+            except Exception as err:
+                name = getattr(storage, "__name__", storage)
+                logger.error(f"注册插件 {key} 的存储 {name} 出错：{str(err)}")
 
 
 def register_plugin_channel_capabilities(running_plugins: Dict[str, Any],
                                          pid: Optional[str] = None) -> None:
     """
     把插件经 provides_channel_capabilities() 声明的渠道能力注册进渠道能力管理器
+
+    逐条隔离，单条声明异常不影响同一趟里的其余声明。
 
     :param running_plugins: 运行态插件表 {实例键: 插件实例}
     :param pid: 插件ID或实例键，为空时处理全部运行态实例
@@ -69,10 +76,14 @@ def register_plugin_channel_capabilities(running_plugins: Dict[str, Any],
         return
     for key, capabilities in provided.items():
         for capability in capabilities:
-            if ChannelCapabilityManager.register_capabilities(capability, owner=key):
-                continue
             channel = getattr(capability, "channel", capability)
-            logger.warning(f"插件 {key} 声明的渠道能力 {channel} 未被接受")
+            try:
+                accepted = ChannelCapabilityManager.register_capabilities(capability, owner=key)
+            except Exception as err:
+                logger.error(f"注册插件 {key} 的渠道能力 {channel} 出错：{str(err)}")
+                continue
+            if not accepted:
+                logger.warning(f"插件 {key} 声明的渠道能力 {channel} 未被接受")
 
 
 def register_plugin_extensions(running_plugins: Dict[str, Any],

@@ -76,18 +76,21 @@ def resolve_running_plugin(running_plugins: Dict[str, Any], key: str) -> Optiona
     """
     在运行态插件表中定位一个插件实例
 
-    传入插件标识时回落到该插件的首个实例，因此插件只有分身实例时按插件标识同样能取到。
+    优先按实例键精确命中；传入插件标识且该插件恰好只有一个实例在运行时回落到该实例，
+    因此只创建了分身、没有默认实例的插件按插件标识同样能取到。有多个实例在运行时不回落，
+    避免按登记顺序取到调用方并未指定的那一个。
 
     :param running_plugins: 运行态插件表 {实例键: plugin}
     :param key: 实例键或插件标识
-    :return: 插件实例，未运行时为 None
+    :return: 插件实例，未运行或无法唯一确定时为 None
     """
     plugin = running_plugins.get(key)
     if plugin is not None:
         return plugin
-    for running_key, running in running_plugins.items():
-        if plugin_id_of(running_key) == key:
-            return running
+    candidates = [running for running_key, running in running_plugins.items()
+                  if plugin_id_of(running_key) == key]
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 

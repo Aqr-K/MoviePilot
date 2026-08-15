@@ -43,3 +43,49 @@ def test_every_registrar_runs_even_when_all_of_them_fail():
         plugin_lifecycle.register_plugin_extensions({}, Mock(), None)
 
     assert attempted == ["modules", "storages", "capabilities"]
+
+
+def test_one_bad_capability_does_not_abort_the_rest():
+    """单条渠道能力声明抛错不影响同一趟里的其余声明。"""
+    from app.runtime.extensions import plugin_lifecycle as lifecycle
+
+    accepted = []
+    good = Mock(channel="ok")
+    bad = Mock(channel="bad")
+
+    def register(capability, owner):
+        """坏声明抛错，好声明记账"""
+        if capability is bad:
+            raise RuntimeError("boom")
+        accepted.append((capability.channel, owner))
+        return True
+
+    manager = Mock()
+    manager.register_capabilities.side_effect = register
+    with patch.object(lifecycle, "get_plugin_provided_channel_capabilities",
+                      return_value={"plugin_a": [bad, good]}), \
+            patch.object(lifecycle, "ChannelCapabilityManager", manager):
+        lifecycle.register_plugin_channel_capabilities({}, None)
+
+    assert accepted == [("ok", "plugin_a")]
+
+
+def test_one_bad_storage_does_not_abort_the_rest():
+    """单条存储声明抛错不影响同一趟里的其余声明。"""
+    from app.runtime.extensions import plugin_lifecycle as lifecycle
+
+    registered = []
+
+    def register(storage, owner):
+        """坏声明抛错，好声明记账"""
+        if storage == "bad":
+            raise RuntimeError("boom")
+        registered.append((storage, owner))
+        return True
+
+    with patch.object(lifecycle, "get_plugin_provided_storages",
+                      return_value={"plugin_a": ["bad", "good"]}), \
+            patch("app.adapters.storage.registry.register_storage", side_effect=register):
+        lifecycle.register_plugin_storages({}, None)
+
+    assert registered == [("good", "plugin_a")]
