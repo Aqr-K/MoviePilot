@@ -47,6 +47,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """回退插件实例配置表。"""
-    if _has_table("pluginconfig"):
-        op.drop_table("pluginconfig")
+    """回退插件实例配置表；表中仍有配置时拒绝执行。"""
+    if not _has_table("pluginconfig"):
+        return
+    pluginconfig = sa.table("pluginconfig", sa.column("id", sa.Integer))
+    remaining = op.get_bind().execute(
+        sa.select(pluginconfig.c.id).limit(1)
+    ).first()
+    if remaining:
+        raise RuntimeError(
+            "pluginconfig 表中仍有插件配置，删表会直接丢数据。"
+            "请先降级到 d1a5c8e3f7b2 之前把配置写回 systemconfig，再回退本迁移。"
+        )
+    op.drop_table("pluginconfig")

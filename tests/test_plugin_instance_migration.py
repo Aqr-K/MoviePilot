@@ -3,6 +3,9 @@
 
 迁移只跑一次却要能重复执行：容器重启、迁移中断重来都会再次进入 upgrade，
 不幂等就会重复插入或把已搬好的数据再搬一次。
+
+降级方向另有一类风险：实例维度在旧结构里没有位置，硬回退就是把分身实例的配置与数据
+悄悄抹掉。回退要么能还原，要么必须报错停下——不能一声不响地少数据。
 """
 import importlib
 
@@ -12,6 +15,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 
+TABLE_MIGRATION_MODULE = "database.versions.c7e1f9a4b8d2_3_1_0"
 CONFIG_MIGRATION_MODULE = "database.versions.d1a5c8e3f7b2_3_1_1"
 DATA_MIGRATION_MODULE = "database.versions.e5f2a9c7b3d1_3_1_2"
 
@@ -303,3 +307,190 @@ def test_plugin_data_migration_downgrade_restores_legacy_shape(monkeypatch):
         indexes = _index_names(connection, "plugindata")
         assert "ix_plugindata_plugin_id_key" in indexes
         assert "ix_plugindata_plugin_instance_key" not in indexes
+
+
+# --------------------------------------------------------------------------- #
+# 降级：分身实例无处安放时必须停下
+# --------------------------------------------------------------------------- #
+
+def test_config_downgrade_refuses_when_clone_instances_exist(monkeypatch):
+    """
+    分身实例的配置在旧结构里没有位置，回退必须报错，而不是把它们连表一起丢掉。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, systemconfig, pluginconfig = _config_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.insert(pluginconfig), [
+            {"instance_id": "default", "plugin_id": "AlphaPlugin",
+             "is_enabled": True, "config_data": {"enable": True}},
+            {"instance_id": "alpha", "plugin_id": "AlphaPlugin",
+             "is_enabled": True, "config_data": {"enable": True, "token": "clone"}},
+        ])
+        migration = _bind_migration(monkeypatch, connection, CONFIG_MIGRATION_MODULE)
+
+        with pytest.raises(RuntimeError) as err:
+            migration.downgrade()
+
+        assert "alpha" in str(err.value)
+        rows = connection.execute(sa.select(pluginconfig.c.instance_id)).scalars().all()
+        assert sorted(rows) == ["alpha", "default"]
+
+
+def test_config_downgrade_restores_enabled_state_missing_from_config(monkeypatch):
+    """
+    启用状态存在独立字段里，回退时要并回配置字典，否则实例回来就是禁用态。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, systemconfig, pluginconfig = _config_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.insert(pluginconfig).values(
+            instance_id="default", plugin_id="AlphaPlugin",
+            is_enabled=True, config_data={"cron": "0 0 * * *"},
+        ))
+        migration = _bind_migration(monkeypatch, connection, CONFIG_MIGRATION_MODULE)
+
+        migration.downgrade()
+
+        value = connection.execute(sa.select(systemconfig.c.value)).scalar_one()
+        assert migration._derive_enabled(value) is True
+        assert value["cron"] == "0 0 * * *"
+
+
+def test_config_downgrade_restores_disabled_state_contradicting_config(monkeypatch):
+    """
+    配置里写着启用、状态字段却是禁用时，以状态字段为准，回退不得把插件重新点亮。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, systemconfig, pluginconfig = _config_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.insert(pluginconfig).values(
+            instance_id="default", plugin_id="AlphaPlugin",
+            is_enabled=False, config_data={"enable": True},
+        ))
+        migration = _bind_migration(monkeypatch, connection, CONFIG_MIGRATION_MODULE)
+
+        migration.downgrade()
+
+        value = connection.execute(sa.select(systemconfig.c.value)).scalar_one()
+        assert migration._derive_enabled(value) is False
+
+
+def test_config_downgrade_round_trips_the_enabled_state(monkeypatch):
+    """
+    升级再回退，插件的启用状态必须与出发时一致。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, systemconfig, pluginconfig = _config_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.insert(systemconfig).values(key="plugin.AlphaPlugin", value={"enabled": True})
+        )
+        migration = _bind_migration(monkeypatch, connection, CONFIG_MIGRATION_MODULE)
+
+        migration.upgrade()
+        migration.downgrade()
+
+        value = connection.execute(sa.select(systemconfig.c.value)).scalar_one()
+        assert migration._derive_enabled(value) is True
+
+
+def test_data_downgrade_refuses_when_clone_instance_rows_exist(monkeypatch):
+    """
+    删掉实例列会让分身的数据与默认实例挤在同一个 (plugin_id, key) 上，
+    按键取数据从此返回任意一条——这种回退必须报错停下。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, plugindata = _legacy_plugindata_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.insert(plugindata).values(plugin_id="AlphaPlugin", key="k1", value={"v": 1})
+        )
+        migration = _bind_migration(monkeypatch, connection, DATA_MIGRATION_MODULE)
+        migration.upgrade()
+        connection.execute(sa.text(
+            "INSERT INTO plugindata (plugin_id, key, value, instance_id) "
+            "VALUES ('AlphaPlugin', 'k1', '{\"v\": 2}', 'alpha')"
+        ))
+
+        with pytest.raises(RuntimeError) as err:
+            migration.downgrade()
+
+        assert "alpha" in str(err.value)
+        columns = {
+            column["name"] for column in sa.inspect(connection).get_columns("plugindata")
+        }
+        assert "instance_id" in columns
+        rows = connection.execute(
+            sa.text("SELECT instance_id FROM plugindata ORDER BY instance_id")
+        ).scalars().all()
+        assert rows == ["alpha", "default"]
+
+
+def test_data_downgrade_keeps_default_instance_rows(monkeypatch):
+    """
+    只有默认实例的数据时回退是无损的，行必须原样留在表里。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, plugindata = _legacy_plugindata_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.insert(plugindata).values(plugin_id="AlphaPlugin", key="k1", value={"v": 1})
+        )
+        migration = _bind_migration(monkeypatch, connection, DATA_MIGRATION_MODULE)
+
+        migration.upgrade()
+        migration.downgrade()
+
+        rows = connection.execute(
+            sa.text("SELECT plugin_id, key FROM plugindata")
+        ).all()
+        assert rows == [("AlphaPlugin", "k1")]
+
+
+def test_table_downgrade_refuses_to_drop_a_non_empty_config_table(monkeypatch):
+    """
+    删表是不可逆的，表里还有配置就必须报错，而不是静默 drop。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, _, pluginconfig = _config_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(sa.insert(pluginconfig).values(
+            instance_id="default", plugin_id="AlphaPlugin",
+            is_enabled=True, config_data={"enable": True},
+        ))
+        migration = _bind_migration(monkeypatch, connection, TABLE_MIGRATION_MODULE)
+
+        with pytest.raises(RuntimeError):
+            migration.downgrade()
+
+        assert "pluginconfig" in sa.inspect(connection).get_table_names()
+
+
+def test_table_downgrade_drops_an_empty_config_table(monkeypatch):
+    """
+    表已清空时回退照常删表，完整降级链能一路走到底。
+    """
+    engine = sa.create_engine("sqlite://")
+    metadata, _, _ = _config_schema()
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        migration = _bind_migration(monkeypatch, connection, TABLE_MIGRATION_MODULE)
+
+        migration.downgrade()
+
+        assert "pluginconfig" not in sa.inspect(connection).get_table_names()

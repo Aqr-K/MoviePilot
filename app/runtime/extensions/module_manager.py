@@ -6,7 +6,7 @@ from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.foundation.reflection import ModuleHelper
 from app.runtime.extensions.contract import verify_module_contract
-from app.runtime.extensions.plugin_instance import qualify_module_id
+from app.runtime.extensions.plugin_instance import plugin_id_of, qualify_module_id
 from app.runtime.log import logger
 from app.schemas.types import EventType, ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
     OtherModulesType, MediaRecognizeType
@@ -266,7 +266,9 @@ class ModuleManager(metaclass=Singleton):
         注册一个外部来源声明的模块，通过契约校验后按内建流程实例化并上线
 
         模块标识与已有模块重名且归属不同来源时拒绝注册，先到者胜；同一来源重复注册为幂等更新。
-        非默认实例的声明按实例键限定模块标识，使同一插件的多个实例注册同一模块类时互不覆盖。
+        非默认实例的声明按实例键限定模块标识，使同一插件的多个实例注册同一模块类时互不覆盖；
+        限定只在同一插件内部消歧，声明自身的模块标识仍要与内建模块和其它插件的模块不重名，
+        因此同一份声明在默认实例与分身实例上得到相同的接受或拒绝结果。
 
         :param module: 模块类或 ProvidedModule 声明
         :param owner: 注册来源的实例键，用于按来源精确卸载
@@ -277,9 +279,10 @@ class ModuleManager(metaclass=Singleton):
         declaration = module if isinstance(module, ProvidedModule) else ProvidedModule(module)
         if not isinstance(declaration.module_cls, type):
             return False
+        declared_id = declaration.module_id
         declaration = ProvidedModule(
             module_cls=declaration.module_cls,
-            module_id=qualify_module_id(declaration.module_id, owner),
+            module_id=qualify_module_id(declared_id, owner),
             factory=declaration.factory,
         )
         module_id = declaration.module_id
@@ -292,6 +295,12 @@ class ModuleManager(metaclass=Singleton):
             if module_id in self._modules and existing_owner != owner:
                 logger.warning(
                     f"模块注册冲突：{module_id} 已存在（owner={existing_owner or 'builtin'}），"
+                    f"拒绝来自 {owner} 的注册")
+                return False
+            if self._is_taken_by_others(declared_id, owner):
+                logger.warning(
+                    f"模块注册冲突：{declared_id} 已存在"
+                    f"（owner={self._find_owner(declared_id) or 'builtin'}），"
                     f"拒绝来自 {owner} 的注册")
                 return False
             declared = self._external_classes.get(owner, [])
@@ -369,6 +378,23 @@ class ModuleManager(metaclass=Singleton):
         for owner, declared in list(self._external_classes.items()):
             for declaration in declared:
                 self._activate_module(declaration, owner)
+
+    def _is_taken_by_others(self, module_id: str, owner: str) -> bool:
+        """
+        判断未限定的模块标识是否已被内建模块或其它插件占用，调用方需持有 self._lock
+
+        同一插件的不同实例共用一份声明，不算占用。
+
+        :param module_id: 声明自身的模块标识
+        :param owner: 注册来源的实例键
+        :return: 是否被他人占用
+        """
+        if module_id not in self._modules:
+            return False
+        holder = self._find_owner(module_id)
+        if holder is None:
+            return True
+        return plugin_id_of(holder) != plugin_id_of(owner)
 
     def _find_owner(self, module_id: str) -> Optional[str]:
         """

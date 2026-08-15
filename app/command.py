@@ -1,7 +1,7 @@
 import copy
 import threading
 import traceback
-from typing import Any, Union, Dict, Optional
+from typing import Any, Union, Dict, List, Optional, Set, Tuple
 
 from app.chain import ChainBase
 from app.chain.download import DownloadChain
@@ -12,6 +12,7 @@ from app.chain.subscribe import SubscribeChain
 from app.chain.system import SystemChain
 from app.chain.transfer import TransferChain
 from app.runtime.events import Event as ManagerEvent, eventmanager, Event
+from app.runtime.extensions.plugin_instance import is_default_instance_key, plugin_id_of
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.extensions.plugin_spi import get_plugin_commands
 from app.application.messaging.message import MessageHelper
@@ -143,6 +144,8 @@ class Command(metaclass=Singleton):
         self._plugin_commands = {}
         # 其他命令集合
         self._other_commands = {}
+        # 上次构建时已告警的命令重叠，用于重复构建时抑制同一组提示
+        self._warned_command_overlaps: Set[Tuple[str, str, str]] = set()
         # 初始化锁
         self._rlock = threading.RLock()
         # 插件管理
@@ -271,25 +274,29 @@ class Command(metaclass=Singleton):
         """
         构建插件命令
 
-        一条命令只归属一个声明来源：不同来源声明同一条命令时先到者胜并告警，同一来源
-        重复声明按最后一次声明更新。来源为实例键，因此同一插件的两个实例也按此判定。
+        菜单里一条命令只占一个条目，条目的描述与归属取自选中的声明来源；同一来源重复声明
+        按最后一次声明更新。多个来源声明同一条命令时，归属插件按声明顺序取先到者，该插件
+        内优先取默认实例，因此分身不会顶掉默认实例的菜单条目。
+
+        菜单条目不限制执行范围：命令按事件类型投递，订阅了该事件且已启用的实例都会收到。
+
+        :return: {命令: 命令条目}
         """
         # 为了保证命令顺序的一致性，目前这里没有直接使用 pid 获取单一插件命令，后续如果存在性能问题，可以考虑优化这里的逻辑
-        plugin_commands = {}
+        declarations: Dict[str, Dict[str, dict]] = {}
         for command in get_plugin_commands(self.pluginmanager.running_plugins):
             cmd = command.get("cmd")
             if not cmd:
                 continue
-            pid = command.get("pid")
-            registered = plugin_commands.get(cmd)
-            if registered is not None and registered.get("pid") != pid:
-                logger.warning(
-                    f"插件命令冲突：{cmd} 已由 {registered.get('pid')} 注册，"
-                    f"拒绝来自 {pid} 的注册"
-                )
-                continue
+            declarations.setdefault(cmd, {})[command.get("pid")] = command
+        plugin_commands = {}
+        overlaps = set()
+        for cmd, by_owner in declarations.items():
+            owner = self.__elect_command_owner(list(by_owner))
+            overlaps.update((cmd, owner, other) for other in by_owner if other != owner)
+            command = by_owner[owner]
             plugin_commands[cmd] = {
-                "pid": pid,
+                "pid": owner,
                 "func": self.send_plugin_event,
                 "description": command.get("desc"),
                 "category": command.get("category"),
@@ -299,7 +306,42 @@ class Command(metaclass=Singleton):
                     "data": command.get("data"),
                 },
             }
+        self.__warn_command_overlaps(overlaps)
         return plugin_commands
+
+    @staticmethod
+    def __elect_command_owner(owners: List[str]) -> str:
+        """
+        在声明同一条命令的来源中选出菜单归属
+
+        先按声明顺序定下归属插件，再在该插件内优先取默认实例。
+
+        :param owners: 声明该命令的实例键，按声明顺序排列
+        :return: 菜单条目归属的实例键
+        """
+        elected_plugin = plugin_id_of(owners[0])
+        same_plugin = [owner for owner in owners if plugin_id_of(owner) == elected_plugin]
+        return next(
+            (owner for owner in same_plugin if is_default_instance_key(owner)),
+            same_plugin[0],
+        )
+
+    def __warn_command_overlaps(self, overlaps: Set[Tuple[str, str, str]]) -> None:
+        """
+        就多个来源声明同一条命令留下告警，重复构建时同一组重叠只提示一次
+
+        :param overlaps: (命令, 菜单归属实例键, 未占用菜单的实例键) 集合
+        """
+        warned = getattr(self, "_warned_command_overlaps", None)
+        if warned is None:
+            warned = set()
+        for overlap in sorted(overlaps - warned):
+            cmd, owner, other = overlap
+            logger.warning(
+                f"插件命令重叠：{cmd} 的菜单条目取自 {owner}，{other} 的声明不再单独显示；"
+                f"命令事件仍按各自的事件订阅投递"
+            )
+        self._warned_command_overlaps = overlaps
 
     def __run_command(
         self,
@@ -447,7 +489,12 @@ class Command(metaclass=Singleton):
     @staticmethod
     def send_plugin_event(etype: EventType, data: dict) -> None:
         """
-        发送插件命令
+        发送插件命令事件
+
+        按事件类型广播，订阅该事件且已启用的插件实例都会收到，投递范围不受菜单条目归属限制。
+
+        :param etype: 命令声明的事件类型
+        :param data: 命令声明的事件数据
         """
         eventmanager.send_event(etype, data)
 

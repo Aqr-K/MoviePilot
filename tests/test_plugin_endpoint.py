@@ -436,12 +436,8 @@ def test_reset_plugin_sends_pre_reset_chain_event_before_deleting_data():
     plugin_manager = MagicMock()
     calls = []
 
-    def delete_config(plugin_id, force=False):
-        calls.append(("delete_config", plugin_id, force))
-        return True
-
-    def delete_data(plugin_id, force=False):
-        calls.append(("delete_data", plugin_id, force))
+    def reset(plugin_id, instance_id=None):
+        calls.append(("reset", plugin_id, instance_id))
         return True
 
     def stop_plugin(plugin_id):
@@ -449,8 +445,7 @@ def test_reset_plugin_sends_pre_reset_chain_event_before_deleting_data():
         return True
 
     plugin_manager.stop.side_effect = stop_plugin
-    plugin_manager.delete_plugin_config.side_effect = delete_config
-    plugin_manager.delete_plugin_data.side_effect = delete_data
+    plugin_manager.reset_plugin.side_effect = reset
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
@@ -461,7 +456,7 @@ def test_reset_plugin_sends_pre_reset_chain_event_before_deleting_data():
         result = reset_plugin("SubscribeAssistantEnhanced", None)
 
     assert result.success is True
-    assert len(calls) == 4
+    assert len(calls) == 3
     event_call = calls[0]
     assert event_call[0] == "event"
     assert event_call[1] is ChainEventType.PluginDataReset
@@ -471,8 +466,7 @@ def test_reset_plugin_sends_pre_reset_chain_event_before_deleting_data():
     assert event_call[2].reset_data is True
     assert calls[1:] == [
         ("stop", "SubscribeAssistantEnhanced"),
-        ("delete_config", "SubscribeAssistantEnhanced", True),
-        ("delete_data", "SubscribeAssistantEnhanced", True),
+        ("reset", "SubscribeAssistantEnhanced", None),
     ]
     reload_plugin_mock.assert_called_once_with("SubscribeAssistantEnhanced")
 

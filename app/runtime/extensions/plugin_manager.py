@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import shutil
 import traceback
 from typing import Any, Dict, List, Optional, Type
 
@@ -518,12 +519,81 @@ class PluginManager(metaclass=Singleton):
         if not force and not self.has_plugin(pid):
             return False
         PluginDataOper().del_data(pid)
-        # 删除插件自管理的独立库，失败不影响已完成的数据清理
+        self._drop_plugin_database(pid)
+        return True
+
+    @staticmethod
+    def _drop_plugin_database(pid: str) -> None:
+        """
+        删除插件自管理的独立库，失败不影响已完成的数据清理
+
+        :param pid: 插件ID
+        """
         try:
             from app.db.plugin import teardown_plugin_database
             teardown_plugin_database(pid)
         except Exception as err:
             logger.error(f"删除插件 {pid} 自管理数据库出错：{str(err)}")
+
+    @staticmethod
+    def _stored_instance_ids(pid: str) -> List[str]:
+        """
+        列出插件已落库的实例标识，未落库的隐式默认实例不在其中
+
+        :param pid: 插件ID
+        :return: 按落库顺序去重的实例标识列表
+        """
+        try:
+            records = PluginConfigOper().list_instances(pid) or []
+        except Exception as err:
+            logger.error(f"读取插件 {pid} 实例列表出错：{str(err)}")
+            return []
+        stored = []
+        for record in records:
+            if not record.instance_id:
+                continue
+            try:
+                normalized = normalize_instance_id(record.instance_id)
+            except ValueError as err:
+                logger.error(f"跳过插件 {pid} 的非法实例配置：{str(err)}")
+                continue
+            if normalized not in stored:
+                stored.append(normalized)
+        return stored
+
+    def reset_plugin(self, pid: str, instance_id: Optional[str] = None) -> bool:
+        """
+        清空插件的配置与数据，已创建的实例定义保留
+
+        实例定义是用户资产：清空后各实例仍在，只是配置回到空、数据被删除。数据目录不在
+        清空范围内，与默认实例重置不动插件目录保持一致。自管理库由同插件的全部实例共享，
+        只在整插件清空时删除。
+
+        :param pid: 插件ID
+        :param instance_id: 实例ID，为空时清空该插件的全部实例
+        :return: 是否清空成功
+        :raises ValueError: 实例标识含非法字符或超长
+        """
+        config_oper = PluginConfigOper()
+        data_oper = PluginDataOper()
+        stored_ids = self._stored_instance_ids(pid)
+
+        if instance_id is None:
+            config_oper.delete_plugin(pid)
+            data_oper.del_data(pid)
+            self._drop_plugin_database(pid)
+            # 只有存在分身时才需要显式补回实例定义：单实例插件的默认实例本就隐式存在，
+            # 补一行空配置反而会让存量插件的重置结果与升级前不同
+            if any(stored != DEFAULT_INSTANCE_ID for stored in stored_ids):
+                for stored in stored_ids:
+                    config_oper.set(pid, {}, stored)
+            return True
+
+        normalized = normalize_instance_id(instance_id)
+        config_oper.delete(pid, normalized)
+        data_oper.del_data(pid, instance_id=normalized)
+        if normalized in stored_ids:
+            config_oper.set(pid, {}, normalized)
         return True
 
     def get_plugin_instances(self, plugin_id: str) -> List[Dict[str, Any]]:
@@ -610,7 +680,7 @@ class PluginManager(metaclass=Singleton):
 
     def delete_plugin_instance(self, plugin_id: str, instance_id: str) -> str:
         """
-        删除插件实例，停止运行态并清除该实例的配置与数据
+        删除插件实例，停止运行态并清除该实例的配置、数据与数据目录
 
         :param plugin_id: 插件ID
         :param instance_id: 实例ID
@@ -624,7 +694,35 @@ class PluginManager(metaclass=Singleton):
         self.stop(plugin_id, normalized)
         PluginConfigOper().delete(plugin_id, normalized)
         PluginDataOper().del_data(plugin_id, instance_id=normalized)
+        self._remove_instance_data_path(plugin_id, normalized)
         return key
+
+    @staticmethod
+    def _remove_instance_data_path(plugin_id: str, instance_id: str) -> None:
+        """
+        回收插件实例独占的数据目录
+
+        默认实例的数据目录就是插件目录本身，由插件级操作负责，这里只处理分身独占的
+        ``PLUGIN_DATA_PATH/<plugin_id>/instances/<instance_id>``。
+
+        :param plugin_id: 插件ID
+        :param instance_id: 实例ID
+        """
+        if instance_id == DEFAULT_INSTANCE_ID:
+            return
+        plugin_path = settings.PLUGIN_DATA_PATH / plugin_id
+        data_path = plugin_path / "instances" / instance_id
+        try:
+            # 实例标识拼进路径，落点必须仍在插件目录之内且不是插件目录本身
+            resolved = data_path.resolve()
+            if resolved == plugin_path.resolve() or not resolved.is_relative_to(plugin_path.resolve()):
+                logger.error(f"拒绝回收插件 {plugin_id} 实例 {instance_id} 的目录：{resolved}")
+                return
+            if not resolved.is_dir():
+                return
+            shutil.rmtree(resolved)
+        except Exception as err:
+            logger.error(f"回收插件 {plugin_id} 实例 {instance_id} 数据目录出错：{str(err)}")
 
     def get_plugin_state(self, pid: str) -> bool:
         """

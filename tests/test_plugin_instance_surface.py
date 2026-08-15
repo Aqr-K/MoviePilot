@@ -447,13 +447,13 @@ def test_targeted_input_reaches_only_the_named_instance(monkeypatch):
     assert RECEIVED == ["alpha"]
 
 
-def test_target_without_instance_still_reaches_every_instance(monkeypatch):
-    """目标只给到插件标识时，该插件的全部实例仍按原行为收取。"""
+def test_target_without_instance_reaches_only_the_default_instance(monkeypatch):
+    """目标只给到插件标识时只投递给默认实例，分身收不到本不属于它的会话内容。"""
     two_running_instances(monkeypatch)
 
     dispatch_to(PLUGIN_ID)
 
-    assert sorted(RECEIVED) == ["alpha", DEFAULT_INSTANCE_ID]
+    assert RECEIVED == [DEFAULT_INSTANCE_ID]
 
 
 def test_single_instance_targeted_delivery_is_unchanged(monkeypatch):

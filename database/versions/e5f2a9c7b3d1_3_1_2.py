@@ -100,9 +100,27 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """回退实例列并恢复按插件与键定位的索引。"""
+    """
+    回退实例列并恢复按插件与键定位的索引。
+
+    旧结构以 ``(plugin_id, key)`` 定位一条数据，分身实例的行删列后会与默认实例挤在
+    同一个键上，按键读取从此返回任意一条；存在分身数据时中止回退。
+    """
     if not _has_table("plugindata"):
         return
+
+    if _has_column("plugindata", "instance_id"):
+        plugindata = _plugindata_table()
+        clones = op.get_bind().execute(
+            sa.select(plugindata.c.instance_id)
+            .where(plugindata.c.instance_id != DEFAULT_INSTANCE_ID)
+            .distinct()
+        ).scalars().all()
+        if clones:
+            raise RuntimeError(
+                f"存在插件分身实例（{'、'.join(clones)}）的数据，删除实例列会让它们与默认实例"
+                "共用同一个 (plugin_id, key)。请先清除这些实例的数据，再回退本迁移。"
+            )
 
     if not _has_index("plugindata", LEGACY_INDEX_NAME):
         op.create_index(

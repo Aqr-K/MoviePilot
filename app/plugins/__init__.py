@@ -84,6 +84,11 @@ class _PluginBase(metaclass=ABCMeta):
         获取实例键
 
         事件定向投递、接口路由与定时服务都以实例键定位一个实例；默认实例的实例键即插件标识。
+
+        向框架登记「本实例」时一律传本属性，不要传 self.plugin_id 或 self.__class__.__name__：
+        裸插件标识只解析到默认实例，分身实例用它登记的插件输入会话，用户回复会被投递给默认
+        实例而不是自己。典型场景是
+        `plugin_input_interaction_manager.create_or_replace(..., plugin_id=self.instance_key, ...)`。
         """
         return instance_key(self.plugin_id, self.instance_id)
 
@@ -280,6 +285,12 @@ class _PluginBase(metaclass=ABCMeta):
         定义 `class XxxModel(PluginBase): ...`，再于此返回 `[XxxModel, ...]`；
         读写用 `self.get_plugin_db().session()`（即「自会话管理」）。
 
+        【多实例】自管理表按插件划分，同一插件的全部实例共享同一个库与同一套表——
+        这与 get_config()、save_data()/get_data()、get_data_path() 按实例隔离的行为
+        不同。分身实例写同一张表时，只按业务键建唯一约束会让两个实例互相覆盖。
+        需要按实例分开存放的，混入 app.db.plugin.instance.PluginInstanceMixin
+        取得 instance_id 列与索引，并把 self.instance_id 带进唯一约束与查询条件。
+
         [XxxModel, YyyModel, ...]
         """
         return []
@@ -357,6 +368,9 @@ class _PluginBase(metaclass=ABCMeta):
         返回 app.db.plugin.PluginDatabase（持有插件专属 Engine + ScopedSession，
         落 PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db）。配合 provides_models()
         声明的模型，用 `self.get_plugin_db().session()` 进行读写（自会话管理）。
+
+        【多实例】容器按插件标识注册，同一插件的全部实例拿到同一个容器、共享同一个库，
+        实例标识不参与寻址。需要按实例分开存放的表，见 provides_models() 的说明。
         """
         from app.db.plugin import db_manager
         return db_manager.register_plugin(self.plugin_id)

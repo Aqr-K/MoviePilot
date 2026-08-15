@@ -5,7 +5,11 @@
 SQLite 每插件一个独立 .db 文件与独立引擎，落在
 ``PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db``；PostgreSQL 每插件一个独立
 schema，共用核心引擎的连接池、仅以 schema_translate_map 路由。
+
+同一插件的多个实例共用一个容器，注册、建表、释放与删除都可能来自不同线程，注册表的
+读改写全程加锁，容器建立按插件串行，插件之间互不排队。
 """
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -60,22 +64,48 @@ class DbManager:
 
     def __init__(self):
         self._plugins: Dict[str, PluginDatabase] = {}
+        # 保护注册表本身的读改写
+        self._lock = threading.RLock()
+        # 按插件串行化容器的建立与销毁，建引擎不占用注册表锁
+        self._plugin_locks: Dict[str, threading.RLock] = {}
+
+    def _plugin_lock(self, plugin_id: str) -> threading.RLock:
+        """
+        取插件专属的生命周期锁，首次访问时建立
+        :param plugin_id: 插件唯一标识
+        :return: 该插件的生命周期锁
+        """
+        with self._lock:
+            lock = self._plugin_locks.get(plugin_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._plugin_locks[plugin_id] = lock
+            return lock
 
     def register_plugin(self, plugin_id: str) -> PluginDatabase:
         """
         注册插件数据库容器，已注册时直接返回既有容器
+
+        并发注册同一插件只建立一个容器，其余调用方等待并拿到同一个实例。
         :param plugin_id: 插件唯一标识
         :return: 该插件的数据库容器
         """
-        existing = self._plugins.get(plugin_id)
-        if existing is not None:
-            return existing
-        if settings.DB_TYPE.lower() == "postgresql":
-            bundle = self._build_postgresql_bundle(plugin_id)
-        else:
-            bundle = self._build_sqlite_bundle(plugin_id)
-        self._plugins[plugin_id] = bundle
-        return bundle
+        with self._lock:
+            existing = self._plugins.get(plugin_id)
+            if existing is not None:
+                return existing
+        with self._plugin_lock(plugin_id):
+            with self._lock:
+                existing = self._plugins.get(plugin_id)
+                if existing is not None:
+                    return existing
+            if settings.DB_TYPE.lower() == "postgresql":
+                bundle = self._build_postgresql_bundle(plugin_id)
+            else:
+                bundle = self._build_sqlite_bundle(plugin_id)
+            with self._lock:
+                self._plugins[plugin_id] = bundle
+            return bundle
 
     @staticmethod
     def _build_sqlite_bundle(plugin_id: str) -> PluginDatabase:
@@ -123,49 +153,57 @@ class DbManager:
     def create_tables(self, plugin_id: str) -> None:
         """
         在插件的独立库或 schema 中创建其 MetaData 上声明的全部表
+
+        建表期间持有该插件的生命周期锁，与同插件的注册和释放互斥。
         :param plugin_id: 插件唯一标识
+        :raises KeyError: 插件尚未注册数据库容器
         """
-        bundle = self._plugins.get(plugin_id)
-        if bundle is None:
-            raise KeyError(f"插件未注册数据库容器: {plugin_id}")
-        if bundle.metadata is None:
-            return
-        if bundle.schema:
-            # 必须在同一事务连接上先建 schema 再建表：绑定到 engine 建表时目标
-            # schema 尚未创建，PostgreSQL 会直接报 schema does not exist
-            with bundle.engine.begin() as conn:
-                conn.execute(_pg_create_schema_ddl(bundle.schema))
-                bundle.metadata.create_all(conn)
-        else:
-            bundle.metadata.create_all(bundle.engine)
+        with self._plugin_lock(plugin_id):
+            with self._lock:
+                bundle = self._plugins.get(plugin_id)
+            if bundle is None:
+                raise KeyError(f"插件未注册数据库容器: {plugin_id}")
+            if bundle.metadata is None:
+                return
+            if bundle.schema:
+                # 必须在同一事务连接上先建 schema 再建表：绑定到 engine 建表时目标
+                # schema 尚未创建，PostgreSQL 会直接报 schema does not exist
+                with bundle.engine.begin() as conn:
+                    conn.execute(_pg_create_schema_ddl(bundle.schema))
+                    bundle.metadata.create_all(conn)
+            else:
+                bundle.metadata.create_all(bundle.engine)
 
     def drop_plugin(self, plugin_id: str) -> None:
         """
         删除插件的独立库：释放容器并删除库文件或 schema，未注册时静默返回
 
-        只删数据库本身，插件数据目录下的其它文件由插件管理器负责清理。
+        只删数据库本身，插件数据目录下的其它文件由插件管理器负责清理。删除期间持有该
+        插件的生命周期锁，同插件的注册会等待删除完成后重建容器。
         :param plugin_id: 插件唯一标识
         """
-        bundle = self._plugins.pop(plugin_id, None)
-        if bundle is None:
-            return
-        if bundle.schema:
-            try:
-                with bundle.engine.begin() as conn:
-                    conn.execute(_pg_drop_schema_ddl(bundle.schema))
-            finally:
-                bundle.dispose()
-            return
-        bundle.dispose()
-        db_path = bundle.db_path
-        # WAL 边车与主库文件同去同留，留下会让下次建库读到半截状态
-        for path in (
-                db_path,
-                db_path.with_name(db_path.name + "-wal"),
-                db_path.with_name(db_path.name + "-shm"),
-        ):
-            if path.exists():
-                path.unlink()
+        with self._plugin_lock(plugin_id):
+            with self._lock:
+                bundle = self._plugins.pop(plugin_id, None)
+            if bundle is None:
+                return
+            if bundle.schema:
+                try:
+                    with bundle.engine.begin() as conn:
+                        conn.execute(_pg_drop_schema_ddl(bundle.schema))
+                finally:
+                    bundle.dispose()
+                return
+            bundle.dispose()
+            db_path = bundle.db_path
+            # WAL 边车与主库文件同去同留，留下会让下次建库读到半截状态
+            for path in (
+                    db_path,
+                    db_path.with_name(db_path.name + "-wal"),
+                    db_path.with_name(db_path.name + "-shm"),
+            ):
+                if path.exists():
+                    path.unlink()
 
     def get(self, plugin_id: str) -> Optional[PluginDatabase]:
         """
@@ -173,7 +211,8 @@ class DbManager:
         :param plugin_id: 插件唯一标识
         :return: 数据库容器，未注册时为 None
         """
-        return self._plugins.get(plugin_id)
+        with self._lock:
+            return self._plugins.get(plugin_id)
 
     def is_registered(self, plugin_id: str) -> bool:
         """
@@ -181,22 +220,27 @@ class DbManager:
         :param plugin_id: 插件唯一标识
         :return: 是否已注册
         """
-        return plugin_id in self._plugins
+        with self._lock:
+            return plugin_id in self._plugins
 
     def dispose(self, plugin_id: str) -> None:
         """
         释放并注销插件的数据库容器，只断连接、保留数据
         :param plugin_id: 插件唯一标识
         """
-        bundle = self._plugins.pop(plugin_id, None)
-        if bundle is not None:
-            bundle.dispose()
+        with self._plugin_lock(plugin_id):
+            with self._lock:
+                bundle = self._plugins.pop(plugin_id, None)
+            if bundle is not None:
+                bundle.dispose()
 
     def dispose_all(self) -> None:
         """
         释放全部插件数据库容器，供进程关停调用
         """
-        for plugin_id in list(self._plugins.keys()):
+        with self._lock:
+            plugin_ids = list(self._plugins.keys())
+        for plugin_id in plugin_ids:
             self.dispose(plugin_id)
 
 

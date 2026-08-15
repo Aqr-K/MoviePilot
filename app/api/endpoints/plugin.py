@@ -783,7 +783,7 @@ def reset_plugin(
     plugin_id: str, _: User = Depends(get_current_active_superuser)
 ) -> Any:
     """
-    根据插件ID重置插件配置及数据
+    根据插件ID重置插件配置及数据，用户创建的实例定义保留
     """
     plugin_manager = PluginManager()
     eventmanager.send_event(
@@ -792,12 +792,50 @@ def reset_plugin(
     )
     # 事件处理器需要运行中插件完成补偿；补偿后先停止插件，避免删除数据时仍有任务读写旧状态。
     plugin_manager.stop(plugin_id)
-    # 删除配置
-    plugin_manager.delete_plugin_config(plugin_id, force=True)
-    # 删除插件所有数据
-    plugin_manager.delete_plugin_data(plugin_id, force=True)
+    # 清空全部实例的配置与数据，实例本身保留
+    plugin_manager.reset_plugin(plugin_id)
     # 重新加载插件
     reload_plugin(plugin_id)
+    return schemas.Response(success=True)
+
+
+@router.post(
+    "/instances/{plugin_id}/{instance_id}/reset",
+    summary="重置插件实例配置及数据",
+    response_model=schemas.Response[None],
+)
+def reset_plugin_instance(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    重置插件单个实例的配置及数据，实例本身与同插件其它实例均保留
+    """
+    plugin_manager = PluginManager()
+    try:
+        normalized = normalize_instance_id(instance_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    existing = {
+        instance.get("instance_id")
+        for instance in plugin_manager.get_plugin_instances(plugin_id)
+    }
+    if normalized not in existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 的实例 {normalized} 不存在",
+        )
+    eventmanager.send_event(
+        ChainEventType.PluginDataReset,
+        PluginDataResetEventData(plugin_id=plugin_id, reset_config=True, reset_data=True),
+    )
+    # 事件处理器需要运行中插件完成补偿；补偿后先停止该实例，避免清空时仍有任务读写旧状态
+    plugin_manager.stop(plugin_id, normalized)
+    plugin_manager.reset_plugin(plugin_id, normalized)
+    # 重新拉起该插件的全部实例，被重置的实例带着空配置回到运行态
+    reload_plugin(plugin_id)
+    register_plugin(plugin_id)
     return schemas.Response(success=True)
 
 

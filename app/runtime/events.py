@@ -12,13 +12,31 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, Any, Type
 from fastapi.concurrency import run_in_threadpool
 
 from app.runtime.config import global_vars
-from app.runtime.extensions.plugin_instance import matches_plugin, plugin_id_of
+from app.runtime.extensions.plugin_instance import instance_key, plugin_id_of, split_instance_key
 from app.runtime.thread import ThreadHelper
 from app.runtime.log import logger
 from app.schemas import ChainEventData
 from app.schemas.types import ChainEventType, EventType
 from app.runtime.rate import ExponentialBackoffRateLimiter
 from app.foundation.singleton import Singleton
+
+def canonical_target_owner(owner: Optional[str]) -> Optional[str]:
+    """
+    把定向投递的目标归一成实例键
+
+    裸插件标识与显式写出的默认实例标识都指向默认实例；实例标识非法时原样返回，
+    该取值不会等于任何运行中实例的实例键，定向因此落空而不是退化成广播。
+
+    :param owner: 目标插件标识或实例键，为空表示不定向
+    :return: 归一后的实例键，为空时返回 None
+    """
+    if not owner:
+        return None
+    try:
+        return instance_key(*split_instance_key(owner))
+    except ValueError:
+        return owner
+
 
 DEFAULT_EVENT_PRIORITY = 10  # 事件的默认优先级
 MIN_EVENT_CONSUMER_THREADS = 1  # 最小事件消费者线程数
@@ -549,7 +567,9 @@ class EventManager(metaclass=Singleton):
         target_owner = None
         if event.event_type == EventType.MessageAction and isinstance(event.event_data, dict):
             target_plugin_id = event.event_data.get("__mp_target_plugin_id")
-            target_owner = str(target_plugin_id) if target_plugin_id else None
+            target_owner = canonical_target_owner(
+                str(target_plugin_id) if target_plugin_id else None
+            )
         # 为每个处理器提供独立的事件实例，防止某个处理器对 event_data 的修改影响其他处理器
         for handler_id, handler in handlers.items():
             if target_owner and not self.__should_dispatch_to_target_plugin(
@@ -729,10 +749,11 @@ class EventManager(metaclass=Singleton):
         """将装饰阶段保存的函数解析为当前全部启用实例上的可调用方法。
 
         :param handler: 装饰阶段保存的处理器函数
-        :param target_owner: 定向投递的插件标识或实例键；实例键只命中该实例，
-            插件标识命中该插件的全部实例，为空时不做定向筛选
+        :param target_owner: 定向投递的目标，只命中实例键与之相等的那一个实例；
+            裸插件标识即默认实例的实例键，为空时不做定向筛选
         :return: (方法, 实例绑定, 类名, 方法名) 列表
         """
+        target_owner = canonical_target_owner(target_owner)
         owner_class = self.__get_handler_owner_class(handler)
         method_name = getattr(handler, "__name__", self.__parse_handler_names(handler)[1])
         if owner_class is None:
@@ -772,8 +793,9 @@ class EventManager(metaclass=Singleton):
                 continue
             if not self.__is_instance_enabled(class_identifier, binding.instance_key):
                 continue
-            if target_owner and binding.instance_key and not matches_plugin(
-                    binding.instance_key, target_owner):
+            # 定向投递的事件携带用户自由文本，只能交给会话所属的那一个实例；
+            # 未登记实例键的绑定只有一个实例，按默认实例参与比对
+            if target_owner and (binding.instance_key or owner_class.__name__) != target_owner:
                 continue
             method = getattr(binding.instance, method_name, None)
             if not callable(method):

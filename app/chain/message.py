@@ -23,6 +23,7 @@ from app.chain.skills import SkillsChain, skills_interaction_manager
 from app.chain.subscribe import SubscribeChain, subscribe_interaction_manager
 from app.chain.transfer import TransferChain
 from app.runtime.config import settings, global_vars
+from app.runtime.events import canonical_target_owner
 from app.domain.context import MediaInfo, Context
 from app.domain.meta.metabase import MetaBase
 from app.db.models import TransferHistory
@@ -531,6 +532,17 @@ class MessageChain(ChainBase):
         )
         return False
 
+    @staticmethod
+    def _target_instance_key(plugin_id: str) -> str:
+        """
+        把输入会话登记的插件标识归一成事件定向目标的实例键。
+
+        :param plugin_id: 插件登记会话时传入的标识，取值为 ``self.instance_key``
+            或历史上的裸插件标识
+        :return: 实例键，裸标识对应默认实例
+        """
+        return canonical_target_owner(plugin_id) or plugin_id
+
     def _handle_plugin_input_interaction(
             self,
             channel: MessageChannel,
@@ -570,7 +582,7 @@ class MessageChain(ChainBase):
                 EventType.MessageAction,
                 {
                     "plugin_id": request.plugin_id,
-                    "__mp_target_plugin_id": request.plugin_id,
+                    "__mp_target_plugin_id": self._target_instance_key(request.plugin_id),
                     "text": f"plugin_input_expired|{request.request_id}",
                     "userid": userid,
                     "channel": channel,
@@ -601,7 +613,7 @@ class MessageChain(ChainBase):
                 EventType.MessageAction,
                 {
                     "plugin_id": request.plugin_id,
-                    "__mp_target_plugin_id": request.plugin_id,
+                    "__mp_target_plugin_id": self._target_instance_key(request.plugin_id),
                     "text": f"plugin_input_cancel|{request.request_id}",
                     "userid": userid,
                     "channel": channel,
@@ -631,7 +643,7 @@ class MessageChain(ChainBase):
             EventType.MessageAction,
             {
                 "plugin_id": request.plugin_id,
-                "__mp_target_plugin_id": request.plugin_id,
+                "__mp_target_plugin_id": self._target_instance_key(request.plugin_id),
                 "text": f"plugin_input|{request.request_id}",
                 "input_text": text,
                 "userid": userid,

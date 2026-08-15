@@ -72,6 +72,28 @@ def _derive_enabled(config) -> bool:
     return False
 
 
+def _restore_config(config, is_enabled: bool):
+    """
+    把启用状态并回配置字典，使写回系统配置表的取值能重新推导出同一个状态
+
+    :param config: 实例配置
+    :param is_enabled: 实例的启用状态
+    :return: 写回系统配置表的配置
+    """
+    enabled = bool(is_enabled)
+    if not isinstance(config, dict):
+        return {"enable": True} if enabled else config
+    if _derive_enabled(config) is enabled:
+        return config
+    restored = dict(config)
+    # 只写着 enabled 的配置沿用该拼写，避免回退后同一份配置出现两个启用字段
+    if "enabled" in restored and "enable" not in restored:
+        restored["enabled"] = enabled
+    else:
+        restored["enable"] = enabled
+    return restored
+
+
 def upgrade() -> None:
     """把系统配置表中的插件配置搬到插件实例配置表，并清除原键。"""
     if not _has_table("systemconfig") or not _has_table("pluginconfig"):
@@ -125,7 +147,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """把默认实例的插件配置写回系统配置表，并清除实例配置。"""
+    """
+    把默认实例的插件配置写回系统配置表，并清除实例配置。
+
+    系统配置表一个插件只有一个键，装不下分身实例；存在分身时中止回退。
+    """
     if not _has_table("systemconfig") or not _has_table("pluginconfig"):
         return
 
@@ -133,12 +159,26 @@ def downgrade() -> None:
     systemconfig = _systemconfig_table()
     pluginconfig = _pluginconfig_table()
 
-    rows = connection.execute(
-        sa.select(pluginconfig.c.plugin_id, pluginconfig.c.config_data).where(
-            pluginconfig.c.instance_id == DEFAULT_INSTANCE_ID
+    clones = connection.execute(
+        sa.select(pluginconfig.c.plugin_id, pluginconfig.c.instance_id).where(
+            pluginconfig.c.instance_id != DEFAULT_INSTANCE_ID
         )
     ).fetchall()
-    for plugin_id, config_data in rows:
+    if clones:
+        detail = "、".join(f"{plugin_id}@{instance_id}" for plugin_id, instance_id in clones)
+        raise RuntimeError(
+            f"存在插件分身实例（{detail}），其配置在 systemconfig 中没有容身之处，"
+            "回退会静默丢弃。请先删除这些实例，再回退本迁移。"
+        )
+
+    rows = connection.execute(
+        sa.select(
+            pluginconfig.c.plugin_id,
+            pluginconfig.c.config_data,
+            pluginconfig.c.is_enabled,
+        ).where(pluginconfig.c.instance_id == DEFAULT_INSTANCE_ID)
+    ).fetchall()
+    for plugin_id, config_data, is_enabled in rows:
         key = f"{LEGACY_KEY_PREFIX}{plugin_id}"
         exists = connection.execute(
             sa.select(systemconfig.c.id).where(systemconfig.c.key == key)
@@ -146,7 +186,9 @@ def downgrade() -> None:
         if exists:
             continue
         connection.execute(
-            sa.insert(systemconfig).values(key=key, value=config_data)
+            sa.insert(systemconfig).values(
+                key=key, value=_restore_config(config_data, is_enabled)
+            )
         )
     connection.execute(
         sa.delete(pluginconfig).where(pluginconfig.c.instance_id == DEFAULT_INSTANCE_ID)
