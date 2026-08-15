@@ -71,7 +71,7 @@ def test_clone_endpoint_returns_gone_with_migration_guidance():
     assert "已彻底移除" in exc.detail
 
 
-def _run_api_uninstall(root):
+def _run_api_uninstall(root, command=None):
     """走 API 层卸载普通插件，返回插件管理器替身。"""
     manager = _make_manager()
     config_oper = MagicMock()
@@ -84,6 +84,7 @@ def _run_api_uninstall(root):
         patch("app.api.endpoints.plugin.remove_plugin_api"),
         patch("app.api.endpoints.plugin.Scheduler"),
         patch("app.api.endpoints.plugin._remove_plugin_from_folders"),
+        patch("app.api.endpoints.plugin.Command", return_value=command or MagicMock()),
         patch("shutil.rmtree") as rmtree,
     ):
         root_path.return_value = root
@@ -94,7 +95,7 @@ def _run_api_uninstall(root):
     return manager
 
 
-def _run_agent_uninstall(root):
+def _run_agent_uninstall(root, command=None):
     """走 Agent 工具层卸载普通插件，返回插件管理器替身。"""
     manager = _make_manager()
     config_oper = MagicMock()
@@ -108,6 +109,7 @@ def _run_agent_uninstall(root):
         patch("app.api.endpoints.plugin.remove_plugin_api"),
         patch("app.api.endpoints.plugin._remove_plugin_from_folders"),
         patch("app.scheduler.Scheduler"),
+        patch("app.command.Command", return_value=command or MagicMock()),
         patch("shutil.rmtree") as rmtree,
     ):
         root_path.return_value = root
@@ -159,3 +161,23 @@ def test_both_uninstall_paths_touch_plugin_manager_identically(tmp_path):
     ]
     assert list(api_manager.method_calls) == expected
     assert list(agent_manager.method_calls) == expected
+
+
+def test_api_uninstall_rebuilds_the_command_menu(tmp_path):
+    """API 卸载后重建菜单命令，被卸载插件各实例的命令不再留在菜单里。"""
+    _make_plugin_dir(tmp_path)
+    command = MagicMock()
+
+    _run_api_uninstall(tmp_path, command=command)
+
+    command.init_commands.assert_called_once_with(PLUGIN_ID)
+
+
+def test_agent_uninstall_rebuilds_the_command_menu(tmp_path):
+    """Agent 工具卸载后同样重建菜单命令，两条路径的收尾一致。"""
+    _make_plugin_dir(tmp_path)
+    command = MagicMock()
+
+    _run_agent_uninstall(tmp_path, command=command)
+
+    command.init_commands.assert_called_once_with(PLUGIN_ID)

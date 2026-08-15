@@ -157,6 +157,18 @@ class PluginConfigOper(DbOper):
         """
         return PluginConfig.list_by_plugin(self._db, plugin_id)
 
+    def list_all_instances(self) -> Dict[str, List[PluginConfig]]:
+        """
+        一次取出全部插件的实例配置并按插件归组
+        :return: {插件ID: [按实例ID升序排列的配置记录]}
+        """
+        grouped: Dict[str, List[PluginConfig]] = {}
+        for record in PluginConfig.list_all(self._db) or []:
+            if not record.plugin_id:
+                continue
+            grouped.setdefault(record.plugin_id, []).append(record)
+        return grouped
+
     def set_log_level(self, plugin_id: str, log_level: Optional[str],
                       expires_at: Optional[datetime] = None,
                       instance_id: str = DEFAULT_INSTANCE_ID) -> bool:

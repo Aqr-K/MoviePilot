@@ -603,26 +603,44 @@ class PluginManager(metaclass=Singleton):
         await PluginConfigOper().async_set(pid, conf, instance_id)
         return True
 
-    def delete_plugin_config(self, pid: str, force: bool = False) -> bool:
+    def delete_plugin_config(self, pid: str, force: bool = False,
+                             instance_id: Optional[str] = None) -> bool:
         """
-        删除插件配置，插件的全部实例一并清除
+        删除插件配置
         :param pid: 插件ID
         :param force: 插件停止后仍允许按插件 ID 删除持久化配置
+        :param instance_id: 实例ID，为空时清除该插件的全部实例
+        :return: 是否删除成功
+        :raises ValueError: 实例标识含非法字符或超长
         """
+        normalized = normalize_instance_id(instance_id) if instance_id is not None else None
         if not force and not self.has_plugin(pid):
             return False
-        return PluginConfigOper().delete_plugin(pid)
+        if normalized is None:
+            return PluginConfigOper().delete_plugin(pid)
+        return PluginConfigOper().delete(pid, normalized)
 
-    def delete_plugin_data(self, pid: str, force: bool = False) -> bool:
+    def delete_plugin_data(self, pid: str, force: bool = False,
+                           instance_id: Optional[str] = None) -> bool:
         """
         删除插件数据
+
+        自管理库由同插件的全部实例共享，只在删除整个插件的数据时一并删除。
+
         :param pid: 插件ID
         :param force: 插件停止后仍允许按插件 ID 删除持久化数据
+        :param instance_id: 实例ID，为空时清除该插件的全部实例
+        :return: 是否删除成功
+        :raises ValueError: 实例标识含非法字符或超长
         """
+        normalized = normalize_instance_id(instance_id) if instance_id is not None else None
         if not force and not self.has_plugin(pid):
             return False
-        PluginDataOper().del_data(pid)
-        self._drop_plugin_database(pid)
+        if normalized is None:
+            PluginDataOper().del_data(pid)
+            self._drop_plugin_database(pid)
+            return True
+        PluginDataOper().del_data(pid, instance_id=normalized)
         return True
 
     @staticmethod
@@ -716,12 +734,22 @@ class PluginManager(metaclass=Singleton):
         :param plugin_id: 插件ID
         :return: 实例列表
         """
-        configured: Dict[str, bool] = {}
         try:
             records = PluginConfigOper().list_instances(plugin_id) or []
         except Exception as err:
             logger.error(f"读取插件 {plugin_id} 实例列表出错：{str(err)}")
             records = []
+        return self._build_instance_view(plugin_id, records)
+
+    def _build_instance_view(self, plugin_id: str, records: List[Any]) -> List[Dict[str, Any]]:
+        """
+        按落库配置与运行态拼出插件的实例视图
+
+        :param plugin_id: 插件ID
+        :param records: 该插件的实例配置记录
+        :return: 实例列表，一个实例都没有配置时按默认实例呈现
+        """
+        configured: Dict[str, bool] = {}
         for record in records:
             try:
                 normalized = normalize_instance_id(record.instance_id)
@@ -902,10 +930,14 @@ class PluginManager(metaclass=Singleton):
         plugins = []
         # 已安装插件
         installed_apps = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+        # 一次取全部实例配置，避免逐插件查库
+        try:
+            instance_records = PluginConfigOper().list_all_instances()
+        except Exception as err:
+            logger.error(f"读取插件实例列表出错：{str(err)}")
+            instance_records = {}
         for pid in self._distinct_plugin_ids(self._plugins):
             plugin_class = self.get_plugin_class(pid)
-            # 运行状插件
-            plugin_obj = resolve_running_plugin(self._running_plugins, pid)
             # 基本属性
             plugin = schemas.Plugin()
             # ID
@@ -915,16 +947,13 @@ class PluginManager(metaclass=Singleton):
                 plugin.installed = True
             else:
                 plugin.installed = False
-            # 运行状态
-            if plugin_obj and hasattr(plugin_obj, "get_state"):
-                try:
-                    state = plugin_obj.get_state()
-                except Exception as e:
-                    logger.error(f"获取插件 {pid} 状态出错：{str(e)}")
-                    state = False
-                plugin.state = state
-            else:
-                plugin.state = False
+            # 实例清单
+            instances = self._build_instance_view(pid, instance_records.get(pid, []))
+            plugin.instances = [schemas.PluginInstance(**instance) for instance in instances]
+            # 运行状态，任一实例已进入运行态且启用即视为该插件在运行；
+            # 只在配置里启用但没能加载起来的插件不算
+            plugin.state = any(instance["running"] and instance["enabled"]
+                               for instance in instances)
             # 是否有详情页面
             if hasattr(plugin_class, "get_page"):
                 if ObjectUtils.check_method(plugin_class.get_page):

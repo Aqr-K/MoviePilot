@@ -342,6 +342,7 @@ async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
     :return: 配置与数据的留存结果
     """
     from app.api.endpoints.plugin import _remove_plugin_from_folders, remove_plugin_api
+    from app.command import Command
     from app.scheduler import Scheduler
 
     config_oper = SystemConfigOper()
@@ -356,6 +357,8 @@ async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
     plugin_manager = PluginManager()
     _remove_plugin_from_folders(plugin_id)
     plugin_manager.remove_plugin(plugin_id)
+    # 重建菜单命令，插件各实例声明的命令随之退出菜单
+    Command().init_commands(plugin_id)
 
     return {
         "config_retained": True,

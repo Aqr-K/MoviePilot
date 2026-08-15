@@ -1222,6 +1222,8 @@ def uninstall_plugin(
     _remove_plugin_from_folders(plugin_id)
     # 移除插件
     plugin_manager.remove_plugin(plugin_id)
+    # 重建菜单命令，插件各实例声明的命令随之退出菜单
+    Command().init_commands(plugin_id)
     return schemas.Response(success=True)
 
 

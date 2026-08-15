@@ -5,6 +5,24 @@ from pydantic import BaseModel, Field, RootModel
 from app.schemas.common import JsonData
 
 
+class PluginInstance(BaseModel):
+    """
+    插件的一个运行实例
+    """
+    # 插件ID
+    plugin_id: Optional[str] = None
+    # 实例ID，默认实例为 default
+    instance_id: Optional[str] = None
+    # 实例键，默认实例即插件ID，其余为 plugin_id@instance_id
+    instance_key: Optional[str] = None
+    # 是否为默认实例
+    is_default: Optional[bool] = False
+    # 是否已进入运行态
+    running: Optional[bool] = False
+    # 是否启用
+    enabled: Optional[bool] = False
+
+
 class Plugin(BaseModel):
     """
     插件信息
@@ -58,6 +76,8 @@ class Plugin(BaseModel):
     add_time: Optional[int] = 0
     # 插件公钥
     plugin_public_key: Optional[str] = None
+    # 插件的全部实例，未安装或市场插件为空
+    instances: List[PluginInstance] = Field(default_factory=list)
 
 
 class PluginDashboard(Plugin):
