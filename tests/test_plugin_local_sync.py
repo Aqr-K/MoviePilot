@@ -10,6 +10,7 @@ from watchfiles import Change
 
 from app.runtime.events import Event, eventmanager
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_watcher import PluginWatcher
 from app.adapters.external.market import PluginHelper
 from app.scheduler import Scheduler
 from app.schemas.types import EventType, SystemConfigKey
@@ -23,6 +24,16 @@ def plugin_manager() -> Iterator[PluginManager]:
     manager = PluginManager()
     yield manager
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
+
+
+@pytest.fixture
+def plugin_watcher() -> Iterator[PluginWatcher]:
+    """构造隔离的插件文件监视器实例，避免单例状态污染其它用例。"""
+    Singleton._instances.pop((PluginWatcher, (), frozenset()), None)
+    watcher = PluginWatcher()
+    yield watcher
+    watcher.stop_monitor()
+    Singleton._instances.pop((PluginWatcher, (), frozenset()), None)
 
 
 def _build_local_plugin_repo(tmp_path: Path) -> tuple[Path, Path]:
@@ -66,9 +77,22 @@ def _configure_local_watcher(
         ROOT_PATH=tmp_path,
         VERSION_FLAG="v2",
     )
-    monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", settings_stub)
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.settings", settings_stub)
     monkeypatch.setattr("app.adapters.external.market.settings", settings_stub)
-    monkeypatch.setattr("app.runtime.extensions.plugin_manager.watch", lambda *_args, **_kwargs: iter([changes]))
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.watch", lambda *_args, **_kwargs: iter([changes]))
+
+
+def _configure_idle_watcher(monkeypatch, tmp_path: Path, *, dev: bool) -> None:
+    """为不涉及具体文件变化的监视线程用例提供最小运行配置。"""
+    settings_stub = SimpleNamespace(
+        DEV=dev,
+        PLUGIN_AUTO_RELOAD=False,
+        PLUGIN_LOCAL_REPO_PATHS="",
+        ROOT_PATH=tmp_path,
+        VERSION_FLAG="v2",
+    )
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.settings", settings_stub)
+    monkeypatch.setattr("app.adapters.external.market.settings", settings_stub)
 
 
 def _set_running_render_mode(
@@ -113,25 +137,25 @@ def _build_scheduler_for_plugin_reload(jobs: dict, backend) -> Scheduler:
 def test_dev_local_plugin_candidate_keeps_hot_sync_allowed_when_system_version_lags(
     tmp_path,
     monkeypatch,
-    plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """DEV 本地源码候选保留热同步资格，系统版本差异只作为兼容性提示。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
     runtime_dir = tmp_path / "app" / "plugins" / "demoplugin"
 
-    monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", SimpleNamespace(DEV=True, ROOT_PATH=tmp_path))
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.settings", SimpleNamespace(DEV=True, ROOT_PATH=tmp_path))
     monkeypatch.setattr("app.adapters.external.market.settings.PLUGIN_LOCAL_REPO_PATHS", str(repo_path))
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.10"))
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.SystemConfigOper.get",
+        "app.runtime.extensions.plugin_watcher.SystemConfigOper.get",
         lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
     )
 
-    candidate = plugin_manager._get_local_plugin_candidate_from_path(source_file)
+    candidate = plugin_watcher._get_local_plugin_candidate_from_path(source_file)
 
     assert candidate["system_version_compatible"] is False
     assert candidate.get("compatible") is not False
-    assert plugin_manager._sync_local_plugin_if_installed("DemoPlugin", candidate)
+    assert plugin_watcher._sync_local_plugin_if_installed("DemoPlugin", candidate)
     assert (runtime_dir / "__init__.py").read_text(encoding="utf-8") == source_file.read_text(encoding="utf-8")
     assert (runtime_dir / "dist" / "assets" / "remoteEntry.js").is_file()
     assert not (runtime_dir / "node_modules").exists()
@@ -140,16 +164,16 @@ def test_dev_local_plugin_candidate_keeps_hot_sync_allowed_when_system_version_l
 def test_local_plugin_candidate_keeps_system_version_gate_outside_dev(
     tmp_path,
     monkeypatch,
-    plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """非 DEV 本地候选继续受主系统版本门禁保护，避免自动热加载绕过安装约束。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
 
-    monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", SimpleNamespace(DEV=False, ROOT_PATH=tmp_path))
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.settings", SimpleNamespace(DEV=False, ROOT_PATH=tmp_path))
     monkeypatch.setattr("app.adapters.external.market.settings.PLUGIN_LOCAL_REPO_PATHS", str(repo_path))
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.10"))
 
-    candidate = plugin_manager._get_local_plugin_candidate_from_path(source_file)
+    candidate = plugin_watcher._get_local_plugin_candidate_from_path(source_file)
 
     assert candidate["system_version_compatible"] is False
     assert candidate["compatible"] is False
@@ -159,7 +183,7 @@ def test_local_plugin_candidate_keeps_system_version_gate_outside_dev(
 def test_local_plugin_sync_without_candidate_respects_system_version_gate(
     tmp_path,
     monkeypatch,
-    plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """未传候选时的本地同步兜底查询也必须遵守系统版本门禁。"""
     repo_path, _source_file = _build_local_plugin_repo(tmp_path)
@@ -171,15 +195,15 @@ def test_local_plugin_sync_without_candidate_respects_system_version_gate(
         PLUGIN_LOCAL_REPO_PATHS=str(repo_path),
     )
 
-    monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", settings_stub)
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.settings", settings_stub)
     monkeypatch.setattr("app.adapters.external.market.settings", settings_stub)
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.10"))
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.SystemConfigOper.get",
+        "app.runtime.extensions.plugin_watcher.SystemConfigOper.get",
         lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
     )
 
-    assert not plugin_manager._sync_local_plugin_if_installed("DemoPlugin")
+    assert not plugin_watcher._sync_local_plugin_if_installed("DemoPlugin")
     assert not runtime_dir.exists()
 
 
@@ -187,6 +211,7 @@ def test_local_federated_asset_batch_syncs_once_without_python_reload(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """同批联邦资产变化只同步一次运行副本，不触发 Python 热重载。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -205,15 +230,15 @@ def test_local_federated_asset_batch_syncs_once_without_python_reload(
     _set_running_render_mode(plugin_manager, "vue", "dist/assets")
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.11"))
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.SystemConfigOper.get",
+        "app.runtime.extensions.plugin_watcher.SystemConfigOper.get",
         lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
     )
-    sync_spy = Mock(wraps=plugin_manager._sync_local_plugin_if_installed)
+    sync_spy = Mock(wraps=plugin_watcher._sync_local_plugin_if_installed)
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     assert sync_spy.call_count == 1
     assert sync_spy.call_args.args[0] == "DemoPlugin"
@@ -235,6 +260,7 @@ def test_local_federated_asset_ignores_non_vue_or_unsafe_render_paths(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
     render_mode: str,
     dist_path: str,
 ) -> None:
@@ -250,10 +276,10 @@ def test_local_federated_asset_ignores_non_vue_or_unsafe_render_paths(
     _set_running_render_mode(plugin_manager, render_mode, dist_path)
     sync_spy = Mock()
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     sync_spy.assert_not_called()
     reload_spy.assert_not_called()
@@ -263,6 +289,7 @@ def test_local_federated_asset_ignores_change_outside_declared_directory(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """声明目录外的普通文件变化不复制联邦构建产物。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -275,10 +302,10 @@ def test_local_federated_asset_ignores_change_outside_declared_directory(
     _set_running_render_mode(plugin_manager, "vue", "dist/assets")
     sync_spy = Mock()
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     sync_spy.assert_not_called()
     reload_spy.assert_not_called()
@@ -288,6 +315,7 @@ def test_local_federated_asset_requires_remote_entry(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """联邦入口文件不存在时不复制声明目录中的其它构建产物。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -305,10 +333,10 @@ def test_local_federated_asset_requires_remote_entry(
     _set_running_render_mode(plugin_manager, "vue", "dist/assets")
     sync_spy = Mock()
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     sync_spy.assert_not_called()
     reload_spy.assert_not_called()
@@ -318,6 +346,7 @@ def test_local_federated_asset_reads_running_render_mode_for_each_batch(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """每批变化都从运行实例读取当前联邦目录，不缓存旧声明。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -332,10 +361,10 @@ def test_local_federated_asset_reads_running_render_mode_for_each_batch(
         ROOT_PATH=tmp_path,
         VERSION_FLAG="v2",
     )
-    monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", settings_stub)
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.settings", settings_stub)
     monkeypatch.setattr("app.adapters.external.market.settings", settings_stub)
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.watch",
+        "app.runtime.extensions.plugin_watcher.watch",
         lambda *_args, **_kwargs: iter([
             {(Change.modified, str(source_dir / "dist" / "assets" / "remoteEntry.js"))},
             {(Change.modified, str(next_entry))},
@@ -345,10 +374,10 @@ def test_local_federated_asset_reads_running_render_mode_for_each_batch(
     plugin_manager.running_plugins["DemoPlugin"] = SimpleNamespace(get_render_mode=render_mode)
     sync_spy = Mock(return_value=True)
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     assert render_mode.call_count == 2
     assert sync_spy.call_count == 2
@@ -359,6 +388,7 @@ def test_local_federated_asset_respects_non_dev_compatibility_gate(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """非 DEV 自动监测不绕过本地插件的系统版本兼容性门禁。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -374,10 +404,10 @@ def test_local_federated_asset_respects_non_dev_compatibility_gate(
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.10"))
     sync_spy = Mock()
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     sync_spy.assert_not_called()
     reload_spy.assert_not_called()
@@ -387,6 +417,7 @@ def test_runtime_federated_asset_change_does_not_copy_or_reload(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """运行目录中的联邦资产由构建方直接写入，不执行本地仓库复制或 Python 重载。"""
     repo_path, _source_file = _build_local_plugin_repo(tmp_path)
@@ -411,10 +442,10 @@ def test_runtime_federated_asset_change_does_not_copy_or_reload(
     _set_running_render_mode(plugin_manager, "vue", "dist/assets")
     sync_spy = Mock()
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     sync_spy.assert_not_called()
     reload_spy.assert_not_called()
@@ -424,6 +455,7 @@ def test_local_requirements_change_still_does_not_sync_or_reload(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """依赖文件变化继续只提示重新安装，不触发自动同步或热重载。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -438,10 +470,10 @@ def test_local_requirements_change_still_does_not_sync_or_reload(
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.11"))
     sync_spy = Mock()
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     sync_spy.assert_not_called()
     reload_spy.assert_not_called()
@@ -451,6 +483,7 @@ def test_local_python_change_still_syncs_and_reloads_plugin(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """本地 Python 源码变化继续沿用同步后热重载语义。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -462,15 +495,15 @@ def test_local_python_change_still_syncs_and_reloads_plugin(
     )
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.11"))
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.SystemConfigOper.get",
+        "app.runtime.extensions.plugin_watcher.SystemConfigOper.get",
         lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
     )
-    sync_spy = Mock(wraps=plugin_manager._sync_local_plugin_if_installed)
+    sync_spy = Mock(wraps=plugin_watcher._sync_local_plugin_if_installed)
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     assert sync_spy.call_count == 1
     reload_spy.assert_called_once_with("DemoPlugin")
@@ -481,6 +514,7 @@ def test_local_python_change_rejects_root_federated_path_and_still_reloads(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
     dist_path: str,
 ) -> None:
     """插件根目录不能作为联邦输出目录，Python 变化仍需同步并热重载。"""
@@ -494,17 +528,17 @@ def test_local_python_change_rejects_root_federated_path_and_still_reloads(
     _set_running_render_mode(plugin_manager, "vue", dist_path)
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.11"))
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.SystemConfigOper.get",
+        "app.runtime.extensions.plugin_watcher.SystemConfigOper.get",
         lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
     )
-    sync_spy = Mock(wraps=plugin_manager._sync_local_plugin_if_installed)
+    sync_spy = Mock(wraps=plugin_watcher._sync_local_plugin_if_installed)
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    assert plugin_manager._get_federated_plugin_change(source_file) is None
+    assert plugin_watcher._get_federated_plugin_change(source_file) is None
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     assert sync_spy.call_count == 1
     reload_spy.assert_called_once_with("DemoPlugin")
@@ -514,6 +548,7 @@ def test_local_python_and_federated_changes_share_one_batch_sync(
     tmp_path,
     monkeypatch,
     plugin_manager: PluginManager,
+    plugin_watcher: PluginWatcher,
 ) -> None:
     """同批 Python 与联邦资产变化共用一次复制，并保留 Python 热重载。"""
     repo_path, source_file = _build_local_plugin_repo(tmp_path)
@@ -530,18 +565,67 @@ def test_local_python_and_federated_changes_share_one_batch_sync(
     _set_running_render_mode(plugin_manager, "vue", "dist/assets")
     monkeypatch.setattr(PluginHelper, "get_current_system_version", lambda: Version("2.13.11"))
     monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.SystemConfigOper.get",
+        "app.runtime.extensions.plugin_watcher.SystemConfigOper.get",
         lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
     )
-    sync_spy = Mock(wraps=plugin_manager._sync_local_plugin_if_installed)
+    sync_spy = Mock(wraps=plugin_watcher._sync_local_plugin_if_installed)
     reload_spy = Mock()
-    monkeypatch.setattr(plugin_manager, "_sync_local_plugin_if_installed", sync_spy)
+    monkeypatch.setattr(plugin_watcher, "_sync_local_plugin_if_installed", sync_spy)
     monkeypatch.setattr(plugin_manager, "reload_plugin", reload_spy)
 
-    plugin_manager._run_file_watcher()
+    plugin_watcher._run_file_watcher()
 
     assert sync_spy.call_count == 1
     reload_spy.assert_called_once_with("DemoPlugin")
+
+
+def test_monitor_thread_is_reclaimed_by_stop_monitor(
+    tmp_path,
+    monkeypatch,
+    plugin_watcher: PluginWatcher,
+) -> None:
+    """监视线程由停止事件退出循环，stop_monitor 必须等到线程结束再释放引用。"""
+    _configure_idle_watcher(monkeypatch, tmp_path, dev=True)
+    watching = threading.Event()
+
+    def fake_watch(*_args, stop_event=None, **_kwargs):
+        """按 watchfiles 的停止事件语义空转，置位后结束迭代。"""
+        watching.set()
+        while not stop_event.is_set():
+            stop_event.wait(0.01)
+            yield set()
+
+    monkeypatch.setattr("app.runtime.extensions.plugin_watcher.watch", fake_watch)
+
+    plugin_watcher.start_monitor()
+
+    assert watching.wait(timeout=5)
+    monitor_thread = plugin_watcher._monitor_thread
+    assert monitor_thread is not None and monitor_thread.is_alive()
+
+    plugin_watcher.stop_monitor()
+
+    assert not monitor_thread.is_alive()
+    assert plugin_watcher._monitor_thread is None
+
+
+def test_monitor_stays_down_while_hot_reload_is_disabled(
+    tmp_path,
+    monkeypatch,
+    plugin_watcher: PluginWatcher,
+) -> None:
+    """未开启开发模式和自动重载时不起监视线程，配置重载同样不得拉起。"""
+    _configure_idle_watcher(monkeypatch, tmp_path, dev=False)
+    monkeypatch.setattr(
+        "app.runtime.extensions.plugin_watcher.watch",
+        Mock(side_effect=AssertionError("热加载关闭时不应进入 watch 循环")),
+    )
+
+    plugin_watcher.start_monitor()
+    assert plugin_watcher._monitor_thread is None
+
+    plugin_watcher.reload_monitor()
+    assert plugin_watcher._monitor_thread is None
 
 
 def test_plugin_reload_refreshes_scheduler_services_idempotently(monkeypatch):

@@ -8,6 +8,7 @@ from app.runtime.extensions.plugin_manager import (
     configure_plugin_legacy_import_services,
     configure_site_auth_level_provider,
 )
+from app.runtime.extensions.plugin_watcher import PluginWatcher
 from app.application.plugin_market import (
     PluginMarket,
     configure_plugin_install_reporter,
@@ -87,6 +88,8 @@ def init_plugins():
     初始化插件
     """
     _configure_plugin_services()
+    # 热加载监视器按 DEV / PLUGIN_AUTO_RELOAD 自行决定是否起线程
+    PluginWatcher().start_monitor()
     PluginManager().start()
     register_plugin_api()
 
@@ -95,9 +98,12 @@ def stop_plugins():
     """
     停止插件
     """
+    # 插件运行态与热加载监视器是两个独立子系统，任一停止失败都不得连累另一个
     try:
-        plugin_manager = PluginManager()
-        plugin_manager.stop()
-        plugin_manager.stop_monitor()
+        PluginManager().stop()
     except Exception as e:
         logger.error(f"停止插件时发生错误：{e}", exc_info=True)
+    try:
+        PluginWatcher().stop_monitor()
+    except Exception as e:
+        logger.error(f"停止插件文件监视器时发生错误：{e}", exc_info=True)
