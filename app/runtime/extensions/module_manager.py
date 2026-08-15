@@ -6,6 +6,7 @@ from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.foundation.reflection import ModuleHelper
 from app.runtime.extensions.contract import verify_module_contract
+from app.runtime.extensions.plugin_instance import qualify_module_id
 from app.runtime.log import logger
 from app.schemas.types import EventType, ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
     OtherModulesType, MediaRecognizeType
@@ -71,27 +72,41 @@ class ModuleManager(metaclass=Singleton):
         # 事件总线通过该解析器绑定已启用的模块实例。
         eventmanager.register_handler_instance_resolver(
             "modules",
-            self.resolve_event_handler_instance,
+            self.resolve_event_handler_instances,
         )
         self.load_modules()
 
-    def resolve_event_handler_instance(
+    def resolve_event_handler_instances(
             self,
             owner_class: type,
-    ) -> Optional[EventHandlerBinding]:
-        """为模块声明的事件方法解析当前运行实例。"""
-        module_id = owner_class.__name__
+    ) -> Optional[List[EventHandlerBinding]]:
+        """
+        为模块声明的事件方法解析当前全部运行实例
+
+        同一个模块类可被多个来源以不同模块id注册，事件需要投递给其中每一个。
+
+        :param owner_class: 声明事件方法的模块类
+        :return: 事件绑定列表，该类未登记时返回 None
+        """
         with self._lock:
-            if module_id not in self._modules:
+            module_ids = list(dict.fromkeys(
+                module_id for module_id, module_cls in self._modules.items()
+                if module_id == owner_class.__name__ or module_cls is owner_class
+            ))
+            if not module_ids:
                 return None
-            module = self._running_modules.get(module_id)
-        owner_name = module_id
-        if module and callable(getattr(module, "get_name", None)):
-            owner_name = module.get_name()
-        return EventHandlerBinding(
-            instance=module,
-            owner_name=owner_name,
-        )
+            modules = [(module_id, self._running_modules.get(module_id)) for module_id in module_ids]
+        bindings = []
+        for module_id, module in modules:
+            owner_name = module_id
+            if module and callable(getattr(module, "get_name", None)):
+                owner_name = module.get_name()
+            bindings.append(EventHandlerBinding(
+                instance=module,
+                owner_name=owner_name,
+                instance_key=module_id,
+            ))
+        return bindings
 
     def load_modules(self):
         """
@@ -251,9 +266,10 @@ class ModuleManager(metaclass=Singleton):
         注册一个外部来源声明的模块，通过契约校验后按内建流程实例化并上线
 
         模块标识与已有模块重名且归属不同来源时拒绝注册，先到者胜；同一来源重复注册为幂等更新。
+        非默认实例的声明按实例键限定模块标识，使同一插件的多个实例注册同一模块类时互不覆盖。
 
         :param module: 模块类或 ProvidedModule 声明
-        :param owner: 注册来源标识，用于按来源精确卸载
+        :param owner: 注册来源的实例键，用于按来源精确卸载
         :return: 是否被接受进注册表，开关关闭或初始化失败不影响接受结果
         """
         if not owner:
@@ -261,6 +277,11 @@ class ModuleManager(metaclass=Singleton):
         declaration = module if isinstance(module, ProvidedModule) else ProvidedModule(module)
         if not isinstance(declaration.module_cls, type):
             return False
+        declaration = ProvidedModule(
+            module_cls=declaration.module_cls,
+            module_id=qualify_module_id(declaration.module_id, owner),
+            factory=declaration.factory,
+        )
         module_id = declaration.module_id
         passed, reasons = verify_module_contract(declaration.module_cls)
         if not passed:
@@ -284,7 +305,7 @@ class ModuleManager(metaclass=Singleton):
         """
         卸载某来源注册的全部模块，停止运行实例并从注册表移除
 
-        :param owner: 注册来源标识
+        :param owner: 注册来源的实例键
         :return: 被移除的模块id列表
         """
         if not owner:

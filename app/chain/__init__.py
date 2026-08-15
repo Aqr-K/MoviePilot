@@ -236,15 +236,17 @@ class ChainBase(metaclass=ABCMeta):
             return ret is None
 
     def __handle_plugin_error(
-            self, err: Exception, plugin_id: str, plugin_name: str, method: str, **kwargs
+            self, err: Exception, plugin_key: str, plugin_name: str, method: str, **kwargs
     ):
         """
         处理插件模块执行错误
+
+        :param plugin_key: 出错插件实例的实例键
         """
         if kwargs.get("raise_exception"):
             raise err
         logger.error(
-            f"运行插件 {plugin_id} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}"
+            f"运行插件 {plugin_key} 模块 {method} 出错：{str(err)}\n{traceback.format_exc()}"
         )
         self.messagehelper.put(
             title=f"{plugin_name} 发生了错误", message=str(err), role="plugin"
@@ -253,7 +255,7 @@ class ChainBase(metaclass=ABCMeta):
             EventType.SystemError,
             {
                 "type": "plugin",
-                "plugin_id": plugin_id,
+                "plugin_id": plugin_key,
                 "plugin_name": plugin_name,
                 "plugin_method": method,
                 "error": str(err),
@@ -306,7 +308,7 @@ class ChainBase(metaclass=ABCMeta):
         执行插件模块
         """
         for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
+            plugin_key, plugin_name = plugin
             if method in module_dict:
                 func = module_dict[method]
                 if func:
@@ -324,11 +326,11 @@ class ChainBase(metaclass=ABCMeta):
                             break
                     except RateLimitExceededException as err:
                         self.__handle_rate_limit_error(
-                            err, "插件", plugin_id, method, **kwargs
+                            err, "插件", plugin_key, method, **kwargs
                         )
                     except Exception as err:
                         self.__handle_plugin_error(
-                            err, plugin_id, plugin_name, method, **kwargs
+                            err, plugin_key, plugin_name, method, **kwargs
                         )
         return result
 
@@ -339,7 +341,7 @@ class ChainBase(metaclass=ABCMeta):
         异步执行插件模块
         """
         for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
-            plugin_id, plugin_name = plugin
+            plugin_key, plugin_name = plugin
             if method in module_dict:
                 func = module_dict[method]
                 if func:
@@ -365,11 +367,11 @@ class ChainBase(metaclass=ABCMeta):
                             break
                     except RateLimitExceededException as err:
                         self.__handle_rate_limit_error(
-                            err, "插件", plugin_id, method, **kwargs
+                            err, "插件", plugin_key, method, **kwargs
                         )
                     except Exception as err:
                         self.__handle_plugin_error(
-                            err, plugin_id, plugin_name, method, **kwargs
+                            err, plugin_key, plugin_name, method, **kwargs
                         )
         return result
 
