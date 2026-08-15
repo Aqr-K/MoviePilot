@@ -279,8 +279,8 @@ def test_start_brings_up_every_configured_instance(manager, monkeypatch):
     oper.set(PLUGIN_ID, {"enable": True, "token": "default-token"}, DEFAULT_INSTANCE_ID)
     oper.set(PLUGIN_ID, {"enable": True, "token": "alpha-token"}, "alpha")
     monkeypatch.setattr(
-        PluginManager, "_load_selective_plugins",
-        staticmethod(lambda *_args, **_kwargs: [MultiInstancePlugin]),
+        "app.runtime.extensions.plugin_manager.load_selective_plugins",
+        lambda *_args, **_kwargs: [MultiInstancePlugin],
     )
 
     manager.start(PLUGIN_ID)
@@ -293,8 +293,8 @@ def test_start_brings_up_every_configured_instance(manager, monkeypatch):
 def test_start_without_configuration_keeps_the_bare_plugin_id_key(manager, monkeypatch):
     """未配置实例的插件仍以裸插件标识入容器，存量调用方按插件ID取实例不受影响。"""
     monkeypatch.setattr(
-        PluginManager, "_load_selective_plugins",
-        staticmethod(lambda *_args, **_kwargs: [MultiInstancePlugin]),
+        "app.runtime.extensions.plugin_manager.load_selective_plugins",
+        lambda *_args, **_kwargs: [MultiInstancePlugin],
     )
 
     manager.start(PLUGIN_ID)

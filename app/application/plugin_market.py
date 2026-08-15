@@ -21,6 +21,7 @@ from app.foundation.reflection import ObjectUtils
 from app.foundation.version import compare_version
 from app.runtime.cache import fresh, async_fresh
 from app.runtime.config import settings
+from app.runtime.extensions.plugin_auth import set_and_check_auth_level
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.log import logger
 from app.schemas.types import SystemConfigKey
@@ -530,7 +531,7 @@ class PluginMarket:
         if plugin_info.get("key"):
             plugin.plugin_public_key = plugin_info.get("key")
         # 权限
-        if not self._plugin_manager.set_and_check_auth_level(plugin=plugin, source=plugin_info):
+        if not set_and_check_auth_level(plugin=plugin, source=plugin_info):
             return None
         # 名称
         if plugin_info.get("name"):

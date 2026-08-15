@@ -3,11 +3,9 @@ from app.runtime.compat.diagnostics import (
     scan_plugin_legacy_imports,
 )
 from app.runtime.config import global_vars
-from app.runtime.extensions.plugin_manager import (
-    PluginManager,
-    configure_plugin_legacy_import_services,
-    configure_site_auth_level_provider,
-)
+from app.runtime.extensions.plugin_auth import configure_site_auth_level_provider
+from app.runtime.extensions.plugin_loader import configure_plugin_legacy_import_services
+from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.extensions.plugin_watcher import PluginWatcher
 from app.application.plugin_market import (
     PluginMarket,

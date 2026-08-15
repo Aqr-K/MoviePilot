@@ -659,7 +659,7 @@ class TestPluginHelper:
         monkeypatch.setattr("app.application.plugin_market.settings", SimpleNamespace(VERSION_FLAG="v2"))
         monkeypatch.setattr("app.application.plugin_market.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
         monkeypatch.setattr(
-            "app.runtime.extensions.plugin_manager._site_auth_level_provider",
+            "app.runtime.extensions.plugin_auth._site_auth_level_provider",
             lambda: 1,
         )
         monkeypatch.setattr(PluginHelper, "get_plugins", lambda _self, *_args: market_plugins)
@@ -721,7 +721,7 @@ class TestPluginHelper:
         monkeypatch.setattr("app.adapters.external.market.settings", SimpleNamespace(VERSION_FLAG="v3"))
         monkeypatch.setattr("app.application.plugin_market.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
         monkeypatch.setattr(
-            "app.runtime.extensions.plugin_manager._site_auth_level_provider",
+            "app.runtime.extensions.plugin_auth._site_auth_level_provider",
             lambda: 1,
         )
         monkeypatch.setattr(PluginHelper, "get_plugins", fake_get_plugins)

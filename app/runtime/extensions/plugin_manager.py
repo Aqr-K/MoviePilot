@@ -1,71 +1,36 @@
 import asyncio
-import importlib
 import inspect
-import os
-import sys
 import traceback
-from typing import Any, Dict, List, Optional, Type, Union, Callable
+from typing import Any, Dict, List, Optional, Type
 
 from app import schemas
 from app.db.models.pluginconfig import DEFAULT_INSTANCE_ID, normalize_instance_id
 from app.db.oper.pluginconfig import PluginConfigOper
 from app.db.oper.plugindata import PluginDataOper
 from app.db.oper.systemconfig import SystemConfigOper
-from app.foundation.crypto import RSAUtils
 from app.foundation.reflection import ObjectUtils
 from app.foundation.singleton import Singleton
 from app.runtime.log import logger
 from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.runtime.extensions.module_manager import ModuleManager
+from app.runtime.extensions.plugin_auth import set_and_check_auth_level
 from app.runtime.extensions.plugin_instance import (
     instance_key,
     plugin_id_of,
     resolve_running_plugin,
     split_instance_key,
 )
+from app.runtime.extensions.plugin_loader import (
+    apply_legacy_import_diagnostics,
+    clear_plugin_modules,
+    load_selective_plugins,
+)
 from app.runtime.extensions.plugin_spi import (
     clear_plugin_agent_tools_cache,
     get_plugin_provided_modules,
 )
 from app.schemas.types import EventType, SystemConfigKey
-
-LegacyDiagnosticsConfigurator = Callable[..., None]
-LegacyImportScanner = Callable[..., None]
-SiteAuthLevelProvider = Callable[[], int]
-
-
-def _ignore_legacy_diagnostics(**_kwargs) -> None:
-    """在启动组合根尚未注入兼容服务时保持插件加载可用。"""
-
-
-def _unavailable_site_auth_level() -> int:
-    """站点能力尚未装配时返回未认证等级。"""
-    return 0
-
-
-_legacy_diagnostics_configurator: LegacyDiagnosticsConfigurator = (
-    _ignore_legacy_diagnostics
-)
-_legacy_import_scanner: LegacyImportScanner = _ignore_legacy_diagnostics
-_site_auth_level_provider: SiteAuthLevelProvider = _unavailable_site_auth_level
-
-
-def configure_plugin_legacy_import_services(
-    *,
-    diagnostics_configurator: LegacyDiagnosticsConfigurator,
-    import_scanner: LegacyImportScanner,
-) -> None:
-    """由启动组合根注入插件旧导入诊断服务，避免扩展层反向依赖兼容层。"""
-    global _legacy_diagnostics_configurator, _legacy_import_scanner
-    _legacy_diagnostics_configurator = diagnostics_configurator
-    _legacy_import_scanner = import_scanner
-
-
-def configure_site_auth_level_provider(provider: SiteAuthLevelProvider) -> None:
-    """由启动组合根注入站点认证等级，避免扩展运行时依赖应用服务。"""
-    global _site_auth_level_provider
-    _site_auth_level_provider = provider
 
 
 class PluginManager(metaclass=Singleton):
@@ -241,7 +206,7 @@ class PluginManager(metaclass=Singleton):
         :param pid: 插件ID，为空加载所有插件
         """
 
-        _legacy_diagnostics_configurator(
+        apply_legacy_import_diagnostics(
             enabled=settings.DEBUG,
             emitter=logger.warning,
         )
@@ -257,7 +222,7 @@ class PluginManager(metaclass=Singleton):
         # 已安装插件
         installed_plugins = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
         # 扫描插件目录，只加载符合条件的插件
-        plugins = self._load_selective_plugins(pid, installed_plugins, check_module)
+        plugins = load_selective_plugins(pid, installed_plugins, check_module)
         # 排序
         plugins.sort(key=lambda x: x.plugin_order if hasattr(x, "plugin_order") else 0)
         for plugin in plugins:
@@ -265,7 +230,7 @@ class PluginManager(metaclass=Singleton):
             if pid and plugin_id != pid:
                 continue
             # 判断插件是否满足认证要求，如不满足则不进行实例化
-            if not self.set_and_check_auth_level(plugin=plugin):
+            if not set_and_check_auth_level(plugin=plugin):
                 # 如果是插件热更新实例，这里则进行替换
                 for key in self.get_instance_keys(plugin_id):
                     self._plugins[key] = plugin
@@ -367,13 +332,13 @@ class PluginManager(metaclass=Singleton):
             # 同插件还有实例在运行时保留模块缓存，避免运行中的实例与重新导入的类对象脱节
             if not self.has_plugin(pid):
                 # 清除插件模块缓存，包括所有子模块
-                self._clear_plugin_modules(pid)
+                clear_plugin_modules(pid)
         else:
             # 清空
             self._plugins = {}
             self._running_plugins = {}
             # 清除所有插件模块缓存
-            self._clear_plugin_modules()
+            clear_plugin_modules()
         clear_plugin_agent_tools_cache()
         logger.info("插件停止完成")
 
@@ -419,84 +384,6 @@ class PluginManager(metaclass=Singleton):
             removed = module_manager.unregister_modules(owner)
             if removed:
                 logger.info(f"已回收插件 {owner} 注册的模块：{'、'.join(removed)}")
-
-    @staticmethod
-    def _load_selective_plugins(pid: Optional[str], installed_plugins: List[str],
-                                check_module_func: Callable) -> List[Any]:
-        """
-        选择性加载插件，只import符合条件的插件
-        :param pid: 指定插件ID，为空则加载所有已安装插件
-        :param installed_plugins: 已安装插件列表
-        :param check_module_func: 模块检查函数
-        :return: 插件类列表
-        """
-        import importlib
-
-        plugins = []
-        plugins_dir = settings.ROOT_PATH / "app" / "plugins"
-
-        if not plugins_dir.exists():
-            logger.warning(f"插件目录不存在：{plugins_dir}")
-            return plugins
-
-        # 确定需要加载的插件目录名称列表
-        if pid:
-            # 加载指定插件
-            target_plugins = [pid.lower()]
-        else:
-            # 加载已安装插件
-            target_plugins = [plugin_id.lower() for plugin_id in installed_plugins]
-
-        if not target_plugins:
-            logger.debug("没有需要加载的插件")
-            return plugins
-
-        # 扫描plugins目录
-        _loaded_modules = set()
-        for plugin_dir in plugins_dir.iterdir():
-            if not plugin_dir.is_dir() or plugin_dir.name.startswith('_'):
-                continue
-
-            # 检查是否是需要加载的插件
-            if plugin_dir.name not in target_plugins:
-                logger.debug(f"跳过插件目录：{plugin_dir.name}（不在加载列表中）")
-                continue
-
-            # 检查__init__.py是否存在
-            init_file = plugin_dir / "__init__.py"
-            if not init_file.exists():
-                logger.debug(f"跳过插件目录：{plugin_dir.name}（缺少__init__.py）")
-                continue
-
-            try:
-                # 构建模块名
-                module_name = f"app.plugins.{plugin_dir.name}"
-                logger.debug(f"正在导入插件模块：{module_name}")
-
-                _legacy_import_scanner(
-                    plugin_id=plugin_dir.name,
-                    plugin_dir=plugin_dir,
-                )
-
-                # 导入模块
-                module = importlib.import_module(module_name)
-
-                # 检查模块中的类
-                for name, obj in module.__dict__.items():
-                    if name.startswith('_') or not isinstance(obj, type):
-                        continue
-                    if name in _loaded_modules:
-                        continue
-                    if check_module_func(obj):
-                        _loaded_modules.add(name)
-                        plugins.append(obj)
-                        logger.debug(f"找到符合条件的插件类：{name}")
-                        break
-
-            except Exception as err:
-                logger.error(f"加载插件 {plugin_dir.name} 失败：{str(err)} - {traceback.format_exc()}")
-
-        return plugins
 
     @property
     def running_plugins(self) -> Dict[str, Any]:
@@ -567,43 +454,6 @@ class PluginManager(metaclass=Singleton):
         self.start(plugin_id)
         # 广播事件
         eventmanager.send_event(EventType.PluginReload, data={"plugin_id": plugin_id})
-
-    @staticmethod
-    def _clear_plugin_modules(plugin_id: Optional[str] = None):
-        """
-        清除插件及其所有子模块的缓存
-        :param plugin_id: 插件ID
-        """
-
-        # 构建插件模块前缀
-        if plugin_id:
-            plugin_module_prefix = f"app.plugins.{plugin_id.lower()}"
-        else:
-            plugin_module_prefix = "app.plugins"
-
-        # 收集需要删除的模块名（创建模块名列表的副本以避免迭代时修改字典）
-        modules_to_remove = []
-        for module_name in list(sys.modules.keys()):
-            if module_name == plugin_module_prefix or module_name.startswith(plugin_module_prefix + "."):
-                modules_to_remove.append(module_name)
-
-        # 删除模块
-        for module_name in modules_to_remove:
-            try:
-                del sys.modules[module_name]
-                logger.debug(f"已清除插件模块缓存：{module_name}")
-            except KeyError:
-                # 模块可能已经被删除
-                pass
-
-        importlib.invalidate_caches()
-        logger.debug("已清除查找器的缓存")
-
-        if plugin_id:
-            if modules_to_remove:
-                logger.info(f"插件 {plugin_id} 共清除 {len(modules_to_remove)} 个模块缓存：{modules_to_remove}")
-            else:
-                logger.debug(f"插件 {plugin_id} 没有找到需要清除的模块缓存")
 
     def get_plugin_config(self, pid: str, instance_id: str = DEFAULT_INSTANCE_ID) -> dict:
         """
@@ -884,7 +734,7 @@ class PluginManager(metaclass=Singleton):
             if hasattr(plugin_class, "plugin_public_key"):
                 plugin.plugin_public_key = plugin_class.plugin_public_key
             # 权限
-            if not self.set_and_check_auth_level(plugin=plugin, source=plugin_class):
+            if not set_and_check_auth_level(plugin=plugin, source=plugin_class):
                 continue
             # 名称
             if hasattr(plugin_class, "plugin_name"):
@@ -930,57 +780,3 @@ class PluginManager(metaclass=Singleton):
         if not plugin_class:
             return None
         return getattr(plugin_class, "plugin_version", None)
-
-    @staticmethod
-    def set_and_check_auth_level(plugin: Union[schemas.Plugin, Type[Any]],
-                                 source: Optional[Union[dict, Type[Any]]] = None) -> bool:
-        """
-        设置并检查插件的认证级别
-        :param plugin: 插件对象或包含 auth_level 属性的对象
-        :param source: 可选的字典对象或类对象，可能包含 "level" 或 "auth_level" 键
-        :return: 如果插件的认证级别有效且当前环境的认证级别满足要求，返回 True，否则返回 False
-        """
-        # 检查并赋值 source 中的 level 或 auth_level
-        if source:
-            if isinstance(source, dict) and "level" in source:
-                plugin.auth_level = source.get("level")
-            elif hasattr(source, "auth_level"):
-                plugin.auth_level = source.auth_level
-        # 如果 source 为空且 plugin 本身没有 auth_level，直接返回 True
-        elif not hasattr(plugin, "auth_level"):
-            return True
-
-        # auth_level 级别说明
-        # 1 - 所有用户可见
-        # 2 - 站点认证用户可见
-        # 3 - 站点&密钥认证可见
-        # 99 - 站点&特殊密钥认证可见
-        # 如果当前站点认证级别大于 1 且插件级别为 99，并存在插件公钥，说明为特殊密钥认证，通过密钥匹配进行认证
-        auth_level = _site_auth_level_provider()
-        if auth_level > 1 and plugin.auth_level == 99 and hasattr(plugin, "plugin_public_key"):
-            plugin_id = plugin.id if isinstance(plugin, schemas.Plugin) else plugin.__name__
-            public_key = plugin.plugin_public_key
-            if public_key:
-                private_key = PluginManager.__get_plugin_private_key(plugin_id)
-                verify = RSAUtils.verify_rsa_keys(public_key=public_key, private_key=private_key)
-                return verify
-        # 如果当前站点认证级别小于插件级别，则返回 False
-        if auth_level < plugin.auth_level:
-            return False
-        return True
-
-    @staticmethod
-    def __get_plugin_private_key(plugin_id: str) -> Optional[str]:
-        """
-        根据插件标识获取对应的私钥
-        :param plugin_id: 插件标识
-        :return: 对应的插件私钥，如果未找到则返回 None
-        """
-        try:
-            # 将插件标识转换为大写并构建环境变量名称
-            env_var_name = f"PLUGIN_{plugin_id.upper()}_PRIVATE_KEY"
-            private_key = os.environ.get(env_var_name)
-            return private_key
-        except Exception as e:
-            logger.debug(f"获取插件 {plugin_id} 的私钥时发生错误：{e}")
-            return None
