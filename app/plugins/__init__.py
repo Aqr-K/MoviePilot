@@ -196,8 +196,22 @@ class _PluginBase(metaclass=ABCMeta):
             "id1": self.xxx1,
             "id2": self.xxx2,
         }
+
+        该方式已废弃，无契约校验且卸载不可回收，请改用 provides_modules()
         """
         pass
+
+    def provides_modules(self) -> List[Any]:
+        """
+        获取插件声明的系统模块，注册后与内建模块同权参与分发
+
+        元素可以是模块类，也可以是 ProvidedModule 声明（自定义模块标识或构造方式）。
+        模块类需继承 app.modules._ModuleBase 并实现完整契约，未通过校验的会被拒绝注册。
+        [ProvidedModule(MyStorageModule), MyNotificationModule]
+
+        :return: 模块声明列表
+        """
+        return []
 
     def get_actions(self) -> List[Dict[str, Any]]:
         """

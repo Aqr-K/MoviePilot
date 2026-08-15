@@ -32,6 +32,11 @@ from app.runtime.log import logger
 from app.runtime.cache import fresh, async_fresh
 from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
+from app.runtime.extensions.module_manager import ModuleManager
+from app.runtime.extensions.plugin_spi import (
+    get_plugin_provided_modules,
+    warn_legacy_module_injection,
+)
 from app.runtime.reload import ConfigReloadMixin
 from app.schemas.types import EventType, SystemConfigKey
 
@@ -190,6 +195,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     eventmanager.disable_event_handler(plugin)
             except Exception as err:
                 logger.error(f"加载插件 {plugin_id} 出错：{str(err)} - {traceback.format_exc()}")
+        self._register_plugin_modules(pid)
         self.clear_plugin_agent_tools_cache()
 
     def init_plugin(self, plugin_id: str, conf: dict):
@@ -209,6 +215,10 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             setup_plugin_database(plugin)
         except Exception as err:
             logger.error(f"初始化插件 {plugin_id} 自管理数据库出错：{str(err)}")
+        # 插件启停和配置变更都可能改变模块声明，先回收再按最新声明注册；
+        # 排在自管理表建立之后，使模块初始化能用上插件自己的表
+        self._unregister_plugin_modules(plugin_id)
+        self._register_plugin_modules(plugin_id)
         # 检查插件状态并启用/禁用事件处理器
         if plugin.get_state():
             # 启用插件类的事件处理器
@@ -238,6 +248,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         停止插件服务
         :param pid: 插件ID，为空停止所有插件
         """
+        # 回收插件注册的系统模块，插件未进入运行态时同样按来源清理，避免残留
+        self._unregister_plugin_modules(pid)
         # 停止插件
         if pid:
             logger.info(f"正在停止插件 {pid}...")
@@ -270,6 +282,37 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             self._clear_plugin_modules()
         self.clear_plugin_agent_tools_cache()
         logger.info("插件停止完成")
+
+    def _register_plugin_modules(self, pid: Optional[str] = None) -> None:
+        """
+        把插件经 provides_modules() 声明的系统模块注册进模块管理器
+
+        无插件声明模块时不触碰模块管理器，避免提前触发模块全量装载。
+
+        :param pid: 插件ID，为空时处理全部运行态插件
+        """
+        provided = get_plugin_provided_modules(self._running_plugins, pid)
+        if not provided:
+            return
+        module_manager = ModuleManager()
+        for plugin_id, modules in provided.items():
+            for module in modules:
+                module_manager.register_module(module, owner=plugin_id)
+
+    def _unregister_plugin_modules(self, pid: Optional[str] = None) -> None:
+        """
+        回收插件注册的系统模块
+
+        :param pid: 插件ID，为空时回收全部已加载插件
+        """
+        module_manager = ModuleManager.get_existing_instance()
+        if module_manager is None:
+            return
+        owners = [pid] if pid else list({**self._plugins, **self._running_plugins})
+        for owner in owners:
+            removed = module_manager.unregister_modules(owner)
+            if removed:
+                logger.info(f"已回收插件 {owner} 注册的模块：{'、'.join(removed)}")
 
     @staticmethod
     def _load_selective_plugins(pid: Optional[str], installed_plugins: List[str],
@@ -1052,6 +1095,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     if not plugin.get_state():
                         continue
                     plugin_module = plugin.get_module() or []
+                    if plugin_module:
+                        warn_legacy_module_injection(plugin_id)
                     ret_modules[(plugin_id, plugin.get_name())] = plugin_module
                 except Exception as e:
                     logger.error(f"获取插件 {plugin_id} 模块出错：{str(e)}")

@@ -16,8 +16,10 @@ except ImportError as e:
     sys.exit(1)
 
 from app.adapters.system.host import SystemUtils
+from app.modules import _ModuleBase
 from app.runtime.log import logger
 from app.runtime.config import settings
+from app.runtime.extensions.contract import configure_module_base
 from app.runtime.extensions.module_manager import ModuleManager
 from app.runtime.events import EventManager
 from app.runtime.state import SystemHelper
@@ -51,6 +53,11 @@ def configure_wallpaper_services() -> None:
             count=count
         ),
     )
+
+
+def configure_module_contract() -> None:
+    """把模块基类装配到契约校验层，使外部注册的模块可被判定。"""
+    configure_module_base(_ModuleBase)
 
 
 def notify_event_error(title: str, message: str) -> None:
@@ -217,6 +224,8 @@ async def init_modules():
     user_auth()
     # 事件错误通知由启动组合层接入消息服务。
     EventManager().set_error_notifier(notify_event_error)
+    # 契约校验层不反向依赖模块实现，由启动组合层注入模块基类。
+    configure_module_contract()
     # 加载模块
     ModuleManager()
     # 启动事件消费
