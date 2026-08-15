@@ -219,6 +219,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             return
         # 初始化插件
         plugin.init_plugin(conf)
+        # 为声明了 provides_models 的插件建立其自管理的表，失败不影响插件其它功能
+        try:
+            from app.db.plugin import setup_plugin_database
+            setup_plugin_database(plugin)
+        except Exception as err:
+            logger.error(f"初始化插件 {plugin_id} 自管理数据库出错：{str(err)}")
         # 检查插件状态并启用/禁用事件处理器
         if plugin.get_state():
             # 启用插件类的事件处理器
@@ -741,6 +747,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         :param plugin_id: 插件ID
         """
         self.stop(plugin_id)
+        # 只释放连接、保留数据：删库只在明确删除插件数据时进行
+        try:
+            from app.db.plugin import db_manager
+            db_manager.dispose(plugin_id)
+        except Exception as err:
+            logger.error(f"释放插件 {plugin_id} 自管理数据库连接出错：{str(err)}")
 
     def reload_plugin(self, plugin_id: str):
         """
@@ -938,6 +950,12 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if not force and not self._plugins.get(pid):
             return False
         PluginDataOper().del_data(pid)
+        # 删除插件自管理的独立库，失败不影响已完成的数据清理
+        try:
+            from app.db.plugin import teardown_plugin_database
+            teardown_plugin_database(pid)
+        except Exception as err:
+            logger.error(f"删除插件 {pid} 自管理数据库出错：{str(err)}")
         return True
 
     def get_plugin_state(self, pid: str) -> bool:
