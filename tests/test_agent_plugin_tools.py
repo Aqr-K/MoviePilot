@@ -333,7 +333,7 @@ def test_uninstall_plugin_uninstalls_installed_candidate() -> None:
         patch(
             "app.agent.tools.impl.uninstall_plugin.uninstall_plugin_runtime",
             new=AsyncMock(
-                return_value={"was_clone": False, "clone_files_removed": False}
+                return_value={"config_retained": True, "data_retained": True}
             ),
         ) as uninstall_runtime,
     ):

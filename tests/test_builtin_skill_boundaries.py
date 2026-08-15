@@ -23,13 +23,13 @@ def test_modified_builtin_skills_have_incremented_versions() -> None:
     """本次修改过的内置技能必须递增版本，确保用户端同步更新。"""
     expected_versions = {
         "database-operation": "4",
-        "moviepilot-api": "13",
+        "moviepilot-api": "14",
         "moviepilot-cli": "7",
         "moviepilot-update": "3",
         "organize-files": "3",
         "transfer-failed-retry": "4",
         "generate-identifiers": "3",
-        "create-moviepilot-plugin": "3",
+        "create-moviepilot-plugin": "4",
     }
 
     for skill_name, expected_version in expected_versions.items():

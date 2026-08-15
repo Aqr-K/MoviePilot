@@ -1,10 +1,8 @@
 """插件 Agent 工具共享辅助方法"""
 
 import json
-import shutil
 from typing import Any, Optional
 
-from app.runtime.config import settings
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.db.oper.systemconfig import SystemConfigOper
 from app.adapters.external.server import MoviePilotServerHelper
@@ -331,7 +329,10 @@ async def install_plugin_runtime(
 
 async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
     """
-    按现有卸载逻辑移除插件，并清理运行态注册与分组信息。
+    卸载插件，清理运行态注册与分组信息，配置与数据保留。
+
+    :param plugin_id: 插件ID
+    :return: 配置与数据的留存结果
     """
     from app.api.endpoints.plugin import _remove_plugin_from_folders, remove_plugin_api
     from app.scheduler import Scheduler
@@ -346,26 +347,10 @@ async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
     Scheduler().remove_plugin_job(plugin_id)
 
     plugin_manager = PluginManager()
-    plugin_class = plugin_manager.plugins.get(plugin_id)
-    was_clone = bool(getattr(plugin_class, "is_clone", False))
-    clone_files_removed = False
-
-    if was_clone:
-        plugin_manager.delete_plugin_config(plugin_id)
-        plugin_manager.delete_plugin_data(plugin_id)
-        plugin_base_dir = settings.ROOT_PATH / "app" / "plugins" / plugin_id.lower()
-        if plugin_base_dir.exists():
-            try:
-                shutil.rmtree(plugin_base_dir)
-                plugin_manager.plugins.pop(plugin_id, None)
-                clone_files_removed = True
-            except Exception:
-                clone_files_removed = False
-
     _remove_plugin_from_folders(plugin_id)
     plugin_manager.remove_plugin(plugin_id)
 
     return {
-        "was_clone": was_clone,
-        "clone_files_removed": clone_files_removed,
+        "config_retained": True,
+        "data_retained": True,
     }

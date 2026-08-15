@@ -1,6 +1,6 @@
 ---
 name: create-moviepilot-plugin
-version: 3
+version: 4
 description: >-
   Use this skill when the user asks to create, modify, debug, validate, or
   scaffold a MoviePilot local plugin. Covers MoviePilot V2 plugin development,
@@ -110,8 +110,9 @@ a local plugin source and installed into the running MoviePilot instance.
    - Directory name is the class name lowercased, for example `mynotifier`.
    - Avoid collisions with installed or market plugins unless the user is
      explicitly modifying that plugin.
-   - Do not hardcode the original plugin ID for data/config namespaces when the
-     plugin may support clones; use `self.__class__.__name__`.
+   - Do not hardcode the plugin ID for data/config namespaces; use
+     `self.plugin_id`, and pair it with `self.instance_id` when the plugin runs
+     multiple instances.
 
 ## UI Mode Selection Gate
 

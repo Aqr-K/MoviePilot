@@ -1,6 +1,6 @@
 ---
 name: moviepilot-api
-version: 13
+version: 14
 description: >-
   Use this skill when you need to call MoviePilot REST API endpoints directly
   with the bundled Python client. Covers MoviePilot HTTP endpoints across media
@@ -399,7 +399,7 @@ Streaming search sends `{"type":"heartbeat"}` every 15 seconds without business 
 | GET | `/api/v1/plugin/{plugin_id}` | Get plugin config |
 | PUT | `/api/v1/plugin/{plugin_id}` | Update plugin config. Body: JSON object |
 | DELETE | `/api/v1/plugin/{plugin_id}` | Uninstall plugin |
-| POST | `/api/v1/plugin/clone/{plugin_id}` | Clone plugin. Body: JSON object |
+| POST | `/api/v1/plugin/clone/{plugin_id}` | Deprecated. Always returns 410 with migration guidance |
 | GET | `/api/v1/plugin/form/{plugin_id}` | Plugin form page |
 | GET | `/api/v1/plugin/page/{plugin_id}` | Plugin data page |
 | GET | `/api/v1/plugin/remotes` | Plugin federation list. Params: `token` (required) |

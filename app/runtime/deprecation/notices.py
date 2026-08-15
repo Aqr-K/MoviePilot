@@ -73,7 +73,7 @@ NOTICES: Mapping[str, DeprecationNotice] = {
     "plugin.clone_by_source_copy": DeprecationNotice(
         key="plugin.clone_by_source_copy",
         subject="以复制源码目录方式创建插件分身",
-        stage=DeprecationStage.WARN,
+        stage=DeprecationStage.REMOVED,
         since="v3.1.0",
         remove_in="v3.3.0",
         replacement="插件实例分身，同一插件类按 instance_id 运行多个实例",
