@@ -81,13 +81,22 @@ def register_plugin_extensions(running_plugins: Dict[str, Any],
     """
     按最新声明注册插件的全部扩展点
 
+    每类扩展点各自隔离，任一类注册失败都不得连累其余。
+
     :param running_plugins: 运行态插件表 {实例键: 插件实例}
     :param create_module_manager: 取模块管理器的工厂，无参调用
     :param pid: 插件ID或实例键，为空时处理全部运行态实例
     """
-    register_plugin_modules(running_plugins, create_module_manager, pid)
-    register_plugin_storages(running_plugins, pid)
-    register_plugin_channel_capabilities(running_plugins, pid)
+    registrars = (
+        lambda: register_plugin_modules(running_plugins, create_module_manager, pid),
+        lambda: register_plugin_storages(running_plugins, pid),
+        lambda: register_plugin_channel_capabilities(running_plugins, pid),
+    )
+    for register in registrars:
+        try:
+            register()
+        except Exception as err:
+            logger.error(f"注册插件扩展点出错：{str(err)}", exc_info=True)
 
 
 def extension_owners(plugins: Dict[str, Any],
