@@ -13,6 +13,7 @@ from .downloadhistory import DownloadHistory, DownloadFiles
 from .mediaserver import MediaServerItem
 from .message import Message
 from .passkey import PassKey
+from .pluginconfig import PluginConfig
 from .plugindata import PluginData
 from .site import Site
 from .siteicon import SiteIcon
