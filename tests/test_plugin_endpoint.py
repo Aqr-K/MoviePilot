@@ -35,10 +35,14 @@ def test_plugin_history_merges_remote_metadata():
     )
     plugin_manager = MagicMock()
     plugin_manager.get_local_plugins.return_value = [installed_plugin]
-    plugin_manager.get_local_repo_plugins.return_value = []
-    plugin_manager.async_get_online_plugins = AsyncMock(return_value=[market_plugin])
+    plugin_market = MagicMock()
+    plugin_market.get_local_repo_plugins.return_value = []
+    plugin_market.async_get_online_plugins = AsyncMock(return_value=[market_plugin])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with (
+        patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
+    ):
         result = asyncio.run(plugin_history("DemoPlugin", None, True))
 
     assert result.repo_url == "https://github.com/demo/plugins"
@@ -59,10 +63,14 @@ def test_plugin_history_returns_installed_plugin_when_remote_missing():
     )
     plugin_manager = MagicMock()
     plugin_manager.get_local_plugins.return_value = [installed_plugin]
-    plugin_manager.get_local_repo_plugins.return_value = []
-    plugin_manager.async_get_online_plugins = AsyncMock(return_value=[])
+    plugin_market = MagicMock()
+    plugin_market.get_local_repo_plugins.return_value = []
+    plugin_market.async_get_online_plugins = AsyncMock(return_value=[])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with (
+        patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
+    ):
         result = asyncio.run(plugin_history("DemoPlugin", None, True))
 
     assert result.id == "DemoPlugin"
@@ -87,18 +95,22 @@ def test_plugin_history_uses_installed_repo_without_refreshing_all_markets():
     )
     plugin_manager = MagicMock()
     plugin_manager.get_local_plugins.return_value = [installed_plugin]
-    plugin_manager.get_local_repo_plugins.return_value = []
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
-    plugin_manager.async_get_online_plugins = AsyncMock(return_value=[])
+    plugin_market = MagicMock()
+    plugin_market.get_local_repo_plugins.return_value = []
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
+    plugin_market.async_get_online_plugins = AsyncMock(return_value=[])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with (
+        patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
+    ):
         result = asyncio.run(plugin_history("DemoPlugin", None, True))
 
     assert result.history == {"v1.1.0": "- 新增更新说明"}
-    plugin_manager.async_get_plugins_from_market.assert_awaited_once_with(
+    plugin_market.async_get_plugins_from_market.assert_awaited_once_with(
         "https://github.com/demo/plugins", settings.VERSION_FLAG, True
     )
-    plugin_manager.async_get_online_plugins.assert_not_awaited()
+    plugin_market.async_get_online_plugins.assert_not_awaited()
 
 
 def test_plugin_releases_returns_supported_versions_with_latest_and_current(monkeypatch):
@@ -112,9 +124,10 @@ def test_plugin_releases_returns_supported_versions_with_latest_and_current(monk
         release=True,
     )
     plugin_manager = MagicMock()
-    plugin_manager.async_get_online_plugins = AsyncMock(return_value=[market_plugin])
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = "1.2.0"
+    plugin_market = MagicMock()
+    plugin_market.async_get_online_plugins = AsyncMock(return_value=[market_plugin])
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_helper = MagicMock()
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[
         {"version": "1.2.3", "tag_name": "DemoPlugin_v1.2.3", "asset_name": "demoplugin_v1.2.3.zip"},
@@ -123,6 +136,7 @@ def test_plugin_releases_returns_supported_versions_with_latest_and_current(monk
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
     ):
         result = asyncio.run(plugin_releases("DemoPlugin", None, "https://github.com/demo/plugins", False))
@@ -134,10 +148,10 @@ def test_plugin_releases_returns_supported_versions_with_latest_and_current(monk
     assert result["items"][0]["is_current"] is False
     assert result["items"][1]["is_latest"] is False
     assert result["items"][1]["is_current"] is True
-    plugin_manager.async_get_plugins_from_market.assert_awaited_once_with(
+    plugin_market.async_get_plugins_from_market.assert_awaited_once_with(
         "https://github.com/demo/plugins", settings.VERSION_FLAG, False
     )
-    plugin_manager.async_get_online_plugins.assert_not_awaited()
+    plugin_market.async_get_online_plugins.assert_not_awaited()
     plugin_manager.get_local_plugins.assert_not_called()
 
 
@@ -155,13 +169,15 @@ def test_plugin_releases_does_not_mutate_cached_release_items(monkeypatch):
         {"version": "1.2.3", "tag_name": "DemoPlugin_v1.2.3", "asset_name": "demoplugin_v1.2.3.zip"},
     ]
     plugin_manager = MagicMock()
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = "1.2.0"
+    plugin_market = MagicMock()
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_helper = MagicMock()
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=release_items)
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
     ):
         result = asyncio.run(plugin_releases("DemoPlugin", None, "https://github.com/demo/plugins", False))
@@ -182,16 +198,18 @@ def test_plugin_releases_falls_back_to_compatible_base_package(monkeypatch):
         release=True,
     )
     plugin_manager = MagicMock()
-    plugin_manager.async_get_plugins_from_market = AsyncMock(
+    plugin_manager.get_local_plugin_version.return_value = None
+    plugin_market = MagicMock()
+    plugin_market.async_get_plugins_from_market = AsyncMock(
         side_effect=[[], [market_plugin]]
     )
-    plugin_manager.get_local_plugin_version.return_value = None
     plugin_helper = MagicMock()
     plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=False)
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[])
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
     ):
         result = asyncio.run(
@@ -199,7 +217,7 @@ def test_plugin_releases_falls_back_to_compatible_base_package(monkeypatch):
         )
 
     assert result["latest_version"] == "1.2.3"
-    assert plugin_manager.async_get_plugins_from_market.await_args_list == [
+    assert plugin_market.async_get_plugins_from_market.await_args_list == [
         (("https://github.com/demo/plugins", settings.VERSION_FLAG, False), {}),
         (("https://github.com/demo/plugins", None, False), {}),
     ]
@@ -216,20 +234,22 @@ def test_plugin_releases_uses_force_refresh_for_market_metadata(monkeypatch):
         release=True,
     )
     plugin_manager = MagicMock()
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = None
+    plugin_market = MagicMock()
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_helper = MagicMock()
     plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=False)
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[])
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
     ):
         result = asyncio.run(plugin_releases("DemoPlugin", None, "https://github.com/demo/plugins", True))
 
     assert result["release_supported"] is False
-    plugin_manager.async_get_plugins_from_market.assert_awaited_once_with(
+    plugin_market.async_get_plugins_from_market.assert_awaited_once_with(
         "https://github.com/demo/plugins", settings.VERSION_FLAG, True
     )
     assert plugin_helper.async_get_plugin_release_versions.await_args.args == (
@@ -251,8 +271,9 @@ def test_plugin_releases_force_uses_cached_release_response_and_schedules_refres
         release=True,
     )
     plugin_manager = MagicMock()
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = None
+    plugin_market = MagicMock()
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     fresh_states = []
     plugin_helper = MagicMock()
     plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=True)
@@ -275,6 +296,7 @@ def test_plugin_releases_force_uses_cached_release_response_and_schedules_refres
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
         patch.object(plugin_endpoint, "_schedule_plugin_release_refresh", fake_schedule),
     ):
@@ -286,7 +308,7 @@ def test_plugin_releases_force_uses_cached_release_response_and_schedules_refres
     plugin_helper.async_has_plugin_release_cache.assert_awaited_once_with(
         "https://github.com/demo/plugins"
     )
-    plugin_manager.async_get_plugins_from_market.assert_awaited_once_with(
+    plugin_market.async_get_plugins_from_market.assert_awaited_once_with(
         "https://github.com/demo/plugins", settings.VERSION_FLAG, True
     )
 
@@ -302,8 +324,9 @@ def test_plugin_releases_force_skips_background_refresh_without_release_cache(mo
         release=True,
     )
     plugin_manager = MagicMock()
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = None
+    plugin_market = MagicMock()
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_helper = MagicMock()
     plugin_helper.async_has_plugin_release_cache = AsyncMock(return_value=False)
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[
@@ -320,6 +343,7 @@ def test_plugin_releases_force_skips_background_refresh_without_release_cache(mo
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
         patch.object(plugin_endpoint, "_schedule_plugin_release_refresh", fake_schedule),
     ):
@@ -343,8 +367,9 @@ def test_plugin_releases_hides_items_when_market_plugin_does_not_enable_release(
         release=False,
     )
     plugin_manager = MagicMock()
-    plugin_manager.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_manager.get_local_plugin_version.return_value = None
+    plugin_market = MagicMock()
+    plugin_market.async_get_plugins_from_market = AsyncMock(return_value=[market_plugin])
     plugin_helper = MagicMock()
     plugin_helper.async_get_plugin_release_versions = AsyncMock(return_value=[
         {"version": "1.2.3", "tag_name": "DemoPlugin_v1.2.3", "asset_name": "demoplugin_v1.2.3.zip"},
@@ -352,6 +377,7 @@ def test_plugin_releases_hides_items_when_market_plugin_does_not_enable_release(
 
     with (
         patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager),
+        patch("app.api.endpoints.plugin.PluginMarket", return_value=plugin_market),
         patch("app.api.endpoints.plugin.PluginHelper", return_value=plugin_helper),
     ):
         result = asyncio.run(plugin_releases("DemoPlugin", None, "https://github.com/demo/plugins", False))

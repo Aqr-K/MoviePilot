@@ -42,6 +42,7 @@ from app.db.models.transferhistory import TransferHistory
 from app.db.oper.systemconfig import SystemConfigOper
 from app.application.image import WallpaperHelper
 from app.application.messaging.message import MessageHelper
+from app.application.plugin_market import PluginMarket
 from app.runtime.progress import ProgressHelper
 from app.adapters.external.server import MoviePilotServerHelper
 from app.runtime.extensions.service_registry import ServiceConfigHelper
@@ -496,7 +497,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 },
                 "plugin_market_refresh": {
                     "name": "插件市场缓存",
-                    "func": PluginManager().async_get_online_plugins,
+                    "func": PluginMarket().async_get_online_plugins,
                     "running": False,
                     "kwargs": {"force": True},
                 },

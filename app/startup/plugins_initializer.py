@@ -5,9 +5,12 @@ from app.runtime.compat.diagnostics import (
 from app.runtime.config import global_vars
 from app.runtime.extensions.plugin_manager import (
     PluginManager,
-    configure_plugin_install_reporter,
     configure_plugin_legacy_import_services,
     configure_site_auth_level_provider,
+)
+from app.application.plugin_market import (
+    PluginMarket,
+    configure_plugin_install_reporter,
 )
 from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
 from app.adapters.external.server import MoviePilotServerHelper
@@ -15,7 +18,7 @@ from app.runtime.log import logger
 
 
 def _configure_plugin_services() -> None:
-    """把兼容诊断、远程上报和站点认证等级装配到插件管理器。"""
+    """把兼容诊断和站点认证等级装配到插件管理器，把远程上报装配到插件市场服务。"""
     configure_plugin_legacy_import_services(
         diagnostics_configurator=configure_legacy_import_diagnostics,
         import_scanner=scan_plugin_legacy_imports,
@@ -32,9 +35,10 @@ async def sync_plugins() -> bool:
         _configure_plugin_services()
         loop = global_vars.loop
         plugin_manager = PluginManager()
+        plugin_market = PluginMarket(plugin_manager)
 
-        sync_result = await execute_task(loop, plugin_manager.sync, "插件同步到本地")
-        resolved_dependencies = await execute_task(loop, plugin_manager.install_plugin_missing_dependencies,
+        sync_result = await execute_task(loop, plugin_market.sync, "插件同步到本地")
+        resolved_dependencies = await execute_task(loop, plugin_market.install_plugin_missing_dependencies,
                                                    "缺失依赖项安装")
         # 判断是否需要进行插件初始化
         if not sync_result and not resolved_dependencies:

@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from app.runtime.extensions.plugin_instance import split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.application.plugin_market import PluginMarket
 from app.db.oper.systemconfig import SystemConfigOper
 from app.adapters.external.server import MoviePilotServerHelper
 from app.adapters.external.market import PluginHelper
@@ -157,8 +158,8 @@ async def enrich_installed_plugin_sources(
     if not missing_source_plugins:
         return installed_plugins
 
-    plugin_manager = PluginManager()
-    local_repo_map = _map_plugins_by_id(plugin_manager.get_local_repo_plugins())
+    plugin_market = PluginMarket()
+    local_repo_map = _map_plugins_by_id(plugin_market.get_local_repo_plugins())
     for plugin in missing_source_plugins:
         source_plugin = local_repo_map.get(getattr(plugin, "id", None))
         if source_plugin:
@@ -170,7 +171,7 @@ async def enrich_installed_plugin_sources(
     if not missing_source_plugins:
         return installed_plugins
 
-    market_plugins = await plugin_manager.async_get_online_plugins(force=force_refresh)
+    market_plugins = await plugin_market.async_get_online_plugins(force=force_refresh)
     market_map = _map_plugins_by_id(market_plugins or [])
     for plugin in missing_source_plugins:
         source_plugin = market_map.get(getattr(plugin, "id", None))
@@ -184,12 +185,12 @@ async def load_market_plugins(force_refresh: bool = False) -> list[Any]:
     """
     聚合插件市场与本地插件仓库中的候选插件。
     """
-    plugin_manager = PluginManager()
-    online_plugins = await plugin_manager.async_get_online_plugins(force=force_refresh)
-    local_repo_plugins = plugin_manager.get_local_repo_plugins()
+    plugin_market = PluginMarket()
+    online_plugins = await plugin_market.async_get_online_plugins(force=force_refresh)
+    local_repo_plugins = plugin_market.get_local_repo_plugins()
     if not online_plugins and not local_repo_plugins:
         return []
-    return plugin_manager.process_plugins_list(online_plugins + local_repo_plugins, [])
+    return plugin_market.process_plugins_list(online_plugins + local_repo_plugins, [])
 
 
 def list_installed_plugins() -> list[Any]:

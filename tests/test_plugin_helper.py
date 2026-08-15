@@ -638,6 +638,7 @@ class TestPluginHelper:
         插件市场 labels 为列表时应转换为字符串，避免响应模型序列化异常。
         """
         try:
+            from app.application.plugin_market import PluginMarket
             from app.runtime.extensions.plugin_manager import PluginManager
             from app.adapters.external.market import PluginHelper
         except ModuleNotFoundError as exc:
@@ -655,15 +656,15 @@ class TestPluginHelper:
         plugin_manager = PluginManager()
         monkeypatch.setattr(plugin_manager, "_plugins", {})
         monkeypatch.setattr(plugin_manager, "_running_plugins", {})
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", SimpleNamespace(VERSION_FLAG="v2"))
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
+        monkeypatch.setattr("app.application.plugin_market.settings", SimpleNamespace(VERSION_FLAG="v2"))
+        monkeypatch.setattr("app.application.plugin_market.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
         monkeypatch.setattr(
             "app.runtime.extensions.plugin_manager._site_auth_level_provider",
             lambda: 1,
         )
         monkeypatch.setattr(PluginHelper, "get_plugins", lambda _self, *_args: market_plugins)
 
-        plugins = plugin_manager.get_plugins_from_market(REPO_URL)
+        plugins = PluginMarket(plugin_manager).get_plugins_from_market(REPO_URL)
 
         assert len(plugins) == 1
         assert plugins[0].plugin_label == "站点 通知"
@@ -675,6 +676,7 @@ class TestPluginHelper:
         package.v2.json 中的 v2 原生插件，并过滤掉未声明任何版本兼容的 v1 插件。
         """
         try:
+            from app.application.plugin_market import PluginMarket
             from app.runtime.extensions.plugin_manager import PluginManager
             from app.adapters.external.market import PluginHelper
         except ModuleNotFoundError as exc:
@@ -713,18 +715,18 @@ class TestPluginHelper:
         monkeypatch.setattr(plugin_manager, "_plugins", {})
         monkeypatch.setattr(plugin_manager, "_running_plugins", {})
         monkeypatch.setattr(
-            "app.runtime.extensions.plugin_manager.settings",
+            "app.application.plugin_market.settings",
             SimpleNamespace(VERSION_FLAG="v3", PLUGIN_MARKET=REPO_URL),
         )
         monkeypatch.setattr("app.adapters.external.market.settings", SimpleNamespace(VERSION_FLAG="v3"))
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
+        monkeypatch.setattr("app.application.plugin_market.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
         monkeypatch.setattr(
             "app.runtime.extensions.plugin_manager._site_auth_level_provider",
             lambda: 1,
         )
         monkeypatch.setattr(PluginHelper, "get_plugins", fake_get_plugins)
 
-        plugins = plugin_manager.get_online_plugins(force=False)
+        plugins = PluginMarket(plugin_manager).get_online_plugins(force=False)
         plugin_ids = {p.id for p in plugins}
 
         assert "V2FlagPlugin" in plugin_ids
@@ -870,26 +872,25 @@ class TestPluginHelper:
         全市场刷新不清理 Release 缓存，Release 接口按请求仓库协调刷新两类数据。
         """
         try:
-            from app.runtime.extensions.plugin_manager import PluginManager
-            from app.adapters.external.market import PluginHelper
+            from app.application.plugin_market import PluginMarket
         except ModuleNotFoundError as exc:
             pytest.skip(f"missing dependency: {exc}")
 
         clear_calls = []
         fake_release_method = SimpleNamespace(cache_clear=lambda: clear_calls.append("clear"))
         fake_helper = SimpleNamespace(get_plugin_release_versions=fake_release_method)
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.PluginHelper", lambda: fake_helper)
-        monkeypatch.setattr(PluginManager, "get_plugins_from_market", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr("app.application.plugin_market.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
+        monkeypatch.setattr("app.application.plugin_market.PluginHelper", lambda: fake_helper)
+        monkeypatch.setattr(PluginMarket, "get_plugins_from_market", lambda *_args, **_kwargs: [])
 
-        PluginManager().get_online_plugins(force=True)
+        PluginMarket().get_online_plugins(force=True)
 
         assert clear_calls == []
 
     def test_async_get_online_plugins_force_keeps_release_cache_scoped(self, monkeypatch):
         """异步全市场刷新同样不得清理其他仓库的 Release 缓存。"""
         try:
-            from app.runtime.extensions.plugin_manager import PluginManager
+            from app.application.plugin_market import PluginMarket
         except ModuleNotFoundError as exc:
             pytest.skip(f"missing dependency: {exc}")
 
@@ -904,11 +905,11 @@ class TestPluginHelper:
         async def fake_market(*_args, **_kwargs):
             return []
 
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.PluginHelper", lambda: fake_helper)
-        monkeypatch.setattr(PluginManager, "async_get_plugins_from_market", fake_market)
+        monkeypatch.setattr("app.application.plugin_market.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
+        monkeypatch.setattr("app.application.plugin_market.PluginHelper", lambda: fake_helper)
+        monkeypatch.setattr(PluginMarket, "async_get_plugins_from_market", fake_market)
 
-        asyncio.run(PluginManager().async_get_online_plugins(force=True))
+        asyncio.run(PluginMarket().async_get_online_plugins(force=True))
 
         assert clear_calls == []
 

@@ -109,9 +109,9 @@ def test_query_installed_plugins_fills_missing_repo_url_from_market() -> None:
         installed=True,
         repo_url="https://github.com/demo/plugins",
     )
-    plugin_manager = MagicMock()
-    plugin_manager.get_local_repo_plugins.return_value = []
-    plugin_manager.async_get_online_plugins = AsyncMock(return_value=[market_plugin])
+    plugin_market = MagicMock()
+    plugin_market.get_local_repo_plugins.return_value = []
+    plugin_market.async_get_online_plugins = AsyncMock(return_value=[market_plugin])
 
     with (
         patch(
@@ -119,8 +119,8 @@ def test_query_installed_plugins_fills_missing_repo_url_from_market() -> None:
             return_value=[installed_plugin],
         ),
         patch(
-            "app.agent.tools.impl._plugin_tool_utils.PluginManager",
-            return_value=plugin_manager,
+            "app.agent.tools.impl._plugin_tool_utils.PluginMarket",
+            return_value=plugin_market,
         ),
     ):
         result = asyncio.run(tool.run(query="demo"))
@@ -128,7 +128,7 @@ def test_query_installed_plugins_fills_missing_repo_url_from_market() -> None:
     payload = json.loads(result)
     assert payload["success"]
     assert payload["plugins"][0]["repo_url"] == "https://github.com/demo/plugins"
-    plugin_manager.async_get_online_plugins.assert_awaited_once_with(force=False)
+    plugin_market.async_get_online_plugins.assert_awaited_once_with(force=False)
 
 
 def test_query_plugin_config_returns_saved_config_and_default_model() -> None:

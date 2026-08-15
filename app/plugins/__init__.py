@@ -276,7 +276,7 @@ class _PluginBase(metaclass=ABCMeta):
         与核心库及其它插件完全隔离；框架（PluginManager 启停）据此自动建表/卸载删库，
         无需插件自行管理 Engine/Session。默认不声明任何表。
 
-        用法：在插件模块内 `PluginBase = build_plugin_base(self.__class__.__name__)`，
+        用法：在插件模块内 `PluginBase = build_plugin_base(self.plugin_id)`，
         定义 `class XxxModel(PluginBase): ...`，再于此返回 `[XxxModel, ...]`；
         读写用 `self.get_plugin_db().session()`（即「自会话管理」）。
 
@@ -352,14 +352,14 @@ class _PluginBase(metaclass=ABCMeta):
 
     def get_plugin_db(self):
         """
-        获取本插件【独立】的数据库容器（按插件类名自动注册，幂等）。
+        获取本插件【独立】的数据库容器（按插件标识自动注册，幂等）。
 
         返回 app.db.plugin.PluginDatabase（持有插件专属 Engine + ScopedSession，
         落 PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db）。配合 provides_models()
         声明的模型，用 `self.get_plugin_db().session()` 进行读写（自会话管理）。
         """
         from app.db.plugin import db_manager
-        return db_manager.register_plugin(self.__class__.__name__)
+        return db_manager.register_plugin(self.plugin_id)
 
     def save_data(self, key: str, value: Any, plugin_id: Optional[str] = None):
         """

@@ -18,6 +18,7 @@ from app.runtime.deprecation.policy import DeprecatedFeatureError, get_notice, g
 from app.runtime.events import eventmanager
 from app.runtime.extensions.plugin_instance import matches_plugin, split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.application.plugin_market import PluginMarket
 from app.application.security.access import (
     resource_token_cookie,
     verify_apikey,
@@ -49,7 +50,7 @@ _plugin_release_refresh_tasks: set[asyncio.Task] = set()
 
 
 async def _get_market_plugin_from_repo(
-    plugin_manager: PluginManager,
+    plugin_market: PluginMarket,
     plugin_id: str,
     repo_url: str,
     force: bool,
@@ -57,7 +58,7 @@ async def _get_market_plugin_from_repo(
     """
     只读取指定插件仓库的市场元数据，避免单插件详情触发全部市场刷新。
     """
-    market_plugins = await plugin_manager.async_get_plugins_from_market(
+    market_plugins = await plugin_market.async_get_plugins_from_market(
         repo_url, settings.VERSION_FLAG, force
     )
     market_plugin = next(
@@ -71,7 +72,7 @@ async def _get_market_plugin_from_repo(
     if market_plugin or not settings.VERSION_FLAG:
         return market_plugin
 
-    compatible_plugins = await plugin_manager.async_get_plugins_from_market(
+    compatible_plugins = await plugin_market.async_get_plugins_from_market(
         repo_url, None, force
     )
     return next(
@@ -305,6 +306,7 @@ async def _get_plugin_history_detail(
     按需获取插件远端元数据，避免插件列表加载时批量访问网络。
     """
     plugin_manager = PluginManager()
+    plugin_market = PluginMarket(plugin_manager)
     installed_plugin = next(
         (
             plugin
@@ -317,7 +319,7 @@ async def _get_plugin_history_detail(
         return None
 
     local_repo_plugin = next(
-        (plugin for plugin in plugin_manager.get_local_repo_plugins() if plugin.id == plugin_id),
+        (plugin for plugin in plugin_market.get_local_repo_plugins() if plugin.id == plugin_id),
         None,
     )
     if local_repo_plugin:
@@ -325,7 +327,7 @@ async def _get_plugin_history_detail(
 
     if installed_plugin.repo_url:
         market_plugin = await _get_market_plugin_from_repo(
-            plugin_manager, plugin_id, installed_plugin.repo_url, force
+            plugin_market, plugin_id, installed_plugin.repo_url, force
         )
         if not market_plugin:
             logger.debug(f"插件 {plugin_id} 未从来源仓库获取到更新说明，返回本地插件信息")
@@ -335,7 +337,7 @@ async def _get_plugin_history_detail(
     market_plugin = next(
         (
             plugin
-            for plugin in await plugin_manager.async_get_online_plugins(force=force)
+            for plugin in await plugin_market.async_get_online_plugins(force=force)
             if plugin.id == plugin_id
         ),
         None,
@@ -357,6 +359,7 @@ async def all_plugins(
     """
     # 本地插件
     plugin_manager = PluginManager()
+    plugin_market = PluginMarket(plugin_manager)
     local_plugins = plugin_manager.get_local_plugins()
     # 已安装插件
     installed_plugins = [plugin for plugin in local_plugins if plugin.installed]
@@ -366,11 +369,11 @@ async def all_plugins(
     # 未安装的本地插件
     not_installed_plugins = [plugin for plugin in local_plugins if not plugin.installed]
     # 本地插件仓库目录中的插件
-    local_repo_plugins = plugin_manager.get_local_repo_plugins()
+    local_repo_plugins = plugin_market.get_local_repo_plugins()
     # 在线插件
-    online_plugins = await plugin_manager.async_get_online_plugins(force)
+    online_plugins = await plugin_market.async_get_online_plugins(force)
     candidate_plugins = (
-        plugin_manager.process_plugins_list(online_plugins + local_repo_plugins, [])
+        plugin_market.process_plugins_list(online_plugins + local_repo_plugins, [])
         if online_plugins or local_repo_plugins
         else []
     )
@@ -457,7 +460,7 @@ async def plugin_releases(
 
     plugin_manager = PluginManager()
     market_plugin = await _get_market_plugin_from_repo(
-        plugin_manager, plugin_id, repo_url, force
+        PluginMarket(plugin_manager), plugin_id, repo_url, force
     )
     latest_version = market_plugin.plugin_version if market_plugin else None
     current_version = plugin_manager.get_local_plugin_version(plugin_id)
