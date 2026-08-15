@@ -259,7 +259,7 @@ class TransferRenameBuildEventData(ChainEventData):
     """
     TransferRenameBuild 事件的数据模型
 
-    在 ``transhandler.get_rename_path`` 渲染文件名之前发出，给插件一次往
+    在 ``TransHandler.get_rename_path`` 渲染文件名之前发出，给插件一次往
     ``rename_dict`` 写字段的机会。典型用法是通过 ffprobe 或外部接口探测源文件，
     把分辨率、视频/音频编码、HDR 等字段写入 ``rename_dict``，主程序下一步渲染时
     就能直接用到这些字段，不需要插件事后再渲染一次去覆盖结果。

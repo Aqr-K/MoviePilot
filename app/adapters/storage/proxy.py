@@ -32,7 +32,7 @@ from app.runtime.log import logger
 
 # worker 脚本路径。用绝对路径直接执行，而不是 -m 或 import：
 # 直接执行文件不会触发 app/__init__.py 的导入链，代理启动才是毫秒级的
-_WORKER_PATH = Path(__file__).parent / "fsworker.py"
+_WORKER_PATH = Path(__file__).parent / "worker.py"
 # 单次快操作（stat/listdir/rename/unlink 等）的默认超时秒数
 DEFAULT_TIMEOUT = 30
 # 长耗时操作（复制）两次进度上报之间的最长间隔秒数。

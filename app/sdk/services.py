@@ -1,5 +1,6 @@
 """插件可使用的宿主服务发现与运行时门面。"""
 
+from app.adapters.storage.config import StorageHelper
 from app.runtime.extensions.service_registry import ServiceBaseHelper, ServiceConfigHelper
 from app.runtime.state import SystemHelper
 from app.application.downloader import DownloaderHelper
@@ -9,7 +10,6 @@ from app.application.mediaserver import (
     MediaServerHelper,
     MusicMediaServerHelper,
 )
-from app.application.storage import StorageHelper
 from app.application.notification import NotificationHelper
 
 

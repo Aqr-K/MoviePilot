@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import schemas
-from app.modules.filemanager.storages import local as local_storage_module
+from app.adapters.storage import local as local_storage_module
 
 
 SOURCE_MTIME_NS = 1_000_000_000_000_000_000
@@ -164,3 +164,25 @@ def test_same_device_move_still_uses_rename(tmp_path: Path) -> None:
     assert target.stat().st_ino == source_stat.st_ino
     assert target.stat().st_mode & 0o777 == 0o600
     copy_mock.assert_not_called()
+
+
+def test_local_usage_paths_orders_by_priority_and_ignores_remote_dirs() -> None:
+    """本地容量统计只汇总本地下载与媒体库目录，并按目录优先级排列。"""
+    dir_confs = [
+        {"priority": 2, "storage": "local", "download_path": "/downloads/second"},
+        {"priority": 1, "storage": "local", "download_path": "/downloads/first"},
+        {"priority": 1, "storage": "u115", "download_path": "/downloads/remote"},
+        {"priority": 1, "library_storage": "local", "library_path": "/library"},
+        {"priority": 1, "library_storage": "alist", "library_path": "/library/remote"},
+    ]
+
+    with patch.object(
+        local_storage_module.SystemConfigOper, "get", return_value=dir_confs
+    ):
+        paths = local_storage_module.local_usage_paths()
+
+    assert paths == [
+        Path("/downloads/first"),
+        Path("/downloads/second"),
+        Path("/library"),
+    ]

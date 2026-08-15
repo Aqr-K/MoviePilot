@@ -12,8 +12,8 @@ from app.application.messaging.message import MessageHelper
 from app.foundation.reflection import ModuleHelper
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.modules.filemanager.storages import StorageBase
-from app.modules.filemanager.transhandler import TransHandler
+from app.adapters.storage import StorageBase
+from app.application.transfer.handler import TransHandler
 from app.schemas import TransferInfo, ExistMediaInfo, TmdbEpisode, TransferDirectoryConf, FileItem, StorageUsage
 from app.schemas.types import MUSIC_ENTITY_ALBUM, MediaType, ModuleType, OtherModulesType
 from app.adapters.system.host import SystemUtils
@@ -36,7 +36,7 @@ class FileManagerModule(_ModuleBase):
     def init_module(self) -> None:
         """初始化文件整理模块支持的存储实现"""
         # 加载模块
-        self._storage_schemas = ModuleHelper.load('app.modules.filemanager.storages',
+        self._storage_schemas = ModuleHelper.load('app.adapters.storage',
                                                   filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
         # 获取存储类型
         self._support_storages = [storage.schema.value for storage in self._storage_schemas if storage.schema]

@@ -536,15 +536,11 @@ def test_space_usage_keeps_windows_drive_behavior_without_fsid_lookup():
 
 
 def test_local_storage_usage_forwards_btrfs_fsid_setting():
-    from app.modules.filemanager.storages import local as local_storage_module
+    from app.adapters.storage import local as local_storage_module
 
-    download_dir = MagicMock(download_path="/downloads")
-    library_dir = MagicMock(library_path="/library")
     with patch.object(local_storage_module.settings, "BTRFS_FSID_DEDUP", True), \
-            patch.object(local_storage_module.DirectoryHelper, "get_local_download_dirs",
-                         return_value=[download_dir]), \
-            patch.object(local_storage_module.DirectoryHelper, "get_local_library_dirs",
-                         return_value=[library_dir]), \
+            patch.object(local_storage_module, "local_usage_paths",
+                         return_value=[Path("/downloads"), Path("/library")]), \
             patch.object(SystemUtils, "space_usage", return_value=(4.0, 2.0)) as usage_mock:
         usage = object.__new__(local_storage_module.LocalStorage).usage()
 

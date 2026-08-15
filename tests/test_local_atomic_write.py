@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.filemanager.storages.local import LocalStorage
+from app.adapters.storage.local import LocalStorage
 from app.schemas import FileItem
 
 

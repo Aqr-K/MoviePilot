@@ -20,6 +20,15 @@ def _default_filter(name: str, obj: Any) -> bool:
 class ModuleHelper:
     """发现并动态加载 Python 包中的模块类。"""
 
+    @staticmethod
+    def _has_target_class(module: Any, filter_func: FilterFuncType) -> bool:
+        """判断模块是否公开了通过过滤器的类对象。"""
+        return any(
+            isinstance(obj, type) and filter_func(name, obj)
+            for name, obj in module.__dict__.items()
+            if not name.startswith("_")
+        )
+
     @classmethod
     def load(
         cls,
@@ -36,7 +45,10 @@ class ModuleHelper:
                     continue
                 full_package_name = f"{package_path}.{package_name}"
                 module = importlib.import_module(full_package_name)
-                importlib.reload(module)
+                # 只重载真正提供目标类的模块：重复执行同包内的协作模块会替换它们的
+                # 类对象和模块级单例，让先前导入的调用方与之失配
+                if cls._has_target_class(module, filter_func):
+                    importlib.reload(module)
                 for name, obj in module.__dict__.items():
                     if name.startswith("_"):
                         continue

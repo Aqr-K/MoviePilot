@@ -5,14 +5,32 @@ from pathlib import Path
 from typing import Optional, List
 
 from app import schemas
+from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.config import global_vars, settings
-from app.application.directory import DirectoryHelper
 from app.runtime.log import logger
-from app.modules.filemanager.fsproxy import fsproxy
-from app.modules.filemanager.storages import StorageBase, transfer_process
+from app.adapters.storage.proxy import fsproxy
+from app.adapters.storage import StorageBase, transfer_process
 from app.schemas.exception import StorageQueryError
-from app.schemas.types import StorageSchema
+from app.schemas.types import StorageSchema, SystemConfigKey
 from app.adapters.system.host import SystemUtils
+
+
+def local_usage_paths() -> List[Path]:
+    """
+    汇总需要统计本地容量的目录
+
+    :return: 按优先级排列的本地下载目录路径，随后是本地媒体库目录路径
+    """
+    dir_confs: List[dict] = SystemConfigOper().get(SystemConfigKey.Directories) or []
+    dirs = sorted(
+        (schemas.TransferDirectoryConf(**conf) for conf in dir_confs),
+        key=lambda conf: conf.priority,
+    )
+    return [
+        Path(d.download_path) for d in dirs if d.download_path and d.storage == "local"
+    ] + [
+        Path(d.library_path) for d in dirs if d.library_path and d.library_storage == "local"
+    ]
 
 
 class LocalStorage(StorageBase):
@@ -469,10 +487,8 @@ class LocalStorage(StorageBase):
         """
         存储使用情况
         """
-        directory_helper = DirectoryHelper()
         total_storage, free_storage = SystemUtils.space_usage(
-            [Path(d.download_path) for d in directory_helper.get_local_download_dirs() if d.download_path] +
-            [Path(d.library_path) for d in directory_helper.get_local_library_dirs() if d.library_path],
+            local_usage_paths(),
             btrfs_fsid_dedup=settings.BTRFS_FSID_DEDUP,
         )
         return schemas.StorageUsage(

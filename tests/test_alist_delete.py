@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from app.modules.filemanager.storages import alist as alist_module
-from app.modules.filemanager.storages.alist import Alist
+from app.adapters.storage import alist as alist_module
+from app.adapters.storage.alist import Alist
 from app.schemas import FileItem
 
 

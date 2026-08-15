@@ -8,7 +8,7 @@ from app.domain.meta.metamusic import MetaMusic
 from app.application.audio import AudioMetadataHelper
 from app.application.directory import DirectoryHelper
 from app.modules.filemanager import FileManagerModule
-from app.modules.filemanager.transhandler import TransHandler
+from app.application.transfer.handler import TransHandler
 from app.schemas import FileItem, TransferDirectoryConf
 from app.schemas.types import MediaType
 
@@ -90,7 +90,7 @@ def test_media_files_uses_music_template_root_and_only_returns_audio():
         "app.modules.filemanager.DirectoryHelper.get_library_dirs",
         return_value=[directory],
     ), patch(
-        "app.modules.filemanager.transhandler.eventmanager.send_event",
+        "app.application.transfer.handler.eventmanager.send_event",
         return_value=None,
     ):
         files = module.media_files(_recording())

@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest import TestCase
 
 from app.runtime.config import settings
-from app.modules.filemanager.transhandler import TransHandler
+from app.application.transfer.handler import TransHandler
 from app.schemas.file import FileItem
 
 
