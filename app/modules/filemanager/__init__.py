@@ -13,8 +13,15 @@ from app.foundation.reflection import ModuleHelper
 from app.runtime.log import logger
 from app.modules import _ModuleBase
 from app.adapters.storage import StorageBase
+from app.adapters.storage.registry import (
+    configure_builtin_schemas,
+    get_registered_storage_schemas,
+    get_registered_storages,
+    storage_schema_value,
+)
 from app.application.transfer.handler import TransHandler
 from app.schemas import TransferInfo, ExistMediaInfo, TmdbEpisode, TransferDirectoryConf, FileItem, StorageUsage
+from app.schemas.file import configure_storage_schema_provider
 from app.schemas.types import MUSIC_ENTITY_ALBUM, MediaType, ModuleType, OtherModulesType
 from app.adapters.system.host import SystemUtils
 from app.foundation import text as text_tools
@@ -25,8 +32,7 @@ class FileManagerModule(_ModuleBase):
     文件整理模块
     """
 
-    _storage_schemas = []
-    _support_storages = []
+    _builtin_storage_schemas = []
 
     def __init__(self):
         super().__init__()
@@ -36,10 +42,27 @@ class FileManagerModule(_ModuleBase):
     def init_module(self) -> None:
         """初始化文件整理模块支持的存储实现"""
         # 加载模块
-        self._storage_schemas = ModuleHelper.load('app.adapters.storage',
-                                                  filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
-        # 获取存储类型
-        self._support_storages = [storage.schema.value for storage in self._storage_schemas if storage.schema]
+        self._builtin_storage_schemas = ModuleHelper.load(
+            'app.adapters.storage',
+            filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
+        # 告知注册表内建存储类型，用于外部存储的重名判定
+        configure_builtin_schemas(
+            [storage_schema_value(storage) for storage in self._builtin_storage_schemas])
+        # 让 URI 前缀解析认出外部注册的存储，否则其路径会被当成本地路径
+        configure_storage_schema_provider(get_registered_storage_schemas)
+
+    def _storage_schemas(self) -> List[type]:
+        """
+        内建存储与注册存储合并后的存储实现类列表
+        """
+        return [*self._builtin_storage_schemas, *get_registered_storages()]
+
+    def _support_storages(self) -> List[str]:
+        """
+        当前支持的存储类型列表
+        """
+        schema_values = (storage_schema_value(storage) for storage in self._storage_schemas())
+        return [schema_value for schema_value in schema_values if schema_value]
 
     @staticmethod
     def get_name() -> str:
@@ -113,9 +136,10 @@ class FileManagerModule(_ModuleBase):
         """
         获取存储操作对象
         """
-        for storage_schema in self._storage_schemas:
-            if storage_schema.schema \
-                    and storage_schema.schema.value == _storage \
+        if not _storage:
+            return None
+        for storage_schema in self._storage_schemas():
+            if storage_schema_value(storage_schema) == _storage \
                     and (not _func or hasattr(storage_schema, _func)):
                 return storage_schema()
         return None
@@ -127,7 +151,7 @@ class FileManagerModule(_ModuleBase):
         """
         支持的整理方式
         """
-        if storage not in self._support_storages:
+        if storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(storage)
         if not storage_oper:
@@ -229,7 +253,7 @@ class FileManagerModule(_ModuleBase):
         :param recursion: 是否递归，此时只浏览文件
         :return: 文件项列表
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -261,7 +285,7 @@ class FileManagerModule(_ModuleBase):
         """
         查询当前目录下是否存在指定扩展名任意文件
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -296,7 +320,7 @@ class FileManagerModule(_ModuleBase):
         :param name: 目录名
         :return: 创建的目录
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -308,7 +332,7 @@ class FileManagerModule(_ModuleBase):
         """
         获取目录，如目录不存在则创建
         """
-        if storage not in self._support_storages:
+        if storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(storage)
         if not storage_oper:
@@ -320,7 +344,7 @@ class FileManagerModule(_ModuleBase):
         """
         删除文件或目录
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -332,7 +356,7 @@ class FileManagerModule(_ModuleBase):
         """
         重命名文件或目录
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -344,7 +368,7 @@ class FileManagerModule(_ModuleBase):
         """
         下载文件
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -356,7 +380,7 @@ class FileManagerModule(_ModuleBase):
         """
         上传文件
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -368,7 +392,7 @@ class FileManagerModule(_ModuleBase):
         """
         根据路径获取文件项
         """
-        if storage not in self._support_storages:
+        if storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(storage)
         if not storage_oper:
@@ -380,7 +404,7 @@ class FileManagerModule(_ModuleBase):
         """
         获取上级目录项
         """
-        if fileitem.storage not in self._support_storages:
+        if fileitem.storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(fileitem.storage)
         if not storage_oper:
@@ -399,7 +423,7 @@ class FileManagerModule(_ModuleBase):
         :param max_depth: 最大递归深度，避免过深遍历
         :param previous_snapshot: 上次完整快照，用于增量对账
         """
-        if storage not in self._support_storages:
+        if storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(storage)
         if not storage_oper:
@@ -416,7 +440,7 @@ class FileManagerModule(_ModuleBase):
         """
         存储使用情况
         """
-        if storage not in self._support_storages:
+        if storage not in self._support_storages():
             return None
         storage_oper = self.__get_storage_oper(storage)
         if not storage_oper:

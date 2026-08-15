@@ -5,7 +5,7 @@ from typing import Callable, Dict, Generator, Optional, Tuple, Any, Union, List
 from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.foundation.reflection import ModuleHelper
-from app.runtime.extensions.contract import verify_module_contract
+from app.runtime.extensions.contract import verify_module_contract, verify_module_type
 from app.runtime.extensions.plugin_instance import plugin_id_of, qualify_module_id
 from app.runtime.log import logger
 from app.schemas.types import EventType, ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
@@ -21,14 +21,17 @@ class ProvidedModule:
     :param module_cls: 模块类，契约校验针对该类进行
     :param module_id: 模块标识，缺省取类名
     :param factory: 实例构造器，缺省直接调用模块类
+    :param expected_type: 期望的模块类型，非空时在契约校验之外追加类型校验
     """
 
     def __init__(self, module_cls: type, module_id: Optional[str] = None,
-                 factory: Optional[Callable[[], Any]] = None):
-        """记录模块声明的类、标识与构造方式"""
+                 factory: Optional[Callable[[], Any]] = None,
+                 expected_type: Optional[ModuleType] = None):
+        """记录模块声明的类、标识、构造方式与期望类型"""
         self.module_cls = module_cls
         self.module_id = module_id or getattr(module_cls, "__name__", "")
         self.factory = factory
+        self.expected_type = expected_type
 
     def instantiate(self) -> Any:
         """
@@ -284,9 +287,13 @@ class ModuleManager(metaclass=Singleton):
             module_cls=declaration.module_cls,
             module_id=qualify_module_id(declared_id, owner),
             factory=declaration.factory,
+            expected_type=declaration.expected_type,
         )
         module_id = declaration.module_id
-        passed, reasons = verify_module_contract(declaration.module_cls)
+        if declaration.expected_type is not None:
+            passed, reasons = verify_module_type(declaration.module_cls, declaration.expected_type)
+        else:
+            passed, reasons = verify_module_contract(declaration.module_cls)
         if not passed:
             logger.warning(f"模块 {module_id}（owner={owner}）未通过契约校验，拒绝注册：{'；'.join(reasons)}")
             return False

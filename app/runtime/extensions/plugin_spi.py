@@ -11,8 +11,19 @@ from typing import Any, Dict, List, Optional
 
 from app.foundation.reflection import ObjectUtils
 from app.runtime.deprecation.policy import warn as deprecation_warn
+from app.runtime.extensions.contract import verify_agent_tool_contract
+from app.runtime.extensions.module_manager import ProvidedModule
 from app.runtime.extensions.plugin_instance import matches_plugin
 from app.runtime.log import logger
+from app.schemas.types import ModuleType
+
+# 按类型细分的模块声明钩子与其期望的模块类型
+TYPED_MODULE_HOOKS: Dict[str, ModuleType] = {
+    "provides_downloaders": ModuleType.Downloader,
+    "provides_mediaservers": ModuleType.MediaServer,
+    "provides_notifications": ModuleType.Notification,
+    "provides_data_sources": ModuleType.MediaRecognize,
+}
 
 # 智能体工具注册表的构建重试上限，插件状态持续变化时据此有界失败
 AGENT_TOOLS_BUILD_MAX_ATTEMPTS = 3
@@ -23,36 +34,115 @@ _agent_tools_cache_lock = threading.Lock()
 _agent_tools_revision: int = 0
 
 
+def _collect_declarations(running_plugins: Dict[str, Any],
+                          pid: Optional[str],
+                          hook_name: str,
+                          subject: str) -> Dict[str, List[Any]]:
+    """
+    按实例键归集一个声明钩子的返回值
+
+    只取已启用实例的非空声明，单个实例的钩子异常只记录日志，不影响其余实例。
+
+    :param running_plugins: 运行态插件表 {实例键: plugin}
+    :param pid: 插件ID或实例键，为空时聚合全部实例
+    :param hook_name: 声明钩子的方法名
+    :param subject: 声明内容的名称，用于日志
+    :return: {实例键: [声明, ...]}
+    """
+    collected: Dict[str, List[Any]] = {}
+    # 快照避免聚合期间插件启停造成并发修改
+    for key, plugin in dict(running_plugins).items():
+        if not matches_plugin(key, pid):
+            continue
+        hook = getattr(plugin, hook_name, None)
+        if hook is None:
+            continue
+        try:
+            # 钩子可实现性的判定要连同调用一起隔离，插件给出无法内省的对象时只跳过该实例
+            if not ObjectUtils.check_method(hook):
+                continue
+            if not plugin.get_state():
+                continue
+            declared = hook() or []
+            if not declared:
+                continue
+            collected.setdefault(key, []).extend(declared)
+        except Exception as err:
+            logger.error(f"获取插件 {key} {subject}出错：{str(err)}")
+    return collected
+
+
 def get_plugin_provided_modules(running_plugins: Dict[str, Any],
                                 pid: Optional[str] = None) -> Dict[str, List[Any]]:
     """
-    聚合插件经 provides_modules() 声明的系统模块
+    聚合插件声明的系统模块
 
+    收 provides_modules() 的通用声明，以及 provides_downloaders() 等按类型细分的声明；
+    后者转成带期望类型的 ProvidedModule，由模块管理器在契约校验之外追加类型校验。
     只取已启用实例的非空声明，单个实例的钩子异常不影响其余实例。
 
     :param running_plugins: 运行态插件表 {实例键: plugin}
     :param pid: 插件ID或实例键，为空时聚合全部实例
     :return: {实例键: [模块类或 ProvidedModule, ...]}
     """
-    provided: Dict[str, List[Any]] = {}
-    # 快照避免聚合期间插件启停造成并发修改
-    for key, plugin in dict(running_plugins).items():
-        if not matches_plugin(key, pid):
-            continue
-        hook = getattr(plugin, "provides_modules", None)
-        if hook is None or not ObjectUtils.check_method(hook):
-            continue
-        try:
-            if not plugin.get_state():
-                continue
-            modules = hook() or []
-            if not modules:
-                continue
-            provided[key] = list(modules)
+    provided = _collect_declarations(running_plugins, pid, "provides_modules", "注册模块")
+    for hook_name, module_type in TYPED_MODULE_HOOKS.items():
+        typed = _collect_declarations(running_plugins, pid, hook_name, f"{hook_name} 声明的模块")
+        for key, modules in typed.items():
+            provided.setdefault(key, []).extend(
+                _as_typed_declaration(module, module_type) for module in modules
+            )
+    for key in provided:
+        plugin = running_plugins.get(key)
+        if plugin is not None:
             _warn_mixed_declaration(key, plugin)
-        except Exception as err:
-            logger.error(f"获取插件 {key} 注册模块出错：{str(err)}")
     return provided
+
+
+def _as_typed_declaration(module: Any, module_type: ModuleType) -> ProvidedModule:
+    """
+    给一个模块声明附上期望的模块类型
+
+    声明自带期望类型时保持原样，使插件可以自行指定更精确的判定。
+
+    :param module: 模块类或 ProvidedModule 声明
+    :param module_type: 期望的模块类型
+    :return: 带期望类型的 ProvidedModule 声明
+    """
+    if isinstance(module, ProvidedModule):
+        if module.expected_type is not None:
+            return module
+        return ProvidedModule(
+            module_cls=module.module_cls,
+            module_id=module.module_id,
+            factory=module.factory,
+            expected_type=module_type,
+        )
+    return ProvidedModule(module_cls=module, expected_type=module_type)
+
+
+def get_plugin_provided_storages(running_plugins: Dict[str, Any],
+                                 pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """
+    聚合插件经 provides_storages() 声明的存储实现
+
+    :param running_plugins: 运行态插件表 {实例键: plugin}
+    :param pid: 插件ID或实例键，为空时聚合全部实例
+    :return: {实例键: [存储类, ...]}
+    """
+    return _collect_declarations(running_plugins, pid, "provides_storages", "注册存储")
+
+
+def get_plugin_provided_channel_capabilities(running_plugins: Dict[str, Any],
+                                             pid: Optional[str] = None) -> Dict[str, List[Any]]:
+    """
+    聚合插件经 provides_channel_capabilities() 声明的渠道能力
+
+    :param running_plugins: 运行态插件表 {实例键: plugin}
+    :param pid: 插件ID或实例键，为空时聚合全部实例
+    :return: {实例键: [ChannelCapabilities, ...]}
+    """
+    return _collect_declarations(running_plugins, pid, "provides_channel_capabilities", "注册渠道能力")
 
 
 def get_plugin_modules(running_plugins: Dict[str, Any],
@@ -280,24 +370,30 @@ def get_plugin_agent_tools(running_plugins: Dict[str, Any],
         ret_tools = []
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(running_plugins)
+        declared = _collect_declarations(
+            running_plugins_snapshot, pid, "provides_agent_tools", "注册智能体工具")
         for plugin_id, plugin in running_plugins_snapshot.items():
             if not matches_plugin(plugin_id, pid):
                 continue
+            tools = _verified_agent_tools(plugin_id, declared.get(plugin_id, []))
             if hasattr(plugin, "get_agent_tools") and ObjectUtils.check_method(
                 plugin.get_agent_tools
             ):
                 try:
                     if not plugin.get_state():
                         continue
-                    tools = plugin.get_agent_tools()
-                    if tools:
-                        ret_tools.append({
-                            "plugin_id": plugin_id,
-                            "plugin_name": plugin.plugin_name,
-                            "tools": tools
-                        })
+                    legacy_tools = plugin.get_agent_tools() or []
+                    if legacy_tools:
+                        _warn_legacy_agent_tools(plugin_id)
+                        tools = tools + list(legacy_tools)
                 except Exception as e:
                     logger.error(f"获取插件 {plugin_id} 智能体工具出错：{str(e)}")
+            if tools:
+                ret_tools.append({
+                    "plugin_id": plugin_id,
+                    "plugin_name": plugin.plugin_name,
+                    "tools": tools
+                })
         with _agent_tools_cache_lock:
             if cache_revision != _agent_tools_revision:
                 # 插件状态在注册表构建期间发生变化，重新读取以避免写回过期快照。
@@ -341,6 +437,37 @@ def _copy_plugin_agent_tools(tools_info: List[Dict[str, Any]]) -> List[Dict[str,
         }
         for plugin_info in tools_info
     ]
+
+
+def _verified_agent_tools(key: str, tools: List[Any]) -> List[Any]:
+    """
+    过滤出满足工具契约的智能体工具类
+
+    不合契约的工具在注册阶段就被拒绝，而不是等到智能体实际调用时才失败。
+
+    :param key: 实例键
+    :param tools: 声明的工具类列表
+    :return: 通过校验的工具类列表
+    """
+    verified: List[Any] = []
+    for tool in tools:
+        passed, reasons = verify_agent_tool_contract(tool)
+        if not passed:
+            name = getattr(tool, "__name__", tool)
+            logger.warning(f"插件 {key} 声明的智能体工具 {name} 未通过契约校验，拒绝注册："
+                           f"{'；'.join(reasons)}")
+            continue
+        verified.append(tool)
+    return verified
+
+
+def _warn_legacy_agent_tools(key: str) -> None:
+    """
+    就插件使用 get_agent_tools() 声明智能体工具发出废弃提示
+
+    :param key: 实例键
+    """
+    deprecation_warn("plugin.get_agent_tools", context=key)
 
 
 def _warn_legacy_module_injection(key: str) -> None:

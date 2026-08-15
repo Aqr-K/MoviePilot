@@ -29,8 +29,11 @@ from app.runtime.extensions.plugin_loader import (
 )
 from app.runtime.extensions.plugin_spi import (
     clear_plugin_agent_tools_cache,
+    get_plugin_provided_channel_capabilities,
     get_plugin_provided_modules,
+    get_plugin_provided_storages,
 )
+from app.schemas.message import ChannelCapabilityManager
 from app.schemas.types import EventType, SystemConfigKey
 
 
@@ -256,7 +259,7 @@ class PluginManager(metaclass=Singleton):
                         eventmanager.disable_event_handler(plugin, key)
                 except Exception as err:
                     logger.error(f"加载插件 {key} 出错：{str(err)} - {traceback.format_exc()}")
-        self._register_plugin_modules(pid)
+        self._register_plugin_extensions(pid)
         clear_plugin_agent_tools_cache()
 
     def init_plugin(self, plugin_id: str, conf: dict, instance_id: str = DEFAULT_INSTANCE_ID):
@@ -278,10 +281,10 @@ class PluginManager(metaclass=Singleton):
             setup_plugin_database(plugin)
         except Exception as err:
             logger.error(f"初始化插件 {plugin_id} 自管理数据库出错：{str(err)}")
-        # 插件启停和配置变更都可能改变模块声明，先回收再按最新声明注册；
+        # 插件启停和配置变更都可能改变声明，先回收再按最新声明注册；
         # 排在自管理表建立之后，使模块初始化能用上插件自己的表
-        self._unregister_module_owners([key])
-        self._register_plugin_modules(key)
+        self._unregister_extension_owners([key])
+        self._register_plugin_extensions(key)
         # 检查插件实例状态并启用/禁用事件处理器
         if plugin.get_state():
             # 启用该实例的事件处理器
@@ -304,11 +307,11 @@ class PluginManager(metaclass=Singleton):
             targets = self.get_instance_keys(pid) or [instance_key(pid)]
         else:
             targets = None
-        # 回收插件注册的系统模块，插件未进入运行态时同样按来源清理，避免残留
+        # 回收插件注册的扩展点，插件未进入运行态时同样按来源清理，避免残留
         if targets is None:
-            self._unregister_plugin_modules()
+            self._unregister_plugin_extensions()
         else:
-            self._unregister_module_owners(targets)
+            self._unregister_extension_owners(targets)
         # 停止插件
         if targets is not None:
             logger.info(f"正在停止插件 {pid}...")
@@ -359,17 +362,117 @@ class PluginManager(metaclass=Singleton):
             for module in modules:
                 module_manager.register_module(module, owner=key)
 
+    def _register_plugin_storages(self, pid: Optional[str] = None) -> None:
+        """
+        把插件经 provides_storages() 声明的存储实现注册进存储注册表
+
+        无插件声明存储时不触碰存储层，避免提前触发存储驱动装载。
+
+        :param pid: 插件ID或实例键，为空时处理全部运行态实例
+        """
+        provided = get_plugin_provided_storages(self._running_plugins, pid)
+        if not provided:
+            return
+        from app.adapters.storage.registry import register_storage
+        for key, storages in provided.items():
+            for storage in storages:
+                register_storage(storage, owner=key)
+
+    def _register_plugin_channel_capabilities(self, pid: Optional[str] = None) -> None:
+        """
+        把插件经 provides_channel_capabilities() 声明的渠道能力注册进渠道能力管理器
+
+        :param pid: 插件ID或实例键，为空时处理全部运行态实例
+        """
+        provided = get_plugin_provided_channel_capabilities(self._running_plugins, pid)
+        if not provided:
+            return
+        for key, capabilities in provided.items():
+            for capability in capabilities:
+                if ChannelCapabilityManager.register_capabilities(capability, owner=key):
+                    continue
+                channel = getattr(capability, "channel", capability)
+                logger.warning(f"插件 {key} 声明的渠道能力 {channel} 未被接受")
+
+    def _register_plugin_extensions(self, pid: Optional[str] = None) -> None:
+        """
+        按最新声明注册插件的全部扩展点
+
+        :param pid: 插件ID或实例键，为空时处理全部运行态实例
+        """
+        self._register_plugin_modules(pid)
+        self._register_plugin_storages(pid)
+        self._register_plugin_channel_capabilities(pid)
+
+    def _extension_owners(self, pid: Optional[str] = None) -> List[str]:
+        """
+        列出需要回收扩展点的注册来源
+
+        :param pid: 插件ID，为空时取全部已加载实例
+        :return: 注册来源的实例键列表
+        """
+        if pid:
+            return self.get_instance_keys(pid) or [instance_key(pid)]
+        return list({**self._plugins, **self._running_plugins})
+
     def _unregister_plugin_modules(self, pid: Optional[str] = None) -> None:
         """
         回收插件注册的系统模块
 
         :param pid: 插件ID，为空时回收全部已加载实例
         """
-        if pid:
-            owners = self.get_instance_keys(pid) or [instance_key(pid)]
-        else:
-            owners = list({**self._plugins, **self._running_plugins})
-        self._unregister_module_owners(owners)
+        self._unregister_module_owners(self._extension_owners(pid))
+
+    def _unregister_plugin_extensions(self, pid: Optional[str] = None) -> None:
+        """
+        回收插件注册的全部扩展点
+
+        :param pid: 插件ID，为空时回收全部已加载实例
+        """
+        self._unregister_extension_owners(self._extension_owners(pid))
+
+    @classmethod
+    def _unregister_extension_owners(cls, owners: List[str]) -> None:
+        """
+        按注册来源回收全部扩展点
+
+        每类扩展点各自隔离，任一回收失败都不得连累其余。
+
+        :param owners: 注册来源的实例键列表
+        """
+        for reclaim in (cls._unregister_module_owners,
+                        cls._unregister_storage_owners,
+                        cls._unregister_capability_owners):
+            try:
+                reclaim(owners)
+            except Exception as err:
+                logger.error(f"回收插件扩展点出错：{str(err)}", exc_info=True)
+
+    @staticmethod
+    def _unregister_storage_owners(owners: List[str]) -> None:
+        """
+        按注册来源回收存储实现
+
+        :param owners: 注册来源的实例键列表
+        """
+        from app.adapters.storage.registry import unregister_storages
+        for owner in owners:
+            removed = unregister_storages(owner)
+            if removed:
+                logger.info(f"已回收插件 {owner} 注册的存储：{'、'.join(removed)}")
+
+    @staticmethod
+    def _unregister_capability_owners(owners: List[str]) -> None:
+        """
+        按注册来源回收渠道能力
+
+        :param owners: 注册来源的实例键列表
+        """
+        for owner in owners:
+            removed = ChannelCapabilityManager.unregister_capabilities(owner)
+            if removed:
+                logger.info(f"已回收插件 {owner} 注册的渠道能力："
+                            f"{'、'.join(channel.value for channel in removed)}")
 
     @staticmethod
     def _unregister_module_owners(owners: List[str]) -> None:

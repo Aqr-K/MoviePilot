@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Optional, List, Dict, Tuple, Callable, Union
 
@@ -69,11 +70,19 @@ class StorageBase(metaclass=ABCMeta):
         """检查存储登录状态"""
         pass
 
+    @property
+    def schema_value(self) -> Optional[str]:
+        """
+        存储的 schema 标识字符串，枚举成员取 value
+        """
+        schema = self.schema
+        return schema.value if isinstance(schema, Enum) else schema
+
     def get_config(self) -> Optional[schemas.StorageConf]:
         """
         获取配置
         """
-        return self.storagehelper.get_storage(self.schema.value)
+        return self.storagehelper.get_storage(self.schema_value)
 
     def get_conf(self) -> dict:
         """
@@ -86,7 +95,7 @@ class StorageBase(metaclass=ABCMeta):
         """
         设置配置
         """
-        self.storagehelper.set_storage(self.schema.value, conf)
+        self.storagehelper.set_storage(self.schema_value, conf)
         self.init_storage()
 
     def support_transtype(self) -> dict:
@@ -105,7 +114,7 @@ class StorageBase(metaclass=ABCMeta):
         """
         重置置配置
         """
-        self.storagehelper.reset_storage(self.schema.value)
+        self.storagehelper.reset_storage(self.schema_value)
         self.init_storage()
 
     @staticmethod

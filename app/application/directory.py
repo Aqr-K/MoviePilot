@@ -6,6 +6,7 @@ from app import schemas
 from app.domain.context import MediaInfo
 from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.log import logger
+from app.schemas.file import known_storage_schemas
 from app.schemas.types import MediaType, StorageSchema, SystemConfigKey
 from app.adapters.system.host import SystemUtils
 
@@ -230,10 +231,10 @@ def _split_file_uri(value: str) -> Tuple[str, str]:
     """
     拆分 FileURI 字符串，保留原始路径用于安全校验。
     """
-    for storage in StorageSchema:
-        protocol = f"{storage.value}:"
+    for schema in known_storage_schemas():
+        protocol = f"{schema}:"
         if value.startswith(protocol):
-            return storage.value, value[len(protocol):]
+            return schema, value[len(protocol):]
     return "local", value
 
 
@@ -323,7 +324,7 @@ def validate_download_save_path(save_path: str) -> str:
     :return: 可直接传给下载接口的规范化保存目录
     """
     value = str(save_path or "").strip()
-    has_storage_prefix = any(value.startswith(f"{item.value}:") for item in StorageSchema)
+    has_storage_prefix = any(value.startswith(f"{schema}:") for schema in known_storage_schemas())
     storage, raw_path = _split_file_uri(value)
     target_style, target_path = _normalize_download_path(raw_path, storage)
 

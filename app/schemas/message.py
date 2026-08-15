@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Union, List, Dict, Set, Any
@@ -433,9 +434,10 @@ class ChannelCapabilities:
 
 class ChannelCapabilityManager:
     """
-    渠道能力管理器
+    渠道能力管理器，外部来源注册的能力优先于内建能力
     """
 
+    # 内建渠道能力基线
     _capabilities: Dict[MessageChannel, ChannelCapabilities] = {
         MessageChannel.Telegram: ChannelCapabilities(
             channel=MessageChannel.Telegram,
@@ -609,11 +611,78 @@ class ChannelCapabilityManager:
         ),
     }
 
+    # 外部来源注册的渠道能力，覆盖同一渠道的内建取值
+    _registered: Dict[MessageChannel, ChannelCapabilities] = {}
+
+    # 已被覆盖的渠道及其来源标识
+    _registered_owners: Dict[MessageChannel, str] = {}
+
+    # 覆盖表与归属表的并发保护锁
+    _registry_lock = threading.RLock()
+
+    @classmethod
+    def register_capabilities(
+        cls, capabilities: ChannelCapabilities, owner: str
+    ) -> bool:
+        """
+        注册一个外部来源声明的渠道能力，覆盖该渠道的内建取值。
+        同一渠道已被其它来源注册时拒绝，同一来源重复注册为幂等更新。
+        :param capabilities: 渠道能力声明
+        :param owner: 来源标识
+        :return: 是否接受本次注册
+        """
+        if not isinstance(capabilities, ChannelCapabilities):
+            return False
+        if not capabilities.channel:
+            return False
+        if not isinstance(owner, str) or not owner.strip():
+            return False
+        with cls._registry_lock:
+            current_owner = cls._registered_owners.get(capabilities.channel)
+            if current_owner is not None and current_owner != owner:
+                return False
+            cls._registered[capabilities.channel] = capabilities
+            cls._registered_owners[capabilities.channel] = owner
+            return True
+
+    @classmethod
+    def unregister_capabilities(cls, owner: str) -> List[MessageChannel]:
+        """
+        卸载某来源注册的全部渠道能力，被覆盖的内建取值随之恢复。
+        :param owner: 来源标识
+        :return: 被移除的渠道列表
+        """
+        if not isinstance(owner, str) or not owner.strip():
+            return []
+        with cls._registry_lock:
+            channels = [
+                channel
+                for channel, channel_owner in cls._registered_owners.items()
+                if channel_owner == owner
+            ]
+            for channel in channels:
+                cls._registered.pop(channel, None)
+                cls._registered_owners.pop(channel, None)
+            return channels
+
+    @classmethod
+    def get_registered_owners(cls) -> Dict[MessageChannel, str]:
+        """
+        获取当前被外部来源覆盖的渠道及其来源。
+        :return: 渠道到来源标识的映射
+        """
+        with cls._registry_lock:
+            return dict(cls._registered_owners)
+
     @classmethod
     def get_capabilities(cls, channel: MessageChannel) -> Optional[ChannelCapabilities]:
         """
-        获取渠道能力
+        获取渠道能力，外部来源注册的取值优先于内建取值
         """
+        with cls._registry_lock:
+            registered = cls._registered.get(channel)
+        if registered is not None:
+            return registered
         return cls._capabilities.get(channel)
 
     @classmethod

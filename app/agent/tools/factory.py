@@ -87,6 +87,7 @@ from app.agent.tools.impl.update_custom_identifiers import UpdateCustomIdentifie
 from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
 from app.agent.tools.impl.update_system_settings import UpdateSystemSettingsTool
 from app.agent.llm.capability import AgentCapabilityManager
+from app.runtime.extensions.contract import configure_agent_tool_base
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.extensions.plugin_spi import (
     get_plugin_agent_tools,
@@ -97,6 +98,9 @@ from app.schemas.message import ChannelCapabilityManager
 from app.schemas.types import MessageChannel
 from .base import MoviePilotTool
 from .catalog import ToolCatalogError, ToolCatalogSnapshot
+
+# 工具契约校验据此判定候选类是否为真工具
+configure_agent_tool_base(MoviePilotTool)
 
 
 class MoviePilotToolFactory:

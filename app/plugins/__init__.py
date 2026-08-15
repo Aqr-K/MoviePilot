@@ -256,6 +256,76 @@ class _PluginBase(metaclass=ABCMeta):
         """
         return []
 
+    def provides_downloaders(self) -> List[Any]:
+        """
+        声明本插件提供的下载器模块
+
+        与 provides_modules() 走同一条注册通道，额外校验模块类型为 ModuleType.Downloader，
+        类型不符的声明在注册前被拒绝而不是等到分发时才发现。
+
+        :return: 模块声明列表
+        """
+        return []
+
+    def provides_mediaservers(self) -> List[Any]:
+        """
+        声明本插件提供的媒体服务器模块
+
+        与 provides_modules() 走同一条注册通道，额外校验模块类型为 ModuleType.MediaServer。
+
+        :return: 模块声明列表
+        """
+        return []
+
+    def provides_notifications(self) -> List[Any]:
+        """
+        声明本插件提供的消息渠道模块
+
+        与 provides_modules() 走同一条注册通道，额外校验模块类型为 ModuleType.Notification。
+        渠道的按钮、富文本等能力另经 provides_channel_capabilities() 声明。
+
+        :return: 模块声明列表
+        """
+        return []
+
+    def provides_data_sources(self) -> List[Any]:
+        """
+        声明本插件提供的媒体识别数据源模块
+
+        与 provides_modules() 走同一条注册通道，额外校验模块类型为
+        ModuleType.MediaRecognize。
+
+        :return: 模块声明列表
+        """
+        return []
+
+    def provides_storages(self) -> List[Type]:
+        """
+        声明本插件提供的存储实现，注册后与内建存储同权参与文件整理
+
+        返回继承自 app.adapters.storage.StorageBase 的存储【类】列表（非实例），类上的
+        schema 属性即该存储的标识，与内建存储和其它插件的存储不得重名。标识可以是字符串，
+        不必是 StorageSchema 枚举成员——枚举是内建存储的封闭集合，插件按字符串取名即可。
+
+        【多实例】存储按 schema 标识注册，同一插件的多个实例声明同一个存储类时后者被拒；
+        需要多份配置的存储，让每个实例声明各自 schema 不同的存储类。
+
+        :return: 存储类列表
+        """
+        return []
+
+    def provides_channel_capabilities(self) -> List[Any]:
+        """
+        声明本插件提供的消息渠道能力
+
+        返回 app.schemas.message.ChannelCapabilities 列表。系统据此决定是否向该渠道下发
+        按钮、Markdown、文件等内容；未声明的渠道按最保守的兜底值处理，富交互会被降级。
+        声明可覆盖内建渠道的能力，插件停用时自动恢复内建取值。
+
+        :return: 渠道能力列表
+        """
+        return []
+
     def get_actions(self) -> List[Dict[str, Any]]:
         """
         获取插件工作流动作
@@ -316,8 +386,26 @@ class _PluginBase(metaclass=ABCMeta):
         2、工具类需要实现 run 方法（异步方法）
         3、工具类需要定义 name 和 description 属性
         4、工具类可以定义 args_schema 来指定输入参数模型
+
+        该方式无契约校验，不合契约的工具类要到智能体实际调用时才暴露，
+        请改用 provides_agent_tools()
         """
         pass
+
+    def provides_agent_tools(self) -> List[Type]:
+        """
+        声明本插件提供的智能体工具，注册后与内建工具同权参与智能体调用
+
+        返回继承自 app.agent.tools.base.MoviePilotTool 的工具【类】列表（非实例）。
+        工具类需实现异步的 run，并定义非空的 name 与 description；未通过校验的会被拒绝
+        注册，而不是等到智能体实际调用时才失败。可定义 args_schema 指定输入参数模型。
+
+        【多实例】工具按声明来源的实例键归组，同一插件的多个实例声明同一个工具类时各占
+        一份，工具名相同则以后到者覆盖，需要并存的分身请让各实例的工具名带上实例标识。
+
+        :return: 工具类列表
+        """
+        return []
 
     @abstractmethod
     def stop_service(self):

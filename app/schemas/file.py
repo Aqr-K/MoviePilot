@@ -1,5 +1,5 @@
 import re
-from typing import Optional
+from typing import Callable, Iterable, List, Optional
 
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -7,6 +7,35 @@ from app.schemas.types import StorageSchema
 
 # Windows 盘符绝对路径，如 Z:/Downloads 或 Z:\Downloads
 WINDOWS_DRIVE_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
+
+# 内建之外的存储标识来源，由存储层装配；未装配时只认内建存储
+_extra_schema_provider: Optional[Callable[[], Iterable[str]]] = None
+
+
+def configure_storage_schema_provider(provider: Optional[Callable[[], Iterable[str]]]) -> None:
+    """
+    装配内建之外的存储标识来源，使 URI 解析能认出外部注册的存储
+
+    :param provider: 返回存储标识集合的可调用对象，传 None 时只认内建存储
+    """
+    global _extra_schema_provider
+    _extra_schema_provider = provider
+
+
+def known_storage_schemas() -> List[str]:
+    """
+    列出当前可被 URI 前缀识别的全部存储标识
+
+    :return: 内建存储标识，以及外部来源注册的存储标识
+    """
+    schemas = [schema.value for schema in StorageSchema]
+    if _extra_schema_provider is None:
+        return schemas
+    try:
+        extra = list(_extra_schema_provider() or [])
+    except Exception:
+        return schemas
+    return schemas + [schema for schema in extra if schema and schema not in schemas]
 
 
 class FileURI(BaseModel):
@@ -33,11 +62,11 @@ class FileURI(BaseModel):
         :return: FileURI 对象
         """
         storage, path = 'local', uri
-        for s in StorageSchema:
-            protocol = f"{s.value}:"
+        for schema in known_storage_schemas():
+            protocol = f"{schema}:"
             if uri.startswith(protocol):
                 path = uri[len(protocol):]
-                storage = s.value
+                storage = schema
                 break
         # Windows 盘符路径本身就是绝对路径，补上根斜杠会得到 /Z:/xxx 这样的非法路径
         if not path.startswith("/") and not WINDOWS_DRIVE_PATTERN.match(path):
