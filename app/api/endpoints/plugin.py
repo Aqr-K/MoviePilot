@@ -1103,8 +1103,8 @@ def create_plugin_instance(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    # 重新拉起该插件的全部实例，新实例随之进入运行态
-    plugin_manager.reload_plugin(plugin_id)
+    # 只拉起新实例，同插件其余实例保持运行不被打断
+    plugin_manager.start_instance(plugin_id, instance_id)
     # 注册插件的定时服务、菜单命令和接口
     register_plugin(plugin_id)
     created = next(

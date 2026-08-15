@@ -667,7 +667,7 @@ def test_instance_list_endpoint_rejects_an_unknown_plugin():
 
 
 def test_create_instance_endpoint_starts_and_registers_the_instance():
-    """创建实例后要拉起运行态并同步注册定时服务、命令与接口。"""
+    """创建实例后只拉起该实例，并同步注册定时服务、命令与接口。"""
     plugin_manager = MagicMock()
     plugin_manager.has_plugin.return_value = True
     plugin_manager.create_plugin_instance.return_value = ALPHA_KEY
@@ -683,7 +683,8 @@ def test_create_instance_endpoint_starts_and_registers_the_instance():
     plugin_manager.create_plugin_instance.assert_called_once_with(
         PLUGIN_ID, "alpha", {"enable": True}
     )
-    plugin_manager.reload_plugin.assert_called_once_with(PLUGIN_ID)
+    plugin_manager.start_instance.assert_called_once_with(PLUGIN_ID, "alpha")
+    plugin_manager.reload_plugin.assert_not_called()
     register_plugin.assert_called_once_with(PLUGIN_ID)
     assert response.success is True
     assert schemas.Response[schemas.PluginInstanceInfo].model_validate(

@@ -241,26 +241,65 @@ class PluginManager(metaclass=Singleton):
                 continue
             # 逐个拉起该插件已配置的实例
             for instance_id in self._list_instance_ids(plugin_id):
-                key = instance_key(plugin_id, instance_id)
-                try:
-                    # 存储Class
-                    self._plugins[key] = plugin
-                    # 生成实例
-                    plugin_obj = self._instantiate_plugin(plugin, plugin_id, instance_id)
-                    # 生效插件配置
-                    plugin_obj.init_plugin(self.get_plugin_config(plugin_id, instance_id))
-                    # 存储运行实例
-                    self._running_plugins[key] = plugin_obj
-                    logger.info(f"加载插件：{key} 版本：{plugin_obj.plugin_version}")
-                    # 启用的插件实例才设置事件注册状态可用
-                    if plugin_obj.get_state():
-                        eventmanager.enable_event_handler(plugin, key)
-                    else:
-                        eventmanager.disable_event_handler(plugin, key)
-                except Exception as err:
-                    logger.error(f"加载插件 {key} 出错：{str(err)} - {traceback.format_exc()}")
+                self._start_instance(plugin, plugin_id, instance_id)
         self._register_plugin_extensions(pid)
         clear_plugin_agent_tools_cache()
+
+    def _start_instance(self, plugin_class: Type[Any], plugin_id: str, instance_id: str) -> bool:
+        """
+        拉起插件的一个实例并登记其事件处理器
+
+        :param plugin_class: 插件类
+        :param plugin_id: 插件ID
+        :param instance_id: 实例ID
+        :return: 是否进入运行态
+        """
+        key = instance_key(plugin_id, instance_id)
+        try:
+            # 存储Class
+            self._plugins[key] = plugin_class
+            # 生成实例
+            plugin_obj = self._instantiate_plugin(plugin_class, plugin_id, instance_id)
+            # 生效插件配置
+            plugin_obj.init_plugin(self.get_plugin_config(plugin_id, instance_id))
+            # 存储运行实例
+            self._running_plugins[key] = plugin_obj
+            logger.info(f"加载插件：{key} 版本：{plugin_obj.plugin_version}")
+            # 启用的插件实例才设置事件注册状态可用
+            if plugin_obj.get_state():
+                eventmanager.enable_event_handler(plugin_class, key)
+            else:
+                eventmanager.disable_event_handler(plugin_class, key)
+            return True
+        except Exception as err:
+            logger.error(f"加载插件 {key} 出错：{str(err)} - {traceback.format_exc()}")
+            return False
+
+    def start_instance(self, plugin_id: str, instance_id: str) -> bool:
+        """
+        单独拉起插件的一个实例，同插件其余实例保持运行不受影响
+
+        插件类取自已加载的注册表而不重扫插件目录，因此不会替换兄弟实例正在使用的类对象。
+
+        :param plugin_id: 插件ID
+        :param instance_id: 实例ID
+        :return: 是否进入运行态
+        :raises ValueError: 实例标识含非法字符或超长
+        """
+        normalized = normalize_instance_id(instance_id)
+        plugin_class = self.get_plugin_class(plugin_id)
+        if plugin_class is None:
+            logger.error(f"插件 {plugin_id} 未加载，无法拉起实例 {normalized}")
+            return False
+        if not set_and_check_auth_level(plugin=plugin_class):
+            logger.warning(f"插件 {plugin_id} 不满足认证要求，实例 {normalized} 不拉起")
+            return False
+        started = self._start_instance(plugin_class, plugin_id, normalized)
+        key = instance_key(plugin_id, normalized)
+        # 扩展点按实例键注册，兄弟实例的既有注册不受影响
+        self._register_plugin_extensions(key)
+        clear_plugin_agent_tools_cache()
+        return started
 
     def init_plugin(self, plugin_id: str, conf: dict, instance_id: str = DEFAULT_INSTANCE_ID):
         """
