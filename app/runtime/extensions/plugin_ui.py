@@ -17,9 +17,10 @@ from starlette import status
 from app import schemas
 from app.foundation.reflection import ObjectUtils
 from app.runtime.extensions.plugin_instance import (
+    instance_key,
     matches_plugin,
     plugin_id_of,
-    resolve_running_plugin,
+    split_instance_key,
 )
 from app.runtime.log import logger
 
@@ -71,8 +72,11 @@ def get_plugin_remotes(running_plugins: Dict[str, Any],
     for key, plugin in running_plugins_snapshot.items():
         if not matches_plugin(key, pid):
             continue
-        if hasattr(plugin, "get_render_mode"):
-            render_mode, dist_path = plugin.get_render_mode()
+        try:
+            render_hook = getattr(plugin, "get_render_mode", None)
+            if render_hook is None:
+                continue
+            render_mode, dist_path = render_hook()
             if render_mode != "vue":
                 continue
             plugin_id = plugin_id_of(key)
@@ -84,52 +88,72 @@ def get_plugin_remotes(running_plugins: Dict[str, Any],
                 "url": get_plugin_remote_entry(plugin_id, dist_path),
                 "name": plugin.plugin_name,
             })
+        except Exception as e:
+            logger.error(f"获取插件[{key}]联邦组件出错：{str(e)}")
     return remotes
+
+
+def _instance_auth_provider_id(declared_id: Optional[str], key: str) -> str:
+    """
+    获取登录认证入口在前端列表中的唯一标识
+
+    入口标识由插件声明，同一插件的多个实例声明的是同一个标识，因此分身实例的入口按实例
+    标识加以区分；未声明时取实例键。
+
+    :param declared_id: 插件声明的入口标识
+    :param key: 声明该入口的实例键
+    :return: 入口标识
+    """
+    if declared_id is None:
+        return f"plugin:{key}"
+    return instance_key(str(declared_id), split_instance_key(key)[1])
 
 
 def get_plugin_auth_providers(running_plugins: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     聚合插件声明的登录认证提供方
 
-    provider 的 plugin_id 为实例键，与该实例注册的接口路由一致；remote 指向插件源码
-    目录下的联邦入口，按插件标识定位。
+    只取已启用实例的入口，同一插件的每个实例各出一条：provider 的 plugin_id 为实例键，
+    与该实例注册的接口路由一致，入口标识按实例区分使多个实例互不覆盖；remote 指向插件
+    源码目录下的联邦入口，按插件标识定位。单个实例的钩子异常只记录日志，不影响其余实例。
 
     :param running_plugins: 运行态插件表 {实例键: plugin}
     :return: 插件认证入口列表
     """
     providers: List[Dict[str, Any]] = []
     running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if not plugin.get_state():
-            continue
-        if not hasattr(plugin, "get_auth_providers") or not ObjectUtils.check_method(plugin.get_auth_providers):
-            continue
+    for key, plugin in running_plugins_snapshot.items():
         try:
-            plugin_providers = plugin.get_auth_providers() or []
-        except Exception as e:
-            logger.error(f"获取插件 {plugin_id} 登录认证提供方出错：{str(e)}")
-            continue
-        render_mode = None
-        dist_path = None
-        if hasattr(plugin, "get_render_mode"):
-            render_mode, dist_path = plugin.get_render_mode()
-        for raw_provider in plugin_providers:
-            if not raw_provider or not isinstance(raw_provider, dict):
+            hook = getattr(plugin, "get_auth_providers", None)
+            if hook is None or not ObjectUtils.check_method(hook):
                 continue
-            provider = raw_provider.copy()
-            provider["type"] = "plugin"
-            provider["plugin_id"] = plugin_id
-            provider.setdefault("id", f"plugin:{plugin_id}")
-            provider.setdefault("name", plugin.plugin_name)
-            provider.setdefault("enabled", True)
-            if render_mode == "vue" and dist_path:
-                provider.setdefault("component", "AuthPage")
-                provider["remote"] = {
-                    "id": plugin_id_of(plugin_id),
-                    "url": get_plugin_remote_entry(plugin_id, dist_path),
-                    "name": plugin.plugin_name,
-                }
-            providers.append(provider)
+            if not plugin.get_state():
+                continue
+            plugin_providers = hook() or []
+            render_mode = None
+            dist_path = None
+            render_hook = getattr(plugin, "get_render_mode", None)
+            if render_hook is not None:
+                render_mode, dist_path = render_hook()
+            for raw_provider in plugin_providers:
+                if not raw_provider or not isinstance(raw_provider, dict):
+                    continue
+                provider = raw_provider.copy()
+                provider["type"] = "plugin"
+                provider["plugin_id"] = key
+                provider["id"] = _instance_auth_provider_id(provider.get("id"), key)
+                provider.setdefault("name", plugin.plugin_name)
+                provider.setdefault("enabled", True)
+                if render_mode == "vue" and dist_path:
+                    provider.setdefault("component", "AuthPage")
+                    provider["remote"] = {
+                        "id": plugin_id_of(key),
+                        "url": get_plugin_remote_entry(key, dist_path),
+                        "name": plugin.plugin_name,
+                    }
+                providers.append(provider)
+        except Exception as e:
+            logger.error(f"获取插件[{key}]登录认证提供方出错：{str(e)}")
     return providers
 
 
@@ -137,25 +161,29 @@ def get_plugin_sidebar_nav(running_plugins: Dict[str, Any]) -> List[Dict[str, An
     """
     聚合所有已启用 Vue 插件的侧栏导航项（get_sidebar_nav）
 
-    导航项的 plugin_id 为实例键，与该实例注册的接口路由前缀一致。
+    同一插件的每个实例各出一条：导航项的 plugin_id 为实例键，与该实例注册的接口路由前缀
+    一致，多个实例声明同名 nav_key 时互不覆盖。单个实例的钩子异常只记录日志，不影响其余
+    实例。
 
     :param running_plugins: 运行态插件表 {实例键: plugin}
     :return: 侧栏导航项列表
     """
     items: List[Dict[str, Any]] = []
     running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if not plugin.get_state():
-            continue
-        if not hasattr(plugin, "get_sidebar_nav") or not ObjectUtils.check_method(plugin.get_sidebar_nav):
-            continue
-        if not hasattr(plugin, "get_render_mode"):
-            continue
-        render_mode, _ = plugin.get_render_mode()
-        if render_mode != "vue":
-            continue
+    for key, plugin in running_plugins_snapshot.items():
         try:
-            nav_list = plugin.get_sidebar_nav()
+            hook = getattr(plugin, "get_sidebar_nav", None)
+            if hook is None or not ObjectUtils.check_method(hook):
+                continue
+            render_hook = getattr(plugin, "get_render_mode", None)
+            if render_hook is None:
+                continue
+            if not plugin.get_state():
+                continue
+            render_mode, _ = render_hook()
+            if render_mode != "vue":
+                continue
+            nav_list = hook()
             if not nav_list:
                 continue
             for raw in nav_list:
@@ -163,7 +191,7 @@ def get_plugin_sidebar_nav(running_plugins: Dict[str, Any]) -> List[Dict[str, An
                     continue
                 nav_key = str(raw.get("nav_key") or raw.get("key") or "main").strip()
                 if not nav_key or any(c in nav_key for c in ["/", "?", "#", " "]):
-                    logger.warning(f"插件[{plugin_id}]侧栏项 nav_key 无效，已跳过: {nav_key!r}")
+                    logger.warning(f"插件[{key}]侧栏项 nav_key 无效，已跳过: {nav_key!r}")
                     continue
                 title = raw.get("title") or plugin.plugin_name
                 icon = raw.get("icon") or "mdi-puzzle"
@@ -181,7 +209,7 @@ def get_plugin_sidebar_nav(running_plugins: Dict[str, Any]) -> List[Dict[str, An
                 except (TypeError, ValueError):
                     order = 0
                 items.append({
-                    "plugin_id": plugin_id,
+                    "plugin_id": key,
                     "nav_key": nav_key,
                     "title": title,
                     "icon": icon,
@@ -190,7 +218,7 @@ def get_plugin_sidebar_nav(running_plugins: Dict[str, Any]) -> List[Dict[str, An
                     "order": order,
                 })
         except Exception as e:
-            logger.error(f"获取插件[{plugin_id}]侧栏导航出错：{str(e)}")
+            logger.error(f"获取插件[{key}]侧栏导航出错：{str(e)}")
     items.sort(key=lambda x: (x["section"], x["order"], x["plugin_id"], x["nav_key"]))
     return items
 
@@ -199,7 +227,9 @@ def get_plugin_dashboard_meta(running_plugins: Dict[str, Any]) -> List[Dict[str,
     """
     聚合所有插件仪表盘元信息
 
-    条目的 id 为实例键，与该实例注册的接口路由前缀一致。
+    只取已启用实例的仪表盘，同一插件的每个实例各出一条：条目的 id 为实例键，与该实例注册
+    的接口路由前缀一致，多个实例声明同名仪表盘 key 时互不覆盖。单个实例的钩子异常只记录
+    日志，不影响其余实例。
 
     :param running_plugins: 运行态插件表 {实例键: plugin}
     :return: 仪表盘元信息列表
@@ -207,29 +237,31 @@ def get_plugin_dashboard_meta(running_plugins: Dict[str, Any]) -> List[Dict[str,
     dashboard_meta = []
     # 创建字典快照避免并发修改
     running_plugins_snapshot = dict(running_plugins)
-    for plugin_id, plugin in running_plugins_snapshot.items():
-        if not hasattr(plugin, "get_dashboard") or not ObjectUtils.check_method(plugin.get_dashboard):
-            continue
+    for key, plugin in running_plugins_snapshot.items():
         try:
+            dashboard_hook = getattr(plugin, "get_dashboard", None)
+            if dashboard_hook is None or not ObjectUtils.check_method(dashboard_hook):
+                continue
             if not plugin.get_state():
                 continue
             # 如果是多仪表盘实现
-            if hasattr(plugin, "get_dashboard_meta") and ObjectUtils.check_method(plugin.get_dashboard_meta):
-                meta = plugin.get_dashboard_meta()
+            meta_hook = getattr(plugin, "get_dashboard_meta", None)
+            if meta_hook is not None and ObjectUtils.check_method(meta_hook):
+                meta = meta_hook()
                 if meta:
                     dashboard_meta.extend([{
-                        "id": plugin_id,
+                        "id": key,
                         "name": m.get("name"),
                         "key": m.get("key"),
                     } for m in meta if m])
             else:
                 dashboard_meta.append({
-                    "id": plugin_id,
+                    "id": key,
                     "name": plugin.plugin_name,
                     "key": "",
                 })
         except Exception as e:
-            logger.error(f"获取插件[{plugin_id}]仪表盘元数据出错：{str(e)}")
+            logger.error(f"获取插件[{key}]仪表盘元数据出错：{str(e)}")
     return dashboard_meta
 
 
@@ -238,12 +270,15 @@ def get_plugin_dashboard(running_plugins: Dict[str, Any], pid: str, key: str,
     """
     获取插件仪表盘
 
+    按实例键精确定位，裸插件标识即默认实例的实例键，因此只解析到默认实例，不会串到该插件
+    的其他实例。
+
     :param running_plugins: 运行态插件表 {实例键: plugin}
-    :param pid: 插件ID或实例键
+    :param pid: 实例键，裸插件标识指向默认实例
     :param key: 仪表盘标识，多仪表盘插件据此区分
     :param user_agent: 请求方 User-Agent，插件据此适配呈现
     :return: 仪表盘数据，插件未返回内容时为 None
-    :raises HTTPException: 插件未加载、调用出错或返回数据格式错误
+    :raises HTTPException: 实例未加载、调用出错或返回数据格式错误
     """
 
     def __get_params_count(func: Callable):
@@ -254,7 +289,7 @@ def get_plugin_dashboard(running_plugins: Dict[str, Any], pid: str, key: str,
         return len(signature.parameters)
 
     # 获取插件实例
-    plugin_instance = resolve_running_plugin(running_plugins, pid)
+    plugin_instance = running_plugins.get(pid)
     if not plugin_instance:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"插件 {pid} 不存在或未加载")
 

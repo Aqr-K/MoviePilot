@@ -21,10 +21,27 @@ from app.api.deps import (
     get_current_active_superuser_async,
 )
 from app.runtime.progress import ProgressHelper
-from app.schemas.types import ProgressKey
+from app.schemas.file import known_storage_schemas
+from app.schemas.types import ProgressKey, StorageSchema
 from app.foundation import text as text_tools
 
 router = ResponseAPIRouter()
+
+
+@router.get(
+    "/schemas",
+    summary="支持的存储类型",
+    response_model=List[schemas.StorageSchemaInfo],
+)
+def storage_schemas(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
+    """
+    列出当前可用的存储类型，含内建存储与插件声明的存储
+    """
+    builtin = {schema.value for schema in StorageSchema}
+    return [
+        schemas.StorageSchemaInfo(name=name, builtin=name in builtin)
+        for name in known_storage_schemas()
+    ]
 
 
 @router.get(

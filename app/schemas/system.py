@@ -122,6 +122,17 @@ class PluginMarketSyncRequest(BaseModel):
     )
 
 
+class StorageSchemaInfo(BaseModel):
+    """
+    一种可用的存储类型
+    """
+
+    # 存储标识，即存储配置里的 type
+    name: Optional[str] = None
+    # 是否为内建存储，非内建来自插件声明
+    builtin: Optional[bool] = True
+
+
 class StorageConf(BaseModel):
     """
     存储配置

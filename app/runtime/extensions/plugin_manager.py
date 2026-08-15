@@ -22,18 +22,23 @@ from app.runtime.extensions.plugin_instance import (
     resolve_running_plugin,
     split_instance_key,
 )
+from app.runtime.extensions.plugin_lifecycle import (
+    extension_owners,
+    reclaim_extension_owners,
+    register_plugin_channel_capabilities,
+    register_plugin_extensions,
+    register_plugin_modules,
+    register_plugin_storages,
+    unregister_capability_owners,
+    unregister_module_owners,
+    unregister_storage_owners,
+)
 from app.runtime.extensions.plugin_loader import (
     apply_legacy_import_diagnostics,
     clear_plugin_modules,
     load_selective_plugins,
 )
-from app.runtime.extensions.plugin_spi import (
-    clear_plugin_agent_tools_cache,
-    get_plugin_provided_channel_capabilities,
-    get_plugin_provided_modules,
-    get_plugin_provided_storages,
-)
-from app.schemas.message import ChannelCapabilityManager
+from app.runtime.extensions.plugin_spi import clear_plugin_agent_tools_cache
 from app.schemas.types import EventType, SystemConfigKey
 
 
@@ -389,33 +394,17 @@ class PluginManager(metaclass=Singleton):
         """
         把插件经 provides_modules() 声明的系统模块注册进模块管理器
 
-        无插件声明模块时不触碰模块管理器，避免提前触发模块全量装载。
-
         :param pid: 插件ID或实例键，为空时处理全部运行态实例
         """
-        provided = get_plugin_provided_modules(self._running_plugins, pid)
-        if not provided:
-            return
-        module_manager = ModuleManager()
-        for key, modules in provided.items():
-            for module in modules:
-                module_manager.register_module(module, owner=key)
+        register_plugin_modules(self._running_plugins, ModuleManager, pid)
 
     def _register_plugin_storages(self, pid: Optional[str] = None) -> None:
         """
         把插件经 provides_storages() 声明的存储实现注册进存储注册表
 
-        无插件声明存储时不触碰存储层，避免提前触发存储驱动装载。
-
         :param pid: 插件ID或实例键，为空时处理全部运行态实例
         """
-        provided = get_plugin_provided_storages(self._running_plugins, pid)
-        if not provided:
-            return
-        from app.adapters.storage.registry import register_storage
-        for key, storages in provided.items():
-            for storage in storages:
-                register_storage(storage, owner=key)
+        register_plugin_storages(self._running_plugins, pid)
 
     def _register_plugin_channel_capabilities(self, pid: Optional[str] = None) -> None:
         """
@@ -423,15 +412,7 @@ class PluginManager(metaclass=Singleton):
 
         :param pid: 插件ID或实例键，为空时处理全部运行态实例
         """
-        provided = get_plugin_provided_channel_capabilities(self._running_plugins, pid)
-        if not provided:
-            return
-        for key, capabilities in provided.items():
-            for capability in capabilities:
-                if ChannelCapabilityManager.register_capabilities(capability, owner=key):
-                    continue
-                channel = getattr(capability, "channel", capability)
-                logger.warning(f"插件 {key} 声明的渠道能力 {channel} 未被接受")
+        register_plugin_channel_capabilities(self._running_plugins, pid)
 
     def _register_plugin_extensions(self, pid: Optional[str] = None) -> None:
         """
@@ -439,9 +420,7 @@ class PluginManager(metaclass=Singleton):
 
         :param pid: 插件ID或实例键，为空时处理全部运行态实例
         """
-        self._register_plugin_modules(pid)
-        self._register_plugin_storages(pid)
-        self._register_plugin_channel_capabilities(pid)
+        register_plugin_extensions(self._running_plugins, ModuleManager, pid)
 
     def _extension_owners(self, pid: Optional[str] = None) -> List[str]:
         """
@@ -450,9 +429,7 @@ class PluginManager(metaclass=Singleton):
         :param pid: 插件ID，为空时取全部已加载实例
         :return: 注册来源的实例键列表
         """
-        if pid:
-            return self.get_instance_keys(pid) or [instance_key(pid)]
-        return list({**self._plugins, **self._running_plugins})
+        return extension_owners(self._plugins, self._running_plugins, pid)
 
     def _unregister_plugin_modules(self, pid: Optional[str] = None) -> None:
         """
@@ -475,17 +452,11 @@ class PluginManager(metaclass=Singleton):
         """
         按注册来源回收全部扩展点
 
-        每类扩展点各自隔离，任一回收失败都不得连累其余。
-
         :param owners: 注册来源的实例键列表
         """
-        for reclaim in (cls._unregister_module_owners,
-                        cls._unregister_storage_owners,
-                        cls._unregister_capability_owners):
-            try:
-                reclaim(owners)
-            except Exception as err:
-                logger.error(f"回收插件扩展点出错：{str(err)}", exc_info=True)
+        reclaim_extension_owners(owners, (cls._unregister_module_owners,
+                                          cls._unregister_storage_owners,
+                                          cls._unregister_capability_owners))
 
     @staticmethod
     def _unregister_storage_owners(owners: List[str]) -> None:
@@ -494,11 +465,7 @@ class PluginManager(metaclass=Singleton):
 
         :param owners: 注册来源的实例键列表
         """
-        from app.adapters.storage.registry import unregister_storages
-        for owner in owners:
-            removed = unregister_storages(owner)
-            if removed:
-                logger.info(f"已回收插件 {owner} 注册的存储：{'、'.join(removed)}")
+        unregister_storage_owners(owners)
 
     @staticmethod
     def _unregister_capability_owners(owners: List[str]) -> None:
@@ -507,11 +474,7 @@ class PluginManager(metaclass=Singleton):
 
         :param owners: 注册来源的实例键列表
         """
-        for owner in owners:
-            removed = ChannelCapabilityManager.unregister_capabilities(owner)
-            if removed:
-                logger.info(f"已回收插件 {owner} 注册的渠道能力："
-                            f"{'、'.join(channel.value for channel in removed)}")
+        unregister_capability_owners(owners)
 
     @staticmethod
     def _unregister_module_owners(owners: List[str]) -> None:
@@ -520,13 +483,7 @@ class PluginManager(metaclass=Singleton):
 
         :param owners: 注册来源的实例键列表
         """
-        module_manager = ModuleManager.get_existing_instance()
-        if module_manager is None:
-            return
-        for owner in owners:
-            removed = module_manager.unregister_modules(owner)
-            if removed:
-                logger.info(f"已回收插件 {owner} 注册的模块：{'、'.join(removed)}")
+        unregister_module_owners(owners, ModuleManager.get_existing_instance)
 
     @property
     def running_plugins(self) -> Dict[str, Any]:

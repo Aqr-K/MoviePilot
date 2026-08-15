@@ -669,6 +669,8 @@ async def remotes(token: str) -> Any:
 def plugin_sidebar_nav(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     聚合已启用 Vue 插件声明的侧栏入口（get_sidebar_nav），供前端主界面侧栏展示。
+
+    同一插件的每个实例各出一条，条目的 plugin_id 为实例键，默认实例即裸插件ID。
     """
     return get_plugin_sidebar_nav(PluginManager().running_plugins)
 
@@ -747,6 +749,8 @@ def plugin_dashboard_meta(
 ) -> List[dict]:
     """
     获取所有插件仪表板元信息
+
+    同一插件的每个实例各出一条，条目的 id 为实例键，默认实例即裸插件ID。
     """
     return get_plugin_dashboard_meta(PluginManager().running_plugins)
 
@@ -759,7 +763,7 @@ def plugin_dashboard_by_key(
     _: User = Depends(get_current_active_superuser),
 ) -> Optional[schemas.PluginDashboard]:
     """
-    根据插件ID获取插件仪表板
+    根据实例键和仪表板 key 获取插件仪表板，裸插件ID指向默认实例
     """
     return get_plugin_dashboard(PluginManager().running_plugins, plugin_id, key, user_agent)
 
@@ -771,7 +775,7 @@ def plugin_dashboard(
     _: User = Depends(get_current_active_superuser),
 ) -> Optional[schemas.PluginDashboard]:
     """
-    根据插件ID获取插件仪表板
+    根据实例键获取插件仪表板，裸插件ID指向默认实例
     """
     return plugin_dashboard_by_key(plugin_id, "", user_agent)
 
