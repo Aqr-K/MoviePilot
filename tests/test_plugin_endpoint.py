@@ -458,11 +458,11 @@ def test_delete_plugin_config_can_force_delete_after_plugin_is_stopped():
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
     manager = PluginManager()
 
-    with patch("app.runtime.extensions.plugin_manager.SystemConfigOper") as system_config_oper:
-        system_config_oper.return_value.delete.return_value = True
+    with patch("app.runtime.extensions.plugin_manager.PluginConfigOper") as plugin_config_oper:
+        plugin_config_oper.return_value.delete_plugin.return_value = True
         assert manager.delete_plugin_config("DemoPlugin", force=True) is True
 
-    system_config_oper.return_value.delete.assert_called_once_with("plugin.DemoPlugin")
+    plugin_config_oper.return_value.delete_plugin.assert_called_once_with("DemoPlugin")
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
 
 

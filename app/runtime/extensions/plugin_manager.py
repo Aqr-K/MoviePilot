@@ -20,6 +20,8 @@ from starlette import status
 from watchfiles import watch
 
 from app import schemas
+from app.db.models.pluginconfig import DEFAULT_INSTANCE_ID
+from app.db.oper.pluginconfig import PluginConfigOper
 from app.db.oper.plugindata import PluginDataOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.foundation.crypto import RSAUtils
@@ -97,8 +99,6 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         self._plugins: dict = {}
         # 运行态插件列表
         self._running_plugins: dict = {}
-        # 配置Key
-        self._config_key: str = "plugin.%s"
         # 监控线程
         self._monitor_thread: Optional[threading.Thread] = None
         # 监控停止事件
@@ -912,54 +912,59 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             logger.warning(f"存在缺失依赖项安装失败，请尝试手动安装，总耗时：{total_elapsed_time:.2f} 秒")
         return missing_dependencies
 
-    def get_plugin_config(self, pid: str) -> dict:
+    def get_plugin_config(self, pid: str, instance_id: str = DEFAULT_INSTANCE_ID) -> dict:
         """
         获取插件配置
         :param pid: 插件ID
+        :param instance_id: 实例ID
         """
         if not self._plugins.get(pid):
             return {}
-        conf = SystemConfigOper().get(self._config_key % pid)
+        conf = PluginConfigOper().get(pid, instance_id)
         if conf:
             # 去掉空Key
             return {k: v for k, v in conf.items() if k}
         return {}
 
-    def save_plugin_config(self, pid: str, conf: dict, force: bool = False) -> bool:
+    def save_plugin_config(self, pid: str, conf: dict, force: bool = False,
+                           instance_id: str = DEFAULT_INSTANCE_ID) -> bool:
         """
         保存插件配置
         :param pid: 插件ID
         :param conf: 配置
         :param force: 强制保存
+        :param instance_id: 实例ID
         """
         if not force and not self._plugins.get(pid):
             return False
-        SystemConfigOper().set(self._config_key % pid, conf)
+        PluginConfigOper().set(pid, conf, instance_id)
         return True
 
     async def async_save_plugin_config(
-        self, pid: str, conf: dict, force: bool = False
+        self, pid: str, conf: dict, force: bool = False,
+        instance_id: str = DEFAULT_INSTANCE_ID
     ) -> bool:
         """
         异步保存插件配置。
         :param pid: 插件ID
         :param conf: 配置
         :param force: 强制保存
+        :param instance_id: 实例ID
         """
         if not force and not self._plugins.get(pid):
             return False
-        await SystemConfigOper().async_set(self._config_key % pid, conf)
+        await PluginConfigOper().async_set(pid, conf, instance_id)
         return True
 
     def delete_plugin_config(self, pid: str, force: bool = False) -> bool:
         """
-        删除插件配置
+        删除插件配置，插件的全部实例一并清除
         :param pid: 插件ID
         :param force: 插件停止后仍允许按插件 ID 删除持久化配置
         """
         if not force and not self._plugins.get(pid):
             return False
-        return SystemConfigOper().delete(self._config_key % pid)
+        return PluginConfigOper().delete_plugin(pid)
 
     def delete_plugin_data(self, pid: str, force: bool = False) -> bool:
         """

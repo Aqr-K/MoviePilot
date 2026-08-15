@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -9,6 +10,7 @@ from app.db import (
     Base,
     async_db_query,
     db_query,
+    db_update,
     get_id_column,
 )
 
@@ -17,6 +19,25 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
 
 # 插件未创建分身时使用的主实例标识
 DEFAULT_INSTANCE_ID = "default"
+
+# 实例标识的合法字符集：实例标识同时作为数据目录名的一段，
+# 不接受路径分隔符与点号，避免拼接出目录树之外的路径
+INSTANCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def normalize_instance_id(instance_id: Optional[str]) -> str:
+    """
+    校验实例标识并返回归一后的取值
+
+    :param instance_id: 待校验的实例标识，为空时取默认实例
+    :return: 合法的实例标识
+    :raises ValueError: 实例标识含非法字符或超长
+    """
+    if not instance_id:
+        return DEFAULT_INSTANCE_ID
+    if not INSTANCE_ID_PATTERN.match(instance_id):
+        raise ValueError(f"非法的插件实例标识：{instance_id}")
+    return instance_id
 
 
 class PluginConfig(Base):
@@ -113,7 +134,7 @@ class PluginConfig(Base):
         ).scalars().all())
 
     @classmethod
-    @db_query
+    @db_update
     def delete_instance(cls, db: Session, plugin_id: str, instance_id: str):
         """
         删除单个插件实例的配置
@@ -126,7 +147,7 @@ class PluginConfig(Base):
         )
 
     @classmethod
-    @db_query
+    @db_update
     def delete_plugin(cls, db: Session, plugin_id: str):
         """
         删除某个插件的全部实例配置
