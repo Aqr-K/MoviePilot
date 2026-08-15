@@ -210,6 +210,8 @@ def get_plugin_sidebar_nav(running_plugins: Dict[str, Any]) -> List[Dict[str, An
                     order = 0
                 items.append({
                     "plugin_id": key,
+                    "instance_id": split_instance_key(key)[1],
+                    "instance_key": key,
                     "nav_key": nav_key,
                     "title": title,
                     "icon": icon,
@@ -251,12 +253,16 @@ def get_plugin_dashboard_meta(running_plugins: Dict[str, Any]) -> List[Dict[str,
                 if meta:
                     dashboard_meta.extend([{
                         "id": key,
+                        "instance_id": split_instance_key(key)[1],
+                        "instance_key": key,
                         "name": m.get("name"),
                         "key": m.get("key"),
                     } for m in meta if m])
             else:
                 dashboard_meta.append({
                     "id": key,
+                    "instance_id": split_instance_key(key)[1],
+                    "instance_key": key,
                     "name": plugin.plugin_name,
                     "key": "",
                 })

@@ -139,8 +139,12 @@ def test_sidebar_survives_one_instance_hook_failure() -> None:
 
 
 def test_single_instance_sidebar_entry_is_unchanged() -> None:
-    """单实例插件的侧栏条目逐字段保持原样。"""
-    assert get_plugin_sidebar_nav(running(UIPlugin())) == [{
+    """单实例插件的侧栏条目在既有字段上保持原样。"""
+    entry = get_plugin_sidebar_nav(running(UIPlugin()))[0]
+
+    assert {field: entry[field] for field in (
+        "plugin_id", "nav_key", "title", "icon", "section", "permission", "order",
+    )} == {
         "plugin_id": PLUGIN_ID,
         "nav_key": "main",
         "title": "示例入口",
@@ -148,7 +152,7 @@ def test_single_instance_sidebar_entry_is_unchanged() -> None:
         "section": "system",
         "permission": None,
         "order": 0,
-    }]
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -180,12 +184,14 @@ def test_dashboard_meta_survives_one_instance_hook_failure() -> None:
 
 
 def test_single_instance_dashboard_meta_is_unchanged() -> None:
-    """单实例插件的仪表板元信息逐字段保持原样。"""
-    assert get_plugin_dashboard_meta(running(UIPlugin())) == [{
+    """单实例插件的仪表板元信息在既有字段上保持原样。"""
+    entry = get_plugin_dashboard_meta(running(UIPlugin()))[0]
+
+    assert {field: entry[field] for field in ("id", "name", "key")} == {
         "id": PLUGIN_ID,
         "name": "示例面板",
         "key": "board",
-    }]
+    }
 
 
 # --------------------------------------------------------------------------- #
