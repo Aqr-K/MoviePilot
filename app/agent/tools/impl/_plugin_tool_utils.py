@@ -3,6 +3,7 @@
 import json
 from typing import Any, Optional
 
+from app.runtime.extensions.plugin_instance import split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.db.oper.systemconfig import SystemConfigOper
 from app.adapters.external.server import MoviePilotServerHelper
@@ -21,12 +22,17 @@ MAX_PLUGIN_CANDIDATE_LIMIT = 200
 def get_plugin_snapshot(plugin_id: str) -> Optional[dict[str, Any]]:
     """
     获取已安装插件的基础信息快照。
+
+    :param plugin_id: 插件ID或实例键
+    :return: 插件快照，未安装时为 None
     """
     plugin_manager = PluginManager()
+    pid, instance_id = split_instance_key(plugin_id)
     for plugin in plugin_manager.get_local_plugins():
-        if plugin.id == plugin_id:
+        if plugin.id == pid:
             return {
                 "plugin_id": plugin.id,
+                "instance_id": instance_id,
                 "plugin_name": plugin.plugin_name,
                 "plugin_version": plugin.plugin_version,
                 "state": plugin.state,

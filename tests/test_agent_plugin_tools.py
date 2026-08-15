@@ -13,6 +13,7 @@ from app.agent.tools.impl.query_plugin_data import QueryPluginDataTool
 from app.agent.tools.impl.reload_plugin import ReloadPluginTool
 from app.agent.tools.impl.uninstall_plugin import UninstallPluginTool
 from app.agent.tools.impl.update_plugin_config import UpdatePluginConfigTool
+from app.db.models.pluginconfig import DEFAULT_INSTANCE_ID
 
 
 def _plugin_snapshot(state: bool = True) -> dict:
@@ -139,7 +140,7 @@ def test_query_plugin_config_returns_saved_config_and_default_model() -> None:
     plugin_manager.get_plugin_config.return_value = {"enabled": True}
     plugin_instance = MagicMock()
     plugin_instance.get_form.return_value = (None, {"enabled": False, "interval": 10})
-    plugin_manager.running_plugins = {"DemoPlugin": plugin_instance}
+    plugin_manager.get_running_plugin.return_value = plugin_instance
 
     with (
         patch(
@@ -197,6 +198,7 @@ def test_update_plugin_config_merges_and_removes_keys_without_reloading() -> Non
     plugin_manager.async_save_plugin_config.assert_awaited_once_with(
         "DemoPlugin",
         {"enabled": True, "interval": 30},
+        instance_id=DEFAULT_INSTANCE_ID,
     )
 
 

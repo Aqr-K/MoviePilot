@@ -27,6 +27,11 @@ from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
 from app.runtime.config import settings, global_vars
 from app.runtime.events import Event, eventmanager
+from app.runtime.extensions.plugin_instance import (
+    is_default_instance_key,
+    matches_plugin,
+    split_instance_key,
+)
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.db import SessionFactory
 from app.db.oper.agenttask import AgentTaskOper
@@ -1235,6 +1240,8 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
     def init_plugin_jobs(self):
         """
         初始化插件定时服务
+
+        按插件登记一次，插件的每个运行实例各自注册自己声明的服务。
         """
         for pid in PluginManager().get_running_plugin_ids():
             self.update_plugin_job(pid)
@@ -1289,7 +1296,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
     def remove_plugin_job(self, pid: str, job_id: Optional[str] = None):
         """
         移除定时服务，可以是单个服务（包括默认服务）或整个插件的所有服务
-        :param pid: 插件 ID
+        :param pid: 插件 ID 或实例键，传插件 ID 时覆盖该插件的全部实例
         :param job_id: 可选，指定要移除的单个服务的 job_id。如果不提供，则移除该插件的所有服务，当移除单个服务时，默认服务也包含在内
         """
         if not self._scheduler:
@@ -1306,7 +1313,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 jobs_to_remove = [
                     (job_id, service)
                     for job_id, service in self._jobs.items()
-                    if service.get("pid") == pid
+                    if pid and service.get("pid") and matches_plugin(service["pid"], pid)
                 ]
                 for job_id, _ in jobs_to_remove:
                     self._jobs.pop(job_id, None)
@@ -1373,9 +1380,24 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                     role="system",
                 )
 
+    @staticmethod
+    def _plugin_job_provider_name(plugin_name: Optional[str], owner_key: str) -> Optional[str]:
+        """
+        生成插件服务在任务列表中的归属名称
+
+        :param plugin_name: 插件名称
+        :param owner_key: 声明该服务的实例键
+        :return: 默认实例返回插件名称，分身实例带上实例标识以便区分
+        """
+        if not plugin_name or is_default_instance_key(owner_key):
+            return plugin_name
+        return f"{plugin_name}({split_instance_key(owner_key)[1]})"
+
     def update_plugin_job(self, pid: str):
         """
         更新插件定时服务
+
+        :param pid: 插件 ID 或实例键，传插件 ID 时覆盖该插件的全部实例
         """
         if not self._scheduler or not pid:
             return
@@ -1396,14 +1418,16 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             # 开始注册插件服务
             for service in plugin_services:
                 try:
-                    sid = f"{pid}_{service['id']}"
+                    # 服务归属的实例键，同一插件的多个实例注册各自独立的 job
+                    owner_key = service.get("pid") or pid
+                    sid = f"{owner_key}_{service['id']}"
                     job_id = sid.split("|")[0]
-                    self.remove_plugin_job(pid, job_id)
+                    self.remove_plugin_job(owner_key, job_id)
                     self._jobs[job_id] = {
                         "func": service["func"],
                         "name": service["name"],
-                        "pid": pid,
-                        "provider_name": plugin_name,
+                        "pid": owner_key,
+                        "provider_name": self._plugin_job_provider_name(plugin_name, owner_key),
                         "kwargs": service.get("func_kwargs") or {},
                         "running": False,
                     }
@@ -1417,7 +1441,8 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                         replace_existing=True,
                     )
                     logger.info(
-                        f"注册插件{plugin_name}服务：{service['name']} - {service['trigger']}"
+                        f"注册插件{self._plugin_job_provider_name(plugin_name, owner_key)}"
+                        f"服务：{service['name']} - {service['trigger']}"
                     )
                 except Exception as e:
                     logger.error(f"注册插件{plugin_name}服务失败：{str(e)} - {service}")

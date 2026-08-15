@@ -12,6 +12,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, Any, Type
 from fastapi.concurrency import run_in_threadpool
 
 from app.runtime.config import global_vars
+from app.runtime.extensions.plugin_instance import matches_plugin, plugin_id_of
 from app.runtime.thread import ThreadHelper
 from app.runtime.log import logger
 from app.schemas import ChainEventData
@@ -545,13 +546,14 @@ class EventManager(metaclass=Singleton):
         if not handlers:
             logger.debug(f"No handlers found for broadcast event: {event}")
             return
-        target_plugin_id = None
+        target_owner = None
         if event.event_type == EventType.MessageAction and isinstance(event.event_data, dict):
             target_plugin_id = event.event_data.get("__mp_target_plugin_id")
+            target_owner = str(target_plugin_id) if target_plugin_id else None
         # 为每个处理器提供独立的事件实例，防止某个处理器对 event_data 的修改影响其他处理器
         for handler_id, handler in handlers.items():
-            if target_plugin_id and not self.__should_dispatch_to_target_plugin(
-                    handler, handler_id, str(target_plugin_id)
+            if target_owner and not self.__should_dispatch_to_target_plugin(
+                    handler, handler_id, target_owner
             ):
                 continue
             # 仅浅拷贝顶层字典，避免不必要的深拷贝开销；这样可以隔离键级别的替换/赋值
@@ -566,12 +568,14 @@ class EventManager(metaclass=Singleton):
             if inspect.iscoroutinefunction(handler):
                 # 对于异步函数，直接在事件循环中运行
                 asyncio.run_coroutine_threadsafe(
-                    self.__safe_invoke_handler_async(handler, isolated_event, True),
+                    self.__safe_invoke_handler_async(handler, isolated_event, True, target_owner),
                     global_vars.loop
                 )
             else:
                 # 对于同步函数，在线程池中运行
-                self.__executor.submit(self.__safe_invoke_handler, handler, isolated_event, True)
+                self.__executor.submit(
+                    self.__safe_invoke_handler, handler, isolated_event, True, target_owner
+                )
 
     @classmethod
     def __should_dispatch_to_target_plugin(
@@ -582,9 +586,14 @@ class EventManager(metaclass=Singleton):
     ) -> bool:
         """
         限定插件输入事件只投递给目标插件，避免自由文本被其他插件观察到。
+
+        :param handler: 处理器
+        :param handler_identifier: 处理器的唯一标识
+        :param target_plugin_id: 目标插件标识或实例键
+        :return: 该处理器所属的类是否为目标插件
         """
         class_name, method_name = cls.__parse_handler_names(handler)
-        if class_name != target_plugin_id:
+        if class_name != plugin_id_of(target_plugin_id):
             return False
         identifier_parts = (handler_identifier or "").split(".")
         if len(identifier_parts) < 2:
@@ -601,40 +610,47 @@ class EventManager(metaclass=Singleton):
             return False
         return True
 
-    def __safe_invoke_handler(self, handler: Callable, event: Event, isolate: bool = False):
+    def __safe_invoke_handler(self, handler: Callable, event: Event, isolate: bool = False,
+                              target_owner: Optional[str] = None):
         """
         调用处理器，处理链式或广播事件
         :param handler: 处理器
         :param event: 事件对象
         :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
         if not self.__is_handler_enabled(handler):
             logger.debug(f"Handler {self.__get_handler_identifier(handler)} is disabled. Skipping execution")
             return
 
-        self.__invoke_handler_by_type_sync(handler, event, isolate)
+        self.__invoke_handler_by_type_sync(handler, event, isolate, target_owner)
 
-    async def __safe_invoke_handler_async(self, handler: Callable, event: Event, isolate: bool = False):
+    async def __safe_invoke_handler_async(self, handler: Callable, event: Event, isolate: bool = False,
+                                          target_owner: Optional[str] = None):
         """
         异步调用处理器，处理链式事件
         :param handler: 处理器
         :param event: 事件对象
         :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
         if not self.__is_handler_enabled(handler):
             logger.debug(f"Handler {self.__get_handler_identifier(handler)} is disabled. Skipping execution")
             return
 
-        await self.__invoke_handler_by_type_async(handler, event, isolate)
+        await self.__invoke_handler_by_type_async(handler, event, isolate, target_owner)
 
-    def __invoke_handler_by_type_sync(self, handler: Callable, event: Event, isolate: bool = False):
+    def __invoke_handler_by_type_sync(self, handler: Callable, event: Event, isolate: bool = False,
+                                      target_owner: Optional[str] = None):
         """
         同步方式在处理器的全部启用实例上调用相应的方法
         :param handler: 处理器
         :param event: 要处理的事件对象
         :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
-        for index, (method, binding, class_name, method_name) in enumerate(self.__resolve_handler(handler)):
+        for index, (method, binding, class_name, method_name) in enumerate(
+                self.__resolve_handler(handler, target_owner)):
             target_event = event if index == 0 or not isolate else self.__isolate_event(event)
             try:
                 method(target_event)
@@ -647,14 +663,17 @@ class EventManager(metaclass=Singleton):
                     e=e,
                 )
 
-    async def __invoke_handler_by_type_async(self, handler: Callable, event: Event, isolate: bool = False):
+    async def __invoke_handler_by_type_async(self, handler: Callable, event: Event, isolate: bool = False,
+                                             target_owner: Optional[str] = None):
         """
         异步方式在处理器的全部启用实例上调用相应的方法
         :param handler: 处理器
         :param event: 要处理的事件对象
         :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
-        for index, (method, binding, class_name, method_name) in enumerate(self.__resolve_handler(handler)):
+        for index, (method, binding, class_name, method_name) in enumerate(
+                self.__resolve_handler(handler, target_owner)):
             target_event = event if index == 0 or not isolate else self.__isolate_event(event)
             try:
                 if inspect.iscoroutinefunction(method):
@@ -705,8 +724,15 @@ class EventManager(metaclass=Singleton):
     def __resolve_handler(
             self,
             handler: Callable,
+            target_owner: Optional[str] = None,
     ) -> List[Tuple[Callable, EventHandlerBinding, str, str]]:
-        """将装饰阶段保存的函数解析为当前全部启用实例上的可调用方法。"""
+        """将装饰阶段保存的函数解析为当前全部启用实例上的可调用方法。
+
+        :param handler: 装饰阶段保存的处理器函数
+        :param target_owner: 定向投递的插件标识或实例键；实例键只命中该实例，
+            插件标识命中该插件的全部实例，为空时不做定向筛选
+        :return: (方法, 实例绑定, 类名, 方法名) 列表
+        """
         owner_class = self.__get_handler_owner_class(handler)
         method_name = getattr(handler, "__name__", self.__parse_handler_names(handler)[1])
         if owner_class is None:
@@ -745,6 +771,9 @@ class EventManager(metaclass=Singleton):
             if binding.instance is None:
                 continue
             if not self.__is_instance_enabled(class_identifier, binding.instance_key):
+                continue
+            if target_owner and binding.instance_key and not matches_plugin(
+                    binding.instance_key, target_owner):
                 continue
             method = getattr(binding.instance, method_name, None)
             if not callable(method):

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import get_plugin_snapshot
+from app.runtime.extensions.plugin_instance import split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.log import logger
 
@@ -57,7 +58,7 @@ class QueryPluginConfigTool(MoviePilotTool):
             )
 
         plugin_manager = PluginManager()
-        saved_config = plugin_manager.get_plugin_config(plugin_id) or {}
+        saved_config = plugin_manager.get_plugin_config(*split_instance_key(plugin_id)) or {}
         result = {
             "success": True,
             **plugin_info,
@@ -65,7 +66,7 @@ class QueryPluginConfigTool(MoviePilotTool):
         }
 
         # get_form 的 model 通常就是插件期望的配置结构，适合作为修改前的键参考。
-        plugin_instance = plugin_manager.running_plugins.get(plugin_id)
+        plugin_instance = plugin_manager.get_running_plugin(plugin_id)
         if plugin_instance and hasattr(plugin_instance, "get_form"):
             try:
                 _form_schema, default_model = plugin_instance.get_form()

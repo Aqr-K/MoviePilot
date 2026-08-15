@@ -10,6 +10,7 @@ from app.db.oper.pluginconfig import PluginConfigOper
 from app.db.oper.plugindata import PluginDataOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.helper.message import MessageHelper
+from app.runtime.extensions.plugin_instance import instance_key
 from app.schemas import Notification, NotificationType, MessageChannel
 
 
@@ -76,6 +77,15 @@ class _PluginBase(metaclass=ABCMeta):
         获取实例标识
         """
         return self._instance_id or DEFAULT_INSTANCE_ID
+
+    @property
+    def instance_key(self) -> str:
+        """
+        获取实例键
+
+        事件定向投递、接口路由与定时服务都以实例键定位一个实例；默认实例的实例键即插件标识。
+        """
+        return instance_key(self.plugin_id, self.instance_id)
 
     @abstractmethod
     def init_plugin(self, config: dict = None):

@@ -194,3 +194,27 @@ class PluginDashboardMetaItem(BaseModel):
     id: str
     name: Optional[str] = None
     key: Optional[str] = None
+
+
+class PluginInstanceInfo(BaseModel):
+    """插件实例及其运行状态。"""
+
+    plugin_id: str = Field(description="插件 ID")
+    instance_id: str = Field(description="实例 ID")
+    instance_key: str = Field(
+        description="实例键，默认实例为插件 ID，分身实例为 plugin_id@instance_id"
+    )
+    is_default: bool = Field(description="是否为默认实例")
+    running: bool = Field(default=False, description="是否已拉起运行实例")
+    enabled: bool = Field(default=False, description="实例是否启用")
+
+
+class PluginInstanceCreate(BaseModel):
+    """插件实例创建请求。"""
+
+    instance_id: str = Field(
+        description="实例 ID，仅接受字母、数字、下划线和短横线，最长 64 位"
+    )
+    config: Optional[Dict[str, JsonData]] = Field(
+        default=None, description="实例的初始配置"
+    )

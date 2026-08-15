@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.agent.tools.impl._plugin_tool_utils import get_plugin_snapshot
+from app.runtime.extensions.plugin_instance import split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.log import logger
 
@@ -89,7 +90,8 @@ class UpdatePluginConfigTool(MoviePilotTool):
             )
 
         plugin_manager = PluginManager()
-        current_config = dict(plugin_manager.get_plugin_config(plugin_id) or {})
+        pid, instance_id = split_instance_key(plugin_id)
+        current_config = dict(plugin_manager.get_plugin_config(pid, instance_id) or {})
 
         # merge 模式以当前保存值为基准，replace 模式则从空配置开始重建。
         next_config = {} if replace else dict(current_config)
@@ -105,7 +107,9 @@ class UpdatePluginConfigTool(MoviePilotTool):
             or (key in current_config) != (key in next_config)
         )
 
-        if not await plugin_manager.async_save_plugin_config(plugin_id, next_config):
+        if not await plugin_manager.async_save_plugin_config(
+            pid, next_config, instance_id=instance_id
+        ):
             return json.dumps(
                 {
                     "success": False,

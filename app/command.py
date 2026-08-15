@@ -269,23 +269,35 @@ class Command(metaclass=Singleton):
     def __build_plugin_commands(self, _: Optional[str] = None) -> Dict[str, dict]:
         """
         构建插件命令
+
+        一条命令只归属一个声明来源：不同来源声明同一条命令时先到者胜并告警，同一来源
+        重复声明按最后一次声明更新。来源为实例键，因此同一插件的两个实例也按此判定。
         """
         # 为了保证命令顺序的一致性，目前这里没有直接使用 pid 获取单一插件命令，后续如果存在性能问题，可以考虑优化这里的逻辑
         plugin_commands = {}
         for command in self.pluginmanager.get_plugin_commands():
             cmd = command.get("cmd")
-            if cmd:
-                plugin_commands[cmd] = {
-                    "pid": command.get("pid"),
-                    "func": self.send_plugin_event,
-                    "description": command.get("desc"),
-                    "category": command.get("category"),
-                    "show": command.get("show", True),
-                    "data": {
-                        "etype": command.get("event"),
-                        "data": command.get("data"),
-                    },
-                }
+            if not cmd:
+                continue
+            pid = command.get("pid")
+            registered = plugin_commands.get(cmd)
+            if registered is not None and registered.get("pid") != pid:
+                logger.warning(
+                    f"插件命令冲突：{cmd} 已由 {registered.get('pid')} 注册，"
+                    f"拒绝来自 {pid} 的注册"
+                )
+                continue
+            plugin_commands[cmd] = {
+                "pid": pid,
+                "func": self.send_plugin_event,
+                "description": command.get("desc"),
+                "category": command.get("category"),
+                "show": command.get("show", True),
+                "data": {
+                    "etype": command.get("event"),
+                    "data": command.get("data"),
+                },
+            }
         return plugin_commands
 
     def __run_command(

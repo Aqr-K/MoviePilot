@@ -16,6 +16,7 @@ from app.runtime.cache import async_fresh
 from app.runtime.config import settings
 from app.runtime.deprecation.policy import DeprecatedFeatureError, get_notice, guard
 from app.runtime.events import eventmanager
+from app.runtime.extensions.plugin_instance import matches_plugin, split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.application.security.access import (
     resource_token_cookie,
@@ -24,6 +25,7 @@ from app.application.security.access import (
     verify_token,
 )
 from app.db.models import User
+from app.db.models.pluginconfig import normalize_instance_id
 from app.db.oper.systemconfig import SystemConfigOper
 from app.api.deps import get_current_active_superuser, get_current_active_superuser_async
 from app.factory import app
@@ -172,17 +174,32 @@ def _update_plugin_api_routes(plugin_id: Optional[str], action: str):
         app.setup()
 
 
+def _plugin_route_owner(path: str) -> Optional[str]:
+    """
+    解析插件接口路由的归属实例键
+    :param path: 路由路径
+    :return: 路径中的实例键，不是插件接口路由时为 None
+    """
+    prefix = f"{PLUGIN_PREFIX}/"
+    if not path.startswith(prefix):
+        return None
+    remainder = path[len(prefix):]
+    if "/" not in remainder:
+        return None
+    return remainder.split("/", 1)[0]
+
+
 def _remove_routes(plugin_id: str) -> bool:
     """
     移除与单个插件相关的路由
-    :param plugin_id: 插件 ID
+    :param plugin_id: 插件 ID 或实例键，传插件 ID 时覆盖该插件全部实例的路由
     :return: 是否有路由被移除
     """
     if not plugin_id:
         return False
-    prefix = f"{PLUGIN_PREFIX}/{plugin_id}/"
     routes_to_remove = [
-        route for route in app.routes if route.path.startswith(prefix)
+        route for route in app.routes
+        if (owner := _plugin_route_owner(route.path)) and matches_plugin(owner, plugin_id)
     ]
     removed = False
     for route in routes_to_remove:
@@ -655,10 +672,10 @@ def plugin_form(
     plugin_id: str, _: User = Depends(get_current_active_superuser)
 ) -> dict:
     """
-    根据插件ID获取插件配置表单或Vue组件URL
+    根据插件ID或实例键获取插件配置表单或Vue组件URL
     """
     plugin_manager = PluginManager()
-    plugin_instance = plugin_manager.running_plugins.get(plugin_id)
+    plugin_instance = plugin_manager.get_running_plugin(plugin_id)
     if not plugin_instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -669,7 +686,7 @@ def plugin_form(
     render_mode, _ = plugin_instance.get_render_mode()
     try:
         conf, model = plugin_instance.get_form()
-        stored_config = plugin_manager.get_plugin_config(plugin_id)
+        stored_config = plugin_manager.get_plugin_config(*split_instance_key(plugin_id))
         # Merge stored config with defaults so all keys exist for v-show evaluation
         merged_model = {**model, **(stored_config or {})}
         return {
@@ -691,9 +708,9 @@ def plugin_page(
     plugin_id: str, _: User = Depends(get_current_active_superuser)
 ) -> dict:
     """
-    根据插件ID获取插件数据页面
+    根据插件ID或实例键获取插件数据页面
     """
-    plugin_instance = PluginManager().running_plugins.get(plugin_id)
+    plugin_instance = PluginManager().get_running_plugin(plugin_id)
     if not plugin_instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -992,6 +1009,115 @@ def clone_plugin(
 
 
 @router.get(
+    "/instances/{plugin_id}",
+    summary="获取插件实例列表",
+    response_model=List[schemas.PluginInstanceInfo],
+)
+def plugin_instances(
+    plugin_id: str, _: User = Depends(get_current_active_superuser)
+) -> List[dict]:
+    """
+    列出插件的全部实例及其运行状态
+    """
+    plugin_manager = PluginManager()
+    if not plugin_manager.has_plugin(plugin_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 不存在或未加载",
+        )
+    return plugin_manager.get_plugin_instances(plugin_id)
+
+
+@router.post(
+    "/instances/{plugin_id}",
+    summary="创建插件实例",
+    response_model=schemas.Response[schemas.PluginInstanceInfo],
+)
+def create_plugin_instance(
+    plugin_id: str,
+    payload: schemas.PluginInstanceCreate,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    创建插件实例，写入初始配置并拉起运行态
+    """
+    plugin_manager = PluginManager()
+    if not plugin_manager.has_plugin(plugin_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 不存在或未加载",
+        )
+    try:
+        # 实例标识会拼进数据目录，创建前先校验字符集
+        instance_id = normalize_instance_id(payload.instance_id)
+        created_key = plugin_manager.create_plugin_instance(
+            plugin_id, instance_id, payload.config
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # 重新拉起该插件的全部实例，新实例随之进入运行态
+    plugin_manager.reload_plugin(plugin_id)
+    # 注册插件的定时服务、菜单命令和接口
+    register_plugin(plugin_id)
+    created = next(
+        (
+            instance
+            for instance in plugin_manager.get_plugin_instances(plugin_id)
+            if instance.get("instance_key") == created_key
+        ),
+        # 配置已落库但运行态读取不到时，按未拉起的实例如实呈现
+        {
+            "plugin_id": plugin_id,
+            "instance_id": instance_id,
+            "instance_key": created_key,
+            "is_default": False,
+            "running": False,
+            "enabled": False,
+        },
+    )
+    return schemas.Response(success=True, data=created)
+
+
+@router.delete(
+    "/instances/{plugin_id}/{instance_id}",
+    summary="删除插件实例",
+    response_model=schemas.Response[None],
+)
+def delete_plugin_instance(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    停止并删除插件实例，同时清除该实例的配置与数据，默认实例不允许删除
+    """
+    plugin_manager = PluginManager()
+    try:
+        # 实例标识会拼进数据目录，删除前先校验字符集
+        normalized = normalize_instance_id(instance_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    existing = {
+        instance.get("instance_id")
+        for instance in plugin_manager.get_plugin_instances(plugin_id)
+    }
+    if normalized not in existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 的实例 {normalized} 不存在",
+        )
+    try:
+        removed_key = plugin_manager.delete_plugin_instance(plugin_id, normalized)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # 回收该实例注册的接口与定时服务，并重建菜单命令
+    remove_plugin_api(removed_key)
+    Scheduler().remove_plugin_job(removed_key)
+    Command().init_commands(plugin_id)
+    return schemas.Response(success=True)
+
+
+@router.get(
     "/{plugin_id}",
     summary="获取插件配置",
     response_model=schemas.JsonObject,
@@ -1000,9 +1126,9 @@ async def plugin_config(
     plugin_id: str, _: User = Depends(get_current_active_superuser_async)
 ) -> dict:
     """
-    根据插件ID获取插件配置信息
+    根据插件ID或实例键获取插件配置信息
     """
-    return PluginManager().get_plugin_config(plugin_id)
+    return PluginManager().get_plugin_config(*split_instance_key(plugin_id))
 
 
 @router.put("/{plugin_id}", summary="更新插件配置", response_model=schemas.Response[None])
@@ -1010,13 +1136,14 @@ def set_plugin_config(
     plugin_id: str, conf: dict, _: User = Depends(get_current_active_superuser)
 ) -> Any:
     """
-    更新插件配置
+    更新插件配置，路径可以是插件ID或实例键
     """
     plugin_manager = PluginManager()
+    pid, instance_id = split_instance_key(plugin_id)
     # 保存配置
-    plugin_manager.save_plugin_config(plugin_id, conf)
+    plugin_manager.save_plugin_config(pid, conf, instance_id=instance_id)
     # 重新生效插件
-    plugin_manager.init_plugin(plugin_id, conf)
+    plugin_manager.init_plugin(pid, conf, instance_id=instance_id)
     # 注册插件服务
     register_plugin(plugin_id)
     return schemas.Response(success=True)

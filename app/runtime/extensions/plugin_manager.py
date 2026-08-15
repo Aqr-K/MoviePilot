@@ -35,7 +35,12 @@ from app.runtime.cache import fresh, async_fresh
 from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.runtime.extensions.module_manager import ModuleManager
-from app.runtime.extensions.plugin_instance import instance_key, matches_plugin, plugin_id_of
+from app.runtime.extensions.plugin_instance import (
+    instance_key,
+    matches_plugin,
+    plugin_id_of,
+    split_instance_key,
+)
 from app.runtime.extensions.plugin_spi import (
     get_plugin_provided_modules,
     warn_legacy_module_injection,
@@ -199,6 +204,17 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if plugin_id_of(running_key) == key:
                 return running
         return None
+
+    def get_running_plugin(self, key: str) -> Optional[Any]:
+        """
+        按实例键或插件ID取运行实例
+
+        插件只有分身实例时，按插件ID同样能取到实例。
+
+        :param key: 实例键或插件ID
+        :return: 插件实例，未运行时为 None
+        """
+        return self._resolve_running_plugin(key)
 
     @staticmethod
     def _distinct_plugin_ids(container: Dict[str, Any]) -> List[str]:
@@ -1157,6 +1173,106 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             logger.error(f"删除插件 {pid} 自管理数据库出错：{str(err)}")
         return True
 
+    def get_plugin_instances(self, plugin_id: str) -> List[Dict[str, Any]]:
+        """
+        列出插件的全部实例及其状态
+        [{
+            "plugin_id": "插件ID",
+            "instance_id": "实例ID",
+            "instance_key": "实例键",
+            "is_default": True,
+            "running": True,
+            "enabled": True
+        }]
+
+        一个实例都没有配置时按默认实例呈现，与拉起逻辑一致。
+
+        :param plugin_id: 插件ID
+        :return: 实例列表
+        """
+        configured: Dict[str, bool] = {}
+        try:
+            records = PluginConfigOper().list_instances(plugin_id) or []
+        except Exception as err:
+            logger.error(f"读取插件 {plugin_id} 实例列表出错：{str(err)}")
+            records = []
+        for record in records:
+            try:
+                normalized = normalize_instance_id(record.instance_id)
+            except ValueError as err:
+                logger.error(f"跳过插件 {plugin_id} 的非法实例配置：{str(err)}")
+                continue
+            configured[normalized] = bool(record.is_enabled)
+        instance_ids = list(configured)
+        for key in self.get_instance_keys(plugin_id):
+            running_instance_id = split_instance_key(key)[1]
+            if running_instance_id not in instance_ids:
+                instance_ids.append(running_instance_id)
+        if not instance_ids:
+            instance_ids = [DEFAULT_INSTANCE_ID]
+        instances = []
+        for instance_id in instance_ids:
+            key = instance_key(plugin_id, instance_id)
+            plugin = self._running_plugins.get(key)
+            if plugin is not None:
+                try:
+                    enabled = bool(plugin.get_state())
+                except Exception as err:
+                    logger.error(f"获取插件实例 {key} 状态出错：{str(err)}")
+                    enabled = False
+            else:
+                enabled = configured.get(instance_id, False)
+            instances.append({
+                "plugin_id": plugin_id,
+                "instance_id": instance_id,
+                "instance_key": key,
+                "is_default": instance_id == DEFAULT_INSTANCE_ID,
+                "running": plugin is not None,
+                "enabled": enabled,
+            })
+        return instances
+
+    def create_plugin_instance(self, plugin_id: str, instance_id: str,
+                               config: Optional[dict] = None) -> str:
+        """
+        创建插件实例并写入其初始配置
+
+        :param plugin_id: 插件ID
+        :param instance_id: 实例ID
+        :param config: 实例的初始配置
+        :return: 新实例的实例键
+        :raises ValueError: 实例标识非法、指向默认实例或实例已存在
+        """
+        normalized = normalize_instance_id(instance_id)
+        if normalized == DEFAULT_INSTANCE_ID:
+            raise ValueError("默认实例随插件自动创建，不能重复创建")
+        config_oper = PluginConfigOper()
+        if config_oper.get_instance(plugin_id, normalized):
+            raise ValueError(f"插件 {plugin_id} 的实例 {normalized} 已存在")
+        # 首个分身落库前先固化默认实例，避免默认实例因没有配置记录而在下次启动时缺席
+        if not config_oper.list_instances(plugin_id):
+            config_oper.set(plugin_id, self.get_plugin_config(plugin_id), DEFAULT_INSTANCE_ID)
+        config_oper.set(plugin_id, config or {}, normalized)
+        return instance_key(plugin_id, normalized)
+
+    def delete_plugin_instance(self, plugin_id: str, instance_id: str) -> str:
+        """
+        删除插件实例，停止运行态并清除该实例的配置与数据
+
+        :param plugin_id: 插件ID
+        :param instance_id: 实例ID
+        :return: 被删除实例的实例键
+        :raises ValueError: 实例标识非法或指向默认实例
+        """
+        normalized = normalize_instance_id(instance_id)
+        if normalized == DEFAULT_INSTANCE_ID:
+            raise ValueError("默认实例不允许删除")
+        key = instance_key(plugin_id, normalized)
+        self.stop(plugin_id, normalized)
+        PluginConfigOper().delete(plugin_id, normalized)
+        PluginDataOper().del_data(plugin_id, instance_id=normalized)
+        return key
+
     def get_plugin_state(self, pid: str) -> bool:
         """
         获取插件状态
@@ -1236,8 +1352,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             "trigger": "触发器：cron、interval、date、CronTrigger.from_crontab()",
             "func": self.xxx,
             "kwargs": {} # 定时器参数,
-            "func_kwargs": {} # 方法参数
+            "func_kwargs": {} # 方法参数,
+            "pid": "声明该服务的实例键"
         }]
+
+        同一插件的多个实例各自声明同名服务，pid 携带声明来源的实例键，调用方据此区分。
         """
         ret_services = []
         # 创建字典快照避免并发修改
@@ -1250,7 +1369,10 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     if not plugin.get_state():
                         continue
                     services = plugin.get_service() or []
-                    ret_services.extend(services)
+                    for service in services:
+                        if not service:
+                            continue
+                        ret_services.append({**service, "pid": plugin_id})
                 except Exception as e:
                     logger.error(f"获取插件 {plugin_id} 服务出错：{str(e)}")
         return ret_services
@@ -1382,7 +1504,11 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_remote_entry(plugin_id: str, dist_path: str) -> str:
         """
         获取插件的远程入口地址
-        :param plugin_id: 插件 ID
+
+        静态资源存放在插件源码目录，同一插件的全部实例共用一份构建产物，因此入口地址
+        取插件标识而非实例键。
+
+        :param plugin_id: 插件 ID 或实例键
         :param dist_path: 插件的分发路径
         :return: 远程入口地址
         """
@@ -1390,7 +1516,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         path = posixpath.join(
             "plugin",
             "file",
-            plugin_id.lower(),
+            plugin_id_of(plugin_id).lower(),
             dist_path,
             "remoteEntry.js",
         )
@@ -1401,17 +1527,24 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_remotes(self, pid: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         获取插件联邦组件列表
+
+        联邦入口是插件源码目录下的一份构建产物，同一插件的多个实例只登记一条。
         """
         remotes = []
+        declared_plugin_ids = set()
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(self._running_plugins)
-        for plugin_id, plugin in running_plugins_snapshot.items():
-            if not matches_plugin(plugin_id, pid):
+        for key, plugin in running_plugins_snapshot.items():
+            if not matches_plugin(key, pid):
                 continue
             if hasattr(plugin, "get_render_mode"):
                 render_mode, dist_path = plugin.get_render_mode()
                 if render_mode != "vue":
                     continue
+                plugin_id = plugin_id_of(key)
+                if plugin_id in declared_plugin_ids:
+                    continue
+                declared_plugin_ids.add(plugin_id)
                 remotes.append({
                     "id": plugin_id,
                     "url": self.get_plugin_remote_entry(plugin_id, dist_path),
@@ -1422,6 +1555,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_auth_providers(self) -> List[Dict[str, Any]]:
         """
         聚合插件声明的登录认证提供方。
+
+        provider 的 plugin_id 为实例键，与该实例注册的接口路由一致；remote 指向插件源码
+        目录下的联邦入口，按插件标识定位。
 
         :return: 插件认证入口列表
         """
@@ -1453,7 +1589,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 if render_mode == "vue" and dist_path:
                     provider.setdefault("component", "AuthPage")
                     provider["remote"] = {
-                        "id": plugin_id,
+                        "id": plugin_id_of(plugin_id),
                         "url": self.get_plugin_remote_entry(plugin_id, dist_path),
                         "name": plugin.plugin_name,
                     }
@@ -1463,6 +1599,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_sidebar_nav(self) -> List[Dict[str, Any]]:
         """
         聚合所有已启用 Vue 插件的侧栏导航项（get_sidebar_nav）。
+
+        导航项的 plugin_id 为实例键，与该实例注册的接口路由前缀一致。
         """
         valid_sections = {"start", "discovery", "subscribe", "organize", "system"}
         valid_permissions = {"subscribe", "discovery", "search", "manage", "admin"}
@@ -1521,6 +1659,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_dashboard_meta(self) -> List[Dict[str, str]]:
         """
         获取所有插件仪表盘元信息
+
+        条目的 id 为实例键，与该实例注册的接口路由前缀一致。
         """
         dashboard_meta = []
         # 创建字典快照避免并发修改
