@@ -188,3 +188,56 @@ def test_create_instance_endpoint_does_not_reload_the_whole_plugin():
     manager.start_instance.assert_called_once_with(PLUGIN_ID, "alpha")
     assert response.success is True
     assert response.data["instance_key"] == f"{PLUGIN_ID}@alpha"
+
+
+def enabled_plugin(state: bool) -> Mock:
+    """
+    构造指定启用状态的运行实例替身
+
+    :param state: 启用状态
+    :return: 插件实例替身
+    """
+    plugin = Mock()
+    plugin.get_state.return_value = state
+    return plugin
+
+
+def test_plugin_state_is_true_when_any_instance_is_enabled():
+    """传插件标识时任一运行实例启用即为在运行。"""
+    manager = make_manager({PLUGIN_ID: enabled_plugin(False),
+                            f"{PLUGIN_ID}@alpha": enabled_plugin(True)})
+
+    assert manager.get_plugin_state(PLUGIN_ID) is True
+
+
+def test_plugin_state_is_false_when_every_instance_is_disabled():
+    """全部实例停用时插件不算在运行。"""
+    manager = make_manager({PLUGIN_ID: enabled_plugin(False),
+                            f"{PLUGIN_ID}@alpha": enabled_plugin(False)})
+
+    assert manager.get_plugin_state(PLUGIN_ID) is False
+
+
+def test_plugin_state_of_an_instance_key_is_judged_alone():
+    """传实例键时只判定该实例，不受兄弟实例影响。"""
+    manager = make_manager({PLUGIN_ID: enabled_plugin(True),
+                            f"{PLUGIN_ID}@alpha": enabled_plugin(False)})
+
+    assert manager.get_plugin_state(f"{PLUGIN_ID}@alpha") is False
+    assert manager.get_plugin_state(PLUGIN_ID) is True
+
+
+def test_plugin_state_survives_a_failing_probe():
+    """单个实例取状态抛错按停用处理，其余实例照常判定。"""
+    broken = Mock()
+    broken.get_state.side_effect = RuntimeError("boom")
+    manager = make_manager({PLUGIN_ID: broken, f"{PLUGIN_ID}@alpha": enabled_plugin(True)})
+
+    assert manager.get_plugin_state(PLUGIN_ID) is True
+
+
+def test_plugin_state_of_an_unloaded_plugin_is_false():
+    """未加载的插件不算在运行。"""
+    manager = make_manager({})
+
+    assert manager.get_plugin_state(PLUGIN_ID) is False

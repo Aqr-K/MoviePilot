@@ -18,6 +18,7 @@ from app.runtime.extensions.module_manager import ModuleManager
 from app.runtime.extensions.plugin_auth import set_and_check_auth_level
 from app.runtime.extensions.plugin_instance import (
     instance_key,
+    is_default_instance_key,
     plugin_id_of,
     resolve_running_plugin,
     split_instance_key,
@@ -817,11 +818,35 @@ class PluginManager(metaclass=Singleton):
 
     def get_plugin_state(self, pid: str) -> bool:
         """
-        获取插件状态
+        获取插件运行状态
+
+        传实例键时判定该实例；传插件标识时任一运行实例启用即为 True，与插件列表的
+        运行状态取值一致。
+
         :param pid: 插件ID或实例键
+        :return: 是否有已启用的运行实例
         """
-        plugin = resolve_running_plugin(self._running_plugins, pid)
-        return plugin.get_state() if plugin else False
+        if not is_default_instance_key(pid):
+            plugin = self._running_plugins.get(pid)
+            return self._instance_enabled(pid, plugin) if plugin is not None else False
+        return any(self._instance_enabled(key, running)
+                   for key, running in dict(self._running_plugins).items()
+                   if plugin_id_of(key) == pid)
+
+    @staticmethod
+    def _instance_enabled(key: str, plugin: Any) -> bool:
+        """
+        取单个实例的启用状态，取值失败按未启用处理
+
+        :param key: 实例键
+        :param plugin: 插件实例
+        :return: 是否启用
+        """
+        try:
+            return bool(plugin.get_state())
+        except Exception as err:
+            logger.error(f"获取插件实例 {key} 状态出错：{str(err)}")
+            return False
 
     def get_plugin_attr(self, pid: str, attr: str) -> Any:
         """
