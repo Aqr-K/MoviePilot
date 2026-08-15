@@ -88,6 +88,10 @@ from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
 from app.agent.tools.impl.update_system_settings import UpdateSystemSettingsTool
 from app.agent.llm.capability import AgentCapabilityManager
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import (
+    get_plugin_agent_tools,
+    get_plugin_agent_tools_revision,
+)
 from app.runtime.log import logger
 from app.schemas.message import ChannelCapabilityManager
 from app.schemas.types import MessageChannel
@@ -285,7 +289,7 @@ class MoviePilotToolFactory:
 
         # 加载插件提供的工具
         plugin_tools_count = 0
-        plugin_tools_info = PluginManager().get_plugin_agent_tools()
+        plugin_tools_info = get_plugin_agent_tools(PluginManager().running_plugins)
         for plugin_info in plugin_tools_info:
             plugin_id = plugin_info.get("plugin_id")
             plugin_name = plugin_info.get("plugin_name")
@@ -334,11 +338,10 @@ class MoviePilotToolFactory:
     @classmethod
     def create_catalog(cls, **tool_kwargs) -> ToolCatalogSnapshot:
         """在插件目录稳定窗口内构造一份完整本地工具快照。"""
-        plugin_manager = PluginManager()
         for _attempt in range(cls.CATALOG_BUILD_MAX_ATTEMPTS):
-            before_revision = plugin_manager.get_plugin_agent_tools_revision()
+            before_revision = get_plugin_agent_tools_revision()
             tools = cls.create_tools(**tool_kwargs)
-            after_revision = plugin_manager.get_plugin_agent_tools_revision()
+            after_revision = get_plugin_agent_tools_revision()
             if before_revision == after_revision:
                 return ToolCatalogSnapshot.from_tools(
                     tools,

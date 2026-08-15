@@ -4,7 +4,6 @@
 插件类名寻址，第二个实例都不会报错，只是不干活；反过来，实例键如果不能对默认实例退化成
 裸插件标识，全部存量单实例插件的键会一次性改名。
 """
-import threading
 from typing import Optional, Tuple
 from unittest.mock import Mock, patch
 
@@ -151,9 +150,6 @@ def manager():
     instance = object.__new__(PluginManager)
     instance._plugins = {}
     instance._running_plugins = {}
-    instance._plugin_agent_tools_cache = {}
-    instance._plugin_agent_tools_cache_lock = threading.Lock()
-    instance._plugin_agent_tools_revision = 0
     return instance
 
 

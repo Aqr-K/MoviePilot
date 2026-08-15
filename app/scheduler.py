@@ -33,6 +33,7 @@ from app.runtime.extensions.plugin_instance import (
     split_instance_key,
 )
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_services
 from app.db import SessionFactory
 from app.db.oper.agenttask import AgentTaskOper
 from app.db.models.downloadhistory import DownloadHistory, DownloadFiles
@@ -1408,7 +1409,7 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
         with self._lock:
             plugin_manager = PluginManager()
             try:
-                plugin_services = plugin_manager.get_plugin_services(pid=pid)
+                plugin_services = get_plugin_services(plugin_manager.running_plugins, pid=pid)
             except Exception as e:
                 logger.error(
                     f"运行插件 {pid} 服务失败：{str(e)} - {traceback.format_exc()}"

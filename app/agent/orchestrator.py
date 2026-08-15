@@ -71,7 +71,7 @@ from app.agent.tools.impl.query_system_settings import QuerySystemSettingsTool
 from app.chain import ChainBase
 from app.runtime.config import settings
 from app.runtime.events import eventmanager
-from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_agent_tools_revision
 from app.db.oper.agentchat import AgentChatOper
 from app.db.oper.agenttask import AgentTaskOper
 from app.db.oper.user import UserOper
@@ -1590,12 +1590,11 @@ class MoviePilotAgent:
         self,
     ) -> tuple[ToolCatalogSnapshot, ToolCatalogSnapshot]:
         """在同一插件 revision 窗口内建立主图和子图工具目录。"""
-        plugin_manager = PluginManager()
         for _attempt in range(MoviePilotToolFactory.CATALOG_BUILD_MAX_ATTEMPTS):
-            before_revision = plugin_manager.get_plugin_agent_tools_revision()
+            before_revision = get_plugin_agent_tools_revision()
             tools = self._initialize_tools()
             subagent_tools = self._initialize_subagent_tools()
-            after_revision = plugin_manager.get_plugin_agent_tools_revision()
+            after_revision = get_plugin_agent_tools_revision()
             if before_revision == after_revision:
                 factory_revision = MoviePilotToolFactory.catalog_factory_revision()
                 return (
@@ -1686,7 +1685,7 @@ class MoviePilotAgent:
                 if tool_catalog is not None and subagent_catalog is not None
                 else (
                     MoviePilotToolFactory.catalog_factory_revision(),
-                    PluginManager().get_plugin_agent_tools_revision(),
+                    get_plugin_agent_tools_revision(),
                 )
             ),
         )
@@ -1796,7 +1795,7 @@ class MoviePilotAgent:
         """
         try:
             runtime_config = await self._resolve_llm_runtime_config()
-            plugin_revision = PluginManager().get_plugin_agent_tools_revision()
+            plugin_revision = get_plugin_agent_tools_revision()
             mcp_config_signature = agent_mcp_manager.config_signature()
             cached_bundle = self._compiled_agent_bundle
             catalog_is_fresh = bool(

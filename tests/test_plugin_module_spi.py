@@ -10,7 +10,7 @@ from app.runtime.deprecation import policy
 from app.runtime.extensions import contract
 from app.runtime.extensions.module_manager import ModuleManager, ProvidedModule
 from app.runtime.extensions.plugin_manager import PluginManager
-from app.runtime.extensions.plugin_spi import get_plugin_provided_modules
+from app.runtime.extensions.plugin_spi import get_plugin_modules, get_plugin_provided_modules
 from app.schemas.types import ModuleType
 
 
@@ -430,14 +430,13 @@ def test_aggregator_filters_by_plugin_id():
 def test_injection_declaration_warns_once_per_plugin():
     """注入式声明按插件去重告警，不随分发次数增长。"""
     policy.reset_warned()
-    manager = object.__new__(PluginManager)
-    manager._running_plugins = {
+    plugins = {
         "plugin_a": make_plugin("plugin_a", module_dict={"stub_capability": lambda: "injected"}),
     }
 
     with patch("app.runtime.extensions.plugin_spi.logger") as spi_logger:
         for _ in range(5):
-            manager.get_plugin_modules()
+            get_plugin_modules(plugins)
 
     assert spi_logger.warning.call_count == 0
     policy.reset_warned()
@@ -446,14 +445,13 @@ def test_injection_declaration_warns_once_per_plugin():
 def test_injection_declaration_emits_the_registered_deprecation_notice():
     """注入式声明命中已登记的废弃提示。"""
     policy.reset_warned()
-    manager = object.__new__(PluginManager)
-    manager._running_plugins = {
+    plugins = {
         "plugin_a": make_plugin("plugin_a", module_dict={"stub_capability": lambda: "injected"}),
     }
 
     with patch("app.runtime.deprecation.policy.logger") as policy_logger:
         for _ in range(5):
-            manager.get_plugin_modules()
+            get_plugin_modules(plugins)
 
     assert policy_logger.warning.call_count == 1
     assert "get_module()" in policy_logger.warning.call_args[0][0]
@@ -566,7 +564,7 @@ def test_injected_and_registered_declarations_both_take_effect(manager):
     with patched_module_manager(manager):
         plugin_manager._register_plugin_modules("plugin_a")
 
-    injected = plugin_manager.get_plugin_modules()
+    injected = get_plugin_modules(plugin_manager.running_plugins)
     assert injected[("plugin_a", "plugin_a")]["stub_capability"]() == "injected"
     registered = list(manager.get_running_modules("stub_capability"))
     assert [module.stub_capability() for module in registered] == ["registered"]

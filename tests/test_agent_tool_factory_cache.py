@@ -13,6 +13,10 @@ from app.agent.tools.impl.ask_user_choice import AskUserChoiceInput, AskUserChoi
 from app.agent.tools.impl.send_local_file import SendLocalFileTool
 from app.agent.tools.impl.send_voice_message import SendVoiceMessageTool
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import (
+    clear_plugin_agent_tools_cache,
+    get_plugin_agent_tools,
+)
 from app.foundation.singleton import Singleton
 
 
@@ -36,11 +40,13 @@ class DemoMessageAgentTool(DemoAgentTool):
 
 @pytest.fixture
 def plugin_manager() -> Iterator[PluginManager]:
-    """构造隔离的插件管理器实例，避免单例缓存污染其它用例。"""
+    """构造隔离的插件管理器实例和空的工具注册表缓存，避免污染其它用例。"""
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
     manager = PluginManager()
+    clear_plugin_agent_tools_cache()
     yield manager
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
+    clear_plugin_agent_tools_cache()
 
 
 def _build_plugin(
@@ -107,8 +113,8 @@ def test_plugin_agent_tools_are_cached(plugin_manager: PluginManager) -> None:
         [DemoAgentTool], calls=calls
     )
 
-    first_result = plugin_manager.get_plugin_agent_tools()
-    second_result = plugin_manager.get_plugin_agent_tools()
+    first_result = get_plugin_agent_tools(plugin_manager.running_plugins)
+    second_result = get_plugin_agent_tools(plugin_manager.running_plugins)
 
     assert len(calls) == 1
     assert first_result == second_result
@@ -119,10 +125,10 @@ def test_plugin_agent_tools_cache_returns_copy(plugin_manager: PluginManager) ->
     """缓存命中时应返回副本，调用方修改结果不应污染注册表缓存。"""
     plugin_manager.running_plugins["DemoPlugin"] = _build_plugin([DemoAgentTool])
 
-    first_result = plugin_manager.get_plugin_agent_tools()
+    first_result = get_plugin_agent_tools(plugin_manager.running_plugins)
     first_result[0]["tools"].append(DemoMessageAgentTool)
 
-    second_result = plugin_manager.get_plugin_agent_tools()
+    second_result = get_plugin_agent_tools(plugin_manager.running_plugins)
 
     assert second_result[0]["tools"] == [DemoAgentTool]
 
@@ -135,13 +141,13 @@ def test_plugin_agent_tools_cache_can_be_cleared(
     calls: list[int] = []
     plugin_manager.running_plugins["DemoPlugin"] = _build_plugin(tools, calls=calls)
 
-    assert plugin_manager.get_plugin_agent_tools()[0]["tools"] == [DemoAgentTool]
+    assert get_plugin_agent_tools(plugin_manager.running_plugins)[0]["tools"] == [DemoAgentTool]
     tools.append(DemoMessageAgentTool)
-    assert plugin_manager.get_plugin_agent_tools()[0]["tools"] == [DemoAgentTool]
+    assert get_plugin_agent_tools(plugin_manager.running_plugins)[0]["tools"] == [DemoAgentTool]
 
-    plugin_manager.clear_plugin_agent_tools_cache()
+    clear_plugin_agent_tools_cache()
 
-    assert plugin_manager.get_plugin_agent_tools()[0]["tools"] == [
+    assert get_plugin_agent_tools(plugin_manager.running_plugins)[0]["tools"] == [
         DemoAgentTool,
         DemoMessageAgentTool,
     ]
@@ -153,7 +159,7 @@ def test_plugin_agent_tools_revision_churn_is_bounded(
 ) -> None:
     """插件状态持续变化时注册表构造必须有界失败，不能卡住调用线程。"""
     def _changing_tools() -> list[type[MoviePilotTool]]:
-        plugin_manager.clear_plugin_agent_tools_cache()
+        clear_plugin_agent_tools_cache()
         return [DemoAgentTool]
 
     plugin_manager.running_plugins["DemoPlugin"] = SimpleNamespace(
@@ -163,7 +169,7 @@ def test_plugin_agent_tools_revision_churn_is_bounded(
     )
 
     with pytest.raises(RuntimeError, match="持续变化"):
-        plugin_manager.get_plugin_agent_tools()
+        get_plugin_agent_tools(plugin_manager.running_plugins)
 
 
 def test_factory_reuses_plugin_registry_but_creates_new_tool_instances(

@@ -20,6 +20,7 @@ from app.domain.meta.metabase import MetaBase
 from app.domain.meta.metamusic import MetaMusic
 from app.runtime.extensions.module_manager import ModuleManager
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_modules
 from app.db.oper.message import MessageOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.db.oper.user import UserOper
@@ -307,7 +308,7 @@ class ChainBase(metaclass=ABCMeta):
         """
         执行插件模块
         """
-        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
+        for plugin, module_dict in get_plugin_modules(self.pluginmanager.running_plugins).items():
             plugin_key, plugin_name = plugin
             if method in module_dict:
                 func = module_dict[method]
@@ -340,7 +341,7 @@ class ChainBase(metaclass=ABCMeta):
         """
         异步执行插件模块
         """
-        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
+        for plugin, module_dict in get_plugin_modules(self.pluginmanager.running_plugins).items():
             plugin_key, plugin_name = plugin
             if method in module_dict:
                 func = module_dict[method]

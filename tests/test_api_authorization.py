@@ -212,14 +212,10 @@ def test_plugin_static_file_requires_resource_token_by_default(monkeypatch):
     """普通插件静态资源必须校验资源令牌。"""
     calls = []
 
-    class FakePluginManager:
-        """返回空认证提供方的插件管理器桩。"""
-
-        def get_plugin_auth_providers(self):
-            """返回插件认证入口列表。"""
-            return []
-
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(
+        plugin_endpoint, "PluginManager", lambda: SimpleNamespace(running_plugins={})
+    )
+    monkeypatch.setattr(plugin_endpoint, "get_plugin_auth_providers", lambda _plugins: [])
     monkeypatch.setattr(plugin_endpoint, "verify_resource_token", lambda token: calls.append(token))
 
     plugin_endpoint._verify_plugin_static_file_access(
@@ -235,21 +231,21 @@ def test_plugin_auth_remote_files_allow_anonymous_bootstrap(monkeypatch):
     """插件登录认证远程组件需要允许登录前匿名加载。"""
     calls = []
 
-    class FakePluginManager:
-        """返回认证插件 remote 信息的插件管理器桩。"""
-
-        def get_plugin_auth_providers(self):
-            """返回插件认证入口列表。"""
-            return [
-                {
-                    "remote": {
-                        "id": "AuthPlugin",
-                        "url": "/plugin/file/AuthPlugin/dist/remoteEntry.js",
-                    }
+    monkeypatch.setattr(
+        plugin_endpoint, "PluginManager", lambda: SimpleNamespace(running_plugins={})
+    )
+    monkeypatch.setattr(
+        plugin_endpoint,
+        "get_plugin_auth_providers",
+        lambda _plugins: [
+            {
+                "remote": {
+                    "id": "AuthPlugin",
+                    "url": "/plugin/file/AuthPlugin/dist/remoteEntry.js",
                 }
-            ]
-
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+            }
+        ],
+    )
     monkeypatch.setattr(plugin_endpoint, "verify_resource_token", lambda token: calls.append(token))
 
     plugin_endpoint._verify_plugin_static_file_access(

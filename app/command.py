@@ -13,6 +13,7 @@ from app.chain.system import SystemChain
 from app.chain.transfer import TransferChain
 from app.runtime.events import Event as ManagerEvent, eventmanager, Event
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_commands
 from app.application.messaging.message import MessageHelper
 from app.runtime.thread import ThreadHelper
 from app.runtime.log import logger
@@ -275,7 +276,7 @@ class Command(metaclass=Singleton):
         """
         # 为了保证命令顺序的一致性，目前这里没有直接使用 pid 获取单一插件命令，后续如果存在性能问题，可以考虑优化这里的逻辑
         plugin_commands = {}
-        for command in self.pluginmanager.get_plugin_commands():
+        for command in get_plugin_commands(self.pluginmanager.running_plugins):
             cmd = command.get("cmd")
             if not cmd:
                 continue

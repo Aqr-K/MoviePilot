@@ -16,7 +16,7 @@ from app.agent.policy import (
 from app.agent.tools.base import ToolExecutionTimeoutError, format_tool_result_for_agent
 from app.agent.tools.factory import MoviePilotToolFactory
 from app.agent.tools.catalog import ToolCatalogSnapshot
-from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_agent_tools_revision
 from app.runtime.log import logger
 
 
@@ -100,16 +100,15 @@ class MoviePilotToolsManager:
         """
         在插件工具注册表变化后惰性刷新工具实例。
         """
-        plugin_manager = PluginManager()
         if (
             self._plugin_agent_tools_revision
-            == plugin_manager.get_plugin_agent_tools_revision()
+            == get_plugin_agent_tools_revision()
         ):
             return
         with self._tools_lock:
             if (
                 self._plugin_agent_tools_revision
-                == plugin_manager.get_plugin_agent_tools_revision()
+                == get_plugin_agent_tools_revision()
             ):
                 return
             self._load_tools()

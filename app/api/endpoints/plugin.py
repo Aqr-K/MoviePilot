@@ -18,6 +18,14 @@ from app.runtime.deprecation.policy import DeprecatedFeatureError, get_notice, g
 from app.runtime.events import eventmanager
 from app.runtime.extensions.plugin_instance import matches_plugin, split_instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_apis
+from app.runtime.extensions.plugin_ui import (
+    get_plugin_auth_providers,
+    get_plugin_dashboard,
+    get_plugin_dashboard_meta,
+    get_plugin_remotes,
+    get_plugin_sidebar_nav,
+)
 from app.application.plugin_market import PluginMarket
 from app.application.security.access import (
     resource_token_cookie,
@@ -147,7 +155,7 @@ def _update_plugin_api_routes(plugin_id: Optional[str], action: str):
         if action != "add":
             continue
         # 获取插件的 API 路由信息
-        plugin_apis = PluginManager().get_plugin_apis(plugin_id)
+        plugin_apis = get_plugin_apis(PluginManager().running_plugins, plugin_id)
         for api in plugin_apis:
             api_path = f"{PLUGIN_PREFIX}{api.get('path', '')}"
             try:
@@ -266,8 +274,7 @@ def _is_plugin_auth_remote_file(plugin_id: str, filepath: str) -> bool:
     """
     path = filepath.lstrip("/")
     normalized_plugin_id = plugin_id.lower()
-    plugin_manager = PluginManager()
-    for provider in plugin_manager.get_plugin_auth_providers():
+    for provider in get_plugin_auth_providers(PluginManager().running_plugins):
         remote = provider.get("remote") or {}
         if str(remote.get("id") or "").lower() != normalized_plugin_id:
             continue
@@ -651,7 +658,7 @@ async def remotes(token: str) -> Any:
     """
     if token != "moviepilot":
         raise HTTPException(status_code=403, detail="Forbidden")
-    return PluginManager().get_plugin_remotes()
+    return get_plugin_remotes(PluginManager().running_plugins)
 
 
 @router.get(
@@ -663,7 +670,7 @@ def plugin_sidebar_nav(_: schemas.TokenPayload = Depends(verify_token)) -> Any:
     """
     聚合已启用 Vue 插件声明的侧栏入口（get_sidebar_nav），供前端主界面侧栏展示。
     """
-    return PluginManager().get_plugin_sidebar_nav()
+    return get_plugin_sidebar_nav(PluginManager().running_plugins)
 
 
 @router.get(
@@ -741,7 +748,7 @@ def plugin_dashboard_meta(
     """
     获取所有插件仪表板元信息
     """
-    return PluginManager().get_plugin_dashboard_meta()
+    return get_plugin_dashboard_meta(PluginManager().running_plugins)
 
 
 @router.get("/dashboard/{plugin_id}/{key}", summary="获取插件仪表板配置")
@@ -754,7 +761,7 @@ def plugin_dashboard_by_key(
     """
     根据插件ID获取插件仪表板
     """
-    return PluginManager().get_plugin_dashboard(plugin_id, key, user_agent)
+    return get_plugin_dashboard(PluginManager().running_plugins, plugin_id, key, user_agent)
 
 
 @router.get("/dashboard/{plugin_id}", summary="获取插件仪表板配置")

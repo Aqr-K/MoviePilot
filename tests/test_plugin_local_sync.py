@@ -548,18 +548,22 @@ def test_plugin_reload_refreshes_scheduler_services_idempotently(monkeypatch):
     """插件重载事件必须按当前服务拓扑幂等刷新 Scheduler。"""
     current_func = Mock()
     plugin_manager = Mock()
-    plugin_manager.get_plugin_services.return_value = [
-        {
-            "id": "new",
-            "name": "新服务",
-            "func": current_func,
-            "trigger": "interval",
-            "kwargs": {"minutes": 5},
-            "func_kwargs": {"marker": "new"},
-        }
-    ]
+    plugin_manager.running_plugins = {}
     plugin_manager.get_plugin_attr.return_value = "测试插件"
     monkeypatch.setattr("app.scheduler.PluginManager", lambda: plugin_manager)
+    monkeypatch.setattr(
+        "app.scheduler.get_plugin_services",
+        lambda _plugins, pid=None: [
+            {
+                "id": "new",
+                "name": "新服务",
+                "func": current_func,
+                "trigger": "interval",
+                "kwargs": {"minutes": 5},
+                "func_kwargs": {"marker": "new"},
+            }
+        ],
+    )
     backend = _FakeSchedulerBackend(["DemoPlugin_old"])
     scheduler = _build_scheduler_for_plugin_reload(
         jobs={

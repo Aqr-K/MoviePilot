@@ -11,7 +11,6 @@ from app.agent.tools.catalog import (
     ToolIdentityAmbiguousError,
 )
 from app.agent.tools.factory import MoviePilotToolFactory
-from app.runtime.extensions.plugin_manager import PluginManager
 
 
 class _Arguments(BaseModel):
@@ -146,10 +145,8 @@ def test_catalog_signature_changes_with_tool_description() -> None:
 def test_factory_catalog_retries_plugin_revision_churn_with_bound() -> None:
     """插件构造期间持续 reload 时只能有界重试并失败关闭。"""
     revisions = iter([1, 2, 3, 4, 5, 6])
-    plugin_manager = PluginManager()
-    with patch.object(
-        plugin_manager,
-        "get_plugin_agent_tools_revision",
+    with patch(
+        "app.agent.tools.factory.get_plugin_agent_tools_revision",
         side_effect=lambda: next(revisions),
     ), patch.object(MoviePilotToolFactory, "create_tools", return_value=[]):
         with pytest.raises(RuntimeError, match="持续变化"):

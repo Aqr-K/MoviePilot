@@ -12,6 +12,10 @@ from app.agent.tools.manager import MoviePilotToolsManager
 from app.agent.tools.catalog import ToolCatalogSnapshot
 from app.api.endpoints import mcp
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import (
+    clear_plugin_agent_tools_cache,
+    get_plugin_agent_tools_revision,
+)
 from app.foundation.singleton import Singleton
 
 
@@ -32,7 +36,9 @@ def plugin_manager() -> Iterator[PluginManager]:
     singleton_key = (PluginManager, (), frozenset())
     previous_instance = Singleton._instances.pop(singleton_key, None)
     manager = PluginManager()
+    clear_plugin_agent_tools_cache()
     yield manager
+    clear_plugin_agent_tools_cache()
     Singleton._instances.pop(singleton_key, None)
     if previous_instance is not None:
         Singleton._instances[singleton_key] = previous_instance
@@ -66,7 +72,7 @@ def test_mcp_refreshes_tools_after_plugin_lifecycle_change(
         assert asyncio.run(mcp.handle_tools_list()) == {"tools": []}
 
         plugin_manager.running_plugins["DemoPlugin"] = _build_plugin()
-        plugin_manager.clear_plugin_agent_tools_cache()
+        clear_plugin_agent_tools_cache()
 
         listed_tools = asyncio.run(mcp.handle_tools_list())["tools"]
         assert [tool["name"] for tool in listed_tools] == ["demo_plugin_tool"]
@@ -84,7 +90,7 @@ def test_mcp_refreshes_tools_after_plugin_lifecycle_change(
         }
 
         plugin_manager.running_plugins.pop("DemoPlugin")
-        plugin_manager.clear_plugin_agent_tools_cache()
+        clear_plugin_agent_tools_cache()
 
         assert asyncio.run(mcp.handle_tools_list()) == {"tools": []}
         missing_result = asyncio.run(
@@ -107,7 +113,7 @@ def test_direct_manager_preserves_legacy_lookup_and_exposes_strict_resolution() 
     manager.tools = [first, second]
     manager.catalog = ToolCatalogSnapshot.from_tools(
         manager.tools,
-        plugin_revision=manager._plugin_agent_tools_revision,
+        plugin_revision=get_plugin_agent_tools_revision(),
         factory_revision=MoviePilotToolFactory.catalog_factory_revision(),
     )
 

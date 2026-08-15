@@ -7,6 +7,7 @@ from app import schemas
 from app.api.response import RAW_RESPONSE_OPENAPI_KEY, ResponseAPIRouter
 from app.application.security.auth import build_token_response, consume_plugin_auth_ticket
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_ui import get_plugin_auth_providers
 from app.db.models.passkey import PassKey
 from app.db.models.user import User
 
@@ -52,7 +53,7 @@ def auth_providers() -> list[dict[str, Any]]:
     :return: 认证提供方摘要列表
     """
     providers = _system_auth_providers()
-    providers.extend(PluginManager().get_plugin_auth_providers())
+    providers.extend(get_plugin_auth_providers(PluginManager().running_plugins))
     return [provider for provider in providers if provider.get("enabled", True)]
 
 

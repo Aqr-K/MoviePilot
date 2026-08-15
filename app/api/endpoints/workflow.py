@@ -11,6 +11,7 @@ from app.api.response import ResponseAPIRouter
 from app.chain.workflow import WorkflowChain
 from app.runtime.config import global_vars
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_actions
 from app.workflow import WorkFlowManager
 from app.db import get_async_db, get_db
 from app.db.models import Workflow, User
@@ -72,7 +73,7 @@ def list_plugin_actions(
     """
     获取所有动作
     """
-    return PluginManager().get_plugin_actions(plugin_id)
+    return get_plugin_actions(PluginManager().running_plugins, plugin_id)
 
 
 @router.get(

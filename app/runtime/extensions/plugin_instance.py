@@ -3,7 +3,7 @@
 运行期容器、模块注册来源与事件启停都以实例键定位一个插件实例。默认实例的实例键退化为
 裸插件标识，因此单实例插件的取值与不区分实例时完全一致。
 """
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from app.db.models.pluginconfig import DEFAULT_INSTANCE_ID, normalize_instance_id
 
@@ -70,6 +70,25 @@ def is_default_instance_key(key: str) -> bool:
     :return: 是否为默认实例
     """
     return split_instance_key(key)[1] == DEFAULT_INSTANCE_ID
+
+
+def resolve_running_plugin(running_plugins: Dict[str, Any], key: str) -> Optional[Any]:
+    """
+    在运行态插件表中定位一个插件实例
+
+    传入插件标识时回落到该插件的首个实例，因此插件只有分身实例时按插件标识同样能取到。
+
+    :param running_plugins: 运行态插件表 {实例键: plugin}
+    :param key: 实例键或插件标识
+    :return: 插件实例，未运行时为 None
+    """
+    plugin = running_plugins.get(key)
+    if plugin is not None:
+        return plugin
+    for running_key, running in running_plugins.items():
+        if plugin_id_of(running_key) == key:
+            return running
+    return None
 
 
 def qualify_module_id(module_id: str, owner: str) -> str:

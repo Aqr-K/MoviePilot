@@ -465,7 +465,7 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
 
     def test_tool_factory_excludes_message_tools_when_disabled(self):
         with patch(
-            "app.agent.tools.factory.PluginManager.get_plugin_agent_tools",
+            "app.agent.tools.factory.get_plugin_agent_tools",
             return_value=[],
         ):
             tools = MoviePilotToolFactory.create_tools(

@@ -5,8 +5,9 @@
 job id、路由、命令与 Agent 工具行为必须逐字节保持原样，否则全部存量单实例插件一次性改名。
 """
 import threading
+from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -23,6 +24,14 @@ from app.plugins import _PluginBase
 from app.runtime.events import Event, eventmanager
 from app.runtime.extensions.plugin_instance import instance_key
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_apis, get_plugin_commands, get_plugin_services
+from app.runtime.extensions.plugin_ui import (
+    get_plugin_auth_providers,
+    get_plugin_dashboard_meta,
+    get_plugin_remote_entry,
+    get_plugin_remotes,
+    get_plugin_sidebar_nav,
+)
 from app.scheduler import Scheduler
 from app.schemas.types import EventType
 
@@ -121,9 +130,6 @@ def manager():
     instance = object.__new__(PluginManager)
     instance._plugins = {}
     instance._running_plugins = {}
-    instance._plugin_agent_tools_cache = {}
-    instance._plugin_agent_tools_cache_lock = threading.Lock()
-    instance._plugin_agent_tools_revision = 0
     return instance
 
 
@@ -234,7 +240,7 @@ def test_plugin_services_carry_their_owner_instance_key(manager):
     """服务声明带上归属实例键，调用方才可能区分同插件的多个实例。"""
     running(manager, DEFAULT_INSTANCE_ID, "alpha")
 
-    owners = sorted(service["pid"] for service in manager.get_plugin_services())
+    owners = sorted(service["pid"] for service in get_plugin_services(manager.running_plugins))
 
     assert owners == [PLUGIN_ID, ALPHA_KEY]
 
@@ -243,13 +249,13 @@ def test_plugin_services_carry_their_owner_instance_key(manager):
 # 菜单命令
 # --------------------------------------------------------------------------- #
 
-def build_command(commands: List[Dict[str, Any]]) -> Command:
-    """构造只保留插件命令构建能力的命令管理器。"""
+@contextmanager
+def build_command(commands: List[Dict[str, Any]]) -> Iterator[Command]:
+    """构造只保留插件命令构建能力的命令管理器，插件命令固定为给定声明。"""
     command = object.__new__(Command)
-    command.pluginmanager = SimpleNamespace(
-        get_plugin_commands=lambda pid=None: commands
-    )
-    return command
+    command.pluginmanager = SimpleNamespace(running_plugins={})
+    with patch("app.command.get_plugin_commands", return_value=commands):
+        yield command
 
 
 def plugin_command(pid: str) -> Dict[str, Any]:
@@ -266,9 +272,8 @@ def plugin_command(pid: str) -> Dict[str, Any]:
 
 def test_single_instance_command_registration_is_unchanged():
     """单实例插件的命令内容保持原样。"""
-    command = build_command([plugin_command(PLUGIN_ID)])
-
-    built = command._Command__build_plugin_commands()
+    with build_command([plugin_command(PLUGIN_ID)]) as command:
+        built = command._Command__build_plugin_commands()
 
     assert built == {
         "/surface": {
@@ -284,10 +289,9 @@ def test_single_instance_command_registration_is_unchanged():
 
 def test_conflicting_command_keeps_the_first_owner_and_warns():
     """两个实例声明同一条命令时先到者胜，冲突必须留下告警而不是静默覆盖。"""
-    command = build_command([plugin_command(PLUGIN_ID), plugin_command(ALPHA_KEY)])
-
-    with patch("app.command.logger") as logger:
-        built = command._Command__build_plugin_commands()
+    with build_command([plugin_command(PLUGIN_ID), plugin_command(ALPHA_KEY)]) as command:
+        with patch("app.command.logger") as logger:
+            built = command._Command__build_plugin_commands()
 
     assert built["/surface"]["pid"] == PLUGIN_ID
     warning = logger.warning.call_args.args[0]
@@ -297,10 +301,9 @@ def test_conflicting_command_keeps_the_first_owner_and_warns():
 def test_same_owner_redeclaring_a_command_updates_it():
     """同一来源重复声明按最后一次声明更新，不当作冲突。"""
     latest = {**plugin_command(PLUGIN_ID), "desc": "最新描述"}
-    command = build_command([plugin_command(PLUGIN_ID), latest])
-
-    with patch("app.command.logger") as logger:
-        built = command._Command__build_plugin_commands()
+    with build_command([plugin_command(PLUGIN_ID), latest]) as command:
+        with patch("app.command.logger") as logger:
+            built = command._Command__build_plugin_commands()
 
     assert built["/surface"]["description"] == "最新描述"
     logger.warning.assert_not_called()
@@ -362,13 +365,13 @@ def test_frontend_entry_ids_match_the_registered_routes(manager):
     """前端据以拼接接口路径的标识必须与实际注册的路由前缀一致。"""
     running(manager, DEFAULT_INSTANCE_ID, "alpha")
     registered = {
-        f"{plugin_endpoint.PLUGIN_PREFIX}{api['path']}" for api in manager.get_plugin_apis()
+        f"{plugin_endpoint.PLUGIN_PREFIX}{api['path']}" for api in get_plugin_apis(manager.running_plugins)
     }
 
     entry_ids = (
-        {item["id"] for item in manager.get_plugin_dashboard_meta()}
-        | {item["plugin_id"] for item in manager.get_plugin_sidebar_nav()}
-        | {item["plugin_id"] for item in manager.get_plugin_auth_providers()}
+        {item["id"] for item in get_plugin_dashboard_meta(manager.running_plugins)}
+        | {item["plugin_id"] for item in get_plugin_sidebar_nav(manager.running_plugins)}
+        | {item["plugin_id"] for item in get_plugin_auth_providers(manager.running_plugins)}
     )
 
     assert entry_ids == {PLUGIN_ID, ALPHA_KEY}
@@ -381,10 +384,10 @@ def test_static_resources_are_addressed_by_the_plugin_source_directory(manager):
     """联邦入口指向插件源码目录，分身实例不得拼出不存在的目录。"""
     running(manager, "alpha")
 
-    providers = manager.get_plugin_auth_providers()
-    remotes = manager.get_plugin_remotes()
+    providers = get_plugin_auth_providers(manager.running_plugins)
+    remotes = get_plugin_remotes(manager.running_plugins)
 
-    assert manager.get_plugin_remote_entry(ALPHA_KEY, "dist/assets") == (
+    assert get_plugin_remote_entry(ALPHA_KEY, "dist/assets") == (
         f"/plugin/file/{PLUGIN_ID.lower()}/dist/assets/remoteEntry.js"
     )
     assert [provider["remote"]["id"] for provider in providers] == [PLUGIN_ID]

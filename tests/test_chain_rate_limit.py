@@ -47,7 +47,7 @@ class ChainRateLimitTest(unittest.TestCase):
         chain = ChainBase()
         limited_module = _LimitedModule()
         chain.pluginmanager = Mock()
-        chain.pluginmanager.get_plugin_modules.return_value = {}
+        chain.pluginmanager.running_plugins = {}
         chain.modulemanager = Mock()
         chain.modulemanager.get_running_modules.return_value = [limited_module]
         chain.messagehelper = Mock()

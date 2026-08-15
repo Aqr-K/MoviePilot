@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import (
+    get_plugin_actions,
+    get_plugin_commands,
+    get_plugin_services,
+)
 from app.runtime.log import logger
 
 
@@ -48,10 +53,10 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
     @staticmethod
     def _load_plugin_capabilities(plugin_id: Optional[str] = None) -> dict:
         """读取运行中插件实例暴露的内存能力信息。"""
-        plugin_manager = PluginManager()
+        running_plugins = PluginManager().running_plugins
         result = {}
 
-        commands = plugin_manager.get_plugin_commands(pid=plugin_id)
+        commands = get_plugin_commands(running_plugins, pid=plugin_id)
         if commands:
             result["commands"] = [
                 {
@@ -63,7 +68,7 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
                 for cmd in commands
             ]
 
-        actions = plugin_manager.get_plugin_actions(pid=plugin_id)
+        actions = get_plugin_actions(running_plugins, pid=plugin_id)
         if actions:
             actions_list = []
             for action_group in actions:
@@ -82,7 +87,7 @@ class QueryPluginCapabilitiesTool(MoviePilotTool):
                 )
             result["actions"] = actions_list
 
-        services = plugin_manager.get_plugin_services(pid=plugin_id)
+        services = get_plugin_services(running_plugins, pid=plugin_id)
         if services:
             services_list = []
             for svc in services:

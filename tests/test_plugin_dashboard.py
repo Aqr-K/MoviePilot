@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_ui import get_plugin_dashboard
 from app.foundation.singleton import Singleton
 
 
@@ -36,7 +37,7 @@ def test_plugin_dashboard_keeps_vue_elements_none(plugin_manager: PluginManager)
         )
     )
 
-    dashboard = plugin_manager.get_plugin_dashboard("DemoPlugin", "usage")
+    dashboard = get_plugin_dashboard(plugin_manager.running_plugins, "DemoPlugin", "usage")
 
     assert dashboard.id == "DemoPlugin"
     assert dashboard.render_mode == "vue"
@@ -49,7 +50,7 @@ def test_plugin_dashboard_returns_none_when_plugin_has_no_dashboard(plugin_manag
     """插件声明当前无仪表板时应返回 None，而不是触发解包异常。"""
     plugin_manager.running_plugins["DemoPlugin"] = _plugin_with_dashboard(None)
 
-    assert plugin_manager.get_plugin_dashboard("DemoPlugin", "missing") is None
+    assert get_plugin_dashboard(plugin_manager.running_plugins, "DemoPlugin", "missing") is None
 
 
 def test_plugin_dashboard_rejects_invalid_dashboard_shape(plugin_manager: PluginManager) -> None:
@@ -59,7 +60,7 @@ def test_plugin_dashboard_rejects_invalid_dashboard_shape(plugin_manager: Plugin
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        plugin_manager.get_plugin_dashboard("DemoPlugin", "broken")
+        get_plugin_dashboard(plugin_manager.running_plugins, "DemoPlugin", "broken")
 
     assert exc_info.value.status_code == 500
     assert "仪表盘数据格式错误" in exc_info.value.detail

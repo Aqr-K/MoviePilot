@@ -694,23 +694,23 @@ def test_plugin_routes_only_register_v1(monkeypatch):
         def setup(self):
             """模拟 FastAPI 路由重建。"""
 
-    class FakePluginManager:
-        """返回单个测试插件 API 的管理器桩。"""
-
-        def get_plugin_apis(self, plugin_id):
-            """返回测试插件 API。"""
-            assert plugin_id == "DemoPlugin"
-            return [
-                {
-                    "path": "/DemoPlugin/health",
-                    "endpoint": lambda: {"ok": True},
-                    "methods": ["GET"],
-                }
-            ]
+    def fake_plugin_apis(_plugins, plugin_id):
+        """返回测试插件 API。"""
+        assert plugin_id == "DemoPlugin"
+        return [
+            {
+                "path": "/DemoPlugin/health",
+                "endpoint": lambda: {"ok": True},
+                "methods": ["GET"],
+            }
+        ]
 
     fake_app = FakeApp()
     monkeypatch.setattr(plugin_endpoint, "app", fake_app)
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(
+        plugin_endpoint, "PluginManager", lambda: SimpleNamespace(running_plugins={})
+    )
+    monkeypatch.setattr(plugin_endpoint, "get_plugin_apis", fake_plugin_apis)
 
     plugin_endpoint._update_plugin_api_routes("DemoPlugin", action="add")
     assert [route.path for route in fake_app.routes] == [

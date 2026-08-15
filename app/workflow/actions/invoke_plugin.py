@@ -2,6 +2,7 @@ from pydantic import Field
 
 from app.workflow.actions import BaseAction
 from app.runtime.extensions.plugin_manager import PluginManager
+from app.runtime.extensions.plugin_spi import get_plugin_actions
 from app.runtime.log import logger
 from app.schemas import ActionParams, ActionContext
 
@@ -53,7 +54,7 @@ class InvokePluginAction(BaseAction):
         if not params.plugin_id or not params.action_id:
             return context
         try:
-            plugin_actions = PluginManager().get_plugin_actions(params.plugin_id)
+            plugin_actions = get_plugin_actions(PluginManager().running_plugins, params.plugin_id)
             if not plugin_actions:
                 logger.error(f"插件不存在: {params.plugin_id}")
                 return context
