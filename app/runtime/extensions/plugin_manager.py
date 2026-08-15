@@ -25,10 +25,8 @@ from app.runtime.extensions.plugin_instance import (
 from app.runtime.extensions.plugin_lifecycle import (
     extension_owners,
     reclaim_extension_owners,
-    register_plugin_channel_capabilities,
     register_plugin_extensions,
     register_plugin_modules,
-    register_plugin_storages,
     unregister_capability_owners,
     unregister_module_owners,
     unregister_storage_owners,
@@ -398,22 +396,6 @@ class PluginManager(metaclass=Singleton):
         """
         register_plugin_modules(self._running_plugins, ModuleManager, pid)
 
-    def _register_plugin_storages(self, pid: Optional[str] = None) -> None:
-        """
-        把插件经 provides_storages() 声明的存储实现注册进存储注册表
-
-        :param pid: 插件ID或实例键，为空时处理全部运行态实例
-        """
-        register_plugin_storages(self._running_plugins, pid)
-
-    def _register_plugin_channel_capabilities(self, pid: Optional[str] = None) -> None:
-        """
-        把插件经 provides_channel_capabilities() 声明的渠道能力注册进渠道能力管理器
-
-        :param pid: 插件ID或实例键，为空时处理全部运行态实例
-        """
-        register_plugin_channel_capabilities(self._running_plugins, pid)
-
     def _register_plugin_extensions(self, pid: Optional[str] = None) -> None:
         """
         按最新声明注册插件的全部扩展点
@@ -455,26 +437,8 @@ class PluginManager(metaclass=Singleton):
         :param owners: 注册来源的实例键列表
         """
         reclaim_extension_owners(owners, (cls._unregister_module_owners,
-                                          cls._unregister_storage_owners,
-                                          cls._unregister_capability_owners))
-
-    @staticmethod
-    def _unregister_storage_owners(owners: List[str]) -> None:
-        """
-        按注册来源回收存储实现
-
-        :param owners: 注册来源的实例键列表
-        """
-        unregister_storage_owners(owners)
-
-    @staticmethod
-    def _unregister_capability_owners(owners: List[str]) -> None:
-        """
-        按注册来源回收渠道能力
-
-        :param owners: 注册来源的实例键列表
-        """
-        unregister_capability_owners(owners)
+                                          unregister_storage_owners,
+                                          unregister_capability_owners))
 
     @staticmethod
     def _unregister_module_owners(owners: List[str]) -> None:
