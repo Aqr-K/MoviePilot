@@ -3,6 +3,16 @@ from app.domain.context import MUSIC_ENTITY_ALBUM, MUSIC_ENTITY_RECORDING, Music
 from app.domain.meta.metamusic import MetaMusic
 from app.modules.recognizers.musicbrainz import MusicBrainzModule
 from app.modules.recognizers.musicbrainz.api import MusicBrainzApi
+from app.modules.recognizers.musicbrainz.mapping import recording_to_info
+from app.modules.recognizers.musicbrainz.matching import (
+    build_query,
+    same_text,
+    search_title,
+    select_album_candidate,
+    select_candidate,
+    soundtrack_body,
+    strip_artist_prefix,
+)
 
 
 def _module() -> MusicBrainzModule:
@@ -20,7 +30,7 @@ def test_musicbrainz_cover_domains_are_allowed_by_image_proxy():
 
 def test_build_query_uses_structured_music_fields():
     """MusicBrainz 查询应同时使用歌曲、艺术家和专辑条件。"""
-    query = MusicBrainzModule._build_query(
+    query = build_query(
         MetaMusic(
             title='Love "Story"',
             artists=["Taylor Swift"],
@@ -36,7 +46,7 @@ def test_build_query_uses_structured_music_fields():
 
 def test_build_query_strips_audio_quality_tokens():
     """资源标题中的格式规格与年份后缀不应污染检索式，繁体统一转简体检索。"""
-    query = MusicBrainzModule._build_query(
+    query = build_query(
         MetaMusic(
             title="永遠是朋友(2000) - ALAC [16B-44.1kHz]",
             artists=["毛阿敏"],
@@ -59,14 +69,14 @@ def test_select_candidate_matches_traditional_chinese_title():
         ),
     ]
 
-    selected = MusicBrainzModule._select_candidate(meta, candidates, media_source="musicbrainz")
+    selected = select_candidate(meta, candidates, media_source="musicbrainz")
 
     assert selected is candidates[0]
 
 
 def test_recording_to_info_maps_musicbrainz_payload():
     """MusicBrainz Recording 应映射为统一 MusicInfo。"""
-    info = MusicBrainzModule._recording_to_info(
+    info = recording_to_info(
         {
             "id": "recording-1",
             "title": "Get Lucky",
@@ -625,14 +635,14 @@ def test_request_json_retries_on_server_busy(monkeypatch):
 
 def test_same_text_normalizes_traditional_chinese():
     """候选比对应归一繁简差异，条目繁体写法不与简体资源标题失配。"""
-    assert MusicBrainzModule._same_text("神的遊戲", "神的游戏")
-    assert MusicBrainzModule._same_text("張懸", "张悬")
-    assert not MusicBrainzModule._same_text("神的遊戲", "神的冒险")
+    assert same_text("神的遊戲", "神的游戏")
+    assert same_text("張懸", "张悬")
+    assert not same_text("神的遊戲", "神的冒险")
 
 
 def test_search_title_replaces_sanitized_underscores():
     """流媒体文件名消毒产生的下划线应转空格，不破坏检索短语。"""
-    assert MusicBrainzModule._search_title("百年經典7_愛的奉獻") == "百年经典7 爱的奉献"
+    assert search_title("百年經典7_愛的奉獻") == "百年经典7 爱的奉献"
 
 
 def test_select_candidate_matches_traditional_chinese_recording():
@@ -646,7 +656,7 @@ def test_select_candidate_matches_traditional_chinese_recording():
         artists=["許茹芸"],
     )
 
-    matched = MusicBrainzModule._select_candidate(meta, [candidate], media_source="musicbrainz")
+    matched = select_candidate(meta, [candidate], media_source="musicbrainz")
 
     assert matched is not None
     assert matched.media_id == "recording-1"
@@ -678,18 +688,18 @@ def test_query_phrase_latin_unchanged_and_cjk_char_or():
 
 def test_same_text_normalizes_cjk_numerals():
     """汉字数字与阿拉伯数字写法差异不应阻断候选比对。"""
-    assert MusicBrainzModule._same_text("茹此精彩十三首", "茹此精彩13首")
-    assert MusicBrainzModule._same_text("二十周年演唱会", "20周年演唱会")
-    assert not MusicBrainzModule._same_text("茹此精彩十三首", "茹此精彩14首")
+    assert same_text("茹此精彩十三首", "茹此精彩13首")
+    assert same_text("二十周年演唱会", "20周年演唱会")
+    assert not same_text("茹此精彩十三首", "茹此精彩14首")
 
 
 def test_strip_artist_prefix_removes_signature_prefix():
     """曲名开头的艺术家署名前缀是命名习惯，检索与比对应使用主体名。"""
-    assert MusicBrainzModule._strip_artist_prefix(
+    assert strip_artist_prefix(
         "许茹芸的爱情电影主题曲", ["许茹芸"]) == "爱情电影主题曲"
     # 剥离后无剩余时保留原标题，短标题不受影响
-    assert MusicBrainzModule._strip_artist_prefix("许茹芸", ["许茹芸"]) == "许茹芸"
-    assert MusicBrainzModule._strip_artist_prefix("晴天", ["周杰伦"]) == "晴天"
+    assert strip_artist_prefix("许茹芸", ["许茹芸"]) == "许茹芸"
+    assert strip_artist_prefix("晴天", ["周杰伦"]) == "晴天"
 
 
 def test_select_album_candidate_matches_lead_token_structure():
@@ -704,7 +714,7 @@ def test_select_album_candidate_matches_lead_token_structure():
         year=2003,
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-1"
@@ -722,7 +732,7 @@ def test_select_album_candidate_matches_performance_suffix():
         year=2018,
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-1"
@@ -740,7 +750,7 @@ def test_select_album_candidate_strips_volume_suffix():
         year=2011,
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-1"
@@ -758,7 +768,7 @@ def test_select_album_candidate_rejects_wrong_volume():
         year=2023,
     )
 
-    assert MusicBrainzModule._select_album_candidate(meta, [wrong_volume]) is None
+    assert select_album_candidate(meta, [wrong_volume]) is None
 
 
 def test_select_album_candidate_matches_contained_title():
@@ -778,7 +788,7 @@ def test_select_album_candidate_matches_contained_title():
         year=2019,
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-1"
@@ -786,7 +796,7 @@ def test_select_album_candidate_matches_contained_title():
 
 def test_soundtrack_body_extracts_movie_name():
     """原声带描述词尾部剔除返回电影名本体，非原声带标题与词内后缀不受影响。"""
-    body = MusicBrainzModule._soundtrack_body
+    body = soundtrack_body
     assert body("Pulp Fiction Original Motion Picture Soundtrack") == "Pulp Fiction"
     assert body("Reply 1988 OST") == "Reply 1988"
     # Ghost 尾部的 ost 是单词组成部分，不能剔除
@@ -796,9 +806,9 @@ def test_soundtrack_body_extracts_movie_name():
 
 def test_search_title_strips_repeated_trailing_year():
     """场景命名重复携带的尾部年份应全部剥离，避免年份文本阻断精确匹配。"""
-    assert MusicBrainzModule._search_title("Live At Montreux 2011 2011") == "Live At Montreux"
+    assert search_title("Live At Montreux 2011 2011") == "Live At Montreux"
     # 纯年份标题无前导空白不受影响
-    assert MusicBrainzModule._search_title("1999") == "1999"
+    assert search_title("1999") == "1999"
 
 
 def test_album_queries_include_soundtrack_body():
@@ -827,7 +837,7 @@ def test_select_album_candidate_matches_soundtrack_body():
         year=1994,
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-1"
@@ -844,7 +854,7 @@ def test_select_candidate_rejects_wrong_artist_same_title():
         artists=["张蔷"],
     )
 
-    assert MusicBrainzModule._select_candidate(meta, [wrong_artist], media_source="musicbrainz") is None
+    assert select_candidate(meta, [wrong_artist], media_source="musicbrainz") is None
 
 
 def test_select_candidate_rejects_artist_only_match():
@@ -858,7 +868,7 @@ def test_select_candidate_rejects_artist_only_match():
         artists=["许茹芸"],
     )
 
-    assert MusicBrainzModule._select_candidate(
+    assert select_candidate(
         meta, [same_artist_other_song], media_source="musicbrainz") is None
 
 
@@ -874,7 +884,7 @@ def test_select_album_candidate_requires_title_and_artist():
         year=2003,
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album_hit])
+    matched = select_album_candidate(meta, [album_hit])
 
     assert matched is not None
     assert matched.media_id == "album-1"
@@ -887,7 +897,7 @@ def test_select_album_candidate_requires_title_and_artist():
         artists=["其他歌手"],
     )
 
-    assert MusicBrainzModule._select_album_candidate(meta, [album_wrong_artist]) is None
+    assert select_album_candidate(meta, [album_wrong_artist]) is None
 
 
 def test_select_album_candidate_matches_colon_subtitle():
@@ -901,7 +911,7 @@ def test_select_album_candidate_matches_colon_subtitle():
         artists=["鄧麗君"],
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-colon"
@@ -918,7 +928,7 @@ def test_select_album_candidate_matches_head_title():
         artists=["许巍"],
     )
 
-    matched = MusicBrainzModule._select_album_candidate(meta, [album])
+    matched = select_album_candidate(meta, [album])
 
     assert matched is not None
     assert matched.media_id == "album-head"
@@ -926,6 +936,6 @@ def test_select_album_candidate_matches_head_title():
 
 def test_search_title_strips_trailing_year():
     """检索式应剥离曲名尾部独立年份，避免年份文本造成精确短语零命中。"""
-    assert MusicBrainzModule._search_title("Funky Jazz Saxophone 2024") == "Funky Jazz Saxophone"
+    assert search_title("Funky Jazz Saxophone 2024") == "Funky Jazz Saxophone"
     # 非尾部年份属于曲名内容，不应剥离
-    assert MusicBrainzModule._search_title("2002年的第一场雪") == "2002年的第一场雪"
+    assert search_title("2002年的第一场雪") == "2002年的第一场雪"

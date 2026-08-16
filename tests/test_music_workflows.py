@@ -10,7 +10,7 @@ from app.chain.recommend import RecommendChain
 from app.chain.search import SearchChain
 from app.domain.context import MusicAlbumInfo, MusicArtistInfo, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.recognizers.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.musicbrainz.matching import select_candidate
 from app.schemas.types import MediaSource, MediaType
 
 
@@ -364,7 +364,7 @@ def test_musicbrainz_module_select_candidate_prefers_matching_audio_tags():
         ),
     ]
 
-    selected = MusicBrainzModule._select_candidate(meta, candidates, media_source="musicbrainz")
+    selected = select_candidate(meta, candidates, media_source="musicbrainz")
 
     assert selected is candidates[1]
 

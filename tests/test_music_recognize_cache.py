@@ -12,6 +12,7 @@ from app.api.endpoints import music as music_endpoint
 from app.domain.context import MusicInfo
 from app.domain.meta.metamusic import MetaMusic
 from app.api.deps import get_current_active_superuser_async
+from app.modules.recognizers import musicbrainz as musicbrainz_module
 from app.modules.recognizers.musicbrainz import music_cache as music_cache_module
 from app.modules.recognizers.musicbrainz import MusicBrainzModule
 from app.modules.recognizers.musicbrainz.music_cache import MusicBrainzCache
@@ -384,7 +385,7 @@ def test_module_recognize_media_bypasses_cache_when_disabled(monkeypatch):
     cache.update(meta, _music_info())
     fresh = _music_info(media_id="rec-2")
     monkeypatch.setattr(module, "_search_recordings", Mock(return_value=[fresh]))
-    monkeypatch.setattr(module, "_select_candidate", Mock(return_value=fresh))
+    monkeypatch.setattr(musicbrainz_module, "select_candidate", Mock(return_value=fresh))
 
     result = module.recognize_media(meta=meta, cache=False)
 
@@ -399,7 +400,7 @@ def test_module_recognize_media_writes_search_result_to_cache(monkeypatch):
     meta = MetaMusic(title="晴天", artists=["周杰伦"], album="叶惠美", year=2003)
     matched = _music_info()
     monkeypatch.setattr(module, "_search_recordings", Mock(return_value=[matched]))
-    monkeypatch.setattr(module, "_select_candidate", Mock(return_value=matched))
+    monkeypatch.setattr(musicbrainz_module, "select_candidate", Mock(return_value=matched))
 
     result = module.recognize_media(meta=meta)
 
