@@ -1,11 +1,13 @@
-"""插件扩展点的生命周期编排：模块、存储与渠道能力随插件启停一并上线和回收。"""
+"""插件扩展点的生命周期编排：模块与渠道能力随插件启停一并上线和回收。
+
+存储是系统模块的一种，与下载器、媒体服务器走同一条注册通道。
+"""
 from typing import Optional, Tuple
 from unittest.mock import Mock, patch
 
 import pytest
 
 from app.modules.storages.base import StorageBase
-from app.adapters.storage.registry import get_registered_storages, unregister_storages
 from app.modules import _ModuleBase
 from app.runtime.extensions import contract
 from app.runtime.extensions.module_manager import ModuleManager
@@ -133,13 +135,11 @@ def module_base_configured():
 
 @pytest.fixture(autouse=True)
 def clean_registries():
-    """用例前后清空存储与渠道能力的外部注册，避免污染同进程内的其它用例。"""
+    """用例前后清空渠道能力的外部注册，避免污染同进程内的其它用例。"""
     def purge():
         """回收本用例可能留下的全部外部注册"""
         for owner in set(ChannelCapabilityManager.get_registered_owners().values()):
             ChannelCapabilityManager.unregister_capabilities(owner)
-        for owner in ("plugin_a", "plugin_a@beta", "plugin_b"):
-            unregister_storages(owner)
 
     purge()
     yield
@@ -199,7 +199,7 @@ def make_plugin_manager(key: str, plugin: Mock) -> PluginManager:
 
 
 def test_registering_extensions_brings_up_every_kind(manager):
-    """插件上线时模块、存储与渠道能力一并注册。"""
+    """插件上线时模块、存储与渠道能力一并注册，存储按模块登记。"""
     plugin = make_plugin("plugin_a",
                          provides_modules=[StubModule],
                          provides_storages=[StubStorage],
@@ -209,8 +209,7 @@ def test_registering_extensions_brings_up_every_kind(manager):
     with patched_module_manager(manager):
         plugin_manager._register_plugin_extensions("plugin_a")
 
-    assert manager.get_external_module_ids("plugin_a") == ["StubModule"]
-    assert StubStorage in get_registered_storages()
+    assert sorted(manager.get_external_module_ids("plugin_a")) == ["StubModule", "StubStorage"]
     assert ChannelCapabilityManager.get_max_buttons_per_row(MessageChannel.VoceChat) == 1
 
 
@@ -229,7 +228,6 @@ def test_unregistering_extensions_reclaims_every_kind(manager):
         plugin_manager._unregister_plugin_extensions("plugin_a")
 
     assert manager.get_external_module_ids() == []
-    assert StubStorage not in get_registered_storages()
     assert ChannelCapabilityManager.get_max_buttons_per_row(
         MessageChannel.VoceChat) == builtin_buttons_per_row
 
@@ -247,7 +245,6 @@ def test_reclaiming_one_kind_does_not_block_the_others(manager):
                           side_effect=RuntimeError("boom")):
             plugin_manager._unregister_plugin_extensions("plugin_a")
 
-    assert StubStorage not in get_registered_storages()
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -264,9 +261,7 @@ def test_reregistration_is_idempotent(manager):
             plugin_manager._unregister_plugin_extensions("plugin_a")
             plugin_manager._register_plugin_extensions("plugin_a")
 
-    assert manager.get_external_module_ids("plugin_a") == ["StubModule"]
-    assert [storage for storage in get_registered_storages()
-            if storage is StubStorage] == [StubStorage]
+    assert sorted(manager.get_external_module_ids("plugin_a")) == ["StubModule", "StubStorage"]
     assert ChannelCapabilityManager.get_registered_owners() == {
         MessageChannel.VoceChat: "plugin_a"
     }
@@ -280,7 +275,6 @@ def test_a_plugin_declaring_nothing_touches_no_registry():
         plugin_manager._register_plugin_extensions()
 
     module_manager.assert_not_called()
-    assert get_registered_storages() == []
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -296,7 +290,6 @@ def test_a_disabled_instance_registers_nothing(manager):
         plugin_manager._register_plugin_extensions("plugin_a")
 
     assert manager.get_external_module_ids() == []
-    assert get_registered_storages() == []
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -315,7 +308,7 @@ def test_extensions_are_reclaimed_per_instance(manager):
         plugin_manager._register_plugin_extensions()
         plugin_manager._unregister_extension_owners(["plugin_a@beta"])
 
-    assert StubStorage not in get_registered_storages()
+    assert manager.get_external_module_ids("plugin_a@beta") == []
     assert ChannelCapabilityManager.get_registered_owners() == {
         MessageChannel.VoceChat: "plugin_a"
     }

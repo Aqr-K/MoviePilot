@@ -11,61 +11,130 @@ from app.runtime.log import logger
 class StorageChain(ChainBase):
     """
     存储处理链
+
+    每种存储是一个独立模块，按存储标识精确分发到对应模块，不广播。
+    跨层级的目录遍历属于编排，由本链在单层列举之上完成。
     """
+
+    def has_storage(self, storage: str) -> bool:
+        """
+        判断存储是否有模块在运行
+
+        :param storage: 存储标识
+        :return: 是否可用
+        """
+        return any(self.modulemanager.get_running_subtype_module(storage))
 
     def save_config(self, storage: str, conf: dict) -> None:
         """
         保存存储配置
         """
-        self.run_module("save_config", storage=storage, conf=conf)
+        self.run_module_for(storage, "set_config", conf=conf)
 
     def reset_config(self, storage: str) -> None:
         """
         重置存储配置
         """
-        self.run_module("reset_config", storage=storage)
+        self.run_module_for(storage, "reset_config")
 
     def generate_qrcode(self, storage: str) -> Optional[Tuple[dict, str]]:
         """
         生成二维码
         """
-        return self.run_module("generate_qrcode", storage=storage)
+        return self.run_module_for(storage, "generate_qrcode")
 
     def generate_auth_url(self, storage: str) -> Optional[Tuple[dict, str]]:
         """
         生成 OAuth2 授权 URL
         """
-        return self.run_module("generate_auth_url", storage=storage)
+        return self.run_module_for(storage, "generate_auth_url")
 
     def check_login(self, storage: str, **kwargs) -> Optional[Tuple[dict, str]]:
         """
         登录确认
         """
-        return self.run_module("check_login", storage=storage, **kwargs)
+        return self.run_module_for(storage, "check_login", **kwargs)
 
     def list_files(self, fileitem: schemas.FileItem, recursion: bool = False) -> Optional[List[schemas.FileItem]]:
         """
         查询当前目录下所有目录和文件
+
+        :param fileitem: 目录项
+        :param recursion: 是否递归，递归时只返回文件
+        :return: 文件项列表，存储不可用时为 None
         """
-        return self.run_module("list_files", fileitem=fileitem, recursion=recursion)
+        if not self.has_storage(fileitem.storage):
+            return None
+        result: List[schemas.FileItem] = []
+        self.__collect_files(fileitem, recursion, result)
+        return result
+
+    def __collect_files(self, fileitem: schemas.FileItem, recursion: bool,
+                        result: List[schemas.FileItem]) -> None:
+        """
+        按需递归收集目录内容
+
+        :param fileitem: 目录项
+        :param recursion: 是否递归
+        :param result: 收集结果
+        """
+        items = self.run_module_for(fileitem.storage, "list", fileitem=fileitem)
+        if not items:
+            return
+        if not recursion:
+            result.extend(items)
+            return
+        for item in items:
+            if item.type == "dir":
+                self.__collect_files(item, recursion, result)
+            else:
+                result.append(item)
 
     def any_files(self, fileitem: schemas.FileItem, extensions: list = None) -> Optional[bool]:
         """
         查询当前目录下是否存在指定扩展名任意文件
+
+        :param fileitem: 目录项
+        :param extensions: 扩展名列表，为空时只要有内容即为存在
+        :return: 是否存在，存储不可用时为 None
         """
-        return self.run_module("any_files", fileitem=fileitem, extensions=extensions)
+        if not self.has_storage(fileitem.storage):
+            return None
+        return self.__any_file(fileitem, extensions)
+
+    def __any_file(self, fileitem: schemas.FileItem, extensions: Optional[list]) -> bool:
+        """
+        递归判断目录下是否存在指定扩展名的文件
+
+        :param fileitem: 目录项
+        :param extensions: 扩展名列表
+        :return: 是否存在
+        """
+        items = self.run_module_for(fileitem.storage, "list", fileitem=fileitem)
+        if not items:
+            return False
+        if not extensions:
+            return True
+        for item in items:
+            if (item.type == "file"
+                    and item.extension
+                    and f".{item.extension.lower()}" in extensions):
+                return True
+            if item.type == "dir" and self.__any_file(item, extensions):
+                return True
+        return False
 
     def create_folder(self, fileitem: schemas.FileItem, name: str) -> Optional[schemas.FileItem]:
         """
         创建目录
         """
-        return self.run_module("create_folder", fileitem=fileitem, name=name)
+        return self.run_module_for(fileitem.storage, "create_folder", fileitem=fileitem, name=name)
 
     def get_folder(self, storage: str, path: Path) -> Optional[schemas.FileItem]:
         """
         获取目录，不存在则递归创建
         """
-        return self.run_module("get_folder", storage=storage, path=path)
+        return self.run_module_for(storage, "get_folder", path=path)
 
     def download_file(self, fileitem: schemas.FileItem, path: Path = None) -> Optional[Path]:
         """
@@ -73,7 +142,7 @@ class StorageChain(ChainBase):
         :param fileitem: 文件项
         :param path: 本地保存路径
         """
-        return self.run_module("download_file", fileitem=fileitem, path=path)
+        return self.run_module_for(fileitem.storage, "download", fileitem=fileitem, path=path)
 
     def upload_file(self, fileitem: schemas.FileItem, path: Path,
                     new_name: Optional[str] = None) -> Optional[schemas.FileItem]:
@@ -83,19 +152,20 @@ class StorageChain(ChainBase):
         :param path: 本地文件路径
         :param new_name: 新文件名
         """
-        return self.run_module("upload_file", fileitem=fileitem, path=path, new_name=new_name)
+        return self.run_module_for(fileitem.storage, "upload",
+                                   fileitem=fileitem, path=path, new_name=new_name)
 
     def delete_file(self, fileitem: schemas.FileItem) -> Optional[bool]:
         """
         删除文件或目录
         """
-        return self.run_module("delete_file", fileitem=fileitem)
+        return self.run_module_for(fileitem.storage, "delete", fileitem=fileitem)
 
     def rename_file(self, fileitem: schemas.FileItem, name: str) -> Optional[bool]:
         """
         重命名文件或目录
         """
-        return self.run_module("rename_file", fileitem=fileitem, name=name)
+        return self.run_module_for(fileitem.storage, "rename", fileitem=fileitem, name=name)
 
     def exists(self, fileitem: schemas.FileItem) -> Optional[bool]:
         """
@@ -113,13 +183,13 @@ class StorageChain(ChainBase):
         """
         根据路径获取文件项
         """
-        return self.run_module("get_file_item", storage=storage, path=path)
+        return self.run_module_for(storage, "get_item", path=path)
 
     def get_parent_item(self, fileitem: schemas.FileItem) -> Optional[schemas.FileItem]:
         """
         获取上级目录项
         """
-        return self.run_module("get_parent_item", fileitem=fileitem)
+        return self.run_module_for(fileitem.storage, "get_parent", fileitem=fileitem)
 
     def snapshot_storage(self, storage: str, path: Path,
                          last_snapshot_time: float = None, max_depth: int = 5,
@@ -132,21 +202,21 @@ class StorageChain(ChainBase):
         :param max_depth: 最大递归深度，避免过深遍历
         :param previous_snapshot: 上次完整快照，用于增量对账
         """
-        return self.run_module("snapshot_storage", storage=storage, path=path,
-                               last_snapshot_time=last_snapshot_time, max_depth=max_depth,
-                               previous_snapshot=previous_snapshot)
+        return self.run_module_for(storage, "snapshot", path=path,
+                                   last_snapshot_time=last_snapshot_time, max_depth=max_depth,
+                                   previous_snapshot=previous_snapshot)
 
     def storage_usage(self, storage: str) -> Optional[schemas.StorageUsage]:
         """
         存储使用情况
         """
-        return self.run_module("storage_usage", storage=storage)
+        return self.run_module_for(storage, "usage")
 
     def support_transtype(self, storage: str) -> Optional[dict]:
         """
         获取支持的整理方式
         """
-        return self.run_module("support_transtype", storage=storage)
+        return self.run_module_for(storage, "support_transtype")
 
     def is_bluray_folder(self, fileitem: Optional[schemas.FileItem]) -> bool:
         """

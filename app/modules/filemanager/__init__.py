@@ -9,19 +9,12 @@ from app.domain.meta.metamusic import MetaMusic
 from app.domain.metainfo import MetaInfo
 from app.application.directory import DirectoryHelper
 from app.application.messaging.message import MessageHelper
-from app.foundation.reflection import ModuleHelper
+from app.runtime.extensions.module_manager import ModuleManager
 from app.runtime.log import logger
 from app.modules import _ModuleBase
 from app.modules.storages.base import StorageBase
-from app.adapters.storage.registry import (
-    configure_builtin_schemas,
-    get_registered_storage_schemas,
-    get_registered_storages,
-    storage_schema_value,
-)
 from app.application.transfer.handler import TransHandler
-from app.schemas import TransferInfo, ExistMediaInfo, TmdbEpisode, TransferDirectoryConf, FileItem, StorageUsage
-from app.schemas.file import configure_storage_schema_provider
+from app.schemas import TransferInfo, ExistMediaInfo, TmdbEpisode, TransferDirectoryConf, FileItem
 from app.schemas.types import MUSIC_ENTITY_ALBUM, MediaType, ModuleType, OtherModulesType
 from app.adapters.system.host import SystemUtils
 from app.foundation import text as text_tools
@@ -32,37 +25,14 @@ class FileManagerModule(_ModuleBase):
     文件整理模块
     """
 
-    _builtin_storage_schemas = []
-
     def __init__(self):
         super().__init__()
         self.directoryhelper = DirectoryHelper()
         self.messagehelper = MessageHelper()
 
     def init_module(self) -> None:
-        """初始化文件整理模块支持的存储实现"""
-        # 加载模块
-        self._builtin_storage_schemas = ModuleHelper.load(
-            'app.modules.storages',
-            filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
-        # 告知注册表内建存储类型，用于外部存储的重名判定
-        configure_builtin_schemas(
-            [storage_schema_value(storage) for storage in self._builtin_storage_schemas])
-        # 让 URI 前缀解析认出外部注册的存储，否则其路径会被当成本地路径
-        configure_storage_schema_provider(get_registered_storage_schemas)
-
-    def _storage_schemas(self) -> List[type]:
-        """
-        内建存储与注册存储合并后的存储实现类列表
-        """
-        return [*self._builtin_storage_schemas, *get_registered_storages()]
-
-    def _support_storages(self) -> List[str]:
-        """
-        当前支持的存储类型列表
-        """
-        schema_values = (storage_schema_value(storage) for storage in self._storage_schemas())
-        return [schema_value for schema_value in schema_values if schema_value]
+        """初始化文件整理模块"""
+        pass
 
     @staticmethod
     def get_name() -> str:
@@ -132,32 +102,26 @@ class FileManagerModule(_ModuleBase):
 
         return True, ""
 
-    def __get_storage_oper(self, _storage: str, _func: Optional[str] = None) -> Optional[StorageBase]:
+    @staticmethod
+    def __get_storage_oper(_storage: str, _func: Optional[str] = None) -> Optional[StorageBase]:
         """
         获取存储操作对象
+
+        整理天然横跨源存储与目标存储，无法按单一子类型分发，只能直接取到操作对象。
+
+        :param _storage: 存储标识
+        :param _func: 要求存储实现的方法名
+        :return: 存储模块实例
         """
         if not _storage:
             return None
-        for storage_schema in self._storage_schemas():
-            if storage_schema_value(storage_schema) == _storage \
-                    and (not _func or hasattr(storage_schema, _func)):
-                return storage_schema()
+        for module in ModuleManager().get_running_subtype_module(_storage):
+            if not _func or hasattr(module, _func):
+                return module
         return None
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
-
-    def support_transtype(self, storage: str) -> Optional[dict]:
-        """
-        支持的整理方式
-        """
-        if storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的整理方式获取")
-            return None
-        return storage_oper.support_transtype()
 
     @staticmethod
     def recommend_name(meta: MetaBase, mediainfo: MediaInfo) -> Optional[str]:
@@ -195,258 +159,6 @@ class FileManagerModule(_ModuleBase):
                                                 file_ext=Path(meta.title).suffix)
         )
         return path.as_posix() if path else ""
-
-    def save_config(self, storage: str, conf: Dict) -> None:
-        """
-        保存存储配置
-        """
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的配置保存")
-            return
-        storage_oper.set_config(conf)
-
-    def reset_config(self, storage: str) -> None:
-        """
-        重置存储配置
-        """
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的重置存储配置")
-            return
-        storage_oper.reset_config()
-
-    def generate_qrcode(self, storage: str) -> Optional[Tuple[dict, str]]:
-        """
-        生成二维码
-        """
-        storage_oper = self.__get_storage_oper(storage, "generate_qrcode")
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的二维码生成")
-            return None
-        return storage_oper.generate_qrcode()
-
-    def generate_auth_url(self, storage: str) -> Optional[Tuple[dict, str]]:
-        """
-        生成 OAuth2 授权 URL
-        """
-        storage_oper = self.__get_storage_oper(storage, "generate_auth_url")
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的 OAuth2 授权")
-            return {}, f"不支持 {storage} 的 OAuth2 授权"
-        return storage_oper.generate_auth_url()
-
-    def check_login(self, storage: str, **kwargs) -> Optional[Dict[str, str]]:
-        """
-        登录确认
-        """
-        storage_oper = self.__get_storage_oper(storage, "check_login")
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的登录确认")
-            return None
-        return storage_oper.check_login(**kwargs)
-
-    def list_files(self, fileitem: FileItem, recursion: Optional[bool] = False) -> Optional[List[FileItem]]:
-        """
-        浏览文件
-        :param fileitem: 源文件
-        :param recursion: 是否递归，此时只浏览文件
-        :return: 文件项列表
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的文件浏览")
-            return None
-
-        def __get_files(_item: FileItem, _r: Optional[bool] = False):
-            """
-            递归处理
-            """
-            _items = storage_oper.list(_item)
-            if _items:
-                if _r:
-                    for t in _items:
-                        if t.type == "dir":
-                            __get_files(t, _r)
-                        else:
-                            result.append(t)
-                else:
-                    result.extend(_items)
-
-        # 返回结果
-        result = []
-        __get_files(fileitem, recursion)
-
-        return result
-
-    def any_files(self, fileitem: FileItem, extensions: list = None) -> Optional[bool]:
-        """
-        查询当前目录下是否存在指定扩展名任意文件
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的文件浏览")
-            return None
-
-        def __any_file(_item: FileItem):
-            """
-            递归处理
-            """
-            _items = storage_oper.list(_item)
-            if _items:
-                if not extensions:
-                    return True
-                for t in _items:
-                    if (t.type == "file"
-                            and t.extension
-                            and f".{t.extension.lower()}" in extensions):
-                        return True
-                    elif t.type == "dir":
-                        if __any_file(t):
-                            return True
-            return False
-
-        # 返回结果
-        return __any_file(fileitem)
-
-    def create_folder(self, fileitem: FileItem, name: str) -> Optional[FileItem]:
-        """
-        创建目录
-        :param fileitem: 源文件
-        :param name: 目录名
-        :return: 创建的目录
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的目录创建")
-            return None
-        return storage_oper.create_folder(fileitem, name)
-
-    def get_folder(self, storage: str, path: Path) -> Optional[FileItem]:
-        """
-        获取目录，如目录不存在则创建
-        """
-        if storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的目录获取")
-            return None
-        return storage_oper.get_folder(path)
-
-    def delete_file(self, fileitem: FileItem) -> Optional[bool]:
-        """
-        删除文件或目录
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的删除处理")
-            return False
-        return storage_oper.delete(fileitem)
-
-    def rename_file(self, fileitem: FileItem, name: str) -> Optional[bool]:
-        """
-        重命名文件或目录
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的重命名处理")
-            return False
-        return storage_oper.rename(fileitem, name)
-
-    def download_file(self, fileitem: FileItem, path: Path = None) -> Optional[Path]:
-        """
-        下载文件
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的下载处理")
-            return None
-        return storage_oper.download(fileitem, path=path)
-
-    def upload_file(self, fileitem: FileItem, path: Path, new_name: Optional[str] = None) -> Optional[FileItem]:
-        """
-        上传文件
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的上传处理")
-            return None
-        return storage_oper.upload(fileitem, path, new_name)
-
-    def get_file_item(self, storage: str, path: Path) -> Optional[FileItem]:
-        """
-        根据路径获取文件项
-        """
-        if storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的文件获取")
-            return None
-        return storage_oper.get_item(path)
-
-    def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
-        """
-        获取上级目录项
-        """
-        if fileitem.storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(fileitem.storage)
-        if not storage_oper:
-            logger.error(f"不支持 {fileitem.storage} 的文件获取")
-            return None
-        return storage_oper.get_parent(fileitem)
-
-    def snapshot_storage(self, storage: str, path: Path,
-                         last_snapshot_time: float = None, max_depth: int = 5,
-                         previous_snapshot: Optional[Dict[str, Dict]] = None) -> Optional[Dict[str, Dict]]:
-        """
-        快照存储
-        :param storage: 存储类型
-        :param path: 路径
-        :param last_snapshot_time: 上次快照时间，用于增量快照
-        :param max_depth: 最大递归深度，避免过深遍历
-        :param previous_snapshot: 上次完整快照，用于增量对账
-        """
-        if storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的快照处理")
-            return None
-        return storage_oper.snapshot(
-            path,
-            last_snapshot_time=last_snapshot_time,
-            max_depth=max_depth,
-            previous_snapshot=previous_snapshot
-        )
-
-    def storage_usage(self, storage: str) -> Optional[StorageUsage]:
-        """
-        存储使用情况
-        """
-        if storage not in self._support_storages():
-            return None
-        storage_oper = self.__get_storage_oper(storage)
-        if not storage_oper:
-            logger.error(f"不支持 {storage} 的存储使用情况")
-            return None
-        return storage_oper.usage()
 
     def transfer(self, fileitem: FileItem, meta: MetaBase, mediainfo: MediaInfo,
                  target_directory: TransferDirectoryConf = None,

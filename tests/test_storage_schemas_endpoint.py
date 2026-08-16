@@ -1,20 +1,20 @@
-"""可用存储类型端点：内建存储与插件声明的存储合并对外呈现。"""
+"""可用存储类型端点：内建存储与插件声明的存储合并对外呈现。
+
+存储标识来源由启动组合层装配为模块管理器中运行态存储模块的子类型集合。
+"""
 from pathlib import Path
 from typing import List, Optional
+
+from unittest.mock import patch
 
 import pytest
 
 from app import schemas
-from app.adapters.storage import registry
-from app.modules.storages.base import StorageBase
-from app.adapters.storage.registry import (
-    configure_builtin_schemas,
-    register_storage,
-    unregister_storages,
-)
 from app.api.endpoints.storage import storage_schemas
+from app.modules.storages.base import StorageBase
+from app.runtime.extensions.module_manager import ModuleManager
 from app.schemas.file import configure_storage_schema_provider
-from app.schemas.types import StorageSchema
+from app.schemas.types import ModuleType, StorageSchema
 
 
 class PluginStorage(StorageBase):
@@ -73,17 +73,23 @@ class PluginStorage(StorageBase):
 
 
 @pytest.fixture(autouse=True)
-def clean_registry():
-    """清空存储注册表与 URI 标识来源，隔离用例间的全局状态。"""
-    def purge():
-        """把全局状态复位到未装配"""
-        registry._registered.clear()
-        configure_builtin_schemas([])
-        configure_storage_schema_provider(None)
-
-    purge()
+def clean_provider():
+    """把 URI 标识来源复位到未装配，隔离用例间的全局状态。"""
+    configure_storage_schema_provider(None)
     yield
-    purge()
+    configure_storage_schema_provider(None)
+
+
+@pytest.fixture
+def module_manager() -> ModuleManager:
+    """构造与全局单例隔离、内建模块为空的模块管理器。"""
+    instance = object.__new__(ModuleManager)
+    with patch("app.runtime.extensions.module_manager.ModuleHelper.load", return_value=[]), \
+            patch("app.runtime.extensions.module_manager.eventmanager"):
+        instance.__init__()
+    configure_storage_schema_provider(
+        lambda: instance.get_running_subtypes(ModuleType.Storage))
+    return instance
 
 
 def schema_names() -> List[str]:
@@ -99,21 +105,19 @@ def test_builtin_storages_are_all_listed():
         assert listed[schema.value] is True
 
 
-def test_a_plugin_storage_joins_the_list_as_non_builtin():
+def test_a_plugin_storage_joins_the_list_as_non_builtin(module_manager):
     """插件注册的存储进入清单，并标记为非内建。"""
-    configure_storage_schema_provider(registry.get_registered_storage_schemas)
-    register_storage(PluginStorage, owner="plugin_a")
+    module_manager.register_module(PluginStorage, owner="plugin_a")
 
     listed = {item.name: item.builtin for item in storage_schemas(None)}
 
     assert listed["plugin_cloud"] is False
 
 
-def test_an_unregistered_plugin_storage_leaves_the_list():
+def test_an_unregistered_plugin_storage_leaves_the_list(module_manager):
     """插件存储卸载后从清单中消失，内建存储不受影响。"""
-    configure_storage_schema_provider(registry.get_registered_storage_schemas)
-    register_storage(PluginStorage, owner="plugin_a")
-    unregister_storages("plugin_a")
+    module_manager.register_module(PluginStorage, owner="plugin_a")
+    module_manager.unregister_modules("plugin_a")
 
     names = schema_names()
 
@@ -126,10 +130,9 @@ def test_the_list_falls_back_to_builtin_storages_without_a_provider():
     assert schema_names() == [schema.value for schema in StorageSchema]
 
 
-def test_listed_names_are_unique():
+def test_listed_names_are_unique(module_manager):
     """清单不出现重复标识。"""
-    configure_storage_schema_provider(registry.get_registered_storage_schemas)
-    register_storage(PluginStorage, owner="plugin_a")
+    module_manager.register_module(PluginStorage, owner="plugin_a")
 
     names = schema_names()
 

@@ -1,7 +1,8 @@
 """插件扩展点注册与回收函数的行为。
 
-直接针对 ``app.runtime.extensions.plugin_lifecycle`` 的公开函数：三类扩展点随实例键上线与
-回收、按注册来源精确回收、以及一类扩展点回收失败不连累其余。
+直接针对 ``app.runtime.extensions.plugin_lifecycle`` 的公开函数：各类扩展点随实例键上线与
+回收、按注册来源精确回收、以及一类扩展点回收失败不连累其余。存储是系统模块的一种，与
+下载器、媒体服务器走同一条注册通道。
 """
 from typing import Optional, Tuple
 from unittest.mock import Mock, patch
@@ -9,7 +10,6 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.modules.storages.base import StorageBase
-from app.adapters.storage.registry import get_registered_storages, unregister_storages
 from app.modules import _ModuleBase
 from app.runtime.extensions import contract
 from app.runtime.extensions.module_manager import ModuleManager
@@ -19,10 +19,8 @@ from app.runtime.extensions.plugin_lifecycle import (
     register_plugin_channel_capabilities,
     register_plugin_extensions,
     register_plugin_modules,
-    register_plugin_storages,
     unregister_capability_owners,
     unregister_module_owners,
-    unregister_storage_owners,
 )
 from app.schemas.message import ChannelCapabilities, ChannelCapability, ChannelCapabilityManager
 from app.schemas.types import MessageChannel, ModuleType
@@ -151,13 +149,11 @@ def module_base_configured():
 
 @pytest.fixture(autouse=True)
 def clean_registries():
-    """用例前后清空存储与渠道能力的全局注册，避免污染同进程内的其它用例。"""
+    """用例前后清空渠道能力的全局注册，避免污染同进程内的其它用例。"""
     def purge():
         """回收本用例可能留下的全部全局注册"""
         for owner in set(ChannelCapabilityManager.get_registered_owners().values()):
             ChannelCapabilityManager.unregister_capabilities(owner)
-        for owner in (PLUGIN_ID, CLONE_KEY, OTHER_PLUGIN_ID):
-            unregister_storages(owner)
 
     purge()
     yield
@@ -219,8 +215,7 @@ def test_registering_brings_up_every_kind(module_manager):
 
     register_plugin_extensions(running, lambda: module_manager, PLUGIN_ID)
 
-    assert module_manager.get_external_module_ids(PLUGIN_ID) == ["StubModule"]
-    assert StubStorage in get_registered_storages()
+    assert sorted(module_manager.get_external_module_ids(PLUGIN_ID)) == ["StubModule", "StubStorage"]
     assert ChannelCapabilityManager.get_registered_owners() == {
         MessageChannel.VoceChat: PLUGIN_ID
     }
@@ -235,7 +230,7 @@ def test_registering_without_a_filter_covers_every_running_instance(module_manag
 
     register_plugin_extensions(running, lambda: module_manager)
 
-    assert StubStorage in get_registered_storages()
+    assert module_manager.get_external_module_ids(CLONE_KEY) != []
     assert ChannelCapabilityManager.get_registered_owners() == {
         MessageChannel.VoceChat: PLUGIN_ID
     }
@@ -251,7 +246,7 @@ def test_registering_is_scoped_to_the_requested_plugin(module_manager):
 
     register_plugin_extensions(running, lambda: module_manager, PLUGIN_ID)
 
-    assert StubStorage in get_registered_storages()
+    assert module_manager.get_external_module_ids(PLUGIN_ID) == ["StubStorage"]
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -265,14 +260,13 @@ def test_registering_modules_without_declarations_skips_the_module_manager():
     factory.assert_not_called()
 
 
-def test_registering_storages_touches_no_other_registry(module_manager):
-    """只注册存储时不触碰模块管理器与渠道能力管理器。"""
-    running = {PLUGIN_ID: full_plugin(PLUGIN_ID)}
+def test_a_declared_storage_registers_as_a_module(module_manager):
+    """存储声明按系统模块登记，与通用模块声明并列。"""
+    running = {PLUGIN_ID: make_plugin(PLUGIN_ID, provides_storages=[StubStorage])}
 
-    register_plugin_storages(running, PLUGIN_ID)
+    register_plugin_modules(running, lambda: module_manager, PLUGIN_ID)
 
-    assert StubStorage in get_registered_storages()
-    assert module_manager.get_external_module_ids() == []
+    assert module_manager.get_external_module_ids(PLUGIN_ID) == ["StubStorage"]
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -283,7 +277,6 @@ def test_a_disabled_instance_registers_nothing(module_manager):
     register_plugin_extensions(running, lambda: module_manager, PLUGIN_ID)
 
     assert module_manager.get_external_module_ids() == []
-    assert get_registered_storages() == []
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -294,9 +287,7 @@ def test_registering_is_idempotent(module_manager):
     for _ in range(3):
         register_plugin_extensions(running, lambda: module_manager, PLUGIN_ID)
 
-    assert module_manager.get_external_module_ids(PLUGIN_ID) == ["StubModule"]
-    assert [storage for storage in get_registered_storages()
-            if storage is StubStorage] == [StubStorage]
+    assert sorted(module_manager.get_external_module_ids(PLUGIN_ID)) == ["StubModule", "StubStorage"]
     assert ChannelCapabilityManager.get_registered_owners() == {
         MessageChannel.VoceChat: PLUGIN_ID
     }
@@ -323,12 +314,10 @@ def test_reclaiming_takes_down_every_kind(module_manager):
 
     reclaim_extension_owners([PLUGIN_ID], (
         lambda owners: unregister_module_owners(owners, lambda: module_manager),
-        unregister_storage_owners,
         unregister_capability_owners,
     ))
 
     assert module_manager.get_external_module_ids() == []
-    assert StubStorage not in get_registered_storages()
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 
@@ -340,10 +329,10 @@ def test_reclaiming_is_scoped_to_the_given_owner(module_manager):
     }
     register_plugin_extensions(running, lambda: module_manager)
 
-    unregister_storage_owners([CLONE_KEY])
+    unregister_module_owners([CLONE_KEY], lambda: module_manager)
     unregister_capability_owners([CLONE_KEY])
 
-    assert StubStorage not in get_registered_storages()
+    assert module_manager.get_external_module_ids(CLONE_KEY) == []
     assert ChannelCapabilityManager.get_registered_owners() == {
         MessageChannel.VoceChat: PLUGIN_ID
     }
@@ -376,13 +365,11 @@ def test_one_failing_kind_does_not_block_the_others(module_manager):
 
     reclaim_extension_owners([PLUGIN_ID], (
         exploding,
-        unregister_storage_owners,
         unregister_capability_owners,
     ))
 
-    assert StubStorage not in get_registered_storages()
     assert ChannelCapabilityManager.get_registered_owners() == {}
-    assert module_manager.get_external_module_ids(PLUGIN_ID) == ["StubModule"]
+    assert sorted(module_manager.get_external_module_ids(PLUGIN_ID)) == ["StubModule", "StubStorage"]
 
 
 def test_every_reclaimer_runs_even_when_all_of_them_fail():

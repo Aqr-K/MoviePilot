@@ -36,7 +36,8 @@ from app.db import close_database
 from app.db.oper.systemconfig import SystemConfigOper
 from app.command import CommandChain
 from app.schemas import Notification, NotificationType
-from app.schemas.types import SystemConfigKey
+from app.schemas.file import configure_storage_schema_provider
+from app.schemas.types import ModuleType, SystemConfigKey
 from app.startup.agent_initializer import init_agent, stop_agent
 from app.application.security.access import set_superuser_token_payload_provider
 from app.application.security.auth import build_superuser_token_payload
@@ -58,6 +59,13 @@ def configure_wallpaper_services() -> None:
 def configure_module_contract() -> None:
     """把模块基类装配到契约校验层，使外部注册的模块可被判定。"""
     configure_module_base(_ModuleBase)
+
+
+def configure_storage_schemas() -> None:
+    """把存储标识来源装配到 URI 解析层，使外部注册的存储不被当成本地路径。"""
+    configure_storage_schema_provider(
+        lambda: ModuleManager().get_running_subtypes(ModuleType.Storage)
+    )
 
 
 def notify_event_error(title: str, message: str) -> None:
@@ -226,6 +234,8 @@ async def init_modules():
     EventManager().set_error_notifier(notify_event_error)
     # 契约校验层不反向依赖模块实现，由启动组合层注入模块基类。
     configure_module_contract()
+    # URI 解析层不反向依赖模块注册表，由启动组合层注入存储标识来源。
+    configure_storage_schemas()
     # 加载模块
     ModuleManager()
     # 启动事件消费

@@ -1,4 +1,8 @@
-"""插件注册式存储驱动：注册表契约、重名判定与文件整理模块的合并视图。"""
+"""插件注册式存储驱动：模块契约、存储类型占用判定与精确分发的可达性。
+
+存储是系统模块的一种，经模块管理器注册，按存储类型精确分发。同一存储类型只能有一个
+模块在运行，否则外部来源可以静默顶替内建后端。
+"""
 from pathlib import Path
 from typing import List, Optional
 from unittest.mock import Mock, patch
@@ -6,19 +10,13 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app import schemas
-from app.modules.storages.base import StorageBase
-from app.adapters.storage import registry
-from app.adapters.storage.registry import (
-    configure_builtin_schemas,
-    get_registered_storages,
-    register_storage,
-    storage_schema_value,
-    unregister_storages,
-)
 from app.application.directory import _split_file_uri
-from app.modules.filemanager import FileManagerModule
+from app.modules import _ModuleBase
+from app.modules.storages.base import StorageBase
+from app.runtime.extensions import contract
+from app.runtime.extensions.module_manager import ModuleManager, subtype_value
 from app.schemas.file import FileURI, configure_storage_schema_provider
-from app.schemas.types import StorageSchema
+from app.schemas.types import ModuleType, StorageSchema
 
 
 class StubStorage(StorageBase):
@@ -120,133 +118,142 @@ class AbstractStorage(StorageBase):
 
 
 @pytest.fixture(autouse=True)
-def clean_registry():
-    """清空存储注册表、内建标识与 URI 标识来源，隔离用例间的全局状态。"""
-    def purge():
-        """把三处全局状态复位到未装配"""
-        registry._registered.clear()
-        configure_builtin_schemas([])
-        configure_storage_schema_provider(None)
-
-    purge()
+def clean_provider():
+    """把 URI 标识来源复位到未装配，隔离用例间的全局状态。"""
+    configure_storage_schema_provider(None)
     yield
-    purge()
+    configure_storage_schema_provider(None)
+
+
+@pytest.fixture(autouse=True)
+def module_base():
+    """把模块基类装配到契约校验层，使外部声明的存储可被判定。"""
+    previous = contract._module_base  # noqa: SLF001
+    contract.configure_module_base(_ModuleBase)
+    yield
+    contract._module_base = previous  # noqa: SLF001
 
 
 @pytest.fixture
-def filemanager() -> FileManagerModule:
-    """构造只识别 BuiltinStubStorage 一个内建存储的文件整理模块。"""
-    module = FileManagerModule()
-    with patch("app.modules.filemanager.ModuleHelper.load", return_value=[BuiltinStubStorage]):
-        module.init_module()
-    return module
+def manager() -> ModuleManager:
+    """构造只装载 BuiltinStubStorage 一个内建存储的模块管理器，并接上标识来源。"""
+    instance = object.__new__(ModuleManager)
+    with patch("app.runtime.extensions.module_manager.ModuleHelper.load",
+               return_value=[BuiltinStubStorage]), \
+            patch("app.runtime.extensions.module_manager.eventmanager"):
+        instance.__init__()
+    configure_storage_schema_provider(
+        lambda: instance.get_running_subtypes(ModuleType.Storage))
+    return instance
 
 
-def storage_oper(module: FileManagerModule, storage: str) -> Optional[StorageBase]:
-    """按存储标识取文件整理模块内部的存储操作对象。"""
-    return module._FileManagerModule__get_storage_oper(storage)  # noqa: SLF001
+def storage_oper(manager: ModuleManager, storage: str) -> Optional[StorageBase]:
+    """按存储标识取精确分发命中的存储模块实例。"""
+    return next(iter(manager.get_running_subtype_module(storage)), None)
 
 
 # --------------------------------------------------------------------------- schema 解析
 
 
-def test_schema_value_reads_enum_string_and_others():
+def test_subtype_value_reads_enum_string_and_others():
     """枚举成员取 value，字符串原样返回，其余为空。"""
-    assert storage_schema_value(BuiltinStubStorage) == "local"
-    assert storage_schema_value(PluginStorage) == "plugin_cloud"
-    assert storage_schema_value(PluginStorage()) == "plugin_cloud"
-    assert storage_schema_value(SchemalessStorage) is None
-    assert storage_schema_value(object()) is None
+    assert subtype_value(BuiltinStubStorage.get_subtype()) == "local"
+    assert subtype_value(PluginStorage.get_subtype()) == "plugin_cloud"
+    assert subtype_value(PluginStorage().get_subtype()) == "plugin_cloud"
+    assert subtype_value(SchemalessStorage.get_subtype()) is None
+    assert subtype_value(object()) is None
 
 
 # --------------------------------------------------------------------------- 注册面
 
 
-def test_registered_storage_joins_the_file_manager_view(filemanager):
-    """注册成功的存储应进入支持列表并可取到操作对象。"""
-    assert register_storage(PluginStorage, owner="plugin_a") is True
+def test_registered_storage_becomes_reachable(manager):
+    """注册成功的存储进入运行态，可按存储标识精确命中。"""
+    assert manager.register_module(PluginStorage, owner="plugin_a") is True
 
-    assert "plugin_cloud" in filemanager._support_storages()
-    assert isinstance(storage_oper(filemanager, "plugin_cloud"), PluginStorage)
-    assert filemanager.support_transtype("plugin_cloud") == {"move": "移动"}
-
-
-def test_storage_registered_after_init_module_is_visible():
-    """插件晚于模块初始化注册的存储同样应能被取到。"""
-    module = FileManagerModule()
-    with patch("app.modules.filemanager.ModuleHelper.load", return_value=[BuiltinStubStorage]):
-        module.init_module()
-
-    assert storage_oper(module, "plugin_cloud") is None
-
-    register_storage(PluginStorage, owner="plugin_a")
-
-    assert "plugin_cloud" in module._support_storages()
-    assert isinstance(storage_oper(module, "plugin_cloud"), PluginStorage)
+    assert "plugin_cloud" in manager.get_running_subtypes(ModuleType.Storage)
+    assert isinstance(storage_oper(manager, "plugin_cloud"), PluginStorage)
+    assert storage_oper(manager, "plugin_cloud").support_transtype() == {"move": "移动"}
 
 
-def test_register_rejects_a_schema_taken_by_a_builtin_storage(filemanager):
-    """与内建存储重名的注册应被拒绝，内建实现不被顶替。"""
-    assert register_storage(ShadowLocalStorage, owner="plugin_a") is False
+def test_storage_registered_after_startup_is_visible(manager):
+    """插件晚于模块装载注册的存储同样能被命中。"""
+    assert storage_oper(manager, "plugin_cloud") is None
 
-    assert get_registered_storages() == []
-    assert isinstance(storage_oper(filemanager, "local"), BuiltinStubStorage)
+    manager.register_module(PluginStorage, owner="plugin_a")
 
-
-def test_register_rejects_a_schema_taken_by_another_owner(filemanager):
-    """同名 schema 先到者胜，后到的其它来源被拒绝。"""
-    assert register_storage(PluginStorage, owner="plugin_a") is True
-    assert register_storage(RivalPluginStorage, owner="plugin_b") is False
-
-    assert get_registered_storages() == [PluginStorage]
-    assert isinstance(storage_oper(filemanager, "plugin_cloud"), PluginStorage)
+    assert "plugin_cloud" in manager.get_running_subtypes(ModuleType.Storage)
+    assert isinstance(storage_oper(manager, "plugin_cloud"), PluginStorage)
 
 
-def test_register_is_idempotent_for_the_same_owner(filemanager):
+def test_register_rejects_a_schema_taken_by_a_builtin_storage(manager):
+    """与内建存储重名的注册被拒绝，内建实现不被顶替。"""
+    assert manager.register_module(ShadowLocalStorage, owner="plugin_a") is False
+
+    assert manager.get_external_module_ids() == []
+    assert isinstance(storage_oper(manager, "local"), BuiltinStubStorage)
+
+
+def test_register_rejects_a_schema_taken_by_another_owner(manager):
+    """同一存储类型先到者胜，后到的其它来源被拒绝。"""
+    assert manager.register_module(PluginStorage, owner="plugin_a") is True
+    assert manager.register_module(RivalPluginStorage, owner="plugin_b") is False
+
+    assert manager.get_external_module_ids() == ["PluginStorage"]
+    assert isinstance(storage_oper(manager, "plugin_cloud"), PluginStorage)
+
+
+def test_register_is_idempotent_for_the_same_owner(manager):
     """同一来源重复注册同一存储不产生重复条目。"""
-    assert register_storage(PluginStorage, owner="plugin_a") is True
-    assert register_storage(PluginStorage, owner="plugin_a") is True
+    assert manager.register_module(PluginStorage, owner="plugin_a") is True
+    assert manager.register_module(PluginStorage, owner="plugin_a") is True
 
-    assert get_registered_storages() == [PluginStorage]
-    assert filemanager._support_storages().count("plugin_cloud") == 1
-
-
-def test_register_rejects_candidates_outside_the_storage_base():
-    """未继承存储基类或未声明 schema 的候选类应被拒绝。"""
-    assert register_storage(NotAStorage, owner="plugin_a") is False
-    assert register_storage(SchemalessStorage, owner="plugin_a") is False
-    assert register_storage(PluginStorage(), owner="plugin_a") is False
-    assert register_storage(PluginStorage, owner="") is False
-
-    assert get_registered_storages() == []
+    assert manager.get_external_module_ids() == ["PluginStorage"]
+    assert manager.get_running_subtypes(ModuleType.Storage).count("plugin_cloud") == 1
 
 
-def test_register_rejects_a_storage_with_unimplemented_abstract_methods():
+def test_register_rejects_candidates_outside_the_module_contract(manager):
+    """未继承模块基类的候选类、实例声明与空来源都被拒绝。"""
+    assert manager.register_module(NotAStorage, owner="plugin_a") is False
+    assert manager.register_module(PluginStorage(), owner="plugin_a") is False
+    assert manager.register_module(PluginStorage, owner="") is False
+
+    assert manager.get_external_module_ids() == []
+
+
+def test_register_rejects_a_storage_with_unimplemented_abstract_methods(manager):
     """抽象方法未落地的存储在注册阶段就被拒绝，而不是等到取用时才实例化失败。"""
-    assert register_storage(AbstractStorage, owner="plugin_a") is False
+    assert manager.register_module(AbstractStorage, owner="plugin_a") is False
 
-    assert get_registered_storages() == []
-
-
-def test_unregister_removes_the_storage_from_the_file_manager_view(filemanager):
-    """按来源卸载后该存储应从支持列表和取用路径中消失。"""
-    register_storage(PluginStorage, owner="plugin_a")
-
-    assert unregister_storages("plugin_a") == ["plugin_cloud"]
-
-    assert get_registered_storages() == []
-    assert "plugin_cloud" not in filemanager._support_storages()
-    assert storage_oper(filemanager, "plugin_cloud") is None
-    assert isinstance(storage_oper(filemanager, "local"), BuiltinStubStorage)
+    assert manager.get_external_module_ids() == []
 
 
-def test_unregister_keeps_storages_of_other_owners(filemanager):
-    """卸载一个来源不应影响其它来源注册的存储。"""
-    register_storage(PluginStorage, owner="plugin_a")
+def test_register_rejects_a_storage_without_a_schema(manager):
+    """未声明存储类型的存储无法参与精确分发，注册后不出现在存储清单里。"""
+    manager.register_module(SchemalessStorage, owner="plugin_a")
 
-    assert unregister_storages("plugin_b") == []
+    assert manager.get_running_subtypes(ModuleType.Storage) == ["local"]
 
-    assert get_registered_storages() == [PluginStorage]
+
+def test_unregister_removes_the_storage_from_dispatch(manager):
+    """按来源卸载后该存储从存储清单与分发路径中消失，内建存储不受影响。"""
+    manager.register_module(PluginStorage, owner="plugin_a")
+
+    assert manager.unregister_modules("plugin_a") == ["PluginStorage"]
+
+    assert manager.get_external_module_ids() == []
+    assert "plugin_cloud" not in manager.get_running_subtypes(ModuleType.Storage)
+    assert storage_oper(manager, "plugin_cloud") is None
+    assert isinstance(storage_oper(manager, "local"), BuiltinStubStorage)
+
+
+def test_unregister_keeps_storages_of_other_owners(manager):
+    """卸载一个来源不影响其它来源注册的存储。"""
+    manager.register_module(PluginStorage, owner="plugin_a")
+
+    assert manager.unregister_modules("plugin_b") == []
+
+    assert manager.get_external_module_ids() == ["PluginStorage"]
 
 
 # --------------------------------------------------------------------------- 配置读写
@@ -285,9 +292,9 @@ def test_enum_schema_storage_keeps_using_the_enum_value():
     storage.storagehelper.reset_storage.assert_called_once_with("local")
 
 
-def test_registered_storage_uri_round_trips(filemanager):
+def test_registered_storage_uri_round_trips(manager):
     """外部注册存储的路径能按其 schema 前缀解析回来，而不是退化成本地路径。"""
-    register_storage(PluginStorage, owner="plugin_a")
+    manager.register_module(PluginStorage, owner="plugin_a")
 
     parsed = FileURI.from_uri("plugin_cloud:/media/movie")
 
@@ -296,17 +303,17 @@ def test_registered_storage_uri_round_trips(filemanager):
     assert parsed.uri == "plugin_cloud:/media/movie"
 
 
-def test_registered_storage_directory_uri_round_trips(filemanager):
+def test_registered_storage_directory_uri_round_trips(manager):
     """目录配置里的外部存储前缀同样能被拆分出来。"""
-    register_storage(PluginStorage, owner="plugin_a")
+    manager.register_module(PluginStorage, owner="plugin_a")
 
     assert _split_file_uri("plugin_cloud:/downloads") == ("plugin_cloud", "/downloads")
 
 
-def test_unregistered_storage_prefix_is_not_recognized(filemanager):
+def test_unregistered_storage_prefix_is_not_recognized(manager):
     """存储卸载后其前缀不再被识别，路径回到本地解析。"""
-    register_storage(PluginStorage, owner="plugin_a")
-    unregister_storages("plugin_a")
+    manager.register_module(PluginStorage, owner="plugin_a")
+    manager.unregister_modules("plugin_a")
 
     assert FileURI.from_uri("plugin_cloud:/media").storage == "local"
 

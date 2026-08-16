@@ -84,6 +84,22 @@ class DataSourceStubModule(TypedStubModule):
         return ModuleType.MediaRecognize
 
 
+class StorageStubModule(TypedStubModule):
+    """类型为存储的模块"""
+
+    @staticmethod
+    def get_name() -> str:
+        return "StorageStub"
+
+    @staticmethod
+    def get_type() -> ModuleType:
+        return ModuleType.Storage
+
+    @staticmethod
+    def get_subtype():
+        return "stub_storage"
+
+
 class OtherTypeStubModule(TypedStubModule):
     """类型为其它的模块"""
 
@@ -268,6 +284,7 @@ def test_generic_hook_still_accepts_the_same_module(manager):
     ("provides_mediaservers", MediaServerStubModule, ModuleType.MediaServer),
     ("provides_notifications", NotificationStubModule, ModuleType.Notification),
     ("provides_data_sources", DataSourceStubModule, ModuleType.MediaRecognize),
+    ("provides_storages", StorageStubModule, ModuleType.Storage),
 ])
 def test_each_typed_hook_carries_its_own_module_type(hook_name, module_cls, expected_type):
     """每个细分钩子给声明附上各自的模块类型。"""
@@ -284,6 +301,7 @@ def test_each_typed_hook_carries_its_own_module_type(hook_name, module_cls, expe
     (TypedStubModule, ModuleType.MediaServer),
     (TypedStubModule, ModuleType.Notification),
     (TypedStubModule, ModuleType.MediaRecognize),
+    (TypedStubModule, ModuleType.Storage),
 ])
 def test_every_module_type_mismatch_is_rejected(manager, module_cls, expected_type):
     """任一细分类型与模块实际类型不符时都被拒绝。"""

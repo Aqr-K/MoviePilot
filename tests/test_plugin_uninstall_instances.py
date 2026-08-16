@@ -14,11 +14,6 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from app.modules.storages.base import StorageBase
-from app.adapters.storage.registry import (
-    get_registered_storages,
-    register_storage,
-    unregister_storages,
-)
 from app.api.endpoints import plugin as plugin_endpoint
 from app.db.models.pluginconfig import DEFAULT_INSTANCE_ID, PluginConfig
 from app.db.models.plugindata import PluginData
@@ -145,7 +140,6 @@ def _clean_registries():
     def purge():
         """回收本用例可能留下的存储与渠道能力注册"""
         for owner in OWNER_KEYS:
-            unregister_storages(owner)
             ChannelCapabilityManager.unregister_capabilities(owner)
 
     purge()
@@ -216,10 +210,10 @@ def running(manager: PluginManager, *instance_ids: str) -> None:
 
 
 def register_extensions(manager: PluginManager, module_manager: ModuleManager) -> None:
-    """为管理器中已登记的每个实例注册模块、存储与渠道能力。"""
+    """为管理器中已登记的每个实例注册模块、存储与渠道能力。存储也是模块，走同一条注册通道。"""
     for key in manager.plugins:
         module_manager.register_module(StubModule, owner=key)
-        register_storage(OWNER_STORAGES[key], owner=key)
+        module_manager.register_module(OWNER_STORAGES[key], owner=key)
         ChannelCapabilityManager.register_capabilities(
             ChannelCapabilities(
                 channel=OWNER_CHANNELS[key],
@@ -427,14 +421,11 @@ def test_deleting_an_instance_reclaims_only_its_extension_registrations(
 
     with patched_module_manager(module_manager):
         register_extensions(manager, module_manager)
-        assert module_manager.get_external_module_ids(ALPHA_KEY) != []
-        assert OWNER_STORAGES[ALPHA_KEY] in get_registered_storages()
+        assert len(module_manager.get_external_module_ids(ALPHA_KEY)) == 2
         manager.delete_plugin_instance(PLUGIN_ID, "alpha")
 
     assert module_manager.get_external_module_ids(ALPHA_KEY) == []
-    assert module_manager.get_external_module_ids(BETA_KEY) != []
-    assert OWNER_STORAGES[ALPHA_KEY] not in get_registered_storages()
-    assert OWNER_STORAGES[BETA_KEY] in get_registered_storages()
+    assert len(module_manager.get_external_module_ids(BETA_KEY)) == 2
     assert set(ChannelCapabilityManager.get_registered_owners().values()) == {
         PLUGIN_ID, BETA_KEY,
     }
@@ -461,13 +452,11 @@ def test_uninstalling_reclaims_every_instance_extension_registration(manager, mo
 
     with patched_module_manager(module_manager):
         register_extensions(manager, module_manager)
-        assert len(module_manager.get_external_module_ids()) == len(OWNER_KEYS)
-        assert len(get_registered_storages()) == len(OWNER_KEYS)
+        assert len(module_manager.get_external_module_ids()) == 2 * len(OWNER_KEYS)
         assert len(ChannelCapabilityManager.get_registered_owners()) == len(OWNER_KEYS)
         run_uninstall(manager)
 
     assert module_manager.get_external_module_ids() == []
-    assert get_registered_storages() == []
     assert ChannelCapabilityManager.get_registered_owners() == {}
 
 

@@ -23,6 +23,7 @@ TYPED_MODULE_HOOKS: Dict[str, ModuleType] = {
     "provides_mediaservers": ModuleType.MediaServer,
     "provides_notifications": ModuleType.Notification,
     "provides_data_sources": ModuleType.MediaRecognize,
+    "provides_storages": ModuleType.Storage,
 }
 
 # 智能体工具注册表的构建重试上限，插件状态持续变化时据此有界失败
@@ -119,18 +120,6 @@ def _as_typed_declaration(module: Any, module_type: ModuleType) -> ProvidedModul
             expected_type=module_type,
         )
     return ProvidedModule(module_cls=module, expected_type=module_type)
-
-
-def get_plugin_provided_storages(running_plugins: Dict[str, Any],
-                                 pid: Optional[str] = None) -> Dict[str, List[Any]]:
-    """
-    聚合插件经 provides_storages() 声明的存储实现
-
-    :param running_plugins: 运行态插件表 {实例键: plugin}
-    :param pid: 插件ID或实例键，为空时聚合全部实例
-    :return: {实例键: [存储类, ...]}
-    """
-    return _collect_declarations(running_plugins, pid, "provides_storages", "注册存储")
 
 
 def get_plugin_provided_channel_capabilities(running_plugins: Dict[str, Any],

@@ -8,8 +8,10 @@ from tqdm import tqdm
 from app import schemas
 from app.runtime.progress import ProgressHelper
 from app.adapters.storage.config import StorageHelper
+from app.modules import _ModuleBase
 from app.runtime.log import logger
 from app.schemas.exception import StorageQueryError
+from app.schemas.types import ModuleType
 from app.foundation.crypto import HashUtils
 
 
@@ -38,15 +40,18 @@ def transfer_process(path: str) -> Callable[[int | float], None]:
     return update_progress
 
 
-class StorageBase(metaclass=ABCMeta):
+class StorageBase(_ModuleBase, metaclass=ABCMeta):
     """
     存储基类
+
+    每个存储实现同时是一个系统模块，以 schema 作为模块子类型参与按存储类型的精确分发。
     """
     schema = None
     transtype = {}
     snapshot_check_folder_modtime = True
 
     def __init__(self):
+        super().__init__()
         self.storagehelper = StorageHelper()
 
     @abstractmethod
@@ -55,6 +60,63 @@ class StorageBase(metaclass=ABCMeta):
         初始化
         """
         pass
+
+    def init_module(self) -> None:
+        """
+        模块初始化，按当前配置初始化存储
+        """
+        self.init_storage()
+
+    def init_setting(self) -> Optional[Tuple[str, Union[str, bool]]]:
+        """
+        模块开关，存储不受开关控制，始终装载
+
+        :return: None
+        """
+        return None
+
+    @classmethod
+    def get_name(cls) -> str:
+        """
+        模块名称，取存储标识
+        """
+        schema = cls.schema
+        if isinstance(schema, Enum):
+            return schema.value
+        return schema or cls.__name__
+
+    @staticmethod
+    def get_type() -> ModuleType:
+        """
+        模块类型
+        """
+        return ModuleType.Storage
+
+    @classmethod
+    def get_subtype(cls):
+        """
+        模块子类型，即存储类型
+        """
+        return cls.schema
+
+    @staticmethod
+    def get_priority() -> int:
+        """
+        模块优先级，数字越小优先级越高
+        """
+        return 0
+
+    def stop(self) -> None:
+        """
+        停止模块
+        """
+        pass
+
+    def test(self) -> Tuple[bool, str]:
+        """
+        模块测试，返回测试结果和错误信息
+        """
+        return (True, "") if self.check() else (False, f"{self.get_name()} 存储不可用")
 
     def generate_qrcode(self, *args, **kwargs) -> Optional[Tuple[dict, str]]:
         """生成存储登录二维码"""

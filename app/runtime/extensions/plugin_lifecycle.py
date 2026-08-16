@@ -1,8 +1,9 @@
 """插件扩展点的注册与回收。
 
-插件声明的系统模块、存储实现与渠道能力在实例上线时按实例键注册，在实例下线时按同一个
-实例键回收，因此同一插件的多个实例互不覆盖、也互不牵连。各函数不持有任何注册表状态，
-运行态插件表、注册来源与模块管理器均由调用方传入。
+插件声明的系统模块与渠道能力在实例上线时按实例键注册，在实例下线时按同一个实例键回收，
+因此同一插件的多个实例互不覆盖、也互不牵连。存储是系统模块的一种，与下载器、媒体服务器
+走同一条注册通道。各函数不持有任何注册表状态，运行态插件表、注册来源与模块管理器均由
+调用方传入。
 """
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -10,7 +11,6 @@ from app.runtime.extensions.plugin_instance import instance_key, plugin_id_of
 from app.runtime.extensions.plugin_spi import (
     get_plugin_provided_channel_capabilities,
     get_plugin_provided_modules,
-    get_plugin_provided_storages,
 )
 from app.runtime.log import logger
 from app.schemas.message import ChannelCapabilityManager
@@ -22,7 +22,8 @@ def register_plugin_modules(running_plugins: Dict[str, Any],
     """
     把插件经 provides_modules() 声明的系统模块注册进模块管理器
 
-    无插件声明模块时不取模块管理器，避免提前触发模块全量装载。
+    无插件声明模块时不取模块管理器，避免提前触发模块全量装载。逐条隔离，单条声明异常
+    不影响同一趟里的其余声明。
 
     :param running_plugins: 运行态插件表 {实例键: 插件实例}
     :param create_module_manager: 取模块管理器的工厂，无参调用
@@ -34,31 +35,11 @@ def register_plugin_modules(running_plugins: Dict[str, Any],
     module_manager = create_module_manager()
     for key, modules in provided.items():
         for module in modules:
-            module_manager.register_module(module, owner=key)
-
-
-def register_plugin_storages(running_plugins: Dict[str, Any],
-                             pid: Optional[str] = None) -> None:
-    """
-    把插件经 provides_storages() 声明的存储实现注册进存储注册表
-
-    无插件声明存储时不触碰存储层，避免提前触发存储驱动装载。逐条隔离，单条声明异常
-    不影响同一趟里的其余声明。
-
-    :param running_plugins: 运行态插件表 {实例键: 插件实例}
-    :param pid: 插件ID或实例键，为空时处理全部运行态实例
-    """
-    provided = get_plugin_provided_storages(running_plugins, pid)
-    if not provided:
-        return
-    from app.adapters.storage.registry import register_storage
-    for key, storages in provided.items():
-        for storage in storages:
             try:
-                register_storage(storage, owner=key)
+                module_manager.register_module(module, owner=key)
             except Exception as err:
-                name = getattr(storage, "__name__", storage)
-                logger.error(f"注册插件 {key} 的存储 {name} 出错：{str(err)}")
+                name = getattr(module, "__name__", module)
+                logger.error(f"注册插件 {key} 的模块 {name} 出错：{str(err)}")
 
 
 def register_plugin_channel_capabilities(running_plugins: Dict[str, Any],
@@ -100,7 +81,6 @@ def register_plugin_extensions(running_plugins: Dict[str, Any],
     """
     registrars = (
         lambda: register_plugin_modules(running_plugins, create_module_manager, pid),
-        lambda: register_plugin_storages(running_plugins, pid),
         lambda: register_plugin_channel_capabilities(running_plugins, pid),
     )
     for register in registrars:
@@ -146,19 +126,6 @@ def unregister_module_owners(owners: List[str],
         removed = module_manager.unregister_modules(owner)
         if removed:
             logger.info(f"已回收插件 {owner} 注册的模块：{'、'.join(removed)}")
-
-
-def unregister_storage_owners(owners: List[str]) -> None:
-    """
-    按注册来源回收存储实现
-
-    :param owners: 注册来源的实例键列表
-    """
-    from app.adapters.storage.registry import unregister_storages
-    for owner in owners:
-        removed = unregister_storages(owner)
-        if removed:
-            logger.info(f"已回收插件 {owner} 注册的存储：{'、'.join(removed)}")
 
 
 def unregister_capability_owners(owners: List[str]) -> None:

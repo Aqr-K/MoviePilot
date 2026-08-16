@@ -1,3 +1,4 @@
+import inspect
 import threading
 import traceback
 from enum import Enum
@@ -20,12 +21,10 @@ def subtype_value(subtype: Any) -> Optional[str]:
     取子类型用于比较的字符串取值
 
     :param subtype: 子类型，枚举成员或字符串
-    :return: 取值字符串，无法归一时返回 None
+    :return: 非空取值字符串，无法归一或为空时返回 None
     """
-    if isinstance(subtype, Enum):
-        value = subtype.value
-        return value if isinstance(value, str) else None
-    return subtype if isinstance(subtype, str) else None
+    value = subtype.value if isinstance(subtype, Enum) else subtype
+    return value if isinstance(value, str) and value else None
 
 
 def subtype_matches(declared: Any, expected: Any) -> bool:
@@ -149,7 +148,9 @@ class ModuleManager(metaclass=Singleton):
         # 扫描模块目录
         modules = ModuleHelper.load(
             "app.modules",
+            # 抽象基类满足契约方法却无法实例化，被包入口导出时会当成模块反复报错
             filter_func=lambda _, obj: hasattr(obj, 'init_module') and hasattr(obj, 'init_setting')
+            and not inspect.isabstract(obj)
         )
         with self._lock:
             self._running_modules = {}
@@ -263,6 +264,26 @@ class ModuleManager(metaclass=Singleton):
                     and module.get_type() == module_type:
                 yield module
 
+    def get_running_subtypes(self, module_type: ModuleType) -> List[str]:
+        """
+        取指定类型下全部运行模块的子类型取值
+
+        :param module_type: 模块类型
+        :return: 子类型取值列表，去重且保持运行态顺序
+        """
+        values: List[str] = []
+        for module in self._running_snapshot():
+            try:
+                if module.get_type() != module_type:
+                    continue
+                value = subtype_value(module.get_subtype())
+            except Exception as err:
+                logger.debug(f"获取模块 {module.__class__.__name__} 类型信息出错：{str(err)}")
+                continue
+            if value and value not in values:
+                values.append(value)
+        return values
+
     def get_running_subtype_module(self, module_subtype: Union[SubType, str]) -> Generator:
         """
         获取指定子类型的模块
@@ -306,6 +327,33 @@ class ModuleManager(metaclass=Singleton):
         """
         with self._lock:
             return list(self._modules.keys())
+
+    def _subtype_holder(self, module_cls: type, module_id: str) -> Optional[str]:
+        """
+        查出已占用该模块子类型的其它运行模块
+
+        按子类型精确分发时同一子类型只能有一个模块，否则外部来源可以静默顶替内建后端。
+        子类型无法在类上取值或为空时不作判定。调用方需持锁。
+
+        :param module_cls: 待注册的模块类
+        :param module_id: 待注册的模块标识
+        :return: 已占用该子类型的模块标识，未被占用时为 None
+        """
+        try:
+            declared = subtype_value(module_cls.get_subtype())
+        except Exception:
+            return None
+        if not declared:
+            return None
+        for running_id, running in self._running_modules.items():
+            if running_id == module_id:
+                continue
+            try:
+                if subtype_value(running.get_subtype()) == declared:
+                    return running_id
+            except Exception:
+                continue
+        return None
 
     def register_module(self, module: Union[type, ProvidedModule], owner: str) -> bool:
         """
@@ -352,6 +400,11 @@ class ModuleManager(metaclass=Singleton):
                     f"模块注册冲突：{declared_id} 已存在"
                     f"（owner={self._find_owner(declared_id) or 'builtin'}），"
                     f"拒绝来自 {owner} 的注册")
+                return False
+            holder = self._subtype_holder(declaration.module_cls, module_id)
+            if holder:
+                logger.warning(
+                    f"模块注册冲突：子类型已被 {holder} 占用，拒绝来自 {owner} 的注册 {module_id}")
                 return False
             declared = self._external_classes.get(owner, [])
             self._external_classes[owner] = [

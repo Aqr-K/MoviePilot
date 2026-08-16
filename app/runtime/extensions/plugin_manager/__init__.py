@@ -24,7 +24,6 @@ from app.runtime.extensions.plugin_lifecycle import (
     register_plugin_modules,
     unregister_capability_owners,
     unregister_module_owners,
-    unregister_storage_owners,
 )
 from app.runtime.extensions.plugin_loader import (
     apply_legacy_import_diagnostics,
@@ -293,7 +292,6 @@ class PluginManager(PluginRegistryMixin, PluginInstanceMixin, PluginConfigMixin,
         :param owners: 注册来源的实例键列表
         """
         reclaim_extension_owners(owners, (cls._unregister_module_owners,
-                                          unregister_storage_owners,
                                           unregister_capability_owners))
 
     @staticmethod
