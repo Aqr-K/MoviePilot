@@ -2,6 +2,9 @@
 
 把 7 个存储驱动从 `FileManagerModule` 底下的二级实现，提升为与 `emby`/`plex`/`qbittorrent` 同级的一级模块。
 
+> 状态：第 1–5 步已落地（`e76ccde35`、`2c7b363fb`、`4d640a9d4`）。第 6 步「整理编排的归属」按计划押后，见 §四。
+> 落地过程中相对本方案有三处修正，见 §六。
+
 ## 一、问题
 
 `FileManagerModule`（`app/modules/filemanager/__init__.py`，795 行）是两样东西粘在一起：
@@ -105,14 +108,22 @@ class StorageBase(metaclass=ABCMeta):
 
 ## 四、落地顺序
 
-| # | 步骤 | 依赖 | 可独立验证 |
+| # | 步骤 | 提交 | 状态 |
 |---|---|---|---|
-| 1 | `run_module_for` + subtype 归一匹配 | 无 | 是 |
-| 2 | 新增 `ModuleType.Storage` | 无 | 是 |
-| 3 | `local` 一个驱动端到端跑通（两条路并存） | 1,2 | 是 |
-| 4 | 其余 6 个驱动批量迁移 | 3 | 是 |
-| 5 | 删 `registry.py` 与合并视图；`provides_storages` 降级 | 4 | 是 |
-| 6 | `FileManagerModule` 只剩编排 | 5 | 是 |
+| 1 | `run_module_for` + subtype 归一匹配 | `e76ccde35` | 已落地 |
+| 2 | 新增 `ModuleType.Storage` | `e76ccde35` | 已落地 |
+| 3 | 驱动迁入 `app/modules/storages/`（纯搬位置） | `2c7b363fb` | 已落地 |
+| 4 | `StorageBase` 长成模块基类，7 个驱动上线 | `4d640a9d4` | 已落地 |
+| 5 | 删 `registry.py`；`provides_storages` 并入模块注册通道 | `4d640a9d4` | 已落地 |
+| 6 | 整理编排的归属 | — | 押后 |
+
+第 3、4 步没有按原计划「先迁 local 再批量」：给 `StorageBase` 加模块契约后，7 个驱动
+自动同时具备模块身份，逐个上线反而要额外造开关。改为「搬位置」与「上模块」两刀切分，
+每刀各自可独立验证——第 3 步扫描到的模块数与迁移前一致，第 4 步从 35 增到 42。
+
+`FileManagerModule` 现在只剩整理编排（`transfer`/`media_files`/`media_exists`/
+`recommend_name`）。**第 6 步是「它该留在 module 还是上移 `app/application/transfer/`」**，
+刻意押后：那是 chain-vs-application 双内核那笔债的一部分，不该与存储分发这笔债捆绑。
 
 第 6 步之后才回到「编排该留在 module 还是上移 `app/application/transfer/`」。**刻意留到最后**：那是 chain-vs-application 双内核那笔债的一部分，不该与存储分发这笔债捆绑。前 5 步无论那个问题怎么答都成立。
 
@@ -122,3 +133,22 @@ class StorageBase(metaclass=ABCMeta):
 - **插件存储**：subtype 匹配的字符串归一是插件存储可用的前提，属于刀 1 的必做项而非优化项。
 - **`app/adapters/storage/` 是本 fork 自创**（提交 `22b4f0ed9`），不是上游结构。上游驱动在 `app/modules/filemanager/storages/`，`StorageHelper` 在 `app/application/storage.py`。本方案的归位方向与上游一致。
 - **架构门禁**：`tests/test_architecture_dependencies.py` 把父包计为依赖边，`storages/__init__.py` 的 re-export 需确认不触发环判定。
+
+## 六、落地过程中对本方案的修正
+
+### 1. 文件搬迁不是可选项，是硬约束
+
+原以为「驱动放哪是文件组织，不是架构」。实际有两条硬约束把它钉死在 `app/modules/` 下：
+
+- 模块扫描用 `pkgutil.iter_modules`，只遍历 `app.modules` 的一级条目；
+- 外部注册走的 `verify_module_contract` 要求模块类继承 `_ModuleBase`，而 `app.adapters` 反向依赖 `app.modules` 会经 `app/modules/__init__.py` 拿到 `app.runtime.extensions`，正是分层禁止的方向。
+
+### 2. 驱动无需改名，长名转发整个消失
+
+原方案「统一到 chain 的长名，短名废弃」是多余的。精确分发把方法名的作用域收敛到单个模块后，`list`/`delete`/`rename` 这类泛名不再有冲突风险。核对结果：7 个与 `FileManagerModule` 同名的方法（`create_folder`/`get_folder`/`reset_config`/`support_transtype`/`generate_qrcode`/`generate_auth_url`/`check_login`）**仅** `app/chain/storage.py` 一处广播调用，切换后无残留广播调用方。7 个驱动因此一个方法都没改。
+
+### 3. 删注册表会连带删掉一条安全属性
+
+旧存储注册表有「schema 重名先到者胜」的保护。删表后若不补，插件可静默顶替内建 `local`。补在 `ModuleManager.register_module`：注册前查子类型是否已被运行中的模块占用。这是 `(type, subtype)` 唯一性这一通用不变量的显式化，不只对存储成立。
+
+同理，`register_plugin_modules` 原先没有逐条隔离（存储注册表有），并入后补上。

@@ -54,7 +54,7 @@ plugin_input_interaction_manager.create_or_replace(..., plugin_id=self.instance_
 | `provides_mediaservers()` | 同上 | 额外校验模块类型为 `MediaServer` |
 | `provides_notifications()` | 同上 | 额外校验模块类型为 `Notification` |
 | `provides_data_sources()` | 同上 | 额外校验模块类型为 `MediaRecognize` |
-| `provides_storages()` | `StorageBase` 子类列表 | 存储实现，与内建存储同权参与文件整理 |
+| `provides_storages()` | `StorageBase` 子类列表 | 存储实现，与内建存储同权参与存储分发；类型校验为 `ModuleType.Storage`，同一存储标识只能有一个模块在运行 |
 | `provides_agent_tools()` | `MoviePilotTool` 子类列表 | 智能体工具 |
 | `provides_channel_capabilities()` | `ChannelCapabilities` 列表 | 消息渠道能力，可覆盖内建取值 |
 | `provides_models()` | ORM 模型类列表 | 插件自管理表 |
