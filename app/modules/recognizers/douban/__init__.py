@@ -710,6 +710,65 @@ class DoubanModule(_ModuleBase):
                 return movie_result
             return await __async_douban_tv()
 
+    # 本源提供的榜单：标识 -> (显示名, 取数方法名, 内容媒体类型, 是否支持翻页)
+    _BOARDS = {
+        "movie_showing": ("正在上映", "movie_showing", MediaType.MOVIE, True),
+        "movie_hot": ("热门电影", "movie_hot", MediaType.MOVIE, True),
+        "movie_top250": ("电影TOP250", "movie_top250", MediaType.MOVIE, True),
+        "tv_hot": ("热门剧集", "tv_hot", MediaType.TV, True),
+        "tv_weekly_chinese": ("本周口碑国产剧", "tv_weekly_chinese", MediaType.TV, True),
+        "tv_weekly_global": ("本周口碑外国剧", "tv_weekly_global", MediaType.TV, True),
+        "tv_animation": ("动画剧集", "tv_animation", MediaType.TV, True),
+    }
+
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        本源提供的榜单清单
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(source=MediaSource.Douban, board=board, name=name,
+                                  media_type=media_type, paged=paged)
+            for board, (name, _, media_type, paged) in self._BOARDS.items()
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                       page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+        """
+        取指定榜单的一页
+
+        :param source: 数据来源，不是本源时不处理
+        :param board: 榜单标识
+        :param page: 页码
+        :param count: 每页条数
+        :return: 媒体信息列表，来源不匹配或榜单未知时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        declared = self._BOARDS.get(board)
+        if not declared:
+            return None
+        # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
+        fetch = getattr(self, declared[1])
+        return fetch(page=page, count=count)
+
+    def discover(self, source: Optional[MediaSource] = None,
+                 mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件筛选
+
+        :param source: 数据来源，不是本源时不处理
+        :param mtype: 媒体类型，未指定时按电影
+        :param criteria: 筛选条件，取 sort 排序方式、tags 标签、page 页码、count 每页条数
+        :return: 媒体信息列表，来源不匹配时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        criteria.setdefault("sort", "R")
+        criteria.setdefault("tags", "")
+        return self.douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
+
     def douban_discover(self, mtype: MediaType, sort: str, tags: str,
                         page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
         """
