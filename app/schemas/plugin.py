@@ -125,7 +125,9 @@ class PluginSidebarNavItem(BaseModel):
     """
     插件侧栏导航项（前端全页路由）
     """
-    plugin_id: str = Field(description="插件 ID")
+    plugin_id: str = Field(description="声明该入口的实例键，默认实例即插件 ID")
+    instance_id: Optional[str] = Field(default=None, description="实例 ID，默认实例为 default")
+    instance_key: Optional[str] = Field(default=None, description="实例键，与 plugin_id 同值")
     nav_key: str = Field(description="导航键，对应 URL 段")
     title: str = Field(description="侧栏标题")
     icon: str = Field(default="mdi-puzzle", description="MDI 图标名")
@@ -234,5 +236,7 @@ class PluginDashboardMetaItem(BaseModel):
     """插件仪表板入口摘要。"""
 
     id: str
+    instance_id: Optional[str] = None
+    instance_key: Optional[str] = None
     name: Optional[str] = None
     key: Optional[str] = None
