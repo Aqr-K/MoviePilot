@@ -82,7 +82,7 @@ class AcoustIdModule(_ModuleBase):
     @staticmethod
     def get_type() -> ModuleType:
         """返回模块所属的其它音乐能力类型。"""
-        return ModuleType.Other
+        return ModuleType.Enrichment
 
     @staticmethod
     def get_subtype() -> OtherModulesType:

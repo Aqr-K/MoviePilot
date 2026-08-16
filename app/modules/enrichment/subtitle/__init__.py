@@ -64,7 +64,7 @@ class SubtitleModule(_ModuleBase):
         """
         获取模块类型
         """
-        return ModuleType.Other
+        return ModuleType.Enrichment
 
     @staticmethod
     def get_subtype() -> OtherModulesType:
