@@ -196,3 +196,87 @@ class ChainSubtypeDispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BroadcastOnlyModule:
+    """参与广播的普通模块替身"""
+
+    def __init__(self, module_type, calls):
+        """
+        :param module_type: 模块类型
+        :param calls: 调用记录
+        """
+        self._type = module_type
+        self._calls = calls
+
+    def get_name(self) -> str:
+        """模块名称"""
+        return f"{self._type} 模块"
+
+    def get_type(self):
+        """模块类型"""
+        return self._type
+
+    def get_priority(self) -> int:
+        """模块优先级"""
+        return 1
+
+    def download(self, content=None, **kwargs):
+        """下载"""
+        self._calls.append(self._type)
+        return "downloaded"
+
+
+class StorageLikeDownloadModule(BroadcastOnlyModule):
+    """存储类型的模块替身，download 的签名与下载器不兼容"""
+
+    def get_priority(self) -> int:
+        """模块优先级，比下载器更高"""
+        return 0
+
+    def download(self, fileitem, path=None):
+        """下载文件"""
+        self._calls.append(self._type)
+        return "storage"
+
+
+class PreciseFamilyBroadcastTest(unittest.TestCase):
+    """必须精确分发的家族不参与广播"""
+
+    @staticmethod
+    def build_chain(*modules):
+        """
+        构造只认给定模块的 ChainBase
+
+        :param modules: 模块替身
+        :return: 链基类实例
+        """
+        from app.runtime.extensions.module_manager import ModuleManager
+        chain = ChainBase()
+        chain.pluginmanager = Mock()
+        chain.pluginmanager.running_plugins = {}
+        manager = object.__new__(ModuleManager)
+        manager._modules = {}
+        manager._external_classes = {}
+        manager._running_modules = {f"m{i}": m for i, m in enumerate(modules)}
+        import threading
+        manager._lock = threading.RLock()
+        chain.modulemanager = manager
+        chain.messagehelper = Mock()
+        chain.eventmanager = Mock()
+        return chain
+
+    def test_storage_modules_stay_out_of_the_broadcast(self):
+        """广播 download 时存储模块一个都不参与，只有下载器被调用。"""
+        from app.schemas.types import ModuleType
+        calls = []
+        chain = self.build_chain(
+            StorageLikeDownloadModule(ModuleType.Storage, calls),
+            BroadcastOnlyModule(ModuleType.Downloader, calls),
+        )
+
+        result = chain.run_module("download", content="magnet:?x", download_dir="/d", cookie="")
+
+        self.assertEqual([ModuleType.Downloader], calls)
+        self.assertEqual("downloaded", result)
+        chain.messagehelper.put.assert_not_called()

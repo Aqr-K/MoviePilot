@@ -7,6 +7,7 @@ from typing import Callable, Dict, Generator, Optional, Tuple, Any, Union, List
 from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.foundation.reflection import ModuleHelper
+from app.runtime.extensions.capability import provided_capabilities
 from app.runtime.extensions.contract import verify_module_contract, verify_module_type
 from app.runtime.extensions.plugin_instance import plugin_id_of, qualify_module_id
 from app.runtime.log import logger
@@ -14,6 +15,10 @@ from app.schemas.types import EventType, ModuleType, DownloaderType, MediaServer
     OtherModulesType, MediaRecognizeType
 from app.foundation.reflection import ObjectUtils
 from app.foundation.singleton import Singleton
+
+
+# 只接受按子类型精确分发的模块类型，不参与按方法名的广播
+PRECISE_DISPATCH_TYPES = frozenset({ModuleType.Storage})
 
 
 def subtype_value(subtype: Any) -> Optional[str]:
@@ -249,11 +254,32 @@ class ModuleManager(metaclass=Singleton):
     def get_running_modules(self, method: str) -> Generator:
         """
         获取实现了同一方法的模块列表
+
+        只面向广播分发，必须精确选中一个后端的家族不参与：它们的方法名可能与别的家族
+        重合而签名不同，被广播命中只会逐个抛错。这类家族只经 run_module_for 到达。
+
+        :param method: 方法名
+        :return: 实现了该方法且参与广播的模块
         """
         for module in self._running_snapshot():
+            if self._is_precise_dispatch_only(module):
+                continue
             if hasattr(module, method) \
                     and ObjectUtils.check_method(getattr(module, method)):
                 yield module
+
+    @staticmethod
+    def _is_precise_dispatch_only(module: Any) -> bool:
+        """
+        判断模块是否只接受按子类型的精确分发
+
+        :param module: 模块实例
+        :return: 是否排除在广播之外
+        """
+        try:
+            return module.get_type() in PRECISE_DISPATCH_TYPES
+        except Exception:
+            return False
 
     def get_running_type_modules(self, module_type: ModuleType) -> Generator:
         """
@@ -263,6 +289,40 @@ class ModuleManager(metaclass=Singleton):
             if hasattr(module, 'get_type') \
                     and module.get_type() == module_type:
                 yield module
+
+    def get_module_capabilities(self, module_id: str) -> List[str]:
+        """
+        取一个运行态模块提供的能力
+
+        :param module_id: 模块标识
+        :return: 能力方法名列表，模块未运行时为空
+        """
+        module = self.get_running_module(module_id)
+        if module is None:
+            return []
+        return sorted(provided_capabilities(module))
+
+    def get_capability_index(self) -> Dict[str, List[str]]:
+        """
+        取能力到提供者的倒排索引
+
+        回答「谁提供了这个能力」，与按 ModuleType 归类无关：能力由运行期实例推导，
+        标签错配或方法继承自兄弟模块都不影响结果。
+
+        :return: {能力方法名: [模块标识, ...]}
+        """
+        index: Dict[str, List[str]] = {}
+        with self._lock:
+            running = dict(self._running_modules)
+        for module_id, module in running.items():
+            try:
+                capabilities = provided_capabilities(module)
+            except Exception as err:
+                logger.debug(f"推导模块 {module_id} 能力出错：{str(err)}")
+                continue
+            for capability in capabilities:
+                index.setdefault(capability, []).append(module_id)
+        return {name: sorted(owners) for name, owners in sorted(index.items())}
 
     def get_running_subtypes(self, module_type: ModuleType) -> List[str]:
         """
