@@ -6,6 +6,7 @@
 from app.modules.recognizers.anilist import AniListModule
 from app.modules.recognizers.bangumi import BangumiModule
 from app.modules.recognizers.douban import DoubanModule
+from app.modules.recognizers.doubanmusic import DoubanMusicModule
 from app.modules.recognizers.musicbrainz import MusicBrainzModule
 from app.modules.recognizers.theaudiodb import TheAudioDbModule
 from app.modules.recognizers.themoviedb import TheMovieDbModule
@@ -15,6 +16,7 @@ __all__ = [
     "AniListModule",
     "BangumiModule",
     "DoubanModule",
+    "DoubanMusicModule",
     "MusicBrainzModule",
     "TheAudioDbModule",
     "TheMovieDbModule",

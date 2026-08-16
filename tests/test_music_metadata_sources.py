@@ -8,7 +8,7 @@ from app.chain.media import MediaChain
 from app.chain.scraping import ScrapingChain
 from app.domain.context import MUSIC_ENTITY_ALBUM, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.recognizers.douban import DoubanModule
+from app.modules.recognizers.doubanmusic import DoubanMusicModule
 from app.modules.recognizers.theaudiodb import TheAudioDbModule
 from app.schemas.types import MediaRecognizeType, MediaSource, MediaType
 
@@ -182,7 +182,7 @@ def test_theaudiodb_album_related_excludes_current_album(monkeypatch):
 
 def test_douban_detail_rejects_album_id_as_recording(monkeypatch):
     """豆瓣单曲使用专辑加曲序复合 ID，纯专辑 ID 不能作为 Recording。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     module.doubanapi = Mock()
 
     result = module.recognize_music(
@@ -197,7 +197,7 @@ def test_douban_detail_rejects_album_id_as_recording(monkeypatch):
 
 def test_douban_music_search_and_album_mapping(monkeypatch):
     """豆瓣模块应把音乐条目映射为专辑，并生成可用于曲目识别的复合 ID。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     module.doubanapi = Mock()
     module.doubanapi.music_search.return_value = {
         "items": [{
@@ -266,12 +266,12 @@ def test_douban_music_search_and_album_mapping(monkeypatch):
 )
 def test_douban_music_card_subtitle_artist_fallback(subtitle, expected):
     """搜索副标题回退应保留完整署名，且不能把纯年份误判为艺术家。"""
-    assert DoubanModule._douban_music_search_artists({"card_subtitle": subtitle}) == expected
+    assert DoubanMusicModule._douban_music_search_artists({"card_subtitle": subtitle}) == expected
 
 
 def test_douban_music_search_prefers_structured_artists_over_card_subtitle():
     """搜索响应已有结构化艺术家时不能被卡片副标题覆盖。"""
-    assert DoubanModule._douban_music_search_artists({
+    assert DoubanMusicModule._douban_music_search_artists({
         "artists": [{"name": "结构化艺术家"}],
         "card_subtitle": "回退艺术家 / 2024",
     }) == ["结构化艺术家"]
@@ -279,7 +279,7 @@ def test_douban_music_search_prefers_structured_artists_over_card_subtitle():
 
 def test_douban_music_discover_and_related_accept_collection_wrappers(monkeypatch):
     """豆瓣新碟榜与相关推荐应兼容 subject 包装并保留专辑身份。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     module.doubanapi = Mock()
     wrapped_item = {
         "type": "subject_collection_item",
@@ -312,7 +312,7 @@ def test_douban_music_discover_and_related_accept_collection_wrappers(monkeypatc
 
 def test_douban_music_tag_discover_intersects_official_tag_results():
     """豆瓣音乐组合筛选应按原生条目 ID 求交集，并保持主风格排序。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     module.doubanapi = Mock()
     module.doubanapi.music_tag.side_effect = [
         {"items": [
@@ -339,7 +339,7 @@ def test_douban_music_tag_discover_intersects_official_tag_results():
 
 def test_douban_music_recognize_expands_album_to_matching_track(monkeypatch):
     """自动文件识别有专辑线索时，豆瓣应返回专辑内音轨而不是专辑实体。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     module.doubanapi = Mock()
     module.doubanapi.music_search.return_value = {
         "items": [{
@@ -378,7 +378,7 @@ def test_douban_music_recognize_expands_album_to_matching_track(monkeypatch):
 
 def test_douban_music_mapping_keeps_legacy_attrs_tracks():
     """豆瓣旧响应中的 attrs.singer 与 attrs.tracks 仍应保持兼容。"""
-    album = DoubanModule._douban_music_to_album({
+    album = DoubanMusicModule._douban_music_to_album({
         "id": "1401853",
         "title": "范特西",
         "attrs": {
@@ -394,7 +394,7 @@ def test_douban_music_mapping_keeps_legacy_attrs_tracks():
 @pytest.mark.asyncio
 async def test_douban_music_async_recognize_maps_real_songs(monkeypatch):
     """异步豆瓣自动识别应从真实 songs 字段返回具体音轨。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     module.doubanapi = Mock()
     module.doubanapi.async_music_search = AsyncMock(return_value={
         "items": [{
@@ -429,7 +429,7 @@ async def test_douban_music_async_recognize_maps_real_songs(monkeypatch):
 @pytest.mark.asyncio
 async def test_douban_recognize_media_routes_only_douban_music(monkeypatch):
     """豆瓣音乐使用独立数据源，不能与影视豆瓣入口或其它音乐源串线。"""
-    module = DoubanModule()
+    module = DoubanMusicModule()
     expected = MusicInfo(media_source="doubanmusic", media_id="1401853", title="范特西")
     recognize_music = Mock(return_value=expected)
     recognize_video = Mock()

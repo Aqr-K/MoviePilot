@@ -503,6 +503,8 @@ class MediaServerType(Enum):
 class MediaRecognizeType(Enum):
     # 豆瓣
     Douban = "豆瓣"
+    # 豆瓣音乐
+    DoubanMusic = "豆瓣音乐"
     # TMDB
     TMDB = "TheMovieDb"
     # TVDB
