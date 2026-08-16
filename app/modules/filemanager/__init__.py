@@ -122,29 +122,6 @@ class FileManagerModule(_ModuleBase):
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
 
-    @staticmethod
-    def recommend_name(meta: MetaBase, mediainfo: MediaInfo,
-                       episodes_info: Optional[List[TmdbEpisode]] = None) -> Optional[str]:
-        """
-        获取重命名后的名称
-        :param meta: 元数据
-        :param mediainfo: 媒体信息
-        :param episodes_info: 当前季的全部集信息，由调用方备好传入
-        :return: 重命名后的名称（含目录）
-        """
-        handler = TransHandler()
-        # 重命名格式
-        rename_format = settings.RENAME_FORMAT(mediainfo.type)
-        # 获取重命名后的名称
-        path = handler.get_rename_path(
-            template_string=rename_format,
-            rename_dict=handler.get_naming_dict(meta=meta,
-                                                mediainfo=mediainfo,
-                                                episodes_info=episodes_info,
-                                                file_ext=Path(meta.title).suffix)
-        )
-        return path.as_posix() if path else ""
-
     def transfer(self, fileitem: FileItem, meta: MetaBase, mediainfo: MediaInfo,
                  target_directory: TransferDirectoryConf = None,
                  target_storage: Optional[str] = None, target_path: Path = None,

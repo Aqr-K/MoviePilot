@@ -1283,6 +1283,25 @@ class TransHandler:
             storage_oper.delete(media_file)
         return True
 
+    def recommend_name(self, meta: MetaBase, mediainfo: MediaInfo,
+                       episodes_info: Optional[List[TmdbEpisode]] = None) -> Optional[str]:
+        """
+        按命名模板算出重命名后的名称
+
+        :param meta: 元数据
+        :param mediainfo: 媒体信息
+        :param episodes_info: 当前季的全部集信息，供模板填充集标题
+        :return: 重命名后的名称（含目录），算不出时为空串
+        """
+        path = self.get_rename_path(
+            template_string=settings.RENAME_FORMAT(mediainfo.type),
+            rename_dict=self.get_naming_dict(meta=meta,
+                                             mediainfo=mediainfo,
+                                             episodes_info=episodes_info,
+                                             file_ext=Path(meta.title).suffix)
+        )
+        return path.as_posix() if path else ""
+
     @staticmethod
     def get_rename_path(
         template_string: str,

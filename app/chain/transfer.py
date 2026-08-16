@@ -65,6 +65,7 @@ from app.schemas.types import (
 )
 from app.runtime.reload import ConfigReloadMixin
 from app.application.transfer import TransferQueue, TransferTask
+from app.application.transfer.handler import TransHandler
 from app.domain.media import normalize_music_type
 from app.schemas.media import normalize_media_source, resolve_media_identity
 from app.foundation.singleton import Singleton
@@ -2622,8 +2623,9 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param mediainfo: 媒体信息
         :return: 重命名后的名称（含目录）
         """
-        return self.run_module("recommend_name", meta=meta, mediainfo=mediainfo,
-                               episodes_info=self.__query_episodes_info(meta, mediainfo))
+        return TransHandler().recommend_name(
+            meta=meta, mediainfo=mediainfo,
+            episodes_info=self.__query_episodes_info(meta, mediainfo))
 
     @staticmethod
     def __query_episodes_info(meta: MetaBase,
