@@ -365,6 +365,29 @@ class BangumiModule(_ModuleBase):
         fetch = getattr(self, declared[1])
         return fetch()
 
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                   board: Optional[str] = None,
+                                   page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+        """
+        异步取指定榜单的一页
+
+        :param source: 数据来源，不是本源时不处理
+        :param board: 榜单标识
+        :param page: 页码，放送表是整周的固定内容，只有第一页
+        :param count: 每页条数，放送表整周返回，不参与取数
+        :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        declared = self._BOARDS.get(board)
+        if not declared:
+            return None
+        if page > 1:
+            return []
+        # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
+        fetch = getattr(self, f"async_{declared[1]}")
+        return await fetch()
+
     def discover(self, source: Optional[MediaSource] = None,
                  mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
         """
@@ -379,6 +402,21 @@ class BangumiModule(_ModuleBase):
         if source != MediaSource.Bangumi:
             return None
         return self.bangumi_discover(**criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                             mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
+        """
+        异步按条件筛选
+
+        :param source: 数据来源，不是本源时不处理
+        :param mtype: 媒体类型，Bangumi 按条目类型（动画、书籍、音乐、游戏）划分内容，
+                      没有影视媒体类型这一维，不参与取数
+        :param criteria: 各源自有的筛选条件
+        :return: 统一媒体信息列表，来源不匹配时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        return await self.async_bangumi_discover(**criteria)
 
     def bangumi_calendar(self) -> Optional[List[MediaInfo]]:
         """

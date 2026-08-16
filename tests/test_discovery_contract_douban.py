@@ -6,7 +6,8 @@
 每个榜单的缓存与限流挂在各自的取数方法上。``discover_board`` 按标识委托到这些方法而不
 自行取数，限流桶因此仍以榜单为粒度，不会退化成整个 ``discover_board`` 一个桶。
 """
-from unittest.mock import Mock, patch
+import asyncio
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -45,6 +46,16 @@ ITEM = {
 }
 
 
+def run(coro):
+    """
+    在同步测试函数里驱动协程
+
+    :param coro: 待驱动的协程
+    :return: 协程的返回值
+    """
+    return asyncio.run(coro)
+
+
 @pytest.fixture
 def module() -> DoubanModule:
     """构造接口客户端被打桩的豆瓣模块。"""
@@ -52,8 +63,12 @@ def module() -> DoubanModule:
     instance.doubanapi = Mock()
     for endpoint in set(BOARD_ENDPOINTS.values()):
         getattr(instance.doubanapi, endpoint).return_value = {"subject_collection_items": [ITEM]}
+        setattr(instance.doubanapi, f"async_{endpoint}",
+                AsyncMock(return_value={"subject_collection_items": [ITEM]}))
     instance.doubanapi.movie_recommend.return_value = {"items": [ITEM]}
     instance.doubanapi.tv_recommend.return_value = {"items": [ITEM]}
+    instance.doubanapi.async_movie_recommend = AsyncMock(return_value={"items": [ITEM]})
+    instance.doubanapi.async_tv_recommend = AsyncMock(return_value={"items": [ITEM]})
     return instance
 
 
@@ -168,3 +183,104 @@ def test_the_board_methods_still_work(module):
 def test_the_filter_method_still_works(module):
     """条件筛选方法可用。"""
     assert module.douban_discover(mtype=MediaType.MOVIE, sort="R", tags="", page=1, count=30)
+
+
+def test_every_declared_board_can_be_fetched_asynchronously(module):
+    """异步取榜单同样覆盖清单里的 7 个榜单。"""
+    for board in module.discover_boards():
+        result = run(module.async_discover_board(source=MediaSource.Douban, board=board.board))
+        assert result
+        assert result[0].douban_id == "1"
+
+
+def test_each_asynchronous_board_is_served_by_its_own_fetch_method(module):
+    """每个榜单的异步取数委托到自己的异步方法，限流与缓存因此仍按榜单分桶。"""
+    for board, (_, _, fetch_name) in EXPECTED_BOARDS.items():
+        with patch.object(DoubanModule, f"async_{fetch_name}",
+                          new_callable=AsyncMock, return_value=[]) as fetch:
+            result = run(module.async_discover_board(source=MediaSource.Douban, board=board,
+                                                     page=2, count=10))
+
+        assert result == []
+        fetch.assert_awaited_once_with(page=2, count=10)
+
+
+def test_asynchronous_board_paging_reaches_the_client(module):
+    """异步取榜单的翻页参数换算成起始位置后传到接口客户端。"""
+    run(module.async_discover_board(source=MediaSource.Douban, board="movie_top250",
+                                    page=3, count=15))
+
+    module.doubanapi.async_movie_top250.assert_awaited_once_with(start=30, count=15)
+
+
+def test_an_asynchronous_board_of_another_source_is_declined(module):
+    """异步取榜单按来源自检，不是本源时返回 None。"""
+    assert run(module.async_discover_board(source=MediaSource.TMDB, board="movie_hot")) is None
+    assert run(
+        module.async_discover_board(source=MediaSource.DoubanMusic, board="movie_hot")
+    ) is None
+
+
+def test_an_asynchronous_board_without_a_source_is_declined(module):
+    """来源缺省时异步取榜单不承接。"""
+    assert run(module.async_discover_board(board="movie_hot")) is None
+
+
+def test_an_unknown_asynchronous_board_is_declined(module):
+    """异步取榜单遇到本源不认识的标识返回 None，不抛错。"""
+    assert run(module.async_discover_board(source=MediaSource.Douban, board="not_a_board")) is None
+
+
+def test_asynchronous_discover_filters_movies_by_criteria(module):
+    """异步条件筛选把排序、标签与翻页透传给电影探索接口。"""
+    result = run(module.async_discover(source=MediaSource.Douban, mtype=MediaType.MOVIE,
+                                       sort="U", tags="喜剧", page=2, count=10))
+
+    assert result
+    module.doubanapi.async_movie_recommend.assert_awaited_once_with(start=10, count=10,
+                                                                    sort="U", tags="喜剧")
+
+
+def test_asynchronous_discover_filters_tvs_by_criteria(module):
+    """异步剧集条件筛选走剧集探索接口。"""
+    run(module.async_discover(source=MediaSource.Douban, mtype=MediaType.TV,
+                              sort="R", tags="日剧"))
+
+    module.doubanapi.async_tv_recommend.assert_awaited_once_with(start=0, count=30,
+                                                                 sort="R", tags="日剧")
+
+
+def test_asynchronous_discover_without_criteria_uses_the_client_defaults(module):
+    """未给条件时异步筛选按接口默认的排序与标签取电影。"""
+    run(module.async_discover(source=MediaSource.Douban))
+
+    module.doubanapi.async_movie_recommend.assert_awaited_once_with(start=0, count=30,
+                                                                    sort="R", tags="")
+
+
+def test_asynchronous_discover_is_served_by_the_existing_filter_method(module):
+    """异步条件筛选委托到自己的异步取数方法，限流与缓存不被绕开。"""
+    with patch.object(DoubanModule, "async_douban_discover",
+                      new_callable=AsyncMock, return_value=[]) as fetch:
+        result = run(module.async_discover(source=MediaSource.Douban, mtype=MediaType.TV,
+                                           tags="悬疑"))
+
+    assert result == []
+    fetch.assert_awaited_once_with(mtype=MediaType.TV, sort="R", tags="悬疑")
+
+
+def test_asynchronous_discover_of_another_source_is_declined(module):
+    """异步条件筛选同样按来源自检。"""
+    assert run(module.async_discover(source=MediaSource.Bangumi, mtype=MediaType.MOVIE)) is None
+    assert run(module.async_discover()) is None
+
+
+def test_the_asynchronous_board_agrees_with_the_synchronous_one(module):
+    """同一榜单同一页，异步与同步取到同样的内容。"""
+    for board in module.discover_boards():
+        synchronous = module.discover_board(source=MediaSource.Douban, board=board.board, page=2)
+        asynchronous = run(module.async_discover_board(source=MediaSource.Douban,
+                                                       board=board.board, page=2))
+
+        assert [media.douban_id for media in asynchronous] == \
+               [media.douban_id for media in synchronous]

@@ -753,6 +753,26 @@ class DoubanModule(_ModuleBase):
         fetch = getattr(self, declared[1])
         return fetch(page=page, count=count)
 
+    async def async_discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                                   page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+        """
+        异步取指定榜单的一页
+
+        :param source: 数据来源，不是本源时不处理
+        :param board: 榜单标识
+        :param page: 页码
+        :param count: 每页条数
+        :return: 媒体信息列表，来源不匹配或榜单未知时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        declared = self._BOARDS.get(board)
+        if not declared:
+            return None
+        # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
+        fetch = getattr(self, f"async_{declared[1]}")
+        return await fetch(page=page, count=count)
+
     def discover(self, source: Optional[MediaSource] = None,
                  mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
         """
@@ -768,6 +788,22 @@ class DoubanModule(_ModuleBase):
         criteria.setdefault("sort", "R")
         criteria.setdefault("tags", "")
         return self.douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                             mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
+        """
+        异步按条件筛选
+
+        :param source: 数据来源，不是本源时不处理
+        :param mtype: 媒体类型，未指定时按电影
+        :param criteria: 筛选条件，取 sort 排序方式、tags 标签、page 页码、count 每页条数
+        :return: 媒体信息列表，来源不匹配时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        criteria.setdefault("sort", "R")
+        criteria.setdefault("tags", "")
+        return await self.async_douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
 
     def douban_discover(self, mtype: MediaType, sort: str, tags: str,
                         page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:

@@ -10,13 +10,24 @@
 
 以 AniList 为试点，其余源与旧方法暂不动。
 """
-from unittest.mock import Mock
+import asyncio
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from app import schemas
 from app.modules.recognizers.anilist import AniListModule
 from app.schemas.types import MediaSource, MediaType
+
+
+def run(coro):
+    """
+    在同步测试函数里驱动协程
+
+    :param coro: 待驱动的协程
+    :return: 协程的返回值
+    """
+    return asyncio.run(coro)
 
 
 @pytest.fixture
@@ -27,6 +38,11 @@ def module() -> AniListModule:
     instance.anilist_api.trending.return_value = [{"id": 1, "format": "TV"}]
     instance.anilist_api.popular_this_season.return_value = [{"id": 2, "format": "TV"}]
     instance.anilist_api.discover.return_value = [{"id": 3, "format": "MOVIE"}]
+    instance.anilist_api.async_trending = AsyncMock(return_value=[{"id": 1, "format": "TV"}])
+    instance.anilist_api.async_popular_this_season = AsyncMock(
+        return_value=[{"id": 2, "format": "TV"}]
+    )
+    instance.anilist_api.async_discover = AsyncMock(return_value=[{"id": 3, "format": "MOVIE"}])
     return instance
 
 
@@ -82,3 +98,79 @@ def test_the_legacy_methods_still_work(module):
     """契约化期间旧方法保留，便于前后对照验证归一无损。"""
     assert module.anilist_trending(page=1, count=20)
     assert module.anilist_popular_this_season(page=1, count=20)
+
+
+def test_every_declared_board_can_be_fetched_asynchronously(module):
+    """异步取榜单同样覆盖清单里的每个榜单。"""
+    for board in module.discover_boards():
+        result = run(module.async_discover_board(source=MediaSource.AniList, board=board.board))
+        assert result is not None
+
+
+def test_an_asynchronous_board_of_another_source_is_declined(module):
+    """异步取榜单按来源自检，不是本源时返回 None。"""
+    assert run(module.async_discover_board(source=MediaSource.TMDB, board="trending")) is None
+
+
+def test_an_asynchronous_board_without_a_source_is_declined(module):
+    """来源缺省时异步取榜单不认领。"""
+    assert run(module.async_discover_board(board="trending")) is None
+
+
+def test_an_unknown_asynchronous_board_is_declined(module):
+    """异步取榜单遇到本源不认识的标识返回 None，不抛错。"""
+    assert run(module.async_discover_board(source=MediaSource.AniList, board="not_a_board")) is None
+
+
+def test_an_asynchronous_board_is_fetched_through_the_existing_method(module):
+    """异步取榜单委托到既有的异步取数方法，缓存与限流仍挂在原来的取数路径上。"""
+    for board, (_, endpoint, _) in module._BOARDS.items():  # noqa: SLF001
+        target = f"async_anilist_{endpoint}"
+        with patch.object(module, target, new_callable=AsyncMock, return_value=[]) as fetch:
+            result = run(module.async_discover_board(source=MediaSource.AniList, board=board))
+
+        assert result == []
+        fetch.assert_awaited_once()
+
+
+def test_asynchronous_board_paging_reaches_the_client(module):
+    """异步取榜单的翻页参数原样传到接口客户端。"""
+    run(module.async_discover_board(source=MediaSource.AniList, board="trending",
+                                    page=3, count=15))
+
+    module.anilist_api.async_trending.assert_awaited_once_with(page=3, count=15)
+
+
+def test_asynchronous_discover_filters_by_criteria(module):
+    """异步条件筛选把条件透传给接口客户端，并返回统一媒体信息。"""
+    result = run(module.async_discover(source=MediaSource.AniList, mtype=MediaType.TV,
+                                       season="WINTER"))
+
+    assert isinstance(result, list)
+    module.anilist_api.async_discover.assert_awaited_once_with(mtype=MediaType.TV, season="WINTER")
+
+
+def test_asynchronous_discover_of_another_source_is_declined(module):
+    """异步条件筛选同样按来源自检。"""
+    assert run(module.async_discover(source=MediaSource.Douban)) is None
+
+
+def test_asynchronous_discover_is_served_by_the_existing_method(module):
+    """异步条件筛选委托到既有的异步取数方法，不绕开缓存与限流。"""
+    with patch.object(module, "async_anilist_discover",
+                      new_callable=AsyncMock, return_value=[]) as fetch:
+        result = run(module.async_discover(source=MediaSource.AniList, season="WINTER"))
+
+    assert result == []
+    fetch.assert_awaited_once_with(season="WINTER")
+
+
+def test_the_asynchronous_board_agrees_with_the_synchronous_one(module):
+    """同一榜单同一页，异步与同步取到同样的内容。"""
+    for board in module.discover_boards():
+        synchronous = module.discover_board(source=MediaSource.AniList, board=board.board, page=2)
+        asynchronous = run(module.async_discover_board(source=MediaSource.AniList,
+                                                       board=board.board, page=2))
+
+        assert [media.anilist_id for media in asynchronous] == \
+               [media.anilist_id for media in synchronous]

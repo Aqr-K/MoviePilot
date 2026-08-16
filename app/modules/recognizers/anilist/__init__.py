@@ -427,6 +427,26 @@ class AniListModule(_ModuleBase):
         fetch = getattr(self.anilist_api, declared[1])
         return [MediaInfo(anilist_info=info) for info in fetch(page=page, count=count)]
 
+    async def async_discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                                   page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+        """
+        异步取指定榜单的一页
+
+        :param source: 数据来源，不是本源时不处理
+        :param board: 榜单标识
+        :param page: 页码
+        :param count: 每页条数
+        :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        declared = self._BOARDS.get(board)
+        if not declared:
+            return None
+        # 缓存与限流挂在 anilist_<榜单> 的异步取数方法上，按标识委托使其仍以榜单为粒度生效
+        fetch = getattr(self, f"async_anilist_{declared[1]}")
+        return await fetch(page=page, count=count)
+
     def discover(self, source: Optional[MediaSource] = None,
                  mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
         """
@@ -442,6 +462,22 @@ class AniListModule(_ModuleBase):
         if mtype is not None:
             criteria["mtype"] = mtype
         return [MediaInfo(anilist_info=info) for info in self.anilist_api.discover(**criteria)]
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                             mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
+        """
+        异步按条件筛选
+
+        :param source: 数据来源，不是本源时不处理
+        :param mtype: 媒体类型
+        :param criteria: 各源自有的筛选条件
+        :return: 统一媒体信息列表，来源不匹配时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        if mtype is not None:
+            criteria["mtype"] = mtype
+        return await self.async_anilist_discover(**criteria)
 
     def anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
         """
