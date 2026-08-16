@@ -24,9 +24,11 @@ class PluginDatabase:
             db_path: Optional[Path] = None,
             schema: Optional[str] = None,
             owns_engine: bool = True,
+            instance_id: str = "default",
     ):
         """
         :param plugin_id: 插件唯一标识
+        :param instance_id: 插件实例标识
         :param engine: 该插件读写所用的引擎
         :param session_factory: 绑定该引擎的会话工厂
         :param scoped_session_factory: 线程局部的会话注册表
@@ -35,6 +37,7 @@ class PluginDatabase:
         :param owns_engine: 是否独占引擎，决定 dispose 能否释放连接池
         """
         self.plugin_id = plugin_id
+        self.instance_id = instance_id
         self.engine = engine
         self.session_factory = session_factory
         self.scoped_session = scoped_session_factory

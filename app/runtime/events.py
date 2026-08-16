@@ -12,12 +12,31 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, Any, Type
 from fastapi.concurrency import run_in_threadpool
 
 from app.runtime.config import global_vars
+from app.runtime.extensions.plugin_instance import instance_key, plugin_id_of, split_instance_key
 from app.runtime.thread import ThreadHelper
 from app.runtime.log import logger
 from app.schemas import ChainEventData
 from app.schemas.types import ChainEventType, EventType
 from app.runtime.rate import ExponentialBackoffRateLimiter
 from app.foundation.singleton import Singleton
+
+def canonical_target_owner(owner: Optional[str]) -> Optional[str]:
+    """
+    把定向投递的目标归一成实例键
+
+    裸插件标识与显式写出的默认实例标识都指向默认实例；实例标识非法时原样返回，
+    该取值不会等于任何运行中实例的实例键，定向因此落空而不是退化成广播。
+
+    :param owner: 目标插件标识或实例键，为空表示不定向
+    :return: 归一后的实例键，为空时返回 None
+    """
+    if not owner:
+        return None
+    try:
+        return instance_key(*split_instance_key(owner))
+    except ValueError:
+        return owner
+
 
 DEFAULT_EVENT_PRIORITY = 10  # 事件的默认优先级
 MIN_EVENT_CONSUMER_THREADS = 1  # 最小事件消费者线程数
@@ -32,10 +51,16 @@ class EventHandlerBinding:
     instance: Optional[Any]
     owner_name: str
     run_sync_in_threadpool: bool = False
+    instance_key: Optional[str] = None
 
 
+# 实例级禁用条目中处理器类标识与实例键的分隔符
+DISABLED_INSTANCE_SEPARATOR = "#"
+
+# 解析器返回该类声明的全部运行实例；类归本解析器管辖但当前无实例时返回空列表，
+# 未登记该类时返回 None，交由后续解析器或默认构造兜底
 HandlerInstanceResolver = Callable[
-    [Type[Any]], Optional[EventHandlerBinding]
+    [Type[Any]], Optional[List[EventHandlerBinding]]
 ]
 EventErrorNotifier = Callable[[str, str], object]
 
@@ -101,8 +126,12 @@ class EventManager(metaclass=Singleton):
         self.__chain_subscribers: Dict[ChainEventType, Dict[str, tuple[int, Callable]]] = {}
         # 禁用的事件处理器集合
         self.__disabled_handlers = set()
-        # 禁用的事件处理器类集合
+        # 整类禁用的事件处理器类集合，覆盖该类的全部实例
         self.__disabled_classes = set()
+        # 实例级禁用的事件处理器集合，元素为“类标识#实例键”
+        self.__disabled_instances = set()
+        # 登记过启停状态的实例键：{类标识: {实例键}}，用于判断某个类是否已无可用实例
+        self.__known_instances: Dict[str, set] = {}
         # 线程锁
         self.__lock = threading.Lock()
         # 退出事件
@@ -265,33 +294,61 @@ class EventManager(metaclass=Singleton):
                 self.__broadcast_subscribers[event_type].pop(handler_identifier, None)
                 logger.debug(f"Unsubscribed from broadcast event: {event_type.value} - {handler_identifier}")
 
-    def disable_event_handler(self, target: Union[Callable, type]):
+    def disable_event_handler(self, target: Union[Callable, type],
+                              instance_key: Optional[str] = None):
         """
         禁用指定的事件处理器或事件处理器类
         :param target: 处理器函数或类
+        :param instance_key: 实例键，仅对处理器类有效；为空时禁用该类的全部实例
         """
         identifier = self.__get_handler_identifier(target)
-        if identifier in self.__disabled_handlers or identifier in self.__disabled_classes:
-            return
-        if isinstance(target, type):
-            self.__disabled_classes.add(identifier)
-            logger.debug(f"Disabled event handler class - {identifier}")
-        else:
+        if not isinstance(target, type):
+            if identifier in self.__disabled_handlers:
+                return
             self.__disabled_handlers.add(identifier)
             logger.debug(f"Disabled event handler - {identifier}")
+            return
+        if instance_key is None:
+            if identifier in self.__disabled_classes:
+                return
+            self.__disabled_classes.add(identifier)
+            logger.debug(f"Disabled event handler class - {identifier}")
+            return
+        instance_identifier = self.__disabled_instance_id(identifier, instance_key)
+        self.__known_instances.setdefault(identifier, set()).add(instance_key)
+        self.__disabled_instances.add(instance_identifier)
+        logger.debug(f"Disabled event handler instance - {instance_identifier}")
 
-    def enable_event_handler(self, target: Union[Callable, type]):
+    def enable_event_handler(self, target: Union[Callable, type],
+                             instance_key: Optional[str] = None):
         """
         启用指定的事件处理器或事件处理器类
         :param target: 处理器函数或类
+        :param instance_key: 实例键，仅对处理器类有效；为空时启用该类的全部实例
         """
         identifier = self.__get_handler_identifier(target)
-        if isinstance(target, type):
-            self.__disabled_classes.discard(identifier)
-            logger.debug(f"Enabled event handler class - {identifier}")
-        else:
+        if not isinstance(target, type):
             self.__disabled_handlers.discard(identifier)
             logger.debug(f"Enabled event handler - {identifier}")
+            return
+        if instance_key is None:
+            self.__disabled_classes.discard(identifier)
+            logger.debug(f"Enabled event handler class - {identifier}")
+            return
+        instance_identifier = self.__disabled_instance_id(identifier, instance_key)
+        self.__known_instances.setdefault(identifier, set()).add(instance_key)
+        self.__disabled_instances.discard(instance_identifier)
+        logger.debug(f"Enabled event handler instance - {instance_identifier}")
+
+    @staticmethod
+    def __disabled_instance_id(class_identifier: str, instance_key: str) -> str:
+        """
+        组合实例级禁用条目的标识
+        :param class_identifier: 处理器类的唯一标识
+        :param instance_key: 实例键
+        :return: 实例级禁用条目标识
+        """
+        return f"{class_identifier}{DISABLED_INSTANCE_SEPARATOR}{instance_key}"
 
     def visualize_handlers(self) -> List[Dict]:
         """
@@ -370,21 +427,51 @@ class EventManager(metaclass=Singleton):
 
     def __is_handler_enabled(self, handler: Callable) -> bool:
         """
-        检查处理器是否已启用（没有被禁用）
+        检查处理器是否还有可投递的实例
         :param handler: 处理器函数
-        :return: 如果处理器启用则返回 True，否则返回 False
+        :return: 处理器自身未被禁用且所属类至少有一个启用实例时返回 True
         """
         # 获取处理器的唯一标识符
         handler_id = self.__get_handler_identifier(handler)
-
-        # 获取处理器所属类的唯一标识符
-        class_id = self.__get_class_from_callable(handler)
-
-        # 检查处理器或类是否被禁用，只要其中之一被禁用则返回 False
-        if handler_id in self.__disabled_handlers or (class_id is not None and class_id in self.__disabled_classes):
+        if handler_id in self.__disabled_handlers:
             return False
 
-        return True
+        # 获取处理器所属类的唯一标识符
+        return self.__is_class_enabled(self.__get_class_from_callable(handler))
+
+    def __is_class_enabled(self, class_identifier: Optional[str]) -> bool:
+        """
+        检查处理器类是否至少有一个启用的实例
+        :param class_identifier: 处理器类的唯一标识
+        :return: 是否存在可投递的实例
+        """
+        if class_identifier is None:
+            return True
+        if class_identifier in self.__disabled_classes:
+            return False
+        known = self.__known_instances.get(class_identifier)
+        if not known:
+            return True
+        return any(
+            self.__disabled_instance_id(class_identifier, instance_key) not in self.__disabled_instances
+            for instance_key in known
+        )
+
+    def __is_instance_enabled(self, class_identifier: Optional[str],
+                              instance_key: Optional[str]) -> bool:
+        """
+        检查处理器类的某个实例是否已启用
+        :param class_identifier: 处理器类的唯一标识
+        :param instance_key: 实例键，为空时只做类级判定
+        :return: 是否可以向该实例投递
+        """
+        if class_identifier is None:
+            return True
+        if class_identifier in self.__disabled_classes:
+            return False
+        if instance_key is None:
+            return True
+        return self.__disabled_instance_id(class_identifier, instance_key) not in self.__disabled_instances
 
     def __trigger_chain_event(self, event: Event) -> Optional[Event]:
         """
@@ -495,13 +582,16 @@ class EventManager(metaclass=Singleton):
         if not handlers:
             logger.debug(f"No handlers found for broadcast event: {event}")
             return
-        target_plugin_id = None
+        target_owner = None
         if event.event_type == EventType.MessageAction and isinstance(event.event_data, dict):
             target_plugin_id = event.event_data.get("__mp_target_plugin_id")
+            target_owner = canonical_target_owner(
+                str(target_plugin_id) if target_plugin_id else None
+            )
         # 为每个处理器提供独立的事件实例，防止某个处理器对 event_data 的修改影响其他处理器
         for handler_id, handler in handlers:
-            if target_plugin_id and not self.__should_dispatch_to_target_plugin(
-                    handler, handler_id, str(target_plugin_id)
+            if target_owner and not self.__should_dispatch_to_target_plugin(
+                    handler, handler_id, target_owner
             ):
                 continue
             # 仅浅拷贝顶层字典，避免不必要的深拷贝开销；这样可以隔离键级别的替换/赋值
@@ -516,12 +606,14 @@ class EventManager(metaclass=Singleton):
             if inspect.iscoroutinefunction(handler):
                 # 对于异步函数，直接在事件循环中运行
                 asyncio.run_coroutine_threadsafe(
-                    self.__safe_invoke_handler_async(handler, isolated_event),
+                    self.__safe_invoke_handler_async(handler, isolated_event, True, target_owner),
                     global_vars.loop
                 )
             else:
                 # 对于同步函数，在线程池中运行
-                self.__executor.submit(self.__safe_invoke_handler, handler, isolated_event)
+                self.__executor.submit(
+                    self.__safe_invoke_handler, handler, isolated_event, True, target_owner
+                )
 
     @classmethod
     def __should_dispatch_to_target_plugin(
@@ -532,9 +624,14 @@ class EventManager(metaclass=Singleton):
     ) -> bool:
         """
         限定插件输入事件只投递给目标插件，避免自由文本被其他插件观察到。
+
+        :param handler: 处理器
+        :param handler_identifier: 处理器的唯一标识
+        :param target_plugin_id: 目标插件标识或实例键
+        :return: 该处理器所属的类是否为目标插件
         """
         class_name, method_name = cls.__parse_handler_names(handler)
-        if class_name != target_plugin_id:
+        if class_name != plugin_id_of(target_plugin_id):
             return False
         identifier_parts = (handler_identifier or "").split(".")
         if len(identifier_parts) < 2:
@@ -551,76 +648,86 @@ class EventManager(metaclass=Singleton):
             return False
         return True
 
-    def __safe_invoke_handler(self, handler: Callable, event: Event):
+    def __safe_invoke_handler(self, handler: Callable, event: Event, isolate: bool = False,
+                              target_owner: Optional[str] = None):
         """
         调用处理器，处理链式或广播事件
         :param handler: 处理器
         :param event: 事件对象
+        :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
         if not self.__is_handler_enabled(handler):
             logger.debug(f"Handler {self.__get_handler_identifier(handler)} is disabled. Skipping execution")
             return
 
-        self.__invoke_handler_by_type_sync(handler, event)
+        self.__invoke_handler_by_type_sync(handler, event, isolate, target_owner)
 
-    async def __safe_invoke_handler_async(self, handler: Callable, event: Event):
+    async def __safe_invoke_handler_async(self, handler: Callable, event: Event, isolate: bool = False,
+                                          target_owner: Optional[str] = None):
         """
         异步调用处理器，处理链式事件
         :param handler: 处理器
         :param event: 事件对象
+        :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
         if not self.__is_handler_enabled(handler):
             logger.debug(f"Handler {self.__get_handler_identifier(handler)} is disabled. Skipping execution")
             return
 
-        await self.__invoke_handler_by_type_async(handler, event)
+        await self.__invoke_handler_by_type_async(handler, event, isolate, target_owner)
 
-    def __invoke_handler_by_type_sync(self, handler: Callable, event: Event):
+    def __invoke_handler_by_type_sync(self, handler: Callable, event: Event, isolate: bool = False,
+                                      target_owner: Optional[str] = None):
         """
-        同步方式根据处理器类型调用相应的方法
+        同步方式在处理器的全部启用实例上调用相应的方法
         :param handler: 处理器
         :param event: 要处理的事件对象
+        :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
-        resolved = self.__resolve_handler(handler)
-        if not resolved:
-            return
-        method, binding, class_name, method_name = resolved
-        try:
-            method(event)
-        except Exception as e:
-            self.__handle_event_error(
-                event=event,
-                module_name=binding.owner_name,
-                class_name=class_name,
-                method_name=method_name,
-                e=e,
-            )
+        for index, (method, binding, class_name, method_name) in enumerate(
+                self.__resolve_handler(handler, target_owner)):
+            target_event = event if index == 0 or not isolate else self.__isolate_event(event)
+            try:
+                method(target_event)
+            except Exception as e:
+                self.__handle_event_error(
+                    event=target_event,
+                    module_name=binding.owner_name,
+                    class_name=class_name,
+                    method_name=method_name,
+                    e=e,
+                )
 
-    async def __invoke_handler_by_type_async(self, handler: Callable, event: Event):
+    async def __invoke_handler_by_type_async(self, handler: Callable, event: Event, isolate: bool = False,
+                                             target_owner: Optional[str] = None):
         """
-        异步方式根据处理器类型调用相应的方法
+        异步方式在处理器的全部启用实例上调用相应的方法
         :param handler: 处理器
         :param event: 要处理的事件对象
+        :param isolate: 是否为处理器的每个实例提供独立的事件对象
+        :param target_owner: 定向投递的插件标识或实例键，为空时投递给全部启用实例
         """
-        resolved = self.__resolve_handler(handler)
-        if not resolved:
-            return
-        method, binding, class_name, method_name = resolved
-        try:
-            if inspect.iscoroutinefunction(method):
-                await method(event)
-            elif binding.run_sync_in_threadpool or not class_name:
-                await run_in_threadpool(method, event)
-            else:
-                method(event)
-        except Exception as e:
-            self.__handle_event_error(
-                event=event,
-                module_name=binding.owner_name,
-                class_name=class_name,
-                method_name=method_name,
-                e=e,
-            )
+        for index, (method, binding, class_name, method_name) in enumerate(
+                self.__resolve_handler(handler, target_owner)):
+            target_event = event if index == 0 or not isolate else self.__isolate_event(event)
+            try:
+                if inspect.iscoroutinefunction(method):
+                    await method(target_event)
+                elif binding.run_sync_in_threadpool or not class_name:
+                    await run_in_threadpool(method, target_event)
+                else:
+                    method(target_event)
+            except Exception as e:
+                self.__handle_event_error(
+                    event=target_event,
+                    module_name=binding.owner_name,
+                    class_name=class_name,
+                    method_name=method_name,
+                    e=e,
+                )
 
     @staticmethod
     def __parse_handler_names(handler: Callable) -> Tuple[str, str]:
@@ -655,8 +762,16 @@ class EventManager(metaclass=Singleton):
     def __resolve_handler(
             self,
             handler: Callable,
-    ) -> Optional[Tuple[Callable, EventHandlerBinding, str, str]]:
-        """将装饰阶段保存的函数解析为当前运行实例上的可调用方法。"""
+            target_owner: Optional[str] = None,
+    ) -> List[Tuple[Callable, EventHandlerBinding, str, str]]:
+        """将装饰阶段保存的函数解析为当前全部启用实例上的可调用方法。
+
+        :param handler: 装饰阶段保存的处理器函数
+        :param target_owner: 定向投递的目标，只命中实例键与之相等的那一个实例；
+            裸插件标识即默认实例的实例键，为空时不做定向筛选
+        :return: (方法, 实例绑定, 类名, 方法名) 列表
+        """
+        target_owner = canonical_target_owner(target_owner)
         owner_class = self.__get_handler_owner_class(handler)
         method_name = getattr(handler, "__name__", self.__parse_handler_names(handler)[1])
         if owner_class is None:
@@ -665,46 +780,57 @@ class EventManager(metaclass=Singleton):
                 owner_name=self.__get_handler_identifier(handler),
                 run_sync_in_threadpool=True,
             )
-            return handler, binding, "", method_name
+            return [(handler, binding, "", method_name)]
 
         with self.__lock:
             resolvers = list(self.__handler_instance_resolvers.values())
-        binding = next(
+        bindings = next(
             (result for resolver in resolvers if (result := resolver(owner_class)) is not None),
             None,
         )
-        if binding is None:
+        if bindings is None:
             try:
                 get_existing = getattr(owner_class, "get_existing_instance", None)
                 instance = get_existing() if callable(get_existing) else None
                 if instance is None:
                     instance = owner_class()
-                binding = EventHandlerBinding(
+                bindings = [EventHandlerBinding(
                     instance=instance,
                     owner_name=owner_class.__name__,
-                )
+                )]
             except Exception as e:
                 logger.error(
                     f"事件处理出错：创建 {owner_class.__name__} 实例失败："
                     f"{str(e)} - {traceback.format_exc()}"
                 )
-                return None
-        if binding.instance is None:
-            return None
-        method = getattr(binding.instance, method_name, None)
-        if not callable(method):
-            # 动态生成的处理器可能只同步了 __qualname__，__name__ 与类上方法名不一致时
-            # 回退到限定名末段重试；仍无法解析时记录告警，避免静默跳过
-            fallback_name = self.__parse_handler_names(handler)[1]
-            method = getattr(binding.instance, fallback_name, None)
-            if fallback_name == method_name or not callable(method):
-                logger.warning(
-                    f"事件处理器 {self.__get_handler_identifier(handler)} "
-                    f"无法解析为实例方法 {owner_class.__name__}.{method_name}，跳过执行"
-                )
-                return None
-            method_name = fallback_name
-        return method, binding, owner_class.__name__, method_name
+                return []
+        class_identifier = self.__get_handler_identifier(owner_class)
+        resolved = []
+        for binding in bindings:
+            if binding.instance is None:
+                continue
+            if not self.__is_instance_enabled(class_identifier, binding.instance_key):
+                continue
+            # 定向投递的事件携带用户自由文本，只能交给会话所属的那一个实例；
+            # 未登记实例键的绑定只有一个实例，按默认实例参与比对
+            if target_owner and (binding.instance_key or owner_class.__name__) != target_owner:
+                continue
+            resolved_name = method_name
+            method = getattr(binding.instance, resolved_name, None)
+            if not callable(method):
+                # 动态生成的处理器可能只同步了 __qualname__，__name__ 与类上方法名不一致时
+                # 回退到限定名末段重试；仍无法解析时记录告警，避免静默跳过
+                fallback_name = self.__parse_handler_names(handler)[1]
+                method = getattr(binding.instance, fallback_name, None)
+                if fallback_name == resolved_name or not callable(method):
+                    logger.warning(
+                        f"事件处理器 {self.__get_handler_identifier(handler)} "
+                        f"无法解析为实例方法 {owner_class.__name__}.{resolved_name}，跳过执行"
+                    )
+                    continue
+                resolved_name = fallback_name
+            resolved.append((method, binding, owner_class.__name__, resolved_name))
+        return resolved
 
     def __broadcast_consumer_loop(self):
         """
