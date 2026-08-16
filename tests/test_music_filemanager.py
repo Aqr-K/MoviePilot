@@ -61,7 +61,7 @@ def test_music_media_root_uses_album_directory_with_or_without_disc_folder():
 
 def test_media_files_uses_music_template_root_and_only_returns_audio():
     """本地音乐查重应扫描目标专辑目录并排除同目录视频文件。"""
-    module = FileManagerModule()
+    handler = TransHandler()
     storage = Mock()
     album_dir = Path("/library/Daft Punk/Random Access Memories (2013)")
     storage.get_item.return_value = FileItem(
@@ -79,21 +79,23 @@ def test_media_files_uses_music_template_root_and_only_returns_audio():
         type="file",
         extension="mkv",
     )
-    module._FileManagerModule__get_storage_oper = Mock(return_value=storage)
-    module.list_files = Mock(return_value=[audio, video])
+    handler.list_files = Mock(return_value=[audio, video])
     directory = TransferDirectoryConf(
         library_path="/library",
         library_storage="local",
     )
 
     with patch(
-        "app.modules.filemanager.DirectoryHelper.get_library_dirs",
+        "app.application.transfer.handler.get_storage",
+        return_value=storage,
+    ), patch(
+        "app.application.transfer.handler.DirectoryHelper.get_library_dirs",
         return_value=[directory],
     ), patch(
         "app.application.transfer.handler.eventmanager.send_event",
         return_value=None,
     ):
-        files = module.media_files(_recording())
+        files = handler.media_files(_recording())
 
     storage.get_item.assert_called_once_with(album_dir)
     assert files == [audio]
@@ -102,14 +104,15 @@ def test_media_files_uses_music_template_root_and_only_returns_audio():
 def test_local_music_recording_requires_matching_track_not_any_album_file():
     """单曲查重必须命中目标曲名，不能因同专辑存在其它音轨而误判完成。"""
     module = FileManagerModule()
-    module.media_files = Mock(
+    media_files = Mock(
         return_value=[
             _audio_file("01 - Give Life Back to Music.flac"),
             _audio_file("08 - Get Lucky.flac"),
         ]
     )
 
-    with patch("app.modules.filemanager.settings.LOCAL_EXISTS_SEARCH", True):
+    with patch("app.modules.filemanager.settings.LOCAL_EXISTS_SEARCH", True), \
+            patch.object(TransHandler, "media_files", media_files):
         exists = module.media_exists(_recording())
         missing = module.media_exists(
             _recording(title="Instant Crush", media_id="recording-2", track_number=5)
@@ -128,7 +131,6 @@ def test_local_music_album_requires_unique_complete_track_coverage():
         duplicate,
         _audio_file("02 - The Game of Love.flac"),
     ]
-    module.media_files = Mock(return_value=files)
     album = _recording(
         music_type="album",
         media_id="release-group-1",
@@ -137,7 +139,8 @@ def test_local_music_album_requires_unique_complete_track_coverage():
         total_tracks=3,
     )
 
-    with patch("app.modules.filemanager.settings.LOCAL_EXISTS_SEARCH", True):
+    with patch("app.modules.filemanager.settings.LOCAL_EXISTS_SEARCH", True), \
+            patch.object(TransHandler, "media_files", Mock(return_value=files)):
         assert module.media_exists(album) is None
         files.append(_audio_file("03 - Giorgio by Moroder.flac"))
         exists = module.media_exists(album)

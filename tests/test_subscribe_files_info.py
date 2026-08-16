@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from app.application.transfer.handler import TransHandler
 from app.chain.subscribe import SubscribeChain
 from app.modules.filemanager import FileManagerModule
 from app.schemas.mediaserver import ExistMediaInfo
@@ -53,7 +54,8 @@ def test_filemanager_media_exists_skips_local_when_server_specified():
     module = FileManagerModule()
     mediainfo = _build_mediainfo()
 
-    with patch.object(module, "media_files", return_value=[SimpleNamespace(path="/media/test.mkv")]) as media_files:
+    with patch.object(TransHandler, "media_files",
+                      return_value=[SimpleNamespace(path="/media/test.mkv")]) as media_files:
         result = module.media_exists(mediainfo, server="Emby1")
 
     assert result is None

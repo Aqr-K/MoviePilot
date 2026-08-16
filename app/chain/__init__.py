@@ -25,6 +25,7 @@ from app.db.oper.message import MessageOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.db.oper.user import UserOper
 from app.application.messaging.message import MessageHelper, MessageQueueManager, MessageTemplateHelper
+from app.application.transfer.handler import TransHandler
 from app.adapters.external.server import MoviePilotServerHelper
 from app.runtime.extensions.service_registry import ServiceConfigHelper
 from app.runtime.log import logger
@@ -1654,8 +1655,7 @@ class ChainBase(metaclass=ABCMeta):
         :param preview: 是否仅预览，不执行实际转移
         :return: {path, target_path, message}
         """
-        return self.run_module(
-            "transfer",
+        return TransHandler().transfer(
             fileitem=fileitem,
             meta=meta,
             mediainfo=mediainfo,
@@ -1823,7 +1823,7 @@ class ChainBase(metaclass=ABCMeta):
         :param mediainfo:  识别的媒体信息
         :return: 媒体文件列表
         """
-        return self.run_module("media_files", mediainfo=mediainfo)
+        return TransHandler().media_files(mediainfo=mediainfo)
 
     def post_message(
             self,

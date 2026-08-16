@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Callable, Optional, List, Tuple, Union
 
 from jinja2 import Template
 
@@ -9,11 +9,12 @@ from app.domain.context import MediaInfo, MusicInfo
 from app.runtime.events import eventmanager
 from app.domain.meta.metabase import MetaBase
 from app.domain.meta.metamusic import MetaMusic
-from app.domain.metainfo import MetaInfoPath
+from app.domain.metainfo import MetaInfo, MetaInfoPath
 from app.application.audio import AudioMetadataHelper
 from app.application.directory import DirectoryHelper
 from app.application.messaging.message import TemplateHelper
 from app.runtime.log import logger
+from app.modules.storages import get_storage
 from app.modules.storages.base import StorageBase
 from app.schemas import (
     TransferInfo,
@@ -26,7 +27,7 @@ from app.schemas import (
     TransferRenameEventData,
 )
 from app.schemas.exception import StorageQueryError
-from app.schemas.types import MediaType, ChainEventType
+from app.schemas.types import MUSIC_ENTITY_ALBUM, MediaType, ChainEventType
 from app.adapters.system.host import SystemUtils
 
 
@@ -159,6 +160,134 @@ class TransHandler:
         if not source_score or not target_score or source_score == target_score:
             return None
         return source_score > target_score
+
+    def transfer(self, fileitem: FileItem, meta: MetaBase, mediainfo: MediaInfo,
+                 target_directory: TransferDirectoryConf = None,
+                 target_storage: Optional[str] = None, target_path: Path = None,
+                 transfer_type: Optional[str] = None, scrape: Optional[bool] = None,
+                 library_type_folder: Optional[bool] = None, library_category_folder: Optional[bool] = None,
+                 episodes_info: List[TmdbEpisode] = None,
+                 source_oper: Callable = None, target_oper: Callable = None,
+                 preview: Optional[bool] = False) -> TransferInfo:
+        """
+        文件整理，校验源文件、解析目标媒体库路径与存储操作对象后执行整理
+
+        :param fileitem:  文件信息
+        :param meta: 预识别的元数据
+        :param mediainfo:  识别的媒体信息
+        :param target_directory:  目标目录配置
+        :param target_storage:  目标存储
+        :param target_path:  目标路径
+        :param transfer_type:  转移模式
+        :param scrape: 是否刮削元数据
+        :param library_type_folder: 是否按媒体类型创建目录
+        :param library_category_folder: 是否按媒体类别创建目录
+        :param episodes_info: 当前季的全部集信息
+        :param source_oper: 源存储操作对象
+        :param target_oper: 目标存储操作对象
+        :param preview: 是否仅预览，不执行实际转移
+        :return: {path, target_path, message}
+        """
+        # 检查目录路径
+        if fileitem.storage == "local" and not Path(fileitem.path).exists():
+            return TransferInfo(success=False,
+                                fileitem=fileitem,
+                                message=f"{fileitem.path} 不存在")
+        # 目标路径不能是文件
+        if target_path and target_path.is_file():
+            logger.error(f"整理目标路径 {target_path} 是一个文件")
+            return TransferInfo(success=False,
+                                fileitem=fileitem,
+                                message=f"{target_path} 不是有效目录")
+        # 获取目标路径
+        if target_directory:
+            # 目标媒体库目录未设置
+            if not target_directory.library_path:
+                logger.error(f"目标媒体库目录未设置，无法整理文件，源路径：{fileitem.path}")
+                return TransferInfo(success=False,
+                                    fileitem=fileitem,
+                                    message="目标媒体库目录未设置")
+            # 整理方式
+            if not transfer_type:
+                transfer_type = target_directory.transfer_type
+            # 目标存储
+            if not target_storage:
+                target_storage = target_directory.library_storage
+            # 是否需要重命名
+            need_rename = target_directory.renaming
+            # 是否需要通知
+            need_notify = target_directory.notify
+            # 覆盖模式
+            overwrite_mode = target_directory.overwrite_mode
+            # 是否需要刮削
+            need_scrape = target_directory.scraping if scrape is None else scrape
+            # 拼装媒体库一、二级子目录
+            target_path = self.get_dest_dir(mediainfo=mediainfo, target_dir=target_directory,
+                                            need_type_folder=library_type_folder,
+                                            need_category_folder=library_category_folder)
+        elif target_path:
+            need_scrape = scrape or False
+            need_rename = True
+            need_notify = False
+            overwrite_mode = "never"
+            # 手动整理的场景，有自定义目标路径
+            target_path = self.get_dest_path(mediainfo=mediainfo, target_path=target_path,
+                                             need_type_folder=library_type_folder,
+                                             need_category_folder=library_category_folder)
+        else:
+            # 未找到有效的媒体库目录
+            logger.error(
+                f"{mediainfo.type.value if mediainfo.type else '未知类型'} {mediainfo.title_year} 未找到有效的媒体库目录，无法整理文件，源路径：{fileitem.path}")
+            return TransferInfo(success=False,
+                                fileitem=fileitem,
+                                message="未找到有效的媒体库目录")
+        # 整理方式
+        if not transfer_type:
+            logger.error(f"{target_directory.name} 未设置整理方式")
+            return TransferInfo(success=False,
+                                fileitem=fileitem,
+                                message=f"{target_directory.name} 未设置整理方式")
+
+        # 源操作对象
+        if not source_oper:
+            source_oper = get_storage(fileitem.storage)
+        if not source_oper:
+            return TransferInfo(success=False,
+                                message=f"不支持的存储类型：{fileitem.storage}",
+                                fileitem=fileitem,
+                                fail_list=[fileitem.path],
+                                transfer_type=transfer_type,
+                                need_notify=need_notify
+                                )
+        # 目的操作对象
+        if not target_oper:
+            if not target_storage:
+                target_storage = fileitem.storage
+            target_oper = get_storage(target_storage)
+        if not target_oper:
+            return TransferInfo(success=False,
+                                message=f"不支持的存储类型：{target_storage}",
+                                fileitem=fileitem,
+                                fail_list=[fileitem.path],
+                                transfer_type=transfer_type,
+                                need_notify=need_notify)
+
+        # 整理
+        logger.info(f"获取整理目标路径：【{target_storage}】{target_path}")
+        return self.transfer_media(fileitem=fileitem,
+                                   in_meta=meta,
+                                   mediainfo=mediainfo,
+                                   target_storage=target_storage,
+                                   target_path=target_path,
+                                   transfer_type=transfer_type,
+                                   need_scrape=need_scrape,
+                                   need_rename=need_rename,
+                                   need_notify=need_notify,
+                                   overwrite_mode=overwrite_mode,
+                                   episodes_info=episodes_info,
+                                   preview=preview,
+                                   source_oper=source_oper,
+                                   target_oper=target_oper)
 
     def transfer_media(
         self,
@@ -1301,6 +1430,111 @@ class TransHandler:
                                              file_ext=Path(meta.title).suffix)
         )
         return path.as_posix() if path else ""
+
+    @staticmethod
+    def _build_library_lookup_meta(
+            mediainfo: Union[MediaInfo, MusicInfo],
+    ) -> MetaBase:
+        """
+        构造标准媒体库路径反查使用的最小元数据
+
+        :param mediainfo: 媒体信息
+        :return: 可用于渲染命名模板的元数据
+        """
+        if mediainfo.type == MediaType.MUSIC:
+            music_type = getattr(mediainfo, "music_type", None)
+            album = getattr(mediainfo, "album", None)
+            if not album and music_type == MUSIC_ENTITY_ALBUM:
+                album = mediainfo.title
+            return MetaMusic(
+                title=mediainfo.title,
+                artists=list(getattr(mediainfo, "artists", None) or []),
+                album=album,
+                album_artist=getattr(mediainfo, "album_artist", None),
+                year=mediainfo.year,
+                disc_number=getattr(mediainfo, "disc_number", None),
+                track_number=getattr(mediainfo, "track_number", None),
+                total_tracks=getattr(mediainfo, "total_tracks", None),
+                media_source=getattr(mediainfo, "source", None),
+                media_id=getattr(mediainfo, "media_id", None),
+            )
+
+        meta = MetaInfo(mediainfo.title)
+        if meta.type == MediaType.UNKNOWN and mediainfo.type is not None:
+            meta.type = mediainfo.type
+        if meta.year is None:
+            meta.year = mediainfo.year
+        if meta.begin_season is None:
+            meta.begin_season = 1
+        if meta.begin_episode is None:
+            meta.begin_episode = 1
+        return meta
+
+    def media_files(self, mediainfo: Union[MediaInfo, MusicInfo]) -> List[FileItem]:
+        """
+        按标准媒体库结构获取对应媒体已入库的文件列表
+
+        :param mediainfo: 媒体信息
+        :return: 媒体库文件列表
+        """
+        ret_fileitems = []
+        # 检查本地媒体库
+        dest_dirs = DirectoryHelper().get_library_dirs()
+        # 检查每一个媒体库目录
+        for dest_dir in dest_dirs:
+            # 存储
+            storage_oper = get_storage(dest_dir.library_storage)
+            if not storage_oper:
+                continue
+            # 媒体分类路径
+            dir_path = self.get_dest_dir(mediainfo=mediainfo, target_dir=dest_dir)
+            # 重命名格式
+            rename_format = settings.RENAME_FORMAT(mediainfo.type)
+            # 元数据补上常用属性，尽可能确保重命名后的路径不出现空白
+            meta = self._build_library_lookup_meta(mediainfo)
+            # 获取路径（重命名路径）
+            target_path = self.get_rename_path(
+                path=dir_path,
+                template_string=rename_format,
+                rename_dict=self.get_naming_dict(meta=meta,
+                                                 mediainfo=mediainfo)
+            )
+            # 获取重命名后的媒体文件根路径
+            media_path = DirectoryHelper.get_media_root_path(
+                rename_format,
+                rename_path=target_path,
+                media_type=mediainfo.type,
+            )
+            if not media_path:
+                # 忽略
+                continue
+            if dir_path != media_path and dir_path.is_relative_to(media_path):
+                # 兜底检查，避免不必要的扫盘
+                logger.warn(f"{media_path} 是媒体库目录 {dir_path} 的父目录，忽略获取媒体文件列表，请检查重命名格式！")
+                continue
+            # 检索媒体文件
+            fileitem = storage_oper.get_item(media_path)
+            if not fileitem:
+                continue
+            try:
+                media_files = self.list_files(fileitem, True)
+            except Exception as e:
+                logger.debug(f"获取媒体文件列表失败：{str(e)}")
+                continue
+            if media_files:
+                media_extensions = (
+                    settings.RMT_AUDIOEXT
+                    if mediainfo.type == MediaType.MUSIC
+                    else settings.RMT_MEDIAEXT
+                )
+                for media_file in media_files:
+                    if (
+                            media_file.extension
+                            and f".{media_file.extension.lower()}" in media_extensions
+                    ):
+                        if media_file not in ret_fileitems:
+                            ret_fileitems.append(media_file)
+        return ret_fileitems
 
     @staticmethod
     def get_rename_path(
