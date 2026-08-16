@@ -820,6 +820,18 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         owner="modules",
         is_package=True,
     ),
+    "app.modules.musicbrainz.mapping": ModuleAlias(
+        target="app.modules.recognizers.musicbrainz.mapping",
+        replacement="app.modules.recognizers.musicbrainz.mapping",
+        introduced="v3.0.0",
+        owner="modules",
+    ),
+    "app.modules.musicbrainz.matching": ModuleAlias(
+        target="app.modules.recognizers.musicbrainz.matching",
+        replacement="app.modules.recognizers.musicbrainz.matching",
+        introduced="v3.0.0",
+        owner="modules",
+    ),
     "app.modules.musicbrainz.api": ModuleAlias(
         target="app.modules.recognizers.musicbrainz.api",
         replacement="app.modules.recognizers.musicbrainz.api",
