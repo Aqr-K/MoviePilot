@@ -1,5 +1,5 @@
 from app.domain.context import MusicInfo
-from app.modules.lrclib import LrclibModule
+from app.modules.enrichment.lrclib import LrclibModule
 
 
 class _FakeLrclibResponse:
@@ -123,7 +123,7 @@ def test_request_json_honors_retry_after_once(monkeypatch) -> None:
     )
     sleeps = []
     monkeypatch.setattr(LrclibModule, "_request_once", lambda *_args, **_kwargs: next(responses))
-    monkeypatch.setattr("app.modules.lrclib.time.sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr("app.modules.enrichment.lrclib.time.sleep", lambda seconds: sleeps.append(seconds))
     LrclibModule._request_json.cache_clear()
 
     result = LrclibModule._request_json(
@@ -145,7 +145,7 @@ def test_request_json_retry_network_failure_is_not_cached(monkeypatch) -> None:
         ]
     )
     monkeypatch.setattr(LrclibModule, "_request_once", lambda *_args, **_kwargs: next(responses))
-    monkeypatch.setattr("app.modules.lrclib.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("app.modules.enrichment.lrclib.time.sleep", lambda _seconds: None)
     LrclibModule._request_json.cache_clear()
     params = {"track_name": "retry"}
 

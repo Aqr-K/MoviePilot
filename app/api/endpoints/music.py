@@ -11,7 +11,7 @@ from app.domain.context import MusicAlbumInfo, MusicArtistInfo, MusicInfo
 from app.application.security.access import verify_token
 from app.db.models.user import User
 from app.api.deps import get_current_active_superuser_async
-from app.modules.listenbrainz import (
+from app.modules.enrichment.listenbrainz import (
     LISTENBRAINZ_CHART_RANGES,
     LISTENBRAINZ_FRESH_MAX_DAYS,
     LISTENBRAINZ_FRESH_SORTS,

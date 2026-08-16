@@ -1,4 +1,4 @@
-from app.modules.listenbrainz import ListenBrainzModule
+from app.modules.enrichment.listenbrainz import ListenBrainzModule
 
 
 def test_recording_to_info_maps_listenbrainz_payload():
@@ -169,7 +169,7 @@ class _FakeListenBrainzResponse:
 
 def test_request_json_caches_repeated_calls(monkeypatch):
     """相同路径与参数的 ListenBrainz 请求应命中缓存，避免重复发起网络调用。"""
-    import app.modules.listenbrainz as listenbrainz_module
+    import app.modules.enrichment.listenbrainz as listenbrainz_module
 
     network_calls = {"count": 0}
 
@@ -197,7 +197,7 @@ def test_request_json_caches_repeated_calls(monkeypatch):
 
 def test_request_json_does_not_cache_errors(monkeypatch):
     """失败请求返回的 None 不应缓存，以便下次重试。"""
-    import app.modules.listenbrainz as listenbrainz_module
+    import app.modules.enrichment.listenbrainz as listenbrainz_module
 
     network_calls = {"count": 0}
 

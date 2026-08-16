@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from app.runtime.config import ConfigModel
-from app.modules.acoustid import AcoustIdModule
+from app.modules.enrichment.acoustid import AcoustIdModule
 from app.adapters.network.http import AsyncRequestUtils, RequestUtils
 
 
@@ -64,10 +64,10 @@ def test_identify_music_by_fingerprint_queries_acoustid_and_caches_result(
         }],
     })
     post_res = Mock(return_value=response)
-    monkeypatch.setattr("app.modules.acoustid.subprocess.run", fpcalc)
+    monkeypatch.setattr("app.modules.enrichment.acoustid.subprocess.run", fpcalc)
     monkeypatch.setattr(RequestUtils, "post_res", post_res)
     monkeypatch.setattr(module, "_wait_for_rate_limit", lambda: None)
-    monkeypatch.setattr("app.modules.acoustid.settings.ACOUSTID_API_KEY", "client-key")
+    monkeypatch.setattr("app.modules.enrichment.acoustid.settings.ACOUSTID_API_KEY", "client-key")
 
     first = module.identify_music_by_fingerprint(audio_path)
     second = module.identify_music_by_fingerprint(audio_path)
@@ -163,12 +163,12 @@ def test_async_identify_music_by_fingerprint_uses_async_process_and_http(
     post_res = AsyncMock(return_value=response)
     wait_rate_limit = AsyncMock()
     monkeypatch.setattr(
-        "app.modules.acoustid.asyncio.create_subprocess_exec",
+        "app.modules.enrichment.acoustid.asyncio.create_subprocess_exec",
         create_process,
     )
     monkeypatch.setattr(AsyncRequestUtils, "post_res", post_res)
     monkeypatch.setattr(module, "_async_wait_for_rate_limit", wait_rate_limit)
-    monkeypatch.setattr("app.modules.acoustid.settings.ACOUSTID_API_KEY", "client-key")
+    monkeypatch.setattr("app.modules.enrichment.acoustid.settings.ACOUSTID_API_KEY", "client-key")
 
     result = asyncio.run(module.async_identify_music_by_fingerprint(audio_path))
 

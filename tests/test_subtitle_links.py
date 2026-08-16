@@ -1,6 +1,6 @@
 from lxml import etree
 
-from app.modules.subtitle import SubtitleModule
+from app.modules.enrichment.subtitle import SubtitleModule
 
 
 def test_parse_subtitle_links_filters_detail_page_action_links():

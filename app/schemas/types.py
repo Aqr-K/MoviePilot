@@ -551,6 +551,8 @@ class ModuleType(Enum):
     Indexer = "indexer"
     # 存储
     Storage = "storage"
+    # 媒体增补：为已识别媒体补充素材或提供单一辅助能力
+    Enrichment = "enrichment"
     # 其它
     Other = "other"
 
