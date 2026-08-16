@@ -1,6 +1,6 @@
 import asyncio
 
-from app.modules.bangumi import BangumiModule
+from app.modules.recognizers.bangumi import BangumiModule
 
 
 class _FakeBangumiApi:

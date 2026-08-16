@@ -10,8 +10,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from app.domain.metainfo import MetaInfo
 from app.chain import ChainBase
 from app.adapters.external.server import MoviePilotServerHelper
-from app.modules.themoviedb import TheMovieDbModule
-from app.modules.themoviedb.tmdbv3api.tmdb import TMDb
+from app.modules.recognizers.themoviedb import TheMovieDbModule
+from app.modules.recognizers.themoviedb.tmdbv3api.tmdb import TMDb
 from app.schemas.types import MediaSource, MediaType
 
 # 离线 TMDB 响应回放：识别测试断言的是 tmdbid 优先/电影电视消歧/类型推断等逻辑，

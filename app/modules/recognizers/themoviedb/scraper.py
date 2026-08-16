@@ -7,7 +7,7 @@ from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
 from app.schemas.types import MediaType
 from app.foundation.dom import DomUtils
-from app.modules.themoviedb.tmdbapi import TmdbApi
+from app.modules.recognizers.themoviedb.tmdbapi import TmdbApi
 
 
 class TmdbScraper:

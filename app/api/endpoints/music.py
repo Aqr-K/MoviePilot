@@ -16,7 +16,7 @@ from app.modules.listenbrainz import (
     LISTENBRAINZ_FRESH_MAX_DAYS,
     LISTENBRAINZ_FRESH_SORTS,
 )
-from app.modules.musicbrainz.music_cache import MusicBrainzCache
+from app.modules.recognizers.musicbrainz.music_cache import MusicBrainzCache
 
 router = ResponseAPIRouter()
 

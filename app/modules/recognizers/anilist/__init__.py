@@ -7,7 +7,7 @@ from app.domain.meta.metabase import MetaBase
 from app.domain.scraper import MediaScraperHelper
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.modules.anilist.anilist import AniListApi
+from app.modules.recognizers.anilist.anilist import AniListApi
 from app.schemas.types import (
     MediaRecognizeType,
     MediaSource,

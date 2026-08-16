@@ -3,7 +3,7 @@ from unittest.mock import Mock
 from unittest.mock import AsyncMock
 
 from app.domain.meta.metabase import MetaBase
-from app.modules.douban import DoubanModule
+from app.modules.recognizers.douban import DoubanModule
 from app.schemas.types import MediaSource, MediaType
 
 

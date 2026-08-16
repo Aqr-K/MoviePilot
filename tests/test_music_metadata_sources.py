@@ -8,8 +8,8 @@ from app.chain.media import MediaChain
 from app.chain.scraping import ScrapingChain
 from app.domain.context import MUSIC_ENTITY_ALBUM, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.douban import DoubanModule
-from app.modules.theaudiodb import TheAudioDbModule
+from app.modules.recognizers.douban import DoubanModule
+from app.modules.recognizers.theaudiodb import TheAudioDbModule
 from app.schemas.types import MediaRecognizeType, MediaSource, MediaType
 
 
@@ -110,7 +110,7 @@ def test_theaudiodb_empty_response_is_soft_failure_and_closes_response(monkeypat
         headers={"Content-Type": "text/html; charset=UTF-8"},
     )
     get_res = Mock(return_value=response)
-    monkeypatch.setattr("app.modules.theaudiodb.RequestUtils.get_res", get_res)
+    monkeypatch.setattr("app.modules.recognizers.theaudiodb.RequestUtils.get_res", get_res)
     TheAudioDbModule._request_json.cache_clear()
 
     result = TheAudioDbModule._request_json("searchtrack.php", {"t": "Yellow"})
@@ -131,7 +131,7 @@ async def test_theaudiodb_async_empty_response_is_soft_failure_and_closes_respon
     )
     response.aclose = AsyncMock()
     get_res = AsyncMock(return_value=response)
-    monkeypatch.setattr("app.modules.theaudiodb.AsyncRequestUtils.get_res", get_res)
+    monkeypatch.setattr("app.modules.recognizers.theaudiodb.AsyncRequestUtils.get_res", get_res)
     await TheAudioDbModule._async_request_json.cache_clear()
 
     result = await TheAudioDbModule._async_request_json(

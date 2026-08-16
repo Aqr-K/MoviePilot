@@ -9,11 +9,11 @@ from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.modules.themoviedb.category import CategoryHelper
-from app.modules.themoviedb.scraper import TmdbScraper
-from app.modules.themoviedb.tmdb_cache import TmdbCache
-from app.modules.themoviedb.tmdbapi import TmdbApi
-from app.modules.themoviedb.tmdbv3api.exceptions import TMDbConnectionError
+from app.modules.recognizers.themoviedb.category import CategoryHelper
+from app.modules.recognizers.themoviedb.scraper import TmdbScraper
+from app.modules.recognizers.themoviedb.tmdb_cache import TmdbCache
+from app.modules.recognizers.themoviedb.tmdbapi import TmdbApi
+from app.modules.recognizers.themoviedb.tmdbv3api.exceptions import TMDbConnectionError
 from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     MediaImageType,

@@ -1,7 +1,7 @@
 from app.runtime.config import settings
 from app.domain.context import MUSIC_ENTITY_ALBUM, MUSIC_ENTITY_RECORDING, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.musicbrainz import MusicBrainzModule
 
 
 def test_musicbrainz_cover_domains_are_allowed_by_image_proxy():
@@ -549,7 +549,7 @@ class _FakeMusicBrainzResponse:
 
 def test_request_json_caches_repeated_calls(monkeypatch):
     """相同路径与参数的 MusicBrainz 请求应命中缓存，避免重复发起网络调用。"""
-    import app.modules.musicbrainz as musicbrainz_module
+    import app.modules.recognizers.musicbrainz as musicbrainz_module
 
     monkeypatch.setattr(
         MusicBrainzModule, "_wait_for_rate_limit", classmethod(lambda cls: None)
@@ -574,7 +574,7 @@ def test_request_json_caches_repeated_calls(monkeypatch):
 
 def test_request_json_caches_not_found(monkeypatch):
     """MusicBrainz 稳定 404 应进入有界缓存，避免重复探测单曲与专辑入口。"""
-    import app.modules.musicbrainz as musicbrainz_module
+    import app.modules.recognizers.musicbrainz as musicbrainz_module
 
     monkeypatch.setattr(
         MusicBrainzModule, "_wait_for_rate_limit", classmethod(lambda cls: None)
@@ -600,7 +600,7 @@ def test_request_json_retries_on_server_busy(monkeypatch):
     """服务端繁忙（429/5xx）属于瞬时错误，应退避重试而不是直接放弃。"""
     import time
 
-    import app.modules.musicbrainz as musicbrainz_module
+    import app.modules.recognizers.musicbrainz as musicbrainz_module
 
     monkeypatch.setattr(
         MusicBrainzModule, "_wait_for_rate_limit", classmethod(lambda cls: None)

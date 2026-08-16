@@ -12,7 +12,7 @@ from app.modules.notifications.qqbot import QQBotModule
 from app.modules.notifications.slack import SlackModule
 from app.modules.notifications.telegram import TelegramModule
 from app.modules.notifications.telegram.telegram import Telegram
-from app.modules.themoviedb import TheMovieDbModule
+from app.modules.recognizers.themoviedb import TheMovieDbModule
 from app.modules.mediaservers.trimemedia import TrimeMediaModule
 from app.modules.mediaservers.ugreen import UgreenModule
 from app.modules.notifications.wechat import WechatModule
