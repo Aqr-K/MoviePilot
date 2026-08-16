@@ -17,13 +17,13 @@ from app.schemas.types import MediaSource, MediaType
 
 # 契约期望：榜单标识 -> (内容媒体类型, 是否支持翻页, 取数方法名)
 EXPECTED_BOARDS = {
-    "movie_showing": (MediaType.MOVIE, True, "movie_showing"),
-    "movie_hot": (MediaType.MOVIE, True, "movie_hot"),
-    "movie_top250": (MediaType.MOVIE, True, "movie_top250"),
-    "tv_hot": (MediaType.TV, True, "tv_hot"),
-    "tv_weekly_chinese": (MediaType.TV, True, "tv_weekly_chinese"),
-    "tv_weekly_global": (MediaType.TV, True, "tv_weekly_global"),
-    "tv_animation": (MediaType.TV, True, "tv_animation"),
+    "movie_showing": (MediaType.MOVIE, True, "_movie_showing"),
+    "movie_hot": (MediaType.MOVIE, True, "_movie_hot"),
+    "movie_top250": (MediaType.MOVIE, True, "_movie_top250"),
+    "tv_hot": (MediaType.TV, True, "_tv_hot"),
+    "tv_weekly_chinese": (MediaType.TV, True, "_tv_weekly_chinese"),
+    "tv_weekly_global": (MediaType.TV, True, "_tv_weekly_global"),
+    "tv_animation": (MediaType.TV, True, "_tv_animation"),
 }
 
 # 榜单标识 -> 接口客户端上对应的取数方法名
@@ -162,7 +162,7 @@ def test_discover_without_criteria_uses_the_client_defaults(module):
 
 def test_discover_is_served_by_the_existing_filter_method(module):
     """条件筛选委托到自己的取数方法，限流与缓存不被绕开。"""
-    with patch.object(DoubanModule, "douban_discover", return_value=[]) as fetch:
+    with patch.object(DoubanModule, "_douban_discover", return_value=[]) as fetch:
         module.discover(source=MediaSource.Douban, mtype=MediaType.TV, tags="悬疑")
 
     fetch.assert_called_once_with(mtype=MediaType.TV, sort="R", tags="悬疑")
@@ -182,7 +182,7 @@ def test_the_board_methods_still_work(module):
 
 def test_the_filter_method_still_works(module):
     """条件筛选方法可用。"""
-    assert module.douban_discover(mtype=MediaType.MOVIE, sort="R", tags="", page=1, count=30)
+    assert module._douban_discover(mtype=MediaType.MOVIE, sort="R", tags="", page=1, count=30)
 
 
 def test_every_declared_board_can_be_fetched_asynchronously(module):
@@ -196,7 +196,7 @@ def test_every_declared_board_can_be_fetched_asynchronously(module):
 def test_each_asynchronous_board_is_served_by_its_own_fetch_method(module):
     """每个榜单的异步取数委托到自己的异步方法，限流与缓存因此仍按榜单分桶。"""
     for board, (_, _, fetch_name) in EXPECTED_BOARDS.items():
-        with patch.object(DoubanModule, f"async_{fetch_name}",
+        with patch.object(DoubanModule, f"_async{fetch_name}",
                           new_callable=AsyncMock, return_value=[]) as fetch:
             result = run(module.async_discover_board(source=MediaSource.Douban, board=board,
                                                      page=2, count=10))
@@ -260,7 +260,7 @@ def test_asynchronous_discover_without_criteria_uses_the_client_defaults(module)
 
 def test_asynchronous_discover_is_served_by_the_existing_filter_method(module):
     """异步条件筛选委托到自己的异步取数方法，限流与缓存不被绕开。"""
-    with patch.object(DoubanModule, "async_douban_discover",
+    with patch.object(DoubanModule, "_async_douban_discover",
                       new_callable=AsyncMock, return_value=[]) as fetch:
         result = run(module.async_discover(source=MediaSource.Douban, mtype=MediaType.TV,
                                            tags="悬疑"))

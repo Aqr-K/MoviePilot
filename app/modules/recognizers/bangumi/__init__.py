@@ -329,7 +329,7 @@ class BangumiModule(_ModuleBase):
 
     # 本源提供的榜单：标识 -> (显示名, 榜单方法名, 媒体类型, 是否支持翻页)
     _BOARDS = {
-        "calendar": ("每日放送", "bangumi_calendar", MediaType.TV, False),
+        "calendar": ("每日放送", "_bangumi_calendar", MediaType.TV, False),
     }
 
     def discover_boards(self) -> List[schemas.DiscoverBoard]:
@@ -401,7 +401,7 @@ class BangumiModule(_ModuleBase):
         if not declared:
             return None
         # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
-        fetch = getattr(self, f"async_{declared[1]}")
+        fetch = getattr(self, f"_async{declared[1]}")
         # 放送表在源侧整周返回，按页码与每页条数切片给出对应的一页
         return self._page_of(await fetch(), page, count)
 
@@ -418,7 +418,7 @@ class BangumiModule(_ModuleBase):
         """
         if source != MediaSource.Bangumi:
             return None
-        return self.bangumi_discover(**criteria)
+        return self._bangumi_discover(**criteria)
 
     async def async_discover(self, source: Optional[MediaSource] = None,
                              mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
@@ -433,9 +433,9 @@ class BangumiModule(_ModuleBase):
         """
         if source != MediaSource.Bangumi:
             return None
-        return await self.async_bangumi_discover(**criteria)
+        return await self._async_bangumi_discover(**criteria)
 
-    def bangumi_calendar(self) -> Optional[List[MediaInfo]]:
+    def _bangumi_calendar(self) -> Optional[List[MediaInfo]]:
         """
         获取Bangumi每日放送
         """
@@ -444,7 +444,7 @@ class BangumiModule(_ModuleBase):
             return [MediaInfo(bangumi_info=info) for info in infos]
         return []
 
-    async def async_bangumi_calendar(self) -> Optional[List[MediaInfo]]:
+    async def _async_bangumi_calendar(self) -> Optional[List[MediaInfo]]:
         """
         获取Bangumi每日放送（异步版本）
         """
@@ -560,7 +560,7 @@ class BangumiModule(_ModuleBase):
             return [MediaInfo(bangumi_info=credit) for credit in credits_info]
         return []
 
-    def bangumi_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
+    def _bangumi_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """
         发现Bangumi番剧
         """
@@ -569,7 +569,7 @@ class BangumiModule(_ModuleBase):
             return [MediaInfo(bangumi_info=info) for info in infos]
         return []
 
-    async def async_bangumi_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
+    async def _async_bangumi_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """
         发现Bangumi番剧（异步版本）
         """

@@ -1,11 +1,11 @@
 """TheMovieDb 与 Bangumi 的发现能力契约。
 
-两源的既有发现方法都是榜单契约的退化情形：``tmdb_trending`` 只有 ``page`` 没有 ``count``，
-``bangumi_calendar`` 无参且整周一次返回。契约不因此走样——榜单声明里的 ``paged`` 说的是源侧
+两源的取数方法都是榜单契约的退化情形：``_tmdb_trending`` 只有 ``page`` 没有 ``count``，
+``_bangumi_calendar`` 无参且整周一次返回。契约不因此走样——榜单声明里的 ``paged`` 说的是源侧
 是否原生分页，源侧整份返回时由源按页码切片，调用方对所有榜单一律可传 ``page`` 与 ``count``。
 
-``discover_board`` 一律委托给既有榜单方法，取数路径与缓存、限流的挂载点保持一致，不因
-归一而退化成整个 ``discover_board`` 一个桶。
+``discover_board`` 一律委托给各榜单自己的取数方法，取数路径与缓存、限流的挂载点保持一致，
+不退化成整个 ``discover_board`` 一个桶。
 """
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
@@ -199,15 +199,15 @@ def test_bangumi_discover_passes_the_given_criteria(bangumi):
     bangumi.bangumiapi.discover.assert_called_once_with(type=2, sort="rank")
 
 
-def test_the_legacy_methods_still_work(tmdb, bangumi):
-    """契约化期间旧方法保留，便于前后对照验证归一无损。"""
-    assert tmdb.tmdb_trending(page=1)
-    assert tmdb.tmdb_discover(mtype=MediaType.MOVIE, sort_by="popularity.desc", with_genres="",
-                              with_original_language="", with_keywords="",
-                              with_watch_providers="", vote_average=0.0, vote_count=0,
-                              release_date="")
-    assert bangumi.bangumi_calendar()
-    assert bangumi.bangumi_discover(type=2)
+def test_the_fetch_methods_behind_the_contract_still_work(tmdb, bangumi):
+    """契约背后的各取数方法自身可用，与契约的逐条对照才成立。"""
+    assert tmdb._tmdb_trending(page=1)
+    assert tmdb._tmdb_discover(mtype=MediaType.MOVIE, sort_by="popularity.desc", with_genres="",
+                               with_original_language="", with_keywords="",
+                               with_watch_providers="", vote_average=0.0, vote_count=0,
+                               release_date="")
+    assert bangumi._bangumi_calendar()
+    assert bangumi._bangumi_discover(type=2)
 
 
 def test_every_declared_board_can_be_fetched_asynchronously(module):
@@ -246,7 +246,7 @@ def test_an_asynchronous_board_is_fetched_through_the_existing_method(module):
     source = source_of(module)
 
     for board, (_, method, _, _) in module._BOARDS.items():  # noqa: SLF001
-        with patch.object(module, f"async_{method}",
+        with patch.object(module, f"_async{method}",
                           new_callable=AsyncMock, return_value=[]) as fetch:
             result = run(module.async_discover_board(source=source, board=board))
 
@@ -304,7 +304,7 @@ def test_tmdb_asynchronous_discover_passes_the_given_criteria(tmdb):
 
 def test_tmdb_asynchronous_discover_is_served_by_the_existing_filter_method(tmdb):
     """异步条件筛选委托到既有的异步取数方法，不绕开缓存与限流。"""
-    with patch.object(tmdb, "async_tmdb_discover",
+    with patch.object(tmdb, "_async_tmdb_discover",
                       new_callable=AsyncMock, return_value=[]) as fetch:
         result = run(tmdb.async_discover(source=MediaSource.TMDB, mtype=MediaType.MOVIE))
 
@@ -333,7 +333,7 @@ def test_bangumi_asynchronous_discover_passes_the_given_criteria(bangumi):
 
 def test_bangumi_asynchronous_discover_is_served_by_the_existing_filter_method(bangumi):
     """异步条件筛选委托到既有的异步取数方法，不绕开缓存与限流。"""
-    with patch.object(bangumi, "async_bangumi_discover",
+    with patch.object(bangumi, "_async_bangumi_discover",
                       new_callable=AsyncMock, return_value=[]) as fetch:
         result = run(bangumi.async_discover(source=MediaSource.Bangumi, type=2))
 

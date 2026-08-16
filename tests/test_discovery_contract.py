@@ -8,7 +8,7 @@
 模式：广播加按来源自检，不匹配返回 None；``discover_boards`` 相反，各源榜单的并集正是
 前端要枚举的全部，广播累加就是它要的语义。
 
-以 AniList 为试点，其余源与旧方法暂不动。
+本文件覆盖 AniList 源，其余三源各有自己的契约测试。
 """
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
@@ -94,10 +94,10 @@ def test_discover_of_another_source_is_declined(module):
     assert module.discover(source=MediaSource.Douban) is None
 
 
-def test_the_legacy_methods_still_work(module):
-    """契约化期间旧方法保留，便于前后对照验证归一无损。"""
-    assert module.anilist_trending(page=1, count=20)
-    assert module.anilist_popular_this_season(page=1, count=20)
+def test_the_fetch_methods_behind_the_contract_still_work(module):
+    """契约背后的两个榜单取数方法自身可用，与契约的逐条对照才成立。"""
+    assert module._anilist_trending(page=1, count=20)
+    assert module._anilist_popular_this_season(page=1, count=20)
 
 
 def test_every_declared_board_can_be_fetched_asynchronously(module):
@@ -125,7 +125,7 @@ def test_an_unknown_asynchronous_board_is_declined(module):
 def test_an_asynchronous_board_is_fetched_through_the_existing_method(module):
     """异步取榜单委托到既有的异步取数方法，缓存与限流仍挂在原来的取数路径上。"""
     for board, (_, endpoint, _) in module._BOARDS.items():  # noqa: SLF001
-        target = f"async_anilist_{endpoint}"
+        target = f"_async_anilist_{endpoint}"
         with patch.object(module, target, new_callable=AsyncMock, return_value=[]) as fetch:
             result = run(module.async_discover_board(source=MediaSource.AniList, board=board))
 
@@ -157,7 +157,7 @@ def test_asynchronous_discover_of_another_source_is_declined(module):
 
 def test_asynchronous_discover_is_served_by_the_existing_method(module):
     """异步条件筛选委托到既有的异步取数方法，不绕开缓存与限流。"""
-    with patch.object(module, "async_anilist_discover",
+    with patch.object(module, "_async_anilist_discover",
                       new_callable=AsyncMock, return_value=[]) as fetch:
         result = run(module.async_discover(source=MediaSource.AniList, season="WINTER"))
 

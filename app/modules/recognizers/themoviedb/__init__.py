@@ -969,7 +969,7 @@ class TheMovieDbModule(_ModuleBase):
 
     # 本源提供的榜单：标识 -> (显示名, 榜单方法名, 媒体类型, 是否支持翻页)
     _BOARDS = {
-        "trending": ("流行趋势", "tmdb_trending", None, True),
+        "trending": ("流行趋势", "_tmdb_trending", None, True),
     }
 
     # 条件筛选支持的条件及其不过滤时的取值
@@ -1038,7 +1038,7 @@ class TheMovieDbModule(_ModuleBase):
         if not declared:
             return None
         # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
-        fetch = getattr(self, f"async_{declared[1]}")
+        fetch = getattr(self, f"_async{declared[1]}")
         return await fetch(page=page, raise_exception=raise_exception)
 
     def discover(self, source: Optional[MediaSource] = None,
@@ -1055,7 +1055,7 @@ class TheMovieDbModule(_ModuleBase):
             return None
         params = {name: criteria.get(name, default)
                   for name, default in self._DISCOVER_CRITERIA.items()}
-        return self.tmdb_discover(mtype=mtype, **params)
+        return self._tmdb_discover(mtype=mtype, **params)
 
     async def async_discover(self, source: Optional[MediaSource] = None,
                              mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
@@ -1072,19 +1072,19 @@ class TheMovieDbModule(_ModuleBase):
             return None
         params = {name: criteria.get(name, default)
                   for name, default in self._DISCOVER_CRITERIA.items()}
-        return await self.async_tmdb_discover(
+        return await self._async_tmdb_discover(
             mtype=mtype, raise_exception=bool(criteria.get("raise_exception")), **params
         )
 
-    def tmdb_discover(self, mtype: MediaType, sort_by: str,
-                      with_genres: str,
-                      with_original_language: str,
-                      with_keywords: str,
-                      with_watch_providers: str,
-                      vote_average: float,
-                      vote_count: int,
-                      release_date: str,
-                      page: Optional[int] = 1) -> Optional[List[MediaInfo]]:
+    def _tmdb_discover(self, mtype: MediaType, sort_by: str,
+                       with_genres: str,
+                       with_original_language: str,
+                       with_keywords: str,
+                       with_watch_providers: str,
+                       vote_average: float,
+                       vote_count: int,
+                       release_date: str,
+                       page: Optional[int] = 1) -> Optional[List[MediaInfo]]:
         """
         :param mtype:  媒体类型
         :param sort_by:  排序方式
@@ -1128,7 +1128,7 @@ class TheMovieDbModule(_ModuleBase):
             return [MediaInfo(tmdb_info=info) for info in infos]
         return []
 
-    def tmdb_trending(self, page: Optional[int] = 1) -> List[MediaInfo]:
+    def _tmdb_trending(self, page: Optional[int] = 1) -> List[MediaInfo]:
         """
         TMDB流行趋势
         :param page: 第几页
@@ -1451,16 +1451,16 @@ class TheMovieDbModule(_ModuleBase):
         # 将搜索词中的季写入标题中
         return self._build_search_medias_result(meta, results)
 
-    async def async_tmdb_discover(self, mtype: MediaType, sort_by: str,
-                                  with_genres: str,
-                                  with_original_language: str,
-                                  with_keywords: str,
-                                  with_watch_providers: str,
-                                  vote_average: float,
-                                  vote_count: int,
-                                  release_date: str,
-                                  page: Optional[int] = 1,
-                                  raise_exception: bool = False) -> Optional[List[MediaInfo]]:
+    async def _async_tmdb_discover(self, mtype: MediaType, sort_by: str,
+                                   with_genres: str,
+                                   with_original_language: str,
+                                   with_keywords: str,
+                                   with_watch_providers: str,
+                                   vote_average: float,
+                                   vote_count: int,
+                                   release_date: str,
+                                   page: Optional[int] = 1,
+                                   raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         TMDB发现功能（异步版本）
         :param mtype:  媒体类型
@@ -1505,7 +1505,7 @@ class TheMovieDbModule(_ModuleBase):
             return [MediaInfo(tmdb_info=info) for info in infos]
         return []
 
-    async def async_tmdb_trending(
+    async def _async_tmdb_trending(
             self, page: Optional[int] = 1, raise_exception: bool = False
     ) -> List[MediaInfo]:
         """

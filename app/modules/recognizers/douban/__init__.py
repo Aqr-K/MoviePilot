@@ -712,13 +712,13 @@ class DoubanModule(_ModuleBase):
 
     # 本源提供的榜单：标识 -> (显示名, 取数方法名, 内容媒体类型, 是否支持翻页)
     _BOARDS = {
-        "movie_showing": ("正在上映", "movie_showing", MediaType.MOVIE, True),
-        "movie_hot": ("热门电影", "movie_hot", MediaType.MOVIE, True),
-        "movie_top250": ("电影TOP250", "movie_top250", MediaType.MOVIE, True),
-        "tv_hot": ("热门剧集", "tv_hot", MediaType.TV, True),
-        "tv_weekly_chinese": ("本周口碑国产剧", "tv_weekly_chinese", MediaType.TV, True),
-        "tv_weekly_global": ("本周口碑外国剧", "tv_weekly_global", MediaType.TV, True),
-        "tv_animation": ("动画剧集", "tv_animation", MediaType.TV, True),
+        "movie_showing": ("正在上映", "_movie_showing", MediaType.MOVIE, True),
+        "movie_hot": ("热门电影", "_movie_hot", MediaType.MOVIE, True),
+        "movie_top250": ("电影TOP250", "_movie_top250", MediaType.MOVIE, True),
+        "tv_hot": ("热门剧集", "_tv_hot", MediaType.TV, True),
+        "tv_weekly_chinese": ("本周口碑国产剧", "_tv_weekly_chinese", MediaType.TV, True),
+        "tv_weekly_global": ("本周口碑外国剧", "_tv_weekly_global", MediaType.TV, True),
+        "tv_animation": ("动画剧集", "_tv_animation", MediaType.TV, True),
     }
 
     def discover_boards(self) -> List[schemas.DiscoverBoard]:
@@ -774,7 +774,7 @@ class DoubanModule(_ModuleBase):
         if not declared:
             return None
         # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
-        fetch = getattr(self, f"async_{declared[1]}")
+        fetch = getattr(self, f"_async{declared[1]}")
         return await fetch(page=page, count=count)
 
     def discover(self, source: Optional[MediaSource] = None,
@@ -791,7 +791,7 @@ class DoubanModule(_ModuleBase):
             return None
         criteria.setdefault("sort", "R")
         criteria.setdefault("tags", "")
-        return self.douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
+        return self._douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
 
     async def async_discover(self, source: Optional[MediaSource] = None,
                              mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
@@ -807,10 +807,10 @@ class DoubanModule(_ModuleBase):
             return None
         criteria.setdefault("sort", "R")
         criteria.setdefault("tags", "")
-        return await self.async_douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
+        return await self._async_douban_discover(mtype=mtype or MediaType.MOVIE, **criteria)
 
-    def douban_discover(self, mtype: MediaType, sort: str, tags: str,
-                        page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+    def _douban_discover(self, mtype: MediaType, sort: str, tags: str,
+                         page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
         """
         发现豆瓣电影、剧集
         :param mtype:  媒体类型
@@ -837,8 +837,8 @@ class DoubanModule(_ModuleBase):
                     and "tv_large.jpg" not in media.poster_path]
         return []
 
-    async def async_douban_discover(self, mtype: MediaType, sort: str, tags: str,
-                                    page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+    async def _async_douban_discover(self, mtype: MediaType, sort: str, tags: str,
+                                     page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
         """
         发现豆瓣电影、剧集（异步版本）
         :param mtype:  媒体类型
@@ -865,7 +865,7 @@ class DoubanModule(_ModuleBase):
                     and "tv_large.jpg" not in media.poster_path]
         return []
 
-    def movie_showing(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _movie_showing(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取正在上映的电影
         """
@@ -875,7 +875,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_movie_showing(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_movie_showing(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取正在上映的电影（异步版本）
         """
@@ -885,7 +885,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    def tv_weekly_chinese(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _tv_weekly_chinese(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣本周口碑国产剧
         """
@@ -895,7 +895,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_tv_weekly_chinese(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_tv_weekly_chinese(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣本周口碑国产剧（异步版本）
         """
@@ -905,7 +905,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    def tv_weekly_global(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _tv_weekly_global(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣本周口碑外国剧
         """
@@ -915,7 +915,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_tv_weekly_global(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_tv_weekly_global(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣本周口碑外国剧（异步版本）
         """
@@ -925,7 +925,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    def tv_animation(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _tv_animation(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣动画剧
         """
@@ -935,7 +935,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_tv_animation(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_tv_animation(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣动画剧（异步版本）
         """
@@ -945,7 +945,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    def movie_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _movie_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣热门电影
         """
@@ -955,7 +955,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_movie_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_movie_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣热门电影（异步版本）
         """
@@ -965,7 +965,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    def tv_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _tv_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣热门剧集
         """
@@ -975,7 +975,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_tv_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_tv_hot(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣热门剧集（异步版本）
         """
@@ -1195,7 +1195,7 @@ class DoubanModule(_ModuleBase):
         result = await self.doubanapi.async_search(f"{name} {year or ''}".strip())
         return self._process_search_results(result, name, mtype, year, season)
 
-    def movie_top250(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    def _movie_top250(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣电影TOP250
         """
@@ -1205,7 +1205,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in infos.get("subject_collection_items")]
         return []
 
-    async def async_movie_top250(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
+    async def _async_movie_top250(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣电影TOP250（异步版本）
         """

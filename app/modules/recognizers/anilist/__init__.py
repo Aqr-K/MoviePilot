@@ -447,8 +447,8 @@ class AniListModule(_ModuleBase):
         declared = self._BOARDS.get(board)
         if not declared:
             return None
-        # 缓存与限流挂在 anilist_<榜单> 的异步取数方法上，按标识委托使其仍以榜单为粒度生效
-        fetch = getattr(self, f"async_anilist_{declared[1]}")
+        # 缓存与限流挂在 _anilist_<榜单> 的异步取数方法上，按标识委托使其仍以榜单为粒度生效
+        fetch = getattr(self, f"_async_anilist_{declared[1]}")
         return await fetch(page=page, count=count)
 
     def discover(self, source: Optional[MediaSource] = None,
@@ -481,9 +481,9 @@ class AniListModule(_ModuleBase):
             return None
         if mtype is not None:
             criteria["mtype"] = mtype
-        return await self.async_anilist_discover(**criteria)
+        return await self._async_anilist_discover(**criteria)
 
-    def anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
+    def _anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
         """
         获取 AniList 当前趋势榜。
 
@@ -494,7 +494,7 @@ class AniListModule(_ModuleBase):
             for info in self.anilist_api.trending(page=page, count=count)
         ]
 
-    async def async_anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
+    async def _async_anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
         """
         异步获取 AniList 当前趋势榜。
 
@@ -505,7 +505,7 @@ class AniListModule(_ModuleBase):
             for info in await self.anilist_api.async_trending(page=page, count=count)
         ]
 
-    def anilist_popular_this_season(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
+    def _anilist_popular_this_season(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
         """
         获取 AniList 本季热门榜。
 
@@ -516,7 +516,7 @@ class AniListModule(_ModuleBase):
             for info in self.anilist_api.popular_this_season(page=page, count=count)
         ]
 
-    async def async_anilist_popular_this_season(
+    async def _async_anilist_popular_this_season(
         self, page: int = 1, count: int = 20
     ) -> List[MediaInfo]:
         """
@@ -527,7 +527,7 @@ class AniListModule(_ModuleBase):
         infos = await self.anilist_api.async_popular_this_season(page=page, count=count)
         return [MediaInfo(anilist_info=info) for info in infos]
 
-    def anilist_discover(self, **kwargs) -> List[MediaInfo]:
+    def _anilist_discover(self, **kwargs) -> List[MediaInfo]:
         """
         按组合条件探索 AniList 动画。
 
@@ -538,7 +538,7 @@ class AniListModule(_ModuleBase):
             for info in self.anilist_api.discover(**kwargs)
         ]
 
-    async def async_anilist_discover(self, **kwargs) -> List[MediaInfo]:
+    async def _async_anilist_discover(self, **kwargs) -> List[MediaInfo]:
         """
         异步按组合条件探索 AniList 动画。
 

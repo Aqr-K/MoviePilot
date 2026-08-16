@@ -204,7 +204,7 @@ class TestBroadcastDispatch:
         result = chain.run_module("discover_board", source=MediaSource.TMDB,
                                   board="trending", page=1, count=30)
 
-        assert digest(result) == digest(tmdb.tmdb_trending(page=1))
+        assert digest(result) == digest(tmdb._tmdb_trending(page=1))
 
     def test_only_the_named_source_answers_a_filter(self, douban, tmdb, anilist, bangumi):
         """条件筛选广播到四个源，只有 source 指名的那个给出内容。"""
@@ -214,7 +214,7 @@ class TestBroadcastDispatch:
                                   mtype=MediaType.MOVIE, sort="R", tags="", page=1, count=30)
 
         assert digest(result) == digest(
-            douban.douban_discover(mtype=MediaType.MOVIE, sort="R", tags="", page=1, count=30)
+            douban._douban_discover(mtype=MediaType.MOVIE, sort="R", tags="", page=1, count=30)
         )
 
     def test_a_board_broadcast_carries_the_rate_limit_flag(self, douban, tmdb, anilist, bangumi):
@@ -226,7 +226,7 @@ class TestBroadcastDispatch:
             page=1, count=30, raise_exception=True,
         ))
 
-        assert digest(result) == digest(run(tmdb.async_tmdb_trending(page=1)))
+        assert digest(result) == digest(run(tmdb._async_tmdb_trending(page=1)))
 
     def test_a_filter_broadcast_carries_the_rate_limit_flag(self, douban, tmdb, anilist, bangumi):
         """条件筛选广播带 raise_exception 时四个源都收得下。"""
@@ -237,7 +237,7 @@ class TestBroadcastDispatch:
             raise_exception=True, **TMDB_CRITERIA,
         ))
 
-        assert digest(result) == digest(run(tmdb.async_tmdb_discover(
+        assert digest(result) == digest(run(tmdb._async_tmdb_discover(
             mtype=MediaType.MOVIE, **TMDB_CRITERIA
         )))
 
@@ -298,7 +298,7 @@ class TestCalendarPaging:
     @pytest.mark.parametrize("page", [1, 2, 3])
     def test_calendar_page_matches_slicing_the_legacy_result(self, bangumi, page):
         """同一页码下，契约取页与取全量再切片得到的内容逐条相同。"""
-        legacy = bangumi.bangumi_calendar()
+        legacy = bangumi._bangumi_calendar()
         expected = legacy[(page - 1) * CALENDAR_COUNT: page * CALENDAR_COUNT]
 
         contract = bangumi.discover_board(source=MediaSource.Bangumi, board="calendar",
@@ -309,7 +309,7 @@ class TestCalendarPaging:
     @pytest.mark.parametrize("page", [1, 2, 3])
     def test_async_calendar_page_matches_slicing_the_legacy_result(self, bangumi, page):
         """异步路径下，契约取页与取全量再切片得到的内容逐条相同。"""
-        legacy = run(bangumi.async_bangumi_calendar())
+        legacy = run(bangumi._async_bangumi_calendar())
         expected = legacy[(page - 1) * CALENDAR_COUNT: page * CALENDAR_COUNT]
 
         contract = run(bangumi.async_discover_board(
@@ -351,7 +351,7 @@ class TestBoardParity:
     @pytest.mark.parametrize("board", sorted(DOUBAN_BOARD_ENDPOINTS))
     def test_douban_board_matches_legacy_method(self, douban, board):
         """豆瓣 7 个榜单逐个对照，契约与专有方法结果逐条相同。"""
-        legacy = getattr(douban, board)(page=2, count=15)
+        legacy = getattr(douban, f"_{board}")(page=2, count=15)
 
         contract = douban.discover_board(source=MediaSource.Douban, board=board,
                                          page=2, count=15)
@@ -361,7 +361,7 @@ class TestBoardParity:
     @pytest.mark.parametrize("board", sorted(DOUBAN_BOARD_ENDPOINTS))
     def test_async_douban_board_matches_legacy_method(self, douban, board):
         """豆瓣 7 个榜单的异步路径同样逐条相同。"""
-        legacy = run(getattr(douban, f"async_{board}")(page=2, count=15))
+        legacy = run(getattr(douban, f"_async_{board}")(page=2, count=15))
 
         contract = run(douban.async_discover_board(source=MediaSource.Douban, board=board,
                                                    page=2, count=15))
@@ -370,7 +370,7 @@ class TestBoardParity:
 
     def test_tmdb_trending_matches_legacy_method(self, tmdb):
         """TMDB 流行趋势契约与专有方法结果逐条相同。"""
-        legacy = tmdb.tmdb_trending(page=2)
+        legacy = tmdb._tmdb_trending(page=2)
 
         contract = tmdb.discover_board(source=MediaSource.TMDB, board="trending", page=2)
 
@@ -378,7 +378,7 @@ class TestBoardParity:
 
     def test_async_tmdb_trending_matches_legacy_method(self, tmdb):
         """TMDB 流行趋势异步路径逐条相同。"""
-        legacy = run(tmdb.async_tmdb_trending(page=2))
+        legacy = run(tmdb._async_tmdb_trending(page=2))
 
         contract = run(tmdb.async_discover_board(source=MediaSource.TMDB,
                                                  board="trending", page=2))
@@ -388,7 +388,7 @@ class TestBoardParity:
     @pytest.mark.parametrize("board", ["trending", "popular_this_season"])
     def test_anilist_board_matches_legacy_method(self, anilist, board):
         """AniList 两个榜单契约与专有方法结果逐条相同。"""
-        legacy = getattr(anilist, f"anilist_{board}")(page=2, count=15)
+        legacy = getattr(anilist, f"_anilist_{board}")(page=2, count=15)
 
         contract = anilist.discover_board(source=MediaSource.AniList, board=board,
                                           page=2, count=15)
@@ -398,7 +398,7 @@ class TestBoardParity:
     @pytest.mark.parametrize("board", ["trending", "popular_this_season"])
     def test_async_anilist_board_matches_legacy_method(self, anilist, board):
         """AniList 两个榜单的异步路径同样逐条相同。"""
-        legacy = run(getattr(anilist, f"async_anilist_{board}")(page=2, count=15))
+        legacy = run(getattr(anilist, f"_async_anilist_{board}")(page=2, count=15))
 
         contract = run(anilist.async_discover_board(source=MediaSource.AniList, board=board,
                                                     page=2, count=15))
@@ -412,7 +412,7 @@ class TestDiscoverParity:
     @pytest.mark.parametrize("mtype", [MediaType.MOVIE, MediaType.TV])
     def test_douban_discover_matches_legacy_method(self, douban, mtype):
         """豆瓣条件筛选契约与专有方法结果逐条相同。"""
-        legacy = douban.douban_discover(mtype=mtype, sort="R", tags="喜剧", page=2, count=15)
+        legacy = douban._douban_discover(mtype=mtype, sort="R", tags="喜剧", page=2, count=15)
 
         contract = douban.discover(source=MediaSource.Douban, mtype=mtype,
                                    sort="R", tags="喜剧", page=2, count=15)
@@ -422,8 +422,8 @@ class TestDiscoverParity:
     @pytest.mark.parametrize("mtype", [MediaType.MOVIE, MediaType.TV])
     def test_async_douban_discover_matches_legacy_method(self, douban, mtype):
         """豆瓣条件筛选异步路径逐条相同。"""
-        legacy = run(douban.async_douban_discover(mtype=mtype, sort="R", tags="喜剧",
-                                                  page=2, count=15))
+        legacy = run(douban._async_douban_discover(mtype=mtype, sort="R", tags="喜剧",
+                                                   page=2, count=15))
 
         contract = run(douban.async_discover(source=MediaSource.Douban, mtype=mtype,
                                              sort="R", tags="喜剧", page=2, count=15))
@@ -433,7 +433,7 @@ class TestDiscoverParity:
     @pytest.mark.parametrize("mtype", [MediaType.MOVIE, MediaType.TV])
     def test_tmdb_discover_matches_legacy_method(self, tmdb, mtype):
         """TMDB 条件筛选契约与专有方法结果逐条相同。"""
-        legacy = tmdb.tmdb_discover(mtype=mtype, **TMDB_CRITERIA)
+        legacy = tmdb._tmdb_discover(mtype=mtype, **TMDB_CRITERIA)
 
         contract = tmdb.discover(source=MediaSource.TMDB, mtype=mtype, **TMDB_CRITERIA)
 
@@ -442,7 +442,7 @@ class TestDiscoverParity:
     @pytest.mark.parametrize("mtype", [MediaType.MOVIE, MediaType.TV])
     def test_async_tmdb_discover_matches_legacy_method(self, tmdb, mtype):
         """TMDB 条件筛选异步路径逐条相同。"""
-        legacy = run(tmdb.async_tmdb_discover(mtype=mtype, **TMDB_CRITERIA))
+        legacy = run(tmdb._async_tmdb_discover(mtype=mtype, **TMDB_CRITERIA))
 
         contract = run(tmdb.async_discover(source=MediaSource.TMDB, mtype=mtype, **TMDB_CRITERIA))
 
@@ -450,7 +450,7 @@ class TestDiscoverParity:
 
     def test_anilist_discover_matches_legacy_method(self, anilist):
         """AniList 条件筛选契约与专有方法结果逐条相同。"""
-        legacy = anilist.anilist_discover(mtype=MediaType.TV, season="WINTER")
+        legacy = anilist._anilist_discover(mtype=MediaType.TV, season="WINTER")
 
         contract = anilist.discover(source=MediaSource.AniList, mtype=MediaType.TV,
                                     season="WINTER")
@@ -459,7 +459,7 @@ class TestDiscoverParity:
 
     def test_async_anilist_discover_matches_legacy_method(self, anilist):
         """AniList 条件筛选异步路径逐条相同。"""
-        legacy = run(anilist.async_anilist_discover(mtype=MediaType.TV, season="WINTER"))
+        legacy = run(anilist._async_anilist_discover(mtype=MediaType.TV, season="WINTER"))
 
         contract = run(anilist.async_discover(source=MediaSource.AniList, mtype=MediaType.TV,
                                               season="WINTER"))
@@ -468,7 +468,7 @@ class TestDiscoverParity:
 
     def test_bangumi_discover_matches_legacy_method(self, bangumi):
         """Bangumi 条件筛选契约与专有方法结果逐条相同。"""
-        legacy = bangumi.bangumi_discover(type=2, sort="rank")
+        legacy = bangumi._bangumi_discover(type=2, sort="rank")
 
         contract = bangumi.discover(source=MediaSource.Bangumi, type=2, sort="rank")
 
@@ -476,7 +476,7 @@ class TestDiscoverParity:
 
     def test_async_bangumi_discover_matches_legacy_method(self, bangumi):
         """Bangumi 条件筛选异步路径逐条相同。"""
-        legacy = run(bangumi.async_bangumi_discover(type=2, sort="rank"))
+        legacy = run(bangumi._async_bangumi_discover(type=2, sort="rank"))
 
         contract = run(bangumi.async_discover(source=MediaSource.Bangumi, type=2, sort="rank"))
 
