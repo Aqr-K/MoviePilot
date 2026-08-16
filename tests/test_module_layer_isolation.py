@@ -18,7 +18,6 @@ MODULES_ROOT = pathlib.Path(__file__).resolve().parents[1] / "app" / "modules"
 
 # 已知违例及其原因，出现新的即失败
 KNOWN_CHAIN_DEPENDENCIES: Dict[str, str] = {
-    "enrichment/subtitle": "轮询下载目录出现，依赖 StorageChain 的文件项查询",
 }
 
 

@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 
 from lxml import etree
 
-from app.chain.storage import StorageChain
+from app.modules.storages import get_storage
 from app.runtime.config import settings
 from app.domain.context import Context
 from app.db.oper.site import SiteOper
@@ -200,24 +200,26 @@ class SubtitleModule(_ModuleBase):
         # 获取种子信息
         folder_name, _ = TorrentHelper().get_fileinfo_from_torrent_content(torrent_content)
         # 文件保存目录，如果是单文件种子，则folder_name是空，此时文件保存目录就是下载目录
-        storageChain = StorageChain()
+        # 下载目录带存储前缀，拆出存储与路径
+        fileURI = FileURI.from_uri(download_dir.as_posix())
+        download_dir = Path(fileURI.path)
+        storage_oper = get_storage(fileURI.storage)
+        if not storage_oper:
+            logger.error(f"{fileURI.storage} 存储不可用，无法保存字幕：{download_dir}")
+            return
         # 等待目录存在
         working_dir_item = None
-        # split download_dir into storage and path
-        fileURI = FileURI.from_uri(download_dir.as_posix())
-        storage = fileURI.storage
-        download_dir = Path(fileURI.path)
         for _ in range(30):
-            found = storageChain.get_file_item(storage,  download_dir / folder_name)
+            found = storage_oper.get_item(download_dir / folder_name)
             if found:
                 working_dir_item = found
                 break
             time.sleep(1)
         # 目录仍然不存在，且有文件夹名，则创建目录
         if not working_dir_item and folder_name:
-            parent_dir_item = storageChain.get_folder(storage, download_dir)
+            parent_dir_item = storage_oper.get_folder(download_dir)
             if parent_dir_item:
-                working_dir_item = storageChain.create_folder(
+                working_dir_item = storage_oper.create_folder(
                     parent_dir_item,
                     folder_name
                 )
@@ -265,11 +267,11 @@ class SubtitleModule(_ModuleBase):
                         # 遍历转移文件
                         for sub_file in SystemUtils.list_files(archive_path, settings.RMT_SUBEXT):
                             target_sub_file = Path(working_dir_item.path) / Path(sub_file.name)
-                            if storageChain.get_file_item(storage, target_sub_file):
+                            if storage_oper.get_item(target_sub_file):
                                 logger.info(f"字幕文件已存在：{target_sub_file}")
                                 continue
                             logger.info(f"转移字幕 {sub_file} 到 {target_sub_file} ...")
-                            storageChain.upload_file(working_dir_item, sub_file)
+                            storage_oper.upload(working_dir_item, sub_file)
                     except Exception as err:
                         logger.error(f"字幕压缩包解压失败：{archive_file} - {str(err)}")
                     # 删除临时文件
@@ -288,11 +290,11 @@ class SubtitleModule(_ModuleBase):
                     # 保存
                     sub_file.write_bytes(ret.content)
                     target_sub_file = Path(working_dir_item.path) / Path(sub_file.name)
-                    if storageChain.get_file_item(storage, target_sub_file):
+                    if storage_oper.get_item(target_sub_file):
                         logger.info(f"字幕文件已存在：{target_sub_file}")
                         continue
                     logger.info(f"转移字幕 {sub_file} 到 {target_sub_file} ...")
-                    storageChain.upload_file(working_dir_item, sub_file)
+                    storage_oper.upload(working_dir_item, sub_file)
             else:
                 logger.error(f"下载字幕文件失败：{sublink}")
                 continue
