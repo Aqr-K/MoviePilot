@@ -72,6 +72,8 @@ class CapabilityRuntime:
             spec.id: _CapabilityState(spec=spec)
             for spec in registry.list_specs()
         }
+        # 运行期来源可增删能力，状态表的增删与查询需互斥
+        self._states_lock = threading.RLock()
         self._observer = observer
         self._observations: deque[CapabilityObservation] = deque(maxlen=observation_limit)
         self._observation_lock = threading.Lock()
@@ -85,7 +87,8 @@ class CapabilityRuntime:
 
     def _state(self, capability_id: str) -> _CapabilityState:
         self._registry.require_spec(capability_id)
-        return self._states[capability_id]
+        with self._states_lock:
+            return self._states[capability_id]
 
     def get_spec(self, capability_id: str) -> CapabilitySpec | None:
         """返回保留在 Registry 中的声明，不受运行失败影响。"""
@@ -94,6 +97,49 @@ class CapabilityRuntime:
     def list_specs(self) -> tuple[CapabilitySpec, ...]:
         """返回全部声明；FAILED 能力不会从列表中消失。"""
         return self._registry.list_specs()
+
+    def register_capability(self, spec: CapabilitySpec) -> None:
+        """
+        登记一条运行期声明并为其建立生命周期状态
+
+        登记只让能力可被调度，不启动资源；启动仍走 activate。
+
+        :param spec: 能力声明
+        :raises CapabilityAdapterContractError: 该 kind 没有对应 adapter
+        :raises CapabilityManifestError: capability id 已被占用
+        """
+        self._ensure_open()
+        if spec.kind not in self._adapters:
+            raise CapabilityAdapterContractError(
+                f"缺少 capability adapter：{spec.kind}"
+            )
+        with self._states_lock:
+            self._registry.register_spec(spec)
+            self._states[spec.id] = _CapabilityState(spec=spec)
+
+    def unregister_capability(self, capability_id: str, *, reason: str) -> Optional[CapabilitySpec]:
+        """
+        停止并移除一条运行期声明
+
+        先停资源再摘声明，使卸载后不残留可被调度的能力。停止失败不阻断摘除，
+        否则一个停不下来的来源会永久占住 capability id。
+
+        :param capability_id: 能力标识
+        :param reason: 记入观测的操作原因
+        :return: 被移除的声明，不存在时为 None
+        """
+        with self._states_lock:
+            known = capability_id in self._states
+        if not known:
+            return None
+        try:
+            self.stop(capability_id, reason=reason)
+        except Exception:
+            # 停止失败已由 Runtime 记录观测，此处继续摘除声明
+            pass
+        with self._states_lock:
+            self._states.pop(capability_id, None)
+        return self._registry.unregister_spec(capability_id)
 
     def _adapter(self, state: _CapabilityState, expected: AdapterExecutionMode) -> Any:
         adapter = self._adapters[state.spec.kind]
@@ -424,12 +470,16 @@ class CapabilityRuntime:
             )
             raise operation_error from error
 
-    @staticmethod
-    def _canonical_implementation(spec: CapabilitySpec, implementation: Any) -> Any:
+    def _canonical_implementation(self, spec: CapabilitySpec, implementation: Any) -> Any:
         if implementation is None:
             raise CapabilityAdapterContractError(
                 f"adapter 没有返回 {spec.id} 的 implementation"
             )
+        # 实现对象由运行期来源直接交出的 kind 无 canonical 符号可比对，其 entrypoint
+        # 只用于标识而非导入，此处按 adapter 声明跳过同一性校验。
+        adapter = self._adapters.get(spec.kind)
+        if not getattr(adapter, "requires_canonical_implementation", True):
+            return implementation
         module_name, symbol_name = spec.entrypoint.split(":", maxsplit=1)
         module = sys.modules.get(module_name)
         namespace = getattr(module, "__dict__", None) if module is not None else None

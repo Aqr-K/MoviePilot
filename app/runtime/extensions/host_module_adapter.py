@@ -4,7 +4,7 @@ import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Collection, Mapping
 
 from app.runtime.capabilities.model import (
     ActivationPolicy,
@@ -97,7 +97,10 @@ HOST_MODULE_SELECTOR_SCHEMAS = MappingProxyType({
 
 
 def _validate_manifest_inventory(registry: CapabilityRegistry) -> None:
-    """校验一级模块包与 manifest 一一对应，并固定宿主声明合同。"""
+    """校验一级模块包与 manifest 一一对应，并固定宿主声明合同。
+
+    只约束宿主模块声明。运行期来源注册的其它 kind 不落在模块包里，也不受本合同管辖。
+    """
     module_packages = {
         child.name
         for child in _MODULE_ROOT.iterdir()
@@ -105,7 +108,7 @@ def _validate_manifest_inventory(registry: CapabilityRegistry) -> None:
         and not child.name.startswith("_")
         and (child / "__init__.py").is_file()
     }
-    specs = registry.list_specs()
+    specs = tuple(spec for spec in registry.list_specs() if spec.kind == HOST_MODULE_KIND)
     manifest_packages = {spec.source.parent.name for spec in specs}
     if module_packages != manifest_packages:
         missing = sorted(module_packages - manifest_packages)
@@ -146,11 +149,14 @@ def _validate_manifest_inventory(registry: CapabilityRegistry) -> None:
                 )
 
 
-def build_host_module_registry() -> CapabilityRegistry:
-    """从现有物理模块包构建 import-free Host Module Registry。"""
+def build_host_module_registry(extra_kinds: Collection[str] = ()) -> CapabilityRegistry:
+    """从现有物理模块包构建 import-free Host Module Registry。
+
+    :param extra_kinds: 该注册表额外接受的 kind，供运行期来源登记自身声明
+    """
     registry = CapabilityRegistry.discover(
         (_MODULE_ROOT,),
-        kinds={HOST_MODULE_KIND},
+        kinds={HOST_MODULE_KIND, *extra_kinds},
         selector_schemas=HOST_MODULE_SELECTOR_SCHEMAS,
     )
     _validate_manifest_inventory(registry)

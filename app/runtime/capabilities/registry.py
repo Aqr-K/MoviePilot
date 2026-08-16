@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import tomllib
 from pathlib import Path
 from types import MappingProxyType
@@ -69,7 +70,11 @@ def _string_list(value: Any, *, field: str, path: Path) -> tuple[str, ...]:
 
 
 class CapabilityRegistry:
-    """只读取 data-only manifest 的不可变能力注册表。"""
+    """能力注册表。
+
+    manifest 声明经 ``discover`` 一次装入；运行期来源经 ``register_spec`` 增删。
+    两侧共用同一张表，查询方不区分声明来自哪一侧。
+    """
 
     def __init__(
         self,
@@ -78,9 +83,39 @@ class CapabilityRegistry:
         kinds: Collection[str],
         selector_schemas: Mapping[str, SelectorSchema],
     ) -> None:
-        self._specs = MappingProxyType(dict(specs))
+        self._specs = dict(specs)
         self._kinds = frozenset(kinds)
         self._selector_schemas = MappingProxyType(dict(selector_schemas))
+        self._lock = threading.RLock()
+
+    def register_spec(self, spec: CapabilitySpec) -> None:
+        """
+        登记一条运行期声明
+
+        :param spec: 能力声明，其 kind 必须已被本注册表接受
+        :raises CapabilityManifestError: kind 未被接受，或 capability id 已被占用
+        """
+        if spec.kind not in self._kinds:
+            raise CapabilityManifestError(
+                f"capability kind 未被注册表接受：{spec.kind}"
+            )
+        with self._lock:
+            previous = self._specs.get(spec.id)
+            if previous is not None:
+                raise CapabilityManifestError(
+                    f"capability id 重复：{spec.id}，来源 {previous.source} 与 {spec.source}"
+                )
+            self._specs[spec.id] = spec
+
+    def unregister_spec(self, capability_id: str) -> CapabilitySpec | None:
+        """
+        移除一条声明
+
+        :param capability_id: 能力标识
+        :return: 被移除的声明，不存在时为 None
+        """
+        with self._lock:
+            return self._specs.pop(capability_id, None)
 
     @classmethod
     def discover(
@@ -273,7 +308,8 @@ class CapabilityRegistry:
 
     def get_spec(self, capability_id: str) -> CapabilitySpec | None:
         """查询声明；不存在时返回 None。"""
-        return self._specs.get(capability_id)
+        with self._lock:
+            return self._specs.get(capability_id)
 
     def require_spec(self, capability_id: str) -> CapabilitySpec:
         """查询必需声明；不存在时给出稳定的领域错误。"""
@@ -284,4 +320,5 @@ class CapabilityRegistry:
 
     def list_specs(self) -> tuple[CapabilitySpec, ...]:
         """按 ID 返回稳定排序的声明快照。"""
-        return tuple(self._specs[key] for key in sorted(self._specs))
+        with self._lock:
+            return tuple(self._specs[key] for key in sorted(self._specs))
