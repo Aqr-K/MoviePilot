@@ -67,7 +67,7 @@ def start(manager: PluginManager, instance_id: str, config=None):
     """
     config_oper = Mock()
     config_oper.get.return_value = config or {}
-    with patch("app.runtime.extensions.plugin_manager.PluginConfigOper",
+    with patch("app.runtime.extensions.plugin_manager.configs.PluginConfigOper",
                return_value=config_oper), \
             patch("app.runtime.extensions.plugin_manager.eventmanager"), \
             patch("app.runtime.extensions.plugin_manager.set_and_check_auth_level",
