@@ -1,5 +1,6 @@
 import threading
 import traceback
+from enum import Enum
 from typing import Callable, Dict, Generator, Optional, Tuple, Any, Union, List
 
 from app.runtime.config import settings
@@ -12,6 +13,36 @@ from app.schemas.types import EventType, ModuleType, DownloaderType, MediaServer
     OtherModulesType, MediaRecognizeType
 from app.foundation.reflection import ObjectUtils
 from app.foundation.singleton import Singleton
+
+
+def subtype_value(subtype: Any) -> Optional[str]:
+    """
+    取子类型用于比较的字符串取值
+
+    :param subtype: 子类型，枚举成员或字符串
+    :return: 取值字符串，无法归一时返回 None
+    """
+    if isinstance(subtype, Enum):
+        value = subtype.value
+        return value if isinstance(value, str) else None
+    return subtype if isinstance(subtype, str) else None
+
+
+def subtype_matches(declared: Any, expected: Any) -> bool:
+    """
+    判断模块声明的子类型是否与期望一致
+
+    两侧都是枚举时按成员身份判定，避免不同枚举的同名取值互相误配；
+    一侧为字符串时按取值判定，使外部来源可用字符串声明子类型。
+
+    :param declared: 模块声明的子类型
+    :param expected: 期望的子类型
+    :return: 是否一致
+    """
+    if isinstance(declared, Enum) and isinstance(expected, Enum):
+        return declared is expected
+    declared_value = subtype_value(declared)
+    return bool(declared_value) and declared_value == subtype_value(expected)
 
 
 class ProvidedModule:
@@ -232,13 +263,25 @@ class ModuleManager(metaclass=Singleton):
                     and module.get_type() == module_type:
                 yield module
 
-    def get_running_subtype_module(self, module_subtype: SubType) -> Generator:
+    def get_running_subtype_module(self, module_subtype: Union[SubType, str]) -> Generator:
         """
         获取指定子类型的模块
+
+        子类型允许以枚举成员或字符串声明，两种形式互认。
+
+        :param module_subtype: 期望的子类型
+        :return: 命中的模块
         """
         for module in self._running_snapshot():
-            if hasattr(module, 'get_subtype') \
-                    and module.get_subtype() == module_subtype:
+            probe = getattr(module, "get_subtype", None)
+            if not callable(probe):
+                continue
+            try:
+                declared = probe()
+            except Exception as err:
+                logger.debug(f"获取模块 {module.__class__.__name__} 子类型出错：{str(err)}")
+                continue
+            if subtype_matches(declared, module_subtype):
                 yield module
 
     def get_module(self, module_id: str) -> Any:

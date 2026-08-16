@@ -496,6 +496,59 @@ class ChainBase(metaclass=ABCMeta):
         # 执行系统模块
         return self.__execute_system_modules(method, result, *args, **kwargs)
 
+    def run_module_for(
+            self,
+            module_subtype: Any,
+            method: str,
+            *args,
+            **kwargs,
+    ) -> Any:
+        """
+        按子类型精确选中一个模块运行该方法，然后返回结果
+
+        与 run_module 的广播语义并列：广播适用于「依次试」「全都要」的模块家族，精确分发
+        适用于必须选中单个后端的家族，如存储、下载器。命中的模块未实现该方法时返回 None，
+        不回落到广播，也不经过 get_module() 注入式旁路。
+        当kwargs包含命名参数raise_exception时，如模块方法抛出异常且raise_exception为True，则同步抛出异常
+
+        :param module_subtype: 模块子类型，枚举成员或字符串
+        :param method: 模块方法名称
+        :return: 模块方法的返回值，未命中或执行出错时为 None
+        """
+        modules = sorted(
+            self.modulemanager.get_running_subtype_module(module_subtype),
+            key=lambda x: x.get_priority(),
+        )
+        if not modules:
+            logger.debug(f"没有运行中的 {module_subtype} 模块，跳过执行：{method}")
+            return None
+        if len(modules) > 1:
+            logger.warning(
+                f"子类型 {module_subtype} 有多个模块在运行，"
+                f"按优先级取 {modules[0].__class__.__name__}："
+                f"{[m.__class__.__name__ for m in modules]}"
+            )
+        module = modules[0]
+        module_id = module.__class__.__name__
+        func = getattr(module, method, None)
+        if not callable(func):
+            logger.debug(f"模块 {module_id} 未实现 {method}，跳过执行")
+            return None
+        try:
+            module_name = module.get_name()
+        except Exception as err:
+            logger.debug(f"获取模块名称出错：{str(err)}")
+            module_name = module_id
+        logger.debug(f"请求模块 {module_id} 执行：{method} ...")
+        try:
+            return func(*args, **kwargs)
+        except RateLimitExceededException as err:
+            self.__handle_rate_limit_error(err, "模块", module_id, method, **kwargs)
+        except Exception as err:
+            logger.error(traceback.format_exc())
+            self.__handle_system_error(err, module_id, module_name, method, **kwargs)
+        return None
+
     async def async_run_module(
             self,
             method: str,
