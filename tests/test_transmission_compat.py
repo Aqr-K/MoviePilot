@@ -74,9 +74,9 @@ def _load_transmission_client_module():
         "transmission_rpc.session": transmission_rpc_session_module,
     }
 
-    transmission_path = repo_root / "app" / "modules" / "transmission" / "transmission.py"
+    transmission_path = repo_root / "app" / "modules" / "downloaders" / "transmission" / "transmission.py"
     transmission_spec = importlib.util.spec_from_file_location(
-        "app.modules.transmission.transmission",
+        "app.modules.downloaders.transmission.transmission",
         transmission_path,
     )
     transmission_module = importlib.util.module_from_spec(transmission_spec)

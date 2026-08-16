@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Set, Tuple, Optional, Union, List, Dict
 
-from qbittorrentapi import TorrentFilesList
 from torrentool.torrent import Torrent
+from transmission_rpc import File
 
 from app import schemas
 from app.runtime.cache import FileCache
@@ -10,7 +10,7 @@ from app.runtime.config import settings
 from app.domain.metainfo import MetaInfo
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _DownloaderBase
-from app.modules.qbittorrent.qbittorrent import Qbittorrent
+from app.modules.downloaders.transmission.transmission import Transmission
 from app.schemas import DownloaderTorrent
 from app.schemas.types import (
     DownloadTaskState,
@@ -22,46 +22,28 @@ from app.schemas.types import (
 from app.domain import torrent as torrent_rules
 from app.foundation import size as size_tools
 from app.foundation import temporal as time_tools
-from app.foundation import text as text_tools
 
-_QBITTORRENT_DOWNLOADING_STATES = {
-    "allocating",
-    "checkingdl",
+_TRANSMISSION_DOWNLOADING_STATES = {
+    "download_pending",
     "downloading",
-    "forceddl",
-    "metadl",
-    "queueddl",
-    "stalleddl",
 }
-_QBITTORRENT_PAUSED_STATES = {
-    "paused",
-    "pauseddl",
-    "pausedup",
-    "stoppeddl",
-    "stoppedup",
+_TRANSMISSION_PAUSED_STATES = {
+    "stopped",
 }
-_TORRENT_FILES_RETRY_TIMES = 5
-_TORRENT_FILES_RETRY_INTERVAL = 1
 
 
-class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
-    """
-    qBittorrent 下载器模块，负责下载任务添加、文件选择和任务管理。
-    """
+class TransmissionModule(_ModuleBase, _DownloaderBase[Transmission]):
 
     def init_module(self) -> None:
         """
         初始化模块
         """
-        super().init_service(service_name=Qbittorrent.__name__.lower(),
-                             service_type=Qbittorrent)
+        super().init_service(service_name=Transmission.__name__.lower(),
+                             service_type=Transmission)
 
     @staticmethod
     def get_name() -> str:
-        """
-        获取模块名称
-        """
-        return "Qbittorrent"
+        return "Transmission"
 
     @staticmethod
     def get_type() -> ModuleType:
@@ -75,19 +57,16 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         """
         获取模块子类型
         """
-        return DownloaderType.Qbittorrent
+        return DownloaderType.Transmission
 
     @staticmethod
     def get_priority() -> int:
         """
         获取模块优先级，数字越小优先级越高，只有同一接口下优先级才生效
         """
-        return 1
+        return 2
 
-    def stop(self) -> None:
-        """
-        停止模块
-        """
+    def stop(self):
         pass
 
     def test(self) -> Optional[Tuple[bool, str]]:
@@ -100,22 +79,20 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             if server.is_inactive():
                 server.reconnect()
             if not server.transfer_info():
-                return False, f"无法连接Qbittorrent下载器：{name}"
+                return False, f"无法连接Transmission下载器：{name}"
         return True, ""
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
-        """
-        返回控制模块启用状态的配置项
-        """
         pass
 
     def scheduler_job(self) -> None:
         """
         定时任务，每10分钟调用一次
         """
+        # 定时重连
         for name, server in self.get_instances().items():
             if server.is_inactive():
-                logger.info(f"Qbittorrent下载器 {name} 连接断开，尝试重连 ...")
+                logger.info(f"Transmission下载器 {name} 连接断开，尝试重连 ...")
                 server.reconnect()
 
     def download(self, content: Union[Path, str, bytes], download_dir: Path, cookie: str,
@@ -123,11 +100,11 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                  downloader: Optional[str] = None) -> Optional[Tuple[Optional[str], Optional[str], Optional[str], str]]:
         """
         根据种子文件，选择并添加下载任务
-        :param content:  种子文件地址或者磁力链接或者种子内容
+        :param content:  种子文件地址或者磁力链接或种子内容
         :param download_dir:  下载目录
         :param cookie:  cookie
         :param episodes:  需要下载的集数
-        :param category:  分类
+        :param category:  分类，TR中未使用
         :param label:  标签
         :param downloader:  下载器
         :return: 下载器名称、种子Hash、种子文件布局、错误原因
@@ -173,112 +150,94 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             return None, None, None, f"添加种子任务失败：无法读取种子文件"
 
         # 获取下载器
-        server: Qbittorrent = self.get_instance(downloader)
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
 
-        # 生成随机Tag
-        tag = text_tools.random_string(10)
-        if label:
-            tags = label.split(',') + [tag]
-        elif settings.TORRENT_TAG:
-            tags = [tag, settings.TORRENT_TAG]
-        else:
-            tags = [tag]
         # 如果要选择文件则先暂停
         is_paused = True if episodes else False
+
+        # 标签
+        if label:
+            labels = label.split(',')
+        elif settings.TORRENT_TAG:
+            labels = settings.TORRENT_TAG.split(',')
+        else:
+            labels = None
         # 添加任务
-        state, added_torrent_ids = server.add_torrent(
+        added_torrent = server.add_torrent(
             content=content,
             download_dir=self.normalize_path(download_dir, downloader),
             is_paused=is_paused,
-            tag=tags,
-            cookie=cookie,
-            category=category,
-            ignore_category_check=False
+            labels=labels,
+            cookie=cookie
         )
+        # TR 始终使用原始种子布局, 返回"Original"
+        torrent_layout = "Original"
 
-        if not state:
+        if not added_torrent:
             # 查询所有下载器的种子
             torrents, error = server.get_torrents()
             if error:
-                return None, None, None, "无法连接qbittorrent下载器"
+                return None, None, None, "无法连接transmission下载器"
             if torrents:
                 try:
                     for torrent in torrents:
                         # 名称与大小相等则认为是同一个种子
-                        if torrent.get("name") == getattr(torrent_from_file, 'name', '') \
-                                and torrent.get("total_size") == getattr(torrent_from_file, 'total_size', 0):
-                            torrent_hash = torrent.get("hash")
-                            server.delete_torrents_tag(torrent_hash, tag)
-                            torrent_tags = [str(tag).strip() for tag in (torrent.get("tags") or "").split(',')]
-                            logger.warn(f"下载器中已存在该种子任务：{torrent_hash} - {torrent.get('name')}")
+                        if torrent.name == getattr(torrent_from_file, 'name', '') and torrent.total_size == getattr(torrent_from_file, 'total_size', 0):
+                            torrent_hash = torrent.hashString
+                            logger.warn(f"下载器中已存在该种子任务：{torrent_hash} - {torrent.name}")
                             # 给种子打上标签
-                            if "已整理" in torrent_tags:
-                                server.remove_torrents_tag(ids=torrent_hash, tag=['已整理'])
-                            if settings.TORRENT_TAG and settings.TORRENT_TAG not in torrent_tags:
+                            if settings.TORRENT_TAG:
                                 logger.info(f"给种子 {torrent_hash} 打上标签：{settings.TORRENT_TAG}")
-                                server.set_torrents_tag(ids=torrent_hash, tags=[settings.TORRENT_TAG])
-                            # 获取种子内容布局: `Original: 原始, Subfolder: 创建子文件夹, NoSubfolder: 不创建子文件夹`
-                            torrent_layout = server.get_content_layout()
+                                # 种子标签
+                                labels = [str(tag).strip()
+                                          for tag in torrent.labels] if hasattr(torrent, "labels") else []
+                                if "已整理" in labels:
+                                    labels.remove("已整理")
+                                    server.set_torrent_tag(ids=torrent_hash, tags=labels)
+                                if settings.TORRENT_TAG and settings.TORRENT_TAG not in labels:
+                                    labels.append(settings.TORRENT_TAG)
+                                    server.set_torrent_tag(ids=torrent_hash, tags=labels)
                             return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, f"下载任务已存在"
                 finally:
                     torrents.clear()
                     del torrents
             return None, None, None, f"添加种子任务失败：{content}"
         else:
-            # 获取种子Hash
-            torrent_hash = next(iter(added_torrent_ids), None)
-            if torrent_hash:
-                server.delete_torrents_tag(torrent_hash, tag)
-            else:
-                torrent_hash = server.get_torrent_id_by_tag(tags=tag)
-            if not torrent_hash:
-                return None, None, None, f"下载任务添加成功，但获取Qbittorrent任务信息失败：{content}"
-            else:
-                # 获取种子内容布局: `Original: 原始, Subfolder: 创建子文件夹, NoSubfolder: 不创建子文件夹`
-                torrent_layout = server.get_content_layout()
-                if is_paused:
-                    # 种子文件
-                    torrent_files = server.get_files(
-                        torrent_hash,
-                        retry=_TORRENT_FILES_RETRY_TIMES,
-                        interval=_TORRENT_FILES_RETRY_INTERVAL,
-                    )
-                    if not torrent_files:
-                        return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, "获取种子文件失败，下载任务可能在暂停状态"
-
-                    # 不需要的文件ID
-                    file_ids = []
-                    # 需要的集清单
-                    sucess_epidised = []
-                    try:
-                        for torrent_file in torrent_files:
-                            file_id = torrent_file.get("id")
-                            file_name = torrent_file.get("name")
-                            meta_info = MetaInfo(file_name)
-                            if not meta_info.episode_list \
-                                    or not set(meta_info.episode_list).issubset(episodes):
-                                file_ids.append(file_id)
-                            else:
-                                sucess_epidised = list(set(sucess_epidised).union(set(meta_info.episode_list)))
-                    finally:
-                        torrent_files.clear()
-                        del torrent_files
-                    if sucess_epidised and file_ids:
-                        # 选择文件
-                        server.set_files(torrent_hash=torrent_hash, file_ids=file_ids, priority=0)
+            torrent_hash = added_torrent.hashString
+            if is_paused:
+                # 选择文件
+                torrent_files = server.get_files(torrent_hash)
+                if not torrent_files:
+                    return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, "获取种子文件失败，下载任务可能在暂停状态"
+                # 需要的文件信息
+                file_ids = []
+                unwanted_file_ids = []
+                try:
+                    for torrent_file in torrent_files:
+                        file_id = torrent_file.id
+                        file_name = torrent_file.name
+                        meta_info = MetaInfo(file_name)
+                        if not meta_info.episode_list:
+                            unwanted_file_ids.append(file_id)
+                            continue
+                        selected = set(meta_info.episode_list).issubset(set(episodes))
+                        if not selected:
+                            unwanted_file_ids.append(file_id)
+                            continue
+                        file_ids.append(file_id)
+                    # 选择文件
+                    server.set_files(torrent_hash, file_ids)
+                    server.set_unwanted_files(torrent_hash, unwanted_file_ids)
                     # 开始任务
-                    if server.is_force_resume():
-                        # 强制继续
-                        server.torrents_set_force_start(torrent_hash)
-                    else:
-                        server.start_torrents(torrent_hash)
-                    return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, f"添加下载成功，已选择集数：{sucess_epidised}"
-                else:
-                    if server.is_force_resume():
-                        server.torrents_set_force_start(torrent_hash)
-                    return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, "添加下载成功"
+                    server.start_torrents(torrent_hash)
+                finally:
+                    torrent_files.clear()
+                    del torrent_files
+                return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, "添加下载任务成功"
+            else:
+                return downloader or self.get_default_config_name(), torrent_hash, torrent_layout, "添加下载任务成功"
 
     def list_torrents(self, status: TorrentStatus = None,
                       hashs: Union[list, str] = None,
@@ -295,60 +254,93 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         """
         # 获取下载器
         if downloader:
-            server: Qbittorrent = self.get_instance(downloader)
+            server: Transmission = self.get_instance(downloader)
             if not server:
                 return None
             servers = {downloader: server}
         else:
-            servers: Dict[str, Qbittorrent] = self.get_instances()
+            servers: Dict[str, Transmission] = self.get_instances()
         ret_torrents = []
         query_status = self.__normalize_query_status(status)
         query_tags = None if include_all_tags else settings.TORRENT_TAG
 
-        def __get_torrent_path(torrent_data: dict) -> Path:
+        def __get_torrent_attr(torrent_data, *attr_names):
             """
-            获取种子内容路径。
+            兼容 transmission-rpc 新旧字段名。
             """
-            content_path = torrent_data.get("content_path")
-            if content_path:
-                return Path(content_path)
-            return Path(torrent_data.get('save_path')) / torrent_data.get('name')
+            for attr_name in attr_names:
+                try:
+                    return getattr(torrent_data, attr_name)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    continue
+            return None
 
-        def __build_torrent(downloader_name: str, torrent_data: dict) -> DownloaderTorrent:
+        def __get_torrent_progress(torrent_data) -> float:
+            """
+            获取任务进度。
+            """
+            return __get_torrent_attr(torrent_data, "progress", "percent_done") or 0
+
+        def __get_torrent_size(torrent_data) -> int:
+            """
+            获取任务大小。
+            """
+            return __get_torrent_attr(torrent_data, "total_size", "totalSize") or 0
+
+        def __get_torrent_labels(torrent_data) -> str:
+            """
+            获取任务标签。
+            """
+            return ",".join(getattr(torrent_data, "labels", None) or [])
+
+        def __get_torrent_path(torrent_data) -> Path:
+            """
+            获取任务内容路径。
+            """
+            return Path(torrent_data.download_dir) / torrent_data.name
+
+        def __build_torrent(downloader_name: str, torrent_data) -> DownloaderTorrent:
             """
             构造统一下载器任务对象。
             """
-            meta = MetaInfo(torrent_data.get('name'))
+            meta = MetaInfo(torrent_data.name)
+            dlspeed = __get_torrent_attr(
+                torrent_data, "rate_download", "rateDownload"
+            ) or 0
+            upspeed = __get_torrent_attr(
+                torrent_data, "rate_upload", "rateUpload"
+            ) or 0
+            left_until_done = __get_torrent_attr(
+                torrent_data, "left_until_done", "leftUntilDone"
+            ) or 0
             torrent_path = __get_torrent_path(torrent_data)
-            dlspeed = torrent_data.get('dlspeed') or 0
-            total_size = torrent_data.get('total_size') or 0
-            completed_size = torrent_data.get('completed') or 0
+            ratio_limit = __get_torrent_attr(torrent_data, "seed_ratio_limit", "seedRatioLimit")
+            seeding_time_limit = __get_torrent_attr(torrent_data, "seed_idle_limit", "seedIdleLimit")
             return DownloaderTorrent(
                 downloader=downloader_name,
-                title=torrent_data.get('name'),
+                hash=torrent_data.hashString,
+                title=torrent_data.name,
                 name=meta.name,
                 year=meta.year,
                 season_episode=meta.season_episode,
                 path=Path(self.normalize_return_path(torrent_path, downloader_name)),
                 save_path=self.normalize_return_path(
-                    Path(torrent_data.get('save_path') or ""), downloader_name
-                ) if torrent_data.get('save_path') else None,
+                    Path(torrent_data.download_dir), downloader_name
+                ) if getattr(torrent_data, "download_dir", None) else None,
                 content_path=self.normalize_return_path(torrent_path, downloader_name),
-                hash=torrent_data.get('hash'),
-                size=total_size,
-                tags=torrent_data.get('tags'),
-                category=torrent_data.get('category'),
-                download_limit=(torrent_data.get('dl_limit') or 0) / 1024,
-                upload_limit=(torrent_data.get('up_limit') or 0) / 1024,
-                ratio_limit=torrent_data.get('ratio_limit'),
-                seeding_time_limit=torrent_data.get('seeding_time_limit'),
-                progress=(torrent_data.get('progress') or 0) * 100,
-                state=self.__normalize_torrent_state(torrent_data.get('state')),
+                progress=__get_torrent_progress(torrent_data),
+                size=__get_torrent_size(torrent_data),
+                state=self.__normalize_torrent_state(torrent_data.status),
                 dlspeed=size_tools.format_compact_size(dlspeed),
-                upspeed=size_tools.format_compact_size(torrent_data.get('upspeed')),
+                upspeed=size_tools.format_compact_size(upspeed),
+                tags=__get_torrent_labels(torrent_data),
+                download_limit=__get_torrent_attr(torrent_data, "download_limit", "downloadLimit"),
+                upload_limit=__get_torrent_attr(torrent_data, "upload_limit", "uploadLimit"),
+                ratio_limit=ratio_limit,
+                seeding_time_limit=seeding_time_limit,
                 left_time=time_tools.format_duration(
-                    (total_size - completed_size) / dlspeed
-                ) if dlspeed > 0 else '',
+                    left_until_done / dlspeed
+                ) if dlspeed > 0 else ''
             )
 
         if hashs:
@@ -367,8 +359,14 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 torrents = server.get_completed_torrents(tags=query_tags) or []
                 try:
                     for torrent_info in torrents:
-                        tags = torrent_info.get("tags") or []
-                        if "已整理" in tags:
+                        # 含"已整理"tag的不处理
+                        if "已整理" in torrent_info.labels or []:
+                            continue
+                        # 下载路径
+                        path = torrent_info.download_dir
+                        # 无法获取下载路径的不处理
+                        if not path:
+                            logger.debug(f"未获取到 {torrent_info.name} 下载保存路径")
                             continue
                         ret_torrents.append(__build_torrent(name, torrent_info))
                 finally:
@@ -394,7 +392,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 torrents, _ = server.get_torrents(tags=query_tags) or []
                 try:
                     for torrent_info in torrents:
-                        torrent_state = self.__normalize_torrent_state(torrent_info.get('state'))
+                        torrent_state = self.__normalize_torrent_state(torrent_info.status)
                         if (
                                 query_status != TorrentQueryStatus.ALL
                                 and torrent_state != query_status.value
@@ -444,14 +442,14 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         return TorrentQueryStatus.ALL
 
     @staticmethod
-    def __normalize_torrent_state(state: Optional[Union[str, int]]) -> str:
+    def __normalize_torrent_state(status: Optional[str]) -> str:
         """
-        归一 qBittorrent 原始任务状态。
+        归一 Transmission 原始任务状态。
         """
-        state_text = str(state or "").strip().lower()
-        if state_text in _QBITTORRENT_PAUSED_STATES:
+        status_text = str(status or "").strip().lower()
+        if status_text in _TRANSMISSION_PAUSED_STATES:
             return DownloadTaskState.PAUSED.value
-        if state_text in _QBITTORRENT_DOWNLOADING_STATES:
+        if status_text in _TRANSMISSION_DOWNLOADING_STATES:
             return DownloadTaskState.DOWNLOADING.value
         return DownloadTaskState.COMPLETED.value
 
@@ -461,10 +459,18 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         :param hashs:  种子Hash
         :param downloader:  下载器
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
-        server.set_torrents_tag(ids=hashs, tags=['已整理'])
+        # 获取原标签
+        org_tags = server.get_torrent_tags(ids=hashs)
+        # 种子打上已整理标签
+        if org_tags:
+            tags = org_tags + ['已整理']
+        else:
+            tags = ['已整理']
+        server.set_torrent_tag(ids=hashs, tags=tags)
         return None
 
     def remove_torrents(self, hashs: Union[str, list], delete_file: Optional[bool] = True,
@@ -476,7 +482,8 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         :param downloader:  下载器
         :return: bool
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
         return server.delete_torrents(delete_file=delete_file, ids=hashs)
@@ -490,11 +497,13 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         :param downloader:  下载器
         :return: bool
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
-        server.set_torrents_tag(ids=hashs, tags=tags)
-        return True
+        # 获取原标签，TR默认会覆盖，需追加
+        org_tags = server.get_torrent_tags(ids=hashs)
+        return server.set_torrent_tag(ids=hashs, tags=tags, org_tags=org_tags)
 
     def update_torrent(
             self,
@@ -516,12 +525,12 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         :param upload_limit: 上传限速，单位 KB/s
         :param tracker_list: Tracker URL列表
         :param save_path: 保存目录
-        :param category: 分类
+        :param category: 分类，Transmission 不支持
         :param ratio_limit: 分享率限制
         :param seeding_time_limit: 做种时间限制，单位分钟
         :return: 各项修改结果
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
         results = {}
@@ -529,26 +538,25 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
                 value is not None
                 for value in (download_limit, upload_limit, ratio_limit, seeding_time_limit)
         ):
-            results["limits"] = server.change_torrent(
+            change_result = server.change_torrent(
                 hash_string=hash_string,
                 download_limit=download_limit,
                 upload_limit=upload_limit,
                 ratio_limit=ratio_limit,
                 seeding_time_limit=seeding_time_limit,
             )
-        if tracker_list is not None:
-            results["trackers"] = server.update_tracker(
-                hash_string=hash_string, tracker_list=tracker_list
-            )
+            results["limits"] = change_result
         if save_path is not None:
             results["save_path"] = server.set_torrent_location(
                 hash_string=hash_string,
                 location=self.normalize_path(Path(save_path), downloader),
             )
-        if category is not None:
-            results["category"] = server.set_torrent_category(
-                hash_string=hash_string, category=category
+        if tracker_list is not None:
+            results["trackers"] = server.update_tracker(
+                hash_string=hash_string, tracker_list=tracker_list
             )
+        if category is not None:
+            results["category"] = False
         return results
 
     def get_torrent_trackers(
@@ -563,12 +571,12 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         :return: 下载器名称到Tracker列表的映射
         """
         if downloader:
-            server: Qbittorrent = self.get_instance(downloader)
+            server: Transmission = self.get_instance(downloader)
             if not server:
                 return None
             servers = {downloader: server}
         else:
-            servers: Dict[str, Qbittorrent] = self.get_instances()
+            servers: Dict[str, Transmission] = self.get_instances()
         ret_trackers = {}
         for name, server in servers.items():
             trackers = server.get_trackers(hash_string)
@@ -584,28 +592,32 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         :param downloader:  下载器
         :return: bool
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
         return server.start_torrents(ids=hashs)
 
-    def stop_torrents(self, hashs: Union[list, str], downloader: Optional[str] = None) -> Optional[bool]:
+    def stop_torrents(self, hashs: Union[list, str],
+                      downloader: Optional[str] = None) -> Optional[bool]:
         """
         停止下载
         :param hashs:  种子Hash
         :param downloader:  下载器
         :return: bool
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
         return server.stop_torrents(ids=hashs)
 
-    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> Optional[TorrentFilesList]:
+    def torrent_files(self, tid: str, downloader: Optional[str] = None) -> Optional[List[File]]:
         """
         获取种子文件列表
         """
-        server: Qbittorrent = self.get_instance(downloader)
+        # 获取下载器
+        server: Transmission = self.get_instance(downloader)
         if not server:
             return None
         return server.get_files(tid=tid)
@@ -615,7 +627,7 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
         下载器信息
         """
         if downloader:
-            server: Qbittorrent = self.get_instance(downloader)
+            server: Transmission = self.get_instance(downloader)
             if not server:
                 return None
             servers = [server]
@@ -628,9 +640,9 @@ class QbittorrentModule(_ModuleBase, _DownloaderBase[Qbittorrent]):
             if not info:
                 continue
             ret_info.append(schemas.DownloaderInfo(
-                download_speed=info.get("dl_info_speed"),
-                upload_speed=info.get("up_info_speed"),
-                download_size=info.get("dl_info_data"),
-                upload_size=info.get("up_info_data")
+                download_speed=info.download_speed,
+                upload_speed=info.upload_speed,
+                download_size=info.current_stats.downloaded_bytes,
+                upload_size=info.current_stats.uploaded_bytes
             ))
         return ret_info

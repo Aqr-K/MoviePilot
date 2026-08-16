@@ -46,9 +46,9 @@ def _load_rtorrent_client_module():
         "app.runtime.log": log_module,
     }
 
-    rtorrent_path = repo_root / "app" / "modules" / "rtorrent" / "rtorrent.py"
+    rtorrent_path = repo_root / "app" / "modules" / "downloaders" / "rtorrent" / "rtorrent.py"
     rtorrent_spec = importlib.util.spec_from_file_location(
-        "app.modules.rtorrent.rtorrent",
+        "app.modules.downloaders.rtorrent.rtorrent",
         rtorrent_path,
     )
     rtorrent_module = importlib.util.module_from_spec(rtorrent_spec)

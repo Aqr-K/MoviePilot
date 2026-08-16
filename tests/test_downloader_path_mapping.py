@@ -111,9 +111,9 @@ def _load_transmission_module():
     cache_module = types.ModuleType("app.runtime.cache")
     modules_module = types.ModuleType("app.modules")
     modules_module.__path__ = []
-    transmission_package_module = types.ModuleType("app.modules.transmission")
+    transmission_package_module = types.ModuleType("app.modules.downloaders.transmission")
     transmission_package_module.__path__ = []
-    transmission_client_module = types.ModuleType("app.modules.transmission.transmission")
+    transmission_client_module = types.ModuleType("app.modules.downloaders.transmission.transmission")
     schemas_module = types.ModuleType("app.schemas")
     schema_types_module = types.ModuleType("app.schemas.types")
     config_module = types.ModuleType("app.runtime.config")
@@ -229,7 +229,10 @@ def _load_transmission_module():
     core_module.cache = cache_module
     core_module.config = config_module
     core_module.metainfo = metainfo_module
-    modules_module.transmission = transmission_package_module
+    downloaders_module = types.ModuleType("app.modules.downloaders")
+    downloaders_module.__path__ = []
+    downloaders_module.transmission = transmission_package_module
+    modules_module.downloaders = downloaders_module
     transmission_package_module.transmission = transmission_client_module
     schemas_module.types = schema_types_module
     torrentool_module.torrent = torrentool_torrent_module
@@ -247,8 +250,9 @@ def _load_transmission_module():
         "app.domain.metainfo": metainfo_module,
         "app.runtime.log": log_module,
         "app.modules": modules_module,
-        "app.modules.transmission": transmission_package_module,
-        "app.modules.transmission.transmission": transmission_client_module,
+        "app.modules.downloaders": downloaders_module,
+        "app.modules.downloaders.transmission": transmission_package_module,
+        "app.modules.downloaders.transmission.transmission": transmission_client_module,
         "app.schemas": schemas_module,
         "app.schemas.types": schema_types_module,
         "transmission_rpc": transmission_rpc_module,
@@ -256,7 +260,7 @@ def _load_transmission_module():
         "torrentool.torrent": torrentool_torrent_module,
     }
 
-    module_path = repo_root / "app" / "modules" / "transmission" / "__init__.py"
+    module_path = repo_root / "app" / "modules" / "downloaders" / "transmission" / "__init__.py"
     module_spec = __import__("importlib.util").util.spec_from_file_location(
         "_test_transmission_module",
         module_path,

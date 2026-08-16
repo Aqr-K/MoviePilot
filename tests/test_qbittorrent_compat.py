@@ -24,7 +24,7 @@ def _load_qbittorrent_modules():
     url_tools_module = types.ModuleType("app.foundation.url")
     modules_module = types.ModuleType("app.modules")
     modules_module.__path__ = []
-    qbittorrent_package_module = types.ModuleType("app.modules.qbittorrent")
+    qbittorrent_package_module = types.ModuleType("app.modules.downloaders.qbittorrent")
     qbittorrent_package_module.__path__ = []
     log_module = types.ModuleType("app.runtime.log")
     cache_module = types.ModuleType("app.runtime.cache")
@@ -168,7 +168,10 @@ def _load_qbittorrent_modules():
     core_module.config = config_module
     core_module.metainfo = metainfo_module
     schemas_module.types = schema_types_module
-    modules_module.qbittorrent = qbittorrent_package_module
+    downloaders_module = types.ModuleType("app.modules.downloaders")
+    downloaders_module.__path__ = []
+    downloaders_module.qbittorrent = qbittorrent_package_module
+    modules_module.downloaders = downloaders_module
     torrentool_module.torrent = torrentool_torrent_module
 
     stub_modules = {
@@ -186,7 +189,8 @@ def _load_qbittorrent_modules():
         "app.domain.metainfo": metainfo_module,
         "app.runtime.log": log_module,
         "app.modules": modules_module,
-        "app.modules.qbittorrent": qbittorrent_package_module,
+        "app.modules.downloaders": downloaders_module,
+        "app.modules.downloaders.qbittorrent": qbittorrent_package_module,
         "app.schemas": schemas_module,
         "app.schemas.types": schema_types_module,
         "qbittorrentapi": qbittorrentapi_module,
@@ -199,15 +203,15 @@ def _load_qbittorrent_modules():
     for stub_module in stub_modules.values():
         stub_module._qbittorrent_test_stub = True
 
-    qbittorrent_path = repo_root / "app" / "modules" / "qbittorrent" / "qbittorrent.py"
+    qbittorrent_path = repo_root / "app" / "modules" / "downloaders" / "qbittorrent" / "qbittorrent.py"
     qbittorrent_spec = importlib.util.spec_from_file_location(
-        "app.modules.qbittorrent.qbittorrent",
+        "app.modules.downloaders.qbittorrent.qbittorrent",
         qbittorrent_path,
     )
     qbittorrent_module = importlib.util.module_from_spec(qbittorrent_spec)
     assert qbittorrent_spec and qbittorrent_spec.loader
 
-    module_path = repo_root / "app" / "modules" / "qbittorrent" / "__init__.py"
+    module_path = repo_root / "app" / "modules" / "downloaders" / "qbittorrent" / "__init__.py"
     qbittorrent_module_spec = importlib.util.spec_from_file_location(
         "_test_qbittorrent_module",
         module_path,
