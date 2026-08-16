@@ -305,6 +305,12 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         owner="adapters",
         is_package=True,
     ),
+    "app.modules.filemanager.storages.base": ModuleAlias(
+        target="app.modules.storages.base",
+        replacement="app.modules.storages.base",
+        introduced="v3.0.0",
+        owner="modules",
+    ),
     "app.modules.filemanager.storages.alipan": ModuleAlias(
         target="app.modules.storages.alipan",
         replacement="app.modules.storages.alipan",
@@ -1252,6 +1258,22 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
     "app.helper.llm": ModuleAlias(
         target="app.agent.llm", replacement="app.agent.llm",
         introduced="v3.0.0", owner="agent", is_package=True,
+    ),
+    "app.helper.llm.capability": ModuleAlias(
+        target="app.agent.llm.capability", replacement="app.agent.llm.capability",
+        introduced="v3.0.0", owner="agent",
+    ),
+    "app.helper.llm.helper": ModuleAlias(
+        target="app.agent.llm.helper", replacement="app.agent.llm.helper",
+        introduced="v3.0.0", owner="agent",
+    ),
+    "app.helper.llm.provider": ModuleAlias(
+        target="app.agent.llm.provider", replacement="app.agent.llm.provider",
+        introduced="v3.0.0", owner="agent",
+    ),
+    "app.helper.llm.server_tools": ModuleAlias(
+        target="app.agent.llm.server_tools", replacement="app.agent.llm.server_tools",
+        introduced="v3.0.0", owner="agent",
     ),
 }
 
