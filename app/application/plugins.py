@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI
 from app.application.security.access import verify_apikey, verify_token
 from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.config import settings
+from app.runtime.extensions.plugin_instance import matches_plugin
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.log import logger
 from app.schemas.types import SystemConfigKey
@@ -121,10 +122,17 @@ def _remove_routes(plugin_id: str) -> bool:
     if not plugin_id:
         return False
     app = get_api_app()
-    prefix = f"{PLUGIN_PREFIX}/{plugin_id}/"
-    routes_to_remove = [
-        route for route in app.routes if route.path.startswith(prefix)
-    ]
+    prefix = f"{PLUGIN_PREFIX}/"
+    # 路径首段是注册来源：插件标识覆盖其全部实例，实例键只命中自身，
+    # 按首段精确解析也不会误伤同前缀的其它插件
+    routes_to_remove = []
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith(prefix):
+            continue
+        owner = path[len(prefix):].split("/", 1)[0]
+        if matches_plugin(owner, plugin_id):
+            routes_to_remove.append(route)
     removed = False
     for route in routes_to_remove:
         try:

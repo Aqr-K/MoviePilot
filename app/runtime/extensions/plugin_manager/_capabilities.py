@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Callable
 
 
 from app.foundation.reflection import ObjectUtils
+from app.runtime.extensions.plugin_instance import matches_plugin
 from app.runtime.log import logger
 
 LegacyDiagnosticsConfigurator = Callable[..., None]
@@ -45,7 +46,7 @@ class _PluginCapabilityMixin:
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(self._running_plugins)
         for plugin_id, plugin in running_plugins_snapshot.items():
-            if pid and pid != plugin_id:
+            if pid and not matches_plugin(plugin_id, pid):
                 continue
             if hasattr(plugin, "get_command") and ObjectUtils.check_method(plugin.get_command):
                 try:
@@ -73,11 +74,13 @@ class _PluginCapabilityMixin:
         """
         ret_apis = []
         if pid:
-            plugins = {pid: self._running_plugins.get(pid)}
+            plugins = {key: plugin
+                       for key, plugin in self._running_plugins.items()
+                       if matches_plugin(key, pid)}
         else:
             plugins = self._running_plugins
         for plugin_id, plugin in plugins.items():
-            if pid and pid != plugin_id:
+            if pid and not matches_plugin(plugin_id, pid):
                 continue
             if hasattr(plugin, "get_api") and ObjectUtils.check_method(plugin.get_api):
                 try:
@@ -107,14 +110,18 @@ class _PluginCapabilityMixin:
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(self._running_plugins)
         for plugin_id, plugin in running_plugins_snapshot.items():
-            if pid and pid != plugin_id:
+            if pid and not matches_plugin(plugin_id, pid):
                 continue
             if hasattr(plugin, "get_service") and ObjectUtils.check_method(plugin.get_service):
                 try:
                     if not plugin.get_state():
                         continue
                     services = plugin.get_service() or []
-                    ret_services.extend(services)
+                    # 带出归属实例键：同一插件的多个实例声明同名服务，调度器据此区分
+                    for service in services:
+                        if not service:
+                            continue
+                        ret_services.append({**service, "pid": plugin_id})
                 except Exception as e:
                     logger.error(f"获取插件 {plugin_id} 服务出错：{str(e)}")
         return ret_services
@@ -132,7 +139,7 @@ class _PluginCapabilityMixin:
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(self._running_plugins)
         for plugin_id, plugin in running_plugins_snapshot.items():
-            if pid and pid != plugin_id:
+            if pid and not matches_plugin(plugin_id, pid):
                 continue
             if hasattr(plugin, "get_module") and ObjectUtils.check_method(plugin.get_module):
                 try:
@@ -158,7 +165,7 @@ class _PluginCapabilityMixin:
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(self._running_plugins)
         for plugin_id, plugin in running_plugins_snapshot.items():
-            if pid and pid != plugin_id:
+            if pid and not matches_plugin(plugin_id, pid):
                 continue
             if hasattr(plugin, "get_actions") and ObjectUtils.check_method(plugin.get_actions):
                 try:
@@ -211,7 +218,7 @@ class _PluginCapabilityMixin:
             # 创建字典快照避免并发修改
             running_plugins_snapshot = dict(self._running_plugins)
             for plugin_id, plugin in running_plugins_snapshot.items():
-                if pid and pid != plugin_id:
+                if pid and not matches_plugin(plugin_id, pid):
                     continue
                 if hasattr(plugin, "get_agent_tools") and ObjectUtils.check_method(
                     plugin.get_agent_tools
