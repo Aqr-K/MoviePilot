@@ -11,6 +11,8 @@ ModuleType 一个标签同时承担分发路由、服务配置归类、契约归
 环境漂移），而是校验不变量，并把已知偏差显式登记：出现新的偏差必须改表。
 """
 import ast
+import collections
+import functools
 import inspect
 import pathlib
 from typing import Dict, FrozenSet, List, Set
@@ -152,32 +154,6 @@ def test_a_module_never_mixes_two_domains(module_classes):
     assert {"recognize_music", "search_music", "music_album"} <= douban_music
 
 
-def broadcast_capabilities() -> Set[str]:
-    """
-    扫描 run_module 广播调用点上的方法名
-
-    :return: 被广播的方法名集合
-    """
-    app_root = pathlib.Path(__file__).resolve().parents[1] / "app"
-    names: Set[str] = set()
-    for path in app_root.rglob("*.py"):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            called = func.attr if isinstance(func, ast.Attribute) else None
-            if called not in ("run_module", "async_run_module"):
-                continue
-            if node.args and isinstance(node.args[0], ast.Constant) \
-                    and isinstance(node.args[0].value, str):
-                names.add(node.args[0].value)
-    return names
-
-
 # 有意跨类型的广播族：提供者分属不同 ModuleType，但签名一致、广播即其语义。
 # 图片族的 FanartModule 声明 Other 却是正式成员；media_exists 由媒体库与整理编排共同回答。
 INTENTIONAL_CROSS_TYPE_BROADCASTS: FrozenSet[str] = frozenset({
@@ -203,3 +179,70 @@ def test_a_capability_shared_across_types_is_never_broadcast(module_classes):
     unexpected = shared & broadcast_capabilities() - INTENTIONAL_CROSS_TYPE_BROADCASTS
 
     assert unexpected == set()
+
+
+@functools.lru_cache(maxsize=1)
+def broadcast_call_sites() -> Dict[str, Set[tuple]]:
+    """
+    扫描 run_module 广播调用点及其关键字实参
+
+    :return: {方法名: {(实参名集合, 位置), ...}}
+    """
+    app_root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    sites: Dict[str, Set[tuple]] = collections.defaultdict(set)
+    for path in app_root.rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in ("run_module", "async_run_module"):
+                continue
+            if not node.args or not isinstance(node.args[0], ast.Constant) \
+                    or not isinstance(node.args[0].value, str):
+                continue
+            keywords = frozenset(kw.arg for kw in node.keywords if kw.arg)
+            sites[node.args[0].value].add((keywords, f"{path.name}:{node.lineno}"))
+    return sites
+
+
+def broadcast_capabilities() -> FrozenSet[str]:
+    """
+    取被广播的方法名
+
+    :return: 方法名集合
+    """
+    return frozenset(broadcast_call_sites())
+
+
+def test_every_broadcast_reaches_providers_that_can_accept_its_arguments(module_classes):
+    """广播的实参必须能被每一个提供者接收，否则该提供者必然抛错并推出错误通知。
+
+    这是 download 那类缺陷的一般形式：存储升为模块后，StorageBase.download(fileitem, path)
+    进入了 run_module("download", content=..., download_dir=..., cookie=...) 的广播集合，
+    每次添加种子先撞 7 个存储抛 7 次 TypeError。按方法名比对碰撞不足以发现它——这里直接
+    拿调用点的实参去比对各提供者的签名。
+    """
+    mismatched = []
+    surfaces = {cls: provided_capabilities(cls) for cls in module_classes
+                if cls.get_type() not in PRECISE_DISPATCH_TYPES}
+    for capability, sites in broadcast_call_sites().items():
+        providers = [cls for cls, caps in surfaces.items() if capability in caps]
+        for keywords, location in sites:
+            for provider in providers:
+                try:
+                    parameters = inspect.signature(getattr(provider, capability)).parameters
+                except (TypeError, ValueError):
+                    continue
+                if any(param.kind == inspect.Parameter.VAR_KEYWORD
+                       for param in parameters.values()):
+                    continue
+                unknown = keywords - set(parameters) - {"raise_exception"}
+                if unknown:
+                    mismatched.append(
+                        f"{location} 广播 {capability}({', '.join(sorted(unknown))}) "
+                        f"但 {provider.__name__} 接收不了")
+
+    assert mismatched == []
