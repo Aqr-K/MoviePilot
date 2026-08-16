@@ -409,7 +409,7 @@ class AniListModule(_ModuleBase):
         ]
 
     def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
-                       page: int = 1, count: int = 20) -> Optional[List[MediaInfo]]:
+                       page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
         """
         取指定榜单的一页
 
