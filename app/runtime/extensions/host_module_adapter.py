@@ -4,7 +4,7 @@ import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Collection, Mapping
+from typing import Any, Mapping
 
 from app.runtime.capabilities.model import (
     ActivationPolicy,
@@ -149,14 +149,11 @@ def _validate_manifest_inventory(registry: CapabilityRegistry) -> None:
                 )
 
 
-def build_host_module_registry(extra_kinds: Collection[str] = ()) -> CapabilityRegistry:
-    """从现有物理模块包构建 import-free Host Module Registry。
-
-    :param extra_kinds: 该注册表额外接受的 kind，供运行期来源登记自身声明
-    """
+def build_host_module_registry() -> CapabilityRegistry:
+    """从现有物理模块包构建 import-free Host Module Registry。"""
     registry = CapabilityRegistry.discover(
         (_MODULE_ROOT,),
-        kinds={HOST_MODULE_KIND, *extra_kinds},
+        kinds={HOST_MODULE_KIND},
         selector_schemas=HOST_MODULE_SELECTOR_SCHEMAS,
     )
     _validate_manifest_inventory(registry)

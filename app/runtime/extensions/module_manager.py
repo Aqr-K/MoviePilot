@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from enum import Enum
 from typing import Any, Generator, List, Optional, Tuple, Union
 
 from app.foundation.reflection import ObjectUtils
@@ -14,6 +15,21 @@ from app.runtime.capabilities.model import (
 from app.runtime.capabilities.runtime import CapabilityRuntime
 from app.runtime.config import settings
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
+from app.runtime.extensions.capability import (
+    BUILTIN_ONLY_CAPABILITIES,
+    provided_capabilities,
+)
+from app.runtime.extensions.contract import (
+    verify_module_contract,
+    verify_module_type,
+)
+from app.runtime.extensions.plugin_instance import plugin_id_of, qualify_module_id
+from app.runtime.extensions.plugin_module_adapter import (
+    PLUGIN_MODULE_KIND,
+    PluginModuleAdapter,
+    ProvidedModule,
+    build_plugin_module_spec,
+)
 from app.runtime.extensions.host_module_adapter import (
     HOST_MODULE_KIND,
     HostModuleAdapter,
@@ -34,8 +50,23 @@ from app.schemas.types import (
 )
 
 
+def _subtype_value(target: Any) -> Optional[str]:
+    """
+    取模块声明的子类型取值
+
+    :param target: 模块类或模块实例
+    :return: 非空取值字符串，无法取值或为空时返回 None
+    """
+    try:
+        declared = target.get_subtype()
+    except Exception:
+        return None
+    value = declared.value if isinstance(declared, Enum) else declared
+    return value if isinstance(value, str) and value else None
+
+
 class ModuleManager(metaclass=Singleton):
-    """以 Capability Runtime 管理宿主模块，并保留旧插件同步查询合同。"""
+    """以 Capability Runtime 管理宿主模块与外部来源注册的模块。"""
 
     SubType = Union[
         DownloaderType,
@@ -52,10 +83,17 @@ class ModuleManager(metaclass=Singleton):
         self._lifecycle_lock = threading.RLock()
         self._modules: dict[str, type] = {}
         self._running_modules: dict[str, Any] = {}
+        # 外部来源声明的模块按 owner 记账：{owner: [module_id, ...]}
+        self._external_modules: dict[str, list[str]] = {}
+        self._plugin_adapter = PluginModuleAdapter()
         registry = build_host_module_registry()
+        registry.allow_kind(PLUGIN_MODULE_KIND)
         self._runtime = CapabilityRuntime(
             registry,
-            adapters={HOST_MODULE_KIND: HostModuleAdapter()},
+            adapters={
+                HOST_MODULE_KIND: HostModuleAdapter(),
+                PLUGIN_MODULE_KIND: self._plugin_adapter,
+            },
             observer=self._observe_transition,
         )
         # pkgutil 的既有发现顺序按一级包名稳定排列，兼容视图继续保持该顺序。
@@ -121,11 +159,15 @@ class ModuleManager(metaclass=Singleton):
         implementation = namespace.get(symbol_name)
         return implementation if isinstance(implementation, type) else None
 
+    def _all_specs(self) -> tuple[CapabilitySpec, ...]:
+        """取宿主与外部来源的全部声明；外部声明可在运行期增删，故每次向 Runtime 取。"""
+        return self._runtime.list_specs()
+
     def _refresh_running_projection(self) -> None:
         """从 Runtime 已发布实例重建插件可见的运行模块字典。"""
         running = {
             spec.id: instance
-            for spec in self._specs
+            for spec in self._all_specs()
             if (instance := self._runtime.get_running(spec.id)) is not None
         }
         with self._lock:
@@ -136,7 +178,7 @@ class ModuleManager(metaclass=Singleton):
         owner_class: type,
     ) -> Optional[EventHandlerBinding]:
         """按 canonical class identity 绑定当前 generation，停止态阻断 fallback 构造。"""
-        for spec in self._specs:
+        for spec in self._all_specs():
             with self._lock:
                 implementation = self._modules.get(spec.id)
             if implementation is None:
@@ -149,7 +191,7 @@ class ModuleManager(metaclass=Singleton):
                 continue
             return EventHandlerBinding(
                 instance=self._runtime.get_running(spec.id),
-                owner_name=str(spec.metadata["name"]),
+                owner_name=str(spec.metadata.get("name", spec.id)),
             )
         return None
 
@@ -192,6 +234,7 @@ class ModuleManager(metaclass=Singleton):
     def load_modules(self) -> None:
         """按当前配置启动未运行模块；已运行模块保持当前 generation。"""
         self._reconcile(reason="module_manager_load")
+        self._reactivate_external_modules()
 
     def handle_config_changed(self, event: Event) -> None:
         """配置变更时仅协调 watch 命中的能力，并保证单一生命周期 writer。"""
@@ -208,7 +251,7 @@ class ModuleManager(metaclass=Singleton):
         """停止全部运行模块但保留 Runtime，使旧插件可随后再次 load。"""
         logger.info("正在停止所有模块...")
         with self._lifecycle_lock:
-            for spec in reversed(self._specs):
+            for spec in reversed(self._all_specs()):
                 snapshot = self._runtime.snapshot(spec.id)
                 if (
                     self._runtime.get_running(spec.id) is None
@@ -270,7 +313,7 @@ class ModuleManager(metaclass=Singleton):
         """直接读取 Runtime 发布视图，转换期间不暴露旧或候选实例。"""
         return tuple(
             instance
-            for spec in self._specs
+            for spec in self._all_specs()
             if (instance := self._runtime.get_running(spec.id)) is not None
         )
 
@@ -313,19 +356,250 @@ class ModuleManager(metaclass=Singleton):
 
     def get_modules(self) -> dict[str, type]:
         """兼容性显式物化全部真实类；单个失败不阻断其它模块。"""
-        for spec in self._specs:
+        for spec in self._all_specs():
             self.get_module(spec.id)
         with self._lock:
             return dict(self._modules)
 
     def get_module_ids(self) -> List[str]:
         """从 manifest 返回全部模块 ID，不物化实现。"""
-        return [spec.id for spec in self._specs]
+        return [spec.id for spec in self._all_specs()]
 
     def list_specs(self) -> tuple[CapabilitySpec, ...]:
         """返回全部轻量模块声明，包含物化或启动失败的能力。"""
-        return self._specs
+        return self._all_specs()
 
     def get_specs(self) -> tuple[CapabilitySpec, ...]:
         """兼容内部调用命名，返回与 `list_specs` 相同的声明快照。"""
         return self.list_specs()
+
+    def _find_owner(self, module_id: str) -> Optional[str]:
+        """
+        查找模块归属的外部来源，调用方需持有 self._lock
+
+        :param module_id: 模块标识
+        :return: 来源标识，内建模块或未注册返回 None
+        """
+        for owner, module_ids in self._external_modules.items():
+            if module_id in module_ids:
+                return owner
+        return None
+
+    def _is_taken_by_others(self, module_id: str, owner: str) -> bool:
+        """
+        判断未限定的模块标识是否已被内建模块或其它插件占用，调用方需持有 self._lock
+
+        同一插件的不同实例共用一份声明，不算占用。
+
+        :param module_id: 声明自身的模块标识
+        :param owner: 注册来源的实例键
+        :return: 是否被他人占用
+        """
+        if self._runtime.get_spec(module_id) is None:
+            return False
+        holder = self._find_owner(module_id)
+        if holder is None:
+            return True
+        return plugin_id_of(holder) != plugin_id_of(owner)
+
+    def _subtype_holder(self, module_cls: type, module_id: str) -> Optional[str]:
+        """
+        查出已占用该模块子类型的其它运行模块
+
+        按子类型精确分发时同一子类型只能有一个模块，否则外部来源可以静默顶替内建后端。
+        子类型无法在类上取值或为空时不作判定。
+
+        :param module_cls: 待注册的模块类
+        :param module_id: 待注册的模块标识
+        :return: 已占用该子类型的模块标识，未被占用时为 None
+        """
+        declared = _subtype_value(module_cls)
+        if not declared:
+            return None
+        with self._lock:
+            running = dict(self._running_modules)
+        for running_id, running_module in running.items():
+            if running_id == module_id:
+                continue
+            if _subtype_value(running_module) == declared:
+                return running_id
+        return None
+
+    def _prepare_module(self, declaration: ProvidedModule) -> Tuple[Any, bool]:
+        """
+        构造模块实例并判定其开关
+
+        开关在实例上读取，因此必须先构造；构造出的实例交给 adapter 复用，同一模块不会
+        为了读开关而构造两次。
+
+        :param declaration: 模块声明
+        :return: (实例, 开关是否打开)，构造失败时为 (None, False)
+        """
+        try:
+            instance = declaration.instantiate()
+        except Exception as err:
+            logger.error(f"Load Module Error：{declaration.module_id}，{str(err)}", exc_info=True)
+            return None, False
+        try:
+            return instance, self.check_setting(instance.init_setting())
+        except Exception as err:
+            logger.debug(f"读取模块 {declaration.module_id} 开关出错，按开启处理：{str(err)}")
+            return instance, True
+
+    def _detach_module(self, module_id: str) -> None:
+        """
+        停止并摘除一个外部模块声明
+
+        :param module_id: 模块标识
+        """
+        try:
+            self._runtime.unregister_capability(module_id, reason="plugin_unregister")
+        except Exception as err:
+            logger.debug(f"摘除模块 {module_id} 声明出错：{str(err)}")
+        self._plugin_adapter.forget(module_id)
+        with self._lock:
+            self._modules.pop(module_id, None)
+            self._running_modules.pop(module_id, None)
+
+    def _activate_external(self, module_id: str, reason: str) -> None:
+        """
+        激活一个已登记的外部模块，失败由 Runtime 记录且不影响其它模块
+
+        :param module_id: 模块标识
+        :param reason: 记入观测的操作原因
+        """
+        try:
+            instance = self._runtime.activate(module_id, reason=reason, retry=True)
+        except Exception:
+            return
+        self._remember_materialized(module_id, type(instance))
+
+    def register_module(self, module: Union[type, ProvidedModule], owner: str) -> bool:
+        """
+        注册一个外部来源声明的模块，通过契约校验后按内建流程实例化并上线
+
+        模块标识与已有模块重名且归属不同来源时拒绝注册，先到者胜；同一来源重复注册为幂等更新。
+        非默认实例的声明按实例键限定模块标识，使同一插件的多个实例注册同一模块类时互不覆盖；
+        限定只在同一插件内部消歧，声明自身的模块标识仍要与内建模块和其它插件的模块不重名。
+
+        :param module: 模块类或 ProvidedModule 声明
+        :param owner: 注册来源的实例键，用于按来源精确卸载
+        :return: 是否被接受进注册表，开关关闭或初始化失败不影响接受结果
+        """
+        if not owner:
+            return False
+        declaration = module if isinstance(module, ProvidedModule) else ProvidedModule(module)
+        if not isinstance(declaration.module_cls, type):
+            return False
+        declared_id = declaration.module_id
+        module_id = qualify_module_id(declared_id, owner)
+        declaration = ProvidedModule(
+            module_cls=declaration.module_cls,
+            module_id=module_id,
+            factory=declaration.factory,
+            expected_type=declaration.expected_type,
+        )
+        if declaration.expected_type is not None:
+            passed, reasons = verify_module_type(declaration.module_cls, declaration.expected_type)
+        else:
+            passed, reasons = verify_module_contract(declaration.module_cls)
+        if not passed:
+            logger.warning(f"模块 {module_id}（owner={owner}）未通过契约校验，拒绝注册：{'；'.join(reasons)}")
+            return False
+        reserved = sorted(provided_capabilities(declaration.module_cls) & BUILTIN_ONLY_CAPABILITIES)
+        if reserved:
+            logger.warning(
+                f"模块 {module_id}（owner={owner}）声明了内建独占能力，拒绝注册：{'、'.join(reserved)}")
+            return False
+        with self._lifecycle_lock:
+            with self._lock:
+                existing_owner = self._find_owner(module_id)
+                if self._runtime.get_spec(module_id) is not None and existing_owner != owner:
+                    logger.warning(
+                        f"模块注册冲突：{module_id} 已存在（owner={existing_owner or 'builtin'}），"
+                        f"拒绝来自 {owner} 的注册")
+                    return False
+                if self._is_taken_by_others(declared_id, owner):
+                    logger.warning(
+                        f"模块注册冲突：{declared_id} 已存在"
+                        f"（owner={self._find_owner(declared_id) or 'builtin'}），"
+                        f"拒绝来自 {owner} 的注册")
+                    return False
+            holder = self._subtype_holder(declaration.module_cls, module_id)
+            if holder:
+                logger.warning(
+                    f"模块注册冲突：子类型已被 {holder} 占用，拒绝来自 {owner} 的注册 {module_id}")
+                return False
+            # 同一来源重复注册为幂等更新，先摘旧声明再登记新的
+            self._detach_module(module_id)
+            prepared, enabled = self._prepare_module(declaration)
+            self._plugin_adapter.declare(module_id, declaration, prepared if enabled else None)
+            try:
+                self._runtime.register_capability(build_plugin_module_spec(module_id, declaration.module_cls))
+            except Exception as err:
+                logger.warning(f"模块 {module_id}（owner={owner}）登记声明失败：{str(err)}")
+                self._plugin_adapter.forget(module_id)
+                return False
+            with self._lock:
+                registered = self._external_modules.setdefault(owner, [])
+                if module_id not in registered:
+                    registered.append(module_id)
+            if enabled:
+                self._activate_external(module_id, reason="plugin_register")
+            self._refresh_running_projection()
+            return True
+
+    def unregister_modules(self, owner: str) -> List[str]:
+        """
+        卸载某来源注册的全部模块，停止运行实例并从注册表移除
+
+        :param owner: 注册来源的实例键
+        :return: 被移除的模块id列表
+        """
+        if not owner:
+            return []
+        with self._lock:
+            module_ids = list(self._external_modules.pop(owner, []))
+        if not module_ids:
+            return []
+        with self._lifecycle_lock:
+            for module_id in module_ids:
+                self._detach_module(module_id)
+            self._refresh_running_projection()
+        return module_ids
+
+    def get_external_module_ids(self, owner: Optional[str] = None) -> List[str]:
+        """
+        获取外部来源注册的模块id列表
+
+        :param owner: 注册来源标识，为空时返回全部来源
+        :return: 模块id列表
+        """
+        with self._lock:
+            if owner is not None:
+                return list(self._external_modules.get(owner, []))
+            return [module_id
+                    for module_ids in self._external_modules.values()
+                    for module_id in module_ids]
+
+    def _reactivate_external_modules(self) -> None:
+        """整体重载后让已登记的外部模块重新上线，其声明不随重载丢失。"""
+        with self._lock:
+            module_ids = [module_id
+                          for module_ids in self._external_modules.values()
+                          for module_id in module_ids]
+        if not module_ids:
+            return
+        with self._lifecycle_lock:
+            for module_id in module_ids:
+                if self._runtime.get_running(module_id) is not None:
+                    continue
+                declaration = self._plugin_adapter.get_declaration(module_id)
+                if declaration is None:
+                    continue
+                prepared, enabled = self._prepare_module(declaration)
+                if not enabled:
+                    continue
+                self._plugin_adapter.declare(module_id, declaration, prepared)
+                self._activate_external(module_id, reason="module_manager_load")
+            self._refresh_running_projection()
