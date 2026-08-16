@@ -15,7 +15,7 @@ from app.runtime.compat.resource_imports import (
     RESOURCE_IMPORT_RULES,
     scan_plugin_resource_imports,
 )
-from app.runtime.extensions import plugin_manager as plugin_manager_module
+from app.runtime.extensions import plugin_shared as plugin_manager_module
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.startup import plugins_initializer
 

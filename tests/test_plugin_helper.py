@@ -655,10 +655,10 @@ class TestPluginHelper:
         plugin_manager = PluginManager()
         monkeypatch.setattr(plugin_manager, "_plugins", {})
         monkeypatch.setattr(plugin_manager, "_running_plugins", {})
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings", SimpleNamespace(VERSION_FLAG="v2"))
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.settings", SimpleNamespace(VERSION_FLAG="v2"))
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
         monkeypatch.setattr(
-            "app.runtime.extensions.plugin_manager._site_auth_level_provider",
+            "app.runtime.extensions.plugin_shared._site_auth_level_provider",
             lambda: 1,
         )
         monkeypatch.setattr(PluginHelper, "get_plugins", lambda _self, *_args: market_plugins)
@@ -713,13 +713,13 @@ class TestPluginHelper:
         monkeypatch.setattr(plugin_manager, "_plugins", {})
         monkeypatch.setattr(plugin_manager, "_running_plugins", {})
         monkeypatch.setattr(
-            "app.runtime.extensions.plugin_manager.settings",
+            "app.runtime.extensions.plugin_shared.settings",
             SimpleNamespace(VERSION_FLAG="v3", PLUGIN_MARKET=REPO_URL),
         )
         monkeypatch.setattr("app.adapters.external.market.settings", SimpleNamespace(VERSION_FLAG="v3"))
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.SystemConfigOper", lambda: SimpleNamespace(get=lambda _key: []))
         monkeypatch.setattr(
-            "app.runtime.extensions.plugin_manager._site_auth_level_provider",
+            "app.runtime.extensions.plugin_shared._site_auth_level_provider",
             lambda: 1,
         )
         monkeypatch.setattr(PluginHelper, "get_plugins", fake_get_plugins)
@@ -878,8 +878,8 @@ class TestPluginHelper:
         clear_calls = []
         fake_release_method = SimpleNamespace(cache_clear=lambda: clear_calls.append("clear"))
         fake_helper = SimpleNamespace(get_plugin_release_versions=fake_release_method)
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.PluginHelper", lambda: fake_helper)
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.PluginHelper", lambda: fake_helper)
         monkeypatch.setattr(PluginManager, "get_plugins_from_market", lambda *_args, **_kwargs: [])
 
         PluginManager().get_online_plugins(force=True)
@@ -904,8 +904,8 @@ class TestPluginHelper:
         async def fake_market(*_args, **_kwargs):
             return []
 
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
-        monkeypatch.setattr("app.runtime.extensions.plugin_manager.PluginHelper", lambda: fake_helper)
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.settings.PLUGIN_MARKET", "https://github.com/demo/plugins")
+        monkeypatch.setattr("app.runtime.extensions.plugin_shared.PluginHelper", lambda: fake_helper)
         monkeypatch.setattr(PluginManager, "async_get_plugins_from_market", fake_market)
 
         asyncio.run(PluginManager().async_get_online_plugins(force=True))
