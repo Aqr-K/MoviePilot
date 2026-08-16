@@ -215,6 +215,18 @@ class _PluginBase(metaclass=ABCMeta):
         """
         pass
 
+    def provides_modules(self) -> List[Any]:
+        """
+        声明本插件提供的系统模块，注册后与内建模块同权参与分发
+
+        元素可以是模块类，也可以是 ProvidedModule 声明（自定义模块标识或构造方式）。
+        模块类需实现完整模块契约，未通过校验的会被拒绝注册；声明了内建独占能力的一并拒绝。
+        插件停用或卸载时，其注册的模块随之停止并摘除。
+
+        :return: 模块声明列表
+        """
+        return []
+
     def provides_models(self) -> List[Type]:
         """
         声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。
