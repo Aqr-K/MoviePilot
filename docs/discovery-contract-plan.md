@@ -2,6 +2,9 @@
 
 把 15 个各自为政的发现方法归一到 2 个契约，让「发现」成为真正的能力族。
 
+> 状态：第 1–5 步已落地（`94116f83e` `9c9cf1495` `d02dcfba7` `d190aae12` `34f42479f` `c3a17cf3b`）。
+> 第 6 步经核实**不需要做**，理由见 §五。落地过程中相对本方案有四处修正，见 §九。
+
 模块归位的总体规则见 [module-organization.md](module-organization.md)。
 
 ## 一、问题
@@ -90,8 +93,12 @@ def discover(self, source, mtype: MediaType = None,
 | 3 | 其余三源实现契约，旧方法保留 | 是 |
 | 3b | 四个源补 `async_discover_board` / `async_discover` | 是 |
 | 4 | `RecommendChain` 内部改为按契约调用，16 个端点与方法签名不动 | 是 |
-| 5 | 摘除 15 个旧方法与其分发调用点 | 是 |
-| 6 | `MediaRecognizeType` 拆出发现源枚举（若届时确有必要） | 是 |
+| 5 | 15 个旧方法**私有化**（非摘除，见 §九） | 是 |
+| ~~6~~ | ~~`MediaRecognizeType` 拆出发现源枚举~~ **不做** | — |
+
+第 6 步不做的理由：发现分发全程用 `MediaSource`（`recommend.py` 20 处、`douban.py` 18 处），
+`MediaRecognizeType` 在发现路径**零使用**，只用于 8 个识别源的 `get_subtype()`。
+§一 担心的「一个枚举承担识别源与发现源两个概念」在契约落地后已自然消失，再拆是无消费方的改动。
 
 第 3 步保留旧方法，使第 4 步前后可对照同一份数据验证归一无损；第 5 步之前任何一步出问题都能停在可用状态。
 
@@ -131,3 +138,39 @@ def discover(self, source, mtype: MediaType = None,
 
 - 不动 `thetvdb`——它没有发现能力，本方案与它无关。
 - 不动 `listenbrainz` 的 `music_chart`/`music_fresh_releases`。它们返回音乐实体不是 `MediaInfo`，与影视榜单不可通约；音乐发现要归一是另一件事。
+
+
+## 九、落地过程中对本方案的修正
+
+### 1. 第 5 步是私有化，不是摘除
+
+方案原文写「摘除 15 个旧方法」。但第 3 步落地时定下「契约实现必须委托给现有方法，以保住
+缓存与限流的接缝」——旧方法因此成了契约的实现层，不是死代码，摘不得。
+
+实际做的是私有化：加前导下划线，从能力面移除（154 → 124，恰好 30 项，零新增），委托关系
+不变。这样 `run_module("movie_hot")` 不再可达，关掉了把刚拆掉的耦合重新建回来的口子。
+
+异步变体命名为 `_async_<name>` 而非 `async__<name>`——`provided_capabilities` 按前导下划线
+过滤，后者会留在能力面上。
+
+### 2. 缓存与限流的担心是多余的
+
+§七 曾担心私有化改名会让缓存键失效。实际核过：30 个方法**一个装饰器都没有**，`@cached` 与
+`rate_limit_exponential` 全挂在各源的接口客户端上（`apiv2.py` / `anilist.py` / `tmdbapi.py` /
+`bangumi.py`），改名不触及。委托这条约束仍然成立，理由是保住接缝而非避免失效。
+
+### 3. `raise_exception` 会被广播转发给每一个提供者
+
+四源都实现 `discover_board` 后，一次带 `raise_exception` 的 TMDB 调用会先打到
+Douban/Bangumi/AniList。`run_module` 不剥离该参数，模块签名里没有它就 `TypeError`；而
+`__handle_system_error` 在它为真时是**重新抛出**，端点会 500 而不是降级。四个源的契约方法
+因此都要接受它。
+
+签名门禁 `test_every_broadcast_reaches_providers_that_can_accept_its_arguments` 原先把
+`raise_exception` 列入白名单，对这 7 个广播点全盲，已去掉。
+
+### 4. `count=None` 在 Bangumi 表示不限条数
+
+`BangumiChain.calendar()` 无分页参数且其调用方自行切片，必须继续返回整周。切片移进模块后
+契约默认的 `count=30` 会截断它，于是 falsy `count` 约定为不切片。这个语义只存在于 Bangumi
+（唯一在源侧切片的源），有测试覆盖。
