@@ -4,6 +4,7 @@ from .category import *
 from .common import *
 from .context import *
 from .dashboard import *
+from .discovery import *
 from .download import *
 from .event import *
 from .exception import *

@@ -390,6 +390,59 @@ class AniListModule(_ModuleBase):
         """
         return await self.anilist_api.async_detail(anilist_id) if anilist_id else None
 
+    # 本源提供的榜单：标识 -> (显示名, 接口客户端方法名, 是否支持翻页)
+    _BOARDS = {
+        "trending": ("当前趋势", "trending", True),
+        "popular_this_season": ("本季热门", "popular_this_season", True),
+    }
+
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        本源提供的榜单清单
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(source=MediaSource.AniList, board=board, name=name,
+                                  media_type=None, paged=paged)
+            for board, (name, _, paged) in self._BOARDS.items()
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                       page: int = 1, count: int = 20) -> Optional[List[MediaInfo]]:
+        """
+        取指定榜单的一页
+
+        :param source: 数据来源，不是本源时不处理
+        :param board: 榜单标识
+        :param page: 页码
+        :param count: 每页条数
+        :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        declared = self._BOARDS.get(board)
+        if not declared:
+            return None
+        fetch = getattr(self.anilist_api, declared[1])
+        return [MediaInfo(anilist_info=info) for info in fetch(page=page, count=count)]
+
+    def discover(self, source: Optional[MediaSource] = None,
+                 mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件筛选
+
+        :param source: 数据来源，不是本源时不处理
+        :param mtype: 媒体类型
+        :param criteria: 各源自有的筛选条件
+        :return: 统一媒体信息列表，来源不匹配时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        if mtype is not None:
+            criteria["mtype"] = mtype
+        return [MediaInfo(anilist_info=info) for info in self.anilist_api.discover(**criteria)]
+
     def anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
         """
         获取 AniList 当前趋势榜。
