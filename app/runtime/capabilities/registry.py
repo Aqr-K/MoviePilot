@@ -88,6 +88,18 @@ class CapabilityRegistry:
         self._selector_schemas = MappingProxyType(dict(selector_schemas))
         self._lock = threading.RLock()
 
+    def allow_kind(self, kind: str) -> None:
+        """
+        让注册表额外接受一个 kind，供运行期来源登记自身声明
+
+        :param kind: capability kind
+        :raises CapabilityManifestError: kind 非法
+        """
+        if not isinstance(kind, str) or not _KIND_PATTERN.fullmatch(kind):
+            raise CapabilityManifestError(f"非法 capability kind：{kind!r}")
+        with self._lock:
+            self._kinds = self._kinds | {kind}
+
     def register_spec(self, spec: CapabilitySpec) -> None:
         """
         登记一条运行期声明
