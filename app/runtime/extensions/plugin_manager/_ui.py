@@ -8,7 +8,7 @@ from starlette import status
 
 from app import schemas
 from app.foundation.reflection import ObjectUtils
-from app.runtime.extensions.plugin_instance import matches_plugin
+from app.runtime.extensions.plugin_instance import matches_plugin, split_instance_key
 from app.runtime.log import logger
 
 LegacyDiagnosticsConfigurator = Callable[..., None]
@@ -57,6 +57,8 @@ class _PluginUIMixin:
                     continue
                 remotes.append({
                     "id": plugin_id,
+                    "instance_id": split_instance_key(plugin_id)[1],
+                    "instance_key": plugin_id,
                     "url": self.get_plugin_remote_entry(plugin_id, dist_path),
                     "name": plugin.plugin_name,
                 })
@@ -149,6 +151,8 @@ class _PluginUIMixin:
                         order = 0
                     items.append({
                         "plugin_id": plugin_id,
+                        "instance_id": split_instance_key(plugin_id)[1],
+                        "instance_key": plugin_id,
                         "nav_key": nav_key,
                         "title": title,
                         "icon": icon,
@@ -180,12 +184,16 @@ class _PluginUIMixin:
                     if meta:
                         dashboard_meta.extend([{
                             "id": plugin_id,
+                            "instance_id": split_instance_key(plugin_id)[1],
+                            "instance_key": plugin_id,
                             "name": m.get("name"),
                             "key": m.get("key"),
                         } for m in meta if m])
                 else:
                     dashboard_meta.append({
                         "id": plugin_id,
+                        "instance_id": split_instance_key(plugin_id)[1],
+                        "instance_key": plugin_id,
                         "name": plugin.plugin_name,
                         "key": "",
                     })
