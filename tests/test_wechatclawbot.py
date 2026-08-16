@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.modules.wechatclawbot import WechatClawBotModule
-from app.modules.wechatclawbot.wechatclawbot import ILinkClient, WechatClawBot
+from app.modules.notifications.wechatclawbot import WechatClawBotModule
+from app.modules.notifications.wechatclawbot.wechatclawbot import ILinkClient, WechatClawBot
 
 
 class WechatClawBotTest(unittest.TestCase):
@@ -101,7 +101,7 @@ class WechatClawBotTest(unittest.TestCase):
             ],
         }
 
-        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+        with patch("app.modules.notifications.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
             messages, sync_buf, result = client.poll_updates()
 
         self.assertTrue(result["success"])
@@ -127,7 +127,7 @@ class WechatClawBotTest(unittest.TestCase):
             ],
         }
 
-        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+        with patch("app.modules.notifications.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
             messages, sync_buf, result = client.poll_updates()
 
         self.assertTrue(result["success"])
@@ -157,7 +157,7 @@ class WechatClawBotTest(unittest.TestCase):
             },
         }
 
-        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+        with patch("app.modules.notifications.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
             messages, sync_buf, result = client.poll_updates()
 
         self.assertFalse(result["success"])
@@ -189,7 +189,7 @@ class WechatClawBotTest(unittest.TestCase):
         }
 
         with patch(
-            "app.modules.wechatclawbot.wechatclawbot.RequestUtils.post",
+            "app.modules.notifications.wechatclawbot.wechatclawbot.RequestUtils.post",
             return_value=failed_response,
         ) as mock_post:
             messages, sync_buf, result = client.poll_updates()
@@ -216,7 +216,7 @@ class WechatClawBotTest(unittest.TestCase):
             "errmsg": "ilink_user_id required",
         }
 
-        with patch("app.modules.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
+        with patch("app.modules.notifications.wechatclawbot.wechatclawbot.RequestUtils.post", return_value=response):
             ok, message = client.test_connection()
 
         # `ilink_user_id required` 仅表示自检接口缺少额外参数，不代表连接失败：视为连接正常

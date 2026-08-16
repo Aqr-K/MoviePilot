@@ -7,13 +7,13 @@ from unittest.mock import ANY, MagicMock, patch
 
 from app.testing.bootstrap import ensure_optional_stub
 
-# 可选三方依赖在 CI / 全新环境可能未安装，补占位避免 app.modules.feishu 导入失败
+# 可选三方依赖在 CI / 全新环境可能未安装，补占位避免 app.modules.notifications.feishu 导入失败
 ensure_optional_stub("psutil")
 ensure_optional_stub("dateparser")
 ensure_optional_stub("Pinyin2Hanzi", is_pinyin=lambda value: False)
 
-from app.modules.feishu import FeishuModule
-from app.modules.feishu.feishu import Feishu
+from app.modules.notifications.feishu import FeishuModule
+from app.modules.notifications.feishu.feishu import Feishu
 from app.schemas import Notification
 from app.schemas.message import (
     ChannelCapability,
@@ -140,7 +140,7 @@ class TestFeishu(unittest.TestCase):
     def test_parse_message_returns_callback_message(self):
         client = self._build_client()
 
-        with patch("app.modules.feishu.feishu.UserOper.get_name", return_value=None):
+        with patch("app.modules.notifications.feishu.feishu.UserOper.get_name", return_value=None):
             result = client.parse_message(
                 {
                     "type": "cardAction",
@@ -201,7 +201,7 @@ class TestFeishu(unittest.TestCase):
         fake_builder = _Builder()
 
         with patch(
-            "app.modules.feishu.feishu.lark.EventDispatcherHandler.builder",
+            "app.modules.notifications.feishu.feishu.lark.EventDispatcherHandler.builder",
             return_value=fake_builder,
         ):
             handler = client._build_event_handler()
@@ -221,7 +221,7 @@ class TestFeishu(unittest.TestCase):
         client = self._build_client(FEISHU_ADMINS="ou_admin")
 
         with (
-            patch("app.modules.feishu.feishu.UserOper.get_name", return_value=None),
+            patch("app.modules.notifications.feishu.feishu.UserOper.get_name", return_value=None),
             patch.object(
                 client, "send_text", return_value={"success": True}
             ) as send_text,
@@ -251,7 +251,7 @@ class TestFeishu(unittest.TestCase):
         client = self._build_client()
 
         with patch(
-            "app.modules.feishu.feishu.UserOper.get_name",
+            "app.modules.notifications.feishu.feishu.UserOper.get_name",
             return_value="moviepilot-user",
         ) as get_name:
             result = client.parse_message(
@@ -345,7 +345,7 @@ class TestFeishu(unittest.TestCase):
         response.content = b"png-bytes"
         response.headers = {"Content-Type": "image/png"}
 
-        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+        with patch("app.modules.notifications.feishu.feishu.RequestUtils") as request_utils:
             request_utils.return_value.get_res.return_value = response
             result = client.send_notification(
                 Notification(
@@ -520,7 +520,7 @@ class TestFeishu(unittest.TestCase):
         response.content = b"png-bytes"
         response.headers = {"Content-Type": "image/jpeg"}
 
-        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+        with patch("app.modules.notifications.feishu.feishu.RequestUtils") as request_utils:
             request_utils.return_value.get_res.return_value = response
             result = client.send_notification(
                 Notification(
@@ -565,7 +565,7 @@ class TestFeishu(unittest.TestCase):
         response.content = b"png-bytes"
         response.headers = {"Content-Type": "image/png"}
 
-        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+        with patch("app.modules.notifications.feishu.feishu.RequestUtils") as request_utils:
             request_utils.return_value.get_res.return_value = response
             result = client.send_notification(
                 Notification(
@@ -823,7 +823,7 @@ class TestFeishu(unittest.TestCase):
         response.content = b"jpg-bytes"
         response.headers = {"Content-Type": "image/jpeg"}
 
-        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+        with patch("app.modules.notifications.feishu.feishu.RequestUtils") as request_utils:
             request_utils.return_value.get_res.return_value = response
             first_success = client.edit_message(
                 message_id="om_stream",
@@ -870,7 +870,7 @@ class TestFeishu(unittest.TestCase):
         response.content = b"<html></html>"
         response.headers = {"Content-Type": "text/html"}
 
-        with patch("app.modules.feishu.feishu.RequestUtils") as request_utils:
+        with patch("app.modules.notifications.feishu.feishu.RequestUtils") as request_utils:
             request_utils.return_value.get_res.return_value = response
             success = client.edit_message(
                 message_id="om_stream",
@@ -901,7 +901,7 @@ class TestFeishu(unittest.TestCase):
     def test_parse_message_supports_image_and_file_payloads(self):
         client = self._build_client()
 
-        with patch("app.modules.feishu.feishu.UserOper.get_name", return_value=None):
+        with patch("app.modules.notifications.feishu.feishu.UserOper.get_name", return_value=None):
             image_message = client.parse_message(
                 {
                     "type": "message",
@@ -1223,18 +1223,18 @@ class TestFeishu(unittest.TestCase):
         fake_ws_client = _FakeWsClient()
         with (
             patch(
-                "app.modules.feishu.feishu.lark_ws_client_module.loop", original_loop
+                "app.modules.notifications.feishu.feishu.lark_ws_client_module.loop", original_loop
             ),
             patch(
-                "app.modules.feishu.feishu.lark_ws_client_module._select",
+                "app.modules.notifications.feishu.feishu.lark_ws_client_module._select",
                 new=MagicMock(return_value=None),
             ),
             patch(
-                "app.modules.feishu.feishu.asyncio.new_event_loop",
+                "app.modules.notifications.feishu.feishu.asyncio.new_event_loop",
                 side_effect=_new_loop,
             ),
             patch(
-                "app.modules.feishu.feishu.lark.ws.Client", return_value=fake_ws_client
+                "app.modules.notifications.feishu.feishu.lark.ws.Client", return_value=fake_ws_client
             ),
         ):
             client._run_ws_client()
@@ -1262,7 +1262,7 @@ class TestFeishu(unittest.TestCase):
             return future
 
         with patch(
-            "app.modules.feishu.feishu.asyncio.run_coroutine_threadsafe",
+            "app.modules.notifications.feishu.feishu.asyncio.run_coroutine_threadsafe",
             side_effect=_run_threadsafe,
         ) as runner:
             client.stop()

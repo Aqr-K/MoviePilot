@@ -16,7 +16,7 @@ from app.application.messaging.agent import (
 )
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.qqbot.qqbot import QQBot
+from app.modules.notifications.qqbot.qqbot import QQBot
 from app.schemas import CommingMessage, MessageChannel, Notification
 from app.schemas.types import ModuleType
 from app.adapters.network.http import RequestUtils

@@ -10,7 +10,7 @@ from app.application.messaging.agent import (
 )
 from app.runtime.log import logger
 from app.modules import _MessageBase, _ModuleBase
-from app.modules.wechatclawbot.wechatclawbot import WechatClawBot
+from app.modules.notifications.wechatclawbot.wechatclawbot import WechatClawBot
 from app.schemas import CommingMessage, Notification
 from app.schemas.types import MessageChannel, ModuleType
 

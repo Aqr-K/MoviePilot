@@ -7,7 +7,7 @@ import pytest
 
 def test_ensure_urllib3_header_param_compat_adds_best_available_alias(monkeypatch):
     """urllib3 future 缺少旧别名时，应补齐最接近的新入口。"""
-    from app.modules.telegram.compat import ensure_urllib3_header_param_compat
+    from app.modules.notifications.telegram.compat import ensure_urllib3_header_param_compat
 
     def multipart_formatter(name, value):
         return f"multipart:{name}={value}"
@@ -29,7 +29,7 @@ def test_ensure_urllib3_header_param_compat_adds_best_available_alias(monkeypatc
 
 def test_ensure_urllib3_header_param_compat_prefers_html5_formatter(monkeypatch):
     """旧版本 urllib3 的 html5 formatter 存在时，应优先保持原别名语义。"""
-    from app.modules.telegram.compat import ensure_urllib3_header_param_compat
+    from app.modules.notifications.telegram.compat import ensure_urllib3_header_param_compat
 
     def html5_formatter(name, value):
         return f"html5:{name}={value}"
@@ -51,7 +51,7 @@ def test_ensure_urllib3_header_param_compat_prefers_html5_formatter(monkeypatch)
 
 def test_ensure_urllib3_header_param_compat_keeps_existing_formatter(monkeypatch):
     """已有 format_header_param 时不应覆盖，避免改变 urllib3 正常行为。"""
-    from app.modules.telegram.compat import ensure_urllib3_header_param_compat
+    from app.modules.notifications.telegram.compat import ensure_urllib3_header_param_compat
 
     def existing_formatter(name, value):
         return f"existing:{name}={value}"
@@ -73,7 +73,7 @@ def test_ensure_urllib3_header_param_compat_keeps_existing_formatter(monkeypatch
 
 def test_ensure_urllib3_header_param_compat_noops_without_fallback(monkeypatch):
     """没有任何可用 fallback 时保持 no-op，让原始导入错误暴露。"""
-    from app.modules.telegram.compat import ensure_urllib3_header_param_compat
+    from app.modules.notifications.telegram.compat import ensure_urllib3_header_param_compat
 
     fake_fields = SimpleNamespace()
     fake_urllib3 = SimpleNamespace(fields=fake_fields)
@@ -101,12 +101,12 @@ def test_telegram_module_imports_when_urllib3_header_alias_missing(monkeypatch):
     monkeypatch.delattr(fields, "format_header_param", raising=False)
     for module_name in list(sys.modules):
         if (
-            module_name == "app.modules.telegram.telegram"
+            module_name == "app.modules.notifications.telegram.telegram"
             or module_name.startswith("telebot")
         ):
             monkeypatch.delitem(sys.modules, module_name, raising=False)
 
-    telegram_module = importlib.import_module("app.modules.telegram.telegram")
+    telegram_module = importlib.import_module("app.modules.notifications.telegram.telegram")
 
     assert telegram_module.Telegram
     assert hasattr(fields, "format_header_param")

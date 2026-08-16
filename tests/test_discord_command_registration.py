@@ -2,8 +2,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from app.modules.discord import DiscordModule
-from app.modules.discord.discord import Discord
+from app.modules.notifications.discord import DiscordModule
+from app.modules.notifications.discord.discord import Discord
 from app.schemas import CommandRegisterEventData
 
 
@@ -30,7 +30,7 @@ def test_discord_module_register_commands_filters_event_subset():
             return_value={"discord-main": SimpleNamespace(name="discord-main", config={})},
         ),
         patch.object(module, "get_instance", return_value=client),
-        patch("app.modules.discord.eventmanager.send_event", return_value=event),
+        patch("app.modules.notifications.discord.eventmanager.send_event", return_value=event),
     ):
         module.register_commands(original_commands)
 
@@ -60,7 +60,7 @@ def test_discord_module_register_commands_deletes_when_event_canceled():
             return_value={"discord-main": SimpleNamespace(name="discord-main", config={})},
         ),
         patch.object(module, "get_instance", return_value=client),
-        patch("app.modules.discord.eventmanager.send_event", return_value=event),
+        patch("app.modules.notifications.discord.eventmanager.send_event", return_value=event),
     ):
         module.register_commands({"/sites": {"description": "管理站点"}})
 

@@ -10,7 +10,7 @@ from app.application.messaging.agent import (
 )
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.synologychat.synologychat import SynologyChat
+from app.modules.notifications.synologychat.synologychat import SynologyChat
 from app.schemas import MessageChannel, CommingMessage, Notification
 from app.schemas.types import ModuleType
 from app.adapters.network.http import RequestUtils

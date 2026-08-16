@@ -17,16 +17,16 @@ from app.agent.llm import AgentCapabilityManager
 from app.chain.message import MessageChain
 from app.runtime.config import settings
 from app.agent.llm import LLMHelper
-from app.modules.discord import DiscordModule
-from app.modules.qqbot import QQBotModule
-from app.modules.qqbot.qqbot import QQBot
-from app.modules.slack import SlackModule
-from app.modules.telegram.telegram import Telegram
-from app.modules.telegram import TelegramModule
-from app.modules.synologychat import SynologyChatModule
-from app.modules.vocechat import VoceChatModule
-from app.modules.wechat import WechatModule
-from app.modules.wechat.wechatbot import WeChatBot
+from app.modules.notifications.discord import DiscordModule
+from app.modules.notifications.qqbot import QQBotModule
+from app.modules.notifications.qqbot.qqbot import QQBot
+from app.modules.notifications.slack import SlackModule
+from app.modules.notifications.telegram.telegram import Telegram
+from app.modules.notifications.telegram import TelegramModule
+from app.modules.notifications.synologychat import SynologyChatModule
+from app.modules.notifications.vocechat import VoceChatModule
+from app.modules.notifications.wechat import WechatModule
+from app.modules.notifications.wechat.wechatbot import WeChatBot
 from app.schemas import CommingMessage, Notification
 from app.schemas.types import MessageChannel, NotificationType
 
@@ -120,7 +120,7 @@ class AgentImageSupportTest(unittest.TestCase):
 
         try:
             with patch(
-                "app.modules.telegram.telegram.RequestUtils.get_res",
+                "app.modules.notifications.telegram.telegram.RequestUtils.get_res",
                 return_value=SimpleNamespace(content=b"image-bytes"),
             ) as get_res:
                 content = telegram.download_file("file-id-1")
@@ -836,7 +836,7 @@ class AgentImageSupportTest(unittest.TestCase):
         ), patch.object(
             module, "get_instance", return_value=SimpleNamespace(send_msg=Mock())
         ), patch(
-            "app.modules.wechat.WXBizMsgCrypt",
+            "app.modules.notifications.wechat.WXBizMsgCrypt",
             return_value=crypt,
         ):
             message = module.message_parser(
@@ -876,7 +876,7 @@ class AgentImageSupportTest(unittest.TestCase):
         ), patch.object(
             module, "get_instance", return_value=SimpleNamespace(send_msg=Mock())
         ), patch(
-            "app.modules.wechat.WXBizMsgCrypt",
+            "app.modules.notifications.wechat.WXBizMsgCrypt",
             return_value=crypt,
         ):
             message = module.message_parser(

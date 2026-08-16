@@ -4,19 +4,19 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.modules import _MessageBase
-from app.modules.discord import DiscordModule
-from app.modules.feishu import FeishuModule
+from app.modules.notifications.discord import DiscordModule
+from app.modules.notifications.feishu import FeishuModule
 from app.modules.filter import FilterModule
 from app.modules.mediaservers.plex import PlexModule
-from app.modules.qqbot import QQBotModule
-from app.modules.slack import SlackModule
-from app.modules.telegram import TelegramModule
-from app.modules.telegram.telegram import Telegram
+from app.modules.notifications.qqbot import QQBotModule
+from app.modules.notifications.slack import SlackModule
+from app.modules.notifications.telegram import TelegramModule
+from app.modules.notifications.telegram.telegram import Telegram
 from app.modules.themoviedb import TheMovieDbModule
 from app.modules.mediaservers.trimemedia import TrimeMediaModule
 from app.modules.mediaservers.ugreen import UgreenModule
-from app.modules.wechat import WechatModule
-from app.modules.wechatclawbot import WechatClawBotModule
+from app.modules.notifications.wechat import WechatModule
+from app.modules.notifications.wechatclawbot import WechatClawBotModule
 
 
 def test_config_reload_stops_before_initializing_latest_generation():

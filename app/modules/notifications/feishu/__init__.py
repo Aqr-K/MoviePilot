@@ -4,7 +4,7 @@ from app.domain.context import Context, MediaInfo
 from app.application.messaging.agent import register_channel_admin_resolver, resolve_config_principal_ids
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.feishu.feishu import Feishu
+from app.modules.notifications.feishu.feishu import Feishu
 from app.schemas import CommingMessage, MessageChannel, MessageResponse, Notification
 from app.schemas.types import ModuleType
 

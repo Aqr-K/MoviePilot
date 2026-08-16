@@ -4,12 +4,12 @@ from unittest.mock import MagicMock, patch
 
 from app.testing.bootstrap import ensure_optional_stub
 
-# 可选三方依赖在 CI / 全新环境可能未安装，补占位避免 app.modules.feishu 导入失败
+# 可选三方依赖在 CI / 全新环境可能未安装，补占位避免 app.modules.notifications.feishu 导入失败
 ensure_optional_stub("psutil")
 ensure_optional_stub("dateparser")
 ensure_optional_stub("Pinyin2Hanzi", is_pinyin=lambda value: False)
 
-from app.modules.feishu.feishu import Feishu
+from app.modules.notifications.feishu.feishu import Feishu
 
 
 def _build_feishu_client() -> Feishu:
@@ -111,8 +111,8 @@ def test_consume_ws_task_result_suppresses_stop_exception():
         client._stop_event.set()
 
         with (
-            patch("app.modules.feishu.feishu.logger.debug") as debug_logger,
-            patch("app.modules.feishu.feishu.logger.error") as error_logger,
+            patch("app.modules.notifications.feishu.feishu.logger.debug") as debug_logger,
+            patch("app.modules.notifications.feishu.feishu.logger.error") as error_logger,
         ):
             client._consume_ws_task_result(future)
     finally:
