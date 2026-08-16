@@ -5,6 +5,48 @@ from pydantic import BaseModel, Field, RootModel
 from app.schemas.common import JsonData
 
 
+class PluginInstance(BaseModel):
+    """
+    插件的一个运行实例
+    """
+    # 插件ID
+    plugin_id: Optional[str] = None
+    # 实例ID，默认实例为 default
+    instance_id: Optional[str] = None
+    # 实例键，默认实例即插件ID，其余为 plugin_id@instance_id
+    instance_key: Optional[str] = None
+    # 是否为默认实例
+    is_default: Optional[bool] = False
+    # 是否已进入运行态
+    running: Optional[bool] = False
+    # 是否启用
+    enabled: Optional[bool] = False
+
+
+class PluginInstanceInfo(BaseModel):
+    """插件实例及其运行状态。"""
+
+    plugin_id: str = Field(description="插件 ID")
+    instance_id: str = Field(description="实例 ID")
+    instance_key: str = Field(
+        description="实例键，默认实例为插件 ID，分身实例为 plugin_id@instance_id"
+    )
+    is_default: bool = Field(description="是否为默认实例")
+    running: bool = Field(default=False, description="是否已拉起运行实例")
+    enabled: bool = Field(default=False, description="实例是否启用")
+
+
+class PluginInstanceCreate(BaseModel):
+    """插件实例创建请求。"""
+
+    instance_id: str = Field(
+        description="实例 ID，仅接受字母、数字、下划线和短横线，最长 64 位"
+    )
+    config: Optional[Dict[str, JsonData]] = Field(
+        default=None, description="实例的初始配置"
+    )
+
+
 class Plugin(BaseModel):
     """
     插件信息

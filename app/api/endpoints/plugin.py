@@ -1,6 +1,5 @@
 import asyncio
 import mimetypes
-import shutil
 from typing import Annotated, Any, Dict, List, Optional
 
 import aiofiles
@@ -22,10 +21,10 @@ from app.application.scheduling import remove_plugin_job, update_plugin_job
 from app.runtime.cache import async_fresh
 from app.runtime.config import settings
 from app.runtime.events import eventmanager
+from app.db.models.pluginconfig import normalize_instance_id
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.application.security.access import (
     resource_token_cookie,
-    verify_apikey,
     verify_resource_token,
     verify_token,
 )
@@ -857,36 +856,6 @@ async def update_folder_plugins(
     )
 
 
-@router.post(
-    "/clone/{plugin_id}", summary="创建插件分身", response_model=schemas.Response[None]
-)
-def clone_plugin(
-    plugin_id: str, clone_data: dict, _: User = Depends(get_current_active_superuser)
-) -> Any:
-    """
-    创建插件分身
-    """
-    try:
-        success, message = PluginManager().clone_plugin(
-            plugin_id=plugin_id,
-            suffix=clone_data.get("suffix", ""),
-            name=clone_data.get("name", ""),
-            description=clone_data.get("description", ""),
-            version=clone_data.get("version", ""),
-            icon=clone_data.get("icon", ""),
-        )
-
-        if success:
-            # 注册插件服务
-            reload_plugin(message)
-            # 将分身插件添加到原插件所在的文件夹中
-            _add_clone_to_plugin_folder(plugin_id, message)
-            return schemas.Response(success=True, message="插件分身创建成功")
-        else:
-            return schemas.Response(success=False, message=message)
-    except Exception as e:
-        logger.error(f"创建插件分身失败：{str(e)}")
-        return schemas.Response(success=False, message=f"创建插件分身失败：{str(e)}")
 
 
 @router.get(
@@ -939,21 +908,7 @@ def uninstall_plugin(
     remove_plugin_api(plugin_id)
     # 移除插件服务
     remove_plugin_job(plugin_id)
-    # 判断是否为分身
     plugin_manager = PluginManager()
-    plugin_class = plugin_manager.plugins.get(plugin_id)
-    if getattr(plugin_class, "is_clone", False):
-        # 如果是分身插件，则删除分身数据和配置
-        plugin_manager.delete_plugin_config(plugin_id)
-        plugin_manager.delete_plugin_data(plugin_id)
-        # 删除分身文件
-        plugin_base_dir = settings.ROOT_PATH / "app" / "plugins" / plugin_id.lower()
-        if plugin_base_dir.exists():
-            try:
-                shutil.rmtree(plugin_base_dir)
-                plugin_manager.plugins.pop(plugin_id, None)
-            except Exception as e:
-                logger.error(f"删除插件分身目录 {plugin_base_dir} 失败: {str(e)}")
     # 从插件文件夹中移除该插件
     remove_plugin_from_folders(plugin_id)
     # 移除插件
@@ -961,56 +916,80 @@ def uninstall_plugin(
     return schemas.Response(success=True)
 
 
-def _add_clone_to_plugin_folder(original_plugin_id: str, clone_plugin_id: str):
-    """
-    将分身插件添加到原插件所在的文件夹中
-    :param original_plugin_id: 原插件ID
-    :param clone_plugin_id: 分身插件ID
-    """
-    try:
-        config_oper = SystemConfigOper()
-        # 获取插件文件夹配置
-        folders = config_oper.get(SystemConfigKey.PluginFolders) or {}
-
-        # 查找原插件所在的文件夹
-        target_folder = None
-        for folder_name, folder_data in folders.items():
-            if isinstance(folder_data, dict) and "plugins" in folder_data:
-                # 新格式：{"plugins": [...], "order": ..., "icon": ...}
-                if original_plugin_id in folder_data["plugins"]:
-                    target_folder = folder_name
-                    break
-            elif isinstance(folder_data, list):
-                # 旧格式：直接是插件列表
-                if original_plugin_id in folder_data:
-                    target_folder = folder_name
-                    break
-
-        # 如果找到了原插件所在的文件夹，则将分身插件也添加到该文件夹中
-        if target_folder:
-            folder_data = folders[target_folder]
-            if isinstance(folder_data, dict) and "plugins" in folder_data:
-                # 新格式
-                if clone_plugin_id not in folder_data["plugins"]:
-                    folder_data["plugins"].append(clone_plugin_id)
-                    logger.info(
-                        f"已将分身插件 {clone_plugin_id} 添加到文件夹 '{target_folder}' 中"
-                    )
-            elif isinstance(folder_data, list):
-                # 旧格式
-                if clone_plugin_id not in folder_data:
-                    folder_data.append(clone_plugin_id)
-                    logger.info(
-                        f"已将分身插件 {clone_plugin_id} 添加到文件夹 '{target_folder}' 中"
-                    )
-
-            # 保存更新后的文件夹配置
-            config_oper.set(SystemConfigKey.PluginFolders, folders)
-        else:
-            logger.info(
-                f"原插件 {original_plugin_id} 不在任何文件夹中，分身插件 {clone_plugin_id} 将保持独立"
-            )
-
-    except Exception as e:
-        logger.error(f"处理插件文件夹时出错：{str(e)}")
         # 文件夹处理失败不影响插件分身创建的整体流程
+
+
+@router.get(
+    "/instances/{plugin_id}",
+    summary="获取插件实例列表",
+    response_model=List[schemas.PluginInstanceInfo],
+)
+def plugin_instances(
+    plugin_id: str, _: User = Depends(get_current_active_superuser)
+) -> List[dict]:
+    """
+    列出插件的全部实例及其运行状态
+    """
+    plugin_manager = PluginManager()
+    if not plugin_manager.has_plugin(plugin_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 不存在或未加载",
+        )
+    return plugin_manager.get_plugin_instances(plugin_id)
+
+
+@router.post(
+    "/instances/{plugin_id}",
+    summary="创建插件实例",
+    response_model=schemas.Response[schemas.PluginInstanceInfo],
+)
+def create_plugin_instance(
+    plugin_id: str,
+    payload: schemas.PluginInstanceCreate,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    创建插件实例，写入初始配置并拉起该实例的运行态
+    """
+    plugin_manager = PluginManager()
+    if not plugin_manager.has_plugin(plugin_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件 {plugin_id} 不存在或未加载",
+        )
+    try:
+        # 实例标识会拼进数据目录与库文件路径，创建前先校验字符集
+        instance_id = normalize_instance_id(payload.instance_id)
+        plugin_manager.create_plugin_instance(plugin_id, instance_id, payload.config)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
+    # 只拉起新实例，同插件其余实例保持运行
+    plugin_manager.start_instance(plugin_id, instance_id)
+    created = next(
+        (item for item in plugin_manager.get_plugin_instances(plugin_id)
+         if item.get("instance_id") == instance_id),
+        None,
+    )
+    return schemas.Response(success=True, data=created)
+
+
+@router.delete(
+    "/instances/{plugin_id}/{instance_id}",
+    summary="删除插件实例",
+    response_model=schemas.Response[None],
+)
+def delete_plugin_instance(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    删除插件实例，停止其运行态并回收该实例的配置、数据与独立库
+    """
+    plugin_manager = PluginManager()
+    try:
+        plugin_manager.delete_plugin_instance(plugin_id, instance_id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
+    return schemas.Response(success=True)

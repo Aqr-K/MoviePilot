@@ -12,6 +12,7 @@ from typing import Union
 from alembic import command
 from alembic.config import Config
 
+from app.db.models.pluginconfig import DEFAULT_INSTANCE_ID
 from app.db.plugin.registry import _pg_create_schema_ddl, db_manager
 
 # 通用 env.py 模板，连接、元数据与版本表 schema 均由运行器经 config.attributes 注入
@@ -55,14 +56,16 @@ def run_plugin_migrations(
         plugin_id: str,
         script_location: Union[str, Path],
         revision: str = "head",
+        instance_id: str = DEFAULT_INSTANCE_ID,
 ) -> None:
     """
     在插件的独立库或 schema 上执行 Alembic 迁移
     :param plugin_id: 插件唯一标识
+    :param instance_id: 实例标识，各实例在自己的库上执行迁移
     :param script_location: 插件迁移目录，需含 env.py 与 versions/
     :param revision: 目标版本，默认迁移到 head
     """
-    bundle = db_manager.register_plugin(plugin_id)
+    bundle = db_manager.register_plugin(plugin_id, instance_id)
     config = Config()
     config.set_main_option("script_location", str(script_location))
     config.attributes["target_metadata"] = bundle.metadata

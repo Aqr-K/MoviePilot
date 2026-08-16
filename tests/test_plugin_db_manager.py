@@ -484,9 +484,9 @@ def test_setup_plugin_database_delegates_to_create_tables(monkeypatch):
     calls = []
     real_create_tables = db_manager.create_tables
 
-    def spy(plugin_id):
+    def spy(plugin_id, instance_id="default"):
         calls.append(plugin_id)
-        return real_create_tables(plugin_id)
+        return real_create_tables(plugin_id, instance_id)
 
     monkeypatch.setattr(db_manager, "create_tables", spy)
     try:
