@@ -204,6 +204,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     eventmanager.enable_event_handler(plugin)
                 else:
                     eventmanager.disable_event_handler(plugin)
+                self._sync_plugin_modules(plugin_id, plugin_obj)
             except Exception as err:
                 logger.error(f"加载插件 {plugin_id} 出错：{str(err)} - {traceback.format_exc()}")
         self.clear_plugin_agent_tools_cache()
@@ -232,7 +233,57 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         else:
             # 禁用插件类的事件处理器
             eventmanager.disable_event_handler(type(plugin))
+        # 配置变更可能改变插件启停状态与模块声明，按当前声明重新同步
+        self._sync_plugin_modules(plugin_id, plugin)
         self.clear_plugin_agent_tools_cache()
+
+    @staticmethod
+    def _unregister_plugin_modules(plugin_id: str) -> None:
+        """
+        摘除某插件注册的全部系统模块
+
+        :param plugin_id: 插件ID，即模块注册来源
+        """
+        from app.runtime.extensions.module_manager import ModuleManager
+
+        try:
+            ModuleManager().unregister_modules(plugin_id)
+        except Exception as err:
+            logger.error(f"摘除插件 {plugin_id} 的模块出错：{str(err)}")
+
+    def _sync_plugin_modules(self, plugin_id: str, plugin_obj: Any) -> None:
+        """
+        按插件声明同步其提供的系统模块
+
+        每次同步先摘除该插件上一轮注册的模块再按当前声明登记，因此重复调用为幂等更新；
+        插件处于停用态时只摘除不登记。声明或注册出错不影响插件其它功能。
+
+        :param plugin_id: 插件ID，同时作为模块注册来源
+        :param plugin_obj: 插件运行实例
+        """
+        from app.runtime.extensions.module_manager import ModuleManager
+
+        self._unregister_plugin_modules(plugin_id)
+        try:
+            if not plugin_obj.get_state():
+                return
+        except Exception as err:
+            logger.debug(f"读取插件 {plugin_id} 状态出错，跳过模块注册：{str(err)}")
+            return
+        hook = getattr(plugin_obj, "provides_modules", None)
+        if not callable(hook):
+            return
+        try:
+            declarations = hook() or []
+        except Exception as err:
+            logger.error(f"读取插件 {plugin_id} 模块声明出错：{str(err)}")
+            return
+        manager = ModuleManager()
+        for declaration in declarations:
+            try:
+                manager.register_module(declaration, owner=plugin_id)
+            except Exception as err:
+                logger.error(f"注册插件 {plugin_id} 的模块出错：{str(err)}")
 
     def clear_plugin_agent_tools_cache(self) -> None:
         """
@@ -270,6 +321,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             plugins = self._running_plugins
         for plugin_id, plugin in plugins.items():
             eventmanager.disable_event_handler(type(plugin))
+            # 先摘除该插件注册的系统模块，避免插件停止后其模块仍留在分发面上
+            self._unregister_plugin_modules(plugin_id)
             self.__stop_plugin(plugin)
         # 清空对象
         if pid:
