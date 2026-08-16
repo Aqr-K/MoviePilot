@@ -967,6 +967,71 @@ class TheMovieDbModule(_ModuleBase):
             return None
         return self.scraper.get_metadata_img(mediainfo=mediainfo, season=season, episode=episode)
 
+    # 本源提供的榜单：标识 -> (显示名, 榜单方法名, 媒体类型, 是否支持翻页)
+    _BOARDS = {
+        "trending": ("流行趋势", "tmdb_trending", None, True),
+    }
+
+    # 条件筛选支持的条件及其不过滤时的取值
+    _DISCOVER_CRITERIA = {
+        "sort_by": "popularity.desc",
+        "with_genres": "",
+        "with_original_language": "",
+        "with_keywords": "",
+        "with_watch_providers": "",
+        "vote_average": 0.0,
+        "vote_count": 0,
+        "release_date": "",
+        "page": 1,
+    }
+
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        本源提供的榜单清单
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(source=MediaSource.TMDB, board=board, name=name,
+                                  media_type=media_type, paged=paged)
+            for board, (name, _, media_type, paged) in self._BOARDS.items()
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: Optional[str] = None,
+                       page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+        """
+        取指定榜单的一页
+
+        :param source: 数据来源，不是本源时不处理
+        :param board: 榜单标识
+        :param page: 页码
+        :param count: 每页条数，TMDB 接口每页条数固定，不参与取数
+        :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        declared = self._BOARDS.get(board)
+        if not declared:
+            return None
+        fetch = getattr(self, declared[1])
+        return fetch(page=page)
+
+    def discover(self, source: Optional[MediaSource] = None,
+                 mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件筛选
+
+        :param source: 数据来源，不是本源时不处理
+        :param mtype: 媒体类型
+        :param criteria: 筛选条件，未给出的条件不过滤，本源没有的条件不参与取数
+        :return: 统一媒体信息列表，来源不匹配时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        params = {name: criteria.get(name, default)
+                  for name, default in self._DISCOVER_CRITERIA.items()}
+        return self.tmdb_discover(mtype=mtype, **params)
+
     def tmdb_discover(self, mtype: MediaType, sort_by: str,
                       with_genres: str,
                       with_original_language: str,
