@@ -3,13 +3,13 @@ from unittest.mock import patch
 
 import pytest
 
-from app.modules.emby.emby import Emby
-from app.modules.jellyfin.jellyfin import Jellyfin
-from app.modules.plex.plex import Plex
-from app.modules.trimemedia.api import Api as TrimeMediaApi
-from app.modules.trimemedia.api import Type as TrimeMediaType
-from app.modules.ugreen.ugreen import Ugreen
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.emby.emby import Emby
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.plex.plex import Plex
+from app.modules.mediaservers.trimemedia.api import Api as TrimeMediaApi
+from app.modules.mediaservers.trimemedia.api import Type as TrimeMediaType
+from app.modules.mediaservers.ugreen.ugreen import Ugreen
+from app.modules.mediaservers.zspace.zspace import ZSpace
 
 
 class _FakeResponse:
@@ -28,8 +28,8 @@ class _FakeResponse:
 @pytest.mark.parametrize(
     ("client_class", "request_utils_path", "url_path"),
     [
-        (Emby, "app.modules.emby.emby.RequestUtils", "emby/Users/user-id/Items"),
-        (Jellyfin, "app.modules.jellyfin.jellyfin.RequestUtils", "Users/user-id/Items"),
+        (Emby, "app.modules.mediaservers.emby.emby.RequestUtils", "emby/Users/user-id/Items"),
+        (Jellyfin, "app.modules.mediaservers.jellyfin.jellyfin.RequestUtils", "Users/user-id/Items"),
     ],
 )
 def test_emby_compatible_items_count_uses_recursive_type_filter(
@@ -62,7 +62,7 @@ def test_zspace_items_count_uses_total_record_count():
     client._apikey = "token"
     client.user = "user-id"
 
-    with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.return_value = _FakeResponse(
             {"TotalRecordCount": 17}
         )

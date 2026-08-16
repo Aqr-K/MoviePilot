@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from app.modules.plex.plex import Plex
+from app.modules.mediaservers.plex.plex import Plex
 
 
 class PlexImageLookupTest(unittest.TestCase):

@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.modules.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
 
 
 class _FakeResponse:
@@ -30,7 +30,7 @@ def test_get_user_supports_legacy_query_and_jellyfin_12_header():
     """用户查询应同时兼容旧版查询参数与 Jellyfin 12 请求头鉴权。"""
     client = _make_client()
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.return_value = _FakeResponse(
             [{"Id": "user-id", "Name": "admin"}]
         )
@@ -51,7 +51,7 @@ def test_authenticate_preserves_client_headers_and_adds_jellyfin_12_header():
     """用户认证应保留客户端声明并补充 Jellyfin 12 请求头鉴权。"""
     client = _make_client()
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.post_res.return_value = _FakeResponse(
             {"AccessToken": "user-token"}
         )
@@ -70,7 +70,7 @@ def test_post_data_preserves_explicit_authorization_header():
     """自定义请求显式提供 Authorization 时不应被服务器密钥覆盖。"""
     client = _make_client()
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         client.post_data(
             "[HOST]Sessions/Playing",
             headers={"Authorization": "Custom token", "X-Test": "value"},

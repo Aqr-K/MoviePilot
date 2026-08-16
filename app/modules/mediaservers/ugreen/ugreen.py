@@ -9,7 +9,7 @@ from app import schemas
 from app.db.oper.systemconfig import SystemConfigOper
 from app.application.mediaserver import MediaServerIdentityHelper, MusicMediaServerHelper
 from app.runtime.log import logger
-from app.modules.ugreen.api import Api
+from app.modules.mediaservers.ugreen.api import Api
 from app.schemas import MediaType
 from app.schemas.types import MediaSource, SystemConfigKey
 from app.foundation.url import UrlUtils

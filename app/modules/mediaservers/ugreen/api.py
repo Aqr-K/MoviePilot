@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 from requests import Session
 
 from app.runtime.log import logger
-from app.modules.ugreen.crypto import UgreenCrypto
+from app.modules.mediaservers.ugreen.crypto import UgreenCrypto
 from app.foundation.url import UrlUtils
 
 

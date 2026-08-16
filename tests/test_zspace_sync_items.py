@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.zspace.zspace import ZSpace
 from app.schemas.types import MediaSource
 
 
@@ -62,8 +62,8 @@ def test_get_items_fetches_all_recursive_pages() -> None:
         }),
     ]
 
-    with patch("app.modules.zspace.zspace.DEFAULT_ITEMS_PAGE_SIZE", 2), patch(
-        "app.modules.zspace.zspace.RequestUtils"
+    with patch("app.modules.mediaservers.zspace.zspace.DEFAULT_ITEMS_PAGE_SIZE", 2), patch(
+        "app.modules.mediaservers.zspace.zspace.RequestUtils"
     ) as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = responses
         items = list(client.get_items(parent="library-id"))
@@ -121,7 +121,7 @@ def test_get_items_expands_boxset_movies() -> None:
         }),
     ]
 
-    with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = responses
         items = list(client.get_items(parent="library-id"))
 
@@ -171,7 +171,7 @@ def test_get_items_expands_boxset_series() -> None:
         }),
     ]
 
-    with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = responses
         items = list(client.get_items(parent="library-id"))
 
@@ -215,7 +215,7 @@ def test_get_items_loads_detail_when_list_metadata_is_incomplete() -> None:
         }),
     ]
 
-    with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = responses
         items = list(client.get_items(parent="library-id"))
 
@@ -262,8 +262,8 @@ def test_get_items_uses_total_count_when_server_returns_short_pages() -> None:
         }),
     ]
 
-    with patch("app.modules.zspace.zspace.DEFAULT_ITEMS_PAGE_SIZE", 100), patch(
-        "app.modules.zspace.zspace.RequestUtils"
+    with patch("app.modules.mediaservers.zspace.zspace.DEFAULT_ITEMS_PAGE_SIZE", 100), patch(
+        "app.modules.mediaservers.zspace.zspace.RequestUtils"
     ) as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = responses
         items = list(client.get_items(parent="library-id"))

@@ -7,14 +7,14 @@ from app.modules import _MessageBase
 from app.modules.discord import DiscordModule
 from app.modules.feishu import FeishuModule
 from app.modules.filter import FilterModule
-from app.modules.plex import PlexModule
+from app.modules.mediaservers.plex import PlexModule
 from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule
 from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
 from app.modules.themoviedb import TheMovieDbModule
-from app.modules.trimemedia import TrimeMediaModule
-from app.modules.ugreen import UgreenModule
+from app.modules.mediaservers.trimemedia import TrimeMediaModule
+from app.modules.mediaservers.ugreen import UgreenModule
 from app.modules.wechat import WechatModule
 from app.modules.wechatclawbot import WechatClawBotModule
 

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from typing import Optional
 from unittest.mock import patch
 
-from app.modules.ugreen.api import Api
+from app.modules.mediaservers.ugreen.api import Api
 
 
 class _FakeResponse:
@@ -127,7 +127,7 @@ def test_login_logout_requests_follow_client_configuration() -> None:
     )
     api._session = fake_session
 
-    with patch("app.modules.ugreen.api.UgreenCrypto", _FakeCrypto):
+    with patch("app.modules.mediaservers.ugreen.api.UgreenCrypto", _FakeCrypto):
         token = api.login("tester", "pwd")
         assert token == "token-value"
         assert api.public_key == "BEGIN LOGIN KEY"
@@ -174,7 +174,7 @@ def test_login_accepts_token_id_and_reuses_check_public_key() -> None:
     )
     api._session = fake_session
 
-    with patch("app.modules.ugreen.api.UgreenCrypto", _FakeCrypto):
+    with patch("app.modules.mediaservers.ugreen.api.UgreenCrypto", _FakeCrypto):
         token = api.login("tester", "pwd")
 
     assert token == "token-id-value"

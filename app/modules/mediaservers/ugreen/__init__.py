@@ -6,7 +6,7 @@ from app.runtime.events import eventmanager
 from app.application.mediaserver import MusicMediaServerHelper
 from app.runtime.log import logger
 from app.modules import _MediaServerBase, _ModuleBase
-from app.modules.ugreen.ugreen import Ugreen
+from app.modules.mediaservers.ugreen.ugreen import Ugreen
 from app.schemas import AuthCredentials, AuthInterceptCredentials
 from app.schemas.types import ChainEventType, MediaServerType, MediaType, ModuleType
 

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app import schemas
-from app.modules.ugreen.ugreen import Ugreen
+from app.modules.mediaservers.ugreen.ugreen import Ugreen
 
 try:
     from app.api.endpoints import dashboard as dashboard_endpoint
@@ -127,7 +127,7 @@ class UgreenReconnectTest(unittest.TestCase):
         ugreen._userinfo = None
 
         with patch.object(Ugreen, "_Ugreen__restore_persisted_session", return_value=False), patch(
-            "app.modules.ugreen.ugreen.Api", return_value=_FakeReconnectApi()
+            "app.modules.mediaservers.ugreen.ugreen.Api", return_value=_FakeReconnectApi()
         ), patch.object(Ugreen, "_Ugreen__save_persisted_session", return_value=None), patch.object(
             Ugreen, "disconnect", wraps=ugreen.disconnect
         ), patch.object(Ugreen, "get_librarys") as mocked_get_librarys:

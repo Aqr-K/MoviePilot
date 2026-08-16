@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from unittest.mock import patch
 
-from app.modules.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
 
 
 class _FakeResponse:
@@ -50,7 +50,7 @@ def test_medias_count_deduplicates_multi_folder_library():
     # 用户级查询会折叠同一影片的多个版本，返回 67 而非数据库原始行数 201
     counts = {("lib-movie", "Movie"): 67}
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = _routed_get_res(
             views, counts, global_counts={"MovieCount": 201}
         )
@@ -78,7 +78,7 @@ def test_medias_count_buckets_by_collection_type():
         ("lib-tv", "Episode"): 45,
     }
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = _routed_get_res(
             views, counts
         )
@@ -93,7 +93,7 @@ def test_medias_count_falls_back_without_user():
     """无可用用户时应回退到全局 Items/Counts 统计。"""
     client = _make_client(user=None)
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.return_value = _FakeResponse(
             {"MovieCount": 5, "SeriesCount": 2, "EpisodeCount": 30}
         )
@@ -117,7 +117,7 @@ def test_medias_count_falls_back_when_views_unavailable():
             return _FakeResponse({"MovieCount": 7, "SeriesCount": 1, "EpisodeCount": 9})
         raise AssertionError(f"意外的请求地址：{url}")
 
-    with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+    with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
         request_utils_cls.return_value.get_res.side_effect = _get_res
         stat = client.get_medias_count()
 

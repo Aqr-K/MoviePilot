@@ -6,7 +6,7 @@ from app.runtime.events import eventmanager
 from app.application.mediaserver import MusicMediaServerHelper
 from app.runtime.log import logger
 from app.modules import _MediaServerBase, _ModuleBase
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.zspace.zspace import ZSpace
 from app.schemas import AuthCredentials, AuthInterceptCredentials
 from app.schemas.types import ChainEventType, MediaServerType, MediaType, ModuleType
 

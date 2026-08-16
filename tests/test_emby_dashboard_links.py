@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 from app import schemas
 from app.api.endpoints.mediaserver import play_item
-from app.modules.emby.emby import Emby
+from app.modules.mediaservers.emby.emby import Emby
 
 
 class _FakeResponse:
@@ -41,7 +41,7 @@ class EmbyDashboardLinksTest(unittest.TestCase):
         client = self._build_client()
         client.serverid = None
 
-        with patch("app.modules.emby.emby.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.emby.emby.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.side_effect = [
                 None,
                 _FakeResponse({"Id": "server-id"}),
@@ -76,7 +76,7 @@ class EmbyDashboardLinksTest(unittest.TestCase):
         client = self._build_client()
         client.get_user_library_folders = Mock(return_value=[])
 
-        with patch("app.modules.emby.emby.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.emby.emby.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse([
                 {
                     "Id": "emby-item-id",
