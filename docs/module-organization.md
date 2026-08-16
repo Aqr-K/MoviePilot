@@ -86,9 +86,29 @@ if media_source == self._music_source:
 - **前缀覆盖。** `app.modules.wechat` 是 `app.modules.wechatclawbot` 的严格前缀，裸 `sed` 会把后者改成乱码。改写时长名优先、并加 `\b`。
 - **文件系统路径漏改。** 部分测试用 `repo_root / "app" / "modules" / X / "y.py"` 装载源码，并自建 `sys.modules` 桩字典。dotted 路径的 grep 扫不到，漏改会在 pytest **collection 阶段**炸掉整轮。另外 `tests/manual/` 下的手工脚本不被 pytest 采集，漏改也不会变红，要按整个 `tests/` 搜而不是只搜 `test_*.py`。
 
-## 五、已知遗留
+## 五、能力归属由运行期推导
 
-- **`fanart` 的目录归属与契约归属不一致。** 它独占方法为 0，全部方法都与 4 个识别源共享，契约上是图片族正式成员，但声明 `ModuleType.Other` 蹲在顶层。移进 `recognizers/` 会让目录名失准（它不识别）。当前由功能族表记录其真实归属，目录不动。
-- **`thetvdb` 声明 `ModuleType.MediaRecognize` 却不实现任何识别族方法**，只有 `tvdb_info`/`tvdb_slug`/`search_tvdb` 三个独占查询。它是能力不全的族成员，不是错分。族内可选能力目前只在消息渠道那里被显式化（`ChannelCapabilities`），其余族靠隐式 `hasattr` 探测。
+`ModuleType` 一个标签同时承担分发路由、服务配置归类、契约归属声明与健康检查分类四种职责，不可能对四种目的都正确。**契约归属因此不能靠标签，只能推导**——见 `app/runtime/extensions/capability.py`。
+
+推导基于运行期实例而非源码文本，因为静态扫描有盲点：`AlistGo` 的整套存储契约继承自 `Alist`，只解析类体会把它看成什么都没实现，43 个模块里 27 个有这类继承。
+
+```python
+ModuleManager().get_capability_index()        # {能力: [提供者, ...]}
+ModuleManager().get_module_capabilities(mid)  # 单个模块提供的能力
+```
+
+于是此前答不出的问题成了可查事实：`metadata_img` 的提供者含 `FanartModule`，`recognize_media` 的提供者不含 `TheTvDbModule`。
+
+**目录按 `ModuleType` 分组是一条一致的规则**，`fanart` 声明 `Other` 就该在顶层——它不是漏归位。它属于图片族这件事由能力索引承载，那正是目录表达不了的跨类型归属所需要的机制。
+
+`thetvdb` 声明 `MediaRecognize` 却不提供 `recognize_media`，是**能力不全的族成员**而非错分。这类偏差在 `tests/test_module_capability_truth.py` 里逐条登记，出现新的即失败。族内可选能力目前只在消息渠道被显式化（`ChannelCapabilities`），其余族仍靠隐式探测。
+
+### 广播与精确分发
+
+存储是 pick-one 家族，**排除在按方法名的广播之外**（`PRECISE_DISPATCH_TYPES`），只经 `run_module_for` 到达。这不是洁癖：`StorageBase.download(fileitem, path)` 与下载器的 `download(content, download_dir, cookie, ...)` 同名而签名不兼容，存储升为模块后一度被 `ChainBase.download()` 的广播命中，且存储优先级更高——每次添加种子先撞 7 个存储抛 7 次 `TypeError` 并推 7 条错误通知。
+
+该缺陷逃过了按方法名的碰撞检查，因为检查用的正则要求方法名与 `run_module(` 同行，而那个调用点换了行。教训是**这类检查必须走 AST**。现在由两道门禁兜住：跨类型重名不得广播、以及更强的一道——真实调用点的实参必须能被每个提供者接收。
+
+## 六、已知遗留
 - **`postgresql`/`redis` 对外方法为 0**，不参与任何分发，只有 `test()` 有内容。它们不是伪模块：模块系统在此兼作健康探针注册表，`/system/modulelist` 与 `/system/moduletest/{moduleid}` 是其 API，前端依赖之。摘除会造成用户可见的功能回退，不做。
 - **`filemanager` 只剩整理编排**，其归属押后到 chain 与 application 双内核那笔债一起解，见存储方案第 6 步。
