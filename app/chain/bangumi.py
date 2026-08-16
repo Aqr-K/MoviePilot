@@ -3,6 +3,7 @@ from typing import Optional, List
 from app import schemas
 from app.chain import ChainBase
 from app.domain.context import MediaInfo
+from app.schemas.types import MediaSource
 
 
 class BangumiChain(ChainBase):
@@ -13,14 +14,18 @@ class BangumiChain(ChainBase):
     def calendar(self) -> Optional[List[MediaInfo]]:
         """
         获取Bangumi每日放送
+        :return: 整周放送的媒体信息列表
         """
-        return self.run_module("bangumi_calendar")
+        return self.run_module("discover_board", source=MediaSource.Bangumi,
+                               board="calendar", count=None)
 
     def discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """
         发现Bangumi番剧
+        :param kwargs: Bangumi自有的筛选条件
+        :return: 媒体信息列表
         """
-        return self.run_module("bangumi_discover", **kwargs)
+        return self.run_module("discover", source=MediaSource.Bangumi, **kwargs)
 
     def bangumi_info(self, bangumiid: int) -> Optional[dict]:
         """
@@ -61,14 +66,18 @@ class BangumiChain(ChainBase):
     async def async_calendar(self) -> Optional[List[MediaInfo]]:
         """
         获取Bangumi每日放送（异步版本）
+        :return: 整周放送的媒体信息列表
         """
-        return await self.async_run_module("async_bangumi_calendar")
+        return await self.async_run_module("async_discover_board", source=MediaSource.Bangumi,
+                                           board="calendar", count=None)
 
     async def async_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """
         发现Bangumi番剧（异步版本）
+        :param kwargs: Bangumi自有的筛选条件
+        :return: 媒体信息列表
         """
-        return await self.async_run_module("async_bangumi_discover", **kwargs)
+        return await self.async_run_module("async_discover", source=MediaSource.Bangumi, **kwargs)
 
     async def async_bangumi_info(self, bangumiid: int) -> Optional[dict]:
         """

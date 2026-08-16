@@ -1,8 +1,8 @@
 """TheMovieDb 与 Bangumi 的发现能力契约。
 
 两源的既有发现方法都是榜单契约的退化情形：``tmdb_trending`` 只有 ``page`` 没有 ``count``，
-``bangumi_calendar`` 无参且不支持翻页。契约不能因此走样——榜单声明里的 ``paged`` 正是为
-后者存在，调用方据此决定是否翻页。
+``bangumi_calendar`` 无参且整周一次返回。契约不因此走样——榜单声明里的 ``paged`` 说的是源侧
+是否原生分页，源侧整份返回时由源按页码切片，调用方对所有榜单一律可传 ``page`` 与 ``count``。
 
 ``discover_board`` 一律委托给既有榜单方法，取数路径与缓存、限流的挂载点保持一致，不因
 归一而退化成整个 ``discover_board`` 一个桶。
@@ -182,12 +182,13 @@ def test_bangumi_declares_an_unpaged_board(bangumi):
     assert boards["calendar"].media_type == MediaType.TV
 
 
-def test_bangumi_board_has_no_second_page(bangumi):
-    """不支持翻页的榜单第二页起为空，与来源不匹配的 None 区分开。"""
+def test_bangumi_board_pages_a_source_that_returns_everything(bangumi):
+    """源侧整份返回的榜单照样按页码切片，页码超出条目总数时为空，与来源不匹配的 None 区分开。"""
     result = bangumi.discover_board(source=MediaSource.Bangumi, board="calendar", page=2)
 
     assert result == []
-    bangumi.bangumiapi.calendar.assert_not_called()
+    assert result is not None
+    bangumi.bangumiapi.calendar.assert_called_once()
 
 
 def test_bangumi_discover_passes_the_given_criteria(bangumi):
@@ -312,14 +313,14 @@ def test_tmdb_asynchronous_discover_is_served_by_the_existing_filter_method(tmdb
     assert fetch.await_args.kwargs["mtype"] == MediaType.MOVIE
 
 
-def test_bangumi_asynchronous_board_has_no_second_page(bangumi):
-    """不支持翻页的榜单异步取第二页起为空，与来源不匹配的 None 区分开。"""
+def test_bangumi_asynchronous_board_pages_a_source_that_returns_everything(bangumi):
+    """异步取源侧整份返回的榜单同样按页码切片，页码超出条目总数时为空。"""
     result = run(bangumi.async_discover_board(source=MediaSource.Bangumi, board="calendar",
                                               page=2))
 
     assert result == []
     assert result is not None
-    bangumi.bangumiapi.async_calendar.assert_not_awaited()
+    bangumi.bangumiapi.async_calendar.assert_awaited_once()
 
 
 def test_bangumi_asynchronous_discover_passes_the_given_criteria(bangumi):

@@ -495,7 +495,8 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步TMDB热门电影
         """
-        movies = await TmdbChain().async_run_module("async_tmdb_discover", mtype=MediaType.MOVIE,
+        movies = await TmdbChain().async_run_module("async_discover", source=MediaSource.TMDB,
+                                                    mtype=MediaType.MOVIE,
                                                     sort_by=sort_by,
                                                     with_genres=with_genres,
                                                     with_original_language=with_original_language,
@@ -523,7 +524,8 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步TMDB热门电视剧
         """
-        tvs = await TmdbChain().async_run_module("async_tmdb_discover", mtype=MediaType.TV,
+        tvs = await TmdbChain().async_run_module("async_discover", source=MediaSource.TMDB,
+                                                 mtype=MediaType.TV,
                                                  sort_by=sort_by,
                                                  with_genres=with_genres,
                                                  with_original_language=with_original_language,
@@ -545,7 +547,9 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         异步TMDB流行趋势
         """
         infos = await TmdbChain().async_run_module(
-            "async_tmdb_trending",
+            "async_discover_board",
+            source=MediaSource.TMDB,
+            board="trending",
             page=page,
             raise_exception=raise_exception,
         )
@@ -557,8 +561,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步Bangumi每日放送
         """
-        medias = await BangumiChain().async_run_module("async_bangumi_calendar")
-        return [media.to_dict() for media in medias[(page - 1) * count: page * count]] if medias else []
+        medias = await BangumiChain().async_run_module("async_discover_board",
+                                                       source=MediaSource.Bangumi,
+                                                       board="calendar", page=page, count=count)
+        return [media.to_dict() for media in medias] if medias else []
 
     @log_execution_time(logger=logger)
     @cached(ttl=recommend_ttl, region=recommend_cache_region, skip_empty=True)
@@ -566,7 +572,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣正在热映
         """
-        movies = await DoubanChain().async_run_module("async_movie_showing", page=page, count=count)
+        movies = await DoubanChain().async_run_module("async_discover_board",
+                                                      source=MediaSource.Douban,
+                                                      board="movie_showing",
+                                                      page=page, count=count)
         return [media.to_dict() for media in movies] if movies else []
 
     @log_execution_time(logger=logger)
@@ -603,8 +612,9 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣最新电影
         """
-        movies = await DoubanChain().async_run_module("async_douban_discover", mtype=MediaType.MOVIE,
-                                                      sort=sort, tags=tags, page=page, count=count)
+        movies = await DoubanChain().async_run_module("async_discover", source=MediaSource.Douban,
+                                                      mtype=MediaType.MOVIE, sort=sort, tags=tags,
+                                                      page=page, count=count)
         return [media.to_dict() for media in movies] if movies else []
 
     @log_execution_time(logger=logger)
@@ -614,8 +624,9 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣最新电视剧
         """
-        tvs = await DoubanChain().async_run_module("async_douban_discover", mtype=MediaType.TV,
-                                                   sort=sort, tags=tags, page=page, count=count)
+        tvs = await DoubanChain().async_run_module("async_discover", source=MediaSource.Douban,
+                                                   mtype=MediaType.TV, sort=sort, tags=tags,
+                                                   page=page, count=count)
         return [media.to_dict() for media in tvs] if tvs else []
 
     @log_execution_time(logger=logger)
@@ -624,7 +635,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣电影TOP250
         """
-        movies = await DoubanChain().async_run_module("async_movie_top250", page=page, count=count)
+        movies = await DoubanChain().async_run_module("async_discover_board",
+                                                      source=MediaSource.Douban,
+                                                      board="movie_top250",
+                                                      page=page, count=count)
         return [media.to_dict() for media in movies] if movies else []
 
     @log_execution_time(logger=logger)
@@ -633,7 +647,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣国产剧集榜
         """
-        tvs = await DoubanChain().async_run_module("async_tv_weekly_chinese", page=page, count=count)
+        tvs = await DoubanChain().async_run_module("async_discover_board",
+                                                   source=MediaSource.Douban,
+                                                   board="tv_weekly_chinese",
+                                                   page=page, count=count)
         return [media.to_dict() for media in tvs] if tvs else []
 
     @log_execution_time(logger=logger)
@@ -642,7 +659,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣全球剧集榜
         """
-        tvs = await DoubanChain().async_run_module("async_tv_weekly_global", page=page, count=count)
+        tvs = await DoubanChain().async_run_module("async_discover_board",
+                                                   source=MediaSource.Douban,
+                                                   board="tv_weekly_global",
+                                                   page=page, count=count)
         return [media.to_dict() for media in tvs] if tvs else []
 
     @log_execution_time(logger=logger)
@@ -651,7 +671,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣热门动漫
         """
-        tvs = await DoubanChain().async_run_module("async_tv_animation", page=page, count=count)
+        tvs = await DoubanChain().async_run_module("async_discover_board",
+                                                   source=MediaSource.Douban,
+                                                   board="tv_animation",
+                                                   page=page, count=count)
         return [media.to_dict() for media in tvs] if tvs else []
 
     @log_execution_time(logger=logger)
@@ -660,7 +683,10 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣热门电影
         """
-        movies = await DoubanChain().async_run_module("async_movie_hot", page=page, count=count)
+        movies = await DoubanChain().async_run_module("async_discover_board",
+                                                      source=MediaSource.Douban,
+                                                      board="movie_hot",
+                                                      page=page, count=count)
         return [media.to_dict() for media in movies] if movies else []
 
     @log_execution_time(logger=logger)
@@ -669,5 +695,8 @@ class RecommendChain(ChainBase, metaclass=Singleton):
         """
         异步豆瓣热门电视剧
         """
-        tvs = await DoubanChain().async_run_module("async_tv_hot", page=page, count=count)
+        tvs = await DoubanChain().async_run_module("async_discover_board",
+                                                   source=MediaSource.Douban,
+                                                   board="tv_hot",
+                                                   page=page, count=count)
         return [media.to_dict() for media in tvs] if tvs else []

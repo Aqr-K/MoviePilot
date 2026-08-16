@@ -344,15 +344,32 @@ class BangumiModule(_ModuleBase):
             for board, (name, _, media_type, paged) in self._BOARDS.items()
         ]
 
+    @staticmethod
+    def _page_of(medias: Optional[List[MediaInfo]], page: int,
+                 count: Optional[int]) -> Optional[List[MediaInfo]]:
+        """
+        从整份榜单内容里切出指定的一页
+
+        :param medias: 榜单全量内容
+        :param page: 页码
+        :param count: 每页条数，为空表示不限条数
+        :return: 该页的媒体信息列表，全量内容为空或不限条数时原样返回
+        """
+        if not medias or not count:
+            return medias
+        return medias[(page - 1) * count: page * count]
+
     def discover_board(self, source: Optional[MediaSource] = None, board: Optional[str] = None,
-                       page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+                       page: int = 1, count: Optional[int] = 30,
+                       raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         取指定榜单的一页
 
         :param source: 数据来源，不是本源时不处理
         :param board: 榜单标识
-        :param page: 页码，放送表是整周的固定内容，只有第一页
-        :param count: 每页条数，放送表整周返回，不参与取数
+        :param page: 页码
+        :param count: 每页条数，为空表示不限条数
+        :param raise_exception: 上游请求失败时是否抛出异常，本源榜单取数不透传该标志
         :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
         """
         if source != MediaSource.Bangumi:
@@ -360,21 +377,22 @@ class BangumiModule(_ModuleBase):
         declared = self._BOARDS.get(board)
         if not declared:
             return None
-        if page > 1:
-            return []
         fetch = getattr(self, declared[1])
-        return fetch()
+        # 放送表在源侧整周返回，按页码与每页条数切片给出对应的一页
+        return self._page_of(fetch(), page, count)
 
     async def async_discover_board(self, source: Optional[MediaSource] = None,
                                    board: Optional[str] = None,
-                                   page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+                                   page: int = 1, count: Optional[int] = 30,
+                                   raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         异步取指定榜单的一页
 
         :param source: 数据来源，不是本源时不处理
         :param board: 榜单标识
-        :param page: 页码，放送表是整周的固定内容，只有第一页
-        :param count: 每页条数，放送表整周返回，不参与取数
+        :param page: 页码
+        :param count: 每页条数，为空表示不限条数
+        :param raise_exception: 上游请求失败时是否抛出异常，本源榜单取数不透传该标志
         :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
         """
         if source != MediaSource.Bangumi:
@@ -382,11 +400,10 @@ class BangumiModule(_ModuleBase):
         declared = self._BOARDS.get(board)
         if not declared:
             return None
-        if page > 1:
-            return []
         # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
         fetch = getattr(self, f"async_{declared[1]}")
-        return await fetch()
+        # 放送表在源侧整周返回，按页码与每页条数切片给出对应的一页
+        return self._page_of(await fetch(), page, count)
 
     def discover(self, source: Optional[MediaSource] = None,
                  mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:

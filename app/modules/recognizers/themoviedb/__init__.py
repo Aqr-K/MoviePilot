@@ -998,7 +998,8 @@ class TheMovieDbModule(_ModuleBase):
         ]
 
     def discover_board(self, source: Optional[MediaSource] = None, board: Optional[str] = None,
-                       page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+                       page: int = 1, count: int = 30,
+                       raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         取指定榜单的一页
 
@@ -1006,6 +1007,7 @@ class TheMovieDbModule(_ModuleBase):
         :param board: 榜单标识
         :param page: 页码
         :param count: 每页条数，TMDB 接口每页条数固定，不参与取数
+        :param raise_exception: 上游请求失败时是否抛出异常，同步取数不透传该标志
         :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
         """
         if source != MediaSource.TMDB:
@@ -1018,7 +1020,8 @@ class TheMovieDbModule(_ModuleBase):
 
     async def async_discover_board(self, source: Optional[MediaSource] = None,
                                    board: Optional[str] = None,
-                                   page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+                                   page: int = 1, count: int = 30,
+                                   raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         异步取指定榜单的一页
 
@@ -1026,6 +1029,7 @@ class TheMovieDbModule(_ModuleBase):
         :param board: 榜单标识
         :param page: 页码
         :param count: 每页条数，TMDB 接口每页条数固定，不参与取数
+        :param raise_exception: 上游请求失败时是否抛出异常，透传给榜单取数方法
         :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
         """
         if source != MediaSource.TMDB:
@@ -1035,7 +1039,7 @@ class TheMovieDbModule(_ModuleBase):
             return None
         # 缓存与限流挂在各榜单自己的取数方法上，按标识委托使其仍以榜单为粒度生效
         fetch = getattr(self, f"async_{declared[1]}")
-        return await fetch(page=page)
+        return await fetch(page=page, raise_exception=raise_exception)
 
     def discover(self, source: Optional[MediaSource] = None,
                  mtype: MediaType = None, **criteria) -> Optional[List[MediaInfo]]:
@@ -1060,14 +1064,17 @@ class TheMovieDbModule(_ModuleBase):
 
         :param source: 数据来源，不是本源时不处理
         :param mtype: 媒体类型
-        :param criteria: 筛选条件，未给出的条件不过滤，本源没有的条件不参与取数
+        :param criteria: 筛选条件，未给出的条件不过滤，本源没有的条件不参与取数；
+                         其中 raise_exception 决定上游请求失败时是否抛出异常
         :return: 统一媒体信息列表，来源不匹配时为 None
         """
         if source != MediaSource.TMDB:
             return None
         params = {name: criteria.get(name, default)
                   for name, default in self._DISCOVER_CRITERIA.items()}
-        return await self.async_tmdb_discover(mtype=mtype, **params)
+        return await self.async_tmdb_discover(
+            mtype=mtype, raise_exception=bool(criteria.get("raise_exception")), **params
+        )
 
     def tmdb_discover(self, mtype: MediaType, sort_by: str,
                       with_genres: str,

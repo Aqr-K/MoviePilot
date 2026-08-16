@@ -409,7 +409,8 @@ class AniListModule(_ModuleBase):
         ]
 
     def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
-                       page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+                       page: int = 1, count: int = 30,
+                       raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         取指定榜单的一页
 
@@ -417,6 +418,7 @@ class AniListModule(_ModuleBase):
         :param board: 榜单标识
         :param page: 页码
         :param count: 每页条数
+        :param raise_exception: 上游请求失败时是否抛出异常，本源榜单取数不透传该标志
         :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
         """
         if source != MediaSource.AniList:
@@ -428,7 +430,8 @@ class AniListModule(_ModuleBase):
         return [MediaInfo(anilist_info=info) for info in fetch(page=page, count=count)]
 
     async def async_discover_board(self, source: Optional[MediaSource] = None, board: str = None,
-                                   page: int = 1, count: int = 30) -> Optional[List[MediaInfo]]:
+                                   page: int = 1, count: int = 30,
+                                   raise_exception: bool = False) -> Optional[List[MediaInfo]]:
         """
         异步取指定榜单的一页
 
@@ -436,6 +439,7 @@ class AniListModule(_ModuleBase):
         :param board: 榜单标识
         :param page: 页码
         :param count: 每页条数
+        :param raise_exception: 上游请求失败时是否抛出异常，本源榜单取数不透传该标志
         :return: 统一媒体信息列表，来源不匹配或榜单未知时为 None
         """
         if source != MediaSource.AniList:

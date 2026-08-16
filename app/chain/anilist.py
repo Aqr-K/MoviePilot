@@ -3,6 +3,7 @@ from typing import Optional
 from app import schemas
 from app.chain import ChainBase
 from app.domain.context import MediaInfo
+from app.schemas.types import MediaSource
 
 
 class AniListChain(ChainBase):
@@ -34,7 +35,8 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module("anilist_trending", page=page, count=count) or []
+        return self.run_module("discover_board", source=MediaSource.AniList,
+                               board="trending", page=page, count=count) or []
 
     async def async_trending(self, page: int = 1, count: int = 20) -> list[MediaInfo]:
         """
@@ -43,7 +45,8 @@ class AniListChain(ChainBase):
         :return: 统一媒体信息列表
         """
         return await self.async_run_module(
-            "async_anilist_trending", page=page, count=count
+            "async_discover_board", source=MediaSource.AniList,
+            board="trending", page=page, count=count
         ) or []
 
     def popular_this_season(self, page: int = 1, count: int = 20) -> list[MediaInfo]:
@@ -53,7 +56,8 @@ class AniListChain(ChainBase):
         :return: 统一媒体信息列表
         """
         return self.run_module(
-            "anilist_popular_this_season", page=page, count=count
+            "discover_board", source=MediaSource.AniList,
+            board="popular_this_season", page=page, count=count
         ) or []
 
     async def async_popular_this_season(
@@ -65,7 +69,8 @@ class AniListChain(ChainBase):
         :return: 统一媒体信息列表
         """
         return await self.async_run_module(
-            "async_anilist_popular_this_season", page=page, count=count
+            "async_discover_board", source=MediaSource.AniList,
+            board="popular_this_season", page=page, count=count
         ) or []
 
     def discover(self, **kwargs) -> list[MediaInfo]:
@@ -74,7 +79,7 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module("anilist_discover", **kwargs) or []
+        return self.run_module("discover", source=MediaSource.AniList, **kwargs) or []
 
     async def async_discover(self, **kwargs) -> list[MediaInfo]:
         """
@@ -82,7 +87,9 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return await self.async_run_module("async_anilist_discover", **kwargs) or []
+        return await self.async_run_module(
+            "async_discover", source=MediaSource.AniList, **kwargs
+        ) or []
 
     def credits(
         self, anilist_id: int, page: int = 1, count: int = 20
