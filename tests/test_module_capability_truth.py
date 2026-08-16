@@ -239,7 +239,7 @@ def test_every_broadcast_reaches_providers_that_can_accept_its_arguments(module_
                 if any(param.kind == inspect.Parameter.VAR_KEYWORD
                        for param in parameters.values()):
                     continue
-                unknown = keywords - set(parameters) - {"raise_exception"}
+                unknown = keywords - set(parameters)
                 if unknown:
                     mismatched.append(
                         f"{location} 广播 {capability}({', '.join(sorted(unknown))}) "
