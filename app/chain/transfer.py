@@ -2622,7 +2622,32 @@ class TransferChain(ChainBase, ConfigReloadMixin, metaclass=Singleton):
         :param mediainfo: 媒体信息
         :return: 重命名后的名称（含目录）
         """
-        return self.run_module("recommend_name", meta=meta, mediainfo=mediainfo)
+        return self.run_module("recommend_name", meta=meta, mediainfo=mediainfo,
+                               episodes_info=self.__query_episodes_info(meta, mediainfo))
+
+    @staticmethod
+    def __query_episodes_info(meta: MetaBase,
+                              mediainfo: MediaInfo) -> Optional[List[TmdbEpisode]]:
+        """
+        取当前季的全部集信息，供命名模板填充集标题
+
+        :param meta: 元数据
+        :param mediainfo: 媒体信息
+        :return: 集信息列表，非剧集或无 TMDB 标识时为 None
+        """
+        if mediainfo.type != MediaType.TV or not mediainfo.tmdb_id:
+            return None
+        # 季号为 0 时不能当作缺省
+        season_num = mediainfo.season
+        if season_num is None and meta.season_seq and meta.season_seq.isdigit():
+            season_num = int(meta.season_seq)
+        if season_num is None:
+            season_num = 1
+        return TmdbChain().tmdb_episodes(
+            tmdbid=mediainfo.tmdb_id,
+            season=season_num,
+            episode_group=mediainfo.episode_group,
+        )
 
     def recommend_episode_format(
             self,
