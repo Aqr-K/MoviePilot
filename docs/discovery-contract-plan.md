@@ -88,19 +88,41 @@ def discover(self, source, mtype: MediaType = None,
 | 1 | 定义 `DiscoverBoard` 与三个契约方法签名 | 是 |
 | 2 | 一个源端到端跑通（建议 `anilist`，只有 3 个方法且两个已是 `**kwargs`） | 是 |
 | 3 | 其余三源实现契约，旧方法保留 | 是 |
-| 4 | `recommend.py` 改为按契约调用，前端从 `discover_boards` 枚举 | 是 |
+| 4 | `RecommendChain` 内部改为按契约调用，16 个端点与方法签名不动 | 是 |
 | 5 | 摘除 15 个旧方法与其分发调用点 | 是 |
 | 6 | `MediaRecognizeType` 拆出发现源枚举（若届时确有必要） | 是 |
 
 第 3 步保留旧方法，使第 4 步前后可对照同一份数据验证归一无损；第 5 步之前任何一步出问题都能停在可用状态。
 
-## 六、风险
+## 六、前端契约：比预想的松
 
-- **前端联动**：发现页现在按后端方法名组织，第 4 步必须与前端仓库同步，否则发现页空白。这是本方案唯一的跨仓协调点。
+前端不消费方法名，消费的是 **16 个 REST 端点**（`app/api/endpoints/recommend.py`），每个榜单一个：
+
+```
+端点 /recommend/douban_movie_top250
+  → RecommendChain.async_movie_top250(page, count)
+    → run_module("async_movie_top250", ...)
+      → DoubanModule.async_movie_top250
+```
+
+**契约化只改最后一跳。** 端点与 `RecommendChain` 的方法全部原样保留，只把它们内部的
+`run_module("async_<board>")` 换成 `run_module("async_discover_board", source=..., board=...)`。
+第 4 步因此**没有跨仓协调点**，前端零改动。
+
+插件贡献的发现源走另一条完全独立的路：`ChainEventType.RecommendSource` 事件返回
+`RecommendMediaSource(name, api_path, type)`，即**给前端一个 URL 让它自己去调**。与模块
+分发正交，本方案不影响它。
+
+把 `discover_boards()` 暴露给前端（让内建榜单也能被枚举，而不是硬编码 16 个）是**另一件
+独立的事**，属于第 6 步之后。做时要注意：前端很可能已经硬编码了这 16 个，直接并进
+`/recommend/source` 会在界面上重复出现。
+
+## 七、风险
+
 - **榜单语义不可通约**：`bangumi_calendar` 是「本周放送表」，`movie_top250` 是「固定榜单」，`tmdb_trending` 是「趋势」。归到同一个 `discover_board(board=...)` 之后，分页语义未必一致（`calendar` 无分页）。契约需允许源声明该榜单是否支持分页，否则前端翻页会出错。
 - **`douban` 的 7 个榜单方法各有独立缓存与限流**（`rate_limit_exponential`），归一时要确认装饰器仍按榜单粒度生效，不能退化成整个 `discover_board` 一个限流桶。
 
-## 七、不做的
+## 八、不做的
 
 - 不动 `thetvdb`——它没有发现能力，本方案与它无关。
 - 不动 `listenbrainz` 的 `music_chart`/`music_fresh_releases`。它们返回音乐实体不是 `MediaInfo`，与影视榜单不可通约；音乐发现要归一是另一件事。
