@@ -275,6 +275,14 @@ class Command(metaclass=Singleton):
         for command in self.pluginmanager.get_plugin_commands():
             cmd = command.get("cmd")
             if cmd:
+                exists = plugin_commands.get(cmd)
+                if exists and exists.get("pid") != command.get("pid"):
+                    # 两个来源声明同一条命令时先到者胜，否则后者会静默顶掉前者
+                    logger.warning(
+                        f"插件命令 {cmd} 已由 {exists.get('pid')} 注册，"
+                        f"忽略来自 {command.get('pid')} 的重复声明"
+                    )
+                    continue
                 plugin_commands[cmd] = {
                     "pid": command.get("pid"),
                     "func": self.send_plugin_event,

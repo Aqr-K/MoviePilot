@@ -9,7 +9,7 @@ import traceback
 from typing import Any, Dict, List, Optional, Type
 
 from app.foundation.singleton import Singleton
-from app.runtime.events import EventHandlerBinding, eventmanager
+from app.runtime.events import eventmanager
 from app.runtime.log import logger
 from app.runtime.reload import ConfigReloadMixin
 from app.schemas.types import SystemConfigKey

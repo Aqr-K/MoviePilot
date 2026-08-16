@@ -27,6 +27,7 @@ from app.chain.transfer import TransferChain
 from app.chain.workflow import WorkflowChain
 from app.runtime.config import settings, global_vars
 from app.runtime.events import Event, eventmanager
+from app.runtime.extensions.plugin_instance import matches_plugin
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.db import SessionFactory
 from app.db.oper.agenttask import AgentTaskOper
@@ -1308,10 +1309,11 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
                 jobs_to_remove = [(job_id, service)]
             else:
                 # 移除插件的所有服务
+                # 插件标识回收其全部实例的服务，实例键只回收自身
                 jobs_to_remove = [
                     (job_id, service)
                     for job_id, service in self._jobs.items()
-                    if service.get("pid") == pid
+                    if matches_plugin(str(service.get("pid") or ""), pid)
                 ]
                 for job_id, _ in jobs_to_remove:
                     self._jobs.pop(job_id, None)
@@ -1401,13 +1403,15 @@ class Scheduler(ConfigReloadMixin, metaclass=SingletonClass):
             # 开始注册插件服务
             for service in plugin_services:
                 try:
-                    sid = f"{pid}_{service['id']}"
+                    # 服务归属实例键，两个实例声明同名服务时 job id 不再互相顶掉
+                    owner = service.get("pid") or pid
+                    sid = f"{owner}_{service['id']}"
                     job_id = sid.split("|")[0]
                     self.remove_plugin_job(pid, job_id)
                     self._jobs[job_id] = {
                         "func": service["func"],
                         "name": service["name"],
-                        "pid": pid,
+                        "pid": owner,
                         "provider_name": plugin_name,
                         "kwargs": service.get("func_kwargs") or {},
                         "running": False,

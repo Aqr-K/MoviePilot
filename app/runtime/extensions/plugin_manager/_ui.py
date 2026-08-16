@@ -8,6 +8,7 @@ from starlette import status
 
 from app import schemas
 from app.foundation.reflection import ObjectUtils
+from app.runtime.extensions.plugin_instance import matches_plugin
 from app.runtime.log import logger
 
 LegacyDiagnosticsConfigurator = Callable[..., None]
@@ -48,7 +49,7 @@ class _PluginUIMixin:
         # 创建字典快照避免并发修改
         running_plugins_snapshot = dict(self._running_plugins)
         for plugin_id, plugin in running_plugins_snapshot.items():
-            if pid and pid != plugin_id:
+            if pid and not matches_plugin(plugin_id, pid):
                 continue
             if hasattr(plugin, "get_render_mode"):
                 render_mode, dist_path = plugin.get_render_mode()
