@@ -966,6 +966,9 @@ def create_plugin_instance(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
     # 只拉起新实例，同插件其余实例保持运行
     plugin_manager.start_instance(plugin_id, instance_id)
+    # 定时服务、命令与接口按插件标识整体重建：新实例的扩展点由此登记，
+    # 兄弟实例的登记在重建中原样恢复
+    register_plugin(plugin_id)
     created = next(
         (item for item in plugin_manager.get_plugin_instances(plugin_id)
          if item.get("instance_id") == instance_id),
@@ -992,4 +995,6 @@ def delete_plugin_instance(
         plugin_manager.delete_plugin_instance(plugin_id, instance_id)
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
+    # 重建该插件的扩展点：被删实例的定时服务与接口在重建中一并消失
+    register_plugin(plugin_id)
     return schemas.Response(success=True)
