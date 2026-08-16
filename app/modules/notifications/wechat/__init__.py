@@ -14,9 +14,9 @@ from app.application.messaging.agent import (
 )
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.wechat.WXBizMsgCrypt3 import WXBizMsgCrypt
-from app.modules.wechat.wechat import WeChat
-from app.modules.wechat.wechatbot import WeChatBot
+from app.modules.notifications.wechat.WXBizMsgCrypt3 import WXBizMsgCrypt
+from app.modules.notifications.wechat.wechat import WeChat
+from app.modules.notifications.wechat.wechatbot import WeChatBot
 from app.schemas import MessageChannel, CommingMessage, Notification, CommandRegisterEventData
 from app.schemas.types import ModuleType, ChainEventType
 from app.foundation.dom import DomUtils

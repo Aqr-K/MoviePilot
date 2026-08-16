@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, Mock, patch
 from app.agent import AgentManager, _MessageTask, _async_start_processing_status
 from app.chain.message import MessageChain
 from app.command import Command, _finish_command_processing_status
-from app.modules.telegram import TelegramModule
-from app.modules.telegram.telegram import Telegram
+from app.modules.notifications.telegram import TelegramModule
+from app.modules.notifications.telegram.telegram import Telegram
 from app.schemas.types import MessageChannel
 
 

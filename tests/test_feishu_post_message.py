@@ -8,7 +8,7 @@ ensure_optional_stub("psutil")
 ensure_optional_stub("dateparser")
 ensure_optional_stub("Pinyin2Hanzi", is_pinyin=lambda value: False)
 
-from app.modules.feishu.feishu import Feishu
+from app.modules.notifications.feishu.feishu import Feishu
 
 
 def _build_feishu_client() -> Feishu:

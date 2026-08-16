@@ -13,7 +13,7 @@ from app.application.messaging.agent import (
 )
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.slack.slack import Slack
+from app.modules.notifications.slack.slack import Slack
 from app.schemas import (
     CommandRegisterEventData,
     CommingMessage,

@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.modules.slack import SlackModule
-from app.modules.slack.slack import Slack
+from app.modules.notifications.slack import SlackModule
+from app.modules.notifications.slack.slack import Slack
 from app.schemas import CommandRegisterEventData
 
 
@@ -29,7 +29,7 @@ def test_slack_module_register_commands_filters_event_subset():
             return_value={"slack-main": SimpleNamespace(name="slack-main", config={})},
         ),
         patch.object(module, "get_instance", return_value=client),
-        patch("app.modules.slack.eventmanager.send_event", return_value=event),
+        patch("app.modules.notifications.slack.eventmanager.send_event", return_value=event),
     ):
         module.register_commands(original_commands)
 

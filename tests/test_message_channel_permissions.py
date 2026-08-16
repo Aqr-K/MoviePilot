@@ -3,14 +3,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.modules.feishu.feishu import Feishu
-from app.modules.discord import DiscordModule
-from app.modules.qqbot import QQBotModule
-from app.modules.slack import SlackModule
-from app.modules.synologychat import SynologyChatModule
-from app.modules.telegram import TelegramModule
-from app.modules.vocechat import VoceChatModule
-from app.modules.wechatclawbot import WechatClawBotModule
+from app.modules.notifications.feishu.feishu import Feishu
+from app.modules.notifications.discord import DiscordModule
+from app.modules.notifications.qqbot import QQBotModule
+from app.modules.notifications.slack import SlackModule
+from app.modules.notifications.synologychat import SynologyChatModule
+from app.modules.notifications.telegram import TelegramModule
+from app.modules.notifications.vocechat import VoceChatModule
+from app.modules.notifications.wechatclawbot import WechatClawBotModule
 
 
 class TestMessageChannelPermissions(unittest.TestCase):

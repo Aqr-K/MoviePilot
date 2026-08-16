@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urljoin, quote
 
-from app.modules.telegram.compat import ensure_urllib3_header_param_compat
+from app.modules.notifications.telegram.compat import ensure_urllib3_header_param_compat
 
 # Must run before importing pyTelegramBotAPI.
 ensure_urllib3_header_param_compat()

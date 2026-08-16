@@ -5,16 +5,16 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.application.messaging.agent import matches_channel_admin, resolve_config_principal_ids
-from app.modules.discord import DiscordModule
-from app.modules.feishu.feishu import Feishu
-from app.modules.qqbot import QQBotModule
-from app.modules.slack import SlackModule
-from app.modules.synologychat import SynologyChatModule
-from app.modules.telegram import TelegramModule
-from app.modules.vocechat import VoceChatModule
-from app.modules.wechat import WechatModule
-from app.modules.wechat.wechatbot import WeChatBot
-from app.modules.wechatclawbot import WechatClawBotModule
+from app.modules.notifications.discord import DiscordModule
+from app.modules.notifications.feishu.feishu import Feishu
+from app.modules.notifications.qqbot import QQBotModule
+from app.modules.notifications.slack import SlackModule
+from app.modules.notifications.synologychat import SynologyChatModule
+from app.modules.notifications.telegram import TelegramModule
+from app.modules.notifications.vocechat import VoceChatModule
+from app.modules.notifications.wechat import WechatModule
+from app.modules.notifications.wechat.wechatbot import WeChatBot
+from app.modules.notifications.wechatclawbot import WechatClawBotModule
 from app.schemas.types import MessageChannel
 
 
@@ -408,7 +408,7 @@ def test_discord_message_and_callback_use_stable_user_id(payload):
 def test_feishu_message_and_card_callback_accept_open_id_or_user_id(payload, admins):
     with patch.object(Feishu, "_build_api_client", return_value=Mock()), patch.object(
         Feishu, "_start_ws_client"
-    ), patch("app.modules.feishu.feishu.UserOper") as user_oper:
+    ), patch("app.modules.notifications.feishu.feishu.UserOper") as user_oper:
         user_oper.return_value.get_name.return_value = None
         client = Feishu(
             FEISHU_APP_ID="app-id",
@@ -426,7 +426,7 @@ def test_feishu_default_open_id_is_admin_without_duplicate_admin_entry():
     """飞书默认用户 Open ID 无需重复加入管理员名单。"""
     with patch.object(Feishu, "_build_api_client", return_value=Mock()), patch.object(
         Feishu, "_start_ws_client"
-    ), patch("app.modules.feishu.feishu.UserOper") as user_oper:
+    ), patch("app.modules.notifications.feishu.feishu.UserOper") as user_oper:
         user_oper.return_value.get_name.return_value = None
         client = Feishu(
             FEISHU_APP_ID="app-id",

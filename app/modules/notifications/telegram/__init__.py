@@ -12,7 +12,7 @@ from app.application.messaging.agent import (
 )
 from app.runtime.log import logger
 from app.modules import _ModuleBase, _MessageBase
-from app.modules.telegram.telegram import Telegram
+from app.modules.notifications.telegram.telegram import Telegram
 from app.schemas import (
     MessageChannel,
     CommingMessage,

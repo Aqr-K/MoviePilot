@@ -7,7 +7,7 @@ from app.api.response import ResponseAPIRouter
 from app.runtime.extensions.module_manager import ModuleManager
 from app.db.models import User
 from app.api.deps import get_current_active_superuser
-from app.modules.wechatclawbot.wechatclawbot import WechatClawBot
+from app.modules.notifications.wechatclawbot.wechatclawbot import WechatClawBot
 
 router = ResponseAPIRouter()
 

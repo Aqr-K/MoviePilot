@@ -11,8 +11,8 @@ import pytest
 
 from app.domain.context import MediaInfo, Context, TorrentInfo
 from app.domain.metainfo import MetaInfo
-from app.modules.telegram import TelegramModule
-from app.modules.telegram.telegram import Telegram
+from app.modules.notifications.telegram import TelegramModule
+from app.modules.notifications.telegram.telegram import Telegram
 from app.schemas import Notification
 from app.schemas.types import MessageChannel
 from app.schemas.types import MediaType
@@ -27,8 +27,8 @@ def telegram():
     （否则对 raw.githubusercontent.com 等外链发起真实 HTTP，外部 IO 不可接受且拖慢用例）。
     with 上下文在 fixture 结束时自动停桩，即使实例化失败也不泄漏 patch。
     """
-    with patch("app.modules.telegram.telegram.TeleBot") as mock_telebot_cls, \
-            patch("app.modules.telegram.telegram.ImageHelper") as mock_image_cls:
+    with patch("app.modules.notifications.telegram.telegram.TeleBot") as mock_telebot_cls, \
+            patch("app.modules.notifications.telegram.telegram.ImageHelper") as mock_image_cls:
         bot_instance = MagicMock()
         # get_me 用于初始化 bot 用户名，需返回带 username 的对象
         bot_instance.get_me.return_value = MagicMock(username="test_bot")

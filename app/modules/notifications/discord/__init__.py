@@ -24,7 +24,7 @@ from app.adapters.network.http import RequestUtils
 from app.foundation.collections import DictUtils
 
 try:
-    from app.modules.discord.discord import Discord
+    from app.modules.notifications.discord.discord import Discord
 except Exception as err:  # ImportError or other load issues
     Discord = None
     logger.error(f"Discord 模块未加载，缺少依赖或初始化错误：{err}")

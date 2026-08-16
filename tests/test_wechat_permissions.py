@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.modules.wechat import WechatModule
+from app.modules.notifications.wechat import WechatModule
 
 
 class TestWechatPermissions(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestWechatPermissions(unittest.TestCase):
         ), patch.object(
             module, "get_instance", return_value=client
         ), patch(
-            "app.modules.wechat.WXBizMsgCrypt",
+            "app.modules.notifications.wechat.WXBizMsgCrypt",
             return_value=crypt,
         ):
             return module.message_parser(

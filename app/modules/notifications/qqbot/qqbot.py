@@ -16,13 +16,13 @@ from app.runtime.config import settings
 from app.domain.context import MediaInfo, Context
 from app.domain.metainfo import MetaInfo
 from app.runtime.log import logger
-from app.modules.qqbot.api import (
+from app.modules.notifications.qqbot.api import (
     get_access_token,
     get_gateway_url,
     send_proactive_c2c_message,
     send_proactive_group_message,
 )
-from app.modules.qqbot.gateway import run_gateway
+from app.modules.notifications.qqbot.gateway import run_gateway
 from app.adapters.network.http import RequestUtils
 from app.foundation import size as size_tools
 

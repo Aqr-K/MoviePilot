@@ -6,9 +6,9 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.agent import _finish_processing_status
-from app.modules.discord import DiscordModule
-from app.modules.discord.discord import Discord
-from app.modules.slack import SlackModule
+from app.modules.notifications.discord import DiscordModule
+from app.modules.notifications.discord.discord import Discord
+from app.modules.notifications.slack import SlackModule
 from app.schemas.message import ChannelCapability, ChannelCapabilityManager
 from app.schemas.types import MessageChannel
 
