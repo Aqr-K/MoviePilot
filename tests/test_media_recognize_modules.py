@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
-from app.modules.douban import DoubanModule
-from app.modules.themoviedb import TheMovieDbModule
-from app.modules.themoviedb.scraper import TmdbScraper
-from app.modules.themoviedb.tmdbapi import TmdbApi
+from app.modules.recognizers.douban import DoubanModule
+from app.modules.recognizers.themoviedb import TheMovieDbModule
+from app.modules.recognizers.themoviedb.scraper import TmdbScraper
+from app.modules.recognizers.themoviedb.tmdbapi import TmdbApi
 from app.schemas.types import MediaSource, MediaType
 
 
@@ -110,7 +110,7 @@ class MediaRecognizeModulesTest(TestCase):
 
     def test_tmdb_image_language_fallback_includes_current_en_null_and_original(self):
         """TMDB 图片查询应带上语言回退，避免当前语言没有图片时直接返回空。"""
-        with patch("app.modules.themoviedb.tmdbapi.settings") as mock_settings:
+        with patch("app.modules.recognizers.themoviedb.tmdbapi.settings") as mock_settings:
             mock_settings.TMDB_LOCALE = "zh"
 
             result = TmdbApi._build_include_image_language("ja")

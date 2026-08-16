@@ -9,8 +9,8 @@ from app.api.endpoints import media as media_endpoints
 from app.api.endpoints.media import search
 from app.chain import ChainBase
 from app.application.security.access import verify_token
-from app.modules.douban import DoubanModule
-from app.modules.themoviedb import TheMovieDbModule
+from app.modules.recognizers.douban import DoubanModule
+from app.modules.recognizers.themoviedb import TheMovieDbModule
 from app.schemas.types import MediaSource, MediaType
 
 
@@ -223,7 +223,7 @@ def test_chain_forwards_source_to_modules(
 
 def test_tmdb_person_search_respects_explicit_source(monkeypatch) -> None:
     """TMDB人物搜索应拒绝其他来源，并允许显式选择覆盖系统默认来源。"""
-    monkeypatch.setattr("app.modules.themoviedb.settings.SEARCH_SOURCE", "douban")
+    monkeypatch.setattr("app.modules.recognizers.themoviedb.settings.SEARCH_SOURCE", "douban")
     module = TheMovieDbModule()
     module.tmdb = Mock()
     module.tmdb.async_search_persons = AsyncMock(return_value=[])
@@ -243,7 +243,7 @@ def test_tmdb_person_search_respects_explicit_source(monkeypatch) -> None:
 def test_douban_person_search_respects_explicit_source(monkeypatch) -> None:
     """豆瓣人物搜索应拒绝其他来源，并允许显式选择覆盖系统默认来源。"""
     monkeypatch.setattr(
-        "app.modules.douban.settings.SEARCH_SOURCE", "themoviedb"
+        "app.modules.recognizers.douban.settings.SEARCH_SOURCE", "themoviedb"
     )
     module = DoubanModule()
     module.doubanapi = Mock()
@@ -294,7 +294,7 @@ def test_tmdb_collection_search_supports_multi_source_request() -> None:
 
 def test_tmdb_media_search_supports_multi_source_request(monkeypatch) -> None:
     """TMDB媒体搜索应支持请求级多数据源枚举元组。"""
-    monkeypatch.setattr("app.modules.themoviedb.settings.SEARCH_SOURCE", "douban")
+    monkeypatch.setattr("app.modules.recognizers.themoviedb.settings.SEARCH_SOURCE", "douban")
     module = TheMovieDbModule()
     module.tmdb = Mock()
     module.tmdb.search_multiis = Mock(return_value=[])
@@ -316,7 +316,7 @@ def test_tmdb_media_search_supports_multi_source_request(monkeypatch) -> None:
 
 def test_douban_media_search_supports_multi_source_request(monkeypatch) -> None:
     """豆瓣媒体搜索应支持请求级多数据源枚举元组。"""
-    monkeypatch.setattr("app.modules.douban.settings.SEARCH_SOURCE", "themoviedb")
+    monkeypatch.setattr("app.modules.recognizers.douban.settings.SEARCH_SOURCE", "themoviedb")
     module = DoubanModule()
     module.doubanapi = Mock()
     module.doubanapi.async_search = AsyncMock(return_value={"items": []})
@@ -336,7 +336,7 @@ def test_douban_media_search_supports_multi_source_request(monkeypatch) -> None:
 
 def test_multi_source_request_keeps_missing_module_skipped(monkeypatch) -> None:
     """请求级多数据源未包含的模块应跳过，避免无关模块参与搜索。"""
-    monkeypatch.setattr("app.modules.douban.settings.SEARCH_SOURCE", "themoviedb")
+    monkeypatch.setattr("app.modules.recognizers.douban.settings.SEARCH_SOURCE", "themoviedb")
     module = DoubanModule()
     module.doubanapi = Mock()
     module.doubanapi.async_search = AsyncMock(return_value={"items": []})

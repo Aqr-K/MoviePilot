@@ -6,7 +6,7 @@ import pytest
 from app.chain.media import MediaChain
 from app.domain.context import MusicAlbumInfo, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.musicbrainz import MusicBrainzModule
 
 
 def _release_detail(release_id: str, title: str, artist: str, tracks: list[tuple[str, int]]):

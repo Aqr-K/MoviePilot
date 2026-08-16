@@ -3,7 +3,7 @@ from xml.dom import minidom
 
 from app.domain.meta.metabase import MetaBase
 from app.domain.scraper import MediaScraperHelper
-from app.modules.bangumi import BangumiModule
+from app.modules.recognizers.bangumi import BangumiModule
 from app.schemas.types import MediaSource, MediaType
 
 

@@ -12,11 +12,11 @@ from app.chain.acoustid import AcoustIdChain
 from app.chain.media import MediaChain
 from app.domain.context import MUSIC_ENTITY_ALBUM, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.anilist import AniListModule
-from app.modules.bangumi import BangumiModule
-from app.modules.musicbrainz import MusicBrainzModule
-from app.modules.theaudiodb import TheAudioDbModule
-from app.modules.themoviedb import TheMovieDbModule
+from app.modules.recognizers.anilist import AniListModule
+from app.modules.recognizers.bangumi import BangumiModule
+from app.modules.recognizers.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.theaudiodb import TheAudioDbModule
+from app.modules.recognizers.themoviedb import TheMovieDbModule
 from app.runtime.config import ConfigModel
 from app.schemas.types import MediaSource, MediaType
 

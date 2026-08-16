@@ -19,7 +19,7 @@ from app.domain.meta.metabase import MetaBase
 from app.domain.meta.metamusic import MetaMusic
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.modules.musicbrainz.music_cache import MusicBrainzCache
+from app.modules.recognizers.musicbrainz.music_cache import MusicBrainzCache
 from app.schemas.types import (
     MUSIC_ENTITY_ALBUM,
     MUSIC_ENTITY_RECORDING,

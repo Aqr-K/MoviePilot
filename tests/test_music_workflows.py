@@ -10,7 +10,7 @@ from app.chain.recommend import RecommendChain
 from app.chain.search import SearchChain
 from app.domain.context import MusicAlbumInfo, MusicArtistInfo, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
-from app.modules.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.musicbrainz import MusicBrainzModule
 from app.schemas.types import MediaSource, MediaType
 
 

@@ -5,8 +5,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.endpoints.recommend import tmdb_movies, tmdb_trending, tmdb_tvs
-from app.modules.themoviedb.tmdbapi import TmdbApi
-from app.modules.themoviedb.tmdbv3api.exceptions import TMDbException
+from app.modules.recognizers.themoviedb.tmdbapi import TmdbApi
+from app.modules.recognizers.themoviedb.tmdbv3api.exceptions import TMDbException
 
 
 @pytest.mark.asyncio

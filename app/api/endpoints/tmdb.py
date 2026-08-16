@@ -10,7 +10,7 @@ from app.application.security.access import verify_token
 from app.db.models.user import User
 from app.db.oper.systemconfig import SystemConfigOper
 from app.api.deps import get_current_active_superuser_async
-from app.modules.themoviedb.tmdb_cache import TmdbCache
+from app.modules.recognizers.themoviedb.tmdb_cache import TmdbCache
 from app.schemas.types import MediaType, SystemConfigKey
 
 router = ResponseAPIRouter()

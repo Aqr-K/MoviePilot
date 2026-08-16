@@ -15,8 +15,8 @@ from app.domain.meta.metamusic import MetaMusic
 from app.domain.metainfo import MetaInfo
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.modules.douban.apiv2 import DoubanApi
-from app.modules.douban.scraper import DoubanScraper
+from app.modules.recognizers.douban.apiv2 import DoubanApi
+from app.modules.recognizers.douban.scraper import DoubanScraper
 from app.schemas import MediaPerson, APIRateLimitException
 from app.schemas.types import (
     MUSIC_ENTITY_ALBUM,

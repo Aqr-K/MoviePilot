@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from app.runtime.cache import cached
-from app.modules.themoviedb.tmdbv3api.tmdb import TMDb
+from app.modules.recognizers.themoviedb.tmdbv3api.tmdb import TMDb
 
 from tests.test_tmdb_response_cache import _FakeResponse
 

@@ -7,8 +7,8 @@ import pytest
 from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
 from app.domain.scraper import MediaScraperHelper
-from app.modules.anilist import AniListModule
-from app.modules.anilist.anilist import AniListApi
+from app.modules.recognizers.anilist import AniListModule
+from app.modules.recognizers.anilist.anilist import AniListApi
 from app.schemas.types import MediaSource, MediaType
 
 

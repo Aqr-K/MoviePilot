@@ -5,9 +5,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.modules.themoviedb.tmdbapi import TmdbApi
-from app.modules.themoviedb.tmdbv3api.exceptions import TMDbException
-from app.modules.themoviedb.tmdbv3api.tmdb import TMDb
+from app.modules.recognizers.themoviedb.tmdbapi import TmdbApi
+from app.modules.recognizers.themoviedb.tmdbv3api.exceptions import TMDbException
+from app.modules.recognizers.themoviedb.tmdbv3api.tmdb import TMDb
 
 
 class _FakeResponse:
@@ -111,7 +111,7 @@ def test_async_request_utils_disables_http2_for_tmdb():
     """
     TMDB异步请求客户端应关闭HTTP/2，避免共享h2长连接异常影响媒体识别。
     """
-    with patch("app.modules.themoviedb.tmdbv3api.tmdb.AsyncRequestUtils") as async_request_utils:
+    with patch("app.modules.recognizers.themoviedb.tmdbv3api.tmdb.AsyncRequestUtils") as async_request_utils:
         TMDb()
 
     assert async_request_utils.call_args.kwargs["http2"] is False

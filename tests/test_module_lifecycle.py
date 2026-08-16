@@ -12,7 +12,7 @@ from app.modules.qqbot import QQBotModule
 from app.modules.slack import SlackModule
 from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
-from app.modules.themoviedb import TheMovieDbModule
+from app.modules.recognizers.themoviedb import TheMovieDbModule
 from app.modules.trimemedia import TrimeMediaModule
 from app.modules.ugreen import UgreenModule
 from app.modules.wechat import WechatModule
