@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.adapters.storage import StorageBase
+from app.modules.storages.base import StorageBase
 from app.adapters.storage.registry import get_registered_storages, unregister_storages
 from app.modules import _ModuleBase
 from app.runtime.extensions import contract

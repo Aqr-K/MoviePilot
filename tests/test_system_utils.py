@@ -536,7 +536,7 @@ def test_space_usage_keeps_windows_drive_behavior_without_fsid_lookup():
 
 
 def test_local_storage_usage_forwards_btrfs_fsid_setting():
-    from app.adapters.storage import local as local_storage_module
+    from app.modules.storages import local as local_storage_module
 
     with patch.object(local_storage_module.settings, "BTRFS_FSID_DEDUP", True), \
             patch.object(local_storage_module, "local_usage_paths",

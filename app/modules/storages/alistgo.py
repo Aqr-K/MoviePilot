@@ -1,4 +1,4 @@
-from app.adapters.storage.alist import Alist
+from app.modules.storages.alist import Alist
 from app.schemas.types import StorageSchema
 
 

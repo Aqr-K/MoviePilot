@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from app.adapters.storage import StorageBase
+from app.modules.storages.base import StorageBase
 from app.adapters.storage.registry import (
     get_registered_storages,
     register_storage,

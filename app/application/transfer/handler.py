@@ -14,7 +14,7 @@ from app.application.audio import AudioMetadataHelper
 from app.application.directory import DirectoryHelper
 from app.application.messaging.message import TemplateHelper
 from app.runtime.log import logger
-from app.adapters.storage import StorageBase
+from app.modules.storages.base import StorageBase
 from app.schemas import (
     TransferInfo,
     TmdbEpisode,

@@ -3,9 +3,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.adapters.storage import alist as alist_module
-from app.adapters.storage.alist import Alist
-from app.adapters.storage.alistgo import AlistGo
+from app.modules.storages import alist as alist_module
+from app.modules.storages.alist import Alist
+from app.modules.storages.alistgo import AlistGo
 from app.schemas.types import StorageSchema
 
 

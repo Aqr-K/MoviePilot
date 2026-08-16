@@ -4,11 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.adapters.storage import StorageBase
-from app.adapters.storage.alipan import AliPan
-from app.adapters.storage.local import LocalStorage
-from app.adapters.storage.rclone import Rclone
-from app.adapters.storage.u115 import U115Pan
+from app.modules.storages.base import StorageBase
+from app.modules.storages.alipan import AliPan
+from app.modules.storages.local import LocalStorage
+from app.modules.storages.rclone import Rclone
+from app.modules.storages.u115 import U115Pan
 from app.schemas.exception import StorageQueryError
 
 
@@ -97,7 +97,7 @@ def test_local_strict_raises_on_stat_error(tmp_path, monkeypatch):
     # 文件系统边界已下移到代理子进程，patch Path.stat 影响不到那里，
     # 必须在代理这一层注入故障
     monkeypatch.setattr(
-        "app.adapters.storage.local.fsproxy.stat", raise_stat_error
+        "app.modules.storages.local.fsproxy.stat", raise_stat_error
     )
 
     with pytest.raises(StorageQueryError):

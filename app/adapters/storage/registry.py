@@ -9,7 +9,7 @@ import threading
 from enum import Enum
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set
 
-from app.adapters.storage import StorageBase
+from app.modules.storages.base import StorageBase
 from app.runtime.log import logger
 
 

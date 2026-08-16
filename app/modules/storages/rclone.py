@@ -9,7 +9,7 @@ from typing import Optional, List, Union
 from app import schemas
 from app.runtime.config import settings
 from app.runtime.log import logger
-from app.adapters.storage import StorageBase, transfer_process
+from app.modules.storages.base import StorageBase, transfer_process
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema
 from app.foundation import temporal as time_tools

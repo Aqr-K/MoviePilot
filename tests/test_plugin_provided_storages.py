@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app import schemas
-from app.adapters.storage import StorageBase
+from app.modules.storages.base import StorageBase
 from app.adapters.storage import registry
 from app.adapters.storage.registry import (
     configure_builtin_schemas,

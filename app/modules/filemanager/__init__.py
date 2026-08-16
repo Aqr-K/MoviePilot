@@ -12,7 +12,7 @@ from app.application.messaging.message import MessageHelper
 from app.foundation.reflection import ModuleHelper
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.adapters.storage import StorageBase
+from app.modules.storages.base import StorageBase
 from app.adapters.storage.registry import (
     configure_builtin_schemas,
     get_registered_storage_schemas,
@@ -43,7 +43,7 @@ class FileManagerModule(_ModuleBase):
         """初始化文件整理模块支持的存储实现"""
         # 加载模块
         self._builtin_storage_schemas = ModuleHelper.load(
-            'app.adapters.storage',
+            'app.modules.storages',
             filter_func=lambda _, obj: hasattr(obj, 'schema') and obj.schema)
         # 告知注册表内建存储类型，用于外部存储的重名判定
         configure_builtin_schemas(

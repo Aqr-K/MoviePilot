@@ -9,7 +9,7 @@ from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.config import global_vars, settings
 from app.runtime.log import logger
 from app.adapters.storage.proxy import fsproxy
-from app.adapters.storage import StorageBase, transfer_process
+from app.modules.storages.base import StorageBase, transfer_process
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema, SystemConfigKey
 from app.adapters.system.host import SystemUtils

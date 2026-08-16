@@ -4,8 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from app.adapters.storage import alist as alist_module
-from app.adapters.storage.alist import Alist
+from app.modules.storages import alist as alist_module
+from app.modules.storages.alist import Alist
 from app.schemas import FileItem
 
 

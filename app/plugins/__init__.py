@@ -303,7 +303,7 @@ class _PluginBase(metaclass=ABCMeta):
         """
         声明本插件提供的存储实现，注册后与内建存储同权参与文件整理
 
-        返回继承自 app.adapters.storage.StorageBase 的存储【类】列表（非实例），类上的
+        返回继承自 app.modules.storages.StorageBase 的存储【类】列表（非实例），类上的
         schema 属性即该存储的标识，与内建存储和其它插件的存储不得重名。标识可以是字符串，
         不必是 StorageSchema 枚举成员——枚举是内建存储的封闭集合，插件按字符串取名即可。
 

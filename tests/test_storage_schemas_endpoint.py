@@ -5,7 +5,8 @@ from typing import List, Optional
 import pytest
 
 from app import schemas
-from app.adapters.storage import StorageBase, registry
+from app.adapters.storage import registry
+from app.modules.storages.base import StorageBase
 from app.adapters.storage.registry import (
     configure_builtin_schemas,
     register_storage,
