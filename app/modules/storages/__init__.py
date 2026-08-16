@@ -34,6 +34,25 @@ def get_storage(schema: str, capability: Optional[str] = None) -> Optional[Stora
     return None
 
 
+def walk_files(storage: StorageBase, fileitem) -> list:
+    """
+    递归列出目录下的全部文件
+
+    存储驱动只提供单层 list，递归属于编排，由调用方完成。
+
+    :param storage: 存储模块实例
+    :param fileitem: 目录项
+    :return: 文件项列表，目录项不在其中
+    """
+    collected = []
+    for child in storage.list(fileitem) or []:
+        if child.type == "dir":
+            collected.extend(walk_files(storage, child))
+        else:
+            collected.append(child)
+    return collected
+
+
 __all__ = [
     "AliPan",
     "Alist",

@@ -79,7 +79,7 @@ def test_media_files_uses_music_template_root_and_only_returns_audio():
         type="file",
         extension="mkv",
     )
-    handler.list_files = Mock(return_value=[audio, video])
+    storage.list.return_value = [audio, video]
     directory = TransferDirectoryConf(
         library_path="/library",
         library_storage="local",

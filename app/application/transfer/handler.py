@@ -14,7 +14,7 @@ from app.application.audio import AudioMetadataHelper
 from app.application.directory import DirectoryHelper
 from app.application.messaging.message import TemplateHelper
 from app.runtime.log import logger
-from app.modules.storages import get_storage
+from app.modules.storages import get_storage, walk_files
 from app.modules.storages.base import StorageBase
 from app.schemas import (
     TransferInfo,
@@ -1517,7 +1517,7 @@ class TransHandler:
             if not fileitem:
                 continue
             try:
-                media_files = self.list_files(fileitem, True)
+                media_files = walk_files(storage_oper, fileitem)
             except Exception as e:
                 logger.debug(f"获取媒体文件列表失败：{str(e)}")
                 continue
