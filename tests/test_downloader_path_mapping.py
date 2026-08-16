@@ -45,7 +45,8 @@ def _load_downloader_base():
     schema_types_module.DownloaderType = Enum("DownloaderType", {"Qbittorrent": "Qbittorrent"})
     schema_types_module.MediaServerType = Enum("MediaServerType", {"Emby": "Emby"})
     schema_types_module.MessageChannel = Enum("MessageChannel", {"Telegram": "telegram"})
-    schema_types_module.OtherModulesType = Enum("OtherModulesType", {"Subtitle": "subtitle"})
+    schema_types_module.OtherModulesType = Enum("OtherModulesType", {"Filter": "过滤器"})
+    schema_types_module.EnrichmentType = Enum("EnrichmentType", {"Subtitle": "站点字幕"})
     schema_types_module.MediaRecognizeType = Enum(
         "MediaRecognizeType", {"TheMovieDb": "themoviedb"}
     )

@@ -9,7 +9,7 @@ from app.domain.context import MusicInfo, MusicLyrics
 from app.domain.meta.metamusic import MetaMusic
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.schemas.types import ModuleType, OtherModulesType
+from app.schemas.types import ModuleType, EnrichmentType
 from app.adapters.network.http import RequestUtils
 
 
@@ -49,9 +49,9 @@ class LrclibModule(_ModuleBase):
         return ModuleType.Enrichment
 
     @staticmethod
-    def get_subtype() -> OtherModulesType:
+    def get_subtype() -> EnrichmentType:
         """返回 LRCLIB 模块子类型。"""
-        return OtherModulesType.Lrclib
+        return EnrichmentType.Lrclib
 
     @staticmethod
     def get_priority() -> int:

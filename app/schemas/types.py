@@ -559,10 +559,6 @@ class ModuleType(Enum):
 
 # 其他杂项模块类型
 class OtherModulesType(Enum):
-    # 字幕
-    Subtitle = "站点字幕"
-    # Fanart
-    Fanart = "Fanart"
     # 文件整理
     FileManager = "文件整理"
     # 过滤器
@@ -573,6 +569,14 @@ class OtherModulesType(Enum):
     PostgreSQL = "PostgreSQL"
     # Redis
     Redis = "Redis"
+
+
+# 媒体增补服务类型
+class EnrichmentType(Enum):
+    # 字幕
+    Subtitle = "站点字幕"
+    # Fanart
+    Fanart = "Fanart"
     # ListenBrainz
     ListenBrainz = "ListenBrainz"
     # LRCLIB 歌词

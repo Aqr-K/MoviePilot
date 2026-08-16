@@ -12,7 +12,7 @@ from app.runtime.extensions.contract import verify_module_contract, verify_modul
 from app.runtime.extensions.plugin_instance import plugin_id_of, qualify_module_id
 from app.runtime.log import logger
 from app.schemas.types import EventType, ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
-    OtherModulesType, MediaRecognizeType
+    OtherModulesType, MediaRecognizeType, EnrichmentType
 from app.foundation.reflection import ObjectUtils
 from app.foundation.singleton import Singleton
 
@@ -93,6 +93,7 @@ class ModuleManager(metaclass=Singleton):
         MessageChannel,
         StorageSchema,
         OtherModulesType,
+        EnrichmentType,
         MediaRecognizeType,
     ]
 

@@ -7,7 +7,7 @@ from app.runtime.extensions.service_registry import ServiceConfigHelper
 from app.runtime.log import logger
 from app.schemas import Notification, NotificationConf, MediaServerConf, DownloaderConf
 from app.schemas.types import ModuleType, DownloaderType, MediaServerType, MessageChannel, StorageSchema, \
-    OtherModulesType, SystemConfigKey, MediaRecognizeType
+    OtherModulesType, SystemConfigKey, MediaRecognizeType, EnrichmentType
 from app.runtime.reload import ConfigReloadMixin
 
 
@@ -72,6 +72,7 @@ class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
         MessageChannel,
         StorageSchema,
         OtherModulesType,
+        EnrichmentType,
         MediaRecognizeType,
     ]:
         """

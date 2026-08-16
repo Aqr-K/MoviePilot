@@ -10,7 +10,7 @@ from app.schemas.types import (
     MUSIC_ENTITY_RECORDING,
     MediaSource,
     ModuleType,
-    OtherModulesType,
+    EnrichmentType,
 )
 from app.adapters.network.http import RequestUtils
 
@@ -77,9 +77,9 @@ class ListenBrainzModule(_ModuleBase):
         return ModuleType.Enrichment
 
     @staticmethod
-    def get_subtype() -> OtherModulesType:
+    def get_subtype() -> EnrichmentType:
         """返回 ListenBrainz 模块子类型。"""
-        return OtherModulesType.ListenBrainz
+        return EnrichmentType.ListenBrainz
 
     @staticmethod
     def get_priority() -> int:

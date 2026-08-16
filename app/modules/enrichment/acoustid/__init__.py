@@ -12,7 +12,7 @@ from uuid import UUID
 from app.runtime.config import settings
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.schemas.types import ModuleType, OtherModulesType
+from app.schemas.types import ModuleType, EnrichmentType
 from app.adapters.network.http import AsyncRequestUtils, RequestUtils
 
 
@@ -85,9 +85,9 @@ class AcoustIdModule(_ModuleBase):
         return ModuleType.Enrichment
 
     @staticmethod
-    def get_subtype() -> OtherModulesType:
+    def get_subtype() -> EnrichmentType:
         """返回 AcoustID 模块子类型。"""
-        return OtherModulesType.AcoustId
+        return EnrichmentType.AcoustId
 
     @staticmethod
     def get_priority() -> int:

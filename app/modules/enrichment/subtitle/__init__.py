@@ -18,7 +18,7 @@ from app.modules import _ModuleBase
 from app.modules.indexer.spider.mtorrent import MTorrentSpider
 from app.schemas import TorrentInfo
 from app.schemas.file import FileURI 
-from app.schemas.types import ModuleType, OtherModulesType
+from app.schemas.types import ModuleType, EnrichmentType
 from app.adapters.network.http import RequestUtils
 from app.adapters.system.host import SystemUtils
 
@@ -67,11 +67,11 @@ class SubtitleModule(_ModuleBase):
         return ModuleType.Enrichment
 
     @staticmethod
-    def get_subtype() -> OtherModulesType:
+    def get_subtype() -> EnrichmentType:
         """
         获取模块子类型
         """
-        return OtherModulesType.Subtitle
+        return EnrichmentType.Subtitle
 
     @staticmethod
     def get_priority() -> int:
