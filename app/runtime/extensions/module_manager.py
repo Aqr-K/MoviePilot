@@ -7,7 +7,7 @@ from typing import Callable, Dict, Generator, Optional, Tuple, Any, Union, List
 from app.runtime.config import settings
 from app.runtime.events import EventHandlerBinding, eventmanager
 from app.foundation.reflection import ModuleHelper
-from app.runtime.extensions.capability import provided_capabilities
+from app.runtime.extensions.capability import BUILTIN_ONLY_CAPABILITIES, provided_capabilities
 from app.runtime.extensions.contract import verify_module_contract, verify_module_type
 from app.runtime.extensions.plugin_instance import plugin_id_of, qualify_module_id
 from app.runtime.log import logger
@@ -447,6 +447,11 @@ class ModuleManager(metaclass=Singleton):
             passed, reasons = verify_module_contract(declaration.module_cls)
         if not passed:
             logger.warning(f"模块 {module_id}（owner={owner}）未通过契约校验，拒绝注册：{'；'.join(reasons)}")
+            return False
+        reserved = sorted(provided_capabilities(declaration.module_cls) & BUILTIN_ONLY_CAPABILITIES)
+        if reserved:
+            logger.warning(
+                f"模块 {module_id}（owner={owner}）声明了内建独占能力，拒绝注册：{'、'.join(reserved)}")
             return False
         with self._lock:
             existing_owner = self._find_owner(module_id)

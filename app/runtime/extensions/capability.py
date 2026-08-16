@@ -27,6 +27,20 @@ LIFECYCLE_METHODS: FrozenSet[str] = frozenset({
     "clear_cache", "scheduler_job",
 })
 
+# 只接受内建模块提供的能力，外部来源声明这些方法时拒绝注册
+#
+# 站点索引刻意不向插件开放。这条约束不能靠「不给 indexer 做注册器」来维持：
+# provides_modules() 的契约是注册后与内建模块同权参与分发，任何插件模块只要实现
+# search_torrents 就会进入 run_module("search_torrents", ...) 的广播，绕过 indexer
+# 直接供种。约束必须落在能力面上。
+BUILTIN_ONLY_CAPABILITIES: FrozenSet[str] = frozenset({
+    "get_search_page_size",
+    "refresh_torrents", "async_refresh_torrents",
+    "refresh_userdata",
+    "search_subtitles", "async_search_subtitles",
+    "search_torrents", "async_search_torrents",
+})
+
 # 提供管道而非能力的基类，其上定义的方法不计入能力
 INFRASTRUCTURE_BASES: FrozenSet[str] = frozenset({
     "object", "ABC", "Generic",
