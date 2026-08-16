@@ -2,9 +2,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
-from app.modules.emby.emby import Emby
-from app.modules.plex.plex import Plex
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.emby.emby import Emby
+from app.modules.mediaservers.plex.plex import Plex
+from app.modules.mediaservers.zspace.zspace import ZSpace
 from app.schemas import RefreshMediaItem
 from app.schemas.types import MediaType
 

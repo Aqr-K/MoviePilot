@@ -4,8 +4,8 @@ from unittest.mock import Mock
 from app import schemas
 from app.runtime.extensions.module_manager import ModuleManager
 from app.domain.context import MusicInfo
-from app.modules.navidrome import NavidromeModule
-from app.modules.navidrome.navidrome import Navidrome
+from app.modules.mediaservers.navidrome import NavidromeModule
+from app.modules.mediaservers.navidrome.navidrome import Navidrome
 from app.schemas.types import MediaServerType, ModuleType
 
 

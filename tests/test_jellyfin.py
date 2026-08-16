@@ -2,8 +2,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from app.modules.jellyfin import jellyfin as jellyfin_module
-from app.modules.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.jellyfin import jellyfin as jellyfin_module
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
 
 
 class _FakeResponse:

@@ -6,22 +6,23 @@ from app.runtime.events import eventmanager
 from app.application.mediaserver import MusicMediaServerHelper
 from app.runtime.log import logger
 from app.modules import _MediaServerBase, _ModuleBase
-from app.modules.emby.emby import Emby
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
+from app.schemas import AuthCredentials, AuthInterceptCredentials
 from app.schemas.types import MediaType, ModuleType, ChainEventType, MediaServerType
 
 
-class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
+class JellyfinModule(_ModuleBase, _MediaServerBase[Jellyfin]):
 
     def init_module(self) -> None:
         """
         初始化模块
         """
-        super().init_service(service_name=Emby.__name__.lower(),
-                             service_type=lambda conf: Emby(**conf.config, sync_libraries=conf.sync_libraries))
+        super().init_service(service_name=Jellyfin.__name__.lower(),
+                             service_type=lambda conf: Jellyfin(**conf.config, sync_libraries=conf.sync_libraries))
 
     @staticmethod
     def get_name() -> str:
-        return "Emby"
+        return "Jellyfin"
 
     @staticmethod
     def get_type() -> ModuleType:
@@ -35,14 +36,27 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         获取模块子类型
         """
-        return MediaServerType.Emby
+        return MediaServerType.Jellyfin
 
     @staticmethod
     def get_priority() -> int:
         """
         获取模块优先级，数字越小优先级越高，只有同一接口下优先级才生效
         """
-        return 1
+        return 2
+
+    def init_setting(self) -> Tuple[str, Union[str, bool]]:
+        pass
+
+    def scheduler_job(self) -> None:
+        """
+        定时任务，每10分钟调用一次
+        """
+        # 定时重连
+        for name, server in self.get_instances().items():
+            if server.is_inactive():
+                logger.info(f"Jellyfin {name} 服务器连接断开，尝试重连 ...")
+                server.reconnect()
 
     def stop(self):
         pass
@@ -57,31 +71,18 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
             if server.is_inactive():
                 server.reconnect()
             if not server.get_user():
-                return False, f"无法连接Emby服务器：{name}"
+                return False, f"无法连接Jellyfin服务器：{name}"
         return True, ""
 
-    def init_setting(self) -> Tuple[str, Union[str, bool]]:
-        pass
-
-    def scheduler_job(self) -> None:
+    def user_authenticate(self, credentials: AuthCredentials, service_name: Optional[str] = None) \
+            -> Optional[AuthCredentials]:
         """
-        定时任务，每10分钟调用一次
-        """
-        # 定时重连
-        for name, server in self.get_instances().items():
-            if server.is_inactive():
-                logger.info(f"Emby服务器 {name} 连接断开，尝试重连 ...")
-                server.reconnect()
-
-    def user_authenticate(self, credentials: schemas.AuthCredentials, service_name: Optional[str] = None) \
-            -> Optional[schemas.AuthCredentials]:
-        """
-        使用Emby用户辅助完成用户认证
+        使用Jellyfin用户辅助完成用户认证
         :param credentials: 认证数据
         :param service_name: 指定要认证的媒体服务器名称，若为 None 则认证所有服务
         :return: 认证数据
         """
-        # Emby认证
+        # Jellyfin认证
         if not credentials or credentials.grant_type != "password":
             return None
         # 确定要认证的服务器列表
@@ -96,11 +97,11 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
             # 触发认证拦截事件
             intercept_event = eventmanager.send_event(
                 etype=ChainEventType.AuthIntercept,
-                data=schemas.AuthInterceptCredentials(username=credentials.username, channel=self.get_name(),
-                                                      service=name, status="triggered")
+                data=AuthInterceptCredentials(username=credentials.username, channel=self.get_name(),
+                                              service=name, status="triggered")
             )
             if intercept_event and intercept_event.event_data:
-                intercept_data: schemas.AuthInterceptCredentials = intercept_event.event_data
+                intercept_data: AuthInterceptCredentials = intercept_event.event_data
                 if intercept_data.cancel:
                     continue
             token = server.authenticate(credentials.username, credentials.password)
@@ -121,17 +122,17 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         source = args.get("source")
         if source:
-            server: Emby = self.get_instance(source)
+            server: Jellyfin = self.get_instance(source)
             if not server:
                 return None
-            result = server.get_webhook_message(form, args)
+            result = server.get_webhook_message(body)
             if result:
                 result.server_name = source
             return result
 
         for server in self.get_instances().values():
             if server:
-                result = server.get_webhook_message(form, args)
+                result = server.get_webhook_message(body)
                 if result:
                     return result
         return None
@@ -158,7 +159,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
                 if match:
                     return schemas.ExistMediaInfo(
                         type=MediaType.MUSIC,
-                        server_type="emby",
+                        server_type="jellyfin",
                         server=name,
                         itemid=match.item_id,
                     )
@@ -170,7 +171,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
                         logger.info(f"媒体库 {name} 中找到了 {movie}")
                         return schemas.ExistMediaInfo(
                             type=MediaType.MOVIE,
-                            server_type="emby",
+                            server_type="jellyfin",
                             server=name,
                             itemid=movie.item_id
                         )
@@ -185,7 +186,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
                     logger.info(f"媒体库 {name} 中找到了 {movies}")
                     return schemas.ExistMediaInfo(
                         type=MediaType.MOVIE,
-                        server_type="emby",
+                        server_type="jellyfin",
                         server=name,
                         itemid=movies[0].item_id
                     )
@@ -203,7 +204,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
                     return schemas.ExistMediaInfo(
                         type=MediaType.TV,
                         seasons=tvs,
-                        server_type="emby",
+                        server_type="jellyfin",
                         server=name,
                         itemid=itemid
                     )
@@ -214,7 +215,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         媒体数量统计
         """
         if server:
-            server_obj: Emby = self.get_instance(server)
+            server_obj: Jellyfin = self.get_instance(server)
             if not server_obj:
                 return None
             servers = [server_obj]
@@ -229,13 +230,13 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
             media_statistics.append(media_statistic)
         return media_statistics
 
-    def mediaserver_librarys(self, server: str,
+    def mediaserver_librarys(self, server: Optional[str] = None,
                              username: Optional[str] = None,
                              hidden: Optional[bool] = False) -> Optional[List[schemas.MediaServerLibrary]]:
         """
         媒体库列表
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if server_obj:
             return server_obj.get_librarys(username=username, hidden=hidden)
         return None
@@ -252,7 +253,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
 
         :return: 返回一个生成器对象，用于逐步获取媒体服务器中的项目
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if server_obj:
             return server_obj.get_items(library_id, start_index, limit)
         return None
@@ -265,7 +266,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         :param library_id: 媒体库ID
         :return: 媒体条目总数，查询失败时返回None
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if server_obj:
             return server_obj.get_items_count(library_id)
         return None
@@ -274,7 +275,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         媒体库项目详情
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if server_obj:
             return server_obj.get_iteminfo(item_id)
         return None
@@ -284,7 +285,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         获取剧集信息
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
             return None
         _, seasoninfo = server_obj.get_tv_episodes(item_id=item_id)
@@ -295,12 +296,13 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
             episodes=episodes
         ) for season, episodes in seasoninfo.items()]
 
-    def mediaserver_playing(self, server: str, count: Optional[int] = 20,
+    def mediaserver_playing(self, server: str,
+                            count: Optional[int] = 20,
                             username: Optional[str] = None) -> Optional[List[schemas.MediaServerPlayItem]]:
         """
         获取媒体服务器正在播放信息
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
             return None
         return server_obj.get_resume(num=count, username=username)
@@ -309,7 +311,7 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         获取媒体库播放地址
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
             return None
         return server_obj.get_play_url(item_id)
@@ -319,12 +321,12 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         获取指定季的集号到条目 ID 映射
 
-        :param server: Emby 媒体服务器名称
-        :param item_id: 剧集在 Emby 中的条目 ID
+        :param server: Jellyfin 媒体服务器名称
+        :param item_id: 剧集在 Jellyfin 中的条目 ID
         :param season: 季号
         :return: 集号到条目 ID 的映射，服务器不可用或无数据时返回 None
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
             return None
         return server_obj.get_season_episode_ids(str(item_id), season)
@@ -334,16 +336,16 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         """
         获取媒体服务器最新入库条目
         """
-        server_obj: Emby = self.get_instance(server)
+        server_obj: Jellyfin = self.get_instance(server)
         if not server_obj:
             return None
         return server_obj.get_latest(num=count, username=username)
 
     def mediaserver_latest_images(self,
                                   server: Optional[str] = None,
-                                  count: Optional[int] = 10,
+                                  count: Optional[int] = 20,
                                   username: Optional[str] = None,
-                                  remote: Optional[bool] = False
+                                  remote: Optional[bool] = False,
                                   ) -> List[str]:
         """
         获取媒体服务器最新入库条目的图片
@@ -354,8 +356,8 @@ class EmbyModule(_ModuleBase, _MediaServerBase[Emby]):
         :param remote: True为外网链接, False为内网链接
         :return: 图片链接列表
         """
-        server_obj: Emby = self.get_instance(server)
-        if not server_obj:
+        server_obj: Jellyfin = self.get_instance(server)
+        if not server:
             return []
 
         links = []

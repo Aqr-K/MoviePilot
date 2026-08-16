@@ -1,6 +1,6 @@
 from unittest.mock import Mock, patch
 
-from app.modules.emby.emby import Emby
+from app.modules.mediaservers.emby.emby import Emby
 
 
 def _resolve_user(users: list[dict], requested_username: str, configured_username: str):
@@ -11,7 +11,7 @@ def _resolve_user(users: list[dict], requested_username: str, configured_usernam
 
     response = Mock()
     response.json.return_value = users
-    with patch("app.modules.emby.emby.RequestUtils") as request_utils:
+    with patch("app.modules.mediaservers.emby.emby.RequestUtils") as request_utils:
         request_utils.return_value.get_res.return_value = response
         return emby.get_user(requested_username)
 

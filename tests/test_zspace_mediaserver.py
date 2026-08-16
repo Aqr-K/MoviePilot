@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.zspace.zspace import ZSpace
 
 
 class _FakeResponse:
@@ -14,7 +14,7 @@ class _FakeResponse:
 
 class ZSpaceMediaServerTest(unittest.TestCase):
     def test_reconnect_uses_username_password_login(self):
-        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
             request_utils = request_utils_cls.return_value
             request_utils.post_res.return_value = _FakeResponse({
                 "AccessToken": "zspace-token",
@@ -58,7 +58,7 @@ class ZSpaceMediaServerTest(unittest.TestCase):
         client.user = "current-user-id"
         client._ZSpace__get_current_user = Mock(return_value={"Id": "current-user-id", "Name": "admin"})
 
-        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse({"invalid": True})
             user_id = client.get_user("admin")
 
@@ -73,7 +73,7 @@ class ZSpaceMediaServerTest(unittest.TestCase):
         )
 
     def test_authenticate_does_not_require_existing_api_key(self):
-        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.post_res.return_value = _FakeResponse({
                 "AccessToken": "user-token",
                 "User": {"Id": "user-id"},
@@ -101,7 +101,7 @@ class ZSpaceMediaServerTest(unittest.TestCase):
         client._sync_libraries = []
         client.get_user_library_folders = Mock(return_value=[])
 
-        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse({"Items": []})
 
             items = client.get_resume()

@@ -4,12 +4,12 @@ from unittest.mock import Mock, patch
 
 from plexapi.exceptions import NotFound
 
-from app.modules.emby.emby import Emby
-from app.modules.jellyfin.jellyfin import Jellyfin
-from app.modules.plex.plex import Plex
-from app.modules.trimemedia.trimemedia import TrimeMedia
-from app.modules.ugreen.ugreen import Ugreen
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.emby.emby import Emby
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.plex.plex import Plex
+from app.modules.mediaservers.trimemedia.trimemedia import TrimeMedia
+from app.modules.mediaservers.ugreen.ugreen import Ugreen
+from app.modules.mediaservers.zspace.zspace import ZSpace
 from app.schemas.types import MediaSource
 
 
@@ -118,7 +118,7 @@ class MediaServerTvStaleItemIdTest(unittest.TestCase):
         ])
         client._Emby__get_emby_series_id_by_name = Mock(return_value="new-series-id")
 
-        with patch("app.modules.emby.emby.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.emby.emby.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse({
                 "Items": [{"ParentIndexNumber": 1, "IndexNumber": 1}]
             })
@@ -147,7 +147,7 @@ class MediaServerTvStaleItemIdTest(unittest.TestCase):
         ])
         client._Jellyfin__get_jellyfin_series_id_by_name = Mock(return_value="new-series-id")
 
-        with patch("app.modules.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.jellyfin.jellyfin.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse({
                 "Items": [{"ParentIndexNumber": 1, "IndexNumber": 1}]
             })
@@ -176,7 +176,7 @@ class MediaServerTvStaleItemIdTest(unittest.TestCase):
         ])
         client._ZSpace__get_series_id_by_name = Mock(return_value="new-series-id")
 
-        with patch("app.modules.zspace.zspace.RequestUtils") as request_utils_cls:
+        with patch("app.modules.mediaservers.zspace.zspace.RequestUtils") as request_utils_cls:
             request_utils_cls.return_value.get_res.return_value = _FakeResponse({
                 "Items": [{"ParentIndexNumber": 1, "IndexNumber": 1}]
             })

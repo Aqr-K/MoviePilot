@@ -8,16 +8,16 @@ import pytest
 from app import schemas
 from app.domain.context import MusicInfo
 from app.application.mediaserver import MusicMediaServerHelper
-from app.modules.emby import EmbyModule
-from app.modules.emby.emby import Emby
-from app.modules.jellyfin import JellyfinModule
-from app.modules.jellyfin.jellyfin import Jellyfin
-from app.modules.plex import PlexModule
-from app.modules.plex.plex import Plex
-from app.modules.trimemedia import TrimeMediaModule
-from app.modules.ugreen import UgreenModule
-from app.modules.zspace import ZSpaceModule
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.emby import EmbyModule
+from app.modules.mediaservers.emby.emby import Emby
+from app.modules.mediaservers.jellyfin import JellyfinModule
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.plex import PlexModule
+from app.modules.mediaservers.plex.plex import Plex
+from app.modules.mediaservers.trimemedia import TrimeMediaModule
+from app.modules.mediaservers.ugreen import UgreenModule
+from app.modules.mediaservers.zspace import ZSpaceModule
+from app.modules.mediaservers.zspace.zspace import ZSpace
 
 
 def _recording() -> MusicInfo:

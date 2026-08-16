@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from app.modules.emby.emby import Emby
-from app.modules.jellyfin.jellyfin import Jellyfin
-from app.modules.zspace.zspace import ZSpace
+from app.modules.mediaservers.emby.emby import Emby
+from app.modules.mediaservers.jellyfin.jellyfin import Jellyfin
+from app.modules.mediaservers.zspace.zspace import ZSpace
 from app.schemas import WebhookEventInfo
 from app.schemas.types import MediaSource
 

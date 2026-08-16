@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
-import app.modules.trimemedia.api as fnapi
+import app.modules.mediaservers.trimemedia.api as fnapi
 from app import schemas
 from app.application.mediaserver import MediaServerIdentityHelper
 from app.runtime.log import logger
