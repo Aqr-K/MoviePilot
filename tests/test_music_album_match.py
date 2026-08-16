@@ -7,6 +7,7 @@ from app.chain.media import MediaChain
 from app.domain.context import MusicAlbumInfo, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
 from app.modules.recognizers.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.musicbrainz.api import MusicBrainzApi
 
 
 def _release_detail(release_id: str, title: str, artist: str, tracks: list[tuple[str, int]]):
@@ -49,6 +50,7 @@ def _local_tracks():
 def test_match_music_album_selects_release_by_count_and_duration(monkeypatch):
     """曲目数和时长一致的发行版本应被选中并返回曲目表。"""
     module = MusicBrainzModule()
+    module.musicbrainzapi = MusicBrainzApi()
     detail = _release_detail("release-1", "七里香", "周杰伦", ALBUM_TRACKS)
 
     def fake_request(path, params=None):
@@ -58,7 +60,7 @@ def test_match_music_album_selects_release_by_count_and_duration(monkeypatch):
             return detail
         return None
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     album = module.match_music_album(
         MetaMusic(album="七里香", artists=["周杰伦"]),
@@ -77,6 +79,7 @@ def test_match_music_album_selects_release_by_count_and_duration(monkeypatch):
 def test_match_music_album_rejects_mismatched_trackset(monkeypatch):
     """曲目数和时长都对不上的候选应被拒绝，避免写错标签。"""
     module = MusicBrainzModule()
+    module.musicbrainzapi = MusicBrainzApi()
     # 候选只有 1 首歌且时长差异巨大
     detail = _release_detail("release-1", "七里香", "周杰伦", [("七里香", 60)])
 
@@ -87,7 +90,7 @@ def test_match_music_album_rejects_mismatched_trackset(monkeypatch):
             return detail
         return None
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     album = module.match_music_album(
         MetaMusic(album="七里香", artists=["周杰伦"]),

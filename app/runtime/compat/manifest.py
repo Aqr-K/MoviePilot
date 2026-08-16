@@ -785,6 +785,12 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         owner="modules",
         is_package=True,
     ),
+    "app.modules.musicbrainz.api": ModuleAlias(
+        target="app.modules.recognizers.musicbrainz.api",
+        replacement="app.modules.recognizers.musicbrainz.api",
+        introduced="v3.0.0",
+        owner="modules",
+    ),
     "app.modules.musicbrainz.music_cache": ModuleAlias(
         target="app.modules.recognizers.musicbrainz.music_cache",
         replacement="app.modules.recognizers.musicbrainz.music_cache",

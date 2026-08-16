@@ -2,6 +2,14 @@ from app.runtime.config import settings
 from app.domain.context import MUSIC_ENTITY_ALBUM, MUSIC_ENTITY_RECORDING, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
 from app.modules.recognizers.musicbrainz import MusicBrainzModule
+from app.modules.recognizers.musicbrainz.api import MusicBrainzApi
+
+
+def _module() -> MusicBrainzModule:
+    """构造已挂载 MusicBrainz 接口客户端的模块实例。"""
+    module = MusicBrainzModule()
+    module.musicbrainzapi = MusicBrainzApi()
+    return module
 
 
 def test_musicbrainz_cover_domains_are_allowed_by_image_proxy():
@@ -98,10 +106,10 @@ def test_recording_to_info_maps_musicbrainz_payload():
 
 def test_search_music_normalizes_candidates(monkeypatch):
     """搜索接口应把 MusicBrainz 列表转换为 MusicInfo 候选。"""
-    module = MusicBrainzModule()
+    module = _module()
     monkeypatch.setattr(
-        module,
-        "_request_json",
+        module.musicbrainzapi,
+        "request_json",
         lambda *_args, **_kwargs: {
             "recordings": [{"id": "recording-1", "title": "晴天"}]
         },
@@ -115,7 +123,7 @@ def test_search_music_normalizes_candidates(monkeypatch):
 
 def test_search_music_interleaves_recordings_albums_and_artists(monkeypatch):
     """全局音乐搜索应交错返回三类实体，避免单曲结果挤掉整专和艺术家入口。"""
-    module = MusicBrainzModule()
+    module = _module()
     requested = []
 
     def fake_request(path, params=None):
@@ -149,7 +157,7 @@ def test_search_music_interleaves_recordings_albums_and_artists(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     results = module.search_music(
         MetaMusic(title="晴天", artists=["周杰伦"]),
@@ -172,7 +180,7 @@ def test_search_music_interleaves_recordings_albums_and_artists(monkeypatch):
 
 def test_file_recognition_searches_recordings_only(monkeypatch):
     """本地音轨识别不得把同名专辑或艺术家候选当成 Recording。"""
-    module = MusicBrainzModule()
+    module = _module()
     requested_paths = []
 
     def fake_request(path, params=None):
@@ -180,7 +188,7 @@ def test_file_recognition_searches_recordings_only(monkeypatch):
         requested_paths.append(path)
         return {"recordings": [{"id": "recording-1", "title": "晴天"}]}
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     result = module.recognize_media(meta=MetaMusic(title="晴天"))
 
@@ -191,7 +199,7 @@ def test_file_recognition_searches_recordings_only(monkeypatch):
 
 def test_recognize_music_ignores_other_sources(monkeypatch):
     """MusicBrainz 模块不应处理其他元数据源的详情请求。"""
-    module = MusicBrainzModule()
+    module = _module()
     called = False
 
     def fake_request(*_args, **_kwargs):
@@ -200,7 +208,7 @@ def test_recognize_music_ignores_other_sources(monkeypatch):
         called = True
         return None
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     assert module.recognize_music("netease", "song-1") is None
     assert called is False
@@ -208,10 +216,10 @@ def test_recognize_music_ignores_other_sources(monkeypatch):
 
 def test_recognize_music_fetches_recording_detail(monkeypatch):
     """MusicBrainz 详情请求应按 Recording ID 返回标准音乐信息。"""
-    module = MusicBrainzModule()
+    module = _module()
     monkeypatch.setattr(
-        module,
-        "_request_json",
+        module.musicbrainzapi,
+        "request_json",
         lambda path, params=None: {
             "id": path.rsplit("/", 1)[-1],
             "title": "晴天",
@@ -227,7 +235,7 @@ def test_recognize_music_fetches_recording_detail(monkeypatch):
 
 def test_recognize_music_falls_back_to_album(monkeypatch):
     """旧调用未给实体类型时保留先单曲后专辑的兼容探测。"""
-    module = MusicBrainzModule()
+    module = _module()
     requested = []
 
     def fake_request(path, params=None):
@@ -246,8 +254,7 @@ def test_recognize_music_falls_back_to_album(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
-    monkeypatch.setattr(MusicBrainzModule, "_request_json", staticmethod(fake_request))
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     info = module.recognize_music("musicbrainz", "release-group-1")
 
@@ -261,11 +268,11 @@ def test_recognize_music_falls_back_to_album(monkeypatch):
 
 def test_recognize_music_recording_does_not_probe_album(monkeypatch):
     """显式 Recording ID 未命中时不得继续请求同 ID 的专辑实体。"""
-    module = MusicBrainzModule()
+    module = _module()
     requested = []
     monkeypatch.setattr(
-        module,
-        "_request_json",
+        module.musicbrainzapi,
+        "request_json",
         lambda path, params=None: requested.append(path),
     )
 
@@ -281,7 +288,7 @@ def test_recognize_music_recording_does_not_probe_album(monkeypatch):
 
 def test_recognize_music_album_skips_recording_namespace(monkeypatch):
     """显式 Album ID 应直接读取 Release Group，不先探测 Recording。"""
-    module = MusicBrainzModule()
+    module = _module()
     requested = []
 
     def fake_request(path, params=None):
@@ -296,7 +303,7 @@ def test_recognize_music_album_skips_recording_namespace(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(module, "_request_json", fake_request)
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     result = module.recognize_music(
         "musicbrainz",
@@ -311,7 +318,7 @@ def test_recognize_music_album_skips_recording_namespace(monkeypatch):
 
 def test_music_album_builds_tracks_and_release_variants(monkeypatch):
     """专辑详情应带上曲目列表、发行版本和 10 分制评分。"""
-    module = MusicBrainzModule()
+    module = _module()
 
     def fake_request(path, params=None):
         """按路径分别返回 Release Group 与代表性 Release 数据。"""
@@ -369,7 +376,7 @@ def test_music_album_builds_tracks_and_release_variants(monkeypatch):
             }
         return None
 
-    monkeypatch.setattr(MusicBrainzModule, "_request_json", staticmethod(fake_request))
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     album = module.music_album("musicbrainz", "release-group-1")
 
@@ -390,47 +397,45 @@ def test_music_album_builds_tracks_and_release_variants(monkeypatch):
 
 def test_music_artist_maps_profile_links_and_image(monkeypatch):
     """艺术家详情应整理活跃时间、别名、外链并把维基共享页转为图片直链。"""
-    module = MusicBrainzModule()
+    module = _module()
     monkeypatch.setattr(
-        MusicBrainzModule,
-        "_request_json",
-        staticmethod(
-            lambda path, params=None: {
-                "id": "artist-1",
-                "name": "Queen",
-                "sort-name": "Queen",
-                "type": "Group",
-                "disambiguation": "UK rock group",
-                "country": "GB",
-                "area": {"name": "United Kingdom"},
-                "life-span": {"begin": "1970-06-27", "ended": True},
-                "genres": [{"name": "rock", "count": 20}, {"name": "glam rock", "count": 9}],
-                "tags": [{"name": "british", "count": 15}],
-                "aliases": [{"name": "皇后乐队", "count": 0}],
-                "relations": [
-                    {
-                        "type": "image",
-                        "target-type": "url",
-                        "url": {"resource": "https://commons.wikimedia.org/wiki/File:Queen.jpg"},
-                    },
-                    {
-                        "type": "official homepage",
-                        "target-type": "url",
-                        "url": {"resource": "http://www.queenonline.com/"},
-                    },
-                    {
-                        "type": "wikidata",
-                        "target-type": "url",
-                        "url": {"resource": "https://www.wikidata.org/wiki/Q15862"},
-                    },
-                    {
-                        "type": "creative commons licensed download",
-                        "target-type": "url",
-                        "url": {"resource": "https://example.com/ignored"},
-                    },
-                ],
-            }
-        ),
+        module.musicbrainzapi,
+        "request_json",
+        lambda path, params=None: {
+            "id": "artist-1",
+            "name": "Queen",
+            "sort-name": "Queen",
+            "type": "Group",
+            "disambiguation": "UK rock group",
+            "country": "GB",
+            "area": {"name": "United Kingdom"},
+            "life-span": {"begin": "1970-06-27", "ended": True},
+            "genres": [{"name": "rock", "count": 20}, {"name": "glam rock", "count": 9}],
+            "tags": [{"name": "british", "count": 15}],
+            "aliases": [{"name": "皇后乐队", "count": 0}],
+            "relations": [
+                {
+                    "type": "image",
+                    "target-type": "url",
+                    "url": {"resource": "https://commons.wikimedia.org/wiki/File:Queen.jpg"},
+                },
+                {
+                    "type": "official homepage",
+                    "target-type": "url",
+                    "url": {"resource": "http://www.queenonline.com/"},
+                },
+                {
+                    "type": "wikidata",
+                    "target-type": "url",
+                    "url": {"resource": "https://www.wikidata.org/wiki/Q15862"},
+                },
+                {
+                    "type": "creative commons licensed download",
+                    "target-type": "url",
+                    "url": {"resource": "https://example.com/ignored"},
+                },
+            ],
+        },
     )
 
     artist = module.music_artist("musicbrainz", "artist-1")
@@ -449,7 +454,7 @@ def test_music_artist_maps_profile_links_and_image(monkeypatch):
 
 def test_music_artist_albums_sorts_page_by_release_date(monkeypatch):
     """艺术家专辑列表应按发行日期倒序，并带上专辑类型筛选参数。"""
-    module = MusicBrainzModule()
+    module = _module()
     requested = {}
 
     def fake_request(path, params=None):
@@ -474,7 +479,7 @@ def test_music_artist_albums_sorts_page_by_release_date(monkeypatch):
             ]
         }
 
-    monkeypatch.setattr(MusicBrainzModule, "_request_json", staticmethod(fake_request))
+    monkeypatch.setattr(module.musicbrainzapi, "request_json", fake_request)
 
     albums = module.music_artist_albums("musicbrainz", "artist-1", page=2, count=10, album_type="album")
 
@@ -488,36 +493,34 @@ def test_music_artist_albums_sorts_page_by_release_date(monkeypatch):
 
 def test_music_artist_related_prefers_meaningful_relations(monkeypatch):
     """关联艺术家应优先返回成员与子团体关系，致敬乐队排在最后。"""
-    module = MusicBrainzModule()
+    module = _module()
     monkeypatch.setattr(
-        MusicBrainzModule,
-        "_request_json",
-        staticmethod(
-            lambda path, params=None: {
-                "relations": [
-                    {
-                        "type": "tribute",
-                        "target-type": "artist",
-                        "artist": {"id": "artist-tribute", "name": "Queen Tribute"},
-                    },
-                    {
-                        "type": "member of band",
-                        "target-type": "artist",
-                        "artist": {"id": "artist-member", "name": "Brian May"},
-                    },
-                    {
-                        "type": "member of band",
-                        "target-type": "artist",
-                        "artist": {"id": "artist-member", "name": "Brian May"},
-                    },
-                    {
-                        "type": "allmusic",
-                        "target-type": "url",
-                        "url": {"resource": "https://example.com"},
-                    },
-                ]
-            }
-        ),
+        module.musicbrainzapi,
+        "request_json",
+        lambda path, params=None: {
+            "relations": [
+                {
+                    "type": "tribute",
+                    "target-type": "artist",
+                    "artist": {"id": "artist-tribute", "name": "Queen Tribute"},
+                },
+                {
+                    "type": "member of band",
+                    "target-type": "artist",
+                    "artist": {"id": "artist-member", "name": "Brian May"},
+                },
+                {
+                    "type": "member of band",
+                    "target-type": "artist",
+                    "artist": {"id": "artist-member", "name": "Brian May"},
+                },
+                {
+                    "type": "allmusic",
+                    "target-type": "url",
+                    "url": {"resource": "https://example.com"},
+                },
+            ]
+        },
     )
 
     related = module.music_artist_related("musicbrainz", "artist-1", count=5)
@@ -549,11 +552,9 @@ class _FakeMusicBrainzResponse:
 
 def test_request_json_caches_repeated_calls(monkeypatch):
     """相同路径与参数的 MusicBrainz 请求应命中缓存，避免重复发起网络调用。"""
-    import app.modules.recognizers.musicbrainz as musicbrainz_module
+    import app.modules.recognizers.musicbrainz.api as musicbrainz_api
 
-    monkeypatch.setattr(
-        MusicBrainzModule, "_wait_for_rate_limit", classmethod(lambda cls: None)
-    )
+    monkeypatch.setattr(MusicBrainzApi, "_wait_for_rate_limit", lambda _self: None)
     network_calls = {"count": 0}
 
     def fake_get_res(_self, url, params=None):
@@ -561,12 +562,13 @@ def test_request_json_caches_repeated_calls(monkeypatch):
         network_calls["count"] += 1
         return _FakeMusicBrainzResponse({"id": "recording-cache", "title": "晴天"})
 
-    monkeypatch.setattr(musicbrainz_module.RequestUtils, "get_res", fake_get_res)
+    monkeypatch.setattr(musicbrainz_api.RequestUtils, "get_res", fake_get_res)
     # 清理缓存区，排除其他用例残留
-    MusicBrainzModule._request_json.cache_clear()
+    MusicBrainzApi.request_json.cache_clear()
 
-    first = MusicBrainzModule._request_json("/recording/recording-cache", params={"fmt": "json"})
-    second = MusicBrainzModule._request_json("/recording/recording-cache", params={"fmt": "json"})
+    api = MusicBrainzApi()
+    first = api.request_json("/recording/recording-cache", params={"fmt": "json"})
+    second = api.request_json("/recording/recording-cache", params={"fmt": "json"})
 
     assert first == second
     assert network_calls["count"] == 1
@@ -574,11 +576,9 @@ def test_request_json_caches_repeated_calls(monkeypatch):
 
 def test_request_json_caches_not_found(monkeypatch):
     """MusicBrainz 稳定 404 应进入有界缓存，避免重复探测单曲与专辑入口。"""
-    import app.modules.recognizers.musicbrainz as musicbrainz_module
+    import app.modules.recognizers.musicbrainz.api as musicbrainz_api
 
-    monkeypatch.setattr(
-        MusicBrainzModule, "_wait_for_rate_limit", classmethod(lambda cls: None)
-    )
+    monkeypatch.setattr(MusicBrainzApi, "_wait_for_rate_limit", lambda _self: None)
     network_calls = {"count": 0}
 
     def fake_get_res(_self, url, params=None):
@@ -586,11 +586,12 @@ def test_request_json_caches_not_found(monkeypatch):
         network_calls["count"] += 1
         return _FakeMusicBrainzResponse(None, status_code=404)
 
-    monkeypatch.setattr(musicbrainz_module.RequestUtils, "get_res", fake_get_res)
-    MusicBrainzModule._request_json.cache_clear()
+    monkeypatch.setattr(musicbrainz_api.RequestUtils, "get_res", fake_get_res)
+    MusicBrainzApi.request_json.cache_clear()
 
-    first = MusicBrainzModule._request_json("/recording/missing", params={"fmt": "json"})
-    second = MusicBrainzModule._request_json("/recording/missing", params={"fmt": "json"})
+    api = MusicBrainzApi()
+    first = api.request_json("/recording/missing", params={"fmt": "json"})
+    second = api.request_json("/recording/missing", params={"fmt": "json"})
 
     assert first == second == {}
     assert network_calls["count"] == 1
@@ -600,11 +601,9 @@ def test_request_json_retries_on_server_busy(monkeypatch):
     """服务端繁忙（429/5xx）属于瞬时错误，应退避重试而不是直接放弃。"""
     import time
 
-    import app.modules.recognizers.musicbrainz as musicbrainz_module
+    import app.modules.recognizers.musicbrainz.api as musicbrainz_api
 
-    monkeypatch.setattr(
-        MusicBrainzModule, "_wait_for_rate_limit", classmethod(lambda cls: None)
-    )
+    monkeypatch.setattr(MusicBrainzApi, "_wait_for_rate_limit", lambda _self: None)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     responses = [
         _FakeMusicBrainzResponse(None, status_code=503),
@@ -615,10 +614,10 @@ def test_request_json_retries_on_server_busy(monkeypatch):
         """依次返回繁忙与成功响应，验证重试后拿到结果。"""
         return responses.pop(0)
 
-    monkeypatch.setattr(musicbrainz_module.RequestUtils, "get_res", fake_get_res)
-    MusicBrainzModule._request_json.cache_clear()
+    monkeypatch.setattr(musicbrainz_api.RequestUtils, "get_res", fake_get_res)
+    MusicBrainzApi.request_json.cache_clear()
 
-    result = MusicBrainzModule._request_json("/recording/search-busy", params={"fmt": "json"})
+    result = MusicBrainzApi().request_json("/recording/search-busy", params={"fmt": "json"})
 
     assert result == {"id": "recording-busy", "title": "晴天"}
     assert not responses
@@ -669,12 +668,12 @@ def test_recording_queries_ladder_relaxes_to_bare_title_last():
 
 def test_query_phrase_latin_unchanged_and_cjk_char_or():
     """拉丁文本保持短语检索，CJK 文本拆为逐字 OR，混合文本按词元拆分。"""
-    assert MusicBrainzModule._query_phrase("Fearless") == '"Fearless"'
-    assert MusicBrainzModule._query_phrase("晴天") == '("晴" OR "天")'
-    assert MusicBrainzModule._query_phrase("好歌茹芸 Vol. 3") == (
+    assert MusicBrainzApi.query_phrase("Fearless") == '"Fearless"'
+    assert MusicBrainzApi.query_phrase("晴天") == '("晴" OR "天")'
+    assert MusicBrainzApi.query_phrase("好歌茹芸 Vol. 3") == (
         '(("好" OR "歌" OR "茹" OR "芸") OR "Vol." OR "3")'
     )
-    assert MusicBrainzModule._query_phrase("") is None
+    assert MusicBrainzApi.query_phrase("") is None
 
 
 def test_same_text_normalizes_cjk_numerals():

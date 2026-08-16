@@ -1,13 +1,7 @@
-import asyncio
 import re
-import threading
-import time
 from difflib import SequenceMatcher
 from typing import Any, Iterable, Optional, Tuple, Union
 
-from requests import Session
-
-from app.runtime.cache import cached
 from app.runtime.config import settings
 from app.domain.context import (
     MusicAlbumInfo,
@@ -19,6 +13,7 @@ from app.domain.meta.metabase import MetaBase
 from app.domain.meta.metamusic import MetaMusic
 from app.runtime.log import logger
 from app.modules import _ModuleBase
+from app.modules.recognizers.musicbrainz.api import MusicBrainzApi
 from app.modules.recognizers.musicbrainz.music_cache import MusicBrainzCache
 from app.schemas.types import (
     MUSIC_ENTITY_ALBUM,
@@ -29,7 +24,6 @@ from app.schemas.types import (
     MediaType,
     ModuleType,
 )
-from app.adapters.network.http import AsyncRequestUtils, RequestUtils
 from app.domain.media import is_media_source_selected
 from app.foundation.text import convert as zhconv_convert
 
@@ -38,22 +32,10 @@ class MusicBrainzModule(_ModuleBase):
     """通过 MusicBrainz 提供音乐元数据搜索和详情识别。"""
 
     _source = MediaSource.MusicBrainz
-    _base_url = "https://musicbrainz.org/ws/2"
-    _detail_url = "https://musicbrainz.org/recording"
-    _album_detail_url = "https://musicbrainz.org/release-group"
-    _artist_detail_url = "https://musicbrainz.org/artist"
-    _cover_url = "https://coverartarchive.org/release-group"
-    _request_interval = 1.0
-    _request_lock = threading.Lock()
-    _last_request_at = 0.0
     # 本地识别缓存，由模块管理器初始化时挂载
     cache: MusicBrainzCache = None
-    # 全局复用 HTTP 会话：keep-alive 省去每次请求的 DNS+TLS 握手（约 6s → 0.4s）
-    _session: Optional[Session] = None
-    _session_lock = threading.Lock()
-    # 服务端繁忙（429/5xx）时的重试次数与退避基数，重试间隔随次数翻倍递增
-    _busy_retries = 2
-    _busy_backoff = 5.0
+    # MusicBrainz 接口客户端，由模块管理器初始化时挂载
+    musicbrainzapi: MusicBrainzApi = None
     # 关联艺术家按关系可读性排序，纪念性质的致敬关系数量庞大且价值低，放到最后
     _artist_relation_priority = (
         "member of band",
@@ -84,20 +66,23 @@ class MusicBrainzModule(_ModuleBase):
     )
 
     def init_module(self) -> None:
-        """初始化 MusicBrainz 模块并挂载本地识别缓存。"""
+        """初始化 MusicBrainz 模块，挂载接口客户端与本地识别缓存。"""
         self.cache = MusicBrainzCache()
+        self.musicbrainzapi = MusicBrainzApi()
 
     def init_setting(self) -> Optional[Tuple[str, Union[str, bool]]]:
         """MusicBrainz 无需独立密钥或启用开关。"""
         return None
 
     def stop(self) -> None:
-        """停止模块，退出前持久化识别缓存。"""
+        """停止模块，退出前持久化识别缓存并关闭接口客户端。"""
         if self.cache:
             try:
                 self.cache.save()
             except Exception as err:
                 logger.error(f"保存音乐识别缓存失败：{str(err)}")
+        if self.musicbrainzapi:
+            self.musicbrainzapi.close()
 
     def scheduler_job(self) -> None:
         """定时任务，每10分钟持久化一次音乐识别缓存。"""
@@ -113,7 +98,7 @@ class MusicBrainzModule(_ModuleBase):
 
     def test(self) -> Tuple[bool, str]:
         """测试 MusicBrainz 搜索接口连通性。"""
-        result = self._request_json(
+        result = self.musicbrainzapi.request_json(
             "/recording",
             params={"query": "recording:test", "limit": 1, "fmt": "json"},
         )
@@ -167,7 +152,7 @@ class MusicBrainzModule(_ModuleBase):
     def _search_recordings(self, meta: MetaMusic, limit: int) -> list[MusicInfo]:
         """按音频标签条件搜索 Recording，供全局搜索和文件识别复用。"""
         for query in self._recording_queries(meta):
-            payload = self._request_json(
+            payload = self.musicbrainzapi.request_json(
                 "/recording",
                 params={"query": query, "limit": max(1, min(limit, 100)), "fmt": "json"},
             )
@@ -187,7 +172,7 @@ class MusicBrainzModule(_ModuleBase):
     ) -> list[MusicInfo]:
         """异步按音频标签条件搜索 Recording 候选。"""
         for query in self._recording_queries(meta):
-            payload = await self._async_request_json(
+            payload = await self.musicbrainzapi.async_request_json(
                 "/recording",
                 params={
                     "query": query,
@@ -223,12 +208,12 @@ class MusicBrainzModule(_ModuleBase):
         queries: list[str] = []
         for query in [
             cls._build_query(meta),
-            f"recording:{cls._query_phrase(title)}" if title else None,
-            f'recording:{cls._query_phrase(bare_title)} AND artist:"{cls._escape_query(artist)}"'
+            f"recording:{MusicBrainzApi.query_phrase(title)}" if title else None,
+            f'recording:{MusicBrainzApi.query_phrase(bare_title)} AND artist:"{MusicBrainzApi.escape_query(artist)}"'
             if artist and bare_title and bare_title != title else None,
             # 艺术家署名变体（外文艺名等）导致 AND 条件零命中时，仅按主体曲名检索，
             # 候选挑选阶段要求艺术家命中兜住同名异曲
-            f"recording:{cls._query_phrase(bare_title)}" if bare_title else None,
+            f"recording:{MusicBrainzApi.query_phrase(bare_title)}" if bare_title else None,
         ]:
             if query and query not in queries:
                 queries.append(query)
@@ -322,7 +307,7 @@ class MusicBrainzModule(_ModuleBase):
     def _search_albums(self, meta: MetaMusic, limit: int) -> list[MusicInfo]:
         """按标题和可选艺术家搜索 Release Group 专辑候选，检索式同样逐级放宽。"""
         for query in self._album_queries(meta):
-            payload = self._request_json(
+            payload = self.musicbrainzapi.request_json(
                 "/release-group",
                 params={
                     "query": query,
@@ -346,7 +331,7 @@ class MusicBrainzModule(_ModuleBase):
     ) -> list[MusicInfo]:
         """异步按标题和可选艺术家搜索 Release Group 专辑候选。"""
         for query in self._album_queries(meta):
-            payload = await self._async_request_json(
+            payload = await self.musicbrainzapi.async_request_json(
                 "/release-group",
                 params={
                     "query": query,
@@ -384,16 +369,16 @@ class MusicBrainzModule(_ModuleBase):
             soundtrack_body = ""
         queries: list[str] = []
         for query in [
-            f'releasegroup:{cls._query_phrase(title)} AND artist:"{cls._escape_query(artist)}"'
+            f'releasegroup:{MusicBrainzApi.query_phrase(title)} AND artist:"{MusicBrainzApi.escape_query(artist)}"'
             if artist else None,
-            f"releasegroup:{cls._query_phrase(title)}" if title else None,
-            f'releasegroup:{cls._query_phrase(bare_title)} AND artist:"{cls._escape_query(artist)}"'
+            f"releasegroup:{MusicBrainzApi.query_phrase(title)}" if title else None,
+            f'releasegroup:{MusicBrainzApi.query_phrase(bare_title)} AND artist:"{MusicBrainzApi.escape_query(artist)}"'
             if artist and bare_title and bare_title != title else None,
-            f'releasegroup:{cls._query_phrase(soundtrack_body)} AND artist:"{cls._escape_query(artist)}"'
+            f'releasegroup:{MusicBrainzApi.query_phrase(soundtrack_body)} AND artist:"{MusicBrainzApi.escape_query(artist)}"'
             if artist and soundtrack_body else None,
-            f"releasegroup:{cls._query_phrase(soundtrack_body)}" if soundtrack_body else None,
+            f"releasegroup:{MusicBrainzApi.query_phrase(soundtrack_body)}" if soundtrack_body else None,
             # 署名变体兜底：仅按去注释专辑名检索，挑选阶段要求艺术家同时命中
-            f"releasegroup:{cls._query_phrase(bare_title)}" if bare_title else None,
+            f"releasegroup:{MusicBrainzApi.query_phrase(bare_title)}" if bare_title else None,
         ]:
             if query and query not in queries:
                 queries.append(query)
@@ -402,10 +387,10 @@ class MusicBrainzModule(_ModuleBase):
     def _search_artists(self, meta: MetaMusic, limit: int) -> list[MusicInfo]:
         """按用户输入中的艺术家部分搜索 Artist 浏览候选。"""
         artist_name = meta.artists[0] if meta.artists else meta.title
-        phrase = self._query_phrase(artist_name)
+        phrase = MusicBrainzApi.query_phrase(artist_name)
         if not phrase:
             return []
-        payload = self._request_json(
+        payload = self.musicbrainzapi.request_json(
             "/artist",
             params={"query": f"artist:{phrase}", "limit": max(1, min(limit, 100)), "fmt": "json"},
         )
@@ -448,7 +433,7 @@ class MusicBrainzModule(_ModuleBase):
             release_id = release.get("id")
             if not release_id:
                 continue
-            detail = self._request_json(
+            detail = self.musicbrainzapi.request_json(
                 f"/release/{release_id}",
                 params={"inc": "recordings+media+artist-credits", "fmt": "json"},
             )
@@ -484,7 +469,7 @@ class MusicBrainzModule(_ModuleBase):
             release_id = release.get("id")
             if not release_id:
                 continue
-            detail = await self._async_request_json(
+            detail = await self.musicbrainzapi.async_request_json(
                 f"/release/{release_id}",
                 params={"inc": "recordings+media+artist-credits", "fmt": "json"},
             )
@@ -511,7 +496,7 @@ class MusicBrainzModule(_ModuleBase):
         releases: list[dict[str, Any]] = []
         seen: set[str] = set()
         for query in self._release_queries(meta, tracks):
-            payload = self._request_json(
+            payload = self.musicbrainzapi.request_json(
                 "/release",
                 params={"query": query, "limit": max(1, min(limit, 25)), "fmt": "json"},
             )
@@ -534,7 +519,7 @@ class MusicBrainzModule(_ModuleBase):
         releases: list[dict[str, Any]] = []
         seen: set[str] = set()
         for query in self._release_queries(meta, tracks):
-            payload = await self._async_request_json(
+            payload = await self.musicbrainzapi.async_request_json(
                 "/release",
                 params={
                     "query": query,
@@ -560,20 +545,20 @@ class MusicBrainzModule(_ModuleBase):
         if album_title:
             if artist:
                 queries.append(
-                    f'release:"{cls._escape_query(album_title)}" AND artist:"{cls._escape_query(artist)}"'
+                    f'release:"{MusicBrainzApi.escape_query(album_title)}" AND artist:"{MusicBrainzApi.escape_query(artist)}"'
                 )
-            queries.append(f'release:"{cls._escape_query(album_title)}"')
+            queries.append(f'release:"{MusicBrainzApi.escape_query(album_title)}"')
         # 目录名无意义时（如 Various Artists 合集），用代表性曲名反查所属发行版本
         titles = cls._unique_texts(
             [track.title for track in tracks if track.title and not track.title.strip().isdigit()]
         )[:3]
         if titles:
             recording_clause = " OR ".join(
-                f'recording:"{cls._escape_query(title)}"' for title in titles
+                f'recording:"{MusicBrainzApi.escape_query(title)}"' for title in titles
             )
             query = f"({recording_clause})"
             if artist:
-                query += f' AND artist:"{cls._escape_query(artist)}"'
+                query += f' AND artist:"{MusicBrainzApi.escape_query(artist)}"'
             queries.append(query)
         return queries
 
@@ -1159,7 +1144,7 @@ class MusicBrainzModule(_ModuleBase):
         if media_source != self._source or not media_id:
             return None
         if music_type != MUSIC_ENTITY_ALBUM:
-            payload = self._request_json(
+            payload = self.musicbrainzapi.request_json(
                 f"/recording/{media_id}",
                 params={
                     "inc": "artists+releases+release-groups+isrcs+genres",
@@ -1184,7 +1169,7 @@ class MusicBrainzModule(_ModuleBase):
         if media_source != self._source or not media_id:
             return None
         if music_type != MUSIC_ENTITY_ALBUM:
-            payload = await self._async_request_json(
+            payload = await self.musicbrainzapi.async_request_json(
                 f"/recording/{media_id}",
                 params={
                     "inc": "artists+releases+release-groups+isrcs+genres",
@@ -1206,7 +1191,7 @@ class MusicBrainzModule(_ModuleBase):
         """异步按 MusicBrainz Release Group ID 获取专辑详情及曲目。"""
         if media_source != self._source or not media_id:
             return None
-        payload = await self._async_request_json(
+        payload = await self.musicbrainzapi.async_request_json(
             f"/release-group/{media_id}",
             params={
                 "inc": "artists+releases+media+genres+tags+ratings",
@@ -1233,7 +1218,7 @@ class MusicBrainzModule(_ModuleBase):
         """按 MusicBrainz Release Group ID 获取标准化专辑详情及曲目。"""
         if media_source != self._source or not media_id:
             return None
-        payload = self._request_json(
+        payload = self.musicbrainzapi.request_json(
             f"/release-group/{media_id}",
             params={
                 "inc": "artists+releases+media+genres+tags+ratings",
@@ -1257,7 +1242,7 @@ class MusicBrainzModule(_ModuleBase):
         """按 MusicBrainz Artist ID 获取标准化艺术家详情。"""
         if media_source != self._source or not media_id:
             return None
-        payload = self._request_json(
+        payload = self.musicbrainzapi.request_json(
             f"/artist/{media_id}",
             params={"inc": "url-rels+genres+tags+aliases", "fmt": "json"},
         )
@@ -1284,7 +1269,7 @@ class MusicBrainzModule(_ModuleBase):
         }
         if album_type:
             params["type"] = album_type
-        payload = self._request_json("/release-group", params=params)
+        payload = self.musicbrainzapi.request_json("/release-group", params=params)
         albums = [
             album
             for item in (payload or {}).get("release-groups") or []
@@ -1303,7 +1288,7 @@ class MusicBrainzModule(_ModuleBase):
         """按 MusicBrainz 艺术家关系返回可继续浏览的关联艺术家。"""
         if media_source != self._source or not media_id:
             return []
-        payload = self._request_json(
+        payload = self.musicbrainzapi.request_json(
             f"/artist/{media_id}",
             params={"inc": "artist-rels", "fmt": "json"},
         )
@@ -1318,60 +1303,14 @@ class MusicBrainzModule(_ModuleBase):
         # 资源标题先剥离音质标记，避免规格文本污染检索式导致零命中
         title = cls._search_title(meta.title)
         if title:
-            clauses.append(f"recording:{cls._query_phrase(title)}")
+            clauses.append(f"recording:{MusicBrainzApi.query_phrase(title)}")
         if meta.artists:
-            clauses.append(f'artist:"{cls._escape_query(meta.artists[0])}"')
+            clauses.append(f'artist:"{MusicBrainzApi.escape_query(meta.artists[0])}"')
         if meta.album:
-            clauses.append(f'release:"{cls._escape_query(meta.album)}"')
+            clauses.append(f'release:"{MusicBrainzApi.escape_query(meta.album)}"')
         if meta.isrc:
-            clauses.append(f'isrc:"{cls._escape_query(meta.isrc)}"')
+            clauses.append(f'isrc:"{MusicBrainzApi.escape_query(meta.isrc)}"')
         return " AND ".join(clauses)
-
-    @staticmethod
-    def _escape_query(value: str) -> str:
-        """转义 MusicBrainz 查询中的引号和反斜线。"""
-        return value.replace("\\", "\\\\").replace('"', '\\"').strip()
-
-    # 中日韩字符：Lucene 标准分词器不会切分连续 CJK，短语检索对中文标题永远零命中
-    _QUERY_CJK_RE = re.compile(
-        r"[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]")
-    # 检索词元切分：按空白、标点与括号拆分，保留 CJK 串与拉丁词（括号对逐字检索无意义）
-    _QUERY_TOKEN_SPLIT_RE = re.compile(
-        r"[\s\-–—−－。，、；：！？·．…()（）「」『』【】\[\]《》,;]+")
-
-    @classmethod
-    def _query_phrase(cls, value: Optional[str]) -> Optional[str]:
-        """构造适配 Lucene 分词的检索表达式。
-
-        无 CJK 的普通文本返回带引号短语；含 CJK 的文本拆为词元后用 OR 交集检索，
-        MusicBrainz 索引中连续 CJK 是单一词元，逐字 OR 才能命中（「茹此精彩十三首」）；
-        过宽的召回由候选挑选阶段的标题与艺术家比对收紧。
-        """
-        text = str(value or "").strip()
-        if not text:
-            return None
-        if not cls._QUERY_CJK_RE.search(text):
-            return f'"{cls._escape_query(text)}"'
-        tokens = [
-            token for token in cls._QUERY_TOKEN_SPLIT_RE.split(text) if token.strip()
-        ]
-        if not tokens:
-            return None
-        parts = [
-            f'"{cls._escape_query(token)}"'
-            if not cls._QUERY_CJK_RE.search(token) else cls._or_group(
-                [f'"{cls._escape_query(char)}"' for char in token]
-            )
-            for token in tokens
-        ]
-        return cls._or_group(parts)
-
-    @staticmethod
-    def _or_group(parts: list[str]) -> str:
-        """拼接 OR 检索表达式，多项时用括号包裹避免与外层 AND 产生优先级歧义。"""
-        if len(parts) == 1:
-            return parts[0]
-        return "(" + " OR ".join(parts) + ")"
 
     @classmethod
     def _recording_to_info(cls, recording: dict[str, Any]) -> Optional[MusicInfo]:
@@ -1408,7 +1347,7 @@ class MusicBrainzModule(_ModuleBase):
             category=" / ".join(str(part) for part in category_parts if part),
             genres=cls._names_of(recording.get("genres")),
             names=[name for name in (title, album) if name],
-            detail_link=f"{cls._detail_url}/{media_id}",
+            detail_link=f"{MusicBrainzApi.detail_url}/{media_id}",
             raw_data=recording,
         )
 
@@ -1436,7 +1375,7 @@ class MusicBrainzModule(_ModuleBase):
             # MusicBrainz 评分是 5 分制，统一放大到与影视一致的 10 分制展示
             rating=round(float(rating["value"]) * 2, 1) if rating.get("value") else 0.0,
             rating_votes=rating.get("votes-count"),
-            detail_link=f"{cls._album_detail_url}/{media_id}",
+            detail_link=f"{MusicBrainzApi.album_detail_url}/{media_id}",
             raw_data=release_group,
         )
 
@@ -1504,46 +1443,44 @@ class MusicBrainzModule(_ModuleBase):
             key=lambda release: cls._date_sort_key(release.get("date")),
         )
 
-    @classmethod
     def _album_tracks(
-            cls,
+            self,
             album: MusicAlbumInfo,
             releases: list[dict[str, Any]],
     ) -> list[MusicInfo]:
         """读取专辑代表性发行版本的曲目，作为专辑内音乐列表。"""
-        release = cls._select_track_release(releases)
+        release = self._select_track_release(releases)
         if not release.get("id"):
             return []
-        payload = cls._request_json(
+        payload = self.musicbrainzapi.request_json(
             f"/release/{release['id']}",
             params={"inc": "recordings+artist-credits", "fmt": "json"},
         )
         tracks: list[MusicInfo] = []
         for medium in (payload or {}).get("media") or []:
             for track in medium.get("tracks") or []:
-                info = cls._track_to_info(album, medium, track)
+                info = self._track_to_info(album, medium, track)
                 if info:
                     tracks.append(info)
         return tracks
 
-    @classmethod
     async def _async_album_tracks(
-            cls,
+            self,
             album: MusicAlbumInfo,
             releases: list[dict[str, Any]],
     ) -> list[MusicInfo]:
         """异步读取专辑代表性发行版本的曲目。"""
-        release = cls._select_track_release(releases)
+        release = self._select_track_release(releases)
         if not release.get("id"):
             return []
-        payload = await cls._async_request_json(
+        payload = await self.musicbrainzapi.async_request_json(
             f"/release/{release['id']}",
             params={"inc": "recordings+artist-credits", "fmt": "json"},
         )
         tracks: list[MusicInfo] = []
         for medium in (payload or {}).get("media") or []:
             for track in medium.get("tracks") or []:
-                info = cls._track_to_info(album, medium, track)
+                info = self._track_to_info(album, medium, track)
                 if info:
                     tracks.append(info)
         return tracks
@@ -1584,7 +1521,7 @@ class MusicBrainzModule(_ModuleBase):
             version=recording.get("disambiguation") or None,
             category=album.category,
             names=[str(title)],
-            detail_link=f"{cls._detail_url}/{media_id}",
+            detail_link=f"{MusicBrainzApi.detail_url}/{media_id}",
         )
 
     @classmethod
@@ -1669,7 +1606,7 @@ class MusicBrainzModule(_ModuleBase):
             aliases=cls._names_of(artist.get("aliases")),
             relation=relation,
             image_url=cls._artist_image(relations),
-            detail_link=f"{cls._artist_detail_url}/{media_id}",
+            detail_link=f"{MusicBrainzApi.artist_detail_url}/{media_id}",
             external_links=cls._artist_links(relations),
             raw_data=artist if include_raw else {},
         )
@@ -1743,139 +1680,3 @@ class MusicBrainzModule(_ModuleBase):
         base = (settings.MUSIC_COVER_PROXY or "https://coverartarchive.org").rstrip("/")
         return f"{base}/release-group/{release_group_id}/front-500"
 
-    @classmethod
-    def _get_session(cls) -> Session:
-        """懒创建并复用全局 HTTP 会话，批量识别时避免重复建连。"""
-        if cls._session is None:
-            with cls._session_lock:
-                if cls._session is None:
-                    cls._session = Session()
-        return cls._session
-
-    @classmethod
-    def _reserve_request_delay(cls) -> float:
-        """为同步和异步 MusicBrainz 请求统一预留发送时间。"""
-        with cls._request_lock:
-            now = time.monotonic()
-            request_at = max(now, cls._last_request_at + cls._request_interval)
-            cls._last_request_at = request_at
-            return max(0.0, request_at - now)
-
-    @classmethod
-    def _wait_for_rate_limit(cls) -> None:
-        """同步等待 MusicBrainz 公共接口的已预留请求时间。"""
-        if delay := cls._reserve_request_delay():
-            time.sleep(delay)
-
-    @classmethod
-    async def _async_wait_for_rate_limit(cls) -> None:
-        """异步等待 MusicBrainz 公共接口的已预留请求时间。"""
-        if delay := cls._reserve_request_delay():
-            await asyncio.sleep(delay)
-
-    @classmethod
-    @cached(maxsize=settings.CONF.musicbrainz, ttl=settings.CONF.meta, skip_none=True)
-    def _request_json(
-            cls,
-            path: str,
-            params: Optional[dict[str, Any]] = None,
-    ) -> Optional[dict[str, Any]]:
-        """请求 MusicBrainz JSON 接口并统一处理网络和响应错误。
-
-        服务端繁忙（429/5xx）属于瞬时错误，退避重试后再失败才放弃，
-        避免批量识别场景下把限流误判为检索零命中。
-        """
-        attempts = cls._busy_retries + 1
-        for attempt in range(attempts):
-            cls._wait_for_rate_limit()
-            response = RequestUtils(
-                headers={
-                    "User-Agent": f"{settings.USER_AGENT} (https://github.com/jxxghp/MoviePilot)",
-                    "Accept": "application/json",
-                },
-                proxies=settings.PROXY,
-                session=cls._get_session(),
-                timeout=20,
-            ).get_res(f"{cls._base_url}{path}", params=params)
-            if response is None:
-                return None
-            status_code = response.status_code
-            try:
-                if status_code == 404:
-                    # 单曲与专辑共用同一套 ID 入口，404 属于正常的探测结果
-                    logger.debug(f"MusicBrainz 资源不存在：{path}")
-                    # 使用空对象区分稳定的不存在与瞬时请求失败，使有界缓存能够复用探测结果。
-                    return {}
-                if status_code == 429 or status_code >= 500:
-                    logger.warning(
-                        f"MusicBrainz 服务繁忙：{status_code} {response.text[:200]}"
-                    )
-                    if attempt < attempts - 1:
-                        time.sleep(cls._busy_backoff * (2 ** attempt))
-                        continue
-                    return None
-                if status_code != 200:
-                    logger.warning(
-                        f"MusicBrainz 请求失败：{status_code} {response.text[:200]}"
-                    )
-                    return None
-                return response.json()
-            except (TypeError, ValueError) as err:
-                logger.warning(f"MusicBrainz 响应解析失败：{err}")
-                return None
-            finally:
-                response.close()
-        return None
-
-    @classmethod
-    @cached(
-        maxsize=settings.CONF.musicbrainz,
-        ttl=settings.CONF.meta,
-        skip_none=True,
-        shared_key="_request_json",
-    )
-    async def _async_request_json(
-            cls,
-            path: str,
-            params: Optional[dict[str, Any]] = None,
-    ) -> Optional[dict[str, Any]]:
-        """异步请求 MusicBrainz JSON 接口并统一处理限流与响应错误。"""
-        attempts = cls._busy_retries + 1
-        for attempt in range(attempts):
-            await cls._async_wait_for_rate_limit()
-            response = await AsyncRequestUtils(
-                headers={
-                    "User-Agent": f"{settings.USER_AGENT} (https://github.com/jxxghp/MoviePilot)",
-                    "Accept": "application/json",
-                },
-                proxies=settings.PROXY,
-                timeout=20,
-            ).get_res(f"{cls._base_url}{path}", params=params)
-            if response is None:
-                return None
-            status_code = response.status_code
-            try:
-                if status_code == 404:
-                    logger.debug(f"MusicBrainz 资源不存在：{path}")
-                    return {}
-                if status_code == 429 or status_code >= 500:
-                    logger.warning(
-                        f"MusicBrainz 服务繁忙：{status_code} {response.text[:200]}"
-                    )
-                    if attempt < attempts - 1:
-                        await asyncio.sleep(cls._busy_backoff * (2 ** attempt))
-                        continue
-                    return None
-                if status_code != 200:
-                    logger.warning(
-                        f"MusicBrainz 请求失败：{status_code} {response.text[:200]}"
-                    )
-                    return None
-                payload = response.json()
-                return payload if isinstance(payload, dict) else None
-            except (TypeError, ValueError) as err:
-                logger.warning(f"MusicBrainz 响应解析失败：{err}")
-                return None
-            finally:
-                await response.aclose()
-        return None
