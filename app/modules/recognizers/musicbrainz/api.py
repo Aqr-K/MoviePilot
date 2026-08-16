@@ -26,8 +26,6 @@ class MusicBrainzApi:
     detail_url = "https://musicbrainz.org/recording"
     album_detail_url = "https://musicbrainz.org/release-group"
     artist_detail_url = "https://musicbrainz.org/artist"
-    # 封面归档的专辑封面地址前缀
-    cover_url = "https://coverartarchive.org/release-group"
     # 公共接口限制每秒一次调用，请求之间至少间隔该秒数
     _request_interval = 1.0
     # 服务端繁忙（429/5xx）时的重试次数与退避基数，重试间隔随次数翻倍递增
