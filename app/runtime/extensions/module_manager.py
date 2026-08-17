@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 from enum import Enum
-from typing import Any, Generator, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 from app.foundation.reflection import ObjectUtils
 from app.foundation.singleton import Singleton
@@ -233,6 +233,44 @@ class ModuleManager(metaclass=Singleton):
         except Exception as err:
             logger.debug(f"推导模块 {module.__class__.__name__} 能力出错：{str(err)}")
             return False
+
+    def get_module_capabilities(self, module_id: str) -> List[str]:
+        """
+        取一个运行态模块提供的能力
+
+        判定复用 `capability.provided_capabilities`，与 `providers_for` 同一份定义，
+        不重新判定「什么算能力」。
+
+        :param module_id: 模块标识
+        :return: 能力方法名列表，按名称排序；模块未运行时为空列表
+        """
+        with self._lock:
+            module = self._running_modules.get(module_id)
+        if module is None:
+            return []
+        return sorted(provided_capabilities(module))
+
+    def get_capability_index(self) -> Dict[str, List[str]]:
+        """
+        取能力到提供者的倒排索引
+
+        排查「为什么某个能力查不到提供者」时，需要反过来看全表而非单个 method 的
+        查询结果。单个模块推导能力出错不中断整张表，记 debug 日志后跳过该模块。
+
+        :return: {能力方法名: [模块标识, ...]}，键与值均排序
+        """
+        with self._lock:
+            running = dict(self._running_modules)
+        index: Dict[str, List[str]] = {}
+        for module_id, module in running.items():
+            try:
+                capabilities = provided_capabilities(module)
+            except Exception as err:
+                logger.debug(f"推导模块 {module_id} 能力出错：{str(err)}")
+                continue
+            for capability in capabilities:
+                index.setdefault(capability, []).append(module_id)
+        return {name: sorted(owners) for name, owners in sorted(index.items())}
 
     def resolve_event_handler_instance(
         self,
