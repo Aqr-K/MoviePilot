@@ -8,12 +8,15 @@ from app.application.security.url import SecurityUtils
 
 class MediaServerImageSigningTest(unittest.TestCase):
     @staticmethod
-    def _build_chain(result):
+    def _build_chain(result, dispatch="unicast"):
         """
-        构造只带 run_module 的 MediaServerChain，避免单测初始化真实模块管理器。
+        构造只带指定分发方法的 MediaServerChain，避免单测初始化真实模块管理器。
+
+        :param result: 分发方法的返回值
+        :param dispatch: 被测方法实际调用的分发方法名（unicast/multicast）
         """
         chain = MediaServerChain.__new__(MediaServerChain)
-        chain.run_module = Mock(return_value=result)
+        setattr(chain, dispatch, Mock(return_value=result))
         return chain
 
     def test_librarys_signs_image_fields(self):
@@ -58,7 +61,8 @@ class MediaServerImageSigningTest(unittest.TestCase):
         媒体服务器壁纸 URL 返回前也需要加签。
         """
         wallpaper = "http://192.168.1.50:8096/Items/item/Images/Backdrop"
-        chain = self._build_chain([wallpaper])
+        # get_latest_wallpapers 走多播，展平各提供方各自的答案列表
+        chain = self._build_chain([[wallpaper]], dispatch="multicast")
 
         result = chain.get_latest_wallpapers()
 
