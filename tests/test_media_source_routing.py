@@ -68,7 +68,7 @@ def test_explicit_source_recognition_reaches_modules_with_unified_identity() -> 
         type=MediaType.TV,
         title="Frieren",
     )
-    chain.run_module = Mock(return_value=media)
+    chain._run_native_media_recognize = Mock(return_value=media)
 
     with patch(
         "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
@@ -81,12 +81,12 @@ def test_explicit_source_recognition_reaches_modules_with_unified_identity() -> 
         )
 
     assert result is media
-    call = chain.run_module.call_args
-    assert call.kwargs["media_source"] == MediaSource.AniList
-    assert call.kwargs["media_id"] == "154587"
+    module_kwargs = chain._run_native_media_recognize.call_args.args[0]
+    assert module_kwargs["media_source"] == MediaSource.AniList
+    assert module_kwargs["media_id"] == "154587"
     assert not {
         "source", "mediaid", "tmdbid", "doubanid", "bangumiid", "anilistid"
-    }.intersection(call.kwargs)
+    }.intersection(module_kwargs)
 
 
 def test_default_recognition_passes_empty_generic_identity() -> None:
@@ -99,7 +99,7 @@ def test_default_recognition_passes_empty_generic_identity() -> None:
         type=MediaType.MOVIE,
         tmdb_id=1,
     )
-    chain.run_module = Mock(return_value=media)
+    chain._run_native_media_recognize = Mock(return_value=media)
     meta = MetaBase("测试电影")
     meta.cn_name = "测试电影"
     meta.type = MediaType.MOVIE
@@ -111,9 +111,9 @@ def test_default_recognition_passes_empty_generic_identity() -> None:
         result = chain.recognize_media(meta=meta)
 
     assert result is media
-    call = chain.run_module.call_args
-    assert call.kwargs["media_source"] is None
-    assert call.kwargs["media_id"] is None
+    module_kwargs = chain._run_native_media_recognize.call_args.args[0]
+    assert module_kwargs["media_source"] is None
+    assert module_kwargs["media_id"] is None
 
 
 def test_module_dispatch_always_reaches_plugins() -> None:

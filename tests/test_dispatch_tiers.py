@@ -734,5 +734,37 @@ class NotificationHookMigrationTest(unittest.TestCase):
         self.assertEqual(0, counters["index_lookups"])
 
 
+class RecognizeFamilyMigrationTest(unittest.TestCase):
+    """媒体识别是查询：依次试、首个非空胜出，正是单播的语义"""
+
+    def test_native_recognize_queries_the_recognize_family(self):
+        """原生识别经识别族查表取单一答案，不再扫全体模块。"""
+        chain, counters = build_chain()
+        chain.modulemanager.providers_for.side_effect = (
+            lambda family, method: (_StubModule("tmdb", method, "media-info"),)
+            if family == ModuleType.MediaRecognize else ()
+        )
+
+        result = chain._run_native_media_recognize({"meta": None}, cache=True)
+
+        self.assertEqual("media-info", result)
+        self.assertEqual(0, counters["broadcast_scans"])
+
+
+@pytest.mark.asyncio
+async def test_async_native_recognize_queries_the_recognize_family():
+    """异步原生识别同样经识别族查表，不再扫全体模块。"""
+    chain, counters = build_chain()
+    chain.modulemanager.providers_for.side_effect = (
+        lambda family, method: (_StubModule("tmdb", method, "media-info"),)
+        if family == ModuleType.MediaRecognize else ()
+    )
+
+    result = await chain._async_run_native_media_recognize({"meta": None}, cache=True)
+
+    assert result == "media-info"
+    assert counters["broadcast_scans"] == 0
+
+
 if __name__ == "__main__":
     unittest.main()

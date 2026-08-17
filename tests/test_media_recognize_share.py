@@ -47,7 +47,7 @@ def test_report_shared_result_after_local_recognize_success():
     meta = _build_meta("测试电影", MediaType.MOVIE)
     mediainfo = _tmdb_media("测试电影", 100, MediaType.MOVIE, year="2024")
 
-    with patch.object(chain, "run_module", return_value=mediainfo) as run_module, patch(
+    with patch.object(chain, "_run_native_media_recognize", return_value=mediainfo) as run_module, patch(
         "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock, patch(
@@ -67,9 +67,7 @@ def test_query_shared_result_when_local_recognize_failed():
     meta = _build_meta("测试剧集")
     shared_media = _tmdb_media("测试剧集", 200, MediaType.TV, year="2024")
 
-    with patch.object(
-        chain,
-        "run_module",
+    with patch.object(chain, "_run_native_media_recognize",
         side_effect=[None, shared_media],
     ) as run_module, patch(
         "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
@@ -99,10 +97,10 @@ def test_query_shared_result_when_local_recognize_failed():
     assert result is shared_media
     assert run_module.call_count == 2
     query_mock.assert_called_once_with(meta=meta, mtype=None, keyword_meta=meta)
-    second_call = run_module.call_args_list[1]
-    assert second_call.kwargs["media_source"] == MediaSource.TMDB
-    assert second_call.kwargs["media_id"] == "200"
-    assert second_call.kwargs["mtype"] == MediaType.TV
+    second_call = run_module.call_args_list[1].args[0]
+    assert second_call["media_source"] == MediaSource.TMDB
+    assert second_call["media_id"] == "200"
+    assert second_call["mtype"] == MediaType.TV
     assert meta.begin_season is None
 
 
@@ -114,9 +112,7 @@ def test_async_query_shared_result_when_local_recognize_failed():
     async_run_module = AsyncMock(side_effect=[None, shared_media])
 
     async def runner():
-        with patch.object(
-            chain,
-            "async_run_module",
+        with patch.object(chain, "_async_run_native_media_recognize",
             async_run_module,
         ), patch(
             "app.chain._recognition.MoviePilotServerHelper.async_query_recognize_share",
@@ -168,11 +164,11 @@ def test_backfill_local_cache_after_shared_recognize_success():
         tmdb_info={"id": 700, "media_type": MediaType.MOVIE, "title": "测试缓存回填"},
     )
 
-    with patch.object(
-        chain,
-        "run_module",
-        side_effect=[None, shared_media, None],
-    ) as run_module_mock, patch(
+    with patch.object(chain, "_run_native_media_recognize",
+        side_effect=[None, shared_media],
+    ) as run_module_mock, patch.object(
+        chain, "run_module",
+    ) as cache_write_mock, patch(
         "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={
             "type": "movie",
@@ -194,8 +190,8 @@ def test_backfill_local_cache_after_shared_recognize_success():
         result = chain.recognize_media(meta=meta, cache=False)
 
     assert result is shared_media
-    assert run_module_mock.call_count == 3
-    update_call = run_module_mock.call_args_list[2]
+    assert run_module_mock.call_count == 2
+    update_call = cache_write_mock.call_args
     assert update_call.args[0] == "update_recognize_cache"
     assert update_call.kwargs["meta"] is not meta
     assert update_call.kwargs["meta"].name == meta.name
@@ -287,7 +283,7 @@ def test_report_shared_result_with_distinct_keyword_meta():
     share_meta.original_name = "辅助识别前的名称"
     mediainfo = _tmdb_media("测试剧集", 402, MediaType.TV, year="2024")
 
-    with patch.object(chain, "run_module", return_value=mediainfo), patch(
+    with patch.object(chain, "_run_native_media_recognize", return_value=mediainfo), patch(
         "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock:
@@ -310,9 +306,7 @@ def test_query_shared_result_with_distinct_keyword_meta():
     share_meta.original_name = "辅助识别前的名称"
     shared_media = _tmdb_media("测试剧集", 403, MediaType.TV, year="2024")
 
-    with patch.object(
-        chain,
-        "run_module",
+    with patch.object(chain, "_run_native_media_recognize",
         side_effect=[None, shared_media],
     ), patch(
         "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
@@ -358,7 +352,7 @@ def test_skip_report_when_local_recognize_hits_cache():
     mediainfo = _tmdb_media("缓存电影", 500, MediaType.MOVIE, year="2024")
     mediainfo.recognize_cache_hit = True
 
-    with patch.object(chain, "run_module", return_value=mediainfo) as run_module, patch(
+    with patch.object(chain, "_run_native_media_recognize", return_value=mediainfo) as run_module, patch(
         "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock, patch(
@@ -380,9 +374,7 @@ def test_async_skip_report_when_local_recognize_hits_cache():
     mediainfo.recognize_cache_hit = True
 
     async def runner():
-        with patch.object(
-            chain,
-            "async_run_module",
+        with patch.object(chain, "_async_run_native_media_recognize",
             AsyncMock(return_value=mediainfo),
         ) as async_run_module, patch(
             "app.chain._recognition.MoviePilotServerHelper.async_report_recognize_share",
