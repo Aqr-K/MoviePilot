@@ -31,7 +31,7 @@ LIFECYCLE_METHODS: FrozenSet[str] = frozenset({
 #
 # 站点索引刻意不向插件开放。这条约束不能靠「不给 indexer 做注册器」来维持：
 # provides_modules() 的契约是注册后与内建模块同权参与分发，任何插件模块只要实现
-# search_torrents 就会进入 run_module("search_torrents", ...) 的广播，绕过 indexer
+# search_torrents 就会进入 unicast("search_torrents", ...) 的候选提供者表，绕过 indexer
 # 直接供种。约束必须落在能力面上。
 BUILTIN_ONLY_CAPABILITIES: FrozenSet[str] = frozenset({
     "get_search_page_size",

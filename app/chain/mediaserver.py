@@ -107,31 +107,10 @@ class MediaServerChain(ChainBase):
         :return: 返回一个生成器对象，用于逐步获取媒体服务器中的项目
 
         说明：
-        - 特别注意的是，这里使用yield from返回迭代器，避免同时使用return与yield导致Python生成器解析异常
+        - 使用yield from返回迭代器，避免同时使用return与yield导致Python生成器解析异常
         - 如果 `limit` 为 None 或 -1 时，表示一次性获取所有数据，分页处理将不再生效
         - 在这种情况下，内存消耗可能会较大，特别是在数据量非常大的场景下
-        - 如果未来评估结果显示，不分页场景下的内存消耗远大于分页处理时的网络请求开销，可以考虑在此方法中实现自分页的处理
-        - 即通过 `while` 循环在上层进行分页控制，逐步获取所有数据，避免内存爆炸，当前该逻辑由具体实例来实现不分页的处理
         - Plex 实际上已默认支持内部分页处理，Jellyfin 与 Emby 获取数据时存在内部过滤场景，如排除合集等，分页数据可能是错误的
-        if limit is not None and limit != -1:
-            yield from self.run_module("mediaserver_items", server=server, library_id=library_id,
-                                   start_index=start_index, limit=limit)
-        else:
-            # 自分页逻辑，通过循环逐步获取所有数据
-            page_size = 10
-            while True:
-                data_generator = self.run_module("mediaserver_items", server=server, library_id=library_id,
-                                                 start_index=start_index, limit=page_size)
-                if not data_generator:
-                    break
-                count = 0
-                for item in data_generator:
-                    if item:
-                        count += 1
-                        yield item
-                if count < page_size:
-                    break
-                start_index += page_size
         """
         yield from self.unicast("mediaserver_items", server=server, library_id=library_id,
                                 start_index=start_index, limit=limit)

@@ -167,7 +167,7 @@ def test_backfill_local_cache_after_shared_recognize_success():
     with patch.object(chain, "_run_native_media_recognize",
         side_effect=[None, shared_media],
     ) as run_module_mock, patch.object(
-        chain, "run_module",
+        chain, "unicast",
     ) as cache_write_mock, patch(
         "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={

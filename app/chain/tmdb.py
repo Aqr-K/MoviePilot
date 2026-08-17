@@ -60,21 +60,21 @@ class TmdbChain(ChainBase):
         根据合集ID查询集合
         :param collection_id:  合集ID
         """
-        return self.run_module("tmdb_collection", collection_id=collection_id)
+        return self.unicast("tmdb_collection", collection_id=collection_id)
 
     def tmdb_seasons(self, tmdbid: int) -> List[schemas.TmdbSeason]:
         """
         根据TMDBID查询themoviedb所有季信息
         :param tmdbid:  TMDBID
         """
-        return self.run_module("tmdb_seasons", tmdbid=tmdbid)
+        return self.unicast("tmdb_seasons", tmdbid=tmdbid)
 
     def tmdb_group_seasons(self, group_id: str) -> List[schemas.TmdbSeason]:
         """
         根据剧集组ID查询themoviedb所有季集信息
         :param group_id: 剧集组ID
         """
-        return self.run_module("tmdb_group_seasons", group_id=group_id)
+        return self.unicast("tmdb_group_seasons", group_id=group_id)
 
     def tmdb_episodes(self, tmdbid: int, season: int, episode_group: Optional[str] = None) -> List[schemas.TmdbEpisode]:
         """
@@ -83,21 +83,21 @@ class TmdbChain(ChainBase):
         :param season:  季
         :param episode_group:  剧集组
         """
-        return self.run_module("tmdb_episodes", tmdbid=tmdbid, season=season, episode_group=episode_group)
+        return self.unicast("tmdb_episodes", tmdbid=tmdbid, season=season, episode_group=episode_group)
 
     def movie_similar(self, tmdbid: int) -> Optional[List[MediaInfo]]:
         """
         根据TMDBID查询类似电影
         :param tmdbid:  TMDBID
         """
-        return self.run_module("tmdb_movie_similar", tmdbid=tmdbid)
+        return self.unicast("tmdb_movie_similar", tmdbid=tmdbid)
 
     def tv_similar(self, tmdbid: int) -> Optional[List[MediaInfo]]:
         """
         根据TMDBID查询类似电视剧
         :param tmdbid:  TMDBID
         """
-        return self.run_module("tmdb_tv_similar", tmdbid=tmdbid)
+        return self.unicast("tmdb_tv_similar", tmdbid=tmdbid)
 
     def movie_recommend(self, tmdbid: int) -> Optional[List[MediaInfo]]:
         """
@@ -220,21 +220,21 @@ class TmdbChain(ChainBase):
         根据合集ID查询集合（异步版本）
         :param collection_id:  合集ID
         """
-        return await self.async_run_module("async_tmdb_collection", collection_id=collection_id)
+        return await self.async_unicast("async_tmdb_collection", collection_id=collection_id)
 
     async def async_tmdb_seasons(self, tmdbid: int) -> List[schemas.TmdbSeason]:
         """
         根据TMDBID查询themoviedb所有季信息（异步版本）
         :param tmdbid:  TMDBID
         """
-        return await self.async_run_module("async_tmdb_seasons", tmdbid=tmdbid)
+        return await self.async_unicast("async_tmdb_seasons", tmdbid=tmdbid)
 
     async def async_tmdb_group_seasons(self, group_id: str) -> List[schemas.TmdbSeason]:
         """
         根据剧集组ID查询themoviedb所有季集信息（异步版本）
         :param group_id: 剧集组ID
         """
-        return await self.async_run_module("async_tmdb_group_seasons", group_id=group_id)
+        return await self.async_unicast("async_tmdb_group_seasons", group_id=group_id)
 
     async def async_tmdb_episodes(self, tmdbid: int, season: int,
                                   episode_group: Optional[str] = None) -> List[schemas.TmdbEpisode]:
@@ -244,7 +244,7 @@ class TmdbChain(ChainBase):
         :param season:  季
         :param episode_group:  剧集组
         """
-        return await self.async_run_module("async_tmdb_episodes", tmdbid=tmdbid, season=season,
+        return await self.async_unicast("async_tmdb_episodes", tmdbid=tmdbid, season=season,
                                            episode_group=episode_group)
 
     async def async_movie_similar(self, tmdbid: int) -> Optional[List[MediaInfo]]:
@@ -252,14 +252,14 @@ class TmdbChain(ChainBase):
         根据TMDBID查询类似电影（异步版本）
         :param tmdbid:  TMDBID
         """
-        return await self.async_run_module("async_tmdb_movie_similar", tmdbid=tmdbid)
+        return await self.async_unicast("async_tmdb_movie_similar", tmdbid=tmdbid)
 
     async def async_tv_similar(self, tmdbid: int) -> Optional[List[MediaInfo]]:
         """
         根据TMDBID查询类似电视剧（异步版本）
         :param tmdbid:  TMDBID
         """
-        return await self.async_run_module("async_tmdb_tv_similar", tmdbid=tmdbid)
+        return await self.async_unicast("async_tmdb_tv_similar", tmdbid=tmdbid)
 
     async def async_movie_recommend(self, tmdbid: int) -> Optional[List[MediaInfo]]:
         """
@@ -338,18 +338,18 @@ class TmdbChain(ChainBase):
         """
         查询TMDB识别缓存条目列表
         """
-        result = self.run_module("tmdb_cache_items")
+        result = self.unicast("tmdb_cache_items")
         return result or []
 
     def delete_cache(self, cache_key: str) -> dict:
         """
         按缓存键删除单条TMDB识别缓存
         """
-        result = self.run_module("tmdb_cache_delete", cache_key=cache_key)
+        result = self.unicast("tmdb_cache_delete", cache_key=cache_key)
         return result or {}
 
     def clear_cache(self) -> None:
         """
         清空全部TMDB识别缓存
         """
-        self.run_module("tmdb_cache_clear")
+        self.unicast("tmdb_cache_clear")

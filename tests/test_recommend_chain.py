@@ -88,12 +88,12 @@ def test_async_recommend_methods_do_not_cache_empty_result(
     recommend_method = getattr(chain, method_name)
 
     with patch(chain_target) as backend_chain:
-        backend_chain.return_value.async_run_module = AsyncMock(side_effect=[[], []])
+        backend_chain.return_value.async_unicast = AsyncMock(side_effect=[[], []])
 
         assert asyncio.run(recommend_method(page=1)) == []
         assert asyncio.run(recommend_method(page=1)) == []
 
-    assert backend_chain.return_value.async_run_module.call_count == 2
+    assert backend_chain.return_value.async_unicast.call_count == 2
 
 
 def test_music_weekly_uses_music_chart():

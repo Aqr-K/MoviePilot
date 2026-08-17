@@ -17,7 +17,7 @@ class DoubanChain(ChainBase):
 
     def search_music(self, meta: MetaMusic, limit: int = 20) -> list[MusicInfo]:
         """按音乐元数据搜索豆瓣音乐候选。"""
-        result = self.run_module(
+        result = self.unicast(
             "search_music",
             meta=meta,
             limit=limit,
@@ -31,7 +31,7 @@ class DoubanChain(ChainBase):
             limit: int = 20,
     ) -> list[MusicInfo]:
         """异步按音乐元数据搜索豆瓣音乐候选。"""
-        result = await self.async_run_module(
+        result = await self.async_unicast(
             "search_music",
             meta=meta,
             limit=limit,
@@ -48,7 +48,7 @@ class DoubanChain(ChainBase):
     ) -> Optional[MusicInfo]:
         """按豆瓣音乐身份或音乐元数据识别标准音乐信息。"""
         normalized_id = self._normalize_music_id(media_id)
-        result = self.run_module(
+        result = self.unicast(
             "recognize_media",
             meta=meta,
             mtype=MediaType.MUSIC,
@@ -68,7 +68,7 @@ class DoubanChain(ChainBase):
     ) -> Optional[MusicInfo]:
         """异步按豆瓣音乐身份或音乐元数据识别标准音乐信息。"""
         normalized_id = self._normalize_music_id(media_id)
-        result = await self.async_run_module(
+        result = await self.async_unicast(
             "async_recognize_media",
             meta=meta,
             mtype=MediaType.MUSIC,
@@ -84,7 +84,7 @@ class DoubanChain(ChainBase):
         normalized_id = self._normalize_music_id(media_id)
         if not normalized_id:
             return None
-        result = self.run_module(
+        result = self.unicast(
             "music_album",
             media_source=self.music_source,
             media_id=normalized_id,
@@ -96,7 +96,7 @@ class DoubanChain(ChainBase):
         normalized_id = self._normalize_music_id(media_id)
         if not normalized_id:
             return None
-        result = await self.async_run_module(
+        result = await self.async_unicast(
             "music_album",
             media_source=self.music_source,
             media_id=normalized_id,
@@ -112,7 +112,7 @@ class DoubanChain(ChainBase):
         normalized_id = self._normalize_music_id(media_id)
         if not normalized_id:
             return []
-        result = await self.async_run_module(
+        result = await self.async_unicast(
             "music_album_related",
             media_source=self.music_source,
             media_id=normalized_id,
@@ -130,7 +130,7 @@ class DoubanChain(ChainBase):
             sort: str = "U",
     ) -> list[MusicInfo]:
         """按豆瓣音乐官方榜单或标签浏览标准音乐条目。"""
-        result = self.run_module(
+        result = self.unicast(
             "music_discover",
             media_source=self.music_source,
             page=page,
@@ -152,7 +152,7 @@ class DoubanChain(ChainBase):
             sort: str = "U",
     ) -> list[MusicInfo]:
         """异步按豆瓣音乐官方榜单或标签浏览标准音乐条目。"""
-        result = await self.async_run_module(
+        result = await self.async_unicast(
             "music_discover",
             media_source=self.music_source,
             page=page,

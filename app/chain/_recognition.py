@@ -59,7 +59,7 @@ class RecognitionMixin:
         """
         if not meta or not mediainfo:
             return
-        self.run_module(
+        self.unicast(
             "update_recognize_cache",
             meta=meta,
             mediainfo=mediainfo,
@@ -75,7 +75,7 @@ class RecognitionMixin:
         """
         if not meta or not mediainfo:
             return
-        await self.async_run_module(
+        await self.async_unicast(
             "async_update_recognize_cache",
             meta=meta,
             mediainfo=mediainfo,

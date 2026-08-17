@@ -170,7 +170,7 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module(
+        return self.unicast(
             "anilist_person_credits", person_id=person_id, page=page, count=count
         ) or []
 
@@ -182,7 +182,7 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return await self.async_run_module(
+        return await self.async_unicast(
             "async_anilist_person_credits",
             person_id=person_id,
             page=page,
