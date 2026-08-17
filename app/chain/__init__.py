@@ -41,6 +41,7 @@ from app.schemas.types import (
     MediaSourceSelection,
     MediaImageType,
     EventType,
+    ModuleType,
 )
 
 
@@ -366,6 +367,80 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
                     err, module_id, module_name, method, **kwargs
                 )
         return result
+
+    def _invoke_provider(self, module: Any, method: str, *args, **kwargs) -> Any:
+        """
+        执行单个提供者，并按既有语义处理限流与错误
+
+        :param module: 提供者模块实例
+        :param method: 模块方法名称
+        :return: 提供者的返回值，跳过或出错时为 None
+        """
+        module_id = module.__class__.__name__
+        try:
+            module_name = module.get_name()
+        except Exception as err:
+            logger.debug(f"获取模块名称出错：{str(err)}")
+            module_name = module_id
+        try:
+            return getattr(module, method)(*args, **kwargs)
+        except RateLimitExceededException as err:
+            self.__handle_rate_limit_error(err, "模块", module_id, method, **kwargs)
+        except Exception as err:
+            logger.error(traceback.format_exc())
+            self.__handle_system_error(err, module_id, module_name, method, **kwargs)
+        return None
+
+    def broadcast(self, method: str, *args, **kwargs) -> None:
+        """
+        通知全体提供者，不收集答案
+
+        触达全体是广播的语义，遍历因此是它的固有代价，不做索引化——一旦按订阅关系
+        建表，它就变成了多播。每个提供者相互独立：一个抛错只按系统模块错误上报，
+        不阻断其余提供者收到通知，也不因谁返回了值而提前中止。
+
+        需要答案的场景用多播或单播，它们经注册表查表，不必付出全体遍历的代价。
+
+        :param method: 模块方法名称
+        """
+        for module in self.modulemanager.get_running_modules(method):
+            self._invoke_provider(module, method, *args, **kwargs)
+
+    def multicast(self, module_type: ModuleType, method: str, *args, **kwargs) -> List[Any]:
+        """
+        圈定一个族类，收集其中每个提供者的答案
+
+        提供者来自 (族类, 能力) 注册表，命中后为 O(1)，只调用真正提供该能力的 k 个模块。
+        提供者返回空表示不认领，不计入结果；单个提供者出错不影响其余答案。
+
+        :param module_type: 模块族类
+        :param method: 模块方法名称
+        :return: 族类内全部非空答案，按优先级顺序排列
+        """
+        answers = []
+        for module in self.modulemanager.providers_for(module_type, method):
+            result = self._invoke_provider(module, method, *args, **kwargs)
+            if result is not None:
+                answers.append(result)
+        return answers
+
+    def unicast(self, module_type: ModuleType, method: str, *args, **kwargs) -> Any:
+        """
+        在族类内仲裁，最终只取一个答案
+
+        候选集与多播完全一致——同一张注册表、同一个优先级顺序，单播只是在其上叠加
+        短路：谁先给出非空答案就用谁的，其余提供者不再执行。提供者返回空表示不认领，
+        仲裁继续下移；族类内无人认领时返回 None，不回落到广播。
+
+        :param module_type: 模块族类
+        :param method: 模块方法名称
+        :return: 优先级最高且认领了本次调用的提供者的答案
+        """
+        for module in self.modulemanager.providers_for(module_type, method):
+            result = self._invoke_provider(module, method, *args, **kwargs)
+            if result is not None:
+                return result
+        return None
 
     def run_module(
             self,
