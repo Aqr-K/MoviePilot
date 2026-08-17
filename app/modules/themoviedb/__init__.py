@@ -1029,6 +1029,35 @@ class TheMovieDbModule(_ModuleBase):
             return None
         return self.scraper.get_metadata_img(mediainfo=mediainfo, season=season, episode=episode)
 
+    def discover(self, source: Optional[MediaSource] = None,
+                 **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按来源条件发现，委托本源既有方法
+
+        筛选条件原样转发，由本源方法自己的签名约束——契约不代填默认值，缺条件应当
+        报错而非被悄悄补上。
+
+        :param source: 请求的数据源，非本源时让出
+        :param criteria: 本源认得的筛选条件
+        :return: 媒体列表，非本源时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        return self.tmdb_discover(**criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                             **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按来源异步条件发现，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param criteria: 本源认得的筛选条件
+        :return: 媒体列表，非本源时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        return await self.async_tmdb_discover(**criteria)
+
     def tmdb_discover(self, mtype: MediaType, sort_by: str,
                       with_genres: str,
                       with_original_language: str,

@@ -36,7 +36,7 @@ class TmdbChain(ChainBase):
         :param page:  页码
         :return: 媒体信息列表
         """
-        return self.run_module("tmdb_discover", mtype=mtype,
+        return self.unicast("discover", source=MediaSource.TMDB, mtype=mtype,
                                sort_by=sort_by,
                                with_genres=with_genres,
                                with_original_language=with_original_language,
@@ -192,7 +192,7 @@ class TmdbChain(ChainBase):
         :param page:  页码
         :return: 媒体信息列表
         """
-        return await self.async_run_module("async_tmdb_discover", mtype=mtype,
+        return await self.async_unicast("async_discover", source=MediaSource.TMDB, mtype=mtype,
                                            sort_by=sort_by,
                                            with_genres=with_genres,
                                            with_original_language=with_original_language,

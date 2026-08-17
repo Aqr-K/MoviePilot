@@ -76,7 +76,7 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module("anilist_discover", **kwargs) or []
+        return self.unicast("discover", source=MediaSource.AniList, **kwargs) or []
 
     async def async_discover(self, **kwargs) -> list[MediaInfo]:
         """
@@ -84,7 +84,8 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return await self.async_run_module("async_anilist_discover", **kwargs) or []
+        return await self.async_unicast("async_discover",
+                                        source=MediaSource.AniList, **kwargs) or []
 
     def credits(
         self, anilist_id: int, page: int = 1, count: int = 20

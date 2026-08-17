@@ -277,7 +277,8 @@ class DoubanChain(ChainBase):
         :param count:  数量
         :return: 媒体信息列表
         """
-        return self.run_module("douban_discover", mtype=mtype, sort=sort, tags=tags,
+        return self.unicast("discover", source=MediaSource.Douban,
+                            mtype=mtype, sort=sort, tags=tags,
                                page=page, count=count)
 
     def tv_animation(self, page: Optional[int] = 1, count: Optional[int] = 30) -> Optional[List[MediaInfo]]:
@@ -384,7 +385,8 @@ class DoubanChain(ChainBase):
         :param count:  数量
         :return: 媒体信息列表
         """
-        return await self.async_run_module("async_douban_discover", mtype=mtype, sort=sort, tags=tags,
+        return await self.async_unicast("async_discover", source=MediaSource.Douban,
+                                        mtype=mtype, sort=sort, tags=tags,
                                            page=page, count=count)
 
     async def async_tv_animation(self, page: Optional[int] = 1,

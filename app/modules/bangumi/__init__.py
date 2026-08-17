@@ -560,6 +560,32 @@ class BangumiModule(_ModuleBase):
             return [MediaInfo(bangumi_info=credit) for credit in credits_info]
         return []
 
+    def discover(self, source: Optional[MediaSource] = None,
+                 **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按来源条件发现，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param criteria: 本源认得的筛选条件
+        :return: 媒体列表，非本源时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        return self.bangumi_discover(**criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                             **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按来源异步条件发现，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param criteria: 本源认得的筛选条件
+        :return: 媒体列表，非本源时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        return await self.async_bangumi_discover(**criteria)
+
     def bangumi_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """
         发现Bangumi番剧

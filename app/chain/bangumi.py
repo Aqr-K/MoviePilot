@@ -21,7 +21,7 @@ class BangumiChain(ChainBase):
         """
         发现Bangumi番剧
         """
-        return self.run_module("bangumi_discover", **kwargs)
+        return self.unicast("discover", source=MediaSource.Bangumi, **kwargs)
 
     def bangumi_info(self, bangumiid: int) -> Optional[dict]:
         """
@@ -72,7 +72,8 @@ class BangumiChain(ChainBase):
         """
         发现Bangumi番剧（异步版本）
         """
-        return await self.async_run_module("async_bangumi_discover", **kwargs)
+        return await self.async_unicast("async_discover",
+                                        source=MediaSource.Bangumi, **kwargs)
 
     async def async_bangumi_info(self, bangumiid: int) -> Optional[dict]:
         """
