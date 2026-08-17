@@ -12,6 +12,8 @@ import unittest
 from types import ModuleType as _PyModuleType
 from unittest.mock import Mock
 
+import pytest
+
 sys.modules.setdefault("qbittorrentapi", _PyModuleType("qbittorrentapi"))
 setattr(sys.modules["qbittorrentapi"], "TorrentFilesList", list)
 sys.modules.setdefault("transmission_rpc", _PyModuleType("transmission_rpc"))
@@ -104,6 +106,8 @@ def build_chain(*modules):
     chain = ChainBase()
     chain.pluginmanager = Mock()
     chain.pluginmanager.running_plugins = {}
+    # 默认无插件注入；需要插件参与的用例各自覆盖
+    chain.pluginmanager.get_plugin_modules.return_value = {}
     chain.modulemanager = Mock()
     chain.modulemanager.get_running_modules.side_effect = running_modules
     chain.modulemanager.providers_for.side_effect = providers_for
@@ -425,6 +429,7 @@ class MediaServerQueryMigrationTest(unittest.TestCase):
         chain = MediaServerChain()
         chain.pluginmanager = Mock()
         chain.pluginmanager.running_plugins = {}
+        chain.pluginmanager.get_plugin_modules.return_value = {}
         chain.modulemanager = Mock()
         chain.modulemanager.get_running_modules.side_effect = running_modules
         chain.modulemanager.providers_for.side_effect = providers_for
@@ -477,6 +482,164 @@ class MediaServerQueryMigrationTest(unittest.TestCase):
         self.assertEqual(66, total)
         self.assertEqual(1, counters["index_lookups"])
         self.assertEqual(0, counters["broadcast_scans"])
+
+
+class PluginProviderTest(unittest.TestCase):
+    """插件经 get_module() 注入的方法同样是提供者
+
+    迁移的前提是行为等价：run_module 会先执行插件注入的同名方法，多播与单播若看不见
+    它们，把一个方法从广播迁过来就会让挂在其上的插件静默失效。
+    """
+
+    @staticmethod
+    def build(modules, plugin_methods):
+        """
+        构造同时提供系统模块与插件注入方法的链
+
+        :param modules: 运行态模块替身
+        :param plugin_methods: {(插件ID, 插件名): {方法名: 函数}}
+        :return: (链实例, 计数器)
+        """
+        chain, counters = build_chain(*modules)
+        chain.pluginmanager.get_plugin_modules.return_value = plugin_methods
+        return chain, counters
+
+    def test_multicast_collects_plugin_answers_too(self):
+        """多播同时收集插件与系统模块的答案，插件在前。"""
+        calls = []
+        chain, _ = self.build(
+            [RecordingModule("emby", calls, result="emby",
+                             module_type=ModuleType.MediaServer)],
+            {("Hijacker", "插件"): {"notify": lambda **kw: "plugin"}},
+        )
+
+        answers = chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+
+        self.assertEqual(["plugin", "emby"], answers)
+
+    def test_unicast_lets_the_plugin_answer_first(self):
+        """单播里插件优先，插件认领后系统模块不再执行。"""
+        calls = []
+        chain, _ = self.build(
+            [RecordingModule("emby", calls, result="emby",
+                             module_type=ModuleType.MediaServer)],
+            {("Hijacker", "插件"): {"notify": lambda **kw: "plugin"}},
+        )
+
+        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+
+        self.assertEqual("plugin", answer)
+        self.assertEqual([], calls)
+
+    def test_unicast_falls_through_when_the_plugin_declines(self):
+        """插件返回空表示不认领，仲裁继续下移到系统模块。"""
+        calls = []
+        chain, _ = self.build(
+            [RecordingModule("emby", calls, result="emby",
+                             module_type=ModuleType.MediaServer)],
+            {("Hijacker", "插件"): {"notify": lambda **kw: None}},
+        )
+
+        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+
+        self.assertEqual("emby", answer)
+
+    def test_a_failing_plugin_is_reported_as_a_plugin_error(self):
+        """插件抛错按插件错误上报，且不阻断系统提供者。"""
+        calls = []
+
+        def boom(**kwargs):
+            """抛错的插件方法"""
+            raise RuntimeError("插件不可用")
+
+        chain, _ = self.build(
+            [RecordingModule("emby", calls, result="emby",
+                             module_type=ModuleType.MediaServer)],
+            {("Hijacker", "插件"): {"notify": boom}},
+        )
+
+        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+
+        self.assertEqual("emby", answer)
+        self.assertEqual("plugin", chain.messagehelper.put.call_args.kwargs["role"])
+
+
+@pytest.mark.asyncio
+async def test_async_broadcast_notifies_every_provider():
+    """异步广播同样触达全体，不因谁返回了值而中止。"""
+    calls = []
+    chain, counters = build_chain(
+        RecordingModule("first", calls, result="handled"),
+        RecordingModule("second", calls),
+    )
+    chain.pluginmanager.get_plugin_modules.return_value = {}
+
+    result = await chain.async_broadcast("notify", payload="x")
+
+    assert calls == ["first", "second"]
+    assert result is None
+    assert counters["index_lookups"] == 0
+
+
+@pytest.mark.asyncio
+async def test_async_multicast_collects_every_answer_from_the_index():
+    """异步多播经注册表查表，收集族类内全部答案。"""
+    calls = []
+    chain, counters = build_chain(
+        RecordingModule("emby", calls, result="emby", module_type=ModuleType.MediaServer),
+        RecordingModule("plex", calls, result="plex", module_type=ModuleType.MediaServer),
+        RecordingModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
+    )
+    chain.pluginmanager.get_plugin_modules.return_value = {}
+
+    answers = await chain.async_multicast(ModuleType.MediaServer, "notify")
+
+    assert answers == ["emby", "plex"]
+    assert counters["index_lookups"] == 1
+    assert counters["broadcast_scans"] == 0
+
+
+@pytest.mark.asyncio
+async def test_async_unicast_arbitrates_on_the_same_index():
+    """异步单播在同一张表上仲裁，取优先级最高且认领的答案。"""
+    calls = []
+    chain, counters = build_chain(
+        RecordingModule("low", calls, result="low", priority=9,
+                        module_type=ModuleType.MediaServer),
+        RecordingModule("high", calls, result="high", priority=1,
+                        module_type=ModuleType.MediaServer),
+    )
+    chain.pluginmanager.get_plugin_modules.return_value = {}
+
+    answer = await chain.async_unicast(ModuleType.MediaServer, "notify")
+
+    assert answer == "high"
+    assert calls == ["high"]
+
+
+@pytest.mark.asyncio
+async def test_async_dispatch_awaits_coroutine_providers():
+    """提供者是协程函数时被 await，而非返回协程对象。"""
+
+    class AsyncModule(RecordingModule):
+        """协程实现的模块替身"""
+
+        async def notify(self, payload=None, **kwargs):
+            """异步能力方法"""
+            self._calls.append(self._name)
+            return self._result
+
+    calls = []
+    chain, _ = build_chain(
+        AsyncModule("async_emby", calls, result="awaited",
+                    module_type=ModuleType.MediaServer),
+    )
+    chain.pluginmanager.get_plugin_modules.return_value = {}
+
+    answer = await chain.async_unicast(ModuleType.MediaServer, "notify")
+
+    assert answer == "awaited"
+    assert calls == ["async_emby"]
 
 
 if __name__ == "__main__":

@@ -418,6 +418,10 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :return: 族类内全部非空答案，按优先级顺序排列
         """
         answers = []
+        for plugin_id, plugin_name, func in self._plugin_providers(method):
+            result = self._invoke_plugin(plugin_id, plugin_name, func, method, *args, **kwargs)
+            if result is not None:
+                answers.append(result)
         for module in self.modulemanager.providers_for(module_type, method):
             result = self._invoke_provider(module, method, *args, **kwargs)
             if result is not None:
@@ -436,8 +440,158 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param method: 模块方法名称
         :return: 优先级最高且认领了本次调用的提供者的答案
         """
+        for plugin_id, plugin_name, func in self._plugin_providers(method):
+            result = self._invoke_plugin(plugin_id, plugin_name, func, method, *args, **kwargs)
+            if result is not None:
+                return result
         for module in self.modulemanager.providers_for(module_type, method):
             result = self._invoke_provider(module, method, *args, **kwargs)
+            if result is not None:
+                return result
+        return None
+
+    def _plugin_providers(self, method: str) -> List[Tuple[str, str, Callable]]:
+        """
+        取插件经 get_module() 注入的同名方法
+
+        这类方法不属于任何族类，但 run_module 一直会先执行它们。多播与单播若看不见
+        它们，把方法从广播迁过来就会让挂在其上的插件静默失效，因此一并纳入提供者。
+
+        :param method: 模块方法名称
+        :return: [(插件ID, 插件名, 方法), ...]
+        """
+        providers = []
+        for plugin, module_dict in self.pluginmanager.get_plugin_modules().items():
+            plugin_id, plugin_name = plugin
+            func = module_dict.get(method)
+            if func:
+                providers.append((plugin_id, plugin_name, func))
+        return providers
+
+    def _invoke_plugin(self, plugin_id: str, plugin_name: str, func: Callable,
+                       method: str, *args, **kwargs) -> Any:
+        """
+        执行插件注入的方法，并按插件语义处理限流与错误
+
+        :param plugin_id: 插件标识
+        :param plugin_name: 插件名称
+        :param func: 插件注入的方法
+        :param method: 模块方法名称
+        :return: 插件的返回值，跳过或出错时为 None
+        """
+        try:
+            logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
+            return func(*args, **kwargs)
+        except RateLimitExceededException as err:
+            self.__handle_rate_limit_error(err, "插件", plugin_id, method, **kwargs)
+        except Exception as err:
+            self.__handle_plugin_error(err, plugin_id, plugin_name, method, **kwargs)
+        return None
+
+    async def _async_invoke_provider(self, module: Any, method: str, *args, **kwargs) -> Any:
+        """
+        异步执行单个提供者；同步方法切线程池，避免阻塞共享事件循环
+
+        :param module: 提供者模块实例
+        :param method: 模块方法名称
+        :return: 提供者的返回值，跳过或出错时为 None
+        """
+        module_id = module.__class__.__name__
+        try:
+            module_name = module.get_name()
+        except Exception as err:
+            logger.debug(f"获取模块名称出错：{str(err)}")
+            module_name = module_id
+        try:
+            func = getattr(module, method)
+            if inspect.iscoroutinefunction(func):
+                return await func(*args, **kwargs)
+            return await run_in_threadpool(func, *args, **kwargs)
+        except RateLimitExceededException as err:
+            self.__handle_rate_limit_error(err, "模块", module_id, method, **kwargs)
+        except Exception as err:
+            logger.error(traceback.format_exc())
+            self.__handle_system_error(err, module_id, module_name, method, **kwargs)
+        return None
+
+    async def _async_invoke_plugin(self, plugin_id: str, plugin_name: str, func: Callable,
+                                   method: str, *args, **kwargs) -> Any:
+        """
+        异步执行插件注入的方法；同步方法切线程池
+
+        :param plugin_id: 插件标识
+        :param plugin_name: 插件名称
+        :param func: 插件注入的方法
+        :param method: 模块方法名称
+        :return: 插件的返回值，跳过或出错时为 None
+        """
+        try:
+            logger.info(f"请求插件 {plugin_name} 执行：{method} ...")
+            if inspect.iscoroutinefunction(func):
+                return await func(*args, **kwargs)
+            return await run_in_threadpool(func, *args, **kwargs)
+        except RateLimitExceededException as err:
+            self.__handle_rate_limit_error(err, "插件", plugin_id, method, **kwargs)
+        except Exception as err:
+            self.__handle_plugin_error(err, plugin_id, plugin_name, method, **kwargs)
+        return None
+
+    async def async_broadcast(self, method: str, *args, **kwargs) -> None:
+        """
+        异步通知全体提供者，不收集答案
+
+        与同步广播语义一致：触达全体是它的固有代价，不做索引化。
+
+        :param method: 模块方法名称
+        """
+        for plugin_id, plugin_name, func in self._plugin_providers(method):
+            await self._async_invoke_plugin(plugin_id, plugin_name, func, method, *args, **kwargs)
+        for module in self.modulemanager.get_running_modules(method):
+            await self._async_invoke_provider(module, method, *args, **kwargs)
+
+    async def async_multicast(self, module_type: ModuleType, method: str,
+                              *args, **kwargs) -> List[Any]:
+        """
+        异步圈定一个族类，收集其中每个提供者的答案
+
+        与同步多播查同一张 (族类, 能力) 注册表。
+
+        :param module_type: 模块族类
+        :param method: 模块方法名称
+        :return: 族类内全部非空答案
+        """
+        answers = []
+        for plugin_id, plugin_name, func in self._plugin_providers(method):
+            result = await self._async_invoke_plugin(
+                plugin_id, plugin_name, func, method, *args, **kwargs
+            )
+            if result is not None:
+                answers.append(result)
+        for module in self.modulemanager.providers_for(module_type, method):
+            result = await self._async_invoke_provider(module, method, *args, **kwargs)
+            if result is not None:
+                answers.append(result)
+        return answers
+
+    async def async_unicast(self, module_type: ModuleType, method: str,
+                            *args, **kwargs) -> Any:
+        """
+        异步在族类内仲裁，最终只取一个答案
+
+        候选集与异步多播完全一致，只叠加短路。
+
+        :param module_type: 模块族类
+        :param method: 模块方法名称
+        :return: 优先级最高且认领了本次调用的提供者的答案
+        """
+        for plugin_id, plugin_name, func in self._plugin_providers(method):
+            result = await self._async_invoke_plugin(
+                plugin_id, plugin_name, func, method, *args, **kwargs
+            )
+            if result is not None:
+                return result
+        for module in self.modulemanager.providers_for(module_type, method):
+            result = await self._async_invoke_provider(module, method, *args, **kwargs)
             if result is not None:
                 return result
         return None
