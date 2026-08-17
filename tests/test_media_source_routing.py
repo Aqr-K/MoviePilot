@@ -1,6 +1,7 @@
 from unittest.mock import Mock, patch
 
 from app.chain import ChainBase
+from app.chain.dispatch import Dispatcher
 from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
 from app.schemas.types import MediaSource, MediaType
@@ -118,15 +119,15 @@ def test_default_recognition_passes_empty_generic_identity() -> None:
 
 def test_module_dispatch_always_reaches_plugins() -> None:
     """模块调度必须始终先执行插件模块。"""
-    chain = _chain_without_init()
-    chain._ChainBase__execute_plugin_modules = Mock(return_value="plugin")
-    chain._ChainBase__execute_system_modules = Mock(return_value="system")
+    dispatcher = Dispatcher(module_manager=Mock(), plugin_manager=Mock())
+    dispatcher._execute_plugin_modules = Mock(return_value="plugin")
+    dispatcher._execute_system_modules = Mock(return_value="system")
 
-    result = chain.run_module("search_medias", meta=MetaBase("test"))
+    result = dispatcher.run_module("search_medias", meta=MetaBase("test"))
 
     assert result == "plugin"
-    chain._ChainBase__execute_plugin_modules.assert_called_once()
-    chain._ChainBase__execute_system_modules.assert_not_called()
+    dispatcher._execute_plugin_modules.assert_called_once()
+    dispatcher._execute_system_modules.assert_not_called()
 
 
 def test_explicit_search_source_reaches_plugins() -> None:

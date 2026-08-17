@@ -14,6 +14,7 @@ sys.modules.setdefault("transmission_rpc", _PyModuleType("transmission_rpc"))
 setattr(sys.modules["transmission_rpc"], "File", object)
 
 from app.chain import ChainBase  # noqa: E402
+from app.chain import dispatch as chain_dispatch  # noqa: E402
 
 
 class ChannelModule:
@@ -85,16 +86,16 @@ class PostMessageTrunkTest(unittest.TestCase):
     """消息主干：队列回调经能力索引分发到每一个认领的渠道"""
 
     def test_init_wires_queue_callback_to_multicast(self):
-        """ChainBase 构造时把队列回调接到多播原语。
+        """ChainBase 构造时把队列回调接到默认分发器的多播原语。
 
         队列是单例，回调只在首个实例构造时绑定，因此这条接线无法由行为用例覆盖，
-        单独锁定。
+        单独锁定。回调是分发器函数而非链实例方法，队列不持有任何链实例。
         """
         with patch("app.chain.MessageQueueManager") as queue_cls:
             ChainBase()
 
         callback = queue_cls.call_args.kwargs["send_callback"]
-        self.assertEqual(callback.__func__, ChainBase.multicast)
+        self.assertIs(callback, chain_dispatch.multicast)
 
     def test_queue_callback_dispatches_via_capability_index(self):
         """队列回调查能力索引，不再回落到全体遍历。

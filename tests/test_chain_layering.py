@@ -54,12 +54,13 @@ def test_chain_base_does_not_import_concrete_chains() -> None:
     imports = _imported_modules(CHAIN_ROOT / "__init__.py")
 
     # 下划线前缀的内部模块（_messaging/_recognition 等）是 ChainBase 的
-    # 功能域 mixin，不是具体处理链，允许导入
+    # 功能域 mixin，dispatch 是三级分发机制模块，均不是具体处理链，允许导入
     assert not {
         module
         for module in imports
         if module.startswith("app.chain.")
         and not module.removeprefix("app.chain.").startswith("_")
+        and module != "app.chain.dispatch"
     }
 
 
