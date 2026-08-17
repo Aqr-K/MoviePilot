@@ -93,6 +93,20 @@ elif ObjectUtils.check_signature(func, result):
   领域模块基类不在此列——它们既给管道也给真业务能力，把整个基类拉黑会连坐判死
   `user_authenticate`、`media_exists`、`register_commands`
 
+### 排查分发问题时的两个入口
+
+```python
+ModuleManager.get_module_capabilities(module_id) -> List[str]   # 这个模块提供什么
+ModuleManager.get_capability_index() -> Dict[str, List[str]]    # 能力 → 提供者的倒排
+```
+
+只读、不触发任何初始化。`providers_for` 只能「按名问人」，答不了「系统里到底有哪些能力」——
+而后者才是分发出问题时最先要问的（某个能力为什么查不到提供者？某个模块到底被识别出了什么？）。
+
+两者都建立在 `provided_capabilities()` 之上，不另写判据。单个模块推导出错只记 debug 日志并跳过，
+不中断整张表——诊断接口本就是故障时用的，若因某个模块状态异常而整体失效，恰好在最需要它的
+时候罢工。
+
 ### 已知盲区
 
 能力推导止步于 **Module 类**，看不到 Module 持有的 service 实例类。`get_music` 定义在
