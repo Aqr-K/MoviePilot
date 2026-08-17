@@ -7,11 +7,18 @@ from app.domain.meta.words import configure_custom_words_provider
 from app.domain.metainfo import clear_rust_parse_options_cache
 from app.adapters.system import rust as rust_accelerator
 from app.runtime.config import settings
+from app.runtime.localization import LocaleHelper
+from app.schemas.i18n import configure_translator
 from app.application.recognition import RecognitionRuleService
 
 
 def configure_domain_dependencies() -> None:
     """在组合根集中注入领域模型需要的配置、持久化规则和加速适配器。"""
+    configure_translator(
+        lambda text: LocaleHelper.translate_text(
+            text, locale=LocaleHelper.get_current_locale()
+        )
+    )
     rule_service = RecognitionRuleService()
     configure_customization_provider(rule_service.get_customization)
     configure_release_groups_provider(rule_service.get_release_groups)

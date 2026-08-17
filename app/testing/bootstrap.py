@@ -185,6 +185,8 @@ def prepare_backend() -> None:
     # 测试与生产使用同一组合入口，确保领域解析器获得隔离库和测试 settings。
     from app.startup.domain_initializer import configure_domain_dependencies
     configure_domain_dependencies()
+    # 导入即注册 Agent 门面 provider（不物化实现），技能交互等门面消费方才能解析。
+    import app.startup.agent_initializer  # noqa: F401
 
 
 def prepare_v2_backend(plugins_repo: Path) -> None:

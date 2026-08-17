@@ -8,7 +8,10 @@ from app.agent.runtime_loader import (
     is_tool_factory_materialized,
     reconcile_agent_service,
 )
-from app.application.agent import register_agent_service_providers
+from app.application.agent import (
+    register_agent_service_providers,
+    register_skill_helper_provider,
+)
 from app.runtime.config import settings
 from app.runtime.events import Event, eventmanager
 from app.runtime.log import logger
@@ -71,6 +74,13 @@ def _get_manual_redo_prompt_builder() -> Any:
     from app.agent.prompt.transfer_redo import build_manual_redo_prompt
 
     return build_manual_redo_prompt
+
+
+def _get_skill_helper() -> Any:
+    """首个技能管理请求才导入技能注册表。"""
+    from app.agent.skills.registry import SkillHelper
+
+    return SkillHelper()
 
 
 async def _handle_agent_config_changed(event: Event) -> None:
@@ -169,6 +179,7 @@ register_agent_service_providers(
     llm_helper_provider=_get_llm_helper,
     manual_redo_prompt_builder_provider=_get_manual_redo_prompt_builder,
 )
+register_skill_helper_provider(_get_skill_helper)
 
 
 async def init_agent() -> bool:

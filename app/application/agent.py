@@ -20,6 +20,7 @@ _prompt_manager_provider: Optional[Provider] = None
 _agent_capability_manager_provider: Optional[Provider] = None
 _llm_helper_provider: Optional[Provider] = None
 _manual_redo_prompt_builder_provider: Optional[Provider] = None
+_skill_helper_provider: Optional[Provider] = None
 
 
 def register_agent_service_providers(
@@ -84,6 +85,17 @@ def get_running_agent_manager() -> Any | None:
 def get_prompt_manager() -> Any:
     """按需返回提示词管理器。"""
     return _resolve(_prompt_manager_provider, "prompt_manager")
+
+
+def register_skill_helper_provider(provider: Provider) -> None:
+    """注册技能管理器 provider，由组合根装配。"""
+    global _skill_helper_provider
+    _skill_helper_provider = provider
+
+
+def get_skill_helper() -> Any:
+    """返回技能管理器实例。"""
+    return _resolve(_skill_helper_provider, "skill_helper")
 
 
 def supports_image_input(

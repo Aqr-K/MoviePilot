@@ -93,7 +93,19 @@ FORBIDDEN_IMPORT_PREFIXES = {
         "app.sdk",
     ),
     "app.application": (
+        "app.agent",
         "app.runtime.compat",
+        "app.sdk",
+    ),
+    "app.schemas": (
+        "app.adapters",
+        "app.agent",
+        "app.api",
+        "app.application",
+        "app.chain",
+        "app.db",
+        "app.modules",
+        "app.runtime",
         "app.sdk",
     ),
 }
