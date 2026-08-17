@@ -373,6 +373,58 @@ class BangumiModule(_ModuleBase):
             return None
         return self.scraper.get_metadata_img(mediainfo, season=season, episode=episode)
 
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        交出本源提供的榜单清单
+
+        本周放送表按周返回全量，没有分页，如实声明以免调用方翻页。
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(
+                source=MediaSource.Bangumi.value,
+                board="calendar",
+                name="每日放送",
+                media_type=MediaType.TV.value,
+                paginated=False,
+            )
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                       page: int = 1, count: int = 30,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        取本源某个榜单，委托对应的既有方法
+
+        本源榜单不分页，page 与 count 到此为止——本源接口没有这两个参数。
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.Bangumi or board != "calendar":
+            return None
+        return self.bangumi_calendar()
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                   board: str = None, page: int = 1, count: int = 30,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        异步取本源某个榜单，委托对应的既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.Bangumi or board != "calendar":
+            return None
+        return await self.async_bangumi_calendar()
+
     def bangumi_calendar(self) -> Optional[List[MediaInfo]]:
         """
         获取Bangumi每日放送

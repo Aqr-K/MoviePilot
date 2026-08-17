@@ -1110,6 +1110,56 @@ class TheMovieDbModule(_ModuleBase):
             return [MediaInfo(tmdb_info=info) for info in infos]
         return []
 
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        交出本源提供的榜单清单
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(
+                source=MediaSource.TMDB.value,
+                board="trending",
+                name="流行趋势",
+                media_type=None,
+                paginated=True,
+            )
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                       page: int = 1, count: int = 30,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        取本源某个榜单的一页，委托对应的既有方法
+
+        本源榜单只认页码，每页条数由接口固定，count 到此为止。
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码
+        :param count: 每页条数，本源不支持
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.TMDB or board != "trending":
+            return None
+        return self.tmdb_trending(page=page)
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                   board: str = None, page: int = 1, count: int = 30,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        异步取本源某个榜单的一页，委托对应的既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码
+        :param count: 每页条数，本源不支持
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.TMDB or board != "trending":
+            return None
+        return await self.async_tmdb_trending(page=page)
+
     def tmdb_trending(self, page: Optional[int] = 1) -> List[MediaInfo]:
         """
         TMDB流行趋势

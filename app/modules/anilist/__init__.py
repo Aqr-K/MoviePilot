@@ -436,6 +436,67 @@ class AniListModule(_ModuleBase):
         """
         return await self.anilist_api.async_detail(anilist_id) if anilist_id else None
 
+    # 本源榜单标识到实现方法名的映射，异步版按 async_ 前缀推导
+    _DISCOVER_BOARDS = (
+        ("trending", "anilist_trending", "当季热门"),
+        ("popular_this_season", "anilist_popular_this_season", "本季流行"),
+    )
+
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        交出本源提供的榜单清单
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(
+                source=MediaSource.AniList.value,
+                board=board,
+                name=name,
+                media_type=MediaType.TV.value,
+                paginated=True,
+            )
+            for board, _, name in self._DISCOVER_BOARDS
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                       page: int = 1, count: int = 20,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        取本源某个榜单的一页，委托对应的既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码
+        :param count: 每页条数
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        method = dict((item[0], item[1]) for item in self._DISCOVER_BOARDS).get(board)
+        if not method:
+            return None
+        return getattr(self, method)(page=page, count=count)
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                   board: str = None, page: int = 1, count: int = 20,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        异步取本源某个榜单的一页，委托对应的既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码
+        :param count: 每页条数
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        method = dict((item[0], item[1]) for item in self._DISCOVER_BOARDS).get(board)
+        if not method:
+            return None
+        return await getattr(self, f"async_{method}")(page=page, count=count)
+
     def anilist_trending(self, page: int = 1, count: int = 20) -> List[MediaInfo]:
         """
         获取 AniList 当前趋势榜。

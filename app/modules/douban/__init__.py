@@ -1392,6 +1392,70 @@ class DoubanModule(_ModuleBase):
                     and "tv_large.jpg" not in media.poster_path]
         return []
 
+    # 本源榜单标识到实现方法名的映射，异步版按 async_ 前缀推导
+    _DISCOVER_BOARDS = (
+        ("movie_showing", "正在热映", MediaType.MOVIE),
+        ("movie_hot", "热门电影", MediaType.MOVIE),
+        ("movie_top250", "豆瓣电影 Top250", MediaType.MOVIE),
+        ("tv_hot", "热门剧集", MediaType.TV),
+        ("tv_animation", "热门动漫", MediaType.TV),
+        ("tv_weekly_chinese", "国产剧集榜", MediaType.TV),
+        ("tv_weekly_global", "全球剧集榜", MediaType.TV),
+    )
+
+    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+        """
+        交出本源提供的榜单清单
+
+        :return: 榜单声明列表
+        """
+        return [
+            schemas.DiscoverBoard(
+                source=MediaSource.Douban.value,
+                board=board,
+                name=name,
+                media_type=media_type.value if media_type else None,
+                paginated=True,
+            )
+            for board, name, media_type in self._DISCOVER_BOARDS
+        ]
+
+    def discover_board(self, source: Optional[MediaSource] = None, board: str = None,
+                       page: int = 1, count: int = 30,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        取本源某个榜单的一页，委托对应的既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码
+        :param count: 每页条数
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        if board not in {item[0] for item in self._DISCOVER_BOARDS}:
+            return None
+        return getattr(self, board)(page=page, count=count)
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                   board: str = None, page: int = 1, count: int = 30,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        异步取本源某个榜单的一页，委托对应的既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param board: 榜单标识，本源没有时让出
+        :param page: 页码
+        :param count: 每页条数
+        :return: 媒体列表，非本源或未知榜单时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        if board not in {item[0] for item in self._DISCOVER_BOARDS}:
+            return None
+        return await getattr(self, f"async_{board}")(page=page, count=count)
+
     def movie_showing(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取正在上映的电影
