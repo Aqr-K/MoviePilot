@@ -56,6 +56,7 @@ from app.schemas.types import (
     ChainEventType,
     MessageChannel,
     MediaSource,
+    ModuleType,
     SystemConfigKey,
 )
 from app.foundation.reflection import ObjectUtils
@@ -474,6 +475,98 @@ class ChainBase(metaclass=ABCMeta):
                     err, module_id, module_name, method, **kwargs
                 )
         return result
+
+    def broadcast(self, method: str, *args, **kwargs) -> None:
+        """
+        通知全体提供者，不收集答案
+
+        每个提供者相互独立：一个抛错只按系统模块错误上报，不阻断其余提供者收到通知，
+        也不因谁返回了值而提前中止。调用方拿不到答案，需要答案的场景用多播或单播。
+
+        :param method: 模块方法名称
+        """
+        for module in self.modulemanager.get_running_modules(method):
+            self._invoke_provider(module, method, *args, **kwargs)
+
+    def _scoped_providers(self, scope: Any, method: str) -> List[Any]:
+        """
+        三级流水线的公共选择器：先按 scope 圈定一类，再按能力过滤出真正的提供者
+
+        scope 允许以模块类型或子类型声明，前者圈定一个家族，后者圈定家族内的一个后端。
+
+        :param scope: 模块类型或子类型
+        :param method: 模块方法名称
+        :return: 圈内实现了该方法的模块
+        """
+        if isinstance(scope, ModuleType):
+            candidates = self.modulemanager.get_running_type_modules(scope)
+        else:
+            candidates = self.modulemanager.get_running_subtype_module(scope)
+        return [module for module in candidates
+                if callable(getattr(module, method, None))]
+
+    def _invoke_provider(self, module: Any, method: str, *args, **kwargs) -> Any:
+        """
+        执行单个提供者，并按既有语义处理限流与错误
+
+        :param module: 提供者模块实例
+        :param method: 模块方法名称
+        :return: 提供者的返回值，跳过或出错时为 None
+        """
+        module_id = module.__class__.__name__
+        try:
+            module_name = module.get_name()
+        except Exception as err:
+            logger.debug(f"获取模块名称出错：{str(err)}")
+            module_name = module_id
+        try:
+            return getattr(module, method)(*args, **kwargs)
+        except RateLimitExceededException as err:
+            self.__handle_rate_limit_error(err, "模块", module_id, method, **kwargs)
+        except Exception as err:
+            logger.error(traceback.format_exc())
+            self.__handle_system_error(err, module_id, module_name, method, **kwargs)
+        return None
+
+    def multicast(self, scope: Any, method: str, *args, **kwargs) -> List[Any]:
+        """
+        圈定一类，收集该类中每个提供者的答案
+
+        与广播的区别是要答案且只在 scope 内取；与单播的区别是不做仲裁，全部答案都交出。
+        提供者返回空表示不认领，不计入结果；单个提供者出错不影响其余答案。
+
+        :param scope: 模块类型或子类型
+        :param method: 模块方法名称
+        :return: 圈内全部非空答案，按提供者顺序排列
+        """
+        answers = []
+        for module in self._scoped_providers(scope, method):
+            result = self._invoke_provider(module, method, *args, **kwargs)
+            if result is not None:
+                answers.append(result)
+        return answers
+
+    def unicast(self, scope: Any, method: str, *args, **kwargs) -> Any:
+        """
+        在多播圈出的子集上仲裁，最终只取一个答案
+
+        候选集与多播完全一致，单播只是在其上叠加优先级排序与短路：按优先级依次询问，
+        谁先给出非空答案就用谁的，其余提供者不再执行。提供者返回空表示不认领，仲裁
+        继续下移；圈内无人认领时返回 None，不回落到广播。
+
+        :param scope: 模块类型或子类型
+        :param method: 模块方法名称
+        :return: 优先级最高且认领了本次调用的提供者的答案
+        """
+        providers = sorted(
+            self._scoped_providers(scope, method),
+            key=lambda module: module.get_priority(),
+        )
+        for module in providers:
+            result = self._invoke_provider(module, method, *args, **kwargs)
+            if result is not None:
+                return result
+        return None
 
     def run_module(
             self,
