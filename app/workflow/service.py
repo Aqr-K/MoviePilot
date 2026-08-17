@@ -12,7 +12,6 @@ from typing import Any, Callable, List, Optional, Tuple
 
 from pydantic import BaseModel
 
-from app.chain import ChainBase
 from app.runtime.config import global_vars
 from app.runtime.events import Event, eventmanager
 from app.db.models import Workflow
@@ -1149,9 +1148,9 @@ class WorkflowExecutor:
                 setattr(self.context, key, value)
 
 
-class WorkflowChain(ChainBase):
+class WorkflowChain:
     """
-    工作流链
+    工作流服务：查询、执行、启停与分享工作流。
     """
 
     @eventmanager.register(EventType.WorkflowExecute)

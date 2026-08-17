@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.api.response import ResponseAPIRouter
-from app.chain.workflow import WorkflowChain
+from app.workflow.service import WorkflowChain
 from app.runtime.config import global_vars
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.workflow import WorkFlowManager

@@ -2,7 +2,6 @@ from typing import Callable, List, Optional
 
 import pillow_avif  # noqa 用于自动注册AVIF支持
 
-from app.chain import ChainBase
 from app.chain.bangumi import BangumiChain
 from app.chain.douban import DoubanChain
 from app.chain.listenbrainz import ListenBrainzChain
@@ -23,7 +22,7 @@ from app.schemas.media import normalize_media_source
 from app.foundation.singleton import Singleton
 
 
-class RecommendChain(ChainBase, metaclass=Singleton):
+class RecommendChain(metaclass=Singleton):
     """
     推荐处理链，单例运行
     """

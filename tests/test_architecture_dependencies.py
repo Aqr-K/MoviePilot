@@ -97,6 +97,9 @@ FORBIDDEN_IMPORT_PREFIXES = {
         "app.runtime.compat",
         "app.sdk",
     ),
+    "app.chain": (
+        "app.workflow",
+    ),
     "app.schemas": (
         "app.adapters",
         "app.agent",
