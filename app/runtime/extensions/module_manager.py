@@ -83,6 +83,8 @@ class ModuleManager(metaclass=Singleton):
         self._lifecycle_lock = threading.RLock()
         self._modules: dict[str, type] = {}
         self._running_modules: dict[str, Any] = {}
+        # 多播与单播的查表结果：{(族类, 能力): (提供者, ...)}，运行态变化时整体丢弃
+        self._dispatch_index: dict[tuple, tuple] = {}
         # 外部来源声明的模块按 owner 记账：{owner: [module_id, ...]}
         self._external_modules: dict[str, list[str]] = {}
         self._plugin_adapter = PluginModuleAdapter()
@@ -172,6 +174,63 @@ class ModuleManager(metaclass=Singleton):
         }
         with self._lock:
             self._running_modules = running
+            self._dispatch_index = {}
+
+    def invalidate_dispatch_index(self) -> None:
+        """
+        丢弃分发注册表
+
+        运行态模块集合变化后调用，使下次查询重新求值。
+        """
+        with self._lock:
+            self._dispatch_index = {}
+
+    def providers_for(self, module_type: ModuleType, method: str) -> tuple:
+        """
+        取某族类下提供指定能力的模块，按优先级排序
+
+        多播与单播都是查询而非通知：它们只关心「这一类里谁能回答」，不需要触达全体。
+        结果按 (族类, 能力) 记入注册表，命中后为 O(1)，只在运行态集合变化时重建。
+        广播不走这里——它要触达全体，遍历本身就是它的语义。
+
+        :param module_type: 模块族类
+        :param method: 能力方法名
+        :return: 按优先级升序排列的提供者
+        """
+        key = (module_type, method)
+        with self._lock:
+            cached = self._dispatch_index.get(key)
+        if cached is not None:
+            return cached
+        providers = tuple(sorted(
+            (
+                module for module in self._running_snapshot()
+                if self._provides(module, module_type, method)
+            ),
+            key=lambda module: module.get_priority(),
+        ))
+        with self._lock:
+            self._dispatch_index[key] = providers
+        return providers
+
+    @staticmethod
+    def _provides(module: Any, module_type: ModuleType, method: str) -> bool:
+        """
+        判断模块是否属于该族类并已实现该能力
+
+        :param module: 运行态模块实例
+        :param module_type: 期望的族类
+        :param method: 能力方法名
+        :return: 是否为该能力的提供者
+        """
+        try:
+            if module.get_type() != module_type:
+                return False
+        except Exception as err:
+            logger.debug(f"获取模块 {module.__class__.__name__} 族类出错：{str(err)}")
+            return False
+        candidate = getattr(module, method, None)
+        return callable(candidate) and ObjectUtils.check_method(candidate)
 
     def resolve_event_handler_instance(
         self,
