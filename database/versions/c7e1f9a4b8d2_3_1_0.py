@@ -2,7 +2,7 @@
 新增插件实例配置表
 
 Revision ID: c7e1f9a4b8d2
-Revises: f4c8d2a7b1e6
+Revises: 73370ce9bab7
 Create Date: 2026-08-15
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "c7e1f9a4b8d2"
-down_revision = "f4c8d2a7b1e6"
+down_revision = "73370ce9bab7"
 branch_labels = None
 depends_on = None
 
