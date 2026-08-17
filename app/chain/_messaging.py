@@ -42,7 +42,9 @@ class MessageProcessingMixin:
         ):
             return None
         try:
-            status = self.run_module(
+            # channel 定位单一渠道模块，认领方给出状态字典、其余渠道返回 None 不认领，
+            # 只需要那一个答案。
+            status = self.unicast(
                 "mark_message_processing_started",
                 channel=channel,
                 source=source,
@@ -80,7 +82,8 @@ class MessageProcessingMixin:
         ):
             return
         try:
-            self.run_module(
+            # 同上：channel 定位单一渠道模块，收尾动作只需一个渠道执行一次。
+            self.unicast(
                 "mark_message_processing_finished",
                 channel=target_channel,
                 source=(status or {}).get("source") or source,
@@ -405,7 +408,8 @@ class NotificationMixin:
         :param chat_id: 聊天ID（如群组ID）
         :return: 删除是否成功
         """
-        return self.run_module(
+        # channel+source 定位单一渠道单一实例，只需要那一个答案。
+        return self.unicast(
             "delete_message",
             channel=channel,
             source=source,
@@ -451,7 +455,8 @@ class NotificationMixin:
                 logger.debug(f"编辑 WebAgent 消息失败: {err}")
                 return False
 
-        return self.run_module(
+        # channel+source 定位单一渠道单一实例，只需要那一个答案。
+        return self.unicast(
             "edit_message",
             channel=channel,
             source=source,
@@ -470,7 +475,8 @@ class NotificationMixin:
         :param message: 消息体
         :return: 消息响应（包含message_id, chat_id等）
         """
-        return self.run_module(
+        # message.channel 定位单一渠道，只需要那一个渠道的发送结果。
+        return self.unicast(
             "send_direct_message",
             message=self._normalize_notification_for_dispatch(message),
         )
@@ -483,4 +489,5 @@ class NotificationMixin:
         对已发送消息执行渠道收尾动作。
         例如关闭流式卡片状态；无特殊收尾的渠道直接返回 False。
         """
-        return self.run_module("finalize_message", response=response)
+        # response.channel 定位单一渠道，只需要那一个渠道的收尾结果。
+        return self.unicast("finalize_message", response=response)
