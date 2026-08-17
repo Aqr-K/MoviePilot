@@ -8,7 +8,7 @@ from app.db.oper.mediaserver import MediaServerOper
 from app.runtime.extensions.service_registry import ServiceConfigHelper
 from app.runtime.log import logger
 from app.schemas import MediaServerLibrary, MediaServerItem, MediaServerSeasonInfo, MediaServerPlayItem
-from app.schemas.types import MediaType, ModuleType
+from app.schemas.types import MediaType
 from app.application.security.url import SecurityUtils
 
 lock = threading.Lock()
@@ -159,9 +159,7 @@ class MediaServerChain(ChainBase):
         """
         statistics = [
             statistic
-            for group in self.multicast(
-                ModuleType.MediaServer, "media_statistic", server=server
-            )
+            for group in self.multicast("media_statistic", server=server)
             for statistic in group
         ]
         if not statistics:
@@ -177,19 +175,13 @@ class MediaServerChain(ChainBase):
         """
         获取媒体服务器项目信息
         """
-        return self.unicast(
-            ModuleType.MediaServer, "mediaserver_iteminfo",
-            server=server, item_id=item_id,
-        )
+        return self.unicast("mediaserver_iteminfo", server=server, item_id=item_id)
 
     def episodes(self, server: str, item_id: Union[str, int]) -> List[MediaServerSeasonInfo]:
         """
         获取媒体服务器剧集信息
         """
-        return self.unicast(
-            ModuleType.MediaServer, "mediaserver_tv_episodes",
-            server=server, item_id=item_id,
-        )
+        return self.unicast("mediaserver_tv_episodes", server=server, item_id=item_id)
 
     def playing(self, server: str, count: Optional[int] = 20,
                 username: Optional[str] = None) -> Optional[List[MediaServerPlayItem]]:
@@ -249,10 +241,7 @@ class MediaServerChain(ChainBase):
         """
         获取播放地址
         """
-        return self.unicast(
-            ModuleType.MediaServer, "mediaserver_play_url",
-            server=server, item_id=item_id,
-        )
+        return self.unicast("mediaserver_play_url", server=server, item_id=item_id)
 
     def get_season_episode_ids(self, server: str, item_id: Union[str, int],
                                season: int) -> Dict[int, str]:

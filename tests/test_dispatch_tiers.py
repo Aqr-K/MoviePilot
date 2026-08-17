@@ -60,6 +60,12 @@ class RecordingModule:
         return self._result
 
 
+class NoCapabilityModule(RecordingModule):
+    """不提供该能力的模块替身"""
+
+    notify = None
+
+
 class FailingModule(RecordingModule):
     """执行时抛错的模块替身"""
 
@@ -94,12 +100,11 @@ def build_chain(*modules):
         counters["broadcast_scans"] += 1
         return iter([m for m in modules if callable(getattr(m, method, None))])
 
-    def providers_for(module_type, method):
-        """查询路径：按族类与能力查表"""
+    def providers_for(method):
+        """查询路径：按能力查表"""
         counters["index_lookups"] += 1
         return tuple(sorted(
-            (m for m in modules
-             if m.get_type() == module_type and callable(getattr(m, method, None))),
+            (m for m in modules if callable(getattr(m, method, None))),
             key=lambda m: m.get_priority(),
         ))
 
@@ -192,7 +197,7 @@ class MulticastTierTest(unittest.TestCase):
             RecordingModule("plex", calls, result="plex", module_type=ModuleType.MediaServer),
         )
 
-        answers = chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+        answers = chain.multicast("notify", payload="x")
 
         self.assertEqual(["emby", "plex"], answers)
 
@@ -204,20 +209,20 @@ class MulticastTierTest(unittest.TestCase):
             RecordingModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
         )
 
-        chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+        chain.multicast("notify", payload="x")
 
         self.assertEqual(1, counters["index_lookups"])
         self.assertEqual(0, counters["broadcast_scans"])
 
-    def test_providers_outside_the_family_are_not_touched(self):
-        """圈外的模块一个都不被调用，即使它实现了同名方法。"""
+    def test_modules_without_the_capability_are_not_touched(self):
+        """不提供该能力的模块一个都不被调用。"""
         calls = []
         chain, _ = build_chain(
             RecordingModule("emby", calls, result="emby", module_type=ModuleType.MediaServer),
-            RecordingModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
+            NoCapabilityModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
         )
 
-        answers = chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+        answers = chain.multicast("notify", payload="x")
 
         self.assertEqual(["emby"], answers)
         self.assertEqual(["emby"], calls)
@@ -230,7 +235,7 @@ class MulticastTierTest(unittest.TestCase):
             RecordingModule("silent", calls, result=None, module_type=ModuleType.MediaServer),
         )
 
-        answers = chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+        answers = chain.multicast("notify", payload="x")
 
         self.assertEqual(["emby"], answers)
         self.assertEqual(["emby", "silent"], calls)
@@ -243,19 +248,19 @@ class MulticastTierTest(unittest.TestCase):
             RecordingModule("emby", calls, result="emby", module_type=ModuleType.MediaServer),
         )
 
-        answers = chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+        answers = chain.multicast("notify", payload="x")
 
         self.assertEqual(["emby"], answers)
         chain.messagehelper.put.assert_called_once()
 
-    def test_an_empty_family_yields_no_answers(self):
-        """族类下无提供者时返回空列表，不回落到广播。"""
+    def test_an_unprovided_capability_yields_no_answers(self):
+        """无人提供该能力时返回空列表，不回落到广播。"""
         calls = []
         chain, counters = build_chain(
-            RecordingModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
+            NoCapabilityModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
         )
 
-        self.assertEqual([], chain.multicast(ModuleType.MediaServer, "notify"))
+        self.assertEqual([], chain.multicast("notify"))
         self.assertEqual([], calls)
         self.assertEqual(0, counters["broadcast_scans"])
 
@@ -273,7 +278,7 @@ class UnicastTierTest(unittest.TestCase):
                             module_type=ModuleType.MediaServer),
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual("high", answer)
         self.assertEqual(["high"], calls)
@@ -288,7 +293,7 @@ class UnicastTierTest(unittest.TestCase):
                             module_type=ModuleType.MediaServer),
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual(1, counters["index_lookups"])
         self.assertEqual(0, counters["broadcast_scans"])
@@ -304,7 +309,7 @@ class UnicastTierTest(unittest.TestCase):
                             module_type=ModuleType.MediaServer),
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual("answers", answer)
         self.assertEqual(["declines", "answers"], calls)
@@ -318,7 +323,7 @@ class UnicastTierTest(unittest.TestCase):
                             module_type=ModuleType.MediaServer),
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual("emby", answer)
         chain.messagehelper.put.assert_called_once()
@@ -331,17 +336,17 @@ class UnicastTierTest(unittest.TestCase):
             RecordingModule("b", calls, result=None, module_type=ModuleType.MediaServer),
         )
 
-        self.assertIsNone(chain.unicast(ModuleType.MediaServer, "notify"))
+        self.assertIsNone(chain.unicast("notify"))
         self.assertEqual(["a", "b"], calls)
 
-    def test_an_empty_family_returns_none_without_falling_back_to_broadcast(self):
-        """族类内无提供者时返回 None，不回落到广播。"""
+    def test_an_unprovided_capability_returns_none_without_falling_back_to_broadcast(self):
+        """无人提供该能力时返回 None，不回落到广播。"""
         calls = []
         chain, counters = build_chain(
-            RecordingModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
+            NoCapabilityModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
         )
 
-        self.assertIsNone(chain.unicast(ModuleType.MediaServer, "notify"))
+        self.assertIsNone(chain.unicast("notify"))
         self.assertEqual([], calls)
         self.assertEqual(0, counters["broadcast_scans"])
 
@@ -357,8 +362,8 @@ class UnicastTierTest(unittest.TestCase):
         multicast_chain, _ = build_chain(*modules)
         unicast_chain, _ = build_chain(*modules)
 
-        all_answers = multicast_chain.multicast(ModuleType.MediaServer, "notify")
-        one_answer = unicast_chain.unicast(ModuleType.MediaServer, "notify")
+        all_answers = multicast_chain.multicast("notify")
+        one_answer = unicast_chain.unicast("notify")
 
         self.assertEqual(["emby", "plex"], all_answers)
         self.assertEqual(all_answers[0], one_answer)
@@ -418,7 +423,7 @@ class MediaServerQueryMigrationTest(unittest.TestCase):
             counters["broadcast_scans"] += 1
             return iter(())
 
-        def providers_for(module_type, method):
+        def providers_for(method):
             """查询路径：按族类与能力查表"""
             counters["index_lookups"] += 1
             return tuple(
@@ -513,7 +518,7 @@ class PluginProviderTest(unittest.TestCase):
             {("Hijacker", "插件"): {"notify": lambda **kw: "plugin"}},
         )
 
-        answers = chain.multicast(ModuleType.MediaServer, "notify", payload="x")
+        answers = chain.multicast("notify", payload="x")
 
         self.assertEqual(["plugin", "emby"], answers)
 
@@ -526,7 +531,7 @@ class PluginProviderTest(unittest.TestCase):
             {("Hijacker", "插件"): {"notify": lambda **kw: "plugin"}},
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual("plugin", answer)
         self.assertEqual([], calls)
@@ -540,7 +545,7 @@ class PluginProviderTest(unittest.TestCase):
             {("Hijacker", "插件"): {"notify": lambda **kw: None}},
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual("emby", answer)
 
@@ -558,7 +563,7 @@ class PluginProviderTest(unittest.TestCase):
             {("Hijacker", "插件"): {"notify": boom}},
         )
 
-        answer = chain.unicast(ModuleType.MediaServer, "notify", payload="x")
+        answer = chain.unicast("notify", payload="x")
 
         self.assertEqual("emby", answer)
         self.assertEqual("plugin", chain.messagehelper.put.call_args.kwargs["role"])
@@ -588,11 +593,11 @@ async def test_async_multicast_collects_every_answer_from_the_index():
     chain, counters = build_chain(
         RecordingModule("emby", calls, result="emby", module_type=ModuleType.MediaServer),
         RecordingModule("plex", calls, result="plex", module_type=ModuleType.MediaServer),
-        RecordingModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
+        NoCapabilityModule("qb", calls, result="qb", module_type=ModuleType.Downloader),
     )
     chain.pluginmanager.get_plugin_modules.return_value = {}
 
-    answers = await chain.async_multicast(ModuleType.MediaServer, "notify")
+    answers = await chain.async_multicast("notify")
 
     assert answers == ["emby", "plex"]
     assert counters["index_lookups"] == 1
@@ -611,7 +616,7 @@ async def test_async_unicast_arbitrates_on_the_same_index():
     )
     chain.pluginmanager.get_plugin_modules.return_value = {}
 
-    answer = await chain.async_unicast(ModuleType.MediaServer, "notify")
+    answer = await chain.async_unicast("notify")
 
     assert answer == "high"
     assert calls == ["high"]
@@ -636,7 +641,7 @@ async def test_async_dispatch_awaits_coroutine_providers():
     )
     chain.pluginmanager.get_plugin_modules.return_value = {}
 
-    answer = await chain.async_unicast(ModuleType.MediaServer, "notify")
+    answer = await chain.async_unicast("notify")
 
     assert answer == "awaited"
     assert calls == ["async_emby"]
@@ -741,8 +746,7 @@ class RecognizeFamilyMigrationTest(unittest.TestCase):
         """原生识别经识别族查表取单一答案，不再扫全体模块。"""
         chain, counters = build_chain()
         chain.modulemanager.providers_for.side_effect = (
-            lambda family, method: (_StubModule("tmdb", method, "media-info"),)
-            if family == ModuleType.MediaRecognize else ()
+            lambda method: (_StubModule("tmdb", method, "media-info"),)
         )
 
         result = chain._run_native_media_recognize({"meta": None}, cache=True)
@@ -756,8 +760,7 @@ async def test_async_native_recognize_queries_the_recognize_family():
     """异步原生识别同样经识别族查表，不再扫全体模块。"""
     chain, counters = build_chain()
     chain.modulemanager.providers_for.side_effect = (
-        lambda family, method: (_StubModule("tmdb", method, "media-info"),)
-        if family == ModuleType.MediaRecognize else ()
+        lambda method: (_StubModule("tmdb", method, "media-info"),)
     )
 
     result = await chain._async_run_native_media_recognize({"meta": None}, cache=True)

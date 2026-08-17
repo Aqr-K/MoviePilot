@@ -1,14 +1,17 @@
-"""分发注册表：按族类与能力查表。
+"""分发注册表：按能力查表。
 
 三级分发里，广播与多播/单播的复杂度代价来源不同：
 
 - 广播是「通知，不求答案」，语义上必须触达全体，O(n) 是它的固有代价，不做优化
 - 多播是「圈定一类，收集所有答案」，单播是「最终只要一个答案」，两者都是**查询**，
-  本该只付出 O(k)——k 为该族类下真正提供该能力的模块数
+  本该只付出 O(k)——k 为真正提供该能力的模块数
 
-过去业务能力查询借广播实现（方法名 + hasattr 扫全体），把 O(k) 的查询摊成了 O(n) 的
-遍历。注册表把 (族类, 能力) 映射到已排序的提供者元组，查询命中后为 O(1)，只有运行态
-模块集合变化时才重建。
+索引的键是**能力**而不是模块身份。get_type() 只有一个取值，它回答「你是什么」；而
+能力回答「你能做什么」。一个模块只有一个身份，却可以提供多种能力：媒体服务器同时
+兼任认证登录，而 ModuleType 里根本没有认证这一族。用身份当键，跨族能力就无处安放。
+
+能力也不能由标签声明，只能从运行期实例推导——方法可以继承自基类（user_authenticate
+就定义在媒体服务器基类上），只看类体会把它看成什么都没实现。
 """
 import threading
 import unittest
@@ -18,12 +21,12 @@ from app.schemas.types import ModuleType
 
 
 class FakeModule:
-    """声明族类与能力的模块替身"""
+    """声明身份与能力的模块替身"""
 
     def __init__(self, name: str, module_type, capabilities, priority: int = 1):
         """
         :param name: 模块名
-        :param module_type: 所属族类
+        :param module_type: 模块身份
         :param capabilities: 该模块提供的能力方法名
         :param priority: 模块优先级
         """
@@ -45,12 +48,24 @@ class FakeModule:
         return self._name
 
     def get_type(self):
-        """模块族类"""
+        """模块身份"""
         return self._type
 
     def get_priority(self) -> int:
         """模块优先级"""
         return self._priority
+
+
+class AuthCapableModule(FakeModule):
+    """兼任认证的模块替身，认证能力定义在本类上"""
+
+    def user_authenticate(self, **kwargs):
+        """认证能力"""
+        return f"{self._name}:user_authenticate"
+
+
+class DerivedModule(AuthCapableModule):
+    """自身类体不含认证能力，仅从基类继承"""
 
 
 def build_manager(*modules):
@@ -76,30 +91,47 @@ def build_manager(*modules):
 
 
 class DispatchIndexTest(unittest.TestCase):
-    """按族类与能力查表的注册表契约"""
+    """按能力查表的注册表契约"""
 
-    def test_a_lookup_returns_only_providers_of_that_family_and_capability(self):
-        """只返回该族类下真正提供该能力的模块。"""
+    def test_a_lookup_returns_every_provider_of_that_capability(self):
+        """返回所有提供该能力的模块，不论它们的身份是什么。"""
         emby = FakeModule("emby", ModuleType.MediaServer, ["media_statistic"])
         plex = FakeModule("plex", ModuleType.MediaServer, ["media_statistic"])
         no_capability = FakeModule("legacy", ModuleType.MediaServer, [])
-        other_family = FakeModule("qb", ModuleType.Downloader, ["media_statistic"])
-        manager, _ = build_manager(emby, plex, no_capability, other_family)
+        manager, _ = build_manager(emby, plex, no_capability)
 
-        providers = manager.providers_for(ModuleType.MediaServer, "media_statistic")
+        providers = manager.providers_for("media_statistic")
 
         self.assertEqual((emby, plex), providers)
+
+    def test_a_capability_crossing_families_is_still_found(self):
+        """跨族能力照样被找到：认证由媒体服务器兼任，而认证不是一个 ModuleType。"""
+        plex = AuthCapableModule("plex", ModuleType.MediaServer, [])
+        ldap_plugin = AuthCapableModule("ldap", ModuleType.Other, [])
+        unrelated = FakeModule("qb", ModuleType.Downloader, ["download"])
+        manager, _ = build_manager(plex, ldap_plugin, unrelated)
+
+        providers = manager.providers_for("user_authenticate")
+
+        self.assertEqual((plex, ldap_plugin), providers)
+
+    def test_a_capability_inherited_from_a_base_class_counts(self):
+        """能力继承自基类时同样算提供者，不能只看类体。"""
+        derived = DerivedModule("navidrome", ModuleType.MediaServer, [])
+        manager, _ = build_manager(derived)
+
+        self.assertEqual((derived,), manager.providers_for("user_authenticate"))
 
     def test_a_repeated_lookup_does_not_rescan_running_modules(self):
         """重复查询直接命中注册表，不再扫描运行态模块。"""
         manager, scans = build_manager(
             FakeModule("emby", ModuleType.MediaServer, ["media_statistic"]),
         )
-        manager.providers_for(ModuleType.MediaServer, "media_statistic")
+        manager.providers_for("media_statistic")
         scans_after_first = scans["count"]
 
         for _ in range(5):
-            manager.providers_for(ModuleType.MediaServer, "media_statistic")
+            manager.providers_for("media_statistic")
 
         self.assertEqual(scans_after_first, scans["count"])
 
@@ -109,51 +141,39 @@ class DispatchIndexTest(unittest.TestCase):
         high = FakeModule("high", ModuleType.MediaServer, ["media_statistic"], priority=1)
         manager, _ = build_manager(low, high)
 
-        providers = manager.providers_for(ModuleType.MediaServer, "media_statistic")
+        providers = manager.providers_for("media_statistic")
 
         self.assertEqual((high, low), providers)
 
     def test_distinct_capabilities_are_indexed_separately(self):
-        """同族类不同能力各自成表，互不串味。"""
+        """不同能力各自成表，互不串味。"""
         emby = FakeModule("emby", ModuleType.MediaServer, ["media_statistic", "playing"])
         plex = FakeModule("plex", ModuleType.MediaServer, ["media_statistic"])
         manager, _ = build_manager(emby, plex)
 
-        self.assertEqual(
-            (emby, plex),
-            manager.providers_for(ModuleType.MediaServer, "media_statistic"),
-        )
-        self.assertEqual(
-            (emby,),
-            manager.providers_for(ModuleType.MediaServer, "playing"),
-        )
+        self.assertEqual((emby, plex), manager.providers_for("media_statistic"))
+        self.assertEqual((emby,), manager.providers_for("playing"))
 
-    def test_an_empty_family_yields_no_providers(self):
-        """族类下无提供者时返回空元组，且该结论同样进表。"""
+    def test_an_unprovided_capability_yields_no_providers(self):
+        """无人提供该能力时返回空元组，且该结论同样进表。"""
         manager, scans = build_manager(
-            FakeModule("qb", ModuleType.Downloader, ["media_statistic"]),
+            FakeModule("qb", ModuleType.Downloader, ["download"]),
         )
 
-        self.assertEqual(
-            (),
-            manager.providers_for(ModuleType.MediaServer, "media_statistic"),
-        )
+        self.assertEqual((), manager.providers_for("media_statistic"))
         scans_after_first = scans["count"]
-        self.assertEqual(
-            (),
-            manager.providers_for(ModuleType.MediaServer, "media_statistic"),
-        )
+        self.assertEqual((), manager.providers_for("media_statistic"))
         self.assertEqual(scans_after_first, scans["count"])
 
     def test_the_index_is_dropped_when_the_running_set_changes(self):
         """运行态模块集合变化后注册表失效，下次查询重新求值。"""
         emby = FakeModule("emby", ModuleType.MediaServer, ["media_statistic"])
         manager, scans = build_manager(emby)
-        manager.providers_for(ModuleType.MediaServer, "media_statistic")
+        manager.providers_for("media_statistic")
         scans_after_first = scans["count"]
 
         manager.invalidate_dispatch_index()
-        manager.providers_for(ModuleType.MediaServer, "media_statistic")
+        manager.providers_for("media_statistic")
 
         self.assertEqual(scans_after_first + 1, scans["count"])
 

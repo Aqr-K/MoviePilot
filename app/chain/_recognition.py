@@ -19,13 +19,7 @@ from app.runtime.config import settings
 from app.runtime.events import Event
 from app.runtime.log import logger
 from app.schemas.media import normalize_media_source, resolve_media_identity
-from app.schemas.types import (
-    ChainEventType,
-    MediaSource,
-    MediaType,
-    ModuleType,
-    SystemConfigKey,
-)
+from app.schemas.types import ChainEventType, MediaSource, MediaType, SystemConfigKey
 
 
 class RecognitionMixin:
@@ -102,9 +96,7 @@ class RecognitionMixin:
     ) -> Optional[MediaInfo]:
         """执行同步原生媒体模块识别，具体媒体领域可覆写该路由钩子。"""
         with fresh(not cache):
-            return self.unicast(
-                ModuleType.MediaRecognize, "recognize_media", **module_kwargs
-            )
+            return self.unicast("recognize_media", **module_kwargs)
 
     async def _async_run_native_media_recognize(
             self,
@@ -113,9 +105,7 @@ class RecognitionMixin:
     ) -> Optional[MediaInfo]:
         """执行异步原生媒体模块识别，具体媒体领域可覆写该路由钩子。"""
         async with async_fresh(not cache):
-            return await self.async_unicast(
-                ModuleType.MediaRecognize, "async_recognize_media", **module_kwargs
-            )
+            return await self.async_unicast("async_recognize_media", **module_kwargs)
 
     def recognize_media(
             self,

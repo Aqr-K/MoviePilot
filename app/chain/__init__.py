@@ -406,29 +406,28 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         for module in self.modulemanager.get_running_modules(method):
             self._invoke_provider(module, method, *args, **kwargs)
 
-    def multicast(self, module_type: ModuleType, method: str, *args, **kwargs) -> List[Any]:
+    def multicast(self, method: str, *args, **kwargs) -> List[Any]:
         """
         圈定一个族类，收集其中每个提供者的答案
 
         提供者来自 (族类, 能力) 注册表，命中后为 O(1)，只调用真正提供该能力的 k 个模块。
         提供者返回空表示不认领，不计入结果；单个提供者出错不影响其余答案。
 
-        :param module_type: 模块族类
         :param method: 模块方法名称
-        :return: 族类内全部非空答案，按优先级顺序排列
+        :return: 全部非空答案，按优先级顺序排列
         """
         answers = []
         for plugin_id, plugin_name, func in self._plugin_providers(method):
             result = self._invoke_plugin(plugin_id, plugin_name, func, method, *args, **kwargs)
             if result is not None:
                 answers.append(result)
-        for module in self.modulemanager.providers_for(module_type, method):
+        for module in self.modulemanager.providers_for(method):
             result = self._invoke_provider(module, method, *args, **kwargs)
             if result is not None:
                 answers.append(result)
         return answers
 
-    def unicast(self, module_type: ModuleType, method: str, *args, **kwargs) -> Any:
+    def unicast(self, method: str, *args, **kwargs) -> Any:
         """
         在族类内仲裁，最终只取一个答案
 
@@ -436,7 +435,6 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         短路：谁先给出非空答案就用谁的，其余提供者不再执行。提供者返回空表示不认领，
         仲裁继续下移；族类内无人认领时返回 None，不回落到广播。
 
-        :param module_type: 模块族类
         :param method: 模块方法名称
         :return: 优先级最高且认领了本次调用的提供者的答案
         """
@@ -444,7 +442,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
             result = self._invoke_plugin(plugin_id, plugin_name, func, method, *args, **kwargs)
             if result is not None:
                 return result
-        for module in self.modulemanager.providers_for(module_type, method):
+        for module in self.modulemanager.providers_for(method):
             result = self._invoke_provider(module, method, *args, **kwargs)
             if result is not None:
                 return result
@@ -549,16 +547,14 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         for module in self.modulemanager.get_running_modules(method):
             await self._async_invoke_provider(module, method, *args, **kwargs)
 
-    async def async_multicast(self, module_type: ModuleType, method: str,
-                              *args, **kwargs) -> List[Any]:
+    async def async_multicast(self, method: str, *args, **kwargs) -> List[Any]:
         """
         异步圈定一个族类，收集其中每个提供者的答案
 
         与同步多播查同一张 (族类, 能力) 注册表。
 
-        :param module_type: 模块族类
         :param method: 模块方法名称
-        :return: 族类内全部非空答案
+        :return: 全部非空答案
         """
         answers = []
         for plugin_id, plugin_name, func in self._plugin_providers(method):
@@ -567,20 +563,18 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
             )
             if result is not None:
                 answers.append(result)
-        for module in self.modulemanager.providers_for(module_type, method):
+        for module in self.modulemanager.providers_for(method):
             result = await self._async_invoke_provider(module, method, *args, **kwargs)
             if result is not None:
                 answers.append(result)
         return answers
 
-    async def async_unicast(self, module_type: ModuleType, method: str,
-                            *args, **kwargs) -> Any:
+    async def async_unicast(self, method: str, *args, **kwargs) -> Any:
         """
         异步在族类内仲裁，最终只取一个答案
 
         候选集与异步多播完全一致，只叠加短路。
 
-        :param module_type: 模块族类
         :param method: 模块方法名称
         :return: 优先级最高且认领了本次调用的提供者的答案
         """
@@ -590,7 +584,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
             )
             if result is not None:
                 return result
-        for module in self.modulemanager.providers_for(module_type, method):
+        for module in self.modulemanager.providers_for(method):
             result = await self._async_invoke_provider(module, method, *args, **kwargs)
             if result is not None:
                 return result

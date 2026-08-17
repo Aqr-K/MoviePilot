@@ -185,50 +185,48 @@ class ModuleManager(metaclass=Singleton):
         with self._lock:
             self._dispatch_index = {}
 
-    def providers_for(self, module_type: ModuleType, method: str) -> tuple:
+    def providers_for(self, method: str) -> tuple:
         """
-        取某族类下提供指定能力的模块，按优先级排序
+        取提供指定能力的模块，按优先级排序
 
-        多播与单播都是查询而非通知：它们只关心「这一类里谁能回答」，不需要触达全体。
-        结果按 (族类, 能力) 记入注册表，命中后为 O(1)，只在运行态集合变化时重建。
+        多播与单播都是查询而非通知：它们只关心「谁能回答这件事」，不需要触达全体。
+        结果按能力记入注册表，命中后为 O(1)，只在运行态集合变化时重建。
         广播不走这里——它要触达全体，遍历本身就是它的语义。
 
-        :param module_type: 模块族类
+        索引的键是能力而不是模块身份。get_type() 只有一个取值，它回答「你是什么」；
+        一个模块只有一个身份却能提供多种能力——媒体服务器同时兼任认证登录，而认证
+        根本不是一个 ModuleType。按身份圈定会把这类跨族能力漏在外面。
+
         :param method: 能力方法名
         :return: 按优先级升序排列的提供者
         """
-        key = (module_type, method)
         with self._lock:
-            cached = self._dispatch_index.get(key)
+            cached = self._dispatch_index.get(method)
         if cached is not None:
             return cached
         providers = tuple(sorted(
             (
                 module for module in self._running_snapshot()
-                if self._provides(module, module_type, method)
+                if self._provides(module, method)
             ),
             key=lambda module: module.get_priority(),
         ))
         with self._lock:
-            self._dispatch_index[key] = providers
+            self._dispatch_index[method] = providers
         return providers
 
     @staticmethod
-    def _provides(module: Any, module_type: ModuleType, method: str) -> bool:
+    def _provides(module: Any, method: str) -> bool:
         """
-        判断模块是否属于该族类并已实现该能力
+        判断模块是否已实现该能力
+
+        能力从运行期实例推导而非按标签声明：方法可以继承自基类（认证就定义在媒体
+        服务器基类上），只看类体会把它看成什么都没实现。
 
         :param module: 运行态模块实例
-        :param module_type: 期望的族类
         :param method: 能力方法名
         :return: 是否为该能力的提供者
         """
-        try:
-            if module.get_type() != module_type:
-                return False
-        except Exception as err:
-            logger.debug(f"获取模块 {module.__class__.__name__} 族类出错：{str(err)}")
-            return False
         candidate = getattr(module, method, None)
         return callable(candidate) and ObjectUtils.check_method(candidate)
 
