@@ -642,5 +642,97 @@ async def test_async_dispatch_awaits_coroutine_providers():
     assert calls == ["async_emby"]
 
 
+class HookModule:
+    """实现通知钩子的模块替身"""
+
+    def __init__(self, name: str, calls: list, result=None):
+        """
+        :param name: 模块名
+        :param calls: 共享的调用记录
+        :param result: 钩子的返回值
+        """
+        self._name = name
+        self._calls = calls
+        self._result = result
+
+    def get_name(self) -> str:
+        """模块名称"""
+        return self._name
+
+    def get_priority(self) -> int:
+        """模块优先级"""
+        return 1
+
+    def clear_cache(self, **kwargs):
+        """响应清理缓存"""
+        self._calls.append(self._name)
+        return self._result
+
+    def scheduler_job(self, **kwargs):
+        """响应定时调度"""
+        self._calls.append(self._name)
+        return self._result
+
+    def register_commands(self, commands=None, **kwargs):
+        """响应命令注册"""
+        self._calls.append(self._name)
+        return self._result
+
+
+class NotificationHookMigrationTest(unittest.TestCase):
+    """定时、清缓存、注册命令是通知，不是查询
+
+    这三个钩子都声明返回 None，语义是「模块实现该接口以响应」。它们此前走 run_module，
+    一旦某个模块返回了非空非列表的值就 break，排在后面的模块收不到通知——对通知语义
+    这是缺陷而非优化。改走广播后全体必达。
+    """
+
+    def test_clear_cache_reaches_every_module_even_after_one_answers(self):
+        """清理缓存必达全体：某个模块返回了值也不中止其余模块。"""
+        calls = []
+        chain, _ = build_chain(
+            HookModule("first", calls, result="done"),
+            HookModule("second", calls),
+            HookModule("third", calls),
+        )
+
+        chain.clear_cache()
+
+        self.assertEqual(["first", "second", "third"], calls)
+
+    def test_scheduler_job_reaches_every_module_even_after_one_answers(self):
+        """定时任务必达全体：某个模块返回了值也不中止其余模块。"""
+        calls = []
+        chain, _ = build_chain(
+            HookModule("first", calls, result="done"),
+            HookModule("second", calls),
+        )
+
+        chain.scheduler_job()
+
+        self.assertEqual(["first", "second"], calls)
+
+    def test_register_commands_reaches_every_module_even_after_one_answers(self):
+        """注册命令必达全体：某个模块返回了值也不中止其余模块。"""
+        calls = []
+        chain, _ = build_chain(
+            HookModule("first", calls, result="done"),
+            HookModule("second", calls),
+        )
+
+        chain.register_commands({})
+
+        self.assertEqual(["first", "second"], calls)
+
+    def test_these_hooks_never_consult_the_index(self):
+        """通知走全体遍历，不查注册表。"""
+        calls = []
+        chain, counters = build_chain(HookModule("only", calls))
+
+        chain.clear_cache()
+
+        self.assertEqual(0, counters["index_lookups"])
+
+
 if __name__ == "__main__":
     unittest.main()
