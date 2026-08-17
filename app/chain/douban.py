@@ -228,7 +228,8 @@ class DoubanChain(ChainBase):
         根据人物ID查询豆瓣人物详情
         :param person_id:  人物ID
         """
-        return self.run_module("douban_person_detail", person_id=person_id)
+        return self.unicast("person_detail",
+                            source=MediaSource.Douban, person_id=person_id)
 
     def person_credits(self, person_id: int, page: Optional[int] = 1) -> List[MediaInfo]:
         """
@@ -329,7 +330,8 @@ class DoubanChain(ChainBase):
         根据人物ID查询豆瓣人物详情（异步版本）
         :param person_id:  人物ID
         """
-        return await self.async_run_module("async_douban_person_detail", person_id=person_id)
+        return await self.async_unicast("async_person_detail",
+                                        source=MediaSource.Douban, person_id=person_id)
 
     async def async_person_credits(self, person_id: int, page: Optional[int] = 1) -> List[MediaInfo]:
         """

@@ -506,6 +506,33 @@ class AniListModule(_ModuleBase):
         )
         return [MediaInfo(anilist_info=info) for info in infos]
 
+    def person_detail(self, source: Optional[MediaSource] = None,
+                      person_id: int = None, **kwargs) -> Optional[schemas.MediaPerson]:
+        """
+        按来源取人物详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :return: 人物详情，非本源时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        return self.anilist_person_detail(person_id=person_id)
+
+    async def async_person_detail(self, source: Optional[MediaSource] = None,
+                                  person_id: int = None,
+                                  **kwargs) -> Optional[schemas.MediaPerson]:
+        """
+        按来源异步取人物详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :return: 人物详情，非本源时为 None
+        """
+        if source != MediaSource.AniList:
+            return None
+        return await self.async_anilist_person_detail(person_id=person_id)
+
     def anilist_person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
         """
         获取 AniList 人物详情。

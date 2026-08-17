@@ -1306,6 +1306,33 @@ class TheMovieDbModule(_ModuleBase):
             return [schemas.MediaPerson(source="themoviedb", **info) for info in credit_infos]
         return []
 
+    def person_detail(self, source: Optional[MediaSource] = None,
+                      person_id: int = None, **kwargs) -> Optional[schemas.MediaPerson]:
+        """
+        按来源取人物详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :return: 人物详情，非本源时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        return self.tmdb_person_detail(person_id=person_id)
+
+    async def async_person_detail(self, source: Optional[MediaSource] = None,
+                                  person_id: int = None,
+                                  **kwargs) -> Optional[schemas.MediaPerson]:
+        """
+        按来源异步取人物详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :return: 人物详情，非本源时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        return await self.async_tmdb_person_detail(person_id=person_id)
+
     def tmdb_person_detail(self, person_id: int) -> schemas.MediaPerson:
         """
         根据TMDBID查询人物详情

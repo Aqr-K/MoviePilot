@@ -3,6 +3,7 @@ from typing import Optional, List
 from app import schemas
 from app.chain import ChainBase
 from app.domain.context import MediaInfo
+from app.schemas.types import MediaSource
 
 
 class BangumiChain(ChainBase):
@@ -49,7 +50,8 @@ class BangumiChain(ChainBase):
         根据人物ID查询Bangumi人物详情
         :param person_id:  人物ID
         """
-        return self.run_module("bangumi_person_detail", person_id=person_id)
+        return self.unicast("person_detail",
+                            source=MediaSource.Bangumi, person_id=person_id)
 
     def person_credits(self, person_id: int) -> Optional[List[MediaInfo]]:
         """
@@ -97,7 +99,8 @@ class BangumiChain(ChainBase):
         根据人物ID查询Bangumi人物详情（异步版本）
         :param person_id:  人物ID
         """
-        return await self.async_run_module("async_bangumi_person_detail", person_id=person_id)
+        return await self.async_unicast("async_person_detail",
+                                        source=MediaSource.Bangumi, person_id=person_id)
 
     async def async_person_credits(self, person_id: int) -> Optional[List[MediaInfo]]:
         """
