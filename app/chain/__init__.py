@@ -60,7 +60,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         self.eventmanager = EventManager()
         self.messageoper = MessageOper()
         self.messagehelper = MessageHelper()
-        self.messagequeue = MessageQueueManager(send_callback=self.run_module)
+        self.messagequeue = MessageQueueManager(send_callback=self.multicast)
         self.pluginmanager = PluginManager()
         self.filecache = FileCache()
         self.async_filecache = AsyncFileCache()
