@@ -36,7 +36,7 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module("anilist_trending", page=page, count=count) or []
+        return self.unicast("discover_board", source=MediaSource.AniList, board="trending", page=page, count=count) or []
 
     async def async_trending(self, page: int = 1, count: int = 20) -> list[MediaInfo]:
         """
@@ -44,8 +44,9 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return await self.async_run_module(
-            "async_anilist_trending", page=page, count=count
+        return await self.async_unicast(
+            "async_discover_board", source=MediaSource.AniList,
+            board="trending", page=page, count=count
         ) or []
 
     def popular_this_season(self, page: int = 1, count: int = 20) -> list[MediaInfo]:
@@ -54,8 +55,9 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module(
-            "anilist_popular_this_season", page=page, count=count
+        return self.unicast(
+            "discover_board", source=MediaSource.AniList,
+            board="popular_this_season", page=page, count=count
         ) or []
 
     async def async_popular_this_season(
@@ -66,8 +68,9 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return await self.async_run_module(
-            "async_anilist_popular_this_season", page=page, count=count
+        return await self.async_unicast(
+            "async_discover_board", source=MediaSource.AniList,
+            board="popular_this_season", page=page, count=count
         ) or []
 
     def discover(self, **kwargs) -> list[MediaInfo]:

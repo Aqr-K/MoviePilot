@@ -15,7 +15,7 @@ class BangumiChain(ChainBase):
         """
         获取Bangumi每日放送
         """
-        return self.run_module("bangumi_calendar")
+        return self.unicast("discover_board", source=MediaSource.Bangumi, board="calendar")
 
     def discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """
@@ -66,7 +66,7 @@ class BangumiChain(ChainBase):
         """
         获取Bangumi每日放送（异步版本）
         """
-        return await self.async_run_module("async_bangumi_calendar")
+        return await self.async_unicast("async_discover_board", source=MediaSource.Bangumi, board="calendar")
 
     async def async_discover(self, **kwargs) -> Optional[List[MediaInfo]]:
         """

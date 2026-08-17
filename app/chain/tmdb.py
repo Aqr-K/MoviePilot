@@ -53,7 +53,7 @@ class TmdbChain(ChainBase):
         :param page: 第几页
         :return: TMDB信息列表
         """
-        return self.run_module("tmdb_trending", page=page)
+        return self.unicast("discover_board", source=MediaSource.TMDB, board="trending", page=page)
 
     def tmdb_collection(self, collection_id: int) -> Optional[List[MediaInfo]]:
         """
@@ -209,7 +209,7 @@ class TmdbChain(ChainBase):
         :param page: 第几页
         :return: TMDB信息列表
         """
-        return await self.async_run_module("async_tmdb_trending", page=page)
+        return await self.async_unicast("async_discover_board", source=MediaSource.TMDB, board="trending", page=page)
 
     async def async_tmdb_collection(self, collection_id: int) -> Optional[List[MediaInfo]]:
         """
