@@ -18,4 +18,9 @@ class DashboardChain(ChainBase):
         """
         下载器信息
         """
-        return self.run_module("downloader_info", downloader=downloader)
+        infos = [
+            info
+            for group in self.multicast("downloader_info", downloader=downloader)
+            for info in group
+        ]
+        return infos or None

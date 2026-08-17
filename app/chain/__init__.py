@@ -1158,7 +1158,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader:  下载器
         :return: 下载器名称、种子Hash、种子文件布局、错误原因
         """
-        return self.run_module(
+        return self.unicast(
             "download",
             content=content,
             download_dir=download_dir,
@@ -1204,13 +1204,18 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param include_all_tags:  是否包含未打内置标签的下载任务
         :return: 下载器中符合状态的种子列表
         """
-        return self.run_module(
-            "list_torrents",
-            status=status,
-            hashs=hashs,
-            downloader=downloader,
-            include_all_tags=include_all_tags,
-        )
+        torrents = [
+            torrent
+            for group in self.multicast(
+                "list_torrents",
+                status=status,
+                hashs=hashs,
+                downloader=downloader,
+                include_all_tags=include_all_tags,
+            )
+            for torrent in group
+        ]
+        return torrents or None
 
     def transfer(
             self,
@@ -1271,7 +1276,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param hashs:  种子Hash
         :param downloader:  下载器
         """
-        return self.run_module("transfer_completed", hashs=hashs, downloader=downloader)
+        self.broadcast("transfer_completed", hashs=hashs, downloader=downloader)
 
     def remove_torrents(
             self,
@@ -1286,7 +1291,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module(
+        return self.unicast(
             "remove_torrents",
             hashs=hashs,
             delete_file=delete_file,
@@ -1302,7 +1307,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("start_torrents", hashs=hashs, downloader=downloader)
+        return self.unicast("start_torrents", hashs=hashs, downloader=downloader)
 
     def stop_torrents(
             self, hashs: Union[list, str], downloader: Optional[str] = None
@@ -1313,7 +1318,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("stop_torrents", hashs=hashs, downloader=downloader)
+        return self.unicast("stop_torrents", hashs=hashs, downloader=downloader)
 
     def set_torrents_tag(
             self, hashs: Union[list, str], tags: list, downloader: Optional[str] = None
@@ -1325,7 +1330,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader:  下载器
         :return: bool
         """
-        return self.run_module("set_torrents_tag", hashs=hashs, tags=tags, downloader=downloader)
+        return self.unicast("set_torrents_tag", hashs=hashs, tags=tags, downloader=downloader)
 
     def update_torrent(
             self,
@@ -1352,7 +1357,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param seeding_time_limit: 做种时间限制，单位分钟
         :return: 各项修改结果
         """
-        return self.run_module(
+        return self.unicast(
             "update_torrent",
             hash_string=hash_string,
             downloader=downloader,
@@ -1376,7 +1381,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader: 下载器
         :return: 下载器名称到Tracker列表的映射
         """
-        return self.run_module(
+        return self.unicast(
             "get_torrent_trackers",
             hash_string=hash_string,
             downloader=downloader,
@@ -1391,7 +1396,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param downloader:  下载器
         :return: 种子文件，具体类型由下载器实现决定（链层不引入下载器协议类型）
         """
-        return self.run_module("torrent_files", tid=tid, downloader=downloader)
+        return self.unicast("torrent_files", tid=tid, downloader=downloader)
 
     def media_exists(
             self,
