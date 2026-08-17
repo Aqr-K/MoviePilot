@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
@@ -39,16 +39,44 @@ class LifecycleComponent:
     stop_failure: LifecycleFailurePolicy = LifecycleFailurePolicy.CONTINUE
 
     def enabled(self, safe_mode: bool) -> bool:
-        """判断组件是否应在当前安全模式设置下启用。"""
+        """
+        判断组件是否应在当前安全模式设置下启用
+
+        :param safe_mode: 当前是否处于安全模式
+        :return: 启用返回 True，跳过返回 False
+        """
         return self.mode is LifecycleMode.ALWAYS or not safe_mode
 
 
+def select_enabled_components(
+    components: Iterable[LifecycleComponent],
+    *,
+    safe_mode: bool,
+) -> tuple[LifecycleComponent, ...]:
+    """
+    按运行模式筛选启用的生命周期组件
+
+    :param components: 待筛选的组件清单
+    :param safe_mode: 当前是否处于安全模式
+    :return: 保持原有声明顺序的启用组件元组
+    """
+    return tuple(
+        component for component in components if component.enabled(safe_mode)
+    )
+
+
 def lifecycle_manifest(
-    components: tuple[LifecycleComponent, ...],
+    components: Iterable[LifecycleComponent],
     *,
     safe_mode: bool,
 ) -> tuple[dict[str, object], ...]:
-    """导出当前模式下启用组件的稳定、可序列化生命周期清单。"""
+    """
+    导出当前模式下启用组件的稳定、可序列化生命周期清单
+
+    :param components: 待导出的组件清单
+    :param safe_mode: 当前是否处于安全模式
+    :return: 每项描述组件依赖、模式、顺序、超时和失败策略的字典元组
+    """
     return tuple(
         {
             "name": component.name,
@@ -61,6 +89,5 @@ def lifecycle_manifest(
             "start_failure": component.start_failure.value,
             "stop_failure": component.stop_failure.value,
         }
-        for component in components
-        if component.enabled(safe_mode)
+        for component in select_enabled_components(components, safe_mode=safe_mode)
     )

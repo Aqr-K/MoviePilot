@@ -1,10 +1,7 @@
-"""应用生命周期组件的组装、启动和关闭编排。"""
+"""应用生命周期组件的组装，以及与 FastAPI 的绑定。"""
 
 import asyncio
-import inspect
-import time
 from contextlib import asynccontextmanager
-from typing import Callable
 
 from fastapi import FastAPI
 
@@ -43,11 +40,17 @@ from app.startup.scheduler_initializer import (
 from app.db import check_connection_budget, get_engine, get_global_async_engine
 from app.startup.transfer_initializer import replay_pending_transfers
 from app.startup.workflow_initializer import init_workflow, stop_workflow
-from app.startup.lifecycle.components import (
+from app.runtime.kernel.lifecycle import (
     LifecycleComponent,
     LifecycleMode,
     lifecycle_manifest,
+    select_enabled_components,
 )
+from app.runtime.kernel.lifecycle_runner import (
+    start_lifecycle_components,
+    stop_lifecycle_components,
+)
+from app.runtime.kernel.step_runner import run_startup_step
 from app.adapters.network.http import (
     aclose_shared_async_transports,
     configure_default_user_agent,
@@ -73,43 +76,6 @@ async def init_extra():
     SystemChain().restart_finish()
     # 上报当前安装版本
     await MoviePilotServerHelper.async_report_usage()
-
-
-async def run_shutdown_step(
-    name: str,
-    callback: Callable[[], object],
-    timeout_seconds: float | None = None,
-) -> None:
-    """隔离单个关闭阶段的异常，确保后续资源仍有机会释放"""
-    try:
-        result = callback()
-        if inspect.isawaitable(result):
-            if timeout_seconds:
-                await asyncio.wait_for(result, timeout=timeout_seconds)
-            else:
-                await result
-    except Exception as err:
-        logger.error(f"关闭{name}失败：{err}")
-
-
-async def run_startup_step(
-    name: str,
-    callback: Callable[[], object],
-    timeout_seconds: float | None = None,
-) -> object:
-    """执行单个启动阶段并记录耗时，失败时保留原异常和 fail-fast 语义。"""
-    started_at = time.perf_counter()
-    try:
-        result = callback()
-        if inspect.isawaitable(result):
-            if timeout_seconds:
-                result = await asyncio.wait_for(result, timeout=timeout_seconds)
-            else:
-                result = await result
-        return result
-    finally:
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
-        logger.info("启动%s完成，耗时=%.2fms", name, elapsed_ms)
 
 
 def build_lifecycle_components(app: FastAPI) -> tuple[LifecycleComponent, ...]:
@@ -278,25 +244,15 @@ async def lifespan(app: FastAPI):
     # 代价：异步侧几乎为零，create_async_engine 只校验 URL 与驱动导入、不建立连接；同步侧
     # 会连一次库、设一遍 journal mode，在事件循环上阻塞一小会儿——但那一次本来就免不了，
     # 放在这里至少还独占着单线程，而且此刻 uvicorn 尚未开始接请求。
-    components = build_lifecycle_components(app)
-    enabled_components = tuple(
-        component
-        for component in components
-        if component.enabled(settings.MOVIEPILOT_SAFE_MODE)
+    enabled_components = select_enabled_components(
+        build_lifecycle_components(app),
+        safe_mode=settings.MOVIEPILOT_SAFE_MODE,
     )
     logger.info(
         "启用生命周期组件：%s",
         ", ".join(component.name for component in enabled_components),
     )
-    for component in sorted(
-        (item for item in enabled_components if item.start is not None),
-        key=lambda item: item.start_order or 0,
-    ):
-        await run_startup_step(
-            component.name,
-            component.start,
-            component.start_timeout_seconds,
-        )
+    await start_lifecycle_components(enabled_components)
     if settings.MOVIEPILOT_SAFE_MODE:
         print("MoviePilot safe mode enabled: skip plugins, scheduler, monitor, commands and workflow.")
     # 插件同步到本地
@@ -318,15 +274,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(str(e))
         try:
-            for component in sorted(
-                (item for item in enabled_components if item.stop is not None),
-                key=lambda item: item.stop_order or 0,
-            ):
-                await run_shutdown_step(
-                    component.name,
-                    component.stop,
-                    component.stop_timeout_seconds,
-                )
+            await stop_lifecycle_components(enabled_components)
         finally:
             # 日志最后关闭，确保其他组件的收尾信息已写入文件
             LoggerManager.shutdown()

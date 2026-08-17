@@ -156,6 +156,7 @@ flowchart TB
 | `app/domain/` | 纯 MoviePilot 业务语义：媒体上下文、识别解析、站点状态解释、磁力语义、NFO 刮削 | `context.py`、`metainfo.py`、`meta/`、`scraper.py` |
 | `app/runtime/` | 进程级运行机制：配置、事件、完整日志、缓存契约与内存后端、并发、调度、限流、本地化、GC、重启状态 | `config.py`、`events.py`、`log.py`、`cache.py` |
 | `app/runtime/extensions/` | 模块 / 插件 / 配置化服务 / 托管资源的发现、注册与生命周期适配 | `module_manager.py`、`plugin_manager.py` |
+| `app/runtime/kernel/` | 启停编排机制：生命周期组件模型、单步隔离原语、按序执行引擎、托管资源 Runtime 装配；只认识抽象组件与步骤，不 import 任何具体子系统 | `lifecycle.py`、`step_runner.py`、`lifecycle_runner.py` |
 | `app/runtime/compat/` | 仅标准库的精确旧导入路由（`app.core/helper/utils/log` → canonical） | `manifest.py`、`imports.py` |
 | `app/adapters/network/` | 通用 HTTP、浏览器、DNS、Cloudflare、IP 传输机制 | `http.py`、`browser.py` |
 | `app/adapters/cache/` | Redis 与文件缓存的具体实现 | `backends.py`、`redis.py` |
@@ -223,7 +224,11 @@ sequenceDiagram
 - **引擎预热 fail-fast**：同步/异步数据库引擎在单线程期完成首次创建，
   避免调度器放出大量线程后再创建引擎导致连接锁竞争。
 - **安全模式**：`MOVIEPILOT_SAFE_MODE` 会跳过插件、定时器、监控器、命令与工作流，用于故障自救。
-- **关停隔离**：每个关停步骤由 `run_shutdown_step` 独立捕获异常，保证后续资源仍有机会释放。
+- **关停隔离**：每个关停步骤由 `runtime/kernel/step_runner.py` 的 `run_shutdown_step`
+  独立捕获异常，保证后续资源仍有机会释放。
+- **机制与策略分离**：组件模型、单步执行与排序执行归 `app/runtime/kernel/`；
+  「有哪些组件、注入谁、按什么顺序」由 `app/startup/lifecycle/` 声明，
+  内核不 import 任何具体子系统。
 
 ---
 
@@ -338,7 +343,7 @@ flowchart LR
 |---|---|
 | **Config Reload** | 继承 `ConfigReloadMixin` 并声明 `CONFIG_WATCH`，配置变更时自动重建长生命周期对象（如下载器客户端重连） |
 | **Singleton** | `EventManager`、`ModuleManager`、`PluginManager` 等全局共享管理器继承 `foundation/singleton.py` 的 `Singleton` |
-| **Managed Resource** | 可选进程级技术资源（浏览器、虚拟显示等）以 data-only `capability.toml` 声明，`runtime/extensions` 解释生命周期，`startup` 构建 Runtime，消费者经 `runtime/managed_resources.py` 显式获取；插件使用浏览器走 `app.sdk.browser` |
+| **Managed Resource** | 可选进程级技术资源（浏览器、虚拟显示等）以 data-only `capability.toml` 声明，`runtime/extensions` 解释生命周期，`runtime/kernel/managed_resource_runtime.py` 构建 Runtime，消费者经 `runtime/managed_resources.py` 显式获取；插件使用浏览器走 `app.sdk.browser` |
 
 ---
 

@@ -1,4 +1,4 @@
-"""Managed Resource 的启动组合与进程关闭入口。"""
+"""Managed Resource 的 Capability Runtime 装配与进程关闭入口。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,11 @@ _managed_resource_runtime: Optional[CapabilityRuntime] = None
 
 
 def init_managed_resources() -> CapabilityRuntime:
-    """构建并注入资源 Runtime；只发现声明，不物化或启动任何资源。"""
+    """
+    构建并注入资源 Runtime；只发现声明，不物化或启动任何资源
+
+    :return: 进程内唯一的 Managed Resource Capability Runtime
+    """
     global _managed_resource_runtime
     with _runtime_lock:
         if _managed_resource_runtime is None:

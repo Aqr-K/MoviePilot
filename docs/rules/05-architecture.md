@@ -88,6 +88,7 @@ create additional top-level directory categories.
 | `app/runtime/managed_resources.py` | Provider-neutral acquisition, observation and shutdown facade for process-owned optional resources |
 | `app/runtime/state.py` | Process restart and update state |
 | `app/runtime/extensions/` | Module, plugin, configured-service and managed-resource discovery/registration/lifecycle adapters |
+| `app/runtime/kernel/` | Startup/shutdown orchestration mechanism: lifecycle component model, isolated single-step primitives, ordered start/stop engine and the managed-resource Capability Runtime assembly. Operates on abstract components and steps only; it must not import any concrete subsystem (`app.chain`, `app.modules`, `app.db`, `app.agent`, `app.api`, `app.command`, `app.scheduler`, `app.monitor`, `app.workflow`, `app.application`, `app.sdk`, `app.runtime.compat`, `app.startup`) |
 | `app/runtime/compat/` | Standard-library-only exact legacy import routing, resource preflight scanning and DEBUG diagnostics |
 
 `app/startup/` remains the established composition root and is not nested under
@@ -129,11 +130,13 @@ mechanism remains in `app/adapters/system/resource.py`.
 
 可选的进程级技术资源使用 Managed Resource 合同：实现及其 data-only
 `capability.toml` 与适配器同目录，`runtime/extensions` 只解释通用的同步/异步
-`start`、`stop` 生命周期，`startup` 负责构建 Capability Runtime。声明必须使用
+`start`、`stop` 生命周期，`app/runtime/kernel/managed_resource_runtime.py` 负责构建
+Capability Runtime。声明必须使用
 `on_first_use`，普通启动只发现声明；消费者通过 `app/runtime/managed_resources.py`
 显式获取资源。关闭路径先释放消费者，再关闭已初始化 Runtime，未使用的资源不得因关闭而物化。
-应用级启动顺序使用 `app/startup/lifecycle/components.py` 的组件描述声明依赖、
-normal/safe-mode 范围、start/stop 顺序、超时预算和失败策略。新增进程级资源不得只在
+应用级启动顺序使用 `app/runtime/kernel/lifecycle.py` 的组件描述声明依赖、
+normal/safe-mode 范围、start/stop 顺序、超时预算和失败策略，具体组件清单由
+`app/startup/lifecycle/` 装配。新增进程级资源不得只在
 `lifespan()` 中追加过程代码，必须先进入可导出的生命周期清单并补顺序快照测试。
 Runtime 关闭后不可逆；完整应用生命周期的再次启动必须由新进程承载，不能在同一解释器中重建局部资源域。
 插件需要浏览器时使用 `app.sdk.browser`，由宿主浏览器适配器协调资源，不直接依赖资源实现。
@@ -208,12 +211,16 @@ Use these questions in order before creating or moving a migrated capability:
    scheduling, concurrency, GC or restart state? Put it in `app/runtime`.
 7. Does it discover/manage modules, plugins or configured service providers?
    Put it in `app/runtime/extensions`.
-8. Does it perform concrete cache, network, OS/process, filesystem, stdio,
+8. Is it a subsystem-agnostic startup/shutdown orchestration mechanism, such as
+   the component model, single-step isolation or ordered execution? Put it in
+   `app/runtime/kernel`. If it names concrete components, injection targets or
+   their order, it is composition-root policy and stays in `app/startup`.
+9. Does it perform concrete cache, network, OS/process, filesystem, stdio,
    package/resource or Rust I/O? Put it under the matching `app/adapters`
    technical boundary.
-9. Does it implement a named external product/ecosystem? Put it in
-   `app/adapters/external`.
-10. Is it public to plugins or only preserving an old path? Curate it in
+10. Does it implement a named external product/ecosystem? Put it in
+    `app/adapters/external`.
+11. Is it public to plugins or only preserving an old path? Curate it in
     `app/sdk` or map it in `app/runtime/compat`; never move implementation there.
 
 Do not create generic `common`, `helper` or `utils` buckets. Reuse does not erase
@@ -373,6 +380,10 @@ policy. `app/db` therefore has no dependency on `app/domain`.
 - Configured notification discovery lives in
   `app/application/notification.py`. Web Push subscription and manual-send HTTP
   behavior stays in `app/api/endpoints/message.py`.
+- `app/runtime/kernel` owns the orchestration mechanism and knows nothing about
+  which components exist. `app/startup/lifecycle/` declares the concrete
+  component manifest and binds it to FastAPI `lifespan`; every subsystem import
+  stays on the startup side.
 - `app/runtime/compat` stores string mappings and resolves aliases lazily. It may
   not eagerly import canonical MoviePilot modules.
 - 已删除的 `app.db.<entity>_oper` 路径继续由精确模块映射提供给旧插件；其中订阅写入、
@@ -427,7 +438,11 @@ policy. `app/db` therefore has no dependency on `app/domain`.
 | `app/runtime/extensions/module/dispatcher.py` | Plugin-first invocation, short-circuit, list merge, signature relay and sync/async execution |
 | `app/runtime/extensions/module/contracts.py` | High-frequency method families and frozen legacy fallback contract |
 | `app/application/chain/context.py` | Injectable Chain dependencies and no-argument compatibility provider |
-| `app/startup/lifecycle/components.py` | Declarative normal/safe-mode lifecycle manifest, ordering and timeout budgets |
+| `app/runtime/kernel/lifecycle.py` | Declarative normal/safe-mode lifecycle component model, manifest export, ordering and timeout budgets |
+| `app/runtime/kernel/step_runner.py` | Isolated single-step startup timing and shutdown failure containment primitives |
+| `app/runtime/kernel/lifecycle_runner.py` | Ordered start/stop execution over an already-filtered component list |
+| `app/runtime/kernel/managed_resource_runtime.py` | Process-singleton managed-resource Capability Runtime assembly and shutdown |
+| `app/startup/lifecycle/__init__.py` | Concrete component manifest assembly and the FastAPI `lifespan` binding |
 | `app/runtime/extensions/module_manager.py` | Module discovery and lifecycle |
 | `app/runtime/extensions/plugin_manager.py` | Plugin discovery and lifecycle |
 | `app/runtime/extensions/plugin/projection.py` | Plugin commands, APIs, services, modules and actions projected from a running-registry snapshot |

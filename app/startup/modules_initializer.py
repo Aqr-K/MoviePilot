@@ -1,4 +1,3 @@
-import inspect
 import sys
 from typing import Callable
 
@@ -43,10 +42,11 @@ from app.schemas.message import Message
 from app.schemas.message import MessageType
 from app.schemas.types import SystemConfigKey
 from app.startup.agent_initializer import init_agent, stop_agent
-from app.startup.managed_resources_initializer import (
+from app.runtime.kernel.managed_resource_runtime import (
     init_managed_resources,
     stop_managed_resources,
 )
+from app.runtime.kernel.step_runner import run_shutdown_step
 from app.application.security.access import set_superuser_token_payload_provider
 from app.application.security.auth import build_superuser_token_payload
 from app.application.image import configure_wallpaper_providers
@@ -292,28 +292,19 @@ async def stop_modules():
     """
     服务关闭
     """
-    async def run_step(name: str, callback: Callable[[], object]) -> None:
-        """单个模块资源关闭失败时继续执行后续阶段"""
-        try:
-            result = callback()
-            if inspect.isawaitable(result):
-                await result
-        except Exception as err:
-            logger.error(f"关闭{name}失败：{err}")
-
-    await run_step("AI智能体", stop_agent)
-    await run_step("模块", lambda: ModuleManager().shutdown())
-    await run_step("事件消费", lambda: EventManager().stop())
-    await run_step("浏览器会话", close_browser_sessions)
-    await run_step("托管资源", stop_managed_resources)
-    await run_step("DoH服务", lambda: DohHelper().shutdown())
-    await run_step("线程池", lambda: ThreadHelper().shutdown())
-    await run_step("消息服务", stop_message)
-    await run_step("Redis缓存连接", lambda: RedisHelper().close())
-    await run_step("异步Redis缓存连接", lambda: AsyncRedisHelper().close())
-    await run_step("数据库连接", close_database)
-    await run_step("前端服务", stop_frontend)
-    await run_step("临时文件", clear_temp)
+    await run_shutdown_step("AI智能体", stop_agent)
+    await run_shutdown_step("模块", lambda: ModuleManager().shutdown())
+    await run_shutdown_step("事件消费", lambda: EventManager().stop())
+    await run_shutdown_step("浏览器会话", close_browser_sessions)
+    await run_shutdown_step("托管资源", stop_managed_resources)
+    await run_shutdown_step("DoH服务", lambda: DohHelper().shutdown())
+    await run_shutdown_step("线程池", lambda: ThreadHelper().shutdown())
+    await run_shutdown_step("消息服务", stop_message)
+    await run_shutdown_step("Redis缓存连接", lambda: RedisHelper().close())
+    await run_shutdown_step("异步Redis缓存连接", lambda: AsyncRedisHelper().close())
+    await run_shutdown_step("数据库连接", close_database)
+    await run_shutdown_step("前端服务", stop_frontend)
+    await run_shutdown_step("临时文件", clear_temp)
 
 
 async def init_modules():

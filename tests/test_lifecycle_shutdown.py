@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 
+from app.runtime.kernel import step_runner
 from app.startup import lifecycle, modules_initializer
 from app.adapters.network import http as http_utils
 
@@ -239,11 +240,11 @@ def test_startup_step_records_duration_without_changing_result(monkeypatch):
     """启动阶段计时必须保留返回值，并输出稳定的阶段名称和毫秒耗时。"""
     perf_counter = MagicMock(side_effect=[10.0, 10.125])
     logger_info = MagicMock()
-    monkeypatch.setattr(lifecycle.time, "perf_counter", perf_counter)
-    monkeypatch.setattr(lifecycle.logger, "info", logger_info)
+    monkeypatch.setattr(step_runner.time, "perf_counter", perf_counter)
+    monkeypatch.setattr(step_runner.logger, "info", logger_info)
 
     result = asyncio.run(
-        lifecycle.run_startup_step("契约测试", lambda: "ready")
+        step_runner.run_startup_step("契约测试", lambda: "ready")
     )
 
     assert result == "ready"

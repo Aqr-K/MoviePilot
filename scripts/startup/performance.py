@@ -92,6 +92,7 @@ from fastapi import FastAPI
 from app.testing.bootstrap import ensure_sites_stub
 
 ensure_sites_stub()
+from app.runtime.kernel import lifecycle_runner
 from app.startup import lifecycle
 
 
@@ -120,7 +121,7 @@ async def _probe():
     )
     lifecycle.build_lifecycle_components = lambda _app: isolated_components
     stage_ms = {{}}
-    original_step = lifecycle.run_startup_step
+    original_step = lifecycle_runner.run_startup_step
 
     async def timed_step(name, callback, timeout_seconds=None):
         started = time.perf_counter()
@@ -128,7 +129,7 @@ async def _probe():
         stage_ms[name] = round((time.perf_counter() - started) * 1000, 3)
         return result
 
-    lifecycle.run_startup_step = timed_step
+    lifecycle_runner.run_startup_step = timed_step
     before_threads = threading.active_count()
     before_tasks = len(asyncio.all_tasks())
     started = time.perf_counter()

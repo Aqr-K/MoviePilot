@@ -55,6 +55,8 @@ RETIRED_CANONICAL_FILES = (
     "app/infrastructure/log.py",
     "app/startup/diagnostics_initializer.py",
     "app/startup/log_initializer.py",
+    "app/startup/lifecycle/components.py",
+    "app/startup/managed_resources_initializer.py",
     "app/messaging/notification.py",
     "app/messaging/webpush.py",
     "app/foundation/jieba.py",
@@ -100,13 +102,71 @@ FORBIDDEN_IMPORT_PREFIXES = {
         "app.sdk",
     ),
     "app.runtime": (
+        "app.agent",
+        "app.api",
         "app.application",
+        "app.chain",
+        "app.command",
+        "app.db",
+        "app.doctor",
+        "app.factory",
+        "app.main",
+        "app.modules",
+        "app.monitor",
+        "app.scheduler",
         "app.sdk",
+        "app.startup",
+        "app.workflow",
     ),
     "app.application": (
         "app.runtime.compat",
         "app.sdk",
     ),
+}
+# 本地插件多实例设计遗留的 runtime -> db 存量边：插件配置与插件数据的读写仍直接依赖
+# ORM 模型与 Oper，尚未全部收敛到 `app/runtime/extensions/plugin/storage.py` 的注入式
+# 存储端口。此处只登记既有事实，新代码不得新增条目，债务清偿后需同步删除对应条目。
+# 依赖基线的 boundary_edges.runtime_to_db 记录同一批边，但那份数据由脚本自动重写，
+# 新违规会被顺带收编；本清单刻意手工维护，新增豁免必须是一次显式的人工决定。
+_KNOWN_RUNTIME_UPWARD_IMPORTS = {
+    "app.runtime.extensions.plugin_instance": {
+        "app.db",
+        "app.db.models",
+        "app.db.models.pluginconfig",
+    },
+    "app.runtime.extensions.plugin_manager": {
+        "app.db",
+        "app.db.models",
+        "app.db.models.pluginconfig",
+        "app.db.plugin",
+    },
+    "app.runtime.extensions.plugin_manager._configs": {
+        "app.db",
+        "app.db.models",
+        "app.db.models.pluginconfig",
+        "app.db.oper",
+        "app.db.oper.pluginconfig",
+        "app.db.oper.plugindata",
+        "app.db.plugin",
+    },
+    "app.runtime.extensions.plugin_manager._instances": {
+        "app.db",
+        "app.db.models",
+        "app.db.models.pluginconfig",
+        "app.db.oper",
+        "app.db.oper.pluginconfig",
+        "app.db.oper.plugindata",
+    },
+    "app.runtime.extensions.plugin_manager._loader": {
+        "app.db",
+        "app.db.plugin",
+    },
+    "app.runtime.extensions.plugin_shared": {
+        "app.db",
+        "app.db.oper",
+        "app.db.oper.plugindata",
+        "app.db.oper.systemconfig",
+    },
 }
 
 
@@ -410,8 +470,11 @@ def test_canonical_layers_do_not_depend_on_sdk_or_compat():
     assert violations == {}
 
 
-def test_capability_packages_do_not_import_forbidden_upper_layers():
-    """新能力包只能依赖明确允许的下层或同层协作包。"""
+def _forbidden_upper_layer_imports() -> dict[str, set[str]]:
+    """收集各能力包对上层包的静态依赖，已登记的存量债不计入。
+
+    :return: 模块名到未登记违规依赖集合的映射
+    """
     modules = _discover_modules()
     known_modules = set(modules)
     violations: dict[str, set[str]] = {}
@@ -434,7 +497,34 @@ def test_capability_packages_do_not_import_forbidden_upper_layers():
         }
         if forbidden:
             violations[module_name] = forbidden
-    assert violations == {}
+    return violations
+
+
+def test_capability_packages_do_not_import_forbidden_upper_layers():
+    """新能力包只能依赖明确允许的下层或同层协作包。"""
+    violations = {
+        module_name: dependencies - _KNOWN_RUNTIME_UPWARD_IMPORTS.get(module_name, set())
+        for module_name, dependencies in _forbidden_upper_layer_imports().items()
+    }
+    assert {
+        module_name: dependencies
+        for module_name, dependencies in violations.items()
+        if dependencies
+    } == {}
+
+
+def test_known_upward_import_exemptions_are_still_real():
+    """存量豁免清单必须与真实依赖一致，债务清偿后要同步删除条目。"""
+    actual = _forbidden_upper_layer_imports()
+    stale = {
+        module_name: exempted - actual.get(module_name, set())
+        for module_name, exempted in _KNOWN_RUNTIME_UPWARD_IMPORTS.items()
+    }
+    assert {
+        module_name: dependencies
+        for module_name, dependencies in stale.items()
+        if dependencies
+    } == {}
 
 
 def test_site_domain_uses_foundation_dom_boundary():
