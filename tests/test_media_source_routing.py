@@ -130,15 +130,21 @@ def test_module_dispatch_always_reaches_plugins() -> None:
 
 
 def test_explicit_search_source_reaches_plugins() -> None:
-    """请求级搜索来源应以统一字段进入完整模块调度。"""
+    """请求级搜索来源应以统一字段进入多播调度，并展平各提供者的答案。"""
     chain = _chain_without_init()
-    chain.run_module = Mock(return_value=[])
+    media = MediaInfo(
+        media_source=MediaSource.AniList,
+        media_id="154587",
+        type=MediaType.TV,
+        title="Frieren",
+    )
+    chain.multicast = Mock(return_value=[[media]])
     meta = MetaBase("Frieren")
 
     result = chain.search_medias(meta, media_source=MediaSource.AniList)
 
-    assert result == []
-    chain.run_module.assert_called_once_with(
+    assert result == [media]
+    chain.multicast.assert_called_once_with(
         "search_medias",
         meta=meta,
         media_source=MediaSource.AniList,

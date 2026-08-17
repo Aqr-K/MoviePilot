@@ -201,9 +201,10 @@ async def test_media_search_route_forwards_plugin_source() -> None:
 def test_chain_forwards_source_to_modules(
     method_name: str, module_method_name: str
 ) -> None:
-    """处理链应将人物和合集的请求级数据源传递给媒体模块。"""
+    """处理链应将人物和合集的请求级数据源传递给媒体模块，并展平多播答案。"""
     chain = Mock(spec=ChainBase)
-    chain.async_run_module = AsyncMock(return_value=[])
+    answer = ["测试结果"]
+    chain.async_multicast = AsyncMock(return_value=[answer])
 
     result = asyncio.run(
         getattr(ChainBase, method_name)(
@@ -213,8 +214,8 @@ def test_chain_forwards_source_to_modules(
         )
     )
 
-    assert result == []
-    chain.async_run_module.assert_awaited_once_with(
+    assert result == answer
+    chain.async_multicast.assert_awaited_once_with(
         module_method_name,
         name="测试",
         media_source=MediaSource.TMDB,
