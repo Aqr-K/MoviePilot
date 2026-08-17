@@ -1,5 +1,5 @@
 import re
-from typing import Optional, List, Tuple, Union, Dict
+from typing import Any, Optional, List, Tuple, Union, Dict
 
 import cn2an
 
@@ -766,6 +766,50 @@ class TheMovieDbModule(_ModuleBase):
             info = await self.tmdb.async_get_info(mtype=info.get("media_type"),
                                                   tmdbid=info.get("id"))
         return info
+
+    def media_detail(self, source: Optional[MediaSource] = None, media_id: Any = None,
+                     mtype: Optional[MediaType] = None, season: Optional[int] = None,
+                     raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源取媒体详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型
+        :param season: 季，仅本源支持
+        :param raise_exception: 触发速率限制时是否抛出异常，本源不支持时忽略
+        :return: 媒体详情，非本源或ID非法时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.tmdb_info(tmdbid=tmdbid, mtype=mtype, season=season)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                 media_id: Any = None, mtype: Optional[MediaType] = None,
+                                 season: Optional[int] = None,
+                                 raise_exception: bool = False,
+                                 **kwargs) -> Optional[dict]:
+        """
+        按来源异步取媒体详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型
+        :param season: 季，仅本源支持
+        :param raise_exception: 触发速率限制时是否抛出异常，本源不支持时忽略
+        :return: 媒体详情，非本源或ID非法时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_tmdb_info(tmdbid=tmdbid, mtype=mtype, season=season)
 
     def tmdb_info(self, tmdbid: int, mtype: MediaType, season: Optional[int] = None) -> Optional[dict]:
         """

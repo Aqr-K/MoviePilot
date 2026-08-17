@@ -18,7 +18,8 @@ class AniListChain(ChainBase):
         :param anilist_id: AniList 媒体 ID
         :return: AniList 媒体详情
         """
-        return self.run_module("anilist_info", anilist_id=anilist_id)
+        return self.unicast("media_detail",
+                            source=MediaSource.AniList, media_id=anilist_id)
 
     async def async_info(self, anilist_id: int) -> Optional[dict]:
         """

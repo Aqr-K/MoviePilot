@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from app import schemas
 from app.runtime.config import settings
@@ -265,6 +265,52 @@ class BangumiModule(_ModuleBase):
                     if meta.name.lower() in str(info.get("name")).lower()
                     or meta.name.lower() in str(info.get("name_cn")).lower()]
         return []
+
+    def media_detail(self, source: Optional[MediaSource] = None, media_id: Any = None,
+                     mtype: Optional[MediaType] = None, season: Optional[int] = None,
+                     raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源取媒体详情，委托本源既有方法
+
+        本源接口只认 ID，其余参数到此为止。
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，本源不支持
+        :param season: 季，本源不支持
+        :param raise_exception: 限流开关，本源不支持
+        :return: 媒体详情，非本源或ID非法时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.bangumi_info(bangumiid=bangumiid)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                 media_id: Any = None, mtype: Optional[MediaType] = None,
+                                 season: Optional[int] = None,
+                                 raise_exception: bool = False,
+                                 **kwargs) -> Optional[dict]:
+        """
+        按来源异步取媒体详情，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，本源不支持
+        :param season: 季，本源不支持
+        :param raise_exception: 限流开关，本源不支持
+        :return: 媒体详情，非本源或ID非法时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_bangumi_info(bangumiid=bangumiid)
 
     def bangumi_info(self, bangumiid: int) -> Optional[dict]:
         """

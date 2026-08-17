@@ -38,6 +38,7 @@ from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     TorrentStatus,
     MediaType,
+    MediaSource,
     MediaSourceSelection,
     MediaImageType,
     EventType,
@@ -792,9 +793,10 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :return: 豆瓣信息
         :param raise_exception: 触发速率限制时是否抛出异常
         """
-        return self.run_module(
-            "douban_info",
-            doubanid=doubanid,
+        return self.unicast(
+            "media_detail",
+            source=MediaSource.Douban,
+            media_id=doubanid,
             mtype=mtype,
             raise_exception=raise_exception,
         )
@@ -812,9 +814,10 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :return: 豆瓣信息
         :param raise_exception: 触发速率限制时是否抛出异常
         """
-        return await self.async_run_module(
-            "async_douban_info",
-            doubanid=doubanid,
+        return await self.async_unicast(
+            "async_media_detail",
+            source=MediaSource.Douban,
+            media_id=doubanid,
             mtype=mtype,
             raise_exception=raise_exception,
         )
@@ -825,7 +828,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param tvdbid: int
         :return: TVDB信息
         """
-        return self.run_module("tvdb_info", tvdbid=tvdbid)
+        return self.unicast("media_detail", source=MediaSource.TVDB, media_id=tvdbid)
 
     def tvdb_slug(self, tvdbid: int) -> Optional[str]:
         """
@@ -845,7 +848,8 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param season: 季
         :return: TVDB信息
         """
-        return self.run_module("tmdb_info", tmdbid=tmdbid, mtype=mtype, season=season)
+        return self.unicast("media_detail", source=MediaSource.TMDB,
+                            media_id=tmdbid, mtype=mtype, season=season)
 
     async def async_tmdb_info(
             self, tmdbid: int, mtype: MediaType, season: Optional[int] = None
@@ -857,8 +861,9 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param season: 季
         :return: TVDB信息
         """
-        return await self.async_run_module(
-            "async_tmdb_info", tmdbid=tmdbid, mtype=mtype, season=season
+        return await self.async_unicast(
+            "async_media_detail", source=MediaSource.TMDB,
+            media_id=tmdbid, mtype=mtype, season=season
         )
 
     def bangumi_info(self, bangumiid: int) -> Optional[dict]:
@@ -867,7 +872,7 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param bangumiid: int
         :return: Bangumi信息
         """
-        return self.run_module("bangumi_info", bangumiid=bangumiid)
+        return self.unicast("media_detail", source=MediaSource.Bangumi, media_id=bangumiid)
 
     async def async_bangumi_info(self, bangumiid: int) -> Optional[dict]:
         """
@@ -875,7 +880,8 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param bangumiid: int
         :return: Bangumi信息
         """
-        return await self.async_run_module("async_bangumi_info", bangumiid=bangumiid)
+        return await self.async_unicast("async_media_detail",
+                                        source=MediaSource.Bangumi, media_id=bangumiid)
 
     def message_parser(
             self, source: str, body: Any, form: Any, args: Any

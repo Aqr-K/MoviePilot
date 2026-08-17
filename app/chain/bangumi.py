@@ -29,7 +29,8 @@ class BangumiChain(ChainBase):
         :param bangumiid: BangumiID
         :return: Bangumi信息
         """
-        return self.run_module("bangumi_info", bangumiid=bangumiid)
+        return self.unicast("media_detail",
+                            source=MediaSource.Bangumi, media_id=bangumiid)
 
     def bangumi_credits(self, bangumiid: int) -> List[schemas.MediaPerson]:
         """

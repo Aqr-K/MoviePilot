@@ -1,11 +1,13 @@
 from threading import Lock
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
+
+from fastapi.concurrency import run_in_threadpool
 
 from app.runtime.config import settings
 from app.runtime.log import logger
 from app.modules import _ModuleBase
 from app.modules.thetvdb import tvdb_v4_official
-from app.schemas.types import ModuleType, MediaRecognizeType
+from app.schemas.types import ModuleType, MediaRecognizeType, MediaSource, MediaType
 
 
 class TheTvDbModule(_ModuleBase):
@@ -129,6 +131,54 @@ class TheTvDbModule(_ModuleBase):
 
     def init_setting(self) -> Tuple[str, Union[str, bool]]:
         pass
+
+    def media_detail(self, source: Optional[MediaSource] = None, media_id: Any = None,
+                     mtype: Optional[MediaType] = None, season: Optional[int] = None,
+                     raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源取媒体详情，委托本源既有方法
+
+        本源接口只认 ID，其余参数到此为止。
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，本源不支持
+        :param season: 季，本源不支持
+        :param raise_exception: 限流开关，本源不支持
+        :return: 媒体详情，非本源或ID非法时为 None
+        """
+        if source != MediaSource.TVDB:
+            return None
+        try:
+            tvdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.tvdb_info(tvdbid=tvdbid)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                 media_id: Any = None, mtype: Optional[MediaType] = None,
+                                 season: Optional[int] = None,
+                                 raise_exception: bool = False,
+                                 **kwargs) -> Optional[dict]:
+        """
+        按来源异步取媒体详情
+
+        本源没有异步实现，同步方法切线程池执行，避免阻塞共享事件循环。
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，本源不支持
+        :param season: 季，本源不支持
+        :param raise_exception: 限流开关，本源不支持
+        :return: 媒体详情，非本源或ID非法时为 None
+        """
+        if source != MediaSource.TVDB:
+            return None
+        try:
+            tvdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await run_in_threadpool(self.tvdb_info, tvdbid=tvdbid)
 
     def tvdb_info(self, tvdbid: int) -> Optional[dict]:
         """
