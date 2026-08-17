@@ -767,6 +767,46 @@ class TheMovieDbModule(_ModuleBase):
                                                   tmdbid=info.get("id"))
         return info
 
+    def match_media(self, source: Optional[MediaSource] = None, name: str = None,
+                    mtype: Optional[MediaType] = None, year: Optional[str] = None,
+                    season: Optional[int] = None, imdbid: Optional[str] = None,
+                    raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源匹配媒体信息，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param name: 名称
+        :param mtype: 媒体类型
+        :param year: 年份
+        :param season: 用于匹配指定季，0 表示特别季
+        :param imdbid: IMDB ID，本源不支持，忽略
+        :param raise_exception: 触发速率限制时是否抛出异常，本源不支持，忽略
+        :return: 匹配到的TMDB信息，非本源时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        return self.match_tmdbinfo(name=name, mtype=mtype, year=year, season=season)
+
+    async def async_match_media(self, source: Optional[MediaSource] = None, name: str = None,
+                                mtype: Optional[MediaType] = None, year: Optional[str] = None,
+                                season: Optional[int] = None, imdbid: Optional[str] = None,
+                                raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源异步匹配媒体信息，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param name: 名称
+        :param mtype: 媒体类型
+        :param year: 年份
+        :param season: 用于匹配指定季，0 表示特别季
+        :param imdbid: IMDB ID，本源不支持，忽略
+        :param raise_exception: 触发速率限制时是否抛出异常，本源不支持，忽略
+        :return: 匹配到的TMDB信息，非本源时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        return await self.async_match_tmdbinfo(name=name, mtype=mtype, year=year, season=season)
+
     def media_detail(self, source: Optional[MediaSource] = None, media_id: Any = None,
                      mtype: Optional[MediaType] = None, season: Optional[int] = None,
                      raise_exception: bool = False, **kwargs) -> Optional[dict]:

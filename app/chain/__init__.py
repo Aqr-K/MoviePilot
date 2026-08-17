@@ -658,8 +658,9 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param season: 季
         :param raise_exception: 触发速率限制时是否抛出异常
         """
-        return self.run_module(
-            "match_doubaninfo",
+        return self.unicast(
+            "match_media",
+            source=MediaSource.Douban,
             name=name,
             imdbid=imdbid,
             mtype=mtype,
@@ -686,8 +687,9 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param season: 季
         :param raise_exception: 触发速率限制时是否抛出异常
         """
-        return await self.async_run_module(
-            "async_match_doubaninfo",
+        return await self.async_unicast(
+            "async_match_media",
+            source=MediaSource.Douban,
             name=name,
             imdbid=imdbid,
             mtype=mtype,
@@ -710,8 +712,9 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param year: 年份
         :param season: 季
         """
-        return self.run_module(
-            "match_tmdbinfo", name=name, mtype=mtype, year=year, season=season
+        return self.unicast(
+            "match_media", source=MediaSource.TMDB,
+            name=name, mtype=mtype, year=year, season=season,
         )
 
     async def async_match_tmdbinfo(
@@ -728,8 +731,9 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         :param year: 年份
         :param season: 季
         """
-        return await self.async_run_module(
-            "async_match_tmdbinfo", name=name, mtype=mtype, year=year, season=season
+        return await self.async_unicast(
+            "async_match_media", source=MediaSource.TMDB,
+            name=name, mtype=mtype, year=year, season=season,
         )
 
     def obtain_images(self, mediainfo: MediaInfo) -> Optional[MediaInfo]:

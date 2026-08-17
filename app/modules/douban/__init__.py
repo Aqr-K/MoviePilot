@@ -1786,6 +1786,50 @@ class DoubanModule(_ModuleBase):
         result = await self.doubanapi.async_search(f"{name} {year or ''}".strip())
         return self._process_search_results(result, name, mtype, year, season)
 
+    def match_media(self, source: Optional[MediaSource] = None, name: str = None,
+                    mtype: Optional[MediaType] = None, year: Optional[str] = None,
+                    season: Optional[int] = None, imdbid: Optional[str] = None,
+                    raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源匹配媒体信息，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param name: 名称
+        :param mtype: 媒体类型
+        :param year: 年份
+        :param season: 季号
+        :param imdbid: IMDB ID，优先使用
+        :param raise_exception: 触发速率限制时是否抛出异常
+        :return: 匹配到的豆瓣信息，非本源时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        return self.match_doubaninfo(name=name, imdbid=imdbid, mtype=mtype,
+                                     year=year, season=season,
+                                     raise_exception=raise_exception)
+
+    async def async_match_media(self, source: Optional[MediaSource] = None, name: str = None,
+                                mtype: Optional[MediaType] = None, year: Optional[str] = None,
+                                season: Optional[int] = None, imdbid: Optional[str] = None,
+                                raise_exception: bool = False, **kwargs) -> Optional[dict]:
+        """
+        按来源异步匹配媒体信息，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param name: 名称
+        :param mtype: 媒体类型
+        :param year: 年份
+        :param season: 季号
+        :param imdbid: IMDB ID，优先使用
+        :param raise_exception: 触发速率限制时是否抛出异常
+        :return: 匹配到的豆瓣信息，非本源时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        return await self.async_match_doubaninfo(name=name, imdbid=imdbid, mtype=mtype,
+                                                  year=year, season=season,
+                                                  raise_exception=raise_exception)
+
     def movie_top250(self, page: int = 1, count: int = 30) -> List[MediaInfo]:
         """
         获取豆瓣电影TOP250
