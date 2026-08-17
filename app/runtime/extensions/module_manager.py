@@ -218,17 +218,21 @@ class ModuleManager(metaclass=Singleton):
     @staticmethod
     def _provides(module: Any, method: str) -> bool:
         """
-        判断模块是否已实现该能力
+        判断模块是否提供该能力
 
-        能力从运行期实例推导而非按标签声明：方法可以继承自基类（认证就定义在媒体
-        服务器基类上），只看类体会把它看成什么都没实现。
+        判定直接复用 capability 的能力推导，全库只此一处定义：生命周期钩子与服务
+        基类的配置、实例管理管道都不算能力，而领域基类上的实现算——认证就定义在
+        媒体服务器基类上，所有媒体服务器共享同一份实现。
 
         :param module: 运行态模块实例
         :param method: 能力方法名
         :return: 是否为该能力的提供者
         """
-        candidate = getattr(module, method, None)
-        return callable(candidate) and ObjectUtils.check_method(candidate)
+        try:
+            return method in provided_capabilities(module)
+        except Exception as err:
+            logger.debug(f"推导模块 {module.__class__.__name__} 能力出错：{str(err)}")
+            return False
 
     def resolve_event_handler_instance(
         self,

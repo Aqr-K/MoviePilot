@@ -42,11 +42,15 @@ BUILTIN_ONLY_CAPABILITIES: FrozenSet[str] = frozenset({
 })
 
 # 提供管道而非能力的基类，其上定义的方法不计入能力
+#
+# 只登记真正的基础设施：配置读取、服务实例管理、生命周期骨架。领域模块基类
+# （_MediaServerModuleBase 等）不在此列——它们既给管道也给真业务能力，所有媒体
+# 服务器共享同一套认证实现、写在基类上是合理设计，把整个基类拉黑会连坐判死
+# user_authenticate、media_exists、register_commands 这些真能力。
 INFRASTRUCTURE_BASES: FrozenSet[str] = frozenset({
     "object", "ABC", "Generic",
     "ConfigReloadMixin", "_ModuleBase",
     "ServiceBase", "_MessageBase", "_DownloaderBase", "_MediaServerBase",
-    "_DownloaderModuleBase", "_MessageChannelModuleBase", "_MediaServerModuleBase",
 })
 
 

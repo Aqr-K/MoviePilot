@@ -20,28 +20,18 @@ from app.runtime.extensions.module_manager import ModuleManager
 from app.schemas.types import ModuleType
 
 
-class FakeModule:
-    """声明身份与能力的模块替身"""
+class _ModuleStub:
+    """模块替身基座，能力声明在类上——与生产模块一致，也是能力推导的前提"""
 
-    def __init__(self, name: str, module_type, capabilities, priority: int = 1):
+    def __init__(self, name: str, module_type=None, priority: int = 1):
         """
         :param name: 模块名
         :param module_type: 模块身份
-        :param capabilities: 该模块提供的能力方法名
         :param priority: 模块优先级
         """
         self._name = name
         self._type = module_type
         self._priority = priority
-        for capability in capabilities:
-            setattr(self, capability, self._make_capability(capability))
-
-    def _make_capability(self, capability: str):
-        """构造一个已实现的能力方法"""
-        def implementation(*args, **kwargs):
-            """能力实现"""
-            return f"{self._name}:{capability}"
-        return implementation
 
     def get_name(self) -> str:
         """模块名称"""
@@ -56,8 +46,37 @@ class FakeModule:
         return self._priority
 
 
-class AuthCapableModule(FakeModule):
+def FakeModule(name: str, module_type, capabilities, priority: int = 1):
+    """
+    构造在类上声明指定能力的模块替身
+
+    :param name: 模块名
+    :param module_type: 模块身份
+    :param capabilities: 该模块提供的能力方法名
+    :param priority: 模块优先级
+    :return: 模块替身实例
+    """
+    namespace = {}
+    for capability in capabilities:
+        def implementation(self, *args, _capability=capability, **kwargs):
+            """能力实现"""
+            return f"{self._name}:{_capability}"
+        namespace[capability] = implementation
+    stub_cls = type(f"Stub_{name}", (_ModuleStub,), namespace)
+    return stub_cls(name, module_type, priority)
+
+
+class AuthCapableModule(_ModuleStub):
     """兼任认证的模块替身，认证能力定义在本类上"""
+
+    def __init__(self, name: str, module_type, capabilities=(), priority: int = 1):
+        """
+        :param name: 模块名
+        :param module_type: 模块身份
+        :param capabilities: 兼容位，认证能力已在类上声明
+        :param priority: 模块优先级
+        """
+        super().__init__(name, module_type, priority)
 
     def user_authenticate(self, **kwargs):
         """认证能力"""
