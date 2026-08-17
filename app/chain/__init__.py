@@ -10,30 +10,21 @@ from typing import Optional, Any, Tuple, List, Set, Union, Dict
 
 from fastapi.concurrency import run_in_threadpool
 
-from app.application.messaging.message import MessageHelper, MessageQueueManager
+from app.application.chain.context import ChainRuntimeContext, get_chain_runtime_context
 from app.chain._messaging import MessageProcessingMixin, NotificationMixin
 from app.chain._recognition import RecognitionMixin
-from app.db.oper.message import MessageOper
 from app.domain.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.domain.meta.metabase import MetaBase
 from app.foundation.reflection import ObjectUtils
-from app.runtime.cache import FileCache, AsyncFileCache
-from app.runtime.events import EventManager
-from app.runtime.extensions.module_manager import ModuleManager
-from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.log import logger
-from app.schemas import (
-    RateLimitExceededException,
-    TransferInfo,
-    ExistMediaInfo,
-    DownloaderTorrent,
-    IncomingMessage,
-    WebhookEventInfo,
-    TmdbEpisode,
-    MediaPerson,
-    FileItem,
-    TransferDirectoryConf,
-)
+from app.schemas.exception import RateLimitExceededException
+from app.schemas.transfer import DownloaderTorrent, TransferInfo
+from app.schemas.mediaserver import ExistMediaInfo, WebhookEventInfo
+from app.schemas.message import IncomingMessage
+from app.schemas.tmdb import TmdbEpisode
+from app.schemas.context import MediaPerson
+from app.schemas.workflow import FileItem
+from app.schemas.system import TransferDirectoryConf
 from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     TorrentStatus,
@@ -52,18 +43,19 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
     处理链基类
     """
 
-    def __init__(self):
+    def __init__(self, runtime_context: Optional[ChainRuntimeContext] = None):
         """
-        公共初始化
+        公共初始化；未显式传入上下文时继续使用兼容运行时 provider。
         """
-        self.modulemanager = ModuleManager()
-        self.eventmanager = EventManager()
-        self.messageoper = MessageOper()
-        self.messagehelper = MessageHelper()
-        self.messagequeue = MessageQueueManager(send_callback=self.run_module)
-        self.pluginmanager = PluginManager()
-        self.filecache = FileCache()
-        self.async_filecache = AsyncFileCache()
+        context = runtime_context or get_chain_runtime_context()
+        self.modulemanager = context.module_manager
+        self.eventmanager = context.event_manager
+        self.messageoper = context.message_oper
+        self.messagehelper = context.message_helper
+        self.pluginmanager = context.plugin_manager
+        self.filecache = context.file_cache
+        self.async_filecache = context.async_file_cache
+        self.messagequeue = context.message_queue_factory(self.run_module)
 
     def load_cache(self, filename: str) -> Any:
         """

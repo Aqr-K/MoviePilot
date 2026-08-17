@@ -64,6 +64,7 @@ def _configure_local_watcher(
         PLUGIN_AUTO_RELOAD=True,
         PLUGIN_LOCAL_REPO_PATHS=str(repo_path),
         ROOT_PATH=tmp_path,
+        TEMP_PATH=tmp_path / "temp",
         VERSION_FLAG="v2",
     )
     monkeypatch.setattr("app.runtime.extensions.plugin_shared.settings", settings_stub)
@@ -79,6 +80,19 @@ def _set_running_render_mode(
     """注册测试所需的运行态插件联邦渲染声明。"""
     plugin_manager.running_plugins["DemoPlugin"] = SimpleNamespace(
         get_render_mode=lambda: (render_mode, dist_path),
+    )
+
+
+def _set_installed_plugins(monkeypatch, plugin_ids: list[str]) -> None:
+    """注入本地同步测试所需的已安装插件读取端口。"""
+    storage = SimpleNamespace(
+        read=lambda key: plugin_ids
+        if key == SystemConfigKey.UserInstalledPlugins
+        else None,
+    )
+    monkeypatch.setattr(
+        "app.runtime.extensions.plugin_manager.get_plugin_storage",
+        lambda: storage,
     )
 
 

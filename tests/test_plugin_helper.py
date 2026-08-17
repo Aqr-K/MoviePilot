@@ -898,9 +898,6 @@ class TestPluginHelper:
         async def fake_clear():
             clear_calls.append("clear")
 
-        fake_release_method = SimpleNamespace(cache_clear=fake_clear)
-        fake_helper = SimpleNamespace(async_get_plugin_release_versions=fake_release_method)
-
         async def fake_market(*_args, **_kwargs):
             return []
 
@@ -916,7 +913,6 @@ class TestPluginHelper:
         """单插件版本查询不构建全部本地插件信息。"""
         try:
             from app.runtime.extensions.plugin_manager import PluginManager
-            from app.db.oper.systemconfig import SystemConfigOper
             from app.schemas.types import SystemConfigKey
         except ModuleNotFoundError as exc:
             pytest.skip(f"missing dependency: {exc}")
@@ -927,9 +923,12 @@ class TestPluginHelper:
         plugin_manager = PluginManager()
         monkeypatch.setattr(plugin_manager, "_plugins", {"DemoPlugin": DemoPlugin})
         monkeypatch.setattr(
-            SystemConfigOper,
-            "get",
-            lambda _self, key: ["DemoPlugin"] if key == SystemConfigKey.UserInstalledPlugins else None,
+            "app.runtime.extensions.plugin_shared.SystemConfigOper",
+            lambda: SimpleNamespace(
+                get=lambda key: ["DemoPlugin"]
+                if key == SystemConfigKey.UserInstalledPlugins
+                else None
+            ),
         )
 
         assert plugin_manager.get_local_plugin_version("DemoPlugin") == "1.2.0"

@@ -6,10 +6,12 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Set, Dict, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Set, Dict, Union
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
-from app import schemas
+from app.schemas.transfer import DownloaderTorrent as _SchemaDownloaderTorrent
+from app.schemas.system import TransferDirectoryConf as _SchemaTransferDirectoryConf
+from app.schemas.workflow import FileItem as _SchemaFileItem
 from app.chain import ChainBase
 from app.chain.media import MediaChain
 from app.chain.storage import StorageChain
@@ -30,11 +32,17 @@ from app.db.oper.downloadfailure import DownloadFailureOper
 from app.db.oper.downloadhistory import DownloadHistoryOper
 from app.db.oper.mediaserver import MediaServerOper
 from app.application.directory import DirectoryHelper, validate_download_save_path
+from app.application.download.tasks import DownloadTaskService
 from app.runtime.thread import ThreadHelper
 from app.application.torrent import TorrentHelper
 from app.runtime.log import logger
-from app.schemas import ExistMediaInfo, FileURI, NotExistMediaInfo, DownloaderTorrent, Message, ResourceSelectionEventData, \
-    ResourceDownloadEventData
+from app.schemas.mediaserver import ExistMediaInfo
+from app.schemas.file import FileURI
+from app.schemas.mediaserver import NotExistMediaInfo
+from app.schemas.transfer import DownloaderTorrent
+from app.schemas.message import Message
+from app.schemas.event import ResourceSelectionEventData
+from app.schemas.event import ResourceDownloadEventData
 from app.schemas.types import MUSIC_ENTITY_ALBUM, MediaSource, MediaType, TorrentStatus, EventType, NotificationChannel, MessageType, ContentType, \
     ChainEventType
 from app.adapters.network.http import RequestUtils
@@ -43,6 +51,9 @@ from app.domain import episode as episode_rules
 from app.foundation import size as size_tools
 from app.foundation import text as text_tools
 from app.adapters.system.host import SystemUtils
+
+if TYPE_CHECKING:
+    from app.db.models.downloadfailure import DownloadFailure
 
 
 DOWNLOAD_FAILURE_RESOURCE_TTL_SECONDS = 24 * 60 * 60
@@ -218,7 +229,7 @@ class DownloadChain(ChainBase):
             storage_chain: StorageChain,
             storage: str,
             target_path: Path,
-    ) -> Tuple[Optional[schemas.FileItem], str]:
+    ) -> Tuple[Optional[_SchemaFileItem], str]:
         """
         获取字幕保存目录，返回失败原因供前端展示。
         """
@@ -293,7 +304,7 @@ class DownloadChain(ChainBase):
     @staticmethod
     def _append_download_classification(
             root_path: Path,
-            dir_info: schemas.TransferDirectoryConf,
+            dir_info: _SchemaTransferDirectoryConf,
             media_info: MediaInfo,
     ) -> Path:
         """
@@ -315,7 +326,7 @@ class DownloadChain(ChainBase):
     def _upload_subtitle_file(
             storage_chain: StorageChain,
             storage: str,
-            working_dir_item: schemas.FileItem,
+            working_dir_item: _SchemaFileItem,
             subtitle_file: Path,
     ) -> Tuple[Optional[str], str]:
         """
@@ -832,12 +843,12 @@ class DownloadChain(ChainBase):
             self,
             contexts: List[Context],
             source: Optional[str],
-    ) -> Set[str]:
+    ) -> Dict[str, "DownloadFailure"]:
         """
-        查询当前订阅候选中仍处于冷却期的失败指纹。
+        查询当前订阅候选中仍处于冷却期的失败记录，返回指纹到失败记录的映射。
         """
         if not self._is_subscribe_source(source):
-            return set()
+            return {}
         fingerprints = [
             fingerprint
             for fingerprint in [
@@ -847,17 +858,15 @@ class DownloadChain(ChainBase):
             if fingerprint
         ]
         if not fingerprints:
-            return set()
+            return {}
         now_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         try:
-            return set(
-                DownloadFailureOper()
-                .get_active_by_fingerprints(fingerprints=fingerprints, now_time=now_time)
-                .keys()
+            return DownloadFailureOper().get_active_by_fingerprints(
+                fingerprints=fingerprints, now_time=now_time,
             )
         except Exception as err:
             logger.error(f"查询下载失败冷却失败：{str(err)}")
-            return set()
+            return {}
 
     def download_torrent(self, torrent: TorrentInfo,
                          channel: NotificationChannel = None,
@@ -1418,7 +1427,7 @@ class DownloadChain(ChainBase):
 
         # 仅排序，不提前按媒体控重；下载失败时需要继续尝试同组后续候选。
         contexts = TorrentHelper().sort_torrents(contexts)
-        active_failure_fingerprints = self._active_download_failure_fingerprints(
+        active_failure_records = self._active_download_failure_fingerprints(
             contexts=contexts,
             source=source,
         )
@@ -1428,8 +1437,16 @@ class DownloadChain(ChainBase):
             判断候选资源是否仍处于失败冷却期。
             """
             fingerprint = self._build_download_failure_fingerprint(_context)
-            if fingerprint and fingerprint in active_failure_fingerprints:
-                logger.info(f"{_context.torrent_info.title} 近期添加下载失败，暂时跳过该资源")
+            if fingerprint and fingerprint in active_failure_records:
+                _failure = active_failure_records[fingerprint]
+                _reason = getattr(_failure, "error_message", None) or "未知原因"
+                _retry_at = getattr(_failure, "next_retry_at", None)
+                if _retry_at:
+                    logger.info(f"{_context.torrent_info.title} 近期添加下载失败（失败原因：{_reason}），"
+                                f"暂时跳过该资源，将于 {_retry_at} 后重试")
+                else:
+                    logger.info(f"{_context.torrent_info.title} 近期添加下载失败（失败原因：{_reason}），"
+                                f"暂时跳过该资源")
                 return True
             return False
 
@@ -1439,7 +1456,7 @@ class DownloadChain(ChainBase):
             """
             fingerprint = self._build_download_failure_fingerprint(_context)
             if fingerprint:
-                active_failure_fingerprints.add(fingerprint)
+                active_failure_records[fingerprint] = None
 
         # 如果是电影，直接下载
         downloaded_movies = set()
@@ -2021,51 +2038,33 @@ class DownloadChain(ChainBase):
         """
         查询正在下载的任务
         """
-        torrents = self.list_torrents(downloader=name, status=TorrentStatus.DOWNLOADING)
-        if not torrents:
-            return []
-
-        history_map = DownloadHistoryOper().get_by_hashes(
-            [torrent.hash for torrent in torrents if torrent.hash]
-        )
-        ret_torrents = []
-        for torrent in torrents:
-            history = history_map.get(torrent.hash)
-            if history:
-                # 媒体信息
-                torrent.media = {
-                    "media_source": history.media_source,
-                    "media_id": history.media_id,
-                    "type": history.type,
-                    "title": history.title,
-                    "season": history.seasons,
-                    "episode": history.episodes,
-                    "image": history.poster,
-                    "poster": history.poster,
-                    "backdrop": history.image,
-                }
-                torrent.site_name = history.torrent_site
-                # 下载用户
-                torrent.userid = history.userid
-                torrent.username = history.username
-            ret_torrents.append(torrent)
-        return ret_torrents
+        return self._download_task_service().downloading(name)
 
     def set_downloading(self, hash_str, oper: str, name: Optional[str] = None) -> bool:
         """
         控制下载任务 start/stop
         """
-        if oper == "start":
-            return self.start_torrents(hashs=[hash_str], downloader=name)
-        elif oper == "stop":
-            return self.stop_torrents(hashs=[hash_str], downloader=name)
-        return False
+        return self._download_task_service().set_downloading(
+            hash_str,
+            oper,
+            name,
+        )
 
     def remove_downloading(self, hash_str: str, name: Optional[str] = None) -> bool:
         """
         删除下载任务
         """
-        return self.remove_torrents(hashs=[hash_str], downloader=name)
+        return self._download_task_service().remove_downloading(hash_str, name)
+
+    def _download_task_service(self) -> DownloadTaskService:
+        """构造绑定当前下载器能力与历史仓储的任务服务。"""
+        return DownloadTaskService(
+            list_torrents=self.list_torrents,
+            get_history_by_hashes=DownloadHistoryOper().get_by_hashes,
+            start_torrents=self.start_torrents,
+            stop_torrents=self.stop_torrents,
+            remove_torrents=self.remove_torrents,
+        )
 
     @eventmanager.register(EventType.DownloadFileDeleted)
     def download_file_deleted(self, event: Event):
@@ -2079,7 +2078,7 @@ class DownloadChain(ChainBase):
             return
         logger.warn(f"检测到下载源文件被删除，删除下载任务（不含文件）：{hash_str}")
         # 先查询种子
-        torrents: List[schemas.DownloaderTorrent] = self.list_torrents(hashs=[hash_str])
+        torrents: List[_SchemaDownloaderTorrent] = self.list_torrents(hashs=[hash_str])
         if torrents:
             self.remove_torrents(hashs=[hash_str], delete_file=False)
             # 发出下载任务删除事件，如需处理辅种，可监听该事件

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 from fastapi import HTTPException
 from starlette import status
 
-from app import schemas
+from app.schemas.plugin import PluginDashboard as _SchemaPluginDashboard
 from app.foundation.reflection import ObjectUtils
 from app.runtime.extensions.plugin_instance import matches_plugin, split_instance_key
 from app.runtime.log import logger
@@ -201,7 +201,7 @@ class _PluginUIMixin:
                 logger.error(f"获取插件[{plugin_id}]仪表盘元数据出错：{str(e)}")
         return dashboard_meta
 
-    def get_plugin_dashboard(self, pid: str, key: str, user_agent: str = None) -> Optional[schemas.PluginDashboard]:
+    def get_plugin_dashboard(self, pid: str, key: str, user_agent: str = None) -> Optional[_SchemaPluginDashboard]:
         """
         获取插件仪表盘
         """
@@ -241,7 +241,7 @@ class _PluginUIMixin:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail=f"插件 {pid} 返回的仪表盘数据格式错误")
         cols, attrs, elements = dashboard
-        return schemas.PluginDashboard(
+        return _SchemaPluginDashboard(
             id=pid,
             name=plugin_instance.plugin_name,
             key=key,

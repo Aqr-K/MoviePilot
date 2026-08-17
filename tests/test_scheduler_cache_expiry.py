@@ -45,8 +45,8 @@ def test_scheduler_initializer_starts_background_jobs(monkeypatch):
     scheduler.init.assert_called_once_with()
 
 
-def test_meta_cache_expire_does_not_schedule_bulk_cache_clear(monkeypatch):
-    """单条缓存 TTL 不应再被用于注册整批缓存清理任务。"""
+def test_clear_cache_is_manual_only(monkeypatch):
+    """缓存清理任务应仅手动执行，不注册到调度器自动运行。"""
     background_scheduler = _BackgroundSchedulerStub()
     generic_chain = Mock()
     for name in [
@@ -100,4 +100,5 @@ def test_meta_cache_expire_does_not_schedule_bulk_cache_clear(monkeypatch):
     scheduled_job_ids = {job["id"] for job in background_scheduler.jobs}
     assert "clear_cache" not in scheduled_job_ids
     assert "clear_cache" in scheduler._jobs
+    assert scheduler._jobs["clear_cache"]["manual"] is True
     assert background_scheduler.started is True

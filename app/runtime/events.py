@@ -15,7 +15,7 @@ from app.runtime.config import global_vars
 from app.runtime.extensions.plugin_instance import instance_key, plugin_id_of, split_instance_key
 from app.runtime.thread import ThreadHelper
 from app.runtime.log import logger
-from app.schemas import ChainEventData
+from app.schemas.event import ChainEventData
 from app.schemas.types import ChainEventType, EventType
 from app.runtime.rate import ExponentialBackoffRateLimiter
 from app.foundation.singleton import Singleton
@@ -923,5 +923,10 @@ class EventManager(metaclass=Singleton):
         return decorator
 
 
+# 模块热重载时类对象会重新创建，但插件和 SDK 可能仍持有旧全局实例。把旧实例登记到
+# 新 EventManager 类的单例键，确保所有公开入口继续共享同一个事件总线。
+_existing_eventmanager = globals().get("eventmanager")
+if _existing_eventmanager is not None:
+    Singleton._instances[(EventManager, (), frozenset())] = _existing_eventmanager
 # 全局实例定义
 eventmanager = EventManager()

@@ -3,7 +3,8 @@ from typing import Any, List, Optional, Tuple, Union
 
 import cn2an
 
-from app import schemas
+from app.schemas.context import MediaPerson as _SchemaMediaPerson
+from app.schemas.discover import DiscoverBoard as _SchemaDiscoverBoard
 from app.runtime.config import settings
 from app.domain.context import (
     MediaInfo,
@@ -17,7 +18,8 @@ from app.runtime.log import logger
 from app.modules import _ModuleBase
 from app.modules.douban.apiv2 import DoubanApi
 from app.modules.douban.scraper import DoubanScraper
-from app.schemas import MediaPerson, APIRateLimitException
+from app.schemas.context import MediaPerson
+from app.schemas.exception import APIRateLimitException
 from app.schemas.types import (
     MUSIC_ENTITY_ALBUM,
     MUSIC_ENTITY_RECORDING,
@@ -1403,14 +1405,14 @@ class DoubanModule(_ModuleBase):
         ("tv_weekly_global", "全球剧集榜", MediaType.TV),
     )
 
-    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+    def discover_boards(self) -> List[_SchemaDiscoverBoard]:
         """
         交出本源提供的榜单清单
 
         :return: 榜单声明列表
         """
         return [
-            schemas.DiscoverBoard(
+            _SchemaDiscoverBoard(
                 source=MediaSource.Douban.value,
                 board=board,
                 name=name,
@@ -1953,7 +1955,7 @@ class DoubanModule(_ModuleBase):
         self.doubanapi.clear_cache()
         logger.info("豆瓣缓存清除完成")
 
-    def douban_movie_credits(self, doubanid: str) -> List[schemas.MediaPerson]:
+    def douban_movie_credits(self, doubanid: str) -> List[_SchemaMediaPerson]:
         """
         根据豆瓣ID查询电影演职员表
         :param doubanid:  豆瓣ID
@@ -1961,7 +1963,7 @@ class DoubanModule(_ModuleBase):
         result = self.doubanapi.movie_celebrities(subject_id=doubanid)
         return self._process_celebrity_data(result)
 
-    def douban_tv_credits(self, doubanid: str) -> List[schemas.MediaPerson]:
+    def douban_tv_credits(self, doubanid: str) -> List[_SchemaMediaPerson]:
         """
         根据豆瓣ID查询电视剧演职员表
         :param doubanid:  豆瓣ID
@@ -1971,7 +1973,7 @@ class DoubanModule(_ModuleBase):
 
     def media_credits(self, source: Optional[MediaSource] = None, media_id: Any = None,
                       mtype: Optional[MediaType] = None, page: int = 1,
-                      count: Optional[int] = None, **kwargs) -> Optional[List[schemas.MediaPerson]]:
+                      count: Optional[int] = None, **kwargs) -> Optional[List[_SchemaMediaPerson]]:
         """
         按来源取演职员表，委托本源既有方法
 
@@ -1995,7 +1997,7 @@ class DoubanModule(_ModuleBase):
     async def async_media_credits(self, source: Optional[MediaSource] = None,
                                   media_id: Any = None, mtype: Optional[MediaType] = None,
                                   page: int = 1, count: Optional[int] = None,
-                                  **kwargs) -> Optional[List[schemas.MediaPerson]]:
+                                  **kwargs) -> Optional[List[_SchemaMediaPerson]]:
         """
         按来源异步取演职员表，委托本源既有方法
 
@@ -2078,7 +2080,7 @@ class DoubanModule(_ModuleBase):
         return await self.async_douban_movie_recommend(doubanid=doubanid)
 
     def person_detail(self, source: Optional[MediaSource] = None,
-                      person_id: int = None, **kwargs) -> Optional[schemas.MediaPerson]:
+                      person_id: int = None, **kwargs) -> Optional[_SchemaMediaPerson]:
         """
         按来源取人物详情，委托本源既有方法
 
@@ -2092,7 +2094,7 @@ class DoubanModule(_ModuleBase):
 
     async def async_person_detail(self, source: Optional[MediaSource] = None,
                                   person_id: int = None,
-                                  **kwargs) -> Optional[schemas.MediaPerson]:
+                                  **kwargs) -> Optional[_SchemaMediaPerson]:
         """
         按来源异步取人物详情，委托本源既有方法
 
@@ -2104,7 +2106,7 @@ class DoubanModule(_ModuleBase):
             return None
         return await self.async_douban_person_detail(person_id=person_id)
 
-    def douban_person_detail(self, person_id: int) -> schemas.MediaPerson:
+    def douban_person_detail(self, person_id: int) -> _SchemaMediaPerson:
         """
         获取人物详细信息
         :param person_id:  豆瓣人物ID
@@ -2118,14 +2120,14 @@ class DoubanModule(_ModuleBase):
             image = detail.get("cover_img", {}).get("url")
             if image:
                 image = image.replace("/l/public/", "/s/public/")
-            return schemas.MediaPerson(source='douban', **{
+            return _SchemaMediaPerson(source='douban', **{
                 "id": detail.get("id"),
                 "name": detail.get("title"),
                 "avatar": image,
                 "biography": detail.get("extra", {}).get("short_info"),
                 "also_known_as": also_known_as,
             })
-        return schemas.MediaPerson(source='douban')
+        return _SchemaMediaPerson(source='douban')
 
     def person_credits(self, source: Optional[MediaSource] = None, person_id: int = None,
                        page: int = 1, count: Optional[int] = None,
@@ -2183,7 +2185,7 @@ class DoubanModule(_ModuleBase):
         return []
 
     @staticmethod
-    def _process_celebrity_data(result: dict) -> List[schemas.MediaPerson]:
+    def _process_celebrity_data(result: dict) -> List[_SchemaMediaPerson]:
         """
         处理演职员表数据的公共方法
         :param result: API返回的演职员表数据
@@ -2196,10 +2198,10 @@ class DoubanModule(_ModuleBase):
             # 更新豆瓣演员信息中的ID，从URI中提取'douban://douban.com/celebrity/1316132?subject_id=27503705' subject_id
             for doubaninfo in ret_list:
                 doubaninfo['id'] = doubaninfo.get('uri', '').split('?subject_id=')[-1]
-            return [schemas.MediaPerson(source='douban', **doubaninfo) for doubaninfo in ret_list]
+            return [_SchemaMediaPerson(source='douban', **doubaninfo) for doubaninfo in ret_list]
         return []
 
-    async def async_douban_movie_credits(self, doubanid: str) -> List[schemas.MediaPerson]:
+    async def async_douban_movie_credits(self, doubanid: str) -> List[_SchemaMediaPerson]:
         """
         根据豆瓣ID查询电影演职员表（异步版本）
         :param doubanid:  豆瓣ID
@@ -2207,7 +2209,7 @@ class DoubanModule(_ModuleBase):
         result = await self.doubanapi.async_movie_celebrities(subject_id=doubanid)
         return self._process_celebrity_data(result)
 
-    async def async_douban_tv_credits(self, doubanid: str) -> List[schemas.MediaPerson]:
+    async def async_douban_tv_credits(self, doubanid: str) -> List[_SchemaMediaPerson]:
         """
         根据豆瓣ID查询电视剧演职员表（异步版本）
         :param doubanid:  豆瓣ID
@@ -2235,7 +2237,7 @@ class DoubanModule(_ModuleBase):
             return [MediaInfo(douban_info=info) for info in recommend]
         return []
 
-    async def async_douban_person_detail(self, person_id: int) -> schemas.MediaPerson:
+    async def async_douban_person_detail(self, person_id: int) -> _SchemaMediaPerson:
         """
         获取人物详细信息（异步版本）
         :param person_id:  豆瓣人物ID
@@ -2249,14 +2251,14 @@ class DoubanModule(_ModuleBase):
             image = detail.get("cover_img", {}).get("url")
             if image:
                 image = image.replace("/l/public/", "/s/public/")
-            return schemas.MediaPerson(source='douban', **{
+            return _SchemaMediaPerson(source='douban', **{
                 "id": detail.get("id"),
                 "name": detail.get("title"),
                 "avatar": image,
                 "biography": detail.get("extra", {}).get("short_info"),
                 "also_known_as": also_known_as,
             })
-        return schemas.MediaPerson(source='douban')
+        return _SchemaMediaPerson(source='douban')
 
     async def async_douban_person_credits(self, person_id: int, page: int = 1) -> List[MediaInfo]:
         """

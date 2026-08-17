@@ -6,12 +6,8 @@ from sqlalchemy import Boolean, DateTime, JSON, String, UniqueConstraint, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app.db import (
-    Base,
-    async_db_query,
-    db_query,
-    get_id_column,
-)
+from app.db.base import Base, get_id_column
+from app.db.decorators import async_db_query, db_query
 
 # 插件独立日志等级的合法取值
 LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")

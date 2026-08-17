@@ -6,6 +6,7 @@ from app.runtime.compat.diagnostics import (
 )
 from app.runtime.compat.resource_imports import scan_plugin_resource_imports
 from app.runtime.config import global_vars
+from app.runtime.config import settings
 from app.runtime.extensions.plugin_manager import (
     PluginManager,
     configure_plugin_install_reporter,
@@ -13,10 +14,35 @@ from app.runtime.extensions.plugin_manager import (
     configure_plugin_resource_import_preparer,
     configure_site_auth_level_provider,
 )
+from app.adapters.external.plugin.client import PluginMarketClient
+from app.runtime.extensions.plugin.storage import (
+    PluginStorage,
+    configure_plugin_storage,
+)
+from app.runtime.extensions.plugin.system import (
+    PluginSystemServices,
+    configure_plugin_system,
+)
 from app.runtime.managed_resources import acquire_managed_resource
 from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
 from app.adapters.external.server import MoviePilotServerHelper
+from app.adapters.external.market import (
+    PluginHelper,
+    VERSION_BACKWARD_COMPATIBLE_FLAGS,
+    configure_installed_plugins_provider,
+)
+from app.adapters.system.plugin.dependency import PluginDependencyInstaller
+from app.adapters.system.plugin.package import PluginPackageManager
+from app.adapters.system.host import SystemUtils
+from app.db.oper.plugindata import PluginDataOper
+from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.log import logger
+from app.schemas.types import SystemConfigKey
+
+
+async def _async_write_plugin_config(key, value):
+    """通过数据库操作器异步保存插件运行时配置。"""
+    return await SystemConfigOper().async_set(key, value)
 
 
 def _prepare_legacy_plugin_import(*, plugin_id: str, plugin_dir: Path) -> None:
@@ -30,6 +56,8 @@ def _prepare_legacy_plugin_import(*, plugin_id: str, plugin_dir: Path) -> None:
 
 def _configure_plugin_services() -> None:
     """把兼容诊断、远程上报和站点认证等级装配到插件管理器。"""
+    plugin_helper = PluginHelper()
+    market_client = PluginMarketClient(plugin_helper)
     configure_plugin_legacy_import_services(
         diagnostics_configurator=configure_legacy_import_diagnostics,
         import_scanner=scan_plugin_legacy_imports,
@@ -37,6 +65,32 @@ def _configure_plugin_services() -> None:
     configure_plugin_resource_import_preparer(_prepare_legacy_plugin_import)
     configure_plugin_install_reporter(MoviePilotServerHelper.install_plugin_reg)
     configure_site_auth_level_provider(lambda: SitesHelper().auth_level)
+    configure_installed_plugins_provider(
+        lambda: SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
+    )
+    configure_plugin_system(PluginSystemServices(
+        market=market_client,
+        package=PluginPackageManager(plugin_helper),
+        dependency=PluginDependencyInstaller(
+            plugin_helper,
+            installed_plugins_provider=lambda: SystemConfigOper().get(
+                SystemConfigKey.UserInstalledPlugins
+            ) or [],
+            plugin_dir=Path(settings.ROOT_PATH) / "app" / "plugins",
+        ),
+        compatible_flags=lambda flag: (
+            [flag] + VERSION_BACKWARD_COMPATIBLE_FLAGS.get(flag, [])
+            if flag else []
+        ),
+        frozen=SystemUtils.is_frozen,
+    ))
+    configure_plugin_storage(PluginStorage(
+        read=lambda key: SystemConfigOper().get(key),
+        write=lambda key, value: SystemConfigOper().set(key, value),
+        async_write=_async_write_plugin_config,
+        delete=lambda key: SystemConfigOper().delete(key),
+        delete_data=lambda plugin_id: PluginDataOper().del_data(plugin_id),
+    ))
 
 
 async def sync_plugins() -> bool:

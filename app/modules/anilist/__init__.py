@@ -1,6 +1,7 @@
 from typing import Any, List, Optional, Tuple, Union
 
-from app import schemas
+from app.schemas.context import MediaPerson as _SchemaMediaPerson
+from app.schemas.discover import DiscoverBoard as _SchemaDiscoverBoard
 from app.runtime.config import settings
 from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
@@ -168,7 +169,7 @@ class AniListModule(_ModuleBase):
         return MediaInfo._anilist_date(date_info)
 
     @classmethod
-    def _build_credit_person(cls, edge: dict) -> Optional[schemas.MediaPerson]:
+    def _build_credit_person(cls, edge: dict) -> Optional[_SchemaMediaPerson]:
         """
         将 AniList 角色配音关系转换为统一人物信息。
 
@@ -181,7 +182,7 @@ class AniListModule(_ModuleBase):
         name_info = actor.get("name") or {}
         character_name = (edge.get("node") or {}).get("name") or {}
         images = actor.get("image") or {}
-        return schemas.MediaPerson(
+        return _SchemaMediaPerson(
             source="anilist",
             id=actor.get("id"),
             name=cls._person_name(name_info),
@@ -194,7 +195,7 @@ class AniListModule(_ModuleBase):
         )
 
     @classmethod
-    def _build_person_detail(cls, info: dict) -> schemas.MediaPerson:
+    def _build_person_detail(cls, info: dict) -> _SchemaMediaPerson:
         """
         将 AniList 人物详情转换为统一人物信息。
 
@@ -203,7 +204,7 @@ class AniListModule(_ModuleBase):
         """
         name_info = info.get("name") or {}
         images = info.get("image") or {}
-        return schemas.MediaPerson(
+        return _SchemaMediaPerson(
             source="anilist",
             id=info.get("id"),
             name=cls._person_name(name_info),
@@ -442,14 +443,14 @@ class AniListModule(_ModuleBase):
         ("popular_this_season", "anilist_popular_this_season", "本季流行"),
     )
 
-    def discover_boards(self) -> List[schemas.DiscoverBoard]:
+    def discover_boards(self) -> List[_SchemaDiscoverBoard]:
         """
         交出本源提供的榜单清单
 
         :return: 榜单声明列表
         """
         return [
-            schemas.DiscoverBoard(
+            _SchemaDiscoverBoard(
                 source=MediaSource.AniList.value,
                 board=board,
                 name=name,
@@ -591,7 +592,7 @@ class AniListModule(_ModuleBase):
 
     def anilist_credits(
         self, anilist_id: int, page: int = 1, count: int = 20
-    ) -> List[schemas.MediaPerson]:
+    ) -> List[_SchemaMediaPerson]:
         """
         获取 AniList 动画配音演员。
 
@@ -605,7 +606,7 @@ class AniListModule(_ModuleBase):
 
     async def async_anilist_credits(
         self, anilist_id: int, page: int = 1, count: int = 20
-    ) -> List[schemas.MediaPerson]:
+    ) -> List[_SchemaMediaPerson]:
         """
         异步获取 AniList 动画配音演员。
 
@@ -641,7 +642,7 @@ class AniListModule(_ModuleBase):
 
     def media_credits(self, source: Optional[MediaSource] = None, media_id: Any = None,
                       mtype: Optional[MediaType] = None, page: int = 1,
-                      count: Optional[int] = None, **kwargs) -> Optional[List[schemas.MediaPerson]]:
+                      count: Optional[int] = None, **kwargs) -> Optional[List[_SchemaMediaPerson]]:
         """
         按来源取演职员表，委托本源既有方法
 
@@ -666,7 +667,7 @@ class AniListModule(_ModuleBase):
     async def async_media_credits(self, source: Optional[MediaSource] = None,
                                   media_id: Any = None, mtype: Optional[MediaType] = None,
                                   page: int = 1, count: Optional[int] = None,
-                                  **kwargs) -> Optional[List[schemas.MediaPerson]]:
+                                  **kwargs) -> Optional[List[_SchemaMediaPerson]]:
         """
         按来源异步取演职员表，委托本源既有方法
 
@@ -734,7 +735,7 @@ class AniListModule(_ModuleBase):
             anilist_id=anilist_id, page=page, count=count if count is not None else 20)
 
     def person_detail(self, source: Optional[MediaSource] = None,
-                      person_id: int = None, **kwargs) -> Optional[schemas.MediaPerson]:
+                      person_id: int = None, **kwargs) -> Optional[_SchemaMediaPerson]:
         """
         按来源取人物详情，委托本源既有方法
 
@@ -748,7 +749,7 @@ class AniListModule(_ModuleBase):
 
     async def async_person_detail(self, source: Optional[MediaSource] = None,
                                   person_id: int = None,
-                                  **kwargs) -> Optional[schemas.MediaPerson]:
+                                  **kwargs) -> Optional[_SchemaMediaPerson]:
         """
         按来源异步取人物详情，委托本源既有方法
 
@@ -760,7 +761,7 @@ class AniListModule(_ModuleBase):
             return None
         return await self.async_anilist_person_detail(person_id=person_id)
 
-    def anilist_person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
+    def anilist_person_detail(self, person_id: int) -> Optional[_SchemaMediaPerson]:
         """
         获取 AniList 人物详情。
 
@@ -772,7 +773,7 @@ class AniListModule(_ModuleBase):
 
     async def async_anilist_person_detail(
         self, person_id: int
-    ) -> Optional[schemas.MediaPerson]:
+    ) -> Optional[_SchemaMediaPerson]:
         """
         异步获取 AniList 人物详情。
 

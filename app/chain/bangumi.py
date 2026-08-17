@@ -1,6 +1,6 @@
 from typing import Optional, List
 
-from app import schemas
+from app.schemas.context import MediaPerson as _SchemaMediaPerson
 from app.chain import ChainBase
 from app.domain.context import MediaInfo
 from app.schemas.types import MediaSource
@@ -32,7 +32,7 @@ class BangumiChain(ChainBase):
         return self.unicast("media_detail",
                             source=MediaSource.Bangumi, media_id=bangumiid)
 
-    def bangumi_credits(self, bangumiid: int) -> List[schemas.MediaPerson]:
+    def bangumi_credits(self, bangumiid: int) -> List[_SchemaMediaPerson]:
         """
         根据BangumiID查询电影演职员表
         :param bangumiid:  BangumiID
@@ -46,7 +46,7 @@ class BangumiChain(ChainBase):
         """
         return self.unicast("media_recommend", source=MediaSource.Bangumi, media_id=bangumiid)
 
-    def person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
+    def person_detail(self, person_id: int) -> Optional[_SchemaMediaPerson]:
         """
         根据人物ID查询Bangumi人物详情
         :param person_id:  人物ID
@@ -84,7 +84,7 @@ class BangumiChain(ChainBase):
         return await self.async_unicast("async_media_detail",
                                         source=MediaSource.Bangumi, media_id=bangumiid)
 
-    async def async_bangumi_credits(self, bangumiid: int) -> List[schemas.MediaPerson]:
+    async def async_bangumi_credits(self, bangumiid: int) -> List[_SchemaMediaPerson]:
         """
         根据BangumiID查询电影演职员表（异步版本）
         :param bangumiid:  BangumiID
@@ -100,7 +100,7 @@ class BangumiChain(ChainBase):
         return await self.async_unicast("async_media_recommend", source=MediaSource.Bangumi,
                                         media_id=bangumiid)
 
-    async def async_person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
+    async def async_person_detail(self, person_id: int) -> Optional[_SchemaMediaPerson]:
         """
         根据人物ID查询Bangumi人物详情（异步版本）
         :param person_id:  人物ID

@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Type, Union, Callable, Tuple
 
 
-from app import schemas
+from app.schemas.plugin import Plugin as _SchemaPlugin
 from app.foundation.crypto import RSAUtils
 from app.foundation.reflection import ObjectUtils
 from app.foundation.version import compare_version
@@ -125,7 +125,7 @@ class _PluginCatalogMixin:
         """
         return list(self._plugins.keys())
 
-    def get_online_plugins(self, force: bool = False) -> List[schemas.Plugin]:
+    def get_online_plugins(self, force: bool = False) -> List[_SchemaPlugin]:
         """
         获取所有在线插件信息
         """
@@ -153,15 +153,15 @@ class _PluginCatalogMixin:
                     futures_meta[higher_future] = (market_index, True, flag_priority)
 
             # 收集结果，按市场顺序、高版本优先、兼容版本优先级排序，保证去重时优先保留高版本来源
-            collected: List[Tuple[int, bool, int, List[schemas.Plugin]]] = []
+            collected: List[Tuple[int, bool, int, List[_SchemaPlugin]]] = []
             for future in concurrent.futures.as_completed(futures_meta):
                 plugins = future.result()
                 market_index, is_higher, flag_priority = futures_meta[future]
                 collected.append((market_index, is_higher, flag_priority, plugins or []))
 
         collected.sort(key=lambda item: (item[0], 0 if item[1] else 1, item[2]))
-        higher_version_plugins: List[schemas.Plugin] = []
-        base_version_plugins: List[schemas.Plugin] = []
+        higher_version_plugins: List[_SchemaPlugin] = []
+        base_version_plugins: List[_SchemaPlugin] = []
         for _market_index, is_higher, _flag_priority, plugins in collected:
             if not plugins:
                 continue
@@ -178,7 +178,7 @@ class _PluginCatalogMixin:
             self,
             force: bool = False,
             progress_callback: Optional[Callable[..., None]] = None,
-    ) -> List[schemas.Plugin]:
+    ) -> List[_SchemaPlugin]:
         """
         异步获取所有在线插件信息
         :param force: 是否强制刷新（忽略缓存）
@@ -194,7 +194,7 @@ class _PluginCatalogMixin:
                 package_version: Optional[str],
                 result_version: str,
                 task_index: int,
-        ) -> Tuple[int, str, List[schemas.Plugin]]:
+        ) -> Tuple[int, str, List[_SchemaPlugin]]:
             """
             获取单个市场版本的插件列表并保留结果分组。
             """
@@ -274,7 +274,7 @@ class _PluginCatalogMixin:
             progress_callback(value=100, text="插件市场缓存刷新完成")
         return result
 
-    def get_local_plugins(self) -> List[schemas.Plugin]:
+    def get_local_plugins(self) -> List[_SchemaPlugin]:
         """
         获取所有本地已下载的插件信息
         """
@@ -286,7 +286,7 @@ class _PluginCatalogMixin:
             # 运行状插件
             plugin_obj = self._running_plugins.get(pid)
             # 基本属性
-            plugin = schemas.Plugin()
+            plugin = _SchemaPlugin()
             # ID
             plugin.id = pid
             # 安装状态
@@ -361,7 +361,7 @@ class _PluginCatalogMixin:
             return None
         return getattr(plugin_class, "plugin_version", None)
 
-    def get_local_repo_plugins(self) -> List[schemas.Plugin]:
+    def get_local_repo_plugins(self) -> List[_SchemaPlugin]:
         """
         获取本地插件仓库目录中的插件信息
         """
@@ -427,7 +427,7 @@ class _PluginCatalogMixin:
 
     def get_plugins_from_market(self, market: str,
                                 package_version: Optional[str] = None,
-                                force: bool = False) -> Optional[List[schemas.Plugin]]:
+                                force: bool = False) -> Optional[List[_SchemaPlugin]]:
         """
         从指定的市场获取插件信息
         :param market: 市场的 URL 或标识
@@ -458,7 +458,7 @@ class _PluginCatalogMixin:
 
     async def async_get_plugins_from_market(self, market: str,
                                             package_version: Optional[str] = None,
-                                            force: bool = False) -> Optional[List[schemas.Plugin]]:
+                                            force: bool = False) -> Optional[List[_SchemaPlugin]]:
         """
         异步从指定的市场获取插件信息
         :param market: 市场的 URL 或标识
@@ -488,8 +488,8 @@ class _PluginCatalogMixin:
         return ret_plugins
 
     @staticmethod
-    def process_plugins_list(higher_version_plugins: List[schemas.Plugin],
-                             base_version_plugins: List[schemas.Plugin]) -> List[schemas.Plugin]:
+    def process_plugins_list(higher_version_plugins: List[_SchemaPlugin],
+                             base_version_plugins: List[_SchemaPlugin]) -> List[_SchemaPlugin]:
         """
         处理插件列表：合并、去重、排序、保留最高版本
         :param higher_version_plugins: 高版本插件列表
@@ -504,7 +504,7 @@ class _PluginCatalogMixin:
         all_plugins.extend([p for p in base_version_plugins if f"{p.id}{p.plugin_version}" not in higher_plugin_ids])
         markets = [item for item in _shared.settings.PLUGIN_MARKET.split(",") if item]
 
-        def repo_order(plugin: schemas.Plugin) -> int:
+        def repo_order(plugin: _SchemaPlugin) -> int:
             if _shared.PluginHelper.is_local_repo_url(plugin.repo_url):
                 return len(markets) + 1
             if plugin.repo_url in markets:
@@ -540,9 +540,9 @@ class _PluginCatalogMixin:
 
     def _process_plugin_info(self, pid: str, plugin_info: dict, market: str,
                              installed_apps: List[str], add_time: int,
-                             package_version: Optional[str] = None) -> Optional[schemas.Plugin]:
+                             package_version: Optional[str] = None) -> Optional[_SchemaPlugin]:
         """
-        处理单个插件信息，创建 schemas.Plugin 对象
+        处理单个插件信息，创建 _SchemaPlugin 对象
         :param pid: 插件ID
         :param plugin_info: 插件信息字典
         :param market: 市场URL
@@ -566,7 +566,7 @@ class _PluginCatalogMixin:
         # 非运行态插件
         plugin_static = self._plugins.get(pid)
         # 基本属性
-        plugin = schemas.Plugin()
+        plugin = _SchemaPlugin()
         # ID
         plugin.id = pid
         # 安装状态
@@ -656,7 +656,7 @@ class _PluginCatalogMixin:
         return None
 
     @classmethod
-    def _set_and_check_auth_level(cls, plugin: Union[schemas.Plugin, Type[Any]],
+    def _set_and_check_auth_level(cls, plugin: Union[_SchemaPlugin, Type[Any]],
                                    source: Optional[Union[dict, Type[Any]]] = None) -> bool:
         """
         设置并检查插件的认证级别
@@ -682,7 +682,7 @@ class _PluginCatalogMixin:
         # 如果当前站点认证级别大于 1 且插件级别为 99，并存在插件公钥，说明为特殊密钥认证，通过密钥匹配进行认证
         auth_level = _shared._site_auth_level_provider()
         if auth_level > 1 and plugin.auth_level == 99 and hasattr(plugin, "plugin_public_key"):
-            plugin_id = plugin.id if isinstance(plugin, schemas.Plugin) else plugin.__name__
+            plugin_id = plugin.id if isinstance(plugin, _SchemaPlugin) else plugin.__name__
             public_key = plugin.plugin_public_key
             if public_key:
                 private_key = cls._get_plugin_private_key(plugin_id)

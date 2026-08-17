@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.db import DbOper
+from app.db.base import DbOper
 from app.db.models.pluginconfig import (
     DEFAULT_INSTANCE_ID,
     LOG_LEVELS,
