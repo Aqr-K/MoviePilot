@@ -86,7 +86,7 @@ class MediaServerChain(ChainBase):
         获取媒体服务器所有媒体库
         """
         return self._sign_library_images(
-            self.run_module(
+            self.unicast(
                 "mediaserver_librarys",
                 server=server,
                 username=username,
@@ -133,8 +133,8 @@ class MediaServerChain(ChainBase):
                     break
                 start_index += page_size
         """
-        yield from self.run_module("mediaserver_items", server=server, library_id=library_id,
-                                   start_index=start_index, limit=limit)
+        yield from self.unicast("mediaserver_items", server=server, library_id=library_id,
+                                start_index=start_index, limit=limit)
 
     def items_count(self, server: str, library_id: Union[str, int]) -> Optional[int]:
         """
@@ -144,7 +144,7 @@ class MediaServerChain(ChainBase):
         :param library_id: 媒体库ID
         :return: 媒体条目总数，无法获取时返回None
         """
-        return self.run_module(
+        return self.unicast(
             "mediaserver_items_count",
             server=server,
             library_id=library_id,
@@ -189,7 +189,7 @@ class MediaServerChain(ChainBase):
         获取媒体服务器正在播放信息
         """
         return self._sign_play_item_images(
-            self.run_module(
+            self.unicast(
                 "mediaserver_playing",
                 count=count,
                 server=server,
@@ -203,7 +203,7 @@ class MediaServerChain(ChainBase):
         获取媒体服务器最新入库条目
         """
         return self._sign_play_item_images(
-            self.run_module(
+            self.unicast(
                 "mediaserver_latest",
                 count=count,
                 server=server,
@@ -216,13 +216,17 @@ class MediaServerChain(ChainBase):
         """
         获取最新最新入库条目海报作为壁纸，缓存1小时
         """
-        wallpapers = self.run_module(
-            "mediaserver_latest_images",
-            server=server,
-            count=count,
-            remote=remote,
-            username=username,
-        )
+        wallpapers = [
+            wallpaper
+            for group in self.multicast(
+                "mediaserver_latest_images",
+                server=server,
+                count=count,
+                remote=remote,
+                username=username,
+            )
+            for wallpaper in group
+        ]
         return [
             self._sign_image_url(wallpaper)
             for wallpaper in wallpapers or []
@@ -253,7 +257,7 @@ class MediaServerChain(ChainBase):
         :param season: 季号
         :return: 集号到条目 ID 的映射，无数据时返回空字典
         """
-        result = self.run_module(
+        result = self.unicast(
             "mediaserver_season_episode_ids",
             server=server,
             item_id=item_id,
@@ -267,7 +271,7 @@ class MediaServerChain(ChainBase):
         """
         获取图片的Cookies
         """
-        return self.run_module(
+        return self.unicast(
             "mediaserver_image_cookies", server=server, image_url=image_url
         )
 
