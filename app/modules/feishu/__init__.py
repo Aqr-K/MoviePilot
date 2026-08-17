@@ -452,9 +452,11 @@ class FeishuModule(_MessageChannelModuleBase[Feishu]):
             source=source,
         )
 
-    def finalize_message(self, response: MessageResponse) -> bool:
+    def finalize_message(self, response: MessageResponse) -> Optional[bool]:
+        # 非本渠道返回 None 表示让出：单播按「首个非空答案」仲裁，返回 False 会被当成
+        # 已认领而短路，把真正该处理这条消息的渠道挡在后面。本渠道内的失败仍返回 False。
         if response.channel != self._channel or not isinstance(response.metadata, dict):
-            return False
+            return None
         stream_meta = response.metadata.get("feishu_streaming") or {}
         card_id = str(stream_meta.get("card_id") or "").strip()
         if not card_id:
