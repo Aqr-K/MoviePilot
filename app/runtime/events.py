@@ -10,6 +10,7 @@ from queue import Empty, PriorityQueue
 from typing import Callable, Dict, List, Optional, Tuple, Union, Any, Type
 
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
 from app.runtime.config import global_vars
 from app.runtime.extensions.plugin_instance import instance_key, plugin_id_of, split_instance_key
@@ -647,6 +648,34 @@ class EventManager(metaclass=Singleton):
             )
             return False
         return True
+
+    @staticmethod
+    def __isolate_event(event: Event) -> Event:
+        """
+        为处理器的下一个启用实例构造独立的事件对象
+
+        同一广播事件在多个实例间复用时，第一个实例直接使用调度层已经隔离好的事件对象，
+        后续实例需要各自独立的副本，避免一个实例对 event_data 的增删改污染同一批次里
+        其他实例看到的数据。event_data 为 dict 或 pydantic 模型时做浅拷贝，与调度层按
+        处理器标识做的顶层拷贝口径一致；其余类型原样复用，深拷贝嵌套对象既没有必要，
+        遇到锁、连接等不可深拷贝的成员还会直接失败。拷贝失败时记录告警并回退为原事件
+        对象，调用方不在 try 块内，这里必须自行兜底、不能向外抛出异常。
+
+        :param event: 上一个实例使用的事件对象
+        :return: 携带独立 event_data 副本的新事件对象；无法安全拷贝时返回原事件对象
+        """
+        try:
+            event_data = event.event_data
+            if isinstance(event_data, dict):
+                isolated_data = event_data.copy()
+            elif isinstance(event_data, BaseModel):
+                isolated_data = event_data.model_copy()
+            else:
+                isolated_data = event_data
+            return Event(event_type=event.event_type, event_data=isolated_data, priority=event.priority)
+        except Exception as e:
+            logger.warning(f"事件实例隔离失败，回退为共享事件对象：{str(e)} - {traceback.format_exc()}")
+            return event
 
     def __safe_invoke_handler(self, handler: Callable, event: Event, isolate: bool = False,
                               target_owner: Optional[str] = None):
