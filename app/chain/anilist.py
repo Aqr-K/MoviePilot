@@ -98,8 +98,9 @@ class AniListChain(ChainBase):
 
         :return: 媒体人物列表
         """
-        return self.run_module(
-            "anilist_credits", anilist_id=anilist_id, page=page, count=count
+        return self.unicast(
+            "media_credits", source=MediaSource.AniList,
+            media_id=anilist_id, page=page, count=count
         ) or []
 
     async def async_credits(
@@ -110,8 +111,9 @@ class AniListChain(ChainBase):
 
         :return: 媒体人物列表
         """
-        return await self.async_run_module(
-            "async_anilist_credits", anilist_id=anilist_id, page=page, count=count
+        return await self.async_unicast(
+            "async_media_credits", source=MediaSource.AniList,
+            media_id=anilist_id, page=page, count=count
         ) or []
 
     def recommendations(
@@ -122,8 +124,9 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return self.run_module(
-            "anilist_recommendations", anilist_id=anilist_id, page=page, count=count
+        return self.unicast(
+            "media_recommend", source=MediaSource.AniList,
+            media_id=anilist_id, page=page, count=count
         ) or []
 
     async def async_recommendations(
@@ -134,11 +137,9 @@ class AniListChain(ChainBase):
 
         :return: 统一媒体信息列表
         """
-        return await self.async_run_module(
-            "async_anilist_recommendations",
-            anilist_id=anilist_id,
-            page=page,
-            count=count,
+        return await self.async_unicast(
+            "async_media_recommend", source=MediaSource.AniList,
+            media_id=anilist_id, page=page, count=count,
         ) or []
 
     def person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:

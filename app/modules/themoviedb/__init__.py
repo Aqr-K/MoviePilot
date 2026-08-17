@@ -1479,6 +1479,56 @@ class TheMovieDbModule(_ModuleBase):
             return await self.async_tmdb_tv_credits(tmdbid=tmdbid, page=page)
         return await self.async_tmdb_movie_credits(tmdbid=tmdbid, page=page)
 
+    def media_recommend(self, source: Optional[MediaSource] = None, media_id: Any = None,
+                        mtype: Optional[MediaType] = None, page: int = 1,
+                        count: Optional[int] = None, **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源取相关推荐，委托本源既有方法
+
+        本源按 mtype 分电影/剧集两条既有方法，TV 走剧集接口，其余按电影处理；
+        page/count 本源不支持。
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，TV 走剧集接口，其余按电影处理
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 推荐媒体列表，非本源或ID非法时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return self.tmdb_tv_recommend(tmdbid=tmdbid)
+        return self.tmdb_movie_recommend(tmdbid=tmdbid)
+
+    async def async_media_recommend(self, source: Optional[MediaSource] = None,
+                                    media_id: Any = None, mtype: Optional[MediaType] = None,
+                                    page: int = 1, count: Optional[int] = None,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源异步取相关推荐，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，TV 走剧集接口，其余按电影处理
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 推荐媒体列表，非本源或ID非法时为 None
+        """
+        if source != MediaSource.TMDB:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return await self.async_tmdb_tv_recommend(tmdbid=tmdbid)
+        return await self.async_tmdb_movie_recommend(tmdbid=tmdbid)
+
     def person_detail(self, source: Optional[MediaSource] = None,
                       person_id: int = None, **kwargs) -> Optional[schemas.MediaPerson]:
         """

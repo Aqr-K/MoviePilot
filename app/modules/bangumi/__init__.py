@@ -528,6 +528,51 @@ class BangumiModule(_ModuleBase):
             return [MediaInfo(bangumi_info=subject) for subject in subjects]
         return []
 
+    def media_recommend(self, source: Optional[MediaSource] = None, media_id: Any = None,
+                        mtype: Optional[MediaType] = None, page: int = 1,
+                        count: Optional[int] = None, **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源取相关推荐，委托本源既有方法
+
+        本源只有一套接口，不分电影/剧集也不分页；mtype/page/count 到此为止。
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，本源不支持
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 推荐媒体列表，非本源或ID非法时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.bangumi_recommend(bangumiid=bangumiid)
+
+    async def async_media_recommend(self, source: Optional[MediaSource] = None,
+                                    media_id: Any = None, mtype: Optional[MediaType] = None,
+                                    page: int = 1, count: Optional[int] = None,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源异步取相关推荐，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param media_id: 数据源原生媒体ID
+        :param mtype: 媒体类型，本源不支持
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 推荐媒体列表，非本源或ID非法时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_bangumi_recommend(bangumiid=bangumiid)
+
     def person_detail(self, source: Optional[MediaSource] = None,
                       person_id: int = None, **kwargs) -> Optional[schemas.MediaPerson]:
         """

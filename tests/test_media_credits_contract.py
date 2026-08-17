@@ -118,6 +118,40 @@ class MediaCreditsContractTest(unittest.TestCase):
         self.assertIsNone(module.media_credits(MediaSource.Bangumi, "not-a-number"))
         module.bangumi_credits.assert_not_called()
 
+    def test_anilist_does_not_split_by_type_and_defaults_count(self):
+        """AniList 只有一套接口，不分电影/剧集，但支持分页；count 缺省时补本源默认值 20。"""
+        from app.modules.anilist import AniListModule
+
+        module = object.__new__(AniListModule)
+        module.anilist_credits = Mock(return_value=["声优"])
+
+        result = module.media_credits(MediaSource.AniList, "5", mtype=MediaType.TV, page=2)
+
+        self.assertEqual(["声优"], result)
+        module.anilist_credits.assert_called_once_with(anilist_id=5, page=2, count=20)
+        self.assertIsNone(module.media_credits(MediaSource.Douban, "5"))
+
+    def test_anilist_forwards_explicit_count(self):
+        """AniList 显式传入 count 时原样下传，不被默认值覆盖。"""
+        from app.modules.anilist import AniListModule
+
+        module = object.__new__(AniListModule)
+        module.anilist_credits = Mock(return_value=["声优"])
+
+        module.media_credits(MediaSource.AniList, "5", page=3, count=8)
+
+        module.anilist_credits.assert_called_once_with(anilist_id=5, page=3, count=8)
+
+    def test_anilist_malformed_id_yields_nothing(self):
+        """AniList 同样对非法 ID 让出而不抛异常。"""
+        from app.modules.anilist import AniListModule
+
+        module = object.__new__(AniListModule)
+        module.anilist_credits = Mock()
+
+        self.assertIsNone(module.media_credits(MediaSource.AniList, "not-a-number"))
+        module.anilist_credits.assert_not_called()
+
 
 class AsyncMediaCreditsContractTest(unittest.IsolatedAsyncioTestCase):
     """异步契约与同步契约语义一致"""
@@ -171,6 +205,21 @@ class AsyncMediaCreditsContractTest(unittest.IsolatedAsyncioTestCase):
                                                    mtype=MediaType.MOVIE, page=2)
         self.assertEqual(["演员"], result)
         self.assertIsNone(await module.async_media_credits(MediaSource.TMDB, "9"))
+
+    async def test_anilist_async_defaults_count(self):
+        """AniList 异步契约同样在 count 缺省时补 20。"""
+        from app.modules.anilist import AniListModule
+
+        async def credits_(anilist_id=None, page=1, count=20):
+            """异步演职员表"""
+            return ["声优"]
+
+        module = object.__new__(AniListModule)
+        module.async_anilist_credits = credits_
+
+        result = await module.async_media_credits(MediaSource.AniList, "5", page=1)
+        self.assertEqual(["声优"], result)
+        self.assertIsNone(await module.async_media_credits(MediaSource.TMDB, "5"))
 
 
 if __name__ == "__main__":

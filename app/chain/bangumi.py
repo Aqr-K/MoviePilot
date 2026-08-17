@@ -44,7 +44,7 @@ class BangumiChain(ChainBase):
         根据BangumiID查询推荐电影
         :param bangumiid:  BangumiID
         """
-        return self.run_module("bangumi_recommend", bangumiid=bangumiid)
+        return self.unicast("media_recommend", source=MediaSource.Bangumi, media_id=bangumiid)
 
     def person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
         """
@@ -96,7 +96,8 @@ class BangumiChain(ChainBase):
         根据BangumiID查询推荐电影（异步版本）
         :param bangumiid:  BangumiID
         """
-        return await self.async_run_module("async_bangumi_recommend", bangumiid=bangumiid)
+        return await self.async_unicast("async_media_recommend", source=MediaSource.Bangumi,
+                                        media_id=bangumiid)
 
     async def async_person_detail(self, person_id: int) -> Optional[schemas.MediaPerson]:
         """
