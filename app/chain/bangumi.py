@@ -58,7 +58,8 @@ class BangumiChain(ChainBase):
         根据人物ID查询人物参演作品
         :param person_id:  人物ID
         """
-        return self.run_module("bangumi_person_credits", person_id=person_id)
+        return self.unicast("person_credits", source=MediaSource.Bangumi,
+                            person_id=person_id)
 
     async def async_calendar(self) -> Optional[List[MediaInfo]]:
         """
@@ -107,4 +108,5 @@ class BangumiChain(ChainBase):
         根据人物ID查询人物参演作品（异步版本）
         :param person_id:  人物ID
         """
-        return await self.async_run_module("async_bangumi_person_credits", person_id=person_id)
+        return await self.async_unicast("async_person_credits", source=MediaSource.Bangumi,
+                                        person_id=person_id)

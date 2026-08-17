@@ -143,7 +143,8 @@ class TmdbChain(ChainBase):
         :param person_id:  人物ID
         :param page:  页码
         """
-        return self.run_module("tmdb_person_credits", person_id=person_id, page=page)
+        return self.unicast("person_credits", source=MediaSource.TMDB,
+                            person_id=person_id, page=page)
 
     def get_random_wallpager(self) -> Optional[str]:
         """
@@ -300,7 +301,8 @@ class TmdbChain(ChainBase):
         :param person_id:  人物ID
         :param page:  页码
         """
-        return await self.async_run_module("async_tmdb_person_credits", person_id=person_id, page=page)
+        return await self.async_unicast("async_person_credits", source=MediaSource.TMDB,
+                                        person_id=person_id, page=page)
 
     async def async_get_random_wallpager(self) -> Optional[str]:
         """

@@ -459,6 +459,41 @@ class BangumiModule(_ModuleBase):
             return None
         return str(value)
 
+    def person_credits(self, source: Optional[MediaSource] = None, person_id: int = None,
+                       page: int = 1, count: Optional[int] = None,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源取人物参演作品，委托本源既有方法
+
+        本源接口不分页，page 与 count 到此为止，不向下传递。
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 参演作品，非本源时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        return self.bangumi_person_credits(person_id=person_id)
+
+    async def async_person_credits(self, source: Optional[MediaSource] = None,
+                                   person_id: int = None, page: int = 1,
+                                   count: Optional[int] = None,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源异步取人物参演作品，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :param page: 页码，本源不支持
+        :param count: 每页条数，本源不支持
+        :return: 参演作品，非本源时为 None
+        """
+        if source != MediaSource.Bangumi:
+            return None
+        return await self.async_bangumi_person_credits(person_id=person_id)
+
     def bangumi_person_credits(self, person_id: int) -> List[MediaInfo]:
         """
         根据TMDBID查询人物参演作品

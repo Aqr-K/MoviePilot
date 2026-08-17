@@ -237,7 +237,8 @@ class DoubanChain(ChainBase):
         :param person_id:  人物ID
         :param page:  页码
         """
-        return self.run_module("douban_person_credits", person_id=person_id, page=page)
+        return self.unicast("person_credits", source=MediaSource.Douban,
+                            person_id=person_id, page=page)
 
     def movie_top250(self, page: Optional[int] = 1, count: Optional[int] = 30) -> Optional[List[MediaInfo]]:
         """
@@ -339,7 +340,8 @@ class DoubanChain(ChainBase):
         :param person_id:  人物ID
         :param page:  页码
         """
-        return await self.async_run_module("async_douban_person_credits", person_id=person_id, page=page)
+        return await self.async_unicast("async_person_credits", source=MediaSource.Douban,
+                                        person_id=person_id, page=page)
 
     async def async_movie_top250(self, page: Optional[int] = 1,
                                  count: Optional[int] = 30) -> Optional[List[MediaInfo]]:

@@ -1863,6 +1863,39 @@ class DoubanModule(_ModuleBase):
             })
         return schemas.MediaPerson(source='douban')
 
+    def person_credits(self, source: Optional[MediaSource] = None, person_id: int = None,
+                       page: int = 1, count: Optional[int] = None,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源取人物参演作品，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :param page: 页码
+        :param count: 每页条数，本源不支持时忽略
+        :return: 参演作品，非本源时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        return self.douban_person_credits(person_id=person_id, page=page)
+
+    async def async_person_credits(self, source: Optional[MediaSource] = None,
+                                   person_id: int = None, page: int = 1,
+                                   count: Optional[int] = None,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        按来源异步取人物参演作品，委托本源既有方法
+
+        :param source: 请求的数据源，非本源时让出
+        :param person_id: 数据源原生人物ID
+        :param page: 页码
+        :param count: 每页条数，本源不支持时忽略
+        :return: 参演作品，非本源时为 None
+        """
+        if source != MediaSource.Douban:
+            return None
+        return await self.async_douban_person_credits(person_id=person_id, page=page)
+
     def douban_person_credits(self, person_id: int, page: int = 1) -> List[MediaInfo]:
         """
         根据TMDBID查询人物参演作品
