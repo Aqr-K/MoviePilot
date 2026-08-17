@@ -4,6 +4,7 @@ import importlib
 import inspect
 import pkgutil
 import textwrap
+from functools import lru_cache
 from pathlib import Path
 from types import FunctionType
 from typing import Any, Callable, List, get_type_hints
@@ -163,6 +164,24 @@ class ObjectUtils:
     def check_method(func: Callable[..., Any]) -> bool:
         """
         检查函数是否已实现
+
+        判定只取决于函数本身，与绑定到哪个实例无关。绑定方法每次取属性都是新对象，
+        因此按底层函数对象缓存：既能命中，也不会把模块实例钉在缓存里，模块停止或
+        重载后实例仍可回收。
+
+        :param func: 待检查的方法
+        :return: 是否已实现
+        """
+        return ObjectUtils._method_is_implemented(getattr(func, "__func__", func))
+
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def _method_is_implemented(func: Callable[..., Any]) -> bool:
+        """
+        判定函数体是否为空实现
+
+        :param func: 底层函数对象
+        :return: 是否已实现
         """
         try:
             src = inspect.getsource(func)
