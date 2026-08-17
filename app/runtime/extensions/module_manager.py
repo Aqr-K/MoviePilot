@@ -237,8 +237,13 @@ class ModuleManager(metaclass=Singleton):
     def resolve_event_handler_instance(
         self,
         owner_class: type,
-    ) -> Optional[EventHandlerBinding]:
-        """按 canonical class identity 绑定当前 generation，停止态阻断 fallback 构造。"""
+    ) -> Optional[List[EventHandlerBinding]]:
+        """按 canonical class identity 绑定当前 generation，停止态阻断 fallback 构造。
+
+        返回类型须与 ``HandlerInstanceResolver`` 契约一致（见 app/runtime/events.py），
+        事件总线按列表遍历全部解析结果；宿主模块每个 class 只有一个运行实例，
+        命中时返回单元素列表。
+        """
         for spec in self._all_specs():
             with self._lock:
                 implementation = self._modules.get(spec.id)
@@ -250,10 +255,10 @@ class ModuleManager(metaclass=Singleton):
                     self._runtime.snapshot(spec.id)
             if implementation is not owner_class:
                 continue
-            return EventHandlerBinding(
+            return [EventHandlerBinding(
                 instance=self._runtime.get_running(spec.id),
                 owner_name=str(spec.metadata.get("name", spec.id)),
-            )
+            )]
         return None
 
     def _reconcile(
