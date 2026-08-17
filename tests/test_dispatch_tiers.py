@@ -124,6 +124,22 @@ def build_chain(*modules):
 class BroadcastTierTest(unittest.TestCase):
     """广播：通知全体，不求答案，遍历是语义不是缺陷"""
 
+    def test_plugin_injected_providers_are_notified_too(self):
+        """插件经 get_module() 注入的方法同样要收到通知。
+
+        广播若只遍历运行态模块，把方法从 run_module 迁过来就会让挂在其上的插件静默
+        失效——与多播、单播必须一致。
+        """
+        calls = []
+        chain, _ = build_chain(RecordingModule("emby", calls))
+        chain.pluginmanager.get_plugin_modules.return_value = {
+            ("Hijacker", "插件"): {"notify": lambda **kw: calls.append("plugin")},
+        }
+
+        chain.broadcast("notify", payload="x")
+
+        self.assertEqual(["plugin", "emby"], calls)
+
     def test_every_provider_is_notified_even_after_one_returns_a_value(self):
         """某个提供者返回了值也不中止，其余照常收到通知。"""
         calls = []

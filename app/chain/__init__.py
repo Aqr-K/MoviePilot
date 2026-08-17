@@ -404,6 +404,8 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
 
         :param method: 模块方法名称
         """
+        for plugin_id, plugin_name, func in self._plugin_providers(method):
+            self._invoke_plugin(plugin_id, plugin_name, func, method, *args, **kwargs)
         for module in self.modulemanager.get_running_modules(method):
             self._invoke_provider(module, method, *args, **kwargs)
 
