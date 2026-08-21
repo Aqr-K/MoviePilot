@@ -317,6 +317,7 @@ SCHEMA_EXPORTS = {
     'ServarrVersion': ('app.schemas.servarr', 'ServarrVersion'),
     'ServiceClientInfo': ('app.schemas.common', 'ServiceClientInfo'),
     'ServiceInfo': ('app.schemas.system', 'ServiceInfo'),
+    'ServiceInstanceRequirementInfo': ('app.schemas.plugin', 'ServiceInstanceRequirementInfo'),
     'Set': ('app.schemas.notification', 'Set'),
     'Site': ('app.schemas.workflow', 'Site'),
     'SiteAuth': ('app.schemas.site', 'SiteAuth'),

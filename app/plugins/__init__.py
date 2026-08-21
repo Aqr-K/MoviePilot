@@ -28,6 +28,7 @@ from app.runtime.extensions.declaration import (
     ModuleDeclaration,
     ScheduleDeclaration,
     ServiceInstanceDeclaration,
+    ServiceInstanceRequirement,
 )
 from app.runtime.extensions.instance import (
     DEFAULT_INSTANCE_ID,
@@ -479,6 +480,12 @@ class _PluginBase(metaclass=ABCMeta):
         仪表盘的组件名，要求 `get_render_mode()` 返回 "vue"；与 `config_form`
         二选一，同时给出视为意图不明，整条声明被拒。
 
+        本仪表盘展示某一族服务实例的数据时，加
+        `requires_service_instance=ServiceInstanceRequirement(capability="downloader")`。
+        宿主据此在仪表盘元信息里带上该族坐标供前端渲染实例选择器，并在取数时把用户
+        选中的实例名按关键字 `service_instance` 交给 get_dashboard()——实现的签名接得住
+        （显式声明该形参或带 **kwargs）才会收到。不声明即与服务实例无关，取数形状不变。
+
         也可直接返回描述字典（不包 `DashboardDeclaration`），字典形态复用
         get_dashboard_meta() 的 key/name 字段，兼容早期写法；此时无法声明专属
         配置界面。
@@ -926,7 +933,16 @@ class _PluginBase(metaclass=ABCMeta):
                                                   # (执行状态, 更新后的 ActionContext)
                                                   # 二元组
             kwargs={},                           # 需要附加传递的静态参数，可选
+            requires_service_instance=ServiceInstanceRequirement(
+                capability="downloader",         # 本动作作用于哪一族服务实例，可选
+                types=("qbittorrent",),          # 收窄到该族的哪几个类型，留空即不收窄
+            ),
         )]
+
+        声明了 requires_service_instance，宿主就在工作流编辑器里渲染实例选择器、校验
+        用户选中的实例仍然存在，并在调用时把实例名按关键字 ``service_instance`` 一并
+        交给实现；实现的签名因此要能接收这个关键字。不声明即本动作与服务实例无关，
+        调用形状不变。声明里不写实例名——那是用户在设置页自填的持久数据，声明期不存在。
 
         也可直接返回描述字典（不包 `ActionDeclaration`），字典形态复用
         get_actions() 每项的字段名（action_id/name/func/kwargs），兼容早期写法。

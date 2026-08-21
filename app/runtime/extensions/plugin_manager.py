@@ -38,11 +38,13 @@ from app.runtime.extensions.declaration import (
     declaration_config_schema,
     declaration_impl,
     declaration_meta_parser_identity,
+    declaration_dashboard_identity,
     declaration_meta_parser_priority,
     declaration_service_instance_constructor,
     declaration_service_instance_icon,
     declaration_service_instance_identity,
     declaration_service_instance_multi_instance,
+    declaration_service_instance_requirement,
 )
 from app.runtime.extensions.instance import (
     DEFAULT_INSTANCE_ID,
@@ -72,6 +74,11 @@ from app.runtime.extensions.filter_rule_registry import plugin_filter_rule_regis
 from app.runtime.extensions.service_instance_registry import service_instance_registry
 from app.runtime.extensions.meta_parser_registry import meta_parser_registry
 from app.runtime.extensions.service_config import STORAGE_CAPABILITY
+from app.runtime.extensions.service_instance_requirement import (
+    SERVICE_INSTANCE_PARAM,
+    accepts_keyword,
+    resolve_required_service_instance,
+)
 from app.runtime.extensions.storage_registry import (
     storage_backend_registry,
     storage_instance_factory,
@@ -2987,9 +2994,51 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         return self._plugin_projection().dashboard_metadata()
 
-    def get_plugin_dashboard(self, pid: str, key: str, user_agent: str = None) -> Optional[_SchemaPluginDashboard]:
+    def _dashboard_requirement(self, instance_key: str, plugin: Any, key: str) -> Any:
+        """
+        取指定分身上该仪表盘声明的服务实例作用对象
+
+        按实例键而不是插件ID取声明：同一插件的两个分身各自声明各自的仪表盘，按插件ID
+        取会读到另一个分身那一份，作用对象随之张冠李戴。
+
+        没声明 ``provides_dashboards`` 的插件整个不走投影：取数在本字段存在之前从不
+        触达声明面，为了读一个它根本没有的字段而把整条取数链路绑上投影，等于让旧写法
+        的仪表盘随投影一起失败。取声明本身出错同理只记一笔并按未声明处理——作用对象是
+        增量能力，读不到它不该让原本取得出数据的仪表盘一并打不开。
+
+        :param instance_key: 已裁决出的运行实例键
+        :param plugin: 该实例键对应的运行态插件实例
+        :param key: 仪表盘 key，空字符串代表默认仪表盘
+        :return: 作用对象声明；该仪表盘未声明或取不到声明时为 None
+        """
+        if not supports_extension_hook(plugin, "provides_dashboards"):
+            return None
+        try:
+            declarations = self._plugin_projection().provided_dashboards(instance_key)
+        except Exception as error:
+            logger.warning(f"读取插件[{instance_key}]仪表盘作用对象出错，按未声明处理：{str(error)}")
+            return None
+        for item in declarations.get(instance_key, []):
+            declared_key, _ = declaration_dashboard_identity(item)
+            if (declared_key or "") == (key or ""):
+                return declaration_service_instance_requirement(item)
+        return None
+
+    def get_plugin_dashboard(self, pid: str, key: str, user_agent: str = None,
+                             service_instance: str = None) -> Optional[_SchemaPluginDashboard]:
         """
         获取插件仪表盘
+
+        仪表盘声明了作用于哪一族服务实例时，用户选中的实例名解析成立后按关键字交给
+        ``get_dashboard``；未选中则按该族的默认调用目标裁决，裁决不出即报错并列出候选。
+        实参只在实现签名接得住时才传——与既有的参数个数探测同一条兼容规则，既有仪表盘
+        的取数形状因此一字不改。
+
+        :param pid: 实例键，或插件ID
+        :param key: 仪表盘 key
+        :param user_agent: 请求方 UA
+        :param service_instance: 用户选中的服务实例名，未选中时为 None
+        :return: 仪表盘数据；插件返回 None 时为 None
         """
 
         def __get_params_count(func: Callable):
@@ -3001,7 +3050,10 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         # 获取插件实例
         try:
-            plugin_instance = self._resolve_call_target(pid)
+            target_key = self._resolve_call_target_key(pid)
+            plugin_instance = (
+                self._plugin_registry.instance(target_key) if target_key is not None else None
+            )
         except LookupError as err:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
         if not plugin_instance:
@@ -3009,14 +3061,29 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
         # 渲染模式
         render_mode, _ = plugin_instance.get_render_mode()
+        # 解析本次取数作用于哪台服务实例；未声明作用对象时不参与调用
+        requirement = self._dashboard_requirement(target_key, plugin_instance, key)
+        resolved_instance = None
+        if requirement is not None:
+            try:
+                resolved_instance = resolve_required_service_instance(requirement, service_instance)
+            except LookupError as err:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
         # 获取插件仪表板
         try:
             # 检查方法的参数个数
             params_count = __get_params_count(plugin_instance.get_dashboard)
+            extra = {}
+            if resolved_instance is not None and accepts_keyword(
+                    plugin_instance.get_dashboard, SERVICE_INSTANCE_PARAM
+            ):
+                extra[SERVICE_INSTANCE_PARAM] = resolved_instance
             if params_count > 1:
-                dashboard: Tuple = plugin_instance.get_dashboard(key=key, user_agent=user_agent)
+                dashboard: Tuple = plugin_instance.get_dashboard(
+                    key=key, user_agent=user_agent, **extra
+                )
             elif params_count > 0:
-                dashboard: Tuple = plugin_instance.get_dashboard(user_agent=user_agent)
+                dashboard: Tuple = plugin_instance.get_dashboard(user_agent=user_agent, **extra)
             else:
                 dashboard: Tuple = plugin_instance.get_dashboard()
         except Exception as e:
