@@ -11,6 +11,7 @@ from starlette.responses import Response as StarletteResponse
 from starlette.responses import StreamingResponse
 
 from app.adapters.web.plugin.routes import FastAPIDynamicRouteRegistry
+from app.runtime.extensions.contract.instance import matches_extension
 from app.api.response import (
     RAW_RESPONSE_OPENAPI_KEY,
     ResponseAPIRoute,
@@ -371,6 +372,10 @@ def test_v1_model_free_routes_match_audited_native_allowlist():
         ("/system/logging", "get_logging"),
         ("/system/logging/download/{name}", "download_logging"),
         (
+            "/system/logging/download/plugin/{plugin_id}/{instance_id}",
+            "download_plugin_instance_logging",
+        ),
+        (
             "/llm/provider-auth/callback/{provider_id}",
             "llm_provider_auth_callback",
         ),
@@ -636,6 +641,9 @@ def test_openapi_success_models_have_no_implicit_empty_nested_schemas():
         "CookieDecryptedPayload",
         # 通用管理请求的 params 按设计透传模块个性化参数。
         "ManageRequest",
+        # 服务实例配置写入载荷按设计放行声明字段之外的顶层键：形状与该族配置
+        # 模型一致，config 归类型实现自己读，宿主只挑自己要的实例级字段。
+        "ServiceInstanceConfigPayload",
         # 通用管理响应的 data 为模块自定义结构，按设计不固定字段。
         "Response_Dict_str__Any__",
         # LLM 提供商管理响应的 data 目录查询为列表、其余动作为映射。
@@ -729,6 +737,7 @@ def test_plugin_routes_only_register_v1(monkeypatch):
         prefix="/api/v1/plugin",
         protected_routes=set(),
         log=SimpleNamespace(debug=lambda *_args: None, error=lambda *_args: None),
+        route_matches=matches_extension,
     ))
 
     plugin_routes.register_plugin_api("DemoPlugin")
@@ -775,6 +784,7 @@ async def test_plugin_routes_ignore_included_router_wrappers():
         prefix="/api/v1/plugin",
         protected_routes=set(),
         log=SimpleNamespace(debug=lambda *_args: None, error=lambda *_args: None),
+        route_matches=matches_extension,
     ))
 
     plugin_routes.register_plugin_api("DemoPlugin")
@@ -923,6 +933,7 @@ def build_plugin_api_app(monkeypatch) -> FastAPI:
         prefix="/api/v1/plugin",
         protected_routes=set(),
         log=SimpleNamespace(debug=lambda *_args: None, error=lambda *_args: None),
+        route_matches=matches_extension,
     ))
     plugin_routes.register_plugin_api("DemoPlugin")
     return app

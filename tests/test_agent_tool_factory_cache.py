@@ -100,6 +100,110 @@ def test_ask_user_choice_option_schema_does_not_expose_description() -> None:
     assert option_schema["required"] == ["label", "value"]
 
 
+def test_builtin_tool_classes_match_expected_fixed_inventory() -> None:
+    """内置工具目录扫描得到的固定工具类型集合与顺序必须与预期清单完全一致。
+
+    新增内置工具只需在 `app/agent/tools/impl/` 下新建模块即可被自动发现，
+    无需改动工厂文件；但新增或删除工具都必须显式更新此清单，作为一次有意
+    确认。清单按类名升序排列，与工厂对扫描结果的稳定排序保持一致，确保
+    工具目录顺序不随文件系统遍历结果抖动。
+    """
+    expected_tool_class_names = [
+        "AddCustomFilterRuleTool",
+        "AddDownloadTasksTool",
+        "AddRuleGroupTool",
+        "AddSubscribeTool",
+        "ApplyPatchTool",
+        "BrowseWebpageTool",
+        "CreateAgentTaskTool",
+        "DeleteAgentTaskTool",
+        "DeleteCustomFilterRuleTool",
+        "DeleteDownloadHistoryTool",
+        "DeleteDownloadTasksTool",
+        "DeleteRuleGroupTool",
+        "DeleteSubscribeTool",
+        "DeleteTransferHistoryTool",
+        "EditFileTool",
+        "ExecuteCommandTool",
+        "GetRecommendationsTool",
+        "GetSearchResultsTool",
+        "InstallPluginTool",
+        "ListDirectoryTool",
+        "ListSlashCommandsTool",
+        "QueryAgentTasksTool",
+        "QueryBuiltinFilterRulesTool",
+        "QueryCustomFilterRulesTool",
+        "QueryCustomIdentifiersTool",
+        "QueryDirectorySettingsTool",
+        "QueryDoctorReportTool",
+        "QueryDownloadTasksTool",
+        "QueryDownloadersTool",
+        "QueryEpisodeScheduleTool",
+        "QueryInstalledPluginsTool",
+        "QueryLibraryExistsTool",
+        "QueryLibraryLatestTool",
+        "QueryMarketPluginsTool",
+        "QueryMediaDetailTool",
+        "QueryPersonasTool",
+        "QueryPluginCapabilitiesTool",
+        "QueryPluginConfigTool",
+        "QueryPluginDataTool",
+        "QueryPopularSubscribesTool",
+        "QueryRuleGroupsTool",
+        "QuerySchedulersTool",
+        "QuerySiteUserdataTool",
+        "QuerySitesTool",
+        "QuerySubscribeHistoryTool",
+        "QuerySubscribeSharesTool",
+        "QuerySubscribesTool",
+        "QuerySystemSettingsTool",
+        "QueryTransferHistoryTool",
+        "QueryWorkflowsTool",
+        "ReadFileTool",
+        "RecognizeCaptchaTool",
+        "RecognizeMediaTool",
+        "ReloadPluginTool",
+        "RunAgentTaskTool",
+        "RunSchedulerTool",
+        "RunSlashCommandTool",
+        "RunWorkflowTool",
+        "ScrapeMetadataTool",
+        "SearchMediaTool",
+        "SearchPersonCreditsTool",
+        "SearchPersonTool",
+        "SearchSubscribeTool",
+        "SearchTorrentsTool",
+        "SearchWebTool",
+        "SendMessageTool",
+        "SwitchPersonaTool",
+        "TestSiteTool",
+        "TransferFileTool",
+        "UninstallPluginTool",
+        "UpdateAgentTaskTool",
+        "UpdateCustomFilterRuleTool",
+        "UpdateCustomIdentifiersTool",
+        "UpdateDownloadTasksTool",
+        "UpdatePersonaDefinitionTool",
+        "UpdatePluginConfigTool",
+        "UpdateRuleGroupTool",
+        "UpdateSiteCookieTool",
+        "UpdateSiteTool",
+        "UpdateSubscribeTool",
+        "UpdateSystemSettingsTool",
+        "WriteFileTool",
+    ]
+
+    discovered_tool_class_names = [
+        tool_class.__qualname__
+        for tool_class in MoviePilotToolFactory.BUILTIN_TOOL_CLASSES
+    ]
+
+    assert discovered_tool_class_names == expected_tool_class_names
+    assert AskUserChoiceTool.__qualname__ not in discovered_tool_class_names
+    assert SendLocalFileTool.__qualname__ not in discovered_tool_class_names
+    assert SendVoiceMessageTool.__qualname__ not in discovered_tool_class_names
+
+
 def test_plugin_agent_tools_are_cached(plugin_manager: PluginManager) -> None:
     """插件智能体工具注册表应缓存，避免同一轮启动反复询问插件实例。"""
     calls: list[int] = []
@@ -232,3 +336,51 @@ def test_factory_catalog_records_two_plugin_duplicate_names(
     assert [
         entry.source for entry in catalog.collisions["demo_agent_tool"]
     ] == ["plugin:PluginOne", "plugin:PluginTwo"]
+
+
+def test_plugin_agent_tools_pid_filter_matches_all_instances_of_a_plugin(
+    plugin_manager: PluginManager,
+) -> None:
+    """插件标识命中该插件全部实例，实例键只命中该实例。"""
+    plugin_manager.running_plugins["DemoPlugin"] = _build_plugin([DemoAgentTool])
+    plugin_manager.running_plugins["DemoPlugin@second"] = _build_plugin(
+        [DemoMessageAgentTool]
+    )
+
+    all_instances = plugin_manager.get_plugin_agent_tools("DemoPlugin")
+    only_second_instance = plugin_manager.get_plugin_agent_tools("DemoPlugin@second")
+
+    assert {entry["plugin_id"] for entry in all_instances} == {
+        "DemoPlugin",
+        "DemoPlugin@second",
+    }
+    assert [entry["plugin_id"] for entry in only_second_instance] == [
+        "DemoPlugin@second"
+    ]
+
+
+def test_factory_tool_source_distinguishes_sibling_instances(
+    plugin_manager: PluginManager,
+) -> None:
+    """两个实例各自加载工具时，工具来源标识带实例键，不会互相撞名。"""
+    plugin_manager.running_plugins["DemoPlugin"] = _build_plugin([DemoAgentTool])
+    plugin_manager.running_plugins["DemoPlugin@second"] = _build_plugin(
+        [DemoAgentTool]
+    )
+
+    with patch.object(
+        MoviePilotToolFactory,
+        "_get_builtin_tool_classes",
+        return_value=[],
+    ):
+        tools = MoviePilotToolFactory.create_tools(
+            session_id="session-1",
+            user_id="10001",
+        )
+
+    sources = {
+        getattr(tool, "_agent_tool_source", None)
+        for tool in tools
+        if tool.name == "demo_agent_tool"
+    }
+    assert sources == {"plugin:DemoPlugin", "plugin:DemoPlugin@second"}

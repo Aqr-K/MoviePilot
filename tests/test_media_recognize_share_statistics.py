@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from app.chain import ChainBase
+from app.application.orchestration import ChainBase
 from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
 from app.adapters.external.server import MoviePilotServerHelper
@@ -29,9 +29,9 @@ def _shared_params(tmdb_id: int) -> dict:
 def _mock_counter(monkeypatch) -> Mock:
     """替换系统配置持久化入口并返回递增调用桩。"""
     increment = Mock()
-    # 计数逻辑在识别 mixin 中，按 _recognition 模块命名空间解析 SystemConfigOper
+    # 计数逻辑在识别 mixin 中，按 _recognition 模块命名空间解析 get_configured_system_config
     monkeypatch.setattr(
-        "app.chain._recognition.get_configured_system_config",
+        "app.application.orchestration._recognition.get_configured_system_config",
         lambda: SimpleNamespace(increment=increment),
     )
     return increment
@@ -58,7 +58,7 @@ def test_sync_shared_recognize_success_increments_persisted_count(monkeypatch):
         type=MediaType.MOVIE,
     )
     increment = _mock_counter(monkeypatch)
-    monkeypatch.setattr(chain, "run_module", Mock(side_effect=[None, media]))
+    monkeypatch.setattr(chain, "unicast", Mock(side_effect=[None, media]))
     monkeypatch.setattr(chain, "_update_local_recognize_cache", Mock())
     monkeypatch.setattr(
         MoviePilotServerHelper,
@@ -86,7 +86,7 @@ def test_sync_shared_result_without_local_match_does_not_increment(monkeypatch):
     chain = _bare_chain()
     meta = _build_meta("共享识别失败电影")
     increment = _mock_counter(monkeypatch)
-    monkeypatch.setattr(chain, "run_module", Mock(side_effect=[None, None]))
+    monkeypatch.setattr(chain, "unicast", Mock(side_effect=[None, None]))
     monkeypatch.setattr(
         MoviePilotServerHelper,
         "query_recognize_share",
@@ -123,7 +123,7 @@ def test_async_shared_recognize_success_increments_persisted_count(monkeypatch):
     increment = _mock_counter(monkeypatch)
     monkeypatch.setattr(
         chain,
-        "async_run_module",
+        "async_unicast",
         AsyncMock(side_effect=[None, media]),
     )
     monkeypatch.setattr(

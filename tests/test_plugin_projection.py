@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from app.runtime.extensions.plugin.projection import PluginProjection
+from app.runtime.extensions.projection.plugin import PluginProjection
 
 
 class _Plugin(SimpleNamespace):
@@ -70,7 +70,7 @@ def test_projection_preserves_services_modules_actions_and_pid_filter():
     other = _Plugin(get_service=lambda: [{"id": "other"}])
     projection = PluginProjection({"Demo": demo, "Other": other})
 
-    assert projection.services("Demo") == [{"id": "job"}]
+    assert projection.services("Demo") == [{"id": "job", "pid": "Demo"}]
     assert projection.modules("Demo") == {
         ("Demo", "测试插件"): {"recognize": "handler"}
     }
@@ -138,7 +138,7 @@ def test_projection_isolates_one_plugin_hook_failure():
         log=log,
     )
 
-    assert projection.services() == [{"id": "healthy"}]
+    assert projection.services() == [{"id": "healthy", "pid": "Healthy"}]
     assert errors and "Broken" in errors[0]
 
 
@@ -150,13 +150,15 @@ def test_projection_builds_federation_and_auth_provider_entries():
     )
     projection = PluginProjection(
         {"Demo": plugin},
-        remote_entry_factory=lambda plugin_id, path: f"/{plugin_id}/{path}",
+        remote_entry_factory=lambda plugin_id, path, version: f"/{plugin_id}/{path}",
     )
 
     assert projection.remotes() == [{
         "id": "Demo",
         "url": "/Demo/dist/assets",
         "name": "测试插件",
+        "version": None,
+        "remote_key": "Demo",
     }]
     assert projection.auth_providers() == [{
         "id": "demo-login",
@@ -164,34 +166,54 @@ def test_projection_builds_federation_and_auth_provider_entries():
         "plugin_id": "Demo",
         "name": "测试插件",
         "enabled": True,
+        "instance_id": "default",
+        "instance_key": "Demo",
         "component": "AuthPage",
         "remote": {
             "id": "Demo",
             "url": "/Demo/dist/assets",
             "name": "测试插件",
+            "version": None,
+            "remote_key": "Demo",
         },
     }]
 
 
-def test_projection_exposes_source_identity_for_virtual_frontend_instance():
-    """虚拟实例的联邦入口保留实例 URL，并补充共享源码身份。"""
-    plugin = _Plugin(
-        plugin_source_id="Demo",
-        get_render_mode=lambda: ("vue", "dist/assets"),
-        get_auth_providers=lambda: [{"id": "demo-login"}],
-    )
+def test_projection_remote_key_falls_back_to_id_without_a_declared_version():
+    """插件未声明 plugin_version 时，remote_key 与 id 取值相同，等价于旧格式。"""
+    plugin = _Plugin(get_render_mode=lambda: ("vue", "dist/assets"))
     projection = PluginProjection(
-        {"DemoWork": plugin},
-        remote_entry_factory=lambda plugin_id, path: f"/{plugin_id}/{path}",
+        {"Demo": plugin},
+        remote_entry_factory=lambda plugin_id, path, version: f"/{plugin_id}/{path}",
     )
 
-    assert projection.remotes()[0] == {
-        "id": "DemoWork",
-        "url": "/DemoWork/dist/assets",
-        "name": "测试插件",
-        "source_plugin_id": "Demo",
-    }
-    assert projection.auth_providers()[0]["remote"]["source_plugin_id"] == "Demo"
+    remote = projection.remotes()[0]
+    assert remote["version"] is None
+    assert remote["remote_key"] == remote["id"] == "Demo"
+
+
+def test_projection_remote_key_differs_across_versions_of_the_same_plugin():
+    """两个实例绑不同版本时，remote_key 各不相同，联邦远程注册不会撞名。"""
+    first = _Plugin(plugin_version="1.0.0", get_render_mode=lambda: ("vue", "dist/assets"))
+    second = _Plugin(plugin_version="2.0.0", get_render_mode=lambda: ("vue", "dist/assets"))
+    captured_versions = []
+
+    def factory(plugin_id, path, version):
+        """记录调用方传入的版本号，并回显一个可辨识的 URL。"""
+        captured_versions.append(version)
+        return f"/{plugin_id}/{version}/{path}"
+
+    projection = PluginProjection(
+        {"Demo": first, "Demo@second": second},
+        remote_entry_factory=factory,
+    )
+
+    remotes = {item["id"]: item for item in projection.remotes()}
+    assert remotes["Demo"]["remote_key"] == "Demo#1.0.0"
+    assert remotes["Demo@second"]["remote_key"] == "Demo@second#2.0.0"
+    assert remotes["Demo"]["remote_key"] != remotes["Demo@second"]["remote_key"]
+    assert remotes["Demo"]["url"] != remotes["Demo@second"]["url"]
+    assert captured_versions == ["1.0.0", "2.0.0"]
 
 
 def test_projection_normalizes_sidebar_and_dashboard_metadata():
@@ -217,9 +239,54 @@ def test_projection_normalizes_sidebar_and_dashboard_metadata():
         "section": "system",
         "permission": None,
         "order": 3,
+        "instance_id": "default",
+        "instance_key": "Demo",
     }]
     assert projection.dashboard_metadata() == [{
         "id": "Demo",
         "name": "状态",
         "key": "status",
+        "instance_id": "default",
+        "instance_key": "Demo",
     }]
+
+
+def test_projection_tags_services_with_owning_instance_key():
+    """两个实例声明同一服务 id 时，各自的服务项带上归属实例键，互不覆盖。"""
+    default_plugin = _Plugin(get_service=lambda: [{"id": "sync"}])
+    second_plugin = _Plugin(get_service=lambda: [{"id": "sync"}])
+    projection = PluginProjection({"Demo": default_plugin, "Demo@second": second_plugin})
+
+    services = projection.services("Demo")
+
+    assert [service["pid"] for service in services] == ["Demo", "Demo@second"]
+
+
+def test_projection_adds_instance_fields_to_sidebar_dashboard_and_auth_providers():
+    """侧栏、仪表板、认证提供方的既有字段继续填实例键，并补实例标识字段。"""
+    second_plugin = _Plugin(
+        get_render_mode=lambda: ("vue", "dist"),
+        get_sidebar_nav=lambda: [{"key": "settings", "section": "system"}],
+        get_dashboard=lambda: ({}, {}, []),
+        get_auth_providers=lambda: [{"id": "demo-login"}],
+    )
+    projection = PluginProjection(
+        {"Demo@second": second_plugin},
+        remote_entry_factory=lambda plugin_id, path, version: f"/{plugin_id}/{path}",
+    )
+
+    sidebar_item = projection.sidebar()[0]
+    assert sidebar_item["plugin_id"] == "Demo@second"
+    assert sidebar_item["instance_id"] == "second"
+    assert sidebar_item["instance_key"] == "Demo@second"
+
+    dashboard_item = projection.dashboard_metadata()[0]
+    assert dashboard_item["id"] == "Demo@second"
+    assert dashboard_item["instance_id"] == "second"
+    assert dashboard_item["instance_key"] == "Demo@second"
+
+    provider = projection.auth_providers()[0]
+    assert provider["plugin_id"] == "Demo@second"
+    assert provider["instance_id"] == "second"
+    assert provider["instance_key"] == "Demo@second"
+    assert provider["remote"]["remote_key"] == "Demo@second"

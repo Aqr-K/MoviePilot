@@ -5,6 +5,7 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 
@@ -104,7 +105,7 @@ class SystemHelperRestartTest(TestCase):
                 settings.TEMP_PATH / "moviepilot.intentional_restart"
             )
             try:
-                with patch("app.runtime.state.is_docker", return_value=True), \
+                with patch("app.runtime.state.hostenv.is_docker", return_value=True), \
                         patch.object(SystemHelper, "_check_restart_policy", return_value=True), \
                         patch.object(SystemHelper, "_start_graceful_shutdown_monitor"), \
                         patch("app.runtime.state.os.kill") as kill_mock:
@@ -572,15 +573,17 @@ def test_space_usage_keeps_windows_drive_behavior_without_fsid_lookup():
 
 
 def test_local_storage_usage_forwards_btrfs_fsid_setting():
-    from app.modules.filemanager.storages import local as local_storage_module
+    from app.modules.localstorage import local as local_storage_module
 
     download_dir = MagicMock(download_path="/downloads")
     library_dir = MagicMock(library_path="/library")
+    directory_config = SimpleNamespace(
+        get_local_download_dirs=lambda: [download_dir],
+        get_local_library_dirs=lambda: [library_dir],
+    )
     with patch.object(local_storage_module.settings, "BTRFS_FSID_DEDUP", True), \
-            patch.object(local_storage_module.DirectoryHelper, "get_local_download_dirs",
-                         return_value=[download_dir]), \
-            patch.object(local_storage_module.DirectoryHelper, "get_local_library_dirs",
-                         return_value=[library_dir]), \
+            patch.object(local_storage_module.directory_config_port, "resolve",
+                         return_value=directory_config), \
             patch.object(SystemUtils, "space_usage", return_value=(4.0, 2.0)) as usage_mock:
         usage = object.__new__(local_storage_module.LocalStorage).usage()
 

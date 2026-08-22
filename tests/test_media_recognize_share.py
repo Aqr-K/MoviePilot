@@ -7,8 +7,8 @@ import asyncio
 from dataclasses import replace
 from unittest.mock import AsyncMock, Mock, patch
 
-from app.chain import ChainBase
-from app.chain.media import MediaChain
+from app.application.orchestration import ChainBase
+from app.application.orchestration.media import MediaChain
 from app.domain.context import MediaInfo, MusicInfo
 from app.domain.meta.metabase import MetaBase
 from app.domain.meta.metamusic import MetaMusic
@@ -56,16 +56,16 @@ def test_report_shared_result_after_local_recognize_success():
     meta = _build_meta("测试电影", MediaType.MOVIE)
     mediainfo = _tmdb_media("测试电影", 100, MediaType.MOVIE, year="2024")
 
-    with patch.object(chain, "run_module", return_value=mediainfo) as run_module, patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+    with patch.object(chain, "unicast", return_value=mediainfo) as unicast, patch(
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share"
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share"
     ) as query_mock:
         result = chain.recognize_media(meta=meta, cache=False)
 
     assert result is mediainfo
-    run_module.assert_called_once()
+    unicast.assert_called_once()
     report_mock.assert_called_once_with(meta=meta, mediainfo=mediainfo, keyword_meta=meta)
     query_mock.assert_not_called()
 
@@ -79,10 +79,10 @@ def test_query_shared_result_when_local_recognize_failed():
 
     with patch.object(
         chain,
-        "run_module",
+        "unicast",
         side_effect=[None, shared_media],
-    ) as run_module, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
+    ) as unicast, patch(
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={
             "type": "tv",
             "media_source": "themoviedb",
@@ -90,7 +90,7 @@ def test_query_shared_result_when_local_recognize_failed():
             "season": 1,
         },
     ) as query_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
         return_value={
             "mtype": MediaType.TV,
             "media_source": MediaSource.TMDB,
@@ -98,7 +98,7 @@ def test_query_shared_result_when_local_recognize_failed():
             "season": 1,
         },
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=False,
     ), patch.object(
         chain,
@@ -107,9 +107,9 @@ def test_query_shared_result_when_local_recognize_failed():
         result = chain.recognize_media(meta=meta, cache=False)
 
     assert result is shared_media
-    assert run_module.call_count == 2
+    assert unicast.call_count == 2
     query_mock.assert_called_once_with(meta=meta, mtype=None, keyword_meta=meta)
-    second_call = run_module.call_args_list[1]
+    second_call = unicast.call_args_list[1]
     assert second_call.kwargs["media_source"] == MediaSource.TMDB
     assert second_call.kwargs["media_id"] == "200"
     assert second_call.kwargs["mtype"] == MediaType.TV
@@ -122,15 +122,15 @@ def test_async_query_shared_result_when_local_recognize_failed():
     _enable_media_recognize_share(chain)
     meta = _build_meta("测试异步剧集")
     shared_media = _tmdb_media("测试异步剧集", 300, MediaType.TV, year="2025")
-    async_run_module = AsyncMock(side_effect=[None, shared_media])
+    async_unicast = AsyncMock(side_effect=[None, shared_media])
 
     async def runner():
         with patch.object(
             chain,
-            "async_run_module",
-            async_run_module,
+            "async_unicast",
+            async_unicast,
         ), patch(
-            "app.chain._recognition.MoviePilotServerHelper.async_query_recognize_share",
+            "app.application.orchestration._recognition.MoviePilotServerHelper.async_query_recognize_share",
             AsyncMock(return_value={
                 "type": "tv",
                 "media_source": "themoviedb",
@@ -138,7 +138,7 @@ def test_async_query_shared_result_when_local_recognize_failed():
                 "season": 2,
             }),
         ) as query_mock, patch(
-            "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+            "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
             return_value={
                 "mtype": MediaType.TV,
                 "media_source": MediaSource.TMDB,
@@ -146,7 +146,7 @@ def test_async_query_shared_result_when_local_recognize_failed():
                 "season": 2,
             },
         ), patch(
-            "app.chain._recognition.MoviePilotServerHelper.async_report_recognize_share",
+            "app.application.orchestration._recognition.MoviePilotServerHelper.async_report_recognize_share",
             AsyncMock(return_value=False),
         ), patch.object(
             chain,
@@ -159,7 +159,7 @@ def test_async_query_shared_result_when_local_recognize_failed():
     result, query_mock, backfill_mock = asyncio.run(runner())
 
     assert result is shared_media
-    assert async_run_module.await_count == 2
+    assert async_unicast.await_count == 2
     query_mock.assert_awaited_once_with(meta=meta, mtype=None, keyword_meta=meta)
     backfill_mock.assert_awaited_once()
     assert meta.begin_season is None
@@ -182,17 +182,20 @@ def test_backfill_local_cache_after_shared_recognize_success():
 
     with patch.object(
         chain,
-        "run_module",
-        side_effect=[None, shared_media, None],
-    ) as run_module_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
+        "unicast",
+        side_effect=[None, shared_media],
+    ) as unicast_mock, patch.object(
+        chain,
+        "broadcast",
+    ) as broadcast_mock, patch(
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={
             "type": "movie",
             "media_source": "themoviedb",
             "media_id": "700",
         },
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
         return_value={
             "mtype": MediaType.MOVIE,
             "media_source": MediaSource.TMDB,
@@ -200,14 +203,15 @@ def test_backfill_local_cache_after_shared_recognize_success():
             "season": None,
         },
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=False,
     ):
         result = chain.recognize_media(meta=meta, cache=False)
 
     assert result is shared_media
-    assert run_module_mock.call_count == 3
-    update_call = run_module_mock.call_args_list[2]
+    assert unicast_mock.call_count == 2
+    broadcast_mock.assert_called_once()
+    update_call = broadcast_mock.call_args
     assert update_call.args[0] == "update_recognize_cache"
     assert update_call.kwargs["meta"] is not meta
     assert update_call.kwargs["meta"].name == meta.name
@@ -299,8 +303,8 @@ def test_report_shared_result_with_distinct_keyword_meta():
     share_meta.original_name = "辅助识别前的名称"
     mediainfo = _tmdb_media("测试剧集", 402, MediaType.TV, year="2024")
 
-    with patch.object(chain, "run_module", return_value=mediainfo), patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+    with patch.object(chain, "unicast", return_value=mediainfo), patch(
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock:
         result = chain.recognize_media(meta=meta, share_meta=share_meta, cache=False)
@@ -325,10 +329,10 @@ def test_query_shared_result_with_distinct_keyword_meta():
 
     with patch.object(
         chain,
-        "run_module",
+        "unicast",
         side_effect=[None, shared_media],
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={
             "type": "tv",
             "media_source": "themoviedb",
@@ -336,7 +340,7 @@ def test_query_shared_result_with_distinct_keyword_meta():
             "season": 1,
         },
     ) as query_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
         return_value={
             "mtype": MediaType.TV,
             "media_source": MediaSource.TMDB,
@@ -344,7 +348,7 @@ def test_query_shared_result_with_distinct_keyword_meta():
             "season": 1,
         },
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=False,
     ), patch.object(
         chain,
@@ -371,16 +375,16 @@ def test_skip_report_when_local_recognize_hits_cache():
     mediainfo = _tmdb_media("缓存电影", 500, MediaType.MOVIE, year="2024")
     mediainfo.recognize_cache_hit = True
 
-    with patch.object(chain, "run_module", return_value=mediainfo) as run_module, patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+    with patch.object(chain, "unicast", return_value=mediainfo) as unicast, patch(
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share"
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share"
     ) as query_mock:
         result = chain.recognize_media(meta=meta)
 
     assert result is mediainfo
-    run_module.assert_called_once()
+    unicast.assert_called_once()
     report_mock.assert_not_called()
     query_mock.assert_not_called()
 
@@ -395,22 +399,22 @@ def test_async_skip_report_when_local_recognize_hits_cache():
     async def runner():
         with patch.object(
             chain,
-            "async_run_module",
+            "async_unicast",
             AsyncMock(return_value=mediainfo),
-        ) as async_run_module, patch(
-            "app.chain._recognition.MoviePilotServerHelper.async_report_recognize_share",
+        ) as async_unicast, patch(
+            "app.application.orchestration._recognition.MoviePilotServerHelper.async_report_recognize_share",
             AsyncMock(return_value=True),
         ) as report_mock, patch(
-            "app.chain._recognition.MoviePilotServerHelper.async_query_recognize_share",
+            "app.application.orchestration._recognition.MoviePilotServerHelper.async_query_recognize_share",
             AsyncMock(),
         ) as query_mock:
             result = await chain.async_recognize_media(meta=meta)
-        return result, async_run_module, report_mock, query_mock
+        return result, async_unicast, report_mock, query_mock
 
-    result, async_run_module, report_mock, query_mock = asyncio.run(runner())
+    result, async_unicast, report_mock, query_mock = asyncio.run(runner())
 
     assert result is mediainfo
-    async_run_module.assert_awaited_once()
+    async_unicast.assert_awaited_once()
     report_mock.assert_not_awaited()
     query_mock.assert_not_awaited()
 
@@ -592,10 +596,10 @@ def test_chain_recognize_media_reports_music_share_result():
     music = _music_info()
 
     with patch.object(chain, "recognize_music_from_source", return_value=music), patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=True,
     ) as report_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share"
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share"
     ) as query_mock:
         result = chain.recognize_media(meta=meta, cache=False)
 
@@ -616,7 +620,7 @@ def test_chain_recognize_media_queries_music_share_when_local_failed():
         "recognize_music_from_source",
         side_effect=[None, music],
     ) as recognize_source, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={
             "type": "music",
             "media_source": "musicbrainz",
@@ -624,7 +628,7 @@ def test_chain_recognize_media_queries_music_share_when_local_failed():
             "music_type": "recording",
         },
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
         return_value={
             "mtype": MediaType.MUSIC,
             "media_source": MediaSource.MusicBrainz,
@@ -633,7 +637,7 @@ def test_chain_recognize_media_queries_music_share_when_local_failed():
             "season": None,
         },
     ), patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=False,
     ), patch.object(
         chain,
@@ -665,7 +669,7 @@ def test_chain_recognize_media_queries_music_share_after_local_fallback():
         "recognize_music_from_source",
         side_effect=[fallback, music],
     ) as recognize_source, patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value={
             "type": "music",
             "media_source": "musicbrainz",
@@ -673,7 +677,7 @@ def test_chain_recognize_media_queries_music_share_after_local_fallback():
             "music_type": "recording",
         },
     ) as query_share, patch(
-        "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
         return_value={
             "mtype": MediaType.MUSIC,
             "media_source": MediaSource.MusicBrainz,
@@ -710,7 +714,7 @@ def test_chain_async_recognize_media_queries_music_share_after_local_fallback():
             "async_recognize_music_from_source",
             new=AsyncMock(side_effect=[fallback, music]),
         ) as recognize_source, patch(
-            "app.chain._recognition.MoviePilotServerHelper.async_query_recognize_share",
+            "app.application.orchestration._recognition.MoviePilotServerHelper.async_query_recognize_share",
             new=AsyncMock(return_value={
                 "type": "music",
                 "media_source": "musicbrainz",
@@ -718,7 +722,7 @@ def test_chain_async_recognize_media_queries_music_share_after_local_fallback():
                 "music_type": "recording",
             }),
         ) as query_share, patch(
-            "app.chain._recognition.MoviePilotServerHelper.to_recognize_params",
+            "app.application.orchestration._recognition.MoviePilotServerHelper.to_recognize_params",
             return_value={
                 "mtype": MediaType.MUSIC,
                 "media_source": MediaSource.MusicBrainz,
@@ -760,10 +764,10 @@ def test_chain_recognize_media_skips_music_report_for_fallback_result():
     fallback = MusicInfo(title="未知曲目", artists=["未知艺术家"])
 
     with patch.object(chain, "recognize_music_from_source", return_value=fallback), patch(
-        "app.chain._recognition.MoviePilotServerHelper.query_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.query_recognize_share",
         return_value=None,
     ) as query_mock, patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share"
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share"
     ) as report_mock:
         result = chain.recognize_media(meta=meta, cache=False)
 

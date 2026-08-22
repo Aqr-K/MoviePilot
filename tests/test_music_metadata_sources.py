@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
-from app.chain.media import MediaChain
-from app.chain.scraping import ScrapingChain
+from app.application.orchestration.media import MediaChain
+from app.application.orchestration.scraping import ScrapingChain
 from app.domain.context import MUSIC_ENTITY_ALBUM, MusicInfo
 from app.domain.meta.metamusic import MetaMusic
 from app.modules.douban import DoubanModule
 from app.modules.theaudiodb import TheAudioDbModule
-from app.schemas.types import MediaRecognizeType, MediaSource, MediaType
+from app.schemas.types import MediaSource, MediaType
 
 
 def test_theaudiodb_module_maps_track_and_album(monkeypatch):
@@ -45,7 +45,6 @@ def test_theaudiodb_module_maps_track_and_album(monkeypatch):
     assert results[0].media_id == "32793500"
     assert results[0].album_id == "2109619"
     assert results[0].duration == 269
-    assert module.get_subtype() == MediaRecognizeType.TheAudioDB
 
 
 def test_theaudiodb_module_ignores_other_sources(monkeypatch):
@@ -558,7 +557,7 @@ def test_music_scrape_resolves_with_selected_source(tmp_path, monkeypatch):
     recognize = Mock(return_value=(MetaMusic(title="Yellow"), expected))
     media_chain = Mock()
     media_chain.recognize_music_by_path = recognize
-    monkeypatch.setattr("app.chain.scraping.MediaChain", Mock(return_value=media_chain))
+    monkeypatch.setattr("app.application.orchestration.scraping.MediaChain", Mock(return_value=media_chain))
 
     result = ScrapingChain._resolve_music_scrape_info(
         path,

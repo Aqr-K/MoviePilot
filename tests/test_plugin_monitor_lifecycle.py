@@ -7,23 +7,34 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.foundation.singleton import Singleton
-from app.runtime.extensions.plugin.dependency import (
+from app.runtime.extensions.contract.dependency import (
     PluginDependencyClassification,
     PluginDependencyInstallResult,
 )
-from app.runtime.extensions.plugin.monitor import (
-    PluginChangeMonitor,
-    PluginMonitorController,
-)
-from app.runtime.extensions.plugin.system import reset_plugin_system
+from app.runtime.extensions.lifecycle.system import reset_plugin_system
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.schemas.plugin import PluginRuntimeStatus
 from app.startup import plugins_initializer
+
+# 插件管理器启动监控线程的私有入口，用例需要在不真正起线程的前提下观察调用
+_START_MONITOR = "_PluginManager__start_monitor"
 
 
 def _reset_plugin_manager() -> None:
     """清除插件管理器单例，保证构造时序测试彼此隔离。"""
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
+
+
+def _patch_settings(monkeypatch, *, dev: bool, auto_reload: bool) -> None:
+    """把插件管理器读取的运行配置替换为用例可控的最小集合。"""
+    monkeypatch.setattr(
+        "app.runtime.extensions.plugin_manager.settings",
+        SimpleNamespace(
+            DEV=dev,
+            PLUGIN_AUTO_RELOAD=auto_reload,
+            ROOT_PATH=MagicMock(),
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -39,15 +50,8 @@ def test_plugin_manager_constructor_does_not_start_monitor_before_runtime(
     _reset_plugin_manager()
     reset_plugin_system()
     start = MagicMock()
-    monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.settings",
-        SimpleNamespace(
-            DEV=dev,
-            PLUGIN_AUTO_RELOAD=auto_reload,
-            ROOT_PATH=MagicMock(),
-        ),
-    )
-    monkeypatch.setattr(PluginMonitorController, "start", start)
+    _patch_settings(monkeypatch, dev=dev, auto_reload=auto_reload)
+    monkeypatch.setattr(PluginManager, _START_MONITOR, start)
 
     PluginManager()
 
@@ -59,6 +63,7 @@ def test_init_plugins_starts_monitor_after_runtime_and_routes(monkeypatch) -> No
     """启动阶段只加载依赖已就绪的插件，再开放路由和文件监控。"""
     order: list[str] = []
     manager = MagicMock()
+    manager.plugins = {}
     manager.classify_plugins.return_value = PluginDependencyClassification(
         ready=("ReadyPlugin",),
         missing_dependencies=("DependencyPending",),
@@ -105,6 +110,30 @@ def test_plugin_manager_projects_dependency_classification_to_runtime_status() -
     _reset_plugin_manager()
 
 
+def test_plugin_manager_keeps_active_plugin_status_on_reclassification() -> None:
+    """已激活插件重新分类时保持 active，不被打回 ready。"""
+    _reset_plugin_manager()
+    manager = PluginManager()
+    manager._plugin_registry.running["ActivePlugin"] = object()
+    manager._plugin_registry.set_runtime_status(
+        "ActivePlugin",
+        PluginRuntimeStatus.ACTIVE,
+    )
+
+    manager.apply_plugin_dependency_classification(
+        PluginDependencyClassification(
+            ready=("ActivePlugin",),
+            missing_dependencies=(),
+            missing_source=(),
+        )
+    )
+
+    assert manager.get_plugin_runtime_statuses()["ActivePlugin"] is (
+        PluginRuntimeStatus.ACTIVE
+    )
+    _reset_plugin_manager()
+
+
 def test_plugin_manager_promotes_running_dependency_after_recovery() -> None:
     """依赖恢复后，运行中的插件状态必须允许后台流程触发重载。"""
     _reset_plugin_manager()
@@ -129,17 +158,25 @@ def test_plugin_manager_promotes_running_dependency_after_recovery() -> None:
     _reset_plugin_manager()
 
 
-def _patch_sync_plugins(monkeypatch, manager: MagicMock) -> MagicMock:
+def _patch_sync_plugins(
+    monkeypatch,
+    manager: MagicMock,
+    running_ids: list[str] | None = None,
+) -> MagicMock:
     """隔离后台执行器并返回动态路由注册替身。"""
     async def execute(_loop, task_func, _task_name):
         return task_func()
 
+    running = list(running_ids or [])
     register = MagicMock()
+    manager.plugins = {}
+    manager.get_running_plugin_ids.side_effect = lambda: list(running)
     monkeypatch.setattr(plugins_initializer, "configure_plugin_services", lambda: None)
     monkeypatch.setattr(plugins_initializer, "PluginManager", lambda: manager)
     monkeypatch.setattr(plugins_initializer, "execute_task", execute)
     monkeypatch.setattr(plugins_initializer, "register_plugin_api", register)
     manager.get_plugin_runtime_statuses.return_value = {}
+    manager.start.side_effect = running.append
     return register
 
 
@@ -158,7 +195,6 @@ async def test_sync_plugins_activates_ready_plugins_when_dependencies_fail(
         missing_dependencies=("DependencyPending",),
         missing_source=(),
     )
-    manager.running_plugins = {}
     register = _patch_sync_plugins(monkeypatch, manager)
 
     assert await plugins_initializer.sync_plugins() is True
@@ -183,14 +219,7 @@ async def test_sync_plugins_loads_only_plugins_that_become_ready(
         missing_dependencies=(),
         missing_source=("SourcePending",),
     )
-    running = {"ReadyPlugin": object()}
-    manager.running_plugins = running
-
-    def start(plugin_id: str) -> None:
-        running[plugin_id] = object()
-
-    manager.start.side_effect = start
-    register = _patch_sync_plugins(monkeypatch, manager)
+    register = _patch_sync_plugins(monkeypatch, manager, ["ReadyPlugin"])
 
     assert await plugins_initializer.sync_plugins() is True
 
@@ -212,11 +241,9 @@ async def test_sync_plugins_reloads_only_updated_running_plugins(monkeypatch) ->
         missing_dependencies=(),
         missing_source=(),
     )
-    manager.running_plugins = {
-        "StablePlugin": object(),
-        "UpdatedPlugin": object(),
-    }
-    register = _patch_sync_plugins(monkeypatch, manager)
+    register = _patch_sync_plugins(
+        monkeypatch, manager, ["StablePlugin", "UpdatedPlugin"]
+    )
 
     assert await plugins_initializer.sync_plugins() is True
 
@@ -240,8 +267,7 @@ async def test_sync_plugins_reloads_running_plugin_after_dependency_recovery(
         missing_dependencies=(),
         missing_source=(),
     )
-    manager.running_plugins = {"DependencyRecovered": object()}
-    register = _patch_sync_plugins(monkeypatch, manager)
+    register = _patch_sync_plugins(monkeypatch, manager, ["DependencyRecovered"])
     manager.get_plugin_runtime_statuses.return_value = {
         "DependencyRecovered": PluginRuntimeStatus.DEPENDENCY_PENDING,
     }
@@ -266,8 +292,7 @@ async def test_sync_plugins_keeps_runtime_when_nothing_changed(monkeypatch) -> N
         missing_dependencies=(),
         missing_source=(),
     )
-    manager.running_plugins = {"ReadyPlugin": object()}
-    register = _patch_sync_plugins(monkeypatch, manager)
+    register = _patch_sync_plugins(monkeypatch, manager, ["ReadyPlugin"])
 
     assert await plugins_initializer.sync_plugins() is False
 
@@ -282,6 +307,7 @@ async def test_sync_plugins_keeps_event_loop_responsive_during_activation(
 ) -> None:
     """插件初始化运行在线程池时，Web 事件循环仍可继续调度。"""
     manager = MagicMock()
+    manager.plugins = {}
     manager.sync.return_value = []
     manager.install_plugin_missing_dependencies_with_status.return_value = (
         PluginDependencyInstallResult(missing=[], success=True)
@@ -291,10 +317,12 @@ async def test_sync_plugins_keeps_event_loop_responsive_during_activation(
         missing_dependencies=(),
         missing_source=(),
     )
-    manager.running_plugins = {}
+    manager.get_running_plugin_ids.return_value = []
+    manager.get_plugin_runtime_statuses.return_value = {}
     activation_started = threading.Event()
 
     def slow_start(_plugin_id: str) -> None:
+        """占用线程池工作线程，模拟一次耗时的插件导入。"""
         activation_started.set()
         time.sleep(0.1)
 
@@ -327,17 +355,10 @@ def test_start_monitor_respects_runtime_configuration(
     """首次启动只在开发模式或插件自动重载启用时创建监控线程。"""
     _reset_plugin_manager()
     reset_plugin_system()
-    monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.settings",
-        SimpleNamespace(
-            DEV=dev,
-            PLUGIN_AUTO_RELOAD=auto_reload,
-            ROOT_PATH=MagicMock(),
-        ),
-    )
+    _patch_settings(monkeypatch, dev=dev, auto_reload=auto_reload)
     manager = PluginManager()
     start = MagicMock()
-    manager._plugin_monitor.start = start
+    monkeypatch.setattr(manager, _START_MONITOR, start)
 
     manager.start_monitor()
 
@@ -349,26 +370,19 @@ def test_plugin_monitor_waits_until_dependency_settlement(monkeypatch) -> None:
     """后台依赖收敛期间不启动文件监控，避免源码写入触发重复重载。"""
     _reset_plugin_manager()
     reset_plugin_system()
-    monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.settings",
-        SimpleNamespace(
-            DEV=True,
-            PLUGIN_AUTO_RELOAD=False,
-            ROOT_PATH=MagicMock(),
-        ),
-    )
+    _patch_settings(monkeypatch, dev=True, auto_reload=False)
     manager = PluginManager()
     start = MagicMock()
-    reload_monitor = MagicMock()
-    manager._plugin_monitor.start = start
-    manager._plugin_monitor.reload = reload_monitor
+    stop = MagicMock()
+    monkeypatch.setattr(manager, _START_MONITOR, start)
+    monkeypatch.setattr(manager, "stop_monitor", stop)
 
     manager.set_plugin_settling(True)
     manager.start_monitor()
     manager.reload_monitor()
 
     start.assert_not_called()
-    reload_monitor.assert_called_once_with(enabled=False)
+    stop.assert_called_once_with()
 
     manager.set_plugin_settling(False)
     manager.start_monitor()
@@ -377,42 +391,44 @@ def test_plugin_monitor_waits_until_dependency_settlement(monkeypatch) -> None:
     _reset_plugin_manager()
 
 
-def test_plugin_monitor_skips_installing_plugin_until_package_write_finishes(tmp_path) -> None:
+def test_plugin_monitor_skips_installing_plugin_until_package_write_finishes(
+    monkeypatch,
+    tmp_path,
+) -> None:
     """安装替换目录期间，文件事件不得抢先导入未完成的插件包。"""
+    _reset_plugin_manager()
+    reset_plugin_system()
+    _patch_settings(monkeypatch, dev=False, auto_reload=False)
+    manager = PluginManager()
     reload_plugin = MagicMock()
-    monitor = PluginChangeMonitor(
-        runtime_root=tmp_path,
-        local_roots=lambda: [],
-        stop_event=threading.Event(),
-        recent_sync={},
-        federated_change=lambda _path: None,
-        runtime_plugin=lambda _path: "DemoPlugin",
-        local_candidate=lambda _path: None,
-        sync_local=MagicMock(),
-        reload_plugin=reload_plugin,
-        dependency_manifest_status=lambda _path: None,
-        watch=lambda *_args, **_kwargs: (),
-        log=MagicMock(),
-        monitor_suppressed=lambda plugin_id: plugin_id.lower() == "demoplugin",
+    monkeypatch.setattr(
+        "app.runtime.extensions.plugin_manager.get_plugin_system",
+        lambda: SimpleNamespace(dependency_manifest_status=lambda _path: None),
     )
+    monkeypatch.setattr(manager, "_get_federated_plugin_change", lambda _path: None)
+    monkeypatch.setattr(
+        manager, "_get_plugin_target_from_path", lambda _path: ("DemoPlugin", None)
+    )
+    monkeypatch.setattr(manager, "reload_plugin", reload_plugin)
 
-    monitor._process_changes({("modified", str(tmp_path / "demo" / "plugin.py"))})
+    with manager.suppress_plugin_monitor("DemoPlugin"):
+        manager._process_watch_changes(
+            {("modified", str(tmp_path / "demo" / "plugin.py"))}
+        )
 
     reload_plugin.assert_not_called()
+
+    manager._process_watch_changes({("modified", str(tmp_path / "demo" / "plugin.py"))})
+
+    reload_plugin.assert_called_once_with("DemoPlugin")
+    _reset_plugin_manager()
 
 
 def test_plugin_monitor_suppression_is_reference_counted(monkeypatch) -> None:
     """同一插件的重叠写入必须等最后一个事务退出后才解除监控抑制。"""
     _reset_plugin_manager()
     reset_plugin_system()
-    monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.settings",
-        SimpleNamespace(
-            DEV=False,
-            PLUGIN_AUTO_RELOAD=False,
-            ROOT_PATH=MagicMock(),
-        ),
-    )
+    _patch_settings(monkeypatch, dev=False, auto_reload=False)
     manager = PluginManager()
 
     with manager.suppress_plugin_monitor("DemoPlugin"):
@@ -429,14 +445,7 @@ def test_config_change_reloads_monitor(monkeypatch) -> None:
     """配置热更新继续使用重建语义，不复用首次启动入口。"""
     _reset_plugin_manager()
     reset_plugin_system()
-    monkeypatch.setattr(
-        "app.runtime.extensions.plugin_manager.settings",
-        SimpleNamespace(
-            DEV=False,
-            PLUGIN_AUTO_RELOAD=False,
-            ROOT_PATH=MagicMock(),
-        ),
-    )
+    _patch_settings(monkeypatch, dev=False, auto_reload=False)
     manager = PluginManager()
     reload_monitor = MagicMock()
     manager.reload_monitor = reload_monitor

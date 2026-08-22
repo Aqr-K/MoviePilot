@@ -13,7 +13,7 @@ from starlette.routing import Route
 from app.adapters.observability import otel
 from app.adapters.web.metrics import HttpMetricsMiddleware
 from app.db.engine import _register_database_pool_metrics
-from app.runtime.extensions.plugin.lifecycle import observe_plugin_lifecycle
+from app.runtime.extensions.lifecycle.observation import observe_plugin_lifecycle
 from app.schemas.plugin import PluginRuntimeStatus
 from app.runtime.observability import (
     METRIC_SPECS,

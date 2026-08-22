@@ -1,6 +1,6 @@
 from unittest.mock import Mock, patch
 
-from app.chain import ChainBase
+from app.application.orchestration import ChainBase
 from app.domain.context import MediaInfo
 from app.domain.meta.metabase import MetaBase
 from app.schemas.types import MediaSource, MediaType
@@ -68,10 +68,10 @@ def test_explicit_source_recognition_reaches_modules_with_unified_identity() -> 
         type=MediaType.TV,
         title="Frieren",
     )
-    chain.run_module = Mock(return_value=media)
+    chain.unicast = Mock(return_value=media)
 
     with patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=False,
     ):
         result = chain.recognize_media(
@@ -81,7 +81,7 @@ def test_explicit_source_recognition_reaches_modules_with_unified_identity() -> 
         )
 
     assert result is media
-    call = chain.run_module.call_args
+    call = chain.unicast.call_args
     assert call.kwargs["media_source"] == MediaSource.AniList
     assert call.kwargs["media_id"] == "154587"
     assert not {
@@ -99,19 +99,19 @@ def test_default_recognition_passes_empty_generic_identity() -> None:
         type=MediaType.MOVIE,
         tmdb_id=1,
     )
-    chain.run_module = Mock(return_value=media)
+    chain.unicast = Mock(return_value=media)
     meta = MetaBase("测试电影")
     meta.cn_name = "测试电影"
     meta.type = MediaType.MOVIE
 
     with patch(
-        "app.chain._recognition.MoviePilotServerHelper.report_recognize_share",
+        "app.application.orchestration._recognition.MoviePilotServerHelper.report_recognize_share",
         return_value=False,
     ):
         result = chain.recognize_media(meta=meta)
 
     assert result is media
-    call = chain.run_module.call_args
+    call = chain.unicast.call_args
     assert call.kwargs["media_source"] is None
     assert call.kwargs["media_id"] is None
 
@@ -131,13 +131,13 @@ def test_module_dispatch_always_reaches_plugins() -> None:
 def test_explicit_search_source_reaches_plugins() -> None:
     """请求级搜索来源应以统一字段进入完整模块调度。"""
     chain = _chain_without_init()
-    chain.run_module = Mock(return_value=[])
+    chain.multicast = Mock(return_value=[])
     meta = MetaBase("Frieren")
 
     result = chain.search_medias(meta, media_source=MediaSource.AniList)
 
     assert result == []
-    chain.run_module.assert_called_once_with(
+    chain.multicast.assert_called_once_with(
         "search_medias",
         meta=meta,
         media_source=MediaSource.AniList,

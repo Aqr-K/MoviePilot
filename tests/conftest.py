@@ -8,7 +8,7 @@ import sys
 import pytest
 from sqlalchemy.orm import Session
 
-# 必须早于首个牵入 app.runtime.config 的 import（app.db / app.chain.* 都会牵入）：引擎本身已惰性，
+# 必须早于首个牵入 app.runtime.config 的 import（app.db / app.application.orchestration.* 都会牵入）：引擎本身已惰性，
 # import app.db 不再连库，但 settings 在 import 期就把 CONFIG_DIR 读进字段并建好配置目录，之后
 # 改环境变量已经晚了。prepare_backend 内部先隔离 CONFIG_DIR、补 app.application.site.sites 垫片，
 # 再建表。app/testing 仅依赖标准库、import 不触发 app.*，故此处先 import 再调用是安全的。
@@ -39,13 +39,17 @@ def configure_plugin_system_services():
         configure_system_config,
         configure_transfer_retry_config,
     )
+    from app.application.service_config import (
+        ServiceInstanceConfigService,
+        configure_service_instance_configs,
+        get_configured_service_instance_configs,
+    )
     from app.runtime.config import settings
-    from app.startup.configuration import (
+    from app.startup.ports.configuration import (
         build_api_runtime_config,
         build_chain_runtime_config,
         build_scheduler_runtime_config,
     )
-    from app.application.service import configure_service_directory
     from app.db.session import (
         SessionFactory,
         async_session_scope,
@@ -57,7 +61,11 @@ def configure_plugin_system_services():
         SqlAlchemyUnitOfWork,
         configure_transaction_runners,
     )
+    from app.db.oper.serviceconfig import ServiceConfigOper
     from app.db.oper.systemconfig import SystemConfigOper
+    from app.runtime.extensions.service_config import (
+        configure_service_instance_config_reader,
+    )
 
     configure_token_codec(create_access_token, decode_access_token)
     configure_runtime_configuration(
@@ -69,16 +77,22 @@ def configure_plugin_system_services():
     )
     configure_runtime_settings(RuntimeSettingsService(settings))
     configure_system_config(SystemConfigService(repository=SystemConfigOper()))
+    configure_service_instance_configs(
+        ServiceInstanceConfigService(repository=ServiceConfigOper())
+    )
+    configure_service_instance_config_reader(
+        lambda capability: get_configured_service_instance_configs().read(capability)
+    )
     configure_transfer_retry_config(
         lambda: TransferRetryConfig(
             max_failed_retries=settings.TRANSFER_MAX_FAILED_RETRIES,
         )
     )
-    from app.application.chain.data import configure_chain_data_ports
+    from app.application.orchestration.data import configure_chain_data_ports
     from app.application.subscription.write import configure_subscribe_writer
     from app.application.plugin.runtime import configure_plugin_runtime
     from app.application.module import configure_module_runtime
-    from app.application.chain.context import (
+    from app.application.orchestration.context import (
         ChainRuntimeContext,
         configure_chain_runtime_context_provider,
     )
@@ -86,13 +100,8 @@ def configure_plugin_system_services():
     from app.runtime.cache import AsyncFileCache, FileCache
     from app.runtime.events import EventManager
     from app.runtime.extensions.module_manager import ModuleManager
-    from app.runtime.extensions.module.dispatcher import ModuleInvocationDispatcher
+    from app.runtime.extensions.projection.dispatcher import ModuleInvocationDispatcher
     from app.runtime.extensions.plugin_manager import PluginManager
-    from app.runtime.extensions.service_config import ServiceConfigHelper
-    configure_service_directory(
-        configs=ServiceConfigHelper.get_configs,
-        modules=lambda module_type: ModuleManager().get_running_type_modules(module_type),
-    )
     configure_plugin_runtime(lambda: PluginManager())
     configure_module_runtime(lambda: ModuleManager())
     from app.application.site.query import SiteQueryService, configure_site_query_service
@@ -112,9 +121,10 @@ def configure_plugin_system_services():
     from app.db.oper.workflow import WorkflowOper, configure_workflow_legacy_writer
     from app.db.oper.message import MessageOper
     from app.db.oper.passkey import PassKeyOper
-    from app.startup.subscription import TransactionalSubscribeWriter
-    from app.startup.workflow import TransactionalWorkflowExecutionService
-    from app.startup.transaction import TransactionalWriteRunner
+    from app.db.oper.user_identity import UserIdentityOper
+    from app.startup.ports.subscription import TransactionalSubscribeWriter
+    from app.startup.ports.workflow import TransactionalWorkflowExecutionService
+    from app.startup.ports.transaction import TransactionalWriteRunner
 
     def compatibility_sync_session() -> Session:
         """动态读取可被存量隔离数据库用例替换的 ScopedSession。"""
@@ -148,12 +158,14 @@ def configure_plugin_system_services():
             "subscribe_history": SubscribeHistoryOper,
             "transfer_history": TransferHistoryOper,
             "user": UserOper,
+            "user_identity": UserIdentityOper,
             "workflow": WorkflowOper,
         },
         standalone={
             "passkey": PassKeyOper,
             "system_config": SystemConfigOper,
             "user": UserOper,
+            "user_identity": UserIdentityOper,
         },
         unit_of_work={
             "async": SqlAlchemyAsyncUnitOfWork,
@@ -165,6 +177,12 @@ def configure_plugin_system_services():
             sync_session=SessionFactory,
             async_session=async_session_scope,
         )
+    )
+
+    from app.application.security.auth import configure_auth_identity_ports
+    configure_auth_identity_ports(
+        identities=UserIdentityOper(),
+        provisioning=UserOper(),
     )
 
     configure_chain_data_ports(
@@ -217,7 +235,7 @@ def configure_plugin_system_services():
     from app.adapters.system.plugin.dependency import PluginDependencyInstaller
     from app.adapters.system.plugin.manifest import dependency_manifest_status
     from app.adapters.system.plugin.package import PluginPackageManager
-    from app.runtime.extensions.plugin.system import (
+    from app.runtime.extensions.lifecycle.system import (
         PluginSystemServices,
         configure_plugin_system,
         reset_plugin_system,
@@ -235,15 +253,22 @@ def configure_plugin_system_services():
         ),
         frozen=lambda: False,
     ))
-    from app.agent.skills.registry import SkillHelper
     from app.agent.llm.gateway import register_llm_provider_runtime
     from app.agent.llm.provider import LLMProviderManager
-    from app.application.messaging.skill import register_skill_catalog_provider
 
-    register_skill_catalog_provider(lambda: SkillHelper())
     register_llm_provider_runtime(lambda: LLMProviderManager())
     yield
     reset_plugin_system()
+
+
+@pytest.fixture(autouse=True)
+def configure_llm_operations_port():
+    """为绕过完整启动流程的单元测试装配真实 LLM 操作端口。"""
+    from app.agent.llm.helper import LLMHelper
+    from app.agent.llm.provider import configure_llm_operations
+
+    configure_llm_operations(LLMHelper())
+    yield
 
 
 class DbHarness:

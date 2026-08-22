@@ -11,7 +11,7 @@ import pytest
 
 from app.domain.context import MediaInfo, Context, TorrentInfo
 from app.domain.metainfo import MetaInfo
-from app.modules.telegram.module import TelegramModule
+from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
 from app.schemas.message import Message
 from app.schemas.types import NotificationChannel

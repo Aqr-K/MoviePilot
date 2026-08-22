@@ -1,12 +1,12 @@
 {
   "model_decorators": {
     "by_kind": {
-      "async_db_query": 49,
-      "async_db_update": 0,
-      "db_query": 74,
-      "db_update": 0
+      "async_db_query": 56,
+      "async_db_update": 5,
+      "db_query": 87,
+      "db_update": 11
     },
-    "count": 123,
+    "count": 159,
     "methods": [
       {
         "decorator": "async_db_query",
@@ -214,6 +214,81 @@
         "method": "PassKey.get_by_user_id"
       },
       {
+        "decorator": "async_db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_delete_by_instance"
+      },
+      {
+        "decorator": "async_db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_delete_by_plugin"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_get_by_instance"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_get_default_target"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_list_by_plugin"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_list_enabled"
+      },
+      {
+        "decorator": "async_db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.async_set_default_target"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.clear_default_target"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.delete_by_instance"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.delete_by_plugin"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.get_by_instance"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.get_default_target"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.list_by_plugin"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.list_enabled"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/pluginconfig.py",
+        "method": "PluginConfig.set_default_target"
+      },
+      {
         "decorator": "async_db_query",
         "file": "app/db/models/plugindata.py",
         "method": "PluginData.async_get_plugin_data"
@@ -242,6 +317,61 @@
         "decorator": "db_query",
         "file": "app/db/models/plugindata.py",
         "method": "PluginData.get_plugin_data_by_plugin_id"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.clear_default_target"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.delete_by_identity"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.get_by_identity"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.get_default_target"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.list_by_capability"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.list_by_provider"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.list_by_type"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.list_with_absent_provider"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.replace_capability"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.set_default_target"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/serviceconfig.py",
+        "method": "ServiceConfig.update_by_identity"
       },
       {
         "decorator": "async_db_query",
@@ -577,6 +707,56 @@
         "decorator": "db_query",
         "file": "app/db/models/user.py",
         "method": "User.get_by_name"
+      },
+      {
+        "decorator": "async_db_update",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.async_delete_by_id"
+      },
+      {
+        "decorator": "async_db_update",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.async_delete_by_user_id"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.async_get_by_id"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.async_get_by_provider_external_id"
+      },
+      {
+        "decorator": "async_db_query",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.async_get_by_user_id"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.delete_by_id"
+      },
+      {
+        "decorator": "db_update",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.delete_by_user_id"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.get_by_id"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.get_by_provider_external_id"
+      },
+      {
+        "decorator": "db_query",
+        "file": "app/db/models/user_identity.py",
+        "method": "UserIdentity.get_by_user_id"
       },
       {
         "decorator": "db_query",

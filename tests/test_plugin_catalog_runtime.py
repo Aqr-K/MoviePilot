@@ -1,55 +1,54 @@
 """插件安装事实与运行状态投影测试。"""
 
 from types import SimpleNamespace
+from typing import Iterator
 
-from app.runtime.extensions.plugin.catalog import PluginCatalogFacade
+import pytest
+
+from app.foundation.singleton import Singleton
+from app.runtime.extensions.plugin_manager import PluginManager
 from app.schemas.plugin import PluginRuntimeStatus
-from app.schemas.types import SystemConfigKey
 
 
-def test_installed_catalog_keeps_plugins_that_are_not_loaded():
+@pytest.fixture
+def plugin_manager() -> Iterator[PluginManager]:
+    """构造隔离的插件管理器实例，避免单例状态污染其它用例。"""
+    Singleton._instances.pop((PluginManager, (), frozenset()), None)
+    manager = PluginManager()
+    yield manager
+    Singleton._instances.pop((PluginManager, (), frozenset()), None)
+
+
+def test_installed_catalog_keeps_plugins_that_are_not_loaded(
+    monkeypatch,
+    plugin_manager: PluginManager,
+) -> None:
     """已安装清单中的插件即使缺依赖或源码也必须保留可观察卡片。"""
+
     class ActivePlugin:
         plugin_name = "已运行插件"
         plugin_version = "1.0.0"
         plugin_order = 0
 
-    active_instance = SimpleNamespace(get_state=lambda: True)
-    statuses = {
-        "ActivePlugin": PluginRuntimeStatus.ACTIVE,
-        "DependencyPending": PluginRuntimeStatus.DEPENDENCY_PENDING,
-        "SourceMissing": PluginRuntimeStatus.SOURCE_MISSING,
-    }
-    facade = PluginCatalogFacade(
-        classes=lambda: {"ActivePlugin": ActivePlugin},
-        running=lambda: {"ActivePlugin": active_instance},
-        storage=lambda: SimpleNamespace(
-            read=lambda key: [
-                "ActivePlugin",
-                "DependencyPending",
-                "SourceMissing",
-            ] if key is SystemConfigKey.UserInstalledPlugins else None,
-        ),
-        system=lambda: SimpleNamespace(),
-        market_catalog=lambda: None,
-        market_loader=lambda *_args, **_kwargs: [],
-        async_market_loader=lambda *_args, **_kwargs: [],
-        map_plugin=lambda **_kwargs: None,
-        auth_checker=lambda **_kwargs: True,
-        plugin_attr=lambda _plugin_id, _attr: None,
-        plugin_instance=lambda _plugin_id: None,
-        plugin_instances=lambda: {},
-        runtime_status=statuses.get,
-        log=SimpleNamespace(error=lambda *_args: None, info=lambda *_args: None),
+    installed_ids = ["ActivePlugin", "DependencyPending", "SourceMissing"]
+    monkeypatch.setattr(
+        "app.runtime.extensions.plugin_manager.get_plugin_storage",
+        lambda: SimpleNamespace(read=lambda _key: list(installed_ids)),
     )
+    plugin_manager._plugins["ActivePlugin"] = ActivePlugin
+    plugin_manager._running_plugins["ActivePlugin"] = SimpleNamespace(
+        get_state=lambda: True
+    )
+    for plugin_id, status in (
+        ("ActivePlugin", PluginRuntimeStatus.ACTIVE),
+        ("DependencyPending", PluginRuntimeStatus.DEPENDENCY_PENDING),
+        ("SourceMissing", PluginRuntimeStatus.SOURCE_MISSING),
+    ):
+        plugin_manager._plugin_registry.set_runtime_status(plugin_id, status)
 
-    plugins = facade.installed()
+    plugins = plugin_manager.get_installed_plugins()
 
-    assert [plugin.id for plugin in plugins] == [
-        "ActivePlugin",
-        "DependencyPending",
-        "SourceMissing",
-    ]
+    assert [plugin.id for plugin in plugins] == installed_ids
     assert [plugin.runtime_status for plugin in plugins] == [
         PluginRuntimeStatus.ACTIVE,
         PluginRuntimeStatus.DEPENDENCY_PENDING,
@@ -57,3 +56,30 @@ def test_installed_catalog_keeps_plugins_that_are_not_loaded():
     ]
     assert plugins[1].plugin_name == "DependencyPending"
     assert plugins[2].installed is True
+
+
+def test_local_catalog_projects_runtime_status(
+    monkeypatch,
+    plugin_manager: PluginManager,
+) -> None:
+    """本地插件投影带上运行状态，前端无需再次查询即可区分未加载原因。"""
+
+    class DemoPlugin:
+        plugin_name = "演示插件"
+        plugin_version = "1.0.0"
+        plugin_order = 0
+
+    monkeypatch.setattr(
+        "app.runtime.extensions.plugin_manager.get_plugin_storage",
+        lambda: SimpleNamespace(read=lambda _key: ["DemoPlugin"]),
+    )
+    plugin_manager._plugins["DemoPlugin"] = DemoPlugin
+    plugin_manager._plugin_registry.set_runtime_status(
+        "DemoPlugin", PluginRuntimeStatus.LOAD_FAILED
+    )
+
+    plugins = plugin_manager.get_local_plugins()
+
+    assert [plugin.runtime_status for plugin in plugins] == [
+        PluginRuntimeStatus.LOAD_FAILED
+    ]

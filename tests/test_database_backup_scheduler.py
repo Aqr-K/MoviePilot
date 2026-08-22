@@ -1,58 +1,35 @@
 """数据库备份与宿主调度器的接入合同。"""
 
 import ast
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
-from app import scheduler as scheduler_module
 from app.scheduler import Scheduler
-from app.application.configuration import SchedulerRuntimeConfig
+from app.scheduler import composition as composition_module
+from app.startup.bindings.scheduling import manifest as manifest_module
+from app.startup.bindings.scheduling import systemjobs as systemjobs_module
 
 
-class _SchedulerStub:
-    """记录 Scheduler 注册结果的最小调度器替身。"""
-
-    def __init__(self) -> None:
-        """初始化空作业表。"""
-        self.jobs = {}
-
-    def add_job(self, func, *, trigger, id, **kwargs) -> None:
-        """按作业 ID 保存最近一次注册参数。"""
-        self.jobs[id] = {"func": func, "trigger": trigger, **kwargs}
-
-
-def _scheduler() -> Scheduler:
-    """构造不启动后台线程的 Scheduler。"""
-    scheduler = object.__new__(Scheduler)
-    scheduler._scheduler = _SchedulerStub()
-    scheduler._jobs = {}
-    return scheduler
-
-
-def _config(**changes) -> SchedulerRuntimeConfig:
-    """构造数据库备份测试所需的最小调度配置快照。"""
-    config = SchedulerRuntimeConfig(
-        dev=False,
-        timezone="Asia/Shanghai",
-        scheduler_workers=1,
-        db_backup_enable=False,
-        db_backup_cron="",
-        cookiecloud_interval=None,
-        mediaserver_sync_interval=None,
-        subscribe_search=False,
-        subscribe_search_interval=24,
-        subscribe_mode="rss",
-        subscribe_rss_interval=30,
-        data_cleanup_enable=False,
-        sitedata_refresh_interval=None,
-        memory_gc_interval=None,
-        ai_agent_enable=False,
-        ai_agent_job_interval=None,
-        usage_statistic_share=False,
-        site_link=None,
+def _backup_jobs(monkeypatch) -> list:
+    """构建宿主作业清单并取出数据库备份作业。"""
+    monkeypatch.setattr(
+        manifest_module.ServiceConfigHelper,
+        "get_mediaserver_configs",
+        lambda: [],
     )
-    return replace(config, **changes)
+    for name in [
+        "MediaServerChain",
+        "RecommendChain",
+        "SchedulerChain",
+        "SiteChain",
+        "SubscribeChain",
+        "TransferChain",
+        "WallpaperHelper",
+        "PluginManager",
+    ]:
+        monkeypatch.setattr(manifest_module, name, Mock())
+    jobs = manifest_module.build_host_jobs(user_auth=lambda: None)
+    return [job for job in jobs if job.id == "database_backup"]
 
 
 def test_database_backup_schedule_only_watches_job_shape() -> None:
@@ -66,53 +43,59 @@ def test_database_backup_schedule_only_watches_job_shape() -> None:
     }) == {"DB_BACKUP_ENABLE", "DB_BACKUP_CRON"}
 
 
-def test_disabled_database_backup_does_not_register_job() -> None:
-    """关闭备份时不注册作业。"""
-    scheduler = _scheduler()
+def test_disabled_database_backup_does_not_register_job(monkeypatch) -> None:
+    monkeypatch.setattr(manifest_module.settings, "DB_BACKUP_ENABLE", False)
 
-    scheduler._register_database_backup_job(_config())
-
-    assert scheduler._scheduler.jobs == {}
+    assert _backup_jobs(monkeypatch) == []
 
 
-def test_enabled_database_backup_without_cron_does_not_register_job() -> None:
+def test_enabled_database_backup_without_cron_does_not_register_job(monkeypatch) -> None:
     """总开关开启但未配置周期时，不启用定时备份。"""
-    scheduler = _scheduler()
-    scheduler._register_database_backup_job(_config(db_backup_enable=True))
+    monkeypatch.setattr(manifest_module.settings, "DB_BACKUP_ENABLE", True)
+    monkeypatch.setattr(manifest_module.settings, "DB_BACKUP_CRON", "")
 
-    assert scheduler._scheduler.jobs == {}
+    assert _backup_jobs(monkeypatch) == []
 
 
 def test_enabled_database_backup_registers_single_replaceable_job(monkeypatch) -> None:
-    scheduler = _scheduler()
     trigger = object()
-    monkeypatch.setattr(scheduler_module.TimerUtils, "build_schedule_trigger", Mock(return_value=trigger))
-    config = _config(db_backup_enable=True, db_backup_cron="0 3 * * *")
+    monkeypatch.setattr(manifest_module.settings, "DB_BACKUP_ENABLE", True)
+    monkeypatch.setattr(manifest_module.settings, "DB_BACKUP_CRON", "0 3 * * *")
+    monkeypatch.setattr(
+        manifest_module.TimerUtils,
+        "build_schedule_trigger",
+        Mock(return_value=trigger),
+    )
 
-    scheduler._register_database_backup_job(config)
-    scheduler._register_database_backup_job(config)
+    jobs = _backup_jobs(monkeypatch)
 
-    assert list(scheduler._scheduler.jobs) == ["database_backup"]
-    assert scheduler._scheduler.jobs["database_backup"]["replace_existing"] is True
+    assert [job.id for job in jobs] == ["database_backup"]
+    assert len(jobs[0].triggers) == 1
+    assert jobs[0].triggers[0].trigger is trigger
+    assert jobs[0].triggers[0].replace_existing is True
 
 
 def test_scheduled_backup_uses_registered_database_governance(monkeypatch) -> None:
     governance = Mock()
-    monkeypatch.setattr(scheduler_module, "get_database_governance", lambda: governance)
+    monkeypatch.setattr(systemjobs_module, "get_database_governance", lambda: governance)
 
-    result = Scheduler.database_backup()
+    result = systemjobs_module.database_backup()
 
     assert result is governance.create_backup.return_value
     governance.create_backup.assert_called_once_with()
 
 
 def test_scheduler_database_dependencies_are_explicit_module_imports() -> None:
-    tree = ast.parse(
-        (Path(__file__).parents[1] / "app" / "scheduler.py").read_text(encoding="utf-8")
+    # 源码位置从已导入的模块取，路径不写死：模块搬家时断言随之移动，
+    # 而不是继续读一个不存在的路径或静默读到旧副本。
+    sources = (
+        Path(composition_module.__file__),
+        Path(systemjobs_module.__file__),
     )
     function_imports = [
         node
-        for function in ast.walk(tree)
+        for source in sources
+        for function in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
         if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
         for node in ast.walk(function)
         if isinstance(node, (ast.Import, ast.ImportFrom))

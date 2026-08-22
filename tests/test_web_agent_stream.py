@@ -40,7 +40,7 @@ from app.application.messaging.chat import AgentChatService, configure_agent_cha
 from app.application.messaging.agent import build_web_agent_message_update_event
 from app.application.messaging.agent import AgentInteractionOption, agent_interaction_manager
 from app.application.messaging.skill import skill_interaction_manager
-from app.chain.message import MessageChain
+from app.application.orchestration.message import MessageChain
 from app.schemas.notification import ChannelCapability, ChannelCapabilityManager
 from app.schemas.types import EventType, NotificationChannel, MessageType
 
@@ -56,7 +56,7 @@ def _running_agent_service():
             "app.api.endpoints.agent.get_running_agent_manager",
             return_value=agent_manager,
         ), patch(
-            "app.chain.message.get_running_agent_manager",
+            "app.application.orchestration.message.get_running_agent_manager",
             return_value=agent_manager,
         ):
             yield
@@ -288,7 +288,9 @@ def test_build_web_agent_command_items_returns_slash_commands():
 
 def test_build_web_agent_command_items_includes_sites_command():
     """WebAgent 命令建议应包含内建站点管理命令。"""
-    with patch("app.command.Scheduler"), patch("app.command.ThreadHelper"):
+    import app.startup.command_initializer  # noqa: F401  组合根装配内建命令清单
+
+    with patch("app.runtime.command.ThreadHelper"):
         commands = _build_web_agent_command_items()
 
     assert any(command["command"] == "/sites" for command in commands)

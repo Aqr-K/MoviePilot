@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from app.runtime.extensions.module.quality import (
+from app.runtime.extensions.contract.module_quality import (
     MODULE_QUALITY_PROFILES,
     QUALITY_RULES,
     ModuleQualityLevel,

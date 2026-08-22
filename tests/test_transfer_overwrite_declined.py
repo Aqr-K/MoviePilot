@@ -9,7 +9,7 @@ __is_overwrite_declined 用于识别这一场景，__default_callback 失败分�
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.chain.transfer import TransferChain
+from app.application.orchestration.transfer import TransferChain
 from app.schemas.transfer import TransferInfo
 from app.schemas.types import EventType
 from tests.test_transfer_job_manager import FakeMedia, make_task, make_transfer_chain
@@ -153,10 +153,10 @@ def test_default_callback_skips_history_and_notification_when_overwrite_declined
     )
 
     with patch(
-        "app.chain.transfer.TransferHistoryOper",
+        "app.application.orchestration.transfer.TransferHistoryOper",
         return_value=transfer_history_oper,
     ), patch(
-        "app.chain.transfer.add_transfer_fail",
+        "app.application.orchestration.transfer.add_transfer_fail",
         make_fail_recorder(add_fail_calls),
     ), patch(
         "app.runtime.config.settings.AI_AGENT_ENABLE", False
@@ -199,10 +199,10 @@ def test_default_callback_keeps_original_failure_semantics_without_success_histo
     )
 
     with patch(
-        "app.chain.transfer.TransferHistoryOper",
+        "app.application.orchestration.transfer.TransferHistoryOper",
         return_value=transfer_history_oper,
     ), patch(
-        "app.chain.transfer.add_transfer_fail",
+        "app.application.orchestration.transfer.add_transfer_fail",
         make_fail_recorder(add_fail_calls),
     ), patch(
         "app.runtime.config.settings.AI_AGENT_ENABLE", False
@@ -251,10 +251,10 @@ def test_default_callback_delegates_primary_failure_to_durable_writer():
 
     chain.durable_event_writer.transfer_result.side_effect = durable_transfer_result
     with patch(
-        "app.chain.transfer.TransferHistoryOper",
+        "app.application.orchestration.transfer.TransferHistoryOper",
         return_value=transfer_history_oper,
     ), patch(
-        "app.chain.transfer.add_transfer_fail",
+        "app.application.orchestration.transfer.add_transfer_fail",
         make_fail_recorder(add_fail_calls),
     ), patch(
         "app.runtime.config.settings.AI_AGENT_ENABLE",

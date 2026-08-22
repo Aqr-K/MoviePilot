@@ -4,7 +4,72 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parents[1]
 APP_ROOT = PROJECT_ROOT / "app"
-LEGACY_ROOTS = ("app.core", "app.helper", "app.utils")
+# 包级依赖矩阵：键是包，值是它允许 import 的包全集。
+# 未列出的包（api / startup / cli 等边缘层与组合根）可依赖任意下层。
+PACKAGE_LAYERS: dict[str, frozenset[str]] = {
+    "foundation": frozenset(),
+    "schemas": frozenset(),
+    "domain": frozenset({"foundation", "schemas"}),
+    "runtime": frozenset({"foundation", "schemas"}),
+    "db": frozenset({"foundation", "schemas", "runtime"}),
+    "adapters": frozenset({"foundation", "schemas", "domain", "runtime"}),
+    "application": frozenset(
+        {"foundation", "schemas", "domain", "runtime", "db", "adapters"}
+    ),
+    "modules": frozenset(
+        {"foundation", "schemas", "domain", "runtime", "db", "adapters"}
+    ),
+    "workflow": frozenset(
+        {
+            "foundation", "schemas", "domain", "runtime", "db", "adapters",
+            "application",
+        }
+    ),
+    "monitor": frozenset(
+        {
+            "foundation", "schemas", "domain", "runtime", "db", "adapters",
+            "application",
+        }
+    ),
+    "doctor": frozenset({"foundation", "schemas", "domain", "runtime", "adapters"}),
+    "agent": frozenset(
+        {
+            "foundation", "schemas", "domain", "runtime", "db", "adapters",
+            "application",
+        }
+    ),
+    "sdk": frozenset(
+        {
+            "foundation", "schemas", "domain", "runtime", "db", "adapters",
+            "application",
+        }
+    ),
+    "testing": frozenset({"application", "startup"}),
+}
+# 已知且被接受的方向负债：矩阵禁止但暂时保留的边，每条附清偿方向。
+# 边消失后条目可直接删除，留着不会导致失败。
+DEPENDENCY_DEBT: dict[tuple[str, str], str] = {
+    ("sdk", "agent"): (
+        "智能体工具基类 MoviePilotTool 现居 app.agent.tools.base，而扩展声明智能体工具时"
+        "必须继承它，SDK 不给出口就只能让扩展直接 import 宿主内部路径。同一处安家还逼得"
+        "app.runtime.extensions.admission.agent_tool 判不了继承，只能由启动"
+        "组合根经 configure_agent_tool_base 在运行期注入基类。"
+        "清偿方向：把该契约迁出 app.agent，SDK 与校验层即可直接 import。"
+    ),
+    ("sdk", "modules"): (
+        "存储后端契约 StorageBase 现居 app.modules._base.storage，而扩展声明存储类型时"
+        "必须继承它，SDK 不给出口就只能让扩展直接 import 宿主内部路径。同一处安家还逼得"
+        "app.runtime.extensions.admission.storage 改用 MRO 限定名字符串比对。"
+        "清偿方向：把该契约迁出 app.modules，两边即可直接 import。"
+    ),
+}
+# 同一产品线变体模块允许依赖的兄弟模块包：变体只改存储/服务标识，
+# 共用一份客户端实现，属于继承而非跨模块编排。
+MODULE_VARIANT_DEPENDENCIES: dict[str, frozenset[str]] = {
+    # AListGo 是 AList 的 Go 重写版，只有存储标识不同
+    "alistgo": frozenset({"alist"}),
+}
+LEGACY_ROOTS = ("app.chain", "app.core", "app.helper", "app.utils")
 LEGACY_MODULES = {"app.log"}
 IMPLEMENTATION_ROOTS = (
     "app.agent.skills",
@@ -64,12 +129,20 @@ RETIRED_CANONICAL_FILES = (
     "app/adapters/network/sites.pyi",
     "app/application/plugins.py",
     "app/application/subscribe.py",
+    "app/scheduler.py",
+    "app/command.py",
 )
+# 空壳目录扫描豁免的 app/ 下顶级目录：目录内容由插件仓自治，属运行期数据。
+SHELL_SCAN_EXEMPT_ROOTS = frozenset({"plugins"})
 PLUGIN_COMPONENT_ROOTS = (
     "app/adapters/external/plugin",
     "app/adapters/system/plugin",
     "app/application/plugin",
-    "app/runtime/extensions/plugin",
+    "app/runtime/extensions/admission",
+    "app/runtime/extensions/contract",
+    "app/runtime/extensions/lifecycle",
+    "app/runtime/extensions/projection",
+    "app/runtime/extensions/registry",
 )
 PLUGIN_LEGACY_ABI_NAMES = {
     "MoviePilotServerHelper",
@@ -99,32 +172,12 @@ FORBIDDEN_IMPORT_PREFIXES = {
         "app.sdk",
     ),
     "app.runtime": (
-        "app.adapters",
         "app.application",
         "app.sdk",
     ),
     "app.application": (
-        "app.runtime.extensions",
         "app.runtime.compat",
         "app.sdk",
-    ),
-    "app.api": (
-        "app.runtime.extensions.plugin_manager",
-        "app.runtime.extensions.module_manager",
-        "app.scheduler",
-    ),
-    "app.agent": (
-        "app.runtime.extensions.plugin_manager",
-        "app.runtime.extensions.module_manager",
-    ),
-    "app.chain": (
-        "app.runtime.extensions.plugin_manager",
-        "app.runtime.extensions.module_manager",
-        "app.runtime.extensions.module.dispatcher",
-    ),
-    "app.workflow": (
-        "app.runtime.extensions.plugin_manager",
-        "app.runtime.extensions.module_manager",
     ),
 }
 
@@ -152,7 +205,12 @@ def _resolve_imports(
     path: Path,
     known_modules: set[str],
 ) -> set[str]:
-    """解析一个模块的静态导入，并计入 Python 必然初始化的父包。"""
+    """解析一个模块的静态导入，并计入 Python 必然初始化的父包。
+
+    模块自身的祖先包不计入依赖：Python 必然先初始化它们，这条边由包结构决定
+    而非模块的设计选择，计入只会把「父包 __init__ 导入子模块」记成环。
+    祖先包被源码显式导入时仍照常计入。
+    """
     tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     package = module_name if path.name == "__init__.py" else module_name.rpartition(".")[0]
     dependencies: set[str] = set()
@@ -183,6 +241,7 @@ def _resolve_imports(
                 parent
                 for index in range(2, len(parts))
                 if (parent := ".".join(parts[:index])) in known_modules
+                and not module_name.startswith(f"{parent}.")
             )
             if candidate in known_modules:
                 dependencies.add(candidate)
@@ -260,20 +319,128 @@ def test_legacy_roots_contain_no_python_sources():
     """旧目录只能作为运行时虚拟包存在，仓库中不得重新出现源码。"""
     leftovers = sorted(
         str(path.relative_to(PROJECT_ROOT))
-        for root_name in ("core", "helper", "utils")
+        for root_name in ("chain", "core", "helper", "utils")
         for path in (APP_ROOT / root_name).rglob("*.py")
     )
     assert leftovers == []
 
 
 def test_legacy_source_directories_do_not_exist():
-    """core/helper/utils 物理目录应完全退役，旧导入只由虚拟兼容包解析。"""
+    """chain/core/helper/utils 物理目录应完全退役，旧导入只由虚拟兼容包解析。"""
     leftovers = [
         root_name
-        for root_name in ("core", "helper", "utils")
+        for root_name in ("chain", "core", "helper", "utils")
         if (APP_ROOT / root_name).exists()
     ]
     assert leftovers == []
+
+
+def _shell_directories() -> list[str]:
+    """收集 `app/` 下不含任何真实文件的空壳目录。
+
+    `__pycache__` 目录自身及其内容不计为真实文件；`SHELL_SCAN_EXEMPT_ROOTS`
+    列出的顶级目录整棵子树不参与扫描。判据是目录递归为空而非是否含 `.py`：
+    零 `.py` 的资源目录（`locales`、能力清单、人格预设）是合法的。
+
+    返回：空壳目录相对仓库根的路径列表，按字典序排序。
+    """
+    directories: set[Path] = set()
+    populated: set[Path] = set()
+    for entry in APP_ROOT.rglob("*"):
+        relative = entry.relative_to(APP_ROOT)
+        if "__pycache__" in relative.parts:
+            continue
+        if relative.parts[0] in SHELL_SCAN_EXEMPT_ROOTS:
+            continue
+        if entry.is_dir():
+            directories.add(entry)
+        else:
+            populated.update(entry.parents)
+    return sorted(
+        str(directory.relative_to(PROJECT_ROOT))
+        for directory in directories - populated
+    )
+
+
+def test_no_shell_directories_remain():
+    """切分或搬迁后不得留下空壳目录。
+
+    没有 `__init__.py` 的目录仍是可导入的命名空间包，本仓的 `app/plugins/`
+    正依赖这一行为。因此只剩 `__pycache__` 的目录不是碍眼而已：
+    `import` 与 `importlib.util.find_spec` 对已退役路径继续成功并返回空包，
+    凭 `ImportError` 判断路径是否退役的调用方会静默走错分支。
+    """
+    shells = _shell_directories()
+    details = "\n".join(f"  - {shell}" for shell in shells)
+    assert shells == [], (
+        f"发现 {len(shells)} 个空壳目录（递归不含任何非 __pycache__ 文件）：\n"
+        f"{details}\n"
+        "判为残留的理由：目录在仓库中零文件，却仍是可被 import 解析的命名空间包，"
+        "使已退役路径的 import 与 find_spec 继续成功。\n"
+        "处理方式：连同目录内的 __pycache__ 一并删除该目录；"
+        "若属插件仓运行期数据，应加入 SHELL_SCAN_EXEMPT_ROOTS。"
+    )
+
+
+def test_startup_root_admits_only_initializers():
+    """组合根顶层只放初始化动作。
+
+    判据 S（docs/rules/05-architecture.md）把 `app/startup/` 的成员分成四类：
+    `lifecycle/` 决定时刻，顶层 `*_initializer.py` 在指定时刻执行一次，
+    `bindings/` 由消费方按自己的时刻反复读取，`ports/` 由组合根构造后交给别处长期
+    持有。顶层若没有形状约束，新文件的默认落点就是顶层——2024-09 到 2026-08-16
+    之间新增的每一个文件都落在这里，四类因此混在一层，「谁在启动时被调用」只能靠
+    逐个打开文件重建。
+    """
+    strays = sorted(
+        path.name
+        for path in (APP_ROOT / "startup").glob("*.py")
+        if path.name != "__init__.py" and not path.name.endswith("_initializer.py")
+    )
+    assert strays == [], (
+        f"app/startup/ 顶层出现非初始化动作模块：{strays}\n"
+        "按判据 S 重新定位：决定其他成员运行时刻的进 lifecycle/；"
+        "由消费方按自己的时刻反复读取的绑定表进 bindings/；"
+        "三问皆不命中时先扩充判据 S，不得默认留在顶层。"
+    )
+
+
+def test_startup_subpackages_admit_no_initializers():
+    """组合根子目录不得混入初始化动作。
+
+    用 rglob 扫描而非逐个列出子目录：新增子包会自动进入覆盖范围，
+    不会出现「加了目录、门禁还绿着但已不覆盖它」的静默失效。
+    """
+    startup_root = APP_ROOT / "startup"
+    strays = sorted(
+        str(path.relative_to(PROJECT_ROOT))
+        for path in startup_root.rglob("*_initializer.py")
+        if path.parent != startup_root
+    )
+    assert strays == [], (
+        f"组合根子目录出现初始化动作模块：{strays}\n"
+        "按判据 S，在组合根指定时刻执行一次的动作平铺在 app/startup/ 顶层。"
+    )
+
+
+def test_startup_subpackages_are_declared():
+    """判据 S 承认的组合根子目录是封闭集合。
+
+    第三个子目录意味着出现了判据 S 四问之外的第四类成员。门禁在此转红，
+    迫使新增者先在 docs/rules/05-architecture.md 里把判据补到能唯一定位它，
+    而不是先建目录、再由后来者反推它凭什么存在。
+    """
+    actual = sorted(
+        path.name
+        for path in (APP_ROOT / "startup").iterdir()
+        if path.is_dir() and path.name != "__pycache__"
+    )
+    assert actual == ["bindings", "lifecycle", "ports"], (
+        f"app/startup/ 的子目录集合变为 {actual}\n"
+        "判据 S 只承认 lifecycle/（S1 决定时刻）、bindings/（S3 供消费方读取的绑定表）"
+        "与 ports/（S4 组合根构造、别处长期持有的端口实现及其运行时形状）。"
+        "新增子目录前先扩充判据 S 并同步更新本断言。"
+    )
 
 
 def test_retired_canonical_filenames_do_not_return():
@@ -392,33 +559,6 @@ def test_database_internals_do_not_import_db_facades():
     assert violations == []
 
 
-def test_entry_layers_do_not_import_database_implementations():
-    """API、应用、编排、Agent、监控、模块和 Runtime 只能经端口访问持久化。"""
-    graph = _build_module_graph()
-    layer_roots = (
-        "app.api",
-        "app.application",
-        "app.agent",
-        "app.chain",
-        "app.monitor",
-        "app.modules",
-        "app.runtime",
-        "app.workflow",
-        "app.adapters",
-    )
-    violations = {
-        source: sorted(
-            dependency
-            for dependency in dependencies
-            if dependency.startswith("app.db")
-        )
-        for source, dependencies in graph.items()
-        if source.startswith(layer_roots)
-        and any(dependency.startswith("app.db") for dependency in dependencies)
-    }
-    assert violations == {}
-
-
 def test_migrated_modules_are_not_in_import_cycles():
     """任何 canonical 迁移模块都不得进入完整应用依赖图的环。"""
     modules = _discover_modules()
@@ -483,10 +623,19 @@ def test_capability_packages_do_not_import_forbidden_upper_layers():
     assert violations == {}
 
 
+# 路由依赖模块的职责就是声明 FastAPI 依赖链，其对 Depends 与令牌校验的引用属于
+# 该职责本身，不是应用层向传输层的越界扩散。
+TRANSPORT_AWARE_APPLICATION_FILES = frozenset({
+    "app/application/security/dependencies.py",
+})
+
+
 def test_application_does_not_import_transport_frameworks():
     """应用层不得依赖 FastAPI、Starlette 或宿主 HTTP 适配器。"""
     violations: dict[str, set[str]] = {}
     for path in (APP_ROOT / "application").rglob("*.py"):
+        if str(path.relative_to(PROJECT_ROOT)) in TRANSPORT_AWARE_APPLICATION_FILES:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         forbidden: set[str] = set()
         for node in ast.walk(tree):
@@ -604,6 +753,8 @@ def test_modules_do_not_import_other_modules_or_chain():
     """模块之间以及模块对链层的直接依赖被禁止，跨模块编排归链层。
 
     `app.modules._base` 是模块共享样板基类包（模块发现会跳过），不视为业务模块。
+    `MODULE_VARIANT_DEPENDENCIES` 声明同一产品线变体共用一份客户端实现的继承边，
+    它不是跨模块编排，仍不允许出现在该表之外。
     """
     modules = _discover_modules()
     known_modules = set(modules)
@@ -612,14 +763,15 @@ def test_modules_do_not_import_other_modules_or_chain():
         if not module_name.startswith("app.modules."):
             continue
         own_package = module_name.split(".")[2]
+        allowed = {own_package, "_base", *MODULE_VARIANT_DEPENDENCIES.get(own_package, ())}
         dependencies = _resolve_imports(module_name, path, known_modules)
         forbidden = {
             dependency
             for dependency in dependencies
-            if dependency.startswith("app.chain")
+            if dependency.startswith("app.application.orchestration")
             or (
                 dependency.startswith("app.modules.")
-                and dependency.split(".")[2] not in (own_package, "_base")
+                and dependency.split(".")[2] not in allowed
             )
         }
         if forbidden:
@@ -651,7 +803,7 @@ def test_chain_does_not_import_downloader_sdks():
     """链层不得引入下载器后端协议类型，避免后端细节泄漏到编排层。"""
     forbidden_sdks = {"qbittorrentapi", "transmission_rpc"}
     violations: list[str] = []
-    for path in (APP_ROOT / "chain").rglob("*.py"):
+    for path in (APP_ROOT / "application" / "orchestration").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         for node in ast.walk(tree):
             names: list[str] = []
@@ -675,7 +827,7 @@ def test_chain_does_not_import_module_internals():
     known_modules = set(modules)
     violations: dict[str, set[str]] = {}
     for module_name, path in modules.items():
-        if not module_name.startswith("app.chain"):
+        if not module_name.startswith("app.application.orchestration"):
             continue
         dependencies = _resolve_imports(module_name, path, known_modules)
         forbidden = {
@@ -706,7 +858,7 @@ def test_chain_does_not_import_agent_implementation():
     """编排层不得反向依赖 Agent 实现，跨域编排经 application 门面。"""
     violations: dict[str, set[str]] = {}
     for module_name, dependencies in _build_module_graph().items():
-        if not module_name.startswith("app.chain"):
+        if not module_name.startswith("app.application.orchestration"):
             continue
         forbidden = {
             dependency
@@ -766,7 +918,7 @@ def test_api_does_not_import_factory():
 
 PROCESS_LEVEL_ROOTS = (
     "app.api",
-    "app.chain",
+    "app.application",
     "app.agent",
     "app.scheduler",
     "app.command",
@@ -796,3 +948,33 @@ def test_process_level_packages_are_not_mutually_cyclic():
         if len(involved) > 1:
             violations.append(sorted(component))
     assert violations == []
+
+
+def _package_of(module_name: str) -> str:
+    """取模块所属的顶级包名；``app`` 下的散件归入 ``(root)``。"""
+    parts = module_name.split(".")
+    if len(parts) < 3:
+        return "(root)"
+    return parts[1]
+
+
+def test_package_dependencies_follow_the_layer_matrix():
+    """包级依赖必须落在允许矩阵内，未登记为负债的越界一律拒绝。
+
+    文件级无环由强连通分量断言保证；本断言约束方向本身：
+    下层不得依赖上层，扩展之间不得互相依赖。
+    """
+    violations: dict[str, set[str]] = {}
+    for module_name, dependencies in _build_module_graph().items():
+        source = _package_of(module_name)
+        allowed = PACKAGE_LAYERS.get(source)
+        if allowed is None:
+            continue
+        for dependency in dependencies:
+            target = _package_of(dependency)
+            if target in (source, "(root)") or target in allowed:
+                continue
+            if (source, target) in DEPENDENCY_DEBT:
+                continue
+            violations.setdefault(module_name, set()).add(dependency)
+    assert violations == {}

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 from app.api.endpoints import media as media_endpoints
 from app.api.endpoints.media import search
-from app.chain import ChainBase
+from app.application.orchestration import ChainBase
 from app.adapters.web.security.access import verify_token
 from app.modules.douban import DoubanModule
 from app.modules.themoviedb import TheMovieDbModule
@@ -203,7 +203,7 @@ def test_chain_forwards_source_to_modules(
 ) -> None:
     """处理链应将人物和合集的请求级数据源传递给媒体模块。"""
     chain = Mock(spec=ChainBase)
-    chain.async_run_module = AsyncMock(return_value=[])
+    chain.async_multicast = AsyncMock(return_value=[])
 
     result = asyncio.run(
         getattr(ChainBase, method_name)(
@@ -214,7 +214,7 @@ def test_chain_forwards_source_to_modules(
     )
 
     assert result == []
-    chain.async_run_module.assert_awaited_once_with(
+    chain.async_multicast.assert_awaited_once_with(
         module_method_name,
         name="测试",
         media_source=MediaSource.TMDB,

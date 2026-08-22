@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from app.application.chain.durable_events import (
+from app.application.orchestration.durable_events import (
     restore_download_added,
     restore_transfer_result,
     snapshot_download_added,
@@ -22,7 +22,7 @@ from app.domain.metainfo import MetaInfo
 from app.schemas.file import FileItem
 from app.schemas.transfer import TransferInfo
 from app.schemas.types import MediaSource, MediaType
-from app.startup.chain_events import TransactionalChainDurableEventWriter
+from app.startup.ports.chain_events import TransactionalChainDurableEventWriter
 
 
 def _session_factory():

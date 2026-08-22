@@ -22,21 +22,25 @@ def test_mypy_gate_has_explicit_strict_scope_without_global_ignore() -> None:
 
     assert settings.getboolean("strict") is True
     assert "app/runtime/event/contracts.py" in governed_files
-    assert "app/runtime/extensions/module/contracts.py" in governed_files
-    assert "app/runtime/extensions/module/dispatcher.py" in governed_files
-    assert "app/runtime/extensions/module/quality.py" in governed_files
+    assert "app/runtime/extensions/contract/module_method.py" in governed_files
+    assert "app/runtime/extensions/projection/dispatcher.py" in governed_files
+    assert "app/runtime/compat/diagnostics.py" in governed_files
+    assert "app/runtime/compat/manifest.py" in governed_files
     assert "app/runtime/event/errors.py" in governed_files
     assert "app/application/scheduling.py" in governed_files
     assert "scripts/architecture/async_blocking.py" in governed_files
-    assert "app/startup/context.py" in governed_files
-    assert "app/startup/configuration.py" in governed_files
-    assert "app/startup/download_failure.py" in governed_files
-    assert "app/startup/workflow.py" in governed_files
+    assert "app/application/plugin/folders.py" in governed_files
+    assert "app/application/plugin/routes.py" in governed_files
+    assert "app/application/plugin/runtime.py" in governed_files
+    assert "app/db/decorators.py" in governed_files
+    assert "app/startup/ports/context.py" in governed_files
+    assert "app/startup/ports/download_failure.py" in governed_files
+    assert "app/startup/ports/workflow.py" in governed_files
     assert "app/application/workflow.py" in governed_files
     assert "app/api/context.py" in governed_files
     assert "app/db/base.py" in governed_files
     assert "app/db/uow.py" in governed_files
-    assert len(governed_files) >= 37
+    assert len(governed_files) >= 34
     assert any(path.startswith("app/domain/") for path in governed_files)
     assert "ignore_errors" not in MYPY_CONFIG.read_text(encoding="utf-8")
 

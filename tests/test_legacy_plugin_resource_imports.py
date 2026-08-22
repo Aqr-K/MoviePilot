@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -19,6 +20,9 @@ from app.runtime.extensions import plugin_manager as plugin_manager_module
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.startup import plugins_initializer
 
+
+# 版本化布局下用例插件的版本目录名
+_FIXTURE_VERSION_DIR = "v1_0_0"
 
 _HEADED_CLOAKBROWSER_ENTRYPOINTS = (
     "launch",
@@ -36,6 +40,28 @@ def _write_plugin(root: Path, plugin_id: str, source: str) -> Path:
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "__init__.py").write_text(source, encoding="utf-8")
     return plugin_dir
+
+
+def _await_new_fs_tick(reference: os.stat_result, probe_dir: Path) -> None:
+    """自旋等待，直到文件系统时间戳推进到一个新的可观测刻度。
+
+    部分文件系统/内核对 inode 时间戳使用粗粒度时钟，间隔极短的两次写入可能
+    落在同一刻度内、拿到完全相同的 mtime/ctime，使基于时间戳比较的缓存失效
+    判断失去区分度、产生与执行顺序相关的偶发失败。通过反复触碰一个探测文件，
+    直到其 ctime 晚于 reference，确保调用方紧随其后的写入必然落入新刻度。
+
+    :param reference: 作为时间基准的 stat 结果
+    :param probe_dir: 探测文件所在目录，测试结束后随 tmp_path 一并清理
+    """
+    probe = probe_dir / ".fs_tick_probe"
+    deadline = time.monotonic() + 2.0
+    while True:
+        probe.write_text("x", encoding="utf-8")
+        if probe.stat().st_ctime_ns > reference.st_ctime_ns:
+            return
+        if time.monotonic() > deadline:
+            pytest.fail("等待文件系统时间戳刻度推进超时，无法验证 ctime 失效路径")
+        time.sleep(0.001)
 
 
 @pytest.mark.parametrize(
@@ -193,6 +219,9 @@ def test_scanner_invalidates_equal_size_source_with_preserved_mtime(
     assert scan_plugin_resource_imports("ReplacedPlugin", plugin_dir) == (
         "host.display",
     )
+    # 保证接下来的写入必然落入新的文件系统时间戳刻度，让 ctime 的变化
+    # 真实可观测，测试不再依赖执行顺序带来的偶然时序间隔。
+    _await_new_fs_tick(original_stat, plugin_dir)
     source_path.write_text("import cloakbrowsex\n", encoding="utf-8")
     os.utime(
         source_path,
@@ -275,11 +304,34 @@ def test_scanner_honors_python_source_encoding_cookie(tmp_path: Path) -> None:
     )
 
 
+def _write_versioned_plugin(root: Path, plugin_id: str, source: str) -> Path:
+    """按版本化布局写入一个仅用于 AST 扫描的最小插件源码目录。
+
+    :param root: 插件根目录
+    :param plugin_id: 插件ID
+    :param source: 主模块源码
+    :return: 版本目录
+    """
+    version_dir = root / plugin_id.lower() / _FIXTURE_VERSION_DIR
+    version_dir.mkdir(parents=True)
+    (version_dir / "__init__.py").write_text(source, encoding="utf-8")
+    return version_dir
+
+
+def _plugin_id_of(module_name: str) -> str:
+    """从版本化模块名中取出插件目录名。
+
+    :param module_name: 形如 app.plugins.<插件ID>.<版本目录> 的模块名
+    :return: 插件目录名
+    """
+    return module_name.split(".")[-2]
+
+
 def _fake_plugin_module(module_name: str) -> ModuleType:
     """构造满足 PluginManager 类发现合同的内存模块。"""
     module = ModuleType(module_name)
     plugin_type = type(
-        module_name.rsplit(".", maxsplit=1)[-1].title(),
+        _plugin_id_of(module_name).title(),
         (),
         {
             "init_plugin": lambda self, _config: None,
@@ -297,12 +349,14 @@ def test_plugin_preparer_runs_before_import_in_non_debug_and_isolates_failures(
     """扫描或资源失败只阻止对应插件，后续插件仍按准备后导入的顺序加载。"""
     plugins_root = tmp_path / "app" / "plugins"
     for plugin_id in ("scanfailed", "resourcefailed", "healthy"):
-        _write_plugin(plugins_root, plugin_id, "plugin_name = 'Fixture'\n")
+        _write_versioned_plugin(plugins_root, plugin_id, "plugin_name = 'Fixture'\n")
 
     events: list[tuple[str, str]] = []
 
     def prepare(*, plugin_id: str, plugin_dir: Path) -> None:
-        assert plugin_dir.name == plugin_id
+        # 扫描范围是本次将被导入的那份源码，即版本目录
+        assert plugin_dir.name == _FIXTURE_VERSION_DIR
+        assert plugin_dir.parent.name == plugin_id
         events.append(("prepare", plugin_id))
         if plugin_id == "scanfailed":
             raise PluginResourceImportScanError("fixture scan failure")
@@ -310,7 +364,7 @@ def test_plugin_preparer_runs_before_import_in_non_debug_and_isolates_failures(
             raise RuntimeError("fixture resource activation failure")
 
     def import_plugin(module_name: str) -> ModuleType:
-        plugin_id = module_name.rsplit(".", maxsplit=1)[-1]
+        plugin_id = _plugin_id_of(module_name)
         assert events[-1] == ("prepare", plugin_id)
         events.append(("import", plugin_id))
         return _fake_plugin_module(module_name)

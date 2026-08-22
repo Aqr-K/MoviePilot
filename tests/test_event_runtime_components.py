@@ -41,7 +41,7 @@ def test_binding_miss_does_not_construct_handler_owner() -> None:
     )
     _UnmanagedHandler.constructed = 0
 
-    assert binding.resolve(_UnmanagedHandler.handle) is None
+    assert binding.resolve(_UnmanagedHandler.handle) == []
     assert _UnmanagedHandler.constructed == 0
     assert binding.unresolved_handlers() == (
         f"{__name__}._UnmanagedHandler.handle",
@@ -133,10 +133,12 @@ def test_binding_uses_explicit_resolver_instance() -> None:
     """显式 resolver 应返回当前托管实例上的绑定方法。"""
     instance = object.__new__(_UnmanagedHandler)
     resolvers = {
-        "test": lambda owner: EventHandlerBinding(
-            instance=instance,
-            owner_name="托管处理器",
-        )
+        "test": lambda owner: [
+            EventHandlerBinding(
+                instance=instance,
+                owner_name="托管处理器",
+            )
+        ]
         if owner is _UnmanagedHandler
         else None
     }
@@ -145,7 +147,7 @@ def test_binding_uses_explicit_resolver_instance() -> None:
         resolvers=lambda: resolvers,
     )
 
-    method, resolved, class_name, method_name = binding.resolve(
+    [(method, resolved, class_name, method_name)] = binding.resolve(
         _UnmanagedHandler.handle
     )
 
@@ -206,6 +208,8 @@ def test_all_decorated_host_handler_classes_have_explicit_factories() -> None:
     assert {owner.__name__ for owner in factories} == {
         "Command",
         "DownloadChain",
+        # 插件重载处理器声明在混入类上，其实例由调度器组合根提供
+        "PluginScheduling",
         "Scheduler",
         "ScrapingChain",
         "SearchChain",

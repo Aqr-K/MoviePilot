@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.chain.subscribe import SubscribeChain
-from app.modules.filemanager import FileManagerModule
+from app.application.orchestration.subscribe import SubscribeChain
+from app.modules.medialibrary import MediaLibraryModule
 from app.schemas.mediaserver import ExistMediaInfo
 from app.schemas.types import MediaType
 
@@ -49,8 +49,8 @@ def _build_mediainfo():
     )
 
 
-def test_filemanager_media_exists_skips_local_when_server_specified():
-    module = FileManagerModule()
+def test_medialibrary_media_exists_skips_local_when_server_specified():
+    module = MediaLibraryModule()
     mediainfo = _build_mediainfo()
 
     with patch.object(module, "media_files", return_value=[SimpleNamespace(path="/media/test.mkv")]) as media_files:
@@ -93,13 +93,13 @@ def test_subscribe_files_info_merges_multiple_mediaservers():
     media_chain.recognize_media.return_value = mediainfo
 
     chain = SubscribeChain()
-    with patch("app.chain.subscribe.DownloadHistoryOper") as download_oper, \
-            patch("app.chain.subscribe.MediaChain", return_value=media_chain), \
+    with patch("app.application.orchestration.subscribe.DownloadHistoryOper") as download_oper, \
+            patch("app.application.orchestration.subscribe.MediaChain", return_value=media_chain), \
             patch.object(chain, "media_files", return_value=None), \
             patch.object(chain, "media_exists", side_effect=_media_exists_side_effect), \
-            patch("app.chain.subscribe.MediaServerHelper", return_value=helper), \
-            patch("app.chain.subscribe.MediaServerChain", return_value=mediaserver_chain), \
-            patch("app.chain.subscribe.Subscribe", side_effect=lambda **kwargs: SimpleNamespace(**kwargs)):
+            patch("app.application.orchestration.subscribe.MediaServerHelper", return_value=helper), \
+            patch("app.application.orchestration.subscribe.MediaServerChain", return_value=mediaserver_chain), \
+            patch("app.application.orchestration.subscribe.Subscribe", side_effect=lambda **kwargs: SimpleNamespace(**kwargs)):
         download_oper.return_value.get_by_mediaid.return_value = []
         result = chain.subscribe_files_info(subscribe)
 
@@ -139,13 +139,13 @@ def test_subscribe_files_info_uses_season_zero_for_tv():
     media_chain.recognize_media.return_value = mediainfo
 
     chain = SubscribeChain()
-    with patch("app.chain.subscribe.DownloadHistoryOper") as download_oper, \
-            patch("app.chain.subscribe.MediaChain", return_value=media_chain), \
+    with patch("app.application.orchestration.subscribe.DownloadHistoryOper") as download_oper, \
+            patch("app.application.orchestration.subscribe.MediaChain", return_value=media_chain), \
             patch.object(chain, "media_files", return_value=None), \
             patch.object(chain, "media_exists", side_effect=_media_exists_side_effect), \
-            patch("app.chain.subscribe.MediaServerHelper", return_value=helper), \
-            patch("app.chain.subscribe.MediaServerChain", return_value=mediaserver_chain), \
-            patch("app.chain.subscribe.Subscribe", side_effect=lambda **kwargs: SimpleNamespace(**kwargs)):
+            patch("app.application.orchestration.subscribe.MediaServerHelper", return_value=helper), \
+            patch("app.application.orchestration.subscribe.MediaServerChain", return_value=mediaserver_chain), \
+            patch("app.application.orchestration.subscribe.Subscribe", side_effect=lambda **kwargs: SimpleNamespace(**kwargs)):
         download_oper.return_value.get_by_mediaid.return_value = []
         result = chain.subscribe_files_info(subscribe)
 

@@ -36,10 +36,10 @@ _STUB_MODULES = dict([
     _stub("aiofiles"),
     _stub("psutil"),
     _stub("app.application.site.sites", SitesHelper=_Dummy),
-    _stub("app.chain.media", MediaChain=_Dummy),
-    _stub("app.chain.mediaserver", MediaServerChain=_Dummy),
-    _stub("app.chain.search", SearchChain=_Dummy),
-    _stub("app.chain.system", SystemChain=_Dummy),
+    _stub("app.application.orchestration.media", MediaChain=_Dummy),
+    _stub("app.application.orchestration.mediaserver", MediaServerChain=_Dummy),
+    _stub("app.application.orchestration.search", SearchChain=_Dummy),
+    _stub("app.application.orchestration.system", SystemChain=_Dummy),
     _stub("app.runtime.events", eventmanager=_Dummy(), Event=_Dummy, EventManager=_Dummy),
     _stub("app.domain.metainfo", MetaInfo=_Dummy),
     _stub("app.runtime.extensions.module_manager", ModuleManager=_Dummy),
@@ -55,7 +55,7 @@ _STUB_MODULES = dict([
     _stub("app.application.rules", RuleHelper=_Dummy),
     _stub("app.adapters.external.server", MoviePilotServerHelper=_Dummy),
     _stub("app.runtime.state", SystemHelper=_Dummy),
-    _stub("app.application.image", ImageHelper=_Dummy),
+    _stub("app.adapters.media.image", ImageHelper=_Dummy),
     _stub("app.scheduler", Scheduler=_Dummy),
     _stub("app.runtime.log", logger=_Dummy(), log_settings=_Dummy(),
           LogConfigModel=type("LogConfigModel", (), {})),
@@ -156,7 +156,7 @@ class NettestSecurityTest(unittest.TestCase):
             "IMAGE_PROXY_ALLOWED_PRIVATE_RANGES",
             ["198.18.0.0/15"],
         ), patch(
-            "app.application.security.url.logger.debug",
+            "app.adapters.network.urlsafety.logger.debug",
         ):
             resp = asyncio.run(
                 system_endpoint.fetch_image(

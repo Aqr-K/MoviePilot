@@ -4,41 +4,41 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.chain.recommend import RecommendChain
+from app.application.orchestration.recommend import RecommendChain
 from app.runtime.cache import TTLCache
 from app.domain.context import MusicInfo
 from app.schemas.types import MUSIC_ENTITY_ALBUM
 
 SYNC_EMPTY_CACHE_CASES = [
-    ("tmdb_movies", "app.chain.recommend.TmdbChain", "tmdb_discover"),
-    ("tmdb_tvs", "app.chain.recommend.TmdbChain", "tmdb_discover"),
-    ("tmdb_trending", "app.chain.recommend.TmdbChain", "tmdb_trending"),
-    ("bangumi_calendar", "app.chain.recommend.BangumiChain", "calendar"),
-    ("douban_movie_showing", "app.chain.recommend.DoubanChain", "movie_showing"),
-    ("douban_movies", "app.chain.recommend.DoubanChain", "douban_discover"),
-    ("douban_tvs", "app.chain.recommend.DoubanChain", "douban_discover"),
-    ("douban_movie_top250", "app.chain.recommend.DoubanChain", "movie_top250"),
-    ("douban_tv_weekly_chinese", "app.chain.recommend.DoubanChain", "tv_weekly_chinese"),
-    ("douban_tv_weekly_global", "app.chain.recommend.DoubanChain", "tv_weekly_global"),
-    ("douban_tv_animation", "app.chain.recommend.DoubanChain", "tv_animation"),
-    ("douban_movie_hot", "app.chain.recommend.DoubanChain", "movie_hot"),
-    ("douban_tv_hot", "app.chain.recommend.DoubanChain", "tv_hot"),
+    ("tmdb_movies", "app.application.orchestration.recommend.TmdbChain", "tmdb_discover"),
+    ("tmdb_tvs", "app.application.orchestration.recommend.TmdbChain", "tmdb_discover"),
+    ("tmdb_trending", "app.application.orchestration.recommend.TmdbChain", "tmdb_trending"),
+    ("bangumi_calendar", "app.application.orchestration.recommend.BangumiChain", "calendar"),
+    ("douban_movie_showing", "app.application.orchestration.recommend.DoubanChain", "movie_showing"),
+    ("douban_movies", "app.application.orchestration.recommend.DoubanChain", "douban_discover"),
+    ("douban_tvs", "app.application.orchestration.recommend.DoubanChain", "douban_discover"),
+    ("douban_movie_top250", "app.application.orchestration.recommend.DoubanChain", "movie_top250"),
+    ("douban_tv_weekly_chinese", "app.application.orchestration.recommend.DoubanChain", "tv_weekly_chinese"),
+    ("douban_tv_weekly_global", "app.application.orchestration.recommend.DoubanChain", "tv_weekly_global"),
+    ("douban_tv_animation", "app.application.orchestration.recommend.DoubanChain", "tv_animation"),
+    ("douban_movie_hot", "app.application.orchestration.recommend.DoubanChain", "movie_hot"),
+    ("douban_tv_hot", "app.application.orchestration.recommend.DoubanChain", "tv_hot"),
 ]
 
 ASYNC_EMPTY_CACHE_CASES = [
-    ("async_tmdb_movies", "app.chain.recommend.TmdbChain"),
-    ("async_tmdb_tvs", "app.chain.recommend.TmdbChain"),
-    ("async_tmdb_trending", "app.chain.recommend.TmdbChain"),
-    ("async_bangumi_calendar", "app.chain.recommend.BangumiChain"),
-    ("async_douban_movie_showing", "app.chain.recommend.DoubanChain"),
-    ("async_douban_movies", "app.chain.recommend.DoubanChain"),
-    ("async_douban_tvs", "app.chain.recommend.DoubanChain"),
-    ("async_douban_movie_top250", "app.chain.recommend.DoubanChain"),
-    ("async_douban_tv_weekly_chinese", "app.chain.recommend.DoubanChain"),
-    ("async_douban_tv_weekly_global", "app.chain.recommend.DoubanChain"),
-    ("async_douban_tv_animation", "app.chain.recommend.DoubanChain"),
-    ("async_douban_movie_hot", "app.chain.recommend.DoubanChain"),
-    ("async_douban_tv_hot", "app.chain.recommend.DoubanChain"),
+    ("async_tmdb_movies", "app.application.orchestration.recommend.TmdbChain", "async_tmdb_discover"),
+    ("async_tmdb_tvs", "app.application.orchestration.recommend.TmdbChain", "async_tmdb_discover"),
+    ("async_tmdb_trending", "app.application.orchestration.recommend.TmdbChain", "async_tmdb_trending"),
+    ("async_bangumi_calendar", "app.application.orchestration.recommend.BangumiChain", "async_calendar"),
+    ("async_douban_movie_showing", "app.application.orchestration.recommend.DoubanChain", "async_movie_showing"),
+    ("async_douban_movies", "app.application.orchestration.recommend.DoubanChain", "async_douban_discover"),
+    ("async_douban_tvs", "app.application.orchestration.recommend.DoubanChain", "async_douban_discover"),
+    ("async_douban_movie_top250", "app.application.orchestration.recommend.DoubanChain", "async_movie_top250"),
+    ("async_douban_tv_weekly_chinese", "app.application.orchestration.recommend.DoubanChain", "async_tv_weekly_chinese"),
+    ("async_douban_tv_weekly_global", "app.application.orchestration.recommend.DoubanChain", "async_tv_weekly_global"),
+    ("async_douban_tv_animation", "app.application.orchestration.recommend.DoubanChain", "async_tv_animation"),
+    ("async_douban_movie_hot", "app.application.orchestration.recommend.DoubanChain", "async_movie_hot"),
+    ("async_douban_tv_hot", "app.application.orchestration.recommend.DoubanChain", "async_tv_hot"),
 ]
 
 
@@ -78,28 +78,33 @@ def test_sync_recommend_methods_do_not_cache_empty_result(
     assert backend_call.call_count == 2
 
 
-@pytest.mark.parametrize(("method_name", "chain_target"), ASYNC_EMPTY_CACHE_CASES)
+@pytest.mark.parametrize(
+    ("method_name", "chain_target", "backend_method"),
+    ASYNC_EMPTY_CACHE_CASES,
+)
 def test_async_recommend_methods_do_not_cache_empty_result(
     method_name: str,
     chain_target: str,
+    backend_method: str,
 ) -> None:
     """异步推荐来源返回空列表时不应缓存。"""
     chain = RecommendChain()
     recommend_method = getattr(chain, method_name)
 
     with patch(chain_target) as backend_chain:
-        backend_chain.return_value.async_run_module = AsyncMock(side_effect=[[], []])
+        backend_call = AsyncMock(side_effect=[[], []])
+        setattr(backend_chain.return_value, backend_method, backend_call)
 
         assert asyncio.run(recommend_method(page=1)) == []
         assert asyncio.run(recommend_method(page=1)) == []
 
-    assert backend_chain.return_value.async_run_module.call_count == 2
+    assert backend_call.call_count == 2
 
 
 def test_music_weekly_uses_music_chart():
     """同步推荐缓存应从本周音乐榜单生成通用媒体字典。"""
     chain = RecommendChain()
-    with patch("app.chain.recommend.ListenBrainzChain") as source_chain:
+    with patch("app.application.orchestration.recommend.ListenBrainzChain") as source_chain:
         source_chain.return_value.music_chart.return_value = [
             MusicInfo(media_source="musicbrainz", media_id="recording-1", title="晴天")
         ]
@@ -118,7 +123,7 @@ def test_music_weekly_uses_music_chart():
 def test_async_music_weekly_uses_music_chart():
     """异步推荐接口应从本周音乐榜单返回统一媒体字典。"""
     chain = RecommendChain()
-    with patch("app.chain.recommend.ListenBrainzChain") as source_chain:
+    with patch("app.application.orchestration.recommend.ListenBrainzChain") as source_chain:
         source_chain.return_value.async_music_chart = AsyncMock(
             return_value=[
                 MusicInfo(media_source="musicbrainz", media_id="recording-1", title="晴天")
@@ -139,7 +144,7 @@ def test_async_music_weekly_uses_music_chart():
 def test_music_douban_recommendations_use_discover():
     """豆瓣音乐推荐入口应保留来源与实体，并输出统一媒体字典。"""
     chain = RecommendChain()
-    with patch("app.chain.recommend.DoubanChain") as source_chain:
+    with patch("app.application.orchestration.recommend.DoubanChain") as source_chain:
         source_chain.return_value.music_discover.return_value = [
             MusicInfo(
                 media_source="doubanmusic",
@@ -165,7 +170,7 @@ def test_music_douban_recommendations_use_discover():
 def test_async_music_douban_recommendations_use_discover():
     """异步豆瓣音乐推荐入口应调用统一发现链并保留来源。"""
     chain = RecommendChain()
-    with patch("app.chain.recommend.DoubanChain") as source_chain:
+    with patch("app.application.orchestration.recommend.DoubanChain") as source_chain:
         source_chain.return_value.async_music_discover = AsyncMock(
             return_value=[
                 MusicInfo(media_source="doubanmusic", media_id="music-1", title="Music")
@@ -210,7 +215,7 @@ def test_music_chart_applies_filter_and_sort() -> None:
             listen_count=40,
         ),
     ]
-    with patch("app.chain.recommend.ListenBrainzChain") as source_chain:
+    with patch("app.application.orchestration.recommend.ListenBrainzChain") as source_chain:
         source_chain.return_value.music_chart.return_value = candidates
 
         result = chain.music_chart(
@@ -228,7 +233,7 @@ def test_music_chart_applies_filter_and_sort() -> None:
 def test_async_music_fresh_releases_uses_listenbrainz_source() -> None:
     """新发行推荐应委派 ListenBrainz 来源链并保留分页参数。"""
     chain = RecommendChain()
-    with patch("app.chain.recommend.ListenBrainzChain") as source_chain:
+    with patch("app.application.orchestration.recommend.ListenBrainzChain") as source_chain:
         source_chain.return_value.async_music_fresh_releases = AsyncMock(
             return_value=[
                 MusicInfo(

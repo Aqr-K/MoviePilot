@@ -15,7 +15,7 @@ from app.agent.tools.impl.send_message import SendMessageInput, SendMessageTool
 from app.agent.tools.impl.send_local_file import SendLocalFileInput
 from app.agent import MoviePilotAgent, AgentChain
 from app.agent.llm import AgentCapabilityManager
-from app.chain.message import MessageChain
+from app.application.orchestration.message import MessageChain
 from app.runtime.config import settings
 from app.agent.llm import LLMHelper
 from app.modules.discord import DiscordModule
@@ -303,13 +303,13 @@ class AgentImageSupportTest(unittest.TestCase):
         ]
 
         with patch(
-            "app.chain.message.is_audio_input_available", return_value=True
+            "app.application.orchestration.message.is_audio_input_available", return_value=True
         ), patch.object(
             chain,
-            "run_module",
+            "unicast",
             side_effect=[b"slack", b"discord", b"qq", b"vocechat", b"synology", b"feishu"],
-        ) as run_module, patch(
-            "app.chain.message.transcribe_audio",
+        ) as unicast, patch(
+            "app.application.orchestration.message.transcribe_audio",
             side_effect=[
                 "slack text",
                 "discord text",
@@ -330,7 +330,7 @@ class AgentImageSupportTest(unittest.TestCase):
             "slack text\ndiscord text\nqq text\nvocechat text\nsynology text\nfeishu text",
         )
         self.assertEqual(
-            [call.args[0] for call in run_module.call_args_list],
+            [call.args[0] for call in unicast.call_args_list],
             [
                 "download_slack_file_bytes",
                 "download_discord_file_bytes",
@@ -472,9 +472,9 @@ class AgentImageSupportTest(unittest.TestCase):
                 }
             ],
         ) as prepare_files, patch(
-            "app.chain.message.get_running_agent_manager"
+            "app.application.orchestration.message.get_running_agent_manager"
         ) as get_running_manager, patch(
-            "app.chain.message.asyncio.run_coroutine_threadsafe",
+            "app.application.orchestration.message.asyncio.run_coroutine_threadsafe",
             side_effect=lambda coro, _loop: coro.close(),
         ) as run_coroutine_threadsafe:
             process_message = AsyncMock()
@@ -511,9 +511,9 @@ class AgentImageSupportTest(unittest.TestCase):
         with patch.object(settings, "AI_AGENT_ENABLE", True), patch.object(
             chain, "_get_or_create_session_id", return_value="session-1"
         ), patch(
-            "app.chain.message.get_running_agent_manager"
+            "app.application.orchestration.message.get_running_agent_manager"
         ) as get_running_manager, patch(
-            "app.chain.message.asyncio.run_coroutine_threadsafe",
+            "app.application.orchestration.message.asyncio.run_coroutine_threadsafe",
             side_effect=lambda coro, _loop: coro.close(),
         ):
             process_message = AsyncMock()
@@ -534,9 +534,9 @@ class AgentImageSupportTest(unittest.TestCase):
 
         with patch.object(
             chain,
-            "run_module",
+            "unicast",
             return_value="data:image/png;base64,abc123",
-        ) as run_module:
+        ) as unicast:
             images = chain._download_attachments_to_data_urls(
                 attachments=["https://files.slack.com/files-pri/T1-F1/test.png"],
                 channel=NotificationChannel.Slack,
@@ -544,7 +544,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertEqual(images, ["data:image/png;base64,abc123"])
-        run_module.assert_called_once_with(
+        unicast.assert_called_once_with(
             "download_slack_file_to_data_url",
             file_url="https://files.slack.com/files-pri/T1-F1/test.png",
             source="slack-test",
@@ -779,9 +779,9 @@ class AgentImageSupportTest(unittest.TestCase):
 
         with patch.object(
             chain,
-            "run_module",
+            "unicast",
             return_value="data:image/png;base64,wechat123",
-        ) as run_module:
+        ) as unicast:
             images = chain._download_attachments_to_data_urls(
                 attachments=["wxwork://media_id/media-1"],
                 channel=NotificationChannel.Wechat,
@@ -789,7 +789,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertEqual(images, ["data:image/png;base64,wechat123"])
-        run_module.assert_called_once_with(
+        unicast.assert_called_once_with(
             "download_wechat_image_to_data_url",
             image_ref="wxwork://media_id/media-1",
             source="wechat-test",
@@ -800,9 +800,9 @@ class AgentImageSupportTest(unittest.TestCase):
 
         with patch.object(
             chain,
-            "run_module",
+            "unicast",
             return_value="data:image/png;base64,feishu123",
-        ) as run_module:
+        ) as unicast:
             data_urls = chain._download_attachments_to_data_urls(
                 attachments=[
                     IncomingMessage.MessageImage(
@@ -815,7 +815,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertEqual(data_urls, ["data:image/png;base64,feishu123"])
-        run_module.assert_called_once_with(
+        unicast.assert_called_once_with(
             "download_feishu_image_to_data_url",
             image_ref="feishu://image/img_v2_xxx",
             source="feishu-test",
@@ -824,7 +824,7 @@ class AgentImageSupportTest(unittest.TestCase):
     def test_download_message_file_bytes_supports_feishu_refs(self):
         chain = MessageChain()
 
-        with patch.object(chain, "run_module", return_value=b"feishu-file") as run_module:
+        with patch.object(chain, "unicast", return_value=b"feishu-file") as unicast:
             content = chain._download_message_file_bytes(
                 file_ref="feishu://file/file_xxx/report.pdf",
                 channel=NotificationChannel.Feishu,
@@ -832,7 +832,7 @@ class AgentImageSupportTest(unittest.TestCase):
             )
 
         self.assertEqual(content, b"feishu-file")
-        run_module.assert_called_once_with(
+        unicast.assert_called_once_with(
             "download_feishu_file_bytes",
             file_ref="feishu://file/file_xxx/report.pdf",
             source="feishu-test",

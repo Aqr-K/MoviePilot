@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterator
+from typing import Iterator, Optional
 from unittest.mock import Mock
 
 import pytest
@@ -19,9 +19,14 @@ from app.runtime.capabilities.errors import CapabilityRuntimeClosedError
 from app.runtime.capabilities.model import SelectorSchema
 from app.runtime.capabilities.registry import CapabilityRegistry
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
+from app.runtime.extensions.lifecycle import host_module_adapter
 from app.runtime.extensions import module_manager as module_manager_extension
 from app.runtime.extensions.module_manager import ModuleManager
-from app.runtime.extensions.service_config import configure_service_config_reader
+from app.runtime.extensions.service_config import (
+    configure_service_config_reader,
+    configure_service_instance_config_reader,
+    service_config_key,
+)
 from app.schemas.event import ConfigChangeEventData
 from app.schemas.types import EventType
 
@@ -35,7 +40,7 @@ depends_on = []
 
 [metadata]
 name = "Sample"
-type = "notification"
+service_capability = "notification"
 subtype = "Telegram"
 priority = 10
 
@@ -60,7 +65,7 @@ depends_on = []
 
 [metadata]
 name = "Other"
-type = "notification"
+service_capability = "notification"
 subtype = "Telegram"
 priority = 20
 
@@ -99,10 +104,6 @@ class {class_name}:
     @staticmethod
     def get_name():
         return "{name}"
-
-    @staticmethod
-    def get_type():
-        return "notification"
 
     @staticmethod
     def get_subtype():
@@ -253,6 +254,9 @@ def module_manager_harness(
     previous_config_reader = configure_service_config_reader(
         lambda key: SystemConfigOper().get(key)
     )
+    previous_instance_reader = configure_service_instance_config_reader(
+        lambda capability: SystemConfigOper().get(service_config_key(capability))
+    )
 
     singleton_key = (ModuleManager, (), frozenset())
     previous_manager = Singleton._instances.pop(singleton_key, None)
@@ -288,6 +292,7 @@ def module_manager_harness(
         for module_name in ("fixture_sample_module", "fixture_other_module"):
             sys.modules.pop(module_name, None)
         configure_service_config_reader(previous_config_reader)
+        configure_service_instance_config_reader(previous_instance_reader)
         restored = True
 
     try:
@@ -312,6 +317,104 @@ def _enable_sample(config_values: dict) -> None:
             "enabled": True,
         }
     ]
+
+
+def _enable_all(config_values: dict) -> None:
+    """写入同时通过 sample 与 other selector 的通知配置。"""
+    config_values["Notifications"] = [
+        {
+            "name": name,
+            "type": name,
+            "config": {},
+            "switchs": [],
+            "enabled": True,
+        }
+        for name in ("other", "sample")
+    ]
+
+
+def test_providers_for_indexes_running_modules_by_priority(
+    module_manager_harness,
+) -> None:
+    """能力索引按方法名命中运行模块，并与线性扫描视图保持一致。"""
+    manager = module_manager_harness.manager
+    _enable_all(module_manager_harness.config_values)
+    manager.load_modules()
+
+    sample = manager.get_running_module("SampleModule")
+    other = manager.get_running_module("OtherModule")
+    providers = manager.providers_for("capability_method")
+
+    assert providers == (sample, other)
+    assert set(providers) == set(manager.get_running_modules("capability_method"))
+    assert manager.providers_for("not_a_capability") == ()
+    assert manager.providers_for("") == ()
+
+
+def test_service_config_modules_follow_declared_ownership(
+    module_manager_harness,
+) -> None:
+    """按 manifest 声明的服务配置归属定位运行模块，未声明该键的配置取不到模块。"""
+    manager = module_manager_harness.manager
+    assert list(manager.get_service_config_modules("Notifications")) == []
+
+    _enable_all(module_manager_harness.config_values)
+    manager.load_modules()
+
+    sample = manager.get_running_module("SampleModule")
+    other = manager.get_running_module("OtherModule")
+
+    assert list(manager.get_service_config_modules("Notifications")) == [other, sample]
+    assert list(manager.get_service_config_modules("Downloaders")) == []
+    assert list(manager.get_service_config_modules("MediaServers")) == []
+    assert list(manager.get_service_config_modules("")) == []
+
+
+def test_service_config_modules_track_lifecycle(
+    module_manager_harness,
+) -> None:
+    """只有已发布运行实例的模块会被服务配置归属查询取到。"""
+    manager = module_manager_harness.manager
+
+    _enable_sample(module_manager_harness.config_values)
+    manager.load_modules()
+    assert list(manager.get_service_config_modules("Notifications")) == [
+        manager.get_running_module("SampleModule"),
+    ]
+
+    manager.stop()
+    assert list(manager.get_service_config_modules("Notifications")) == []
+
+
+def test_providers_for_cache_is_invalidated_on_lifecycle_changes(
+    module_manager_harness,
+) -> None:
+    """模块启停与重载必须作废能力索引，查询结果跟随发布视图变化。"""
+    manager = module_manager_harness.manager
+    assert manager.providers_for("capability_method") == ()
+
+    _enable_sample(module_manager_harness.config_values)
+    manager.load_modules()
+    first = manager.get_running_module("SampleModule")
+    assert manager.providers_for("capability_method") == (first,)
+
+    manager.stop()
+    assert manager.providers_for("capability_method") == ()
+
+    manager.load_modules()
+    second = manager.get_running_module("SampleModule")
+    assert second is not first
+    assert manager.providers_for("capability_method") == (second,)
+
+    _enable_all(module_manager_harness.config_values)
+    manager.load_modules()
+    assert manager.providers_for("capability_method") == (
+        second,
+        manager.get_running_module("OtherModule"),
+    )
+
+    manager.stop()
+    assert manager.providers_for("capability_method") == ()
 
 
 def test_harness_restores_module_manager_config_listener(
@@ -482,14 +585,14 @@ def test_all_real_host_modules_zero_arg_construct_without_starting_resources(
 ) -> None:
     """每份真实 manifest 都必须能解析 canonical class 并零参数构造且不启动资源。"""
     body = r"""
-from app.runtime.extensions.host_module_adapter import (
+from app.runtime.extensions.lifecycle.host_module_adapter import (
     HostModuleAdapter,
     build_host_module_registry,
 )
 
 registry = build_host_module_registry()
 specs = registry.list_specs()
-assert len(specs) == 39
+assert len(specs) == 46
 
 adapter = HostModuleAdapter()
 lifecycle_events = []
@@ -526,17 +629,21 @@ from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.capabilities.model import ActivationPolicy
 from app.runtime.config import settings
 from app.runtime.events import Event
-from app.runtime.extensions.host_module_adapter import (
+from app.runtime.extensions.lifecycle.host_module_adapter import (
     HostModuleAdapter,
     build_host_module_registry,
 )
-from app.runtime.extensions.service_config import configure_service_config_reader
+from app.runtime.extensions.service_config import (
+    configure_service_config_reader,
+    configure_service_instance_config_reader,
+    service_config_key,
+)
 from app.schemas.event import ConfigChangeEventData
 from app.schemas.types import EventType
 
 registry = build_host_module_registry()
 specs = registry.list_specs()
-assert len(specs) == 39
+assert len(specs) == 46
 spec_by_id = {spec.id: spec for spec in specs}
 
 events = {spec.id: [] for spec in specs}
@@ -585,6 +692,9 @@ def get_config(_self, key=None):
 
 SystemConfigOper.get = get_config
 configure_service_config_reader(lambda key: SystemConfigOper().get(key))
+configure_service_instance_config_reader(
+    lambda capability: SystemConfigOper().get(service_config_key(capability))
+)
 
 from app.runtime.extensions.module_manager import ModuleManager
 
@@ -696,14 +806,14 @@ def test_default_config_keeps_every_manifest_configured_entrypoint_unimported(
 from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.capabilities.model import ActivationPolicy
 from app.runtime.config import settings
-from app.runtime.extensions.host_module_adapter import (
+from app.runtime.extensions.lifecycle.host_module_adapter import (
     HostModuleAdapter,
     build_host_module_registry,
 )
 
 registry = build_host_module_registry()
 specs = registry.list_specs()
-assert len(specs) == 39
+assert len(specs) == 46
 configured_specs = tuple(
     spec for spec in specs
     if spec.activation is ActivationPolicy.WHEN_CONFIGURED
@@ -757,10 +867,12 @@ def test_event_resolver_uses_exact_class_and_blocks_stopped_owner_fallback(
     running = manager.get_running_module("SampleModule")
 
     active_binding = manager.resolve_event_handler_instance(module_class)
-    assert active_binding == EventHandlerBinding(
-        instance=running,
-        owner_name="Sample",
-    )
+    assert active_binding == [
+        EventHandlerBinding(
+            instance=running,
+            owner_name="Sample",
+        )
+    ]
 
     impostor = type("SampleModule", (), {})
     impostor.__module__ = module_class.__module__
@@ -768,10 +880,12 @@ def test_event_resolver_uses_exact_class_and_blocks_stopped_owner_fallback(
 
     manager.stop()
     stopped_binding = manager.resolve_event_handler_instance(module_class)
-    assert stopped_binding == EventHandlerBinding(
-        instance=None,
-        owner_name="Sample",
-    )
+    assert stopped_binding == [
+        EventHandlerBinding(
+            instance=None,
+            owner_name="Sample",
+        )
+    ]
 
 
 def test_default_modulelist_does_not_import_unconfigured_provider_sdks(
@@ -799,12 +913,12 @@ from app.application.module import configure_module_runtime
 configure_module_runtime(lambda: ModuleManager())
 
 manager = ModuleManager()
-assert len(manager.list_specs()) == 39
+assert len(manager.list_specs()) == 46
 assert manager.get_specs() == manager.list_specs()
 
 from app.api.endpoints.system import modulelist
 response = modulelist(None)
-assert len(response.data["modules"]) == 39
+assert len(response.data["modules"]) == 46
 
 heavy_prefixes = (
     "lark_oapi",
@@ -867,7 +981,7 @@ def loaded_provider_modules():
 
 assert loaded_provider_modules() == []
 
-from app.chain import ChainBase
+from app.application.orchestration import ChainBase
 from app.api.endpoints.message import WebPushError, is_webpush_subscription_gone
 
 assert get_type_hints(ChainBase.torrent_files)["return"] == Optional[Any]
@@ -912,12 +1026,12 @@ from app.runtime.extensions.module_manager import ModuleManager
 
 manager = ModuleManager()
 modules = manager.get_modules()
-assert len(modules) == len(manager.list_specs()) == 39
+assert len(modules) == len(manager.list_specs()) == 46
 for spec in manager.list_specs():
     implementation = modules[spec.id]
     assert implementation.get_name() == spec.metadata["name"]
-    assert implementation.get_type().value == spec.metadata["type"]
-    assert implementation.get_subtype().name == spec.metadata["subtype"]
+    if "subtype" in spec.metadata:
+        assert implementation.get_subtype().name == spec.metadata["subtype"]
     assert implementation.get_priority() == spec.metadata["priority"]
 manager.shutdown()
 """
@@ -938,3 +1052,202 @@ manager.shutdown()
         f"模块 metadata 兼容检查失败：\nstdout:\n{result.stdout[-2000:]}\n"
         f"stderr:\n{result.stderr[-4000:]}"
     )
+
+
+def _write_single_module_manifest(
+    module_root: Path,
+    *,
+    package: str,
+    subtype: Optional[str] = None,
+    service_capability: Optional[str] = None,
+) -> None:
+    """在合成模块根下写入一个只含单个包的 Host Module 声明，用于单独测试 metadata 校验。
+
+    :param module_root: 合成模块根目录
+    :param package: 一级模块包名
+    :param subtype: 模块子类型，为空时不声明
+    :param service_capability: 模块归属的服务能力标签，为空时不声明
+    """
+    package_dir = module_root / package
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    service_line = (
+        f'service_capability = "{service_capability}"\n' if service_capability else ""
+    )
+    subtype_line = f'subtype = "{subtype}"\n' if subtype else ""
+    config_key = service_config_key(service_capability)
+    watch = f'["{config_key.value}"]' if config_key else "[]"
+    (package_dir / "capability.toml").write_text(
+        f"""
+schema_version = 1
+id = "{package.title()}Module"
+kind = "host_module"
+entrypoint = "app.modules.{package}:{package.title()}Module"
+depends_on = []
+
+[metadata]
+name = "{package.title()}"
+{service_line}{subtype_line}priority = 1
+
+[activation]
+policy = "bootstrap"
+watch = {watch}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_manifest_accepts_unregistered_subtype_for_non_notification_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非通知渠道模块声明未登记的 subtype 仍能通过 inventory 校验并被 Registry 收录。"""
+    module_root = tmp_path / "modules"
+    _write_single_module_manifest(
+        module_root,
+        package="newbackend",
+        subtype="TotallyNewBackend",
+        service_capability="downloader",
+    )
+    monkeypatch.setattr(host_module_adapter, "_MODULE_ROOT", module_root)
+
+    registry = host_module_adapter.build_host_module_registry()
+
+    specs = registry.list_specs()
+    assert len(specs) == 1
+    assert specs[0].metadata["subtype"] == "TotallyNewBackend"
+
+
+def test_manifest_accepts_unregistered_subtype_for_notification_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """通知渠道模块声明未登记的 subtype 仍能通过 inventory 校验，渠道标识取值不再要求登记于内核枚举。"""
+    module_root = tmp_path / "modules"
+    _write_single_module_manifest(
+        module_root,
+        package="newchannel",
+        subtype="TotallyNewChannel",
+        service_capability="notification",
+    )
+    monkeypatch.setattr(host_module_adapter, "_MODULE_ROOT", module_root)
+
+    registry = host_module_adapter.build_host_module_registry()
+
+    specs = registry.list_specs()
+    assert len(specs) == 1
+    assert specs[0].metadata["subtype"] == "TotallyNewChannel"
+
+
+def test_manifest_requires_subtype_for_notification_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """通知渠道模块必须声明 subtype，它是渠道标识的必要元数据。"""
+    module_root = tmp_path / "modules"
+    _write_single_module_manifest(
+        module_root,
+        package="unlabeledchannel",
+        service_capability="notification",
+    )
+    monkeypatch.setattr(host_module_adapter, "_MODULE_ROOT", module_root)
+
+    with pytest.raises(ValueError, match="subtype"):
+        host_module_adapter.build_host_module_registry()
+
+
+@pytest.mark.parametrize(
+    "capability",
+    ["Sites", "Downloaders"],
+    ids=["unknown_label", "storage_key"],
+)
+def test_manifest_rejects_unknown_service_capability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capability: str,
+) -> None:
+    """metadata.service_capability 只能是服务能力标签，配置存放键同样被拒。"""
+    module_root = tmp_path / "modules"
+    _write_single_module_manifest(
+        module_root,
+        package="newservice",
+        subtype="NewService",
+        service_capability=capability,
+    )
+    monkeypatch.setattr(host_module_adapter, "_MODULE_ROOT", module_root)
+
+    with pytest.raises(ValueError, match="service_capability"):
+        host_module_adapter.build_host_module_registry()
+
+
+def test_manifest_requires_service_config_key_to_be_watched(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """声明了服务归属的模块必须同时监听该族配置键，配置变更才能重建实例。"""
+    module_root = tmp_path / "modules"
+    package_dir = module_root / "unwatched"
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (package_dir / "capability.toml").write_text(
+        """
+schema_version = 1
+id = "UnwatchedModule"
+kind = "host_module"
+entrypoint = "app.modules.unwatched:UnwatchedModule"
+depends_on = []
+
+[metadata]
+name = "Unwatched"
+service_capability = "downloader"
+subtype = "Unwatched"
+priority = 1
+
+[activation]
+policy = "bootstrap"
+watch = []
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(host_module_adapter, "_MODULE_ROOT", module_root)
+
+    with pytest.raises(ValueError, match="activation.watch"):
+        host_module_adapter.build_host_module_registry()
+
+
+def test_manifest_rejects_legacy_module_type_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """metadata 不再接受模块族枚举字段，族识别只由服务配置归属承担。"""
+    module_root = tmp_path / "modules"
+    package_dir = module_root / "typed"
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (package_dir / "capability.toml").write_text(
+        """
+schema_version = 1
+id = "TypedModule"
+kind = "host_module"
+entrypoint = "app.modules.typed:TypedModule"
+depends_on = []
+
+[metadata]
+name = "Typed"
+type = "downloader"
+subtype = "Typed"
+priority = 1
+
+[activation]
+policy = "bootstrap"
+watch = []
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(host_module_adapter, "_MODULE_ROOT", module_root)
+
+    with pytest.raises(ValueError, match="unknown=\\['type'\\]"):
+        host_module_adapter.build_host_module_registry()

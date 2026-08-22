@@ -232,6 +232,34 @@ def test_db_refactor_legacy_modules_are_all_registered():
     assert expected <= set(MODULE_ALIASES)
 
 
+def test_orchestration_legacy_root_serves_plugin_chain_imports():
+    """插件按 app.chain.* 直接导入具体链类，旧路径必须解析到同一 canonical 模块。"""
+    expected = {
+        "app.chain": "ChainBase",
+        "app.chain.download": "DownloadChain",
+        "app.chain.media": "MediaChain",
+        "app.chain.search": "SearchChain",
+        "app.chain.site": "SiteChain",
+        "app.chain.storage": "StorageChain",
+        "app.chain.subscribe": "SubscribeChain",
+        "app.chain.transfer": "TransferChain",
+    }
+
+    for legacy_name, symbol in expected.items():
+        legacy = importlib.import_module(legacy_name)
+        canonical = importlib.import_module(
+            legacy_name.replace("app.chain", "app.application.orchestration", 1)
+        )
+        assert legacy is canonical, legacy_name
+        assert getattr(legacy, symbol) is getattr(canonical, symbol), legacy_name
+
+
+def test_orchestration_legacy_root_blocks_unregistered_submodules():
+    """app.chain 已收敛为虚拟兼容包，未登记的旧子模块不得从物理路径泄漏。"""
+    with pytest.raises(ModuleNotFoundError, match="未在兼容映射中登记"):
+        importlib.import_module("app.chain.not_a_chain")
+
+
 def test_split_user_oper_facade_exports_data_and_auth_contracts():
     """旧 user_oper 同时提供 UserOper 与八个认证依赖。"""
     legacy = importlib.import_module("app.db.user_oper")
@@ -296,9 +324,9 @@ def test_physical_modules_resolve_moved_symbols_without_reverse_imports():
 
 
 def test_chain_media_legacy_scraping_symbols_resolve_to_scraping_chain():
-    """刮削拆分后，旧 app.chain.media 路径应能继续取用刮削公开符号。"""
-    legacy_media = importlib.import_module("app.chain.media")
-    canonical_scraping = importlib.import_module("app.chain.scraping")
+    """刮削拆分后，旧 app.application.orchestration.media 路径应能继续取用刮削公开符号。"""
+    legacy_media = importlib.import_module("app.application.orchestration.media")
+    canonical_scraping = importlib.import_module("app.application.orchestration.scraping")
 
     assert legacy_media.ScrapingChain is canonical_scraping.ScrapingChain
     assert legacy_media.ScrapingOption is canonical_scraping.ScrapingOption
@@ -363,7 +391,7 @@ def test_symbol_alias_manifest_covers_all_moved_public_symbols():
         "normalize_media_identity_payload",
         "build_media_key",
     }
-    assert set(SYMBOL_ALIASES["app.chain.media"]) == {
+    assert set(SYMBOL_ALIASES["app.application.orchestration.media"]) == {
         "ScrapingChain",
         "ScrapingOption",
         "ScrapingConfig",
@@ -399,3 +427,26 @@ def test_symbol_alias_manifest_covers_all_moved_public_symbols():
     assert set(SYMBOL_ALIASES["app.schemas.message"]) == set(
         _MESSAGE_NOTIFICATION_SYMBOL_ALIASES
     )
+
+
+def test_command_legacy_module_shares_identity_with_canonical_path(monkeypatch):
+    """旧路径 app.command 与新路径 app.runtime.command 必须是同一模块对象。
+
+    命令中枢的测试历来在旧路径上 monkeypatch 模块级变量（消息网关、ThreadHelper 等）；
+    若兼容层给出的是转发副本而非同一对象，这类 patch 改的是没人读的副本，
+    新路径下运行的代码不会感知到，而测试仍可能因为没读到 patch 前的值而误判通过。
+    """
+    legacy = importlib.import_module("app.command")
+    canonical = importlib.import_module("app.runtime.command")
+
+    assert legacy is canonical
+    assert sys.modules["app.command"] is sys.modules["app.runtime.command"]
+    assert legacy.Command is canonical.Command
+
+    sentinel_a = object()
+    monkeypatch.setattr("app.command._command_messenger_provider", lambda: sentinel_a)
+    assert canonical._command_messenger_provider() is sentinel_a
+
+    sentinel_b = object()
+    monkeypatch.setattr(canonical, "_command_messenger_provider", lambda: sentinel_b)
+    assert legacy._command_messenger_provider() is sentinel_b

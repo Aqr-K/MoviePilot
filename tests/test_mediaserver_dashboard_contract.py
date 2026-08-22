@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.endpoints.mediaserver import latest, library, playing
-from app.chain.mediaserver import MediaServerChain
+from app.application.orchestration.mediaserver import MediaServerChain
 
 
 @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ def test_dashboard_media_endpoints_report_upstream_failures(
 def test_media_server_chain_preserves_none_from_provider(method_name, run_method):
     """媒体服务器处理链应保留提供方失败状态，交由接口层转换为明确错误。"""
     chain = MediaServerChain.__new__(MediaServerChain)
-    chain.run_module = lambda method, **kwargs: None
+    chain.unicast = lambda method, **kwargs: None
 
     result = getattr(chain, method_name)(server="home")
 

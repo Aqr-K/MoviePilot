@@ -2,11 +2,11 @@
 
 from unittest.mock import Mock
 
-from app.application.chain.context import ChainRuntimeContext
+from app.application.orchestration.context import ChainRuntimeContext
 from app.application.configuration import ChainRuntimeConfig
-from app.application.chain import context as chain_context
-from app.chain import ChainBase
-from app.runtime.extensions.module.dispatcher import ModuleInvocationDispatcher
+from app.application.orchestration import context as chain_context
+from app.application.orchestration import ChainBase
+from app.runtime.extensions.projection.dispatcher import ModuleInvocationDispatcher
 
 
 def _context() -> ChainRuntimeContext:
@@ -37,7 +37,7 @@ def test_chain_accepts_explicit_runtime_context() -> None:
     assert chain.eventmanager is context.event_manager
     assert chain.messagehelper is context.message_helper
     assert chain.durable_event_writer is context.durable_event_writer
-    context.message_queue_factory.assert_called_once_with(chain.run_module)
+    context.message_queue_factory.assert_called_once_with(chain.multicast)
 
 
 def test_no_arg_chain_uses_compatibility_context_provider(monkeypatch) -> None:

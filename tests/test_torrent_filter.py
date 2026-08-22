@@ -5,7 +5,7 @@ from unittest.mock import patch
 from app.domain.context import MediaInfo, TorrentInfo
 from app.application.torrent import TorrentHelper
 from app.modules.filter import FilterModule
-from app.application.rules import BUILTIN_RULE_SET
+from app.domain.filterrule import BUILTIN_RULE_SET
 from app.adapters.system import rust as rust_accel
 
 
@@ -218,11 +218,11 @@ def test_filter_torrents_uses_rust_entry_without_python_match_fallback():
 
     def fail_python_fallback(*_args, **_kwargs):
         """
-        如果入口仍调用旧 Python 私有匹配逻辑，测试应立即失败。
+        如果入口仍调用 Python 私有匹配逻辑，测试应立即失败。
         """
         raise AssertionError("Python fallback should not be called")
 
-    module._FilterModule__filter_torrents = fail_python_fallback
+    module._FilterModule__match_orders_with_python = fail_python_fallback
 
     with patch("app.modules.filter.rust_accel.is_enabled", return_value=True), \
             patch("app.modules.filter.rust_accel.filter_torrents", return_value=[(0, 100)]):

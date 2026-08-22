@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 
 from app.agent import AgentManager, _MessageTask, _async_start_processing_status
-from app.chain.message import MessageChain
-from app.command import Command, _finish_command_processing_status
+from app.application.orchestration.message import MessageChain
+from app.runtime.command import Command, _finish_command_processing_status
 from app.modules.telegram import TelegramModule
 from app.modules.telegram.telegram import Telegram
 from app.schemas.types import NotificationChannel
@@ -230,7 +230,7 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
             }
         )
 
-        with patch("app.command._finish_command_processing_status") as finish_status:
+        with patch("app.runtime.command._finish_command_processing_status") as finish_status:
             command.command_event(event)
 
         command.execute.assert_called_once()
@@ -248,10 +248,11 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
             "metadata": {"kind": "typing"},
         }
 
-        with patch("app.command.CommandChain") as chain_cls:
+        messenger = Mock()
+        with patch("app.runtime.command._command_messenger_provider", return_value=messenger):
             _finish_command_processing_status(status, user_id="fallback")
 
-        chain_cls.return_value.finish_message_processing_status.assert_called_once_with(
+        messenger.finish_message_processing_status.assert_called_once_with(
             status=status,
             userid="fallback",
         )
@@ -266,9 +267,9 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
         with patch.object(chain, "_record_user_message"), patch.object(
                 chain, "_mark_message_processing_started"
         ) as start_status, patch(
-                "app.chain.message.get_running_agent_manager",
+                "app.application.orchestration.message.get_running_agent_manager",
         ) as get_running_manager, patch(
-                "app.chain.message.asyncio.run_coroutine_threadsafe",
+                "app.application.orchestration.message.asyncio.run_coroutine_threadsafe",
                 side_effect=lambda coro, _loop: (coro.close(), Mock())[1],
         ), patch.object(
                 chain, "_mark_message_processing_finished"

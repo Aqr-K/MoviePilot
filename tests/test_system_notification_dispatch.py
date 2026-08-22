@@ -10,7 +10,7 @@ sys.modules.setdefault("transmission_rpc", ModuleType("transmission_rpc"))
 setattr(sys.modules["transmission_rpc"], "File", object)
 sys.modules.setdefault("psutil", ModuleType("psutil"))
 
-from app.chain.message import MessageChain
+from app.application.orchestration.message import MessageChain
 from app.application.messaging.message import MessageQueueManager
 from app.schemas import Message
 from app.foundation.identity import (
@@ -36,7 +36,7 @@ class TestSystemNotificationDispatch(unittest.TestCase):
             text="任务完成",
         )
 
-        with patch("app.chain._messaging.MessageTemplateHelper.render", return_value=message), patch.object(
+        with patch("app.application.orchestration._messaging.MessageTemplateHelper.render", return_value=message), patch.object(
             chain.messagehelper, "put"
         ), patch.object(chain.messageoper, "add"), patch.object(
             chain.eventmanager, "send_event"
@@ -61,10 +61,10 @@ class TestSystemNotificationDispatch(unittest.TestCase):
             text="任务完成",
         )
 
-        with patch.object(chain, "run_module") as run_module:
+        with patch.object(chain, "unicast") as unicast:
             chain.send_direct_message(message)
 
-        sent_message = run_module.call_args.kwargs["message"]
+        sent_message = unicast.call_args.kwargs["message"]
         self.assertIsNone(sent_message.userid)
 
     def test_async_send_message_uses_executor_for_immediate_send(self):
