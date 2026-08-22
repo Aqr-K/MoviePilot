@@ -32,10 +32,6 @@ class ExampleModule(_ModuleBase, _DownloaderBase):
         return "Example"
 
     @staticmethod
-    def get_type() -> ModuleType:
-        return ModuleType.Downloader
-
-    @staticmethod
     def get_subtype() -> DownloaderType:
         return DownloaderType.Example
 
@@ -53,7 +49,9 @@ class ExampleModule(_ModuleBase, _DownloaderBase):
 
 **Module directory convention:** `app/modules/<backend_name>/` containing at minimum `__init__.py` (the module class) and the implementation class.
 
-**Module types** are defined in `app/schemas/types.py` as `ModuleType`, `DownloaderType`, `MediaServerType`, `MessageChannel`, `StorageSchema`, `OtherModulesType`. When adding a new category, update these enums.
+**Module subtypes** are defined in `app/schemas/types.py` as `DownloaderType`, `MediaServerType`, `NotificationChannel`, `StorageSchema`, `OtherModulesType`, `MediaRecognizeType`.
+
+**Service capability ownership:** a module that fans out into per-config service instances declares the service family it belongs to via `metadata.service_capability` in its `capability.toml` (`downloader`, `mediaserver` or `notification`) — the same semantic labels plugins use in `ModuleDeclaration.service_capability` and `ServiceInstanceDeclaration.capability`. Where that family's configuration is stored is host-internal: the label-to-`SystemConfigKey` mapping lives in `app/runtime/extensions/service_config.py`, and storage keys only appear in `activation.watch`/selector. `ServiceBaseHelper` locates a family's modules through that declaration; there is no module-family enum.
 
 ---
 
@@ -61,7 +59,7 @@ class ExampleModule(_ModuleBase, _DownloaderBase):
 
 **When to use:** Adding a new business workflow that is shared across multiple entrypoints (API endpoint, CLI, agent, scheduler, webhook). Chains coordinate modules, helpers, databases, events, and caches.
 
-**Base class:** `ChainBase` in `app/chain/__init__.py`
+**Base class:** `ChainBase` in `app/application/orchestration/__init__.py`
 
 **Calling modules from a chain:**
 
@@ -76,7 +74,7 @@ result = await self.async_run_module("method_name", kwarg1=val1)
 
 **Chain-to-chain calls:** A chain may call another chain to reuse stable domain logic. Avoid introducing new circular dependencies between chains.
 
-**File convention:** `app/chain/<domain>.py`, class name `<Domain>Chain` (e.g., `DownloadChain`, `SearchChain`, `SubscribeChain`).
+**File convention:** `app/application/orchestration/<domain>.py`, class name `<Domain>Chain` (e.g., `DownloadChain`, `SearchChain`, `SubscribeChain`).
 
 ---
 

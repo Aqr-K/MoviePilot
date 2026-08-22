@@ -67,7 +67,7 @@ uv run --locked --no-sync pytest tests/test_xxx.py::test_function_name
 uv run --locked --no-sync pylint app/
 
 # Run pylint on a specific module
-uv run --locked --no-sync pylint app/chain/download.py
+uv run --locked --no-sync pylint app/application/orchestration/download.py
 ```
 
 **Rules:**

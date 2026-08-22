@@ -75,7 +75,7 @@ flowchart TB
     end
 
     subgraph 编排层["编排层"]
-        Chain["app/chain<br/>Chain 用例编排"]
+        Chain["app/application/orchestration<br/>用例编排"]
         App["app/application<br/>聚焦应用服务"]
     end
 
@@ -178,10 +178,10 @@ flowchart TB
 | `app/application/plugin/` | 插件市场、安装、运行时端口、文件夹操作和动态路由用例；具体 FastAPI 路由适配器在 adapters 层 | `catalog.py`、`install.py`、`runtime.py`、`folders.py`、`routes.py` |
 | `app/application/messaging/` | 消息渲染/路由、命令交互会话、插件按钮回调、Agent 消息桥接 | `message.py`、`router.py`、`agent.py` |
 | `app/application/security/` | 认证、授权、Cookie、Passkey、OTP/二次认证、SSRF 与 URL/路径安全 | `auth.py`、`url.py`、`twofactor.py` |
-| `app/chain/` | 跨入口复用的用例编排：订阅、搜索、下载、整理、媒体、消息等 Chain | `subscribe.py`、`search.py`、`transfer.py` |
+| `app/application/orchestration/` | 跨入口复用的用例编排：订阅、搜索、下载、整理、媒体、消息等 Chain | `subscribe.py`、`search.py`、`transfer.py` |
 | `app/modules/` | 可插拔后端：下载器、媒体服务器、元数据源、消息渠道、索引器、存储 | `qbittorrent/`、`emby/`、`telegram/`、`themoviedb/` |
 | `app/db/` | SQLAlchemy 模型（`models/`）与一一对应的数据访问类（`oper/`） | `models/subscribe.py` ↔ `oper/subscribe.py` |
-| `app/schemas/` | Pydantic 传输模型、枚举（`ModuleType`、`EventType`、`SystemConfigKey` 等） | `types.py`、`context.py` |
+| `app/schemas/` | Pydantic 传输模型、枚举（`ModuleType`（已退为元数据）、`EventType`、`SystemConfigKey`、`NotificationChannel` 等） | `types.py`、`context.py` |
 | `app/api/` | FastAPI 主端点、鉴权依赖、统一 `Response` 响应封装；动态插件端点不走此统一包装 | `apiv1.py`、`endpoints/`、`response.py` |
 | `app/adapters/web/plugin/` | FastAPI 动态插件路由的技术适配：注册/移除、认证依赖、OpenAPI 重建；保留插件原生响应结构 | `routes.py` |
 | `app/agent/` | AI Agent：编排器、运行时、工具、中间件、LLM、记忆、技能、策略 | `orchestrator.py`、`runtime_loader.py`、`tools/` |
@@ -270,7 +270,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph 契约["_ModuleBase 契约"]
-        A["get_name / get_type / get_subtype"]
+        A["get_name / get_subtype"]
         B["init_setting()：返回控制开关的配置项"]
         C["init_module()：初始化"]
         D["test()：连通性测试"]
@@ -296,7 +296,7 @@ flowchart LR
 
 ### 5.2 Chain 模式：用例编排
 
-`app/chain/` 承载被 API、CLI、Agent、调度器、Webhook 等多入口共享的业务用例。
+`app/application/orchestration/` 承载被 API、CLI、Agent、调度器、Webhook 等多入口共享的业务用例。
 所有 Chain 继承 `ChainBase`，Chain 访问模块**只能通过方法名分发**：
 
 ```mermaid
@@ -318,9 +318,7 @@ flowchart TB
 
 - `run_module("method_name", **kwargs)` 会遍历所有实现了该方法的模块并聚合结果；
   插件若实现了同名方法可获得优先响应。
-- `runtime/extensions/module/contracts.py` 为宿主已观察到的方法提供显式参数与返回合同；兼容期只诊断
-  旧插件签名差异，不改变插件优先级、短路和自由返回语义。
-- `app/chain/` 中下划线前缀文件（`_recognition.py`、`_messaging.py`、`_interaction.py`、
+- `app/application/orchestration/` 中下划线前缀文件（`_recognition.py`、`_messaging.py`、`_interaction.py`、
   `_music.py`、`_transfer.py`）是 `ChainBase` 的功能域 Mixin，不是独立 Chain。
 - 需要斜杠命令交互的 Chain 继承 `InteractionChainMixin`，只实现 `_interaction_handler`。
 
@@ -501,7 +499,7 @@ flowchart TB
 约束要点：
 
 - Chain 访问 Agent 运行时只能经 `app/application/agent.py`；
-  `app/chain/agent.py` 的 `AgentChain` 是链层入口，Agent 实现保持在 `app/agent/`。
+  `app/application/orchestration/agent.py` 的 `AgentChain` 是链层入口，Agent 实现保持在 `app/agent/`。
 - Agent 工具不直接 import API / 调度器 / 命令：插件动态路由与文件夹操作使用
   `application/plugin/routes.py`、`application/plugin/folders.py`，调度和命令分别使用
   `application/scheduling.py`、`application/commands.py`。FastAPI 具体实现位于
@@ -550,8 +548,9 @@ flowchart TB
 - 动态插件路由使用原生 `APIRoute`，插件自行决定返回结构；主程序的统一 `Response` 封装只适用于
   `app/api/` 的宿主端点。插件若已经自行返回 `Response`、字典、列表或其它可序列化值，宿主不再二次包裹。
 - `app/runtime/extensions/plugin_manager.py` 是保留插件 ABI 的管理器门面，发现、加载、生命周期、
-  目录、同步等实现拆在 `app/runtime/extensions/plugin/`；这个“门面 + 实现包”是有意的兼容边界，
-  不应为了目录整齐而让外部插件改用内部实现文件。
+  目录、同步等实现按扩展生命周期的时刻拆在 `app/runtime/extensions/` 的 `contract/`、
+  `admission/`、`registry/`、`projection/`、`lifecycle/` 五个包里；这个“门面 + 实现包”是有意
+  的兼容边界，不应为了目录整齐而让外部插件改用内部实现文件。
 - 插件可参与 `run_module` 方法分发（同名方法优先响应）并注册事件处理器。
 
 ---
@@ -615,7 +614,7 @@ flowchart LR
 - `tests/test_architecture_dependencies.py` 构建完整 Python 模块图，拒绝：
   物理遗留源码、禁止的上向依赖、SDK/compat 反向引用、包含迁移模块的强连通分量、
   模块间/模块到 Chain 的 import、入口层对 `app.modules` 内部的 import、
-  Chain 直接 import 模块内部（必须走 `run_module` 分发）、`app/chain` 内的下载器 SDK 依赖。
+  Chain 直接 import 模块内部（必须走 `run_module` 分发）、`app/application/orchestration` 内的下载器 SDK 依赖。
 - 任何所有权迁移必须同步更新：canonical 导入、`app/runtime/compat/manifest.py`、
   SDK 导出（若公开）、`docs/rules/05-architecture.md` 与上述架构测试。
 - 延迟导入不被接受为隐藏循环依赖的手段。
@@ -629,8 +628,9 @@ flowchart LR
   `app/sdk/_legacy/` 薄门面保留行为兼容。兼容清单是导入路由，不负责合并模块，也不负责把任意
   新实现重新导出到旧模块。
 - 已完成的插件边界：插件 API 的动态路由由 application 端口 + web adapter 组成，使用原生
-  `APIRoute` 保留插件响应；插件管理器保留 `plugin_manager.py` 的稳定 ABI，内部实现拆在
-  `runtime/extensions/plugin/`；`app/plugins/` 仅作为运行时插件副本/覆盖层处理。
+  `APIRoute` 保留插件响应；插件管理器保留 `plugin_manager.py` 的稳定 ABI，内部实现按扩展
+  生命周期的时刻拆在 `runtime/extensions/` 的各阶段包里；`app/plugins/` 仅作为运行时插件
+  副本/覆盖层处理。
 - 已完成的主题收口：订阅写入归入 `app/application/subscription/write.py`；插件动态路由与
   文件夹操作归入 `app/application/plugin/routes.py`、`folders.py`。原
   `app/application/subscribe.py`、`app/application/plugins.py` 未形成插件 ABI，已经直接删除，

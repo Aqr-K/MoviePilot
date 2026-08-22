@@ -2,11 +2,12 @@
 
 ## Directory Model
 
-MoviePilot keeps the established product packages such as `app/chain`,
+MoviePilot keeps the established product packages such as `app/application`,
 `app/agent`, `app/modules`, `app/db`, `app/api`, `app/startup` and
-`app/workflow` in their original locations. The historical `app/core`,
+`app/workflow` in their canonical locations. The historical `app/core`,
 `app/helper` and `app/utils` roots are virtual compatibility packages only;
-physical Python sources must not be recreated there.
+physical Python sources must not be recreated there. Use-case orchestration is
+now part of `app/application/orchestration/`.
 
 The legacy roots have no physical directories in the source tree. Current
 images and update flows write site resources only to `app/application/site/`;
@@ -65,7 +66,7 @@ to make the directory tree look symmetrical.
 | `app/application/search/` | Search state and later search-plan use cases |
 | `app/application/download/` | Download task querying/control and later submission use cases |
 | `app/application/music/` | Multi-source music catalog orchestration |
-| `app/application/chain/` | Injectable Chain runtime context and compatibility provider |
+| `app/application/orchestration/` | Processing chains and their dispatch primitives; `context.py` owns the injectable runtime context and its no-argument compatibility provider |
 | `app/application/plugin/` | Plugin market catalog, installation command, runtime port, folder operations and dynamic-route use cases; filenames remain single words (`catalog.py`, `install.py`, `runtime.py`, `folders.py`, `routes.py`) |
 | `app/application/server/` | MoviePilot Server reporting and sharing use cases; local data readers and transport callbacks are injected by startup |
 | `app/application/site/` | Configured site catalog, authentication level and index-resource capability; the generated extension and its data bundle stay together here |
@@ -73,36 +74,102 @@ to make the directory tree look symmetrical.
 | `app/application/security/` | Authentication, authorization, cookies, passkeys, OTP/two-factor, path/URL safety, SSRF and signing policy |
 
 Application services may use domain rules, runtime contracts, Oper classes and
-adapters. Multi-domain workflows still belong in the existing `app/chain/`
+adapters. Multi-domain workflows belong to `app/application/orchestration/`
 package. `Chain`, `Service` and `Manager` remain class patterns; they do not
 create additional top-level directory categories.
 
 ### Runtime boundaries
 
-| Path | Ownership |
-|---|---|
-| `app/runtime/config.py` | Deployment configuration and resolved runtime settings |
-| `app/runtime/topology.py` | Process topology policy shared by startup and offline diagnostics |
-| `app/runtime/events.py` | Event contracts, dispatch and resolver registration |
-| `app/runtime/observability/` | Low-cardinality metric contracts and no-op-capable observation facade |
-| `app/runtime/log.py` | Complete console/plugin/file logging runtime and shutdown |
-| `app/runtime/cache.py` | Cache protocols, memory implementations, decorators and proxies |
-| `app/runtime/managed_resources.py` | Provider-neutral acquisition, observation and shutdown facade for process-owned optional resources |
-| `app/runtime/state.py` | Process restart and update state |
-| `app/runtime/extensions/` | Module, plugin, configured-service and managed-resource discovery/registration/lifecycle adapters |
-| `app/runtime/compat/` | Standard-library-only exact legacy import routing, resource preflight scanning and DEBUG diagnostics |
+`app/runtime` spans far more modules than a per-file ownership table can track,
+and such a table silently rots: it drifts from the tree and starts assigning
+responsibilities to files that no longer exist. Placement is therefore decided
+by a rule, and the rule is what this section fixes.
 
-`app/startup/` remains the established composition root and is not nested under
-runtime. It injects providers and callbacks, orders initialization/shutdown and
-decides restart policy. Lower-level runtime modules must not import startup.
-Startup publishes its frozen, slotted `HostRuntime` through FastAPI `app.state`.
-API dependencies must narrow that object to a domain runtime (for example,
-`AgentChatRuntime`) instead of adding a string key to a global service map.
-Legacy registries may delegate the same object while domains migrate, but they
-must not construct a second set of service instances.
+**Criterion D — a directory exists because *when its members run* and *who may
+import them* differ, not because they share a topic word.**
+
+Ask in order. The first hit decides placement; parallel answers are not allowed.
+
+| # | Question | Hit → |
+|---|---|---|
+| D1 | Would deleting it break plugin code that is already written? | `extensions/contract/` when the host still routes every caller there; `compat/` when only already-published plugins still import it |
+| D2 | Is its shape a port slot — registered by the composition root, resolved by extensions? | `hostports/` |
+| D3 | At which moment of the extension lifecycle does it run? | discovery and loading → `extensions/lifecycle/`; registration → `extensions/admission/`; held state → `extensions/registry/`; query → `extensions/projection/` |
+| D4 | None of the above | Process-level mechanism; stays flat at the runtime root |
+
+Tie-break: when two lifecycle phases both claim a module, it belongs to the
+earliest one. The D3 row lists the four directories in that chronological
+order, so the earlier claimant is the one listed first.
+
+A hit on D1 or D2 only decides placement when the target directory's own rule
+admits the module. `contract/` admits a module when every public symbol it
+declares reaches extension authors through the SDK; `hostports/` admits one
+protocol plus one module-level `HostPort` instance. A module that hits the
+question but fails the rule falls through to the next question.
+
+Directories follow from the criterion, not from subject matter:
+
+| Path | Admitted by | Contents |
+|---|---|---|
+| `app/runtime/*.py` (flat) | D4 | Process-level mechanisms owned by the process, not by any extension: deployment configuration, logging, cache, event facade, scheduling, threading, execution, rate limiting, process and reload state |
+| `app/runtime/hostports/` | D2 | Port slots only. Each module declares one protocol plus one module-level `HostPort` instance; `port.py` holds the generic. Every slot is injected in one place, by `app/startup/hostport_initializer.py` |
+| `app/runtime/extensions/` | D3 | Module, plugin, configured-service and managed-resource discovery, registration and lifecycle adapters, split by lifecycle phase. Flat at this level: the host-internal service-configuration substrate that every phase reads and that runs at none of them, plus the modules named below that a gate or a hard-coded string holds in place |
+| `app/runtime/extensions/contract/` | D1 | Declaration types, distribution and hook probing, instance identity and the configuration-schema subset. Every symbol here is handed to extension authors through the SDK, and the package imports nothing from `app/runtime` |
+| `app/runtime/extensions/admission/` | D3 registration | Declaration contract checks, extension-scoped deduplication, instance selection, service-instance requirement shape checks and registration arbitration. A declaration that breaks its contract is rejected at registration, never at call time |
+| `app/runtime/extensions/registry/` | D3 held state | Registries that keep admitted extensions by coordinate and reclaim their entries. They only store and hand back registration results |
+| `app/runtime/extensions/projection/` | D3 query | Views and dispatch paths aggregated from a registration snapshot; a projection never changes what is registered |
+| `app/runtime/extensions/lifecycle/` | D3 discovery and loading | Manifest discovery, versioned plugin source layout, plugin persistence directory layout, the Capability Runtime adapters that materialize/start/stop host modules and managed resources, and the persistence and external-system ports the loader resolves |
+| `app/runtime/compat/` | D1 | Exact legacy import routing, resource preflight scanning and DEBUG diagnostics, plus modules the host itself no longer calls and only already-published plugins still import. `manifest.py` stays standard-library-only so the baseline script can load it without importing the host |
+
+`plugin_manager.py` and `module_manager.py` stay flat in
+`app/runtime/extensions/`. They belong to the discovery-and-loading phase, but
+five hard-coded names in `scripts/sdk/exports.py`, one `__module__` assertion
+and fourteen patch-target strings in tests all spell their current path, and
+every one of those is a string match that stays green when it is wrong.
+
+`service_config.py` stays flat for a structural reason: the host-internal
+service-family landing table, the injected configuration readers and the single
+fan-out implementation are read from `admission/`, `registry/`, `projection/`
+and `lifecycle/` alike, and run at none of those moments. A substrate every
+phase imports belongs below the phase directories, not inside one of them.
+
+`service_registry.py` stays flat for a gate reason. It hits D1 — `app.helper.service`
+aliases this exact module and both of its public symbols are SDK exports — but
+`contract/` cannot take it. Modules under the plugin-component roots may not
+declare `__all__`, and this module's `__all__` is what makes
+`scripts/sdk/exports.py` require `ServiceConfigHelper` from `app.sdk.services`:
+without it `public_surface()` falls back to symbols defined in the module and
+the re-exported class silently drops out of the required-export list. It also
+imports `module_manager`, which would make the frozen contract package depend on
+the manager it is supposed to be independent of.
+
+Directories inside `app/runtime/extensions/` are scanned by `rglob` from
+`PLUGIN_COMPONENT_ROOTS` in `tests/test_architecture_dependencies.py`. Moving a
+file into or out of one of them changes what the gate covers without changing
+the assertion, so any such move must be validated by injecting one deliberate
+violation and confirming the gate turns red.
+
+A file name never repeats the phase its directory already states: the
+registration check for storage declarations is `admission/storage.py`, the
+registry that holds them is `registry/storage.py`.
+
+`app/runtime/config.py` does not move. Three workflow paths under `.github/`
+and three assertions in `tests/test_plugin_market_default.py` name it literally.
+
+`topology.py` and `observability/` are admitted by D4: process topology policy is
+read by startup and by offline diagnostics alike, and the metric contracts are a
+no-op-capable facade the process owns. Neither belongs to any extension, so
+neither enters `extensions/`.
+
+`app/startup/` is the composition root and is not nested under runtime; lower
+runtime modules must not import it. It publishes its frozen, slotted
+`HostRuntime` through FastAPI `app.state`. API dependencies narrow that object to
+a domain runtime — `AgentChatRuntime`, for example — instead of adding a string
+key to a global service map; a legacy registry may delegate the same object while
+its domain migrates, but must not construct a second set of service instances.
 API, Scheduler and Chain deployment values are exposed as frozen snapshots from
-`HostRuntime.configuration`; canonical callers must not add a fresh direct
-`settings` import when the required field belongs to an existing snapshot.
+`HostRuntime.configuration`, so a canonical caller must not add a fresh direct
+`settings` import for a field an existing snapshot already carries.
 
 `app.schemas` and `app.db` are compatibility facades, not implementation
 dependency hubs. Host code imports concrete schema submodules; the schema root
@@ -111,6 +178,86 @@ DB internals import `base`, `decorators`, `engine`, `session`, concrete models
 and Oper modules directly. `app.db.models.load_all_models()` is the explicit
 composition entry used before metadata creation or migration; importing one
 model must not import every table.
+
+### Composition-root boundaries
+
+`app/startup/` remains the established composition root and is not nested under
+runtime. It injects providers and callbacks, orders initialization/shutdown and
+decides restart policy. Lower-level runtime modules must not import startup.
+
+Criterion D cannot place a file inside `app/startup/`. Its four questions ask
+what a module means to extension authors, and the composition root holds no
+extension: D1–D3 miss every member and all of them fall through to D4,
+"process-level mechanism, stays flat at the root". One answer for every file is
+not a decision procedure, and it is exactly where the *de facto* rule — "a new
+file defaults to the top level" — came from. That default held for every file
+added between 2024-09 and 2026-08-16, and it left three unrelated shapes
+indistinguishable by path.
+
+**Criterion S — a directory under `app/startup/` exists because *what the caller
+does with its members* differs, not because they share a topic word.**
+
+Ask in order. The first hit decides placement; parallel answers are not allowed.
+
+| # | Question | Hit → |
+|---|---|---|
+| S1 | Does it decide *when* other members run — order, dependencies, timeout budget, failure policy, normal/safe-mode scope? | `lifecycle/` |
+| S2 | Does the caller *perform* it, once, at a moment the composition root names, and never read it again? | flat `*_initializer.py` at the startup root |
+| S3 | Does the caller *read* it as a table — the caller picks the moment, may read it again, and an engine that must not know the entries executes them later? | `bindings/` |
+| S4 | Does the caller *build* it — a port implementation, or the frozen type of the runtime those implementations are assembled into — and hand the object to another layer that then holds it for the life of the process? | `ports/` |
+| S5 | None of the above | There is no fifth class. Extend this criterion before landing the file; it must not default to the top level |
+
+Tie-break: S1 > S2 > S3 > S4 — the end that decides moments wins.
+`command_initializer.py` both pushes a table into the command hub at import time
+(S3-shaped) and exposes `init_command`/`stop_command` (S2); it hits S2 and stays
+flat, while the table it pushes hits S3 and lives in `bindings/`.
+
+Decidability check when S2 and S3 both look like a hit: **is it called a second
+time in the same process?** An action runs once per lifecycle moment — a restart
+is a new process or a new `lifespan`. A binding is re-read on the consumer's
+schedule: `builtin_commands()` on every `restart_command()`, `build_host_jobs()`
+on every `Scheduler().init()`, `build_database_governance()` on every backup.
+
+Decidability check when S2 and S4 both look like a hit: **is the module read
+again after that one call?** An initialization action is dead once its moment
+has passed — nothing imports it afterwards. A port module keeps being read: the
+object it defines is held and called for the life of the process, and its types
+annotate the layers that hold it. `ports/subscription.py` exposes one
+registration verb next to its writer, and stays a port module because
+`modules_initializer.py` also constructs `TransactionalSubscribeWriter` from it.
+
+| Path | Admitted by | Contents |
+|---|---|---|
+| `app/startup/lifecycle/` | S1 | `components.py` declares the normal/safe-mode manifest, ordering, dependencies, timeout budgets and failure policy; `__init__.py` is the `lifespan` that executes it. Nothing here binds a business domain |
+| `app/startup/*_initializer.py` (flat) | S2 | One initialization-action family per module. Every public symbol is a verb bound to a moment, and deleting its lifecycle entry makes the module dead. The top level admits nothing else |
+| `app/startup/bindings/` | S3 | Command word, job id and database dialect bound to concrete business chains and infrastructure. Knows every business domain; the engines that consume it know none. One binding family per module, or a subpackage when it needs more than one |
+| `app/startup/ports/` | S4 | `context.py` declares the shape — request-scoped repository/transaction factory protocols and the frozen `HostRuntime` that groups them by domain; every other module implements one application-declared port over SQLAlchemy and Oper classes. This is the only place in the host allowed to depend on `app/db` and `app/application` at once: the port is declared in application, landed in db, and only the composition root sees both ends |
+
+`app/runtime/hostports/` and `app/startup/ports/` are different ends of the same
+word. The runtime package holds *slots* — one protocol plus one module-level
+`HostPort` instance that extensions resolve. The startup package holds
+*implementations* the composition root constructs and hands out; nothing resolves
+them by name.
+
+The fifteen `*_initializer.py` modules deliberately stay flat. They are one class
+with one shape, and a subdirectory for them would only restate `_initializer`.
+Eleven are invoked from `lifecycle/`, three (`agent`, `hostport`,
+`managed_resources`) from `modules_initializer.py`, and `database_initializer.py`
+from `app/main.py` before the ASGI application exists. That is a difference in
+*which* moment, not in *what the caller does*, so criterion S does not split on
+it — and `lifecycle/components.py` is already the one place the moments are
+declared.
+
+`bindings/database.py` and `database_initializer.py` are two modules on purpose.
+The first picks the backup backend by dialect and assembles the governance
+facade; the second owns table creation and Alembic migration. Keeping them apart
+keeps Alembic and `load_all_models()` off `app/cli.py`, which builds the
+governance facade to take one backup without ever starting the application.
+
+`tests/test_architecture_dependencies.py` gates all four rows: the top level
+admits only `*_initializer.py`, no subpackage may contain one, and the set of
+subpackages is closed — a fourth one turns the gate red until criterion S is
+extended to admit it.
 
 ### Adapter boundaries
 
@@ -187,12 +334,12 @@ part of migrated-capability cleanup:
 
 - `app/agent/`
 - `app/api/`
-- `app/chain/`
 - `app/db/`
 - `app/doctor/`
 - `app/modules/`
 - `app/monitor/`
-- `app/plugins/`
+- `app/plugins/`（扩展的安装挂载点，纯数据目录：不放任何宿主源码，连
+  `__init__.py` 都没有，`app.plugins` 是命名空间包）
 - `app/schemas/`
 - `app/startup/`
 - `app/testing/`
@@ -225,6 +372,11 @@ Use these questions in order before creating or moving a migrated capability:
    `app/adapters/external`.
 10. Is it public to plugins or only preserving an old path? Curate it in
     `app/sdk` or map it in `app/runtime/compat`; never move implementation there.
+    Sole exception: `_PluginBase` itself. It is not a re-export of an
+    implementation living elsewhere — it *is* the extension ABI, and its only
+    other possible home, `app/plugins/`, must stay a pure data directory so a
+    container volume can cover it. Its public surface is pinned by
+    `SDK_PLUGIN_BASE_SURFACE` in `app/sdk/_exports.py`.
 
 Do not create generic `common`, `helper` or `utils` buckets. Reuse does not erase
 ownership.
@@ -248,7 +400,7 @@ architecture snapshot, not through incidental module globals.
 
 ### Chain layer
 
-`app/chain/` implements use cases shared by API, CLI, Agent, scheduler and other
+`app/application/orchestration/` implements use cases shared by API, CLI, Agent, scheduler and other
 entrypoints. Chains may coordinate modules, application services, Oper classes,
 events and caches. New chain-to-chain dependencies are allowed only while the
 static graph remains acyclic. Backend protocol details and HTTP request objects
@@ -257,16 +409,16 @@ do not belong here. Chains interact with modules exclusively through
 internals (classes, exceptions, constants) are forbidden, so every module stays
 pluggable and a chain never names a concrete module implementation.
 The dispatch algorithm belongs to
-`app/runtime/extensions/module/dispatcher.py`; `ChainBase` remains the
+`app/runtime/extensions/projection/dispatcher.py`; `ChainBase` remains the
 compatibility facade. New chains and tests inject the minimal
-`ChainRuntimeContext` from `app/application/chain/context.py`. No-argument
+`ChainRuntimeContext` from `app/application/orchestration/context.py`. No-argument
 `Chain()` remains supported through the startup-configured compatibility
 provider. High-frequency string methods are classified in
 `module/contracts.py`; unknown third-party plugin methods retain the frozen
 legacy aggregation contract, while the architecture baseline records every
 literal method and call site.
 
-Underscore-prefixed files in `app/chain/` are feature-domain mixins for
+Underscore-prefixed files in `app/application/orchestration/` are feature-domain mixins for
 `ChainBase` and concrete chains, not chains themselves: `_recognition.py`
 (`RecognitionMixin`), `_messaging.py` (`MessageProcessingMixin` /
 `NotificationMixin`), `_interaction.py` (`InteractionChainMixin`, the shared
@@ -275,7 +427,7 @@ slash-command delegation for `remote_list` / `parse_callback` /
 (`MusicSubscribeMixin`, the music single/album subscribe domain mixed into
 `SubscribeChain`) and `_transfer.py` (TransferChain feature mixins). Shared
 subscription metadata and media-key construction belongs to
-`app.application.subscription.contract`; `app.chain.subscribe` keeps the old helper
+`app.application.subscription.contract`; `app.application.orchestration.subscribe` keeps the old helper
 names only as compatibility forwards and `_music` must not import its concrete
 chain owner. A concrete chain that exposes slash-command
 interaction inherits `InteractionChainMixin`, injects its handler class via
@@ -293,12 +445,13 @@ exceptions and value domains used by both modules and upper layers live in
 method names. The directory remains unchanged because discovery and plugin code
 depend on this established runtime root.
 
-`app.modules.filemanager` is a lazy compatibility entrypoint. The concrete
-`FileManagerModule` implementation lives in `app.modules.filemanager.module`,
-while the historical capability path and class module identity remain
-`app.modules.filemanager:FileManagerModule`. Storage and transfer-handler
-submodules must not import the concrete module implementation through the
-package root.
+`app.modules.medialibrary` is the media library filesystem module: it organises
+files into the library and resolves library files back from the standard library
+layout. Its capability entrypoint is
+`app.modules.medialibrary:MediaLibraryModule`. Storage backends and the transfer
+handler live outside this package and must not be reached through it; the
+historical `app.modules.filemanager` path and the `FileManagerModule` class name
+stay resolvable through `app/runtime/compat/manifest.py`.
 
 `app/modules/_base/` hosts the shared template base classes for module families
 (`downloader.py`, `mediaserver.py`, `notification.py`), each combining the
@@ -390,7 +543,8 @@ policy. `app/db` therefore has no dependency on `app/domain`.
   Application/Oper，不把领域对象或 HTTP 依赖重新引回 DB 层。
 - 物理模块仍存在但公开符号已经迁走时（例如 `app.domain.media` 的身份原语、
   `app.schemas` 的整理工作项），兼容 Finder 在标准 Loader 执行后叠加白名单符号路由；
-  canonical 模块不得为兼容而反向 import `app.runtime.compat`。
+  canonical 模块不得为兼容而反向 import `app.runtime.compat`。命名空间包同样适用：
+  `app.plugins` 没有 `__init__.py`，兼容 Finder 直接给它挂叠加层。
 - Canonical implementation packages may not import `app/runtime/compat` or
   `app/sdk`.
 - Host code uses canonical paths. Only `app/plugins/` and compatibility tests
@@ -427,7 +581,7 @@ policy. `app/db` therefore has no dependency on `app/domain`.
 | `app/application/subscription/write.py` | Subscription media translation and sync/async write-port orchestration |
 | `app/application/scheduling.py` | Runtime scheduler facade for Agent tools and endpoints; `Scheduler` class registered by `app/startup/scheduler_initializer.py` |
 | `app/application/commands.py` | Command registry facade for Agent tools and endpoints; `Command` class registered by `app/startup/command_initializer.py` |
-| `app/chain/agent.py` | `AgentChain(ChainBase)`: the chain-layer entry for Agent sessions; Agent runtime stays in `app/agent/` |
+| `app/application/orchestration/agent.py` | `AgentChain(ChainBase)`: the chain-layer entry for Agent sessions; Agent runtime stays in `app/agent/` |
 | `app/runtime/config.py` | `ConfigModel`, `Settings` and deployment configuration |
 | `app/runtime/topology.py` | Single-worker full-runtime policy and safe-mode topology validation |
 | `app/runtime/events.py` | `EventManager`/`Event` compatibility facade and global `eventmanager` identity |
@@ -435,15 +589,14 @@ policy. `app/db` therefore has no dependency on `app/domain`.
 | `app/runtime/event/binding.py` | Explicit module/plugin/host handler resolvers; unresolved classes are diagnosed and skipped, never implicitly constructed by the bus |
 | `app/runtime/event/dispatch.py` | Chain/broadcast ordering, concurrency, target-plugin filtering and isolated delivery |
 | `app/runtime/event/errors.py` | Handler failure notification and non-recursive `SystemError` downgrade policy |
-| `app/runtime/extensions/module/dispatcher.py` | Plugin-first invocation, short-circuit, list merge, signature relay and sync/async execution |
-| `app/runtime/extensions/module/contracts.py` | High-frequency method families and frozen legacy fallback contract |
-| `app/application/chain/context.py` | Injectable Chain dependencies and no-argument compatibility provider |
+| `app/runtime/extensions/projection/dispatcher.py` | Plugin-first invocation, short-circuit, list merge, signature relay and sync/async execution |
+| `app/runtime/extensions/contract/module_method.py` | High-frequency method families and frozen legacy fallback contract |
+| `app/application/orchestration/context.py` | Injectable Chain dependencies and no-argument compatibility provider |
 | `app/startup/lifecycle/components.py` | Declarative normal/safe-mode lifecycle manifest, ordering and timeout budgets |
 | `app/runtime/extensions/module_manager.py` | Module discovery and lifecycle |
 | `app/runtime/extensions/plugin_manager.py` | Plugin discovery and lifecycle |
-| `app/runtime/extensions/plugin/monitor.py` | Plugin file-change aggregation and monitor-thread lifecycle |
-| `app/runtime/extensions/plugin/projection.py` | Plugin commands, APIs, services, modules and actions projected from a running-registry snapshot |
-| `app/runtime/extensions/plugin/storage.py` | Injected plugin configuration/data persistence port; runtime code does not import DB Oper classes |
+| `app/runtime/extensions/projection/plugin.py` | Plugin commands, APIs, services, modules and actions projected from a running-registry snapshot |
+| `app/runtime/extensions/lifecycle/storage.py` | Injected plugin configuration/data persistence port; runtime code does not import DB Oper classes |
 | `app/application/plugin/catalog.py` | Plugin-market mapping, concurrent collection, generation merge and source/version deduplication |
 | `app/application/plugin/install.py` | Compatibility, package installation, reporting, installed-list persistence and runtime reload command |
 | `app/application/plugin/routes.py` | Dynamic plugin-route registry protocol and registration/removal use cases; plugin response payloads remain raw unless the plugin chooses its own envelope |
@@ -451,12 +604,18 @@ policy. `app/db` therefore has no dependency on `app/domain`.
 | `app/application/plugin/runtime.py` | Plugin runtime port consumed by API, Agent and Workflow; the concrete `PluginManager` is registered only by startup |
 | `app/application/module.py` | Host module runtime port consumed by entrypoints; the concrete `ModuleManager` is registered only by startup |
 | `app/application/scheduling.py` | Scheduler runtime port consumed by API/Agent/application commands |
+| `app/runtime/scheduler.py` | Scheduled-job declaration types and the generic execution engine: job-state registry, trigger expansion, sync/async/subprocess execution, progress convergence and listing. Knows no business domain; failure notices leave through a host-overridable hook |
+| `app/scheduler/` | Scheduling composition root: `composition.py` assembles the engine with the host manifest, `agent_tasks.py`/`workflows.py`/`plugins.py` own one registration path each. The three paths differ in trigger timing, lifecycle and failure semantics and are deliberately not merged |
+| `app/startup/bindings/scheduling/` | Host business job manifest expressed as data (`manifest.py`) plus the system jobs the host implements itself (`systemjobs.py`). This is where knowledge of every business domain lives |
+| `app/startup/bindings/builtin_commands.py` | Built-in command words bound to business chains and scheduled-job ids; business chains materialize on first execution, not at registration |
+| `app/startup/bindings/database.py` | Backup backend selected by dialect and the assembled database-governance facade; carries no Alembic or model-loading dependency |
+| `app/application/orchestration/scheduler.py` | `SchedulerChain`: table cleanup, `scheduler_job`/`clear_cache` broadcast and system-message forwarding for scheduled jobs |
 | `app/application/server/report.py` | Server reporting use cases over injected local readers and transport callbacks |
 | `app/application/server/share.py` | Server sharing use cases over injected repositories and transport callbacks |
 | `app/adapters/external/plugin/client.py` | Plugin-market read adapter and cache-refresh boundary |
 | `app/adapters/system/plugin/package.py` | Plugin package installation adapter |
 | `app/adapters/system/plugin/dependency.py` | Plugin dependency inspection and installation adapter |
-| `app/runtime/extensions/managed_resource_adapter.py` | Data-only managed-resource registry and sync/async lifecycle adapters |
+| `app/runtime/extensions/lifecycle/managed_resource_adapter.py` | Data-only managed-resource registry and sync/async lifecycle adapters |
 | `app/runtime/managed_resources.py` | Lightweight acquisition, state observation and shutdown facade |
 | `app/foundation/reflection.py` | Generic reflection and Python module discovery |
 | `app/adapters/network/http.py` | Shared synchronous and asynchronous HTTP clients |
@@ -483,6 +642,6 @@ component containing a migrated module, module-to-module or module-to-chain
 imports, entrypoint (`api`/`agent`/`monitor`/`workflow`/`doctor`) imports of
 `app.modules` internals, chain imports of `app.modules` internals (chains reach
 modules only through `run_module` dispatch), and downloader SDK
-(`qbittorrentapi`, `transmission_rpc`) imports inside `app/chain`.
+(`qbittorrentapi`, `transmission_rpc`) imports inside `app/application/orchestration`.
 
 *Last Updated: 2026-08-18*
