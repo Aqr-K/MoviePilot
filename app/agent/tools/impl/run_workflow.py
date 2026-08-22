@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
-from app.chain.workflow import WorkflowChain
-from app.application.workflow import get_configured_workflow_query
+from app.runtime.hostports.workflows import workflow_execution_port
+from app.application.agentdata import WorkflowPort as WorkflowOper
 from app.runtime.log import logger
 
 
@@ -52,7 +52,9 @@ class RunWorkflowTool(MoviePilotTool):
         workflow_id: int, from_begin: Optional[bool] = True
     ) -> tuple[bool, str]:
         """同步执行工作流，放到专用线程池避免长流程阻塞 API 响应。"""
-        return WorkflowChain().process(workflow_id, from_begin=from_begin)
+        return workflow_execution_port.resolve().process(
+            workflow_id, from_begin=from_begin
+        )
 
     async def run(
         self, workflow_id: int, from_begin: Optional[bool] = True, **kwargs
@@ -62,7 +64,8 @@ class RunWorkflowTool(MoviePilotTool):
         )
 
         try:
-            workflow = await get_configured_workflow_query().get(workflow_id)
+            workflow_oper = WorkflowOper()
+            workflow = await workflow_oper.async_get(workflow_id)
 
             if not workflow:
                 return f"未找到工作流：{workflow_id}，请使用 query_workflows 工具查询可用的工作流"

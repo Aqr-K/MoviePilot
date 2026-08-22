@@ -18,9 +18,12 @@ from app.agent.tools.impl._system_setting_utils import (
 )
 from app.runtime.config import settings
 from app.runtime.events import eventmanager
-from app.application.configuration import (
-    SystemConfigService,
-    get_configured_system_config as SystemConfigOper,
+from app.runtime.extensions.service_config import service_capability
+from app.runtime.extensions.admission.service_config import service_config_write_violation
+from app.application.configuration import SystemConfigService
+from app.application.service_config import (
+    async_write_system_setting,
+    read_system_setting,
 )
 from app.runtime.log import logger
 from app.schemas.event import ConfigChangeEventData
@@ -106,10 +109,6 @@ class UpdateSystemSettingsTool(MoviePilotTool):
         super().__init__(session_id=session_id, user_id=user_id, **kwargs)
         self._system_config = system_config
 
-    def _get_system_config(self) -> SystemConfigService:
-        """返回显式注入服务，旧构造形态则延迟读取组合根服务。"""
-        return self._system_config or SystemConfigOper()
-
     def get_tool_message(self, **kwargs) -> Optional[str]:
         """根据更新参数生成友好的提示消息。"""
 
@@ -124,10 +123,16 @@ class UpdateSystemSettingsTool(MoviePilotTool):
         return f"{action_map.get(operation, '更新系统设置')}: {setting_key}"
 
     def _load_setting_value(self, spec: SettingSpec):
-        """读取指定设置项的当前值。"""
+        """读取指定设置项的当前值。
+
+        显式注入了配置服务时优先使用该服务；否则退回按配置键分流的
+        `read_system_setting`，服务实例配置族的事实源才不会被绕过。
+        """
         if spec.source == "settings":
             return getattr(settings, spec.key)
-        return self._get_system_config().get(spec.systemconfig_key)
+        if self._system_config is not None:
+            return self._system_config.get(spec.systemconfig_key)
+        return read_system_setting(spec.systemconfig_key)
 
     @staticmethod
     def _normalize_systemconfig_value(value: Any):
@@ -286,12 +291,26 @@ class UpdateSystemSettingsTool(MoviePilotTool):
                 changed = success is True
             else:
                 normalized_value = self._normalize_systemconfig_value(next_value)
-                event_value = normalized_value
-                success = await self._get_system_config().async_set(
-                    spec.systemconfig_key,
-                    normalized_value,
+                # 服务实例配置按声明该类型的扩展给出的契约判定，与设置页写入同一道关卡
+                violation = service_config_write_violation(
+                    service_capability(spec.key), normalized_value
                 )
-                changed = success is True
+                if violation:
+                    return json.dumps(
+                        {"success": False, "message": violation},
+                        ensure_ascii=False,
+                    )
+                event_value = normalized_value
+                if self._system_config is not None:
+                    changed = await self._system_config.async_set(
+                        spec.systemconfig_key,
+                        normalized_value,
+                    ) is True
+                else:
+                    changed = await async_write_system_setting(
+                        spec.systemconfig_key,
+                        normalized_value,
+                    )
 
             if changed:
                 await eventmanager.async_send_event(

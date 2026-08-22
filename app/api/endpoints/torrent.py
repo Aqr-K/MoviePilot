@@ -6,10 +6,10 @@ from app.schemas.cache import TorrentCacheData as _SchemaTorrentCacheData
 from app.schemas.cache import TorrentReidentifyData as _SchemaTorrentReidentifyData
 from app.schemas.response import Response as _SchemaResponse
 from app.api.response import ResponseAPIRouter
-from app.chain.media import MediaChain
-from app.chain.torrents import TorrentsChain
+from app.application.orchestration.media import MediaChain
+from app.application.orchestration.torrents import TorrentsChain
 from app.application.configuration import get_api_runtime_config_snapshot
-from app.api.dependencies.auth import (
+from app.api.deps import (
     get_current_active_superuser,
     get_current_active_superuser_async,
 )
@@ -162,7 +162,7 @@ def refresh_cache(_: object = Depends(get_current_active_superuser)):
     """
     刷新种子缓存
     """
-    from app.chain.torrents import TorrentsChain
+    from app.application.orchestration.torrents import TorrentsChain
 
     torrents_chain = TorrentsChain()
 

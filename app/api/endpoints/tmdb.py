@@ -10,11 +10,11 @@ from app.schemas.token import TokenPayload as _SchemaTokenPayload
 from app.schemas.tmdb import TmdbEpisode as _SchemaTmdbEpisode
 from app.schemas.workflow import MediaInfo as _SchemaMediaInfo
 from app.api.response import ResponseAPIRouter
-from app.chain.tmdb import TmdbChain
+from app.application.orchestration.tmdb import TmdbChain
 from app.application.configuration import get_api_runtime_config_snapshot
 from app.adapters.web.security.access import verify_token
 from app.application.configuration import get_configured_system_config
-from app.api.dependencies.auth import get_current_active_superuser_async
+from app.api.deps import get_current_active_superuser_async
 from app.schemas.types import MediaType, SystemConfigKey
 
 router = ResponseAPIRouter()

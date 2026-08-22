@@ -3,8 +3,8 @@ import sys
 from typing import Callable
 
 from app.adapters.cache.redis import RedisHelper, AsyncRedisHelper
-from app.chain.mediaserver import MediaServerChain
-from app.chain.tmdb import TmdbChain
+from app.application.orchestration.mediaserver import MediaServerChain
+from app.application.orchestration.tmdb import TmdbChain
 
 # SitesHelper涉及资源包拉取，提前引入并容错提示
 try:
@@ -18,9 +18,7 @@ except ImportError as e:
 from app.adapters.system.host import SystemUtils
 from app.runtime.log import logger
 from app.runtime.config import settings
-from app.runtime.cache import AsyncFileCache, FileCache
 from app.runtime.extensions.module_manager import ModuleManager
-from app.runtime.extensions.module.dispatcher import ModuleInvocationDispatcher
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.events import EventHandlerBinding, EventManager
 from app.runtime.observability import record_metric
@@ -36,6 +34,8 @@ from app.application.messaging.message import (
     MessageQueueManager,
     stop_message,
 )
+from app.runtime.cache import AsyncFileCache, FileCache
+from app.runtime.extensions.projection.dispatcher import ModuleInvocationDispatcher
 from app.application.configuration import (
     RuntimeConfiguration,
     RuntimeSettingsService,
@@ -46,13 +46,12 @@ from app.application.configuration import (
     configure_system_config,
     configure_transfer_retry_config,
 )
-from app.startup.configuration import (
+from app.startup.ports.configuration import (
     build_api_runtime_config,
     build_chain_runtime_config,
     build_scheduler_runtime_config,
 )
 from app.application.database import configure_database_governance
-from app.application.service import configure_service_directory
 from app.application.plugin.runtime import configure_plugin_runtime
 from app.application.module import configure_module_runtime
 from app.application.messaging.chat import AgentChatService, configure_agent_chat_service
@@ -65,7 +64,7 @@ from app.application.security.userconfig import (
 )
 from app.application.history import configure_transfer_history_provider
 from app.application.outbox import OutboxDispatcher, configure_outbox_dispatcher
-from app.startup.outbox import SqlAlchemyAsyncOutboxStager, SqlAlchemyOutboxRepository
+from app.startup.ports.outbox import SqlAlchemyAsyncOutboxStager, SqlAlchemyOutboxRepository
 from app.application.site.query import SiteQueryService, configure_site_query_service
 from app.application.site.health import SiteHealthService, configure_site_health_service
 from app.application.workflow import WorkflowQueryService, configure_workflow_query
@@ -90,6 +89,7 @@ from app.db.uow import (
     SqlAlchemyUnitOfWork,
     configure_transaction_runners,
 )
+from app.db.oper.serviceconfig import ServiceConfigOper
 from app.db.oper.subscribe import SubscribeOper
 from app.db.oper.agentchat import AgentChatOper
 from app.db.oper.agenttask import AgentTaskOper
@@ -106,25 +106,25 @@ from app.db.oper.subscribehistory import SubscribeHistoryOper
 from app.db.oper.plugindata import PluginDataOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.db.oper.workflow import WorkflowOper, configure_workflow_legacy_writer
-from app.command import CommandChain
+from app.application.messaging.gateway import CommandChain
 from app.schemas.message import Message
 from app.schemas.message import MessageType
 from app.schemas.types import EventType, SystemConfigKey
 from app.startup.agent_initializer import init_agent, stop_agent
-from app.startup.database import build_database_governance
+from app.startup.bindings.database import build_database_governance
 from app.startup.managed_resources_initializer import (
     init_managed_resources,
     stop_managed_resources,
 )
-from app.startup.subscription import (
+from app.startup.ports.subscription import (
     TransactionalSubscribeWriter,
     configure_transactional_subscription_scopes,
 )
-from app.startup.chain_events import TransactionalChainDurableEventWriter
-from app.startup.download_failure import TransactionalDownloadFailureRepository
-from app.startup.workflow import TransactionalWorkflowExecutionService
-from app.startup.transaction import TransactionalWriteRunner
-from app.startup.context import (
+from app.startup.ports.chain_events import TransactionalChainDurableEventWriter
+from app.startup.ports.download_failure import TransactionalDownloadFailureRepository
+from app.startup.ports.workflow import TransactionalWorkflowExecutionService
+from app.startup.ports.transaction import TransactionalWriteRunner
+from app.startup.ports.context import (
     AgentChatRuntime,
     AuthenticationRuntime,
     HistoryRuntime,
@@ -138,19 +138,56 @@ from app.startup.context import (
 from app.adapters.web.security.access import set_superuser_token_payload_provider
 from app.application.security.auth import build_superuser_token_payload
 from app.application.image import configure_wallpaper_providers
-from app.application.chain.context import (
+from app.application.orchestration.context import (
     ChainRuntimeContext,
     configure_chain_runtime_context_provider,
 )
-from app.application.chain.durable_events import (
+from app.application.orchestration.durable_events import (
     restore_download_added,
     restore_transfer_result,
 )
-from app.application.chain.data import configure_chain_data_ports, get_chain_data_ports
-from app.runtime.extensions.service_config import (
-    ServiceConfigHelper,
-    configure_service_config_reader,
+from app.application.orchestration.data import (
+    configure_chain_data_ports,
+    get_chain_data_ports,
 )
+from app.application.service_config import (
+    ServiceInstanceConfigService,
+    configure_service_instance_configs,
+    get_configured_service_instance_configs,
+)
+from app.runtime.extensions.registry.meta_parser import configure_meta_parser_order_reader
+from app.runtime.extensions.service_config import (
+    configure_service_config_reader,
+    configure_service_instance_config_reader,
+)
+from app.startup.hostport_initializer import (
+    configure_dispatch_host_ports,
+    configure_host_ports,
+)
+
+
+def build_default_chain_runtime_context() -> ChainRuntimeContext:
+    """
+    按宿主既有的管理器单例身份组装 Chain 运行上下文
+
+    上下文本身只声明所需对象，装配这些全局管理器是组合根的职责，因此构造放在
+    这里而不是声明处，避免应用层在模块导入期就抓取运行时管理器与数据库操作器。
+    :return: Chain 无参兼容入口使用的运行上下文
+    """
+    return ChainRuntimeContext(
+        module_manager=ModuleManager(),
+        plugin_manager=PluginManager(),
+        event_manager=EventManager(),
+        message_oper=MessageOper(),
+        message_helper=MessageHelper(),
+        file_cache=FileCache(),
+        async_file_cache=AsyncFileCache(),
+        message_queue_factory=lambda callback: MessageQueueManager(send_callback=callback),
+        module_dispatcher_factory=ModuleInvocationDispatcher,
+        configuration=build_chain_runtime_config(settings),
+        data_ports=get_chain_data_ports(),
+        durable_event_writer=TransactionalChainDurableEventWriter(SessionFactory),
+    )
 
 
 async def _async_get_subscribe(subscribe_id: int):
@@ -163,36 +200,17 @@ async def _async_get_workflow(workflow_id: int):
     return await WorkflowOper().async_get(workflow_id)
 
 
-def _build_chain_runtime_context() -> ChainRuntimeContext:
-    """在启动组合根创建 Chain 所需的运行时对象和数据端口。"""
-    return ChainRuntimeContext(
-        module_manager=ModuleManager(),
-        plugin_manager=PluginManager(),
-        event_manager=EventManager(),
-        message_oper=MessageOper(),
-        message_helper=MessageHelper(),
-        file_cache=FileCache(),
-        async_file_cache=AsyncFileCache(),
-        message_queue_factory=lambda callback: MessageQueueManager(
-            send_callback=callback
-        ),
-        module_dispatcher_factory=ModuleInvocationDispatcher,
-        configuration=build_chain_runtime_config(settings),
-        data_ports=get_chain_data_ports(),
-        durable_event_writer=TransactionalChainDurableEventWriter(SessionFactory),
-    )
-
-
 def configure_runtime_data_providers() -> None:
     """在启动组合层装配运行时和外部服务所需的数据库读取能力。"""
     configure_service_config_reader(lambda key: SystemConfigOper().get(key))
-    configure_module_runtime(lambda: ModuleManager())
-    configure_plugin_runtime(lambda: PluginManager())
-    configure_service_directory(
-        configs=ServiceConfigHelper.get_configs,
-        modules=lambda module_type: ModuleManager().get_running_type_modules(
-            module_type
-        ),
+    configure_service_instance_configs(
+        ServiceInstanceConfigService(repository=ServiceConfigOper())
+    )
+    configure_service_instance_config_reader(
+        lambda capability: get_configured_service_instance_configs().read(capability)
+    )
+    configure_meta_parser_order_reader(
+        lambda: SystemConfigOper().get(SystemConfigKey.MetaParserOrder)
     )
     configure_server_application_services(
         report_service=ServerReportService(
@@ -294,18 +312,20 @@ def notify_event_error(title: str, message: str) -> None:
 
 def get_host_event_handler_factories() -> dict[type, Callable[[], object]]:
     """返回所有使用事件装饰器的宿主类及其明确实例工厂。"""
-    from app.chain.download import DownloadChain
-    from app.chain.scraping import ScrapingChain
-    from app.chain.search import SearchChain
-    from app.chain.site import SiteChain
-    from app.chain.subscribe import SubscribeChain
-    from app.chain.workflow import WorkflowChain
-    from app.command import Command
-    from app.scheduler import Scheduler
+    from app.application.orchestration.download import DownloadChain
+    from app.application.orchestration.scraping import ScrapingChain
+    from app.application.orchestration.search import SearchChain
+    from app.application.orchestration.site import SiteChain
+    from app.application.orchestration.subscribe import SubscribeChain
+    from app.workflow.service import WorkflowChain
+    from app.runtime.command import Command
+    from app.scheduler import PluginScheduling, Scheduler
 
     return {
         Command: Command,
         DownloadChain: DownloadChain,
+        # 插件重载处理器声明在插件调度混入类上，实例仍是调度器组合根单例
+        PluginScheduling: Scheduler,
         Scheduler: Scheduler,
         ScrapingChain: ScrapingChain,
         SearchChain: SearchChain,
@@ -319,8 +339,8 @@ def configure_host_event_handler_resolver() -> None:
     """显式登记宿主内置类处理器，禁止事件总线按类名临时构造未知对象。"""
     factories = get_host_event_handler_factories()
 
-    def resolve(owner_class: type) -> EventHandlerBinding | None:
-        """按明确白名单复用单例或构造与旧路径等价的 Chain 实例。"""
+    def resolve(owner_class: type) -> list[EventHandlerBinding] | None:
+        """按明确白名单复用单例或构造与旧路径等价的 Chain 实例绑定列表。"""
         factory = factories.get(owner_class)
         if factory is None:
             return None
@@ -328,10 +348,12 @@ def configure_host_event_handler_resolver() -> None:
         instance = get_existing() if callable(get_existing) else None
         if instance is None:
             instance = factory()
-        return EventHandlerBinding(
-            instance=instance,
-            owner_name=owner_class.__name__,
-        )
+        return [
+            EventHandlerBinding(
+                instance=instance,
+                owner_name=owner_class.__name__,
+            )
+        ]
 
     EventManager().register_handler_instance_resolver("host", resolve)
 
@@ -483,6 +505,11 @@ async def init_modules() -> HostRuntime:
     """
     启动模块并返回本次 lifespan 唯一的类型化 HostRuntime。
     """
+    # 扩展经端口取用目录、存储、命名、站点资源与规则配置，须先于模块加载完成注入。
+    configure_host_ports()
+    # 入口层经应用端口取用模块目录与插件目录，不直接构造运行时单例。
+    configure_module_runtime(lambda: ModuleManager())
+    configure_plugin_runtime(lambda: PluginManager())
     # 兼容 Oper 的无 Session 写入口仍由组合根持有事务，避免模型恢复自动提交。
     transaction_runner = TransactionalWriteRunner(
         sync_session=SessionFactory,
@@ -634,7 +661,7 @@ async def init_modules() -> HostRuntime:
     # 应用服务不反向依赖 Chain，由启动组合层注入壁纸来源。
     configure_wallpaper_services()
     # Chain 无参兼容入口由组合根明确提供依赖上下文；测试和新代码可直接注入替代上下文。
-    configure_chain_runtime_context_provider(_build_chain_runtime_context)
+    configure_chain_runtime_context_provider(build_default_chain_runtime_context)
     # 认证访问层不反向依赖数据库实现，由启动组合层注入载荷提供器。
     set_superuser_token_payload_provider(build_superuser_token_payload)
     # DoH
@@ -651,6 +678,8 @@ async def init_modules() -> HostRuntime:
     configure_host_event_handler_resolver()
     # 加载模块
     ModuleManager()
+    # 需要模块分发的扩展端口在模块目录就绪后注册。
+    configure_dispatch_host_ports()
     # 启动事件消费
     EventManager().start()
     # 初始化共享服务端状态
@@ -658,6 +687,12 @@ async def init_modules() -> HostRuntime:
     MoviePilotServerHelper.init_subscribe_report()
     MoviePilotServerHelper.get_user_uuid()
     MoviePilotServerHelper.get_github_user()
+    # LLM 提供商管理动作（测试连接、模型目录查询）依赖的构建能力独立于 Agent 启用开关，
+    # 须在此无条件注入，使用户在开启智能助手前也能测试模型连接。
+    from app.agent.llm import LLMHelper
+    from app.agent.llm.provider import configure_llm_operations
+
+    configure_llm_operations(LLMHelper())
     # 初始化AI智能体
     await init_agent()
     # 启动前端服务

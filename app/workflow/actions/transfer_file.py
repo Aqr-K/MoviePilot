@@ -6,11 +6,11 @@ from pydantic import Field
 
 from app.workflow.actions import BaseAction
 from app.runtime.config import global_vars
-from app.application.chain.data import TransferHistoryPortProxy as TransferHistoryOper
+from app.application.orchestration.data import TransferHistoryPortProxy as TransferHistoryOper
 from app.schemas.workflow import ActionParams
 from app.schemas.workflow import ActionContext
-from app.chain.storage import StorageChain
-from app.chain.transfer import TransferChain
+from app.application.orchestration.storage import StorageChain
+from app.application.orchestration.transfer import TransferChain
 from app.runtime.log import logger
 
 

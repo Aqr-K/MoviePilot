@@ -15,14 +15,14 @@ from app.schemas.system import TorrentInfo as _SchemaTorrentInfo
 from app.schemas.token import TokenPayload as _SchemaTokenPayload
 from app.schemas.workflow import Context as _SchemaContext
 from app.api.response import ResponseAPIRouter
-from app.chain.search import SearchChain
+from app.application.orchestration.search import SearchChain
 from app.adapters.web.security.access import verify_resource_token, verify_token
 from app.runtime.localization import LocaleHelper
 from app.runtime.log import logger
 from app.schemas.types import MediaSource, MediaType
 from app.domain.media import normalize_music_type
 from app.schemas.media import resolve_media_identity
-from app.application.security.url import SecurityUtils
+from app.adapters.network.urlsafety import SecurityUtils
 
 router = ResponseAPIRouter()
 

@@ -1,11 +1,11 @@
 import asyncio
 import mimetypes
-import shutil
+from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
 import aiofiles
 from anyio import Path as AsyncPath
-from fastapi import Depends, Header, HTTPException, Security
+from fastapi import Depends, Header, HTTPException, Query, Security
 from fastapi.concurrency import run_in_threadpool
 from starlette import status
 from starlette.responses import StreamingResponse
@@ -13,9 +13,17 @@ from starlette.responses import StreamingResponse
 from app.schemas.common import JsonObject as _SchemaJsonObject
 from app.schemas.plugin import Plugin as _SchemaPlugin
 from app.schemas.plugin import PluginDashboard as _SchemaPluginDashboard
-from app.schemas.plugin import PluginCloneRequest as _SchemaPluginCloneRequest
 from app.schemas.plugin import PluginDashboardMetaItem as _SchemaPluginDashboardMetaItem
 from app.schemas.plugin import PluginFoldersData as _SchemaPluginFoldersData
+from app.schemas.plugin import PluginInstanceCreate as _SchemaPluginInstanceCreate
+from app.schemas.plugin import PluginInstanceInfo as _SchemaPluginInstanceInfo
+from app.schemas.plugin import PluginInstanceLogFileInfo as _SchemaPluginInstanceLogFileInfo
+from app.schemas.plugin import PluginInstanceLogLevelInfo as _SchemaPluginInstanceLogLevelInfo
+from app.schemas.plugin import PluginInstanceLogLevelSet as _SchemaPluginInstanceLogLevelSet
+from app.schemas.plugin import PluginInstanceVersionBinding as _SchemaPluginInstanceVersionBinding
+from app.schemas.plugin import PluginInstanceVersionSet as _SchemaPluginInstanceVersionSet
+from app.schemas.plugin import PluginVersionOverview as _SchemaPluginVersionOverview
+from app.schemas.plugin import PluginVersionRecycleResult as _SchemaPluginVersionRecycleResult
 from app.schemas.plugin import PluginRating as _SchemaPluginRating
 from app.schemas.plugin import PluginRatingMap as _SchemaPluginRatingMap
 from app.schemas.plugin import PluginRatingRequest as _SchemaPluginRatingRequest
@@ -34,30 +42,36 @@ from app.application.plugin.config import PluginConfigCommand
 from app.application.commands import init_commands
 from app.application.scheduling import remove_plugin_job, update_plugin_job
 from app.runtime.cache import async_fresh
+from app.runtime.extensions.contract.instance import extension_id_of
 from app.application.configuration import get_api_runtime_config_snapshot
 from app.application.plugin.runtime import get_plugin_manager as PluginManager
-from app.runtime.extensions.plugin.contracts import (
-    PluginDashboardError,
-    PluginNotFoundError,
-)
 from app.adapters.web.security.access import (
     resource_token_cookie,
     verify_resource_token,
     verify_token,
 )
+from app.db.models import User
+from app.db.models.pluginconfig import LOG_LEVELS
+from app.db.oper.pluginconfig import PluginConfigOper
 from app.api.principal import ApiPrincipal
 from app.application.configuration import get_configured_system_config
-from app.api.dependencies.auth import (
+from app.application.configuration import get_configured_system_config as SystemConfigOper
+from app.api.deps import (
     get_current_active_superuser,
     get_current_active_superuser_async,
-)
-from app.api.dependencies.plugin import (
     get_plugin_config_command,
 )
 from app.adapters.external.server import MoviePilotServerHelper
 from app.adapters.external.market import PluginHelper
 from app.adapters.system.plugin.package import PluginPackageManager
-from app.runtime.log import logger
+from app.runtime.log import (
+    clear_plugin_instance_log_level,
+    get_effective_plugin_instance_log_level,
+    get_plugin_instance_log_dir,
+    get_plugin_instance_log_level_override,
+    logger,
+    set_plugin_instance_log_level,
+)
 from app.schemas.types import SystemConfigKey
 
 router = ResponseAPIRouter()
@@ -160,13 +174,16 @@ def _is_plugin_auth_remote_file(plugin_id: str, filepath: str) -> bool:
 
     登录页加载插件认证组件时尚未产生登录态和资源 Cookie，因此仅对插件主动
     声明的认证 remote 保留匿名读取能力，其余插件静态资源仍需资源令牌。
+    联邦构建产物属于插件本身而非某个实例，比对前把两侧都降级到插件标识，
+    非默认实例声明的认证 remote 才不会因实例键带的 @ 分隔符被误判为不匹配。
     """
     path = filepath.lstrip("/")
-    normalized_plugin_id = plugin_id.lower()
+    normalized_plugin_id = extension_id_of(plugin_id).lower()
     plugin_manager = PluginManager()
     for provider in plugin_manager.get_plugin_auth_providers():
         remote = provider.get("remote") or {}
-        if str(remote.get("id") or "").lower() != normalized_plugin_id:
+        remote_plugin_id = extension_id_of(str(remote.get("id") or "")).lower()
+        if remote_plugin_id != normalized_plugin_id:
             continue
         remote_path = str(remote.get("url") or "").lstrip("/")
         remote_path_lower = remote_path.lower()
@@ -559,13 +576,12 @@ async def install(
         )
 
     async def reload_runtime(target_id: str) -> object:
-        """在线程池中重建源插件及其全部虚拟实例。"""
-        return await run_in_threadpool(PluginManager().reload_plugin_tree, target_id)
+        """在线程池中重建插件实例并广播重载事件。"""
+        return await run_in_threadpool(PluginManager().reload_plugin, target_id)
 
     async def refresh_registrations(target_id: str) -> object:
-        """在线程池中刷新源插件及其虚拟实例的全部宿主注册。"""
-        for reload_target in plugin_manager.get_plugin_reload_targets(target_id):
-            await run_in_threadpool(register_plugin, reload_target)
+        """在线程池中刷新插件服务、命令和动态路由。"""
+        return await run_in_threadpool(register_plugin, target_id)
 
     command = PluginInstallCommand(
         installed_plugins_reader=lambda: get_configured_system_config().get(
@@ -708,29 +724,32 @@ def plugin_dashboard_by_key(
     plugin_id: str,
     key: str,
     user_agent: Annotated[str | None, Header()] = None,
+    service_instance: str = Query(default="", description="该仪表盘作用的服务实例名"),
     _: ApiPrincipal = Depends(get_current_active_superuser),
 ) -> Optional[_SchemaPluginDashboard]:
     """
     根据插件ID获取插件仪表板
+
+    ``service_instance`` 只对声明了服务实例作用对象的仪表盘有意义：用户在仪表盘上选中
+    哪台服务实例随请求带上来，宿主解析后交给取数实现。未声明作用对象的仪表盘忽略该参数，
+    取数形状与它存在之前一字不改。
     """
-    try:
-        return PluginManager().get_plugin_dashboard(plugin_id, key, user_agent)
-    except PluginNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    except PluginDashboardError as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+    return PluginManager().get_plugin_dashboard(
+        plugin_id, key, user_agent, service_instance or None
+    )
 
 
 @router.get("/dashboard/{plugin_id}", summary="获取插件仪表板配置")
 def plugin_dashboard(
     plugin_id: str,
     user_agent: Annotated[str | None, Header()] = None,
+    service_instance: str = Query(default="", description="该仪表盘作用的服务实例名"),
     _: ApiPrincipal = Depends(get_current_active_superuser),
 ) -> Optional[_SchemaPluginDashboard]:
     """
     根据插件ID获取插件仪表板
     """
-    return plugin_dashboard_by_key(plugin_id, "", user_agent)
+    return plugin_dashboard_by_key(plugin_id, "", user_agent, service_instance)
 
 
 @router.get(
@@ -781,12 +800,13 @@ async def plugin_static_file(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    source_plugin_id = PluginManager().get_plugin_source_id(plugin_id)
+    # 联邦构建产物属于插件本身而非某个实例，先降级到插件标识再拼目录，
+    # 避免实例键的 @ 分隔符指向不存在的目录，同一插件的全部实例共享同一份代码。
     plugin_base_dir = (
         AsyncPath(get_api_runtime_config_snapshot().root_path)
         / "app"
         / "plugins"
-        / source_plugin_id.lower()
+        / extension_id_of(plugin_id).lower()
     )
     plugin_file_path = plugin_base_dir / filepath.lstrip("/")
 
@@ -942,38 +962,321 @@ async def update_folder_plugins(
     )
 
 
-@router.post(
-    "/clone/{plugin_id}", summary="创建插件分身", response_model=_SchemaResponse[None]
+@router.get(
+    "/instances/{plugin_id}",
+    summary="获取插件实例列表",
+    response_model=List[_SchemaPluginInstanceInfo],
 )
-def clone_plugin(
-    plugin_id: str,
-    clone_data: _SchemaPluginCloneRequest,
-    _: ApiPrincipal = Depends(get_current_active_superuser),
+def list_plugin_instances(
+    plugin_id: str, _: User = Depends(get_current_active_superuser)
 ) -> Any:
     """
-    创建插件分身
+    列出指定插件的全部实例及其运行状态，并标注当前的默认调用目标
     """
     try:
-        success, message = PluginManager().clone_plugin(
-            plugin_id=plugin_id,
-            suffix=clone_data.suffix,
-            name=clone_data.name,
-            description=clone_data.description,
-            version=clone_data.version,
-            icon=clone_data.icon,
+        instances = PluginManager().list_plugin_instances(plugin_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    default_target = PluginConfigOper().get_default_target(plugin_id)
+    default_instance_id = default_target.instance_id if default_target else None
+    for info in instances:
+        info["is_default_target"] = info["instance_id"] == default_instance_id
+    return instances
+
+
+@router.post(
+    "/instances/{plugin_id}",
+    summary="创建插件实例",
+    response_model=_SchemaPluginInstanceInfo,
+)
+def create_plugin_instance(
+    plugin_id: str,
+    instance_data: _SchemaPluginInstanceCreate,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    创建插件的新实例：写入初始配置并拉起，随后重建该插件的定时服务、命令与接口
+    """
+    plugin_manager = PluginManager()
+    try:
+        info = plugin_manager.create_plugin_instance(
+            plugin_id, instance_data.instance_id, instance_data.config
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # 新实例的定时服务、命令与接口需要整体重建才会被登记
+    register_plugin(plugin_id)
+    return info
+
+
+@router.delete(
+    "/instances/{plugin_id}/{instance_id}",
+    summary="删除插件实例",
+    response_model=_SchemaResponse[None],
+)
+def delete_plugin_instance(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    删除插件的单个实例：停止运行态、回收配置数据与自管理库，随后重建该插件的定时服务、命令与接口
+    """
+    plugin_manager = PluginManager()
+    try:
+        plugin_manager.delete_plugin_instance(plugin_id, instance_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # 删除后必须整体重建，避免残留登记指向已停止的实例，兄弟实例的登记原样恢复
+    register_plugin(plugin_id)
+    return _SchemaResponse(success=True)
+
+
+@router.put(
+    "/instances/{plugin_id}/{instance_id}/default_target",
+    summary="设为插件的默认调用目标",
+    response_model=_SchemaResponse[None],
+)
+def set_plugin_instance_default_target(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    把指定实例设为该插件的默认调用目标：外部调用未指定实例时改按该实例解析；
+    同一事务内先清除该插件原有的置位再置位新目标，目标实例没有配置行时报错
+    且原有置位保持不变
+    """
+    if not PluginConfigOper().set_default_target(plugin_id, instance_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件实例 {plugin_id}@{instance_id} 不存在",
+        )
+    return _SchemaResponse(success=True)
+
+
+@router.delete(
+    "/instances/{plugin_id}/{instance_id}/default_target",
+    summary="清除插件的默认调用目标",
+    response_model=_SchemaResponse[None],
+)
+def clear_plugin_instance_default_target(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    清除该插件的默认调用目标置位：仅当该实例当前正是默认调用目标时才会清除，
+    否则视为目标状态已经满足，直接返回成功
+    """
+    default_target = PluginConfigOper().get_default_target(plugin_id)
+    if default_target is not None and default_target.instance_id == instance_id:
+        PluginConfigOper().clear_default_target(plugin_id)
+    return _SchemaResponse(success=True)
+
+
+@router.get(
+    "/versions/{plugin_id}",
+    summary="获取插件已装版本与各实例的版本绑定",
+    response_model=_SchemaPluginVersionOverview,
+)
+def list_plugin_versions(
+    plugin_id: str, _: User = Depends(get_current_active_superuser)
+) -> Any:
+    """
+    列出插件磁盘上可加载的已装版本，以及各实例已生效版本、跟随开关与期望版本
+    """
+    try:
+        return PluginManager().list_plugin_versions(plugin_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.put(
+    "/versions/{plugin_id}/{instance_id}",
+    summary="设置插件实例绑定的版本",
+    response_model=_SchemaPluginInstanceVersionBinding,
+)
+def set_plugin_instance_version(
+    plugin_id: str,
+    instance_id: str,
+    version_data: _SchemaPluginInstanceVersionSet,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    设置插件实例绑定的版本与跟随开关，并立即停止再启动该实例完成切换；
+    切换失败时已生效版本保持旧值并以旧版本重新启动，随后重建该插件的定时服务、命令与接口
+    """
+    plugin_manager = PluginManager()
+    try:
+        binding = plugin_manager.set_plugin_instance_version(
+            plugin_id,
+            instance_id,
+            version=version_data.plugin_version,
+            follow_default_version=version_data.follow_default_version,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # 切换后实例对象已换新，定时服务、命令与接口需要整体重建才会指向新实例
+    register_plugin(plugin_id)
+    return binding
+
+
+@router.post(
+    "/versions/{plugin_id}/recycle",
+    summary="立即回收插件未被引用的旧版本目录",
+    response_model=_SchemaPluginVersionRecycleResult,
+)
+def recycle_plugin_versions(
+    plugin_id: str, _: User = Depends(get_current_active_superuser)
+) -> Any:
+    """
+    立即回收该插件没有实例引用、不在保留窗口内的旧版本目录，无需等待下次启动；
+    磁盘紧张等场景下用于主动清理，日常回收已经挂在启动流程里自动完成
+    """
+    plugin_manager = PluginManager()
+    try:
+        results = plugin_manager.recycle_plugin_versions(plugin_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    outcome = results.get(plugin_id, {"removed": [], "kept": {}})
+    return {"plugin_id": plugin_id, **outcome}
+
+
+def _require_known_plugin_instance(plugin_id: str, instance_id: str) -> None:
+    """
+    校验插件与实例均存在。
+    :raises HTTPException: 插件未登记或实例标识未登记，均返回 404
+    """
+    try:
+        instance_ids = {
+            item["instance_id"] for item in PluginManager().list_plugin_instances(plugin_id)
+        }
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    if instance_id not in instance_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"插件实例 {plugin_id}@{instance_id} 不存在",
         )
 
-        if success:
-            # 分身服务已完成运行态加载，此处只补齐宿主注册。
-            register_plugin(message)
-            # 将分身插件添加到原插件所在的文件夹中
-            _add_clone_to_plugin_folder(plugin_id, message)
-            return _SchemaResponse(success=True, message="插件分身创建成功")
-        else:
-            return _SchemaResponse(success=False, message=message)
-    except Exception as e:
-        logger.error(f"创建插件分身失败：{str(e)}")
-        return _SchemaResponse(success=False, message=f"创建插件分身失败：{str(e)}")
+
+@router.get(
+    "/loglevel/{plugin_id}",
+    summary="获取插件各实例的日志等级设置",
+    response_model=List[_SchemaPluginInstanceLogLevelInfo],
+)
+def plugin_instance_log_levels(
+    plugin_id: str, _: User = Depends(get_current_active_superuser)
+) -> Any:
+    """
+    列出插件各实例的日志等级配置（覆盖值，跟随全局时为空）与当前生效等级
+    """
+    try:
+        instances = PluginManager().list_plugin_instances(plugin_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    result = []
+    for info in instances:
+        instance_id = info["instance_id"]
+        override = get_plugin_instance_log_level_override(plugin_id, instance_id)
+        result.append(
+            _SchemaPluginInstanceLogLevelInfo(
+                instance_id=instance_id,
+                configured_level=override[0] if override else None,
+                expires_at=override[1] if override else None,
+                effective_level=get_effective_plugin_instance_log_level(plugin_id, instance_id),
+            )
+        )
+    return result
+
+
+@router.put(
+    "/loglevel/{plugin_id}/{instance_id}",
+    summary="设置插件实例的日志等级",
+    response_model=_SchemaResponse[None],
+)
+def set_plugin_instance_log_level_api(
+    plugin_id: str,
+    instance_id: str,
+    log_level_data: _SchemaPluginInstanceLogLevelSet,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    设置插件实例的日志等级覆盖，可选携带失效时间；写入配置表并立即在日志模块生效
+    """
+    _require_known_plugin_instance(plugin_id, instance_id)
+    normalized_level = (log_level_data.level or "").strip().upper()
+    if normalized_level not in LOG_LEVELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的日志等级：{log_level_data.level}",
+        )
+    PluginConfigOper().upsert(
+        plugin_id,
+        instance_id,
+        {"log_level": normalized_level, "log_expires_at": log_level_data.expires_at},
+    )
+    set_plugin_instance_log_level(
+        plugin_id, instance_id, normalized_level, log_level_data.expires_at
+    )
+    return _SchemaResponse(success=True)
+
+
+@router.delete(
+    "/loglevel/{plugin_id}/{instance_id}",
+    summary="清除插件实例的日志等级覆盖",
+    response_model=_SchemaResponse[None],
+)
+def clear_plugin_instance_log_level_api(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    清除插件实例的日志等级覆盖，运行期立即回落全局等级，配置表同步清空
+    """
+    _require_known_plugin_instance(plugin_id, instance_id)
+    PluginConfigOper().upsert(
+        plugin_id, instance_id, {"log_level": None, "log_expires_at": None}
+    )
+    clear_plugin_instance_log_level(plugin_id, instance_id)
+    return _SchemaResponse(success=True)
+
+
+@router.get(
+    "/logfiles/{plugin_id}/{instance_id}",
+    summary="列出插件实例的日志文件",
+    response_model=List[_SchemaPluginInstanceLogFileInfo],
+)
+def plugin_instance_log_files(
+    plugin_id: str,
+    instance_id: str,
+    _: User = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    列出插件实例日志目录下的全部日志文件（含滚动备份），按修改时间倒序排列
+    """
+    _require_known_plugin_instance(plugin_id, instance_id)
+    log_dir = get_plugin_instance_log_dir(plugin_id, instance_id)
+    if log_dir is None or not log_dir.exists():
+        return []
+    files = [item for item in log_dir.iterdir() if item.is_file()]
+    files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    return [
+        _SchemaPluginInstanceLogFileInfo(
+            name=item.name,
+            size=item.stat().st_size,
+            modified_at=datetime.fromtimestamp(item.stat().st_mtime),
+        )
+        for item in files
+    ]
 
 
 @router.get(
@@ -1009,109 +1312,24 @@ def uninstall_plugin(
     plugin_id: str, _: ApiPrincipal = Depends(get_current_active_superuser)
 ) -> Any:
     """
-    卸载插件
+    卸载插件：停止运行态、清理配置数据与源码目录，并注销已安装登记、动态 API、
+    定时任务与文件夹归属
     """
     plugin_manager = PluginManager()
-    virtual_instance = plugin_manager.get_plugin_instance(plugin_id)
-    source_instances = plugin_manager.get_plugin_source_instances(plugin_id)
-    if not virtual_instance and source_instances:
-        instance_ids = "、".join(item.instance_id for item in source_instances)
-        return _SchemaResponse(
-            success=False,
-            message=f"请先卸载该插件的分身：{instance_ids}",
-        )
-    config_oper = get_configured_system_config()
+    try:
+        plugin_manager.uninstall_plugin(plugin_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     # 删除已安装信息
+    config_oper = SystemConfigOper()
     install_plugins = config_oper.get(SystemConfigKey.UserInstalledPlugins) or []
-    for plugin in install_plugins:
-        if plugin == plugin_id:
-            install_plugins.remove(plugin)
-            break
-    config_oper.set(SystemConfigKey.UserInstalledPlugins, install_plugins)
+    if plugin_id in install_plugins:
+        install_plugins = [pid for pid in install_plugins if pid != plugin_id]
+        config_oper.set(SystemConfigKey.UserInstalledPlugins, install_plugins)
     # 移除插件API
     remove_plugin_api(plugin_id)
     # 移除插件服务
     remove_plugin_job(plugin_id)
-    # 判断是否为分身
-    plugin_class = plugin_manager.plugins.get(plugin_id)
-    if virtual_instance:
-        plugin_manager.delete_plugin_config(plugin_id, force=True)
-        plugin_manager.delete_plugin_data(plugin_id, force=True)
-        plugin_manager.delete_plugin_instance(plugin_id)
-    elif getattr(plugin_class, "is_clone", False):
-        # 如果是分身插件，则删除分身数据和配置
-        plugin_manager.delete_plugin_config(plugin_id)
-        plugin_manager.delete_plugin_data(plugin_id)
-        # 删除分身文件
-        plugin_base_dir = (
-            get_api_runtime_config_snapshot().root_path
-            / "app"
-            / "plugins"
-            / plugin_id.lower()
-        )
-        if plugin_base_dir.exists():
-            try:
-                shutil.rmtree(plugin_base_dir)
-                plugin_manager.plugins.pop(plugin_id, None)
-            except Exception as e:
-                logger.error(f"删除插件分身目录 {plugin_base_dir} 失败: {str(e)}")
     # 从插件文件夹中移除该插件
     remove_plugin_from_folders(plugin_id)
-    # 移除插件
-    plugin_manager.remove_plugin(plugin_id)
     return _SchemaResponse(success=True)
-
-
-def _add_clone_to_plugin_folder(original_plugin_id: str, clone_plugin_id: str):
-    """
-    将分身插件添加到原插件所在的文件夹中
-    :param original_plugin_id: 原插件ID
-    :param clone_plugin_id: 分身插件ID
-    """
-    try:
-        config_oper = get_configured_system_config()
-        # 获取插件文件夹配置
-        folders = config_oper.get(SystemConfigKey.PluginFolders) or {}
-
-        # 查找原插件所在的文件夹
-        target_folder = None
-        for folder_name, folder_data in folders.items():
-            if isinstance(folder_data, dict) and "plugins" in folder_data:
-                # 新格式：{"plugins": [...], "order": ..., "icon": ...}
-                if original_plugin_id in folder_data["plugins"]:
-                    target_folder = folder_name
-                    break
-            elif isinstance(folder_data, list):
-                # 旧格式：直接是插件列表
-                if original_plugin_id in folder_data:
-                    target_folder = folder_name
-                    break
-
-        # 如果找到了原插件所在的文件夹，则将分身插件也添加到该文件夹中
-        if target_folder:
-            folder_data = folders[target_folder]
-            if isinstance(folder_data, dict) and "plugins" in folder_data:
-                # 新格式
-                if clone_plugin_id not in folder_data["plugins"]:
-                    folder_data["plugins"].append(clone_plugin_id)
-                    logger.info(
-                        f"已将分身插件 {clone_plugin_id} 添加到文件夹 '{target_folder}' 中"
-                    )
-            elif isinstance(folder_data, list):
-                # 旧格式
-                if clone_plugin_id not in folder_data:
-                    folder_data.append(clone_plugin_id)
-                    logger.info(
-                        f"已将分身插件 {clone_plugin_id} 添加到文件夹 '{target_folder}' 中"
-                    )
-
-            # 保存更新后的文件夹配置
-            config_oper.set(SystemConfigKey.PluginFolders, folders)
-        else:
-            logger.info(
-                f"原插件 {original_plugin_id} 不在任何文件夹中，分身插件 {clone_plugin_id} 将保持独立"
-            )
-
-    except Exception as e:
-        logger.error(f"处理插件文件夹时出错：{str(e)}")
-        # 文件夹处理失败不影响插件分身创建的整体流程

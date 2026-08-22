@@ -21,6 +21,11 @@ import psutil
 from app.adapters.system.backup.database import verify_database_backup
 from app.adapters.system.backup.files import BackupFiles
 from app.runtime.config import settings
+from app.runtime.log import PLUGIN_LOG_FILENAME
+from app.runtime.compat.plugin_version_readiness import (
+    PluginVersionReadiness,
+    scan_plugin_version_readiness,
+)
 from app.runtime.topology import process_topology_issue
 from app.doctor.models import DoctorFinding, DoctorFindingStatus, DoctorReport, DoctorSeverity
 from app.adapters.system.host import SystemUtils
@@ -143,6 +148,7 @@ def default_checks() -> list[CheckFunc]:
         _check_database,
         _check_frontend_assets,
         _check_logs,
+        _check_plugin_version_layout,
         _check_docker,
         _check_safe_mode,
     ]
@@ -976,19 +982,67 @@ def _check_frontend_assets(runner: DoctorRunnerProtocol) -> None:
     )
 
 
+def _legacy_plugin_log_files() -> list[Path]:
+    """列出旧版扁平布局下的插件日志文件：`settings.LOG_PATH/plugins/<插件id>.log*`。
+
+    旧文件不迁移，仍可能保留排障价值，因此继续扫描；新日志改按实例目录存放，
+    见 `_new_layout_plugin_log_files`。
+    """
+    plugin_log_dir = settings.LOG_PATH / "plugins"
+    if not plugin_log_dir.exists():
+        return []
+    return sorted(plugin_log_dir.rglob("*.log"))
+
+
+def _new_layout_plugin_log_files() -> list[Path]:
+    """列出新版插件实例日志目录下的日志文件：
+    `settings.PLUGIN_DATA_PATH/<插件id>/<实例id>/logs/plugin.log*`。
+    """
+    plugin_data_root = settings.PLUGIN_DATA_PATH
+    if not plugin_data_root.exists():
+        return []
+    return sorted(plugin_data_root.rglob(f"{PLUGIN_LOG_FILENAME}*"))
+
+
+def _plugin_logger_name_for(path: Path, legacy_root: Path, new_layout_root: Path) -> Optional[str]:
+    """从日志文件路径推断其所属插件标识，供核心日志中的插件线索识别使用。
+
+    :param path: 日志文件路径
+    :param legacy_root: 旧版扁平布局的插件日志目录
+    :param new_layout_root: 新版插件持久化根目录
+    :return: 插件标识（小写）；无法归属任何一种布局时为 None
+    """
+    if legacy_root in path.parents:
+        return path.stem.lower()
+    if new_layout_root in path.parents:
+        try:
+            return path.relative_to(new_layout_root).parts[0].lower()
+        except (ValueError, IndexError):
+            return None
+    return None
+
+
 def _check_logs(runner: DoctorRunnerProtocol) -> None:
-    """扫描近期日志，并区分核心运行异常与插件扩展异常。"""
+    """扫描近期日志，并区分核心运行异常与插件扩展异常。
+
+    插件日志同时扫描旧版扁平布局（不迁移，仍留在磁盘上）和新版按实例分目录的
+    布局，避免仅适配新位置导致读取端看不到新写入的日志。
+    """
     log_files = [
         _backend_app_log_file(),
         _backend_stdio_log_file(),
         _frontend_stdio_log_file(),
     ]
-    plugin_log_dir = settings.LOG_PATH / "plugins"
-    plugin_logger_names: set[str] = set()
-    if plugin_log_dir.exists():
-        plugin_log_files = sorted(plugin_log_dir.rglob("*.log"))
-        plugin_logger_names = {path.stem.lower() for path in plugin_log_files}
-        log_files.extend(plugin_log_files[:20])
+    legacy_plugin_log_dir = settings.LOG_PATH / "plugins"
+    new_plugin_log_root = settings.PLUGIN_DATA_PATH
+    legacy_plugin_log_files = _legacy_plugin_log_files()
+    new_plugin_log_files = _new_layout_plugin_log_files()
+    plugin_logger_names: set[str] = {
+        name
+        for path in (*legacy_plugin_log_files, *new_plugin_log_files)
+        if (name := _plugin_logger_name_for(path, legacy_plugin_log_dir, new_plugin_log_root))
+    }
+    log_files.extend((*legacy_plugin_log_files, *new_plugin_log_files)[:20])
 
     found_any = False
     entries: dict[str, list[tuple[Path, str]]] = {
@@ -1000,7 +1054,9 @@ def _check_logs(runner: DoctorRunnerProtocol) -> None:
             continue
         found_any = True
         lines = _recent_log_lines(_tail_lines(path))
-        is_plugin_log = plugin_log_dir in path.parents
+        is_plugin_log = (
+            legacy_plugin_log_dir in path.parents or new_plugin_log_root in path.parents
+        )
         if is_plugin_log:
             scoped_errors = [(True, _find_error_lines(lines))]
         else:
@@ -1069,6 +1125,96 @@ def _check_logs(runner: DoctorRunnerProtocol) -> None:
                 "启动日志和插件日志；插件扩展告警不参与核心健康状态。"
             ),
             recommendation="如果问题仍存在，请结合具体操作时间扩大日志范围排查。",
+        )
+
+
+def _plugins_root_dir() -> Path:
+    return settings.ROOT_PATH / "app" / "plugins"
+
+
+def _installed_plugin_dirs(plugins_dir: Path) -> list[Path]:
+    """按插件加载器同样的过滤规则列出已安装插件源码目录。"""
+    if not plugins_dir.exists():
+        return []
+    return sorted(
+        (
+            entry for entry in plugins_dir.iterdir()
+            if entry.is_dir()
+            and not entry.name.startswith("_")
+            and (entry / "__init__.py").exists()
+        ),
+        key=lambda entry: entry.name,
+    )
+
+
+def _plugin_version_readiness_detail(readiness: PluginVersionReadiness) -> str:
+    """把单个插件的多版本目录布局扫描结论拼装成可读文本。"""
+    sections: list[str] = []
+    if readiness.self_referential_imports:
+        hits = "\n".join(
+            f"  {hit.file}:{hit.line} `{hit.statement}` → {hit.suggestion}"
+            for hit in readiness.self_referential_imports
+        )
+        sections.append(f"自引用绝对 import（版本化后会 ModuleNotFoundError，须改为相对 import）：\n{hits}")
+    if readiness.cross_plugin_imports:
+        hits = "\n".join(
+            f"  {hit.file}:{hit.line} `{hit.statement}` 依赖插件 {hit.target_plugin_id}"
+            for hit in readiness.cross_plugin_imports
+        )
+        sections.append(f"跨插件依赖（多版本下需重新评估兼容性）：\n{hits}")
+    if readiness.shared_base_models:
+        hits = "\n".join(
+            f"  {hit.file}:{hit.line} class {hit.class_name}"
+            for hit in readiness.shared_base_models
+        )
+        sections.append(f"在宿主共享声明基类 Base 上定义模型（多版本会同名建表冲突，无法并存）：\n{hits}")
+    if readiness.unparsed_files:
+        sections.append("以下文件无法解析，未参与本次静态扫描：" + "、".join(readiness.unparsed_files))
+    if not sections:
+        return "未发现自引用绝对 import、跨插件依赖或共享基类模型定义，适配多版本目录布局无需改动。"
+    return "\n".join(sections)
+
+
+def _check_plugin_version_layout(runner: DoctorRunnerProtocol) -> None:
+    """扫描已安装插件源码，报告其对按版本分目录布局（app/plugins/<pid>/<版本号>/）的适配情况。"""
+    plugins_dir = _plugins_root_dir()
+    plugin_dirs = _installed_plugin_dirs(plugins_dir)
+    if not plugin_dirs:
+        runner.add(
+            finding_id="plugins.version_layout.none",
+            severity=DoctorSeverity.Info,
+            status=DoctorFindingStatus.Skipped,
+            title="未发现已安装插件源码",
+            detail=f"{plugins_dir} 下没有包含 __init__.py 的插件目录。",
+            recommendation="无需处理。",
+            affects_report_status=False,
+        )
+        return
+
+    for plugin_dir in plugin_dirs:
+        readiness = scan_plugin_version_readiness(plugin_dir.name, plugin_dir)
+        has_issue = not readiness.is_clean
+        runner.add(
+            finding_id=f"plugins.version_layout.{plugin_dir.name.lower()}",
+            severity=DoctorSeverity.Warn if has_issue else DoctorSeverity.Info,
+            status=DoctorFindingStatus.Degraded if has_issue else DoctorFindingStatus.Ok,
+            title=f"插件 {plugin_dir.name} 多版本目录布局适配情况",
+            detail=_plugin_version_readiness_detail(readiness),
+            recommendation=(
+                "按上方建议把自引用绝对 import 改成相对 import；"
+                "跨插件依赖需在多版本环境下重新确认兼容性；"
+                "在共享 Base 上定义模型的插件需迁移到插件自有的声明式基类，否则无法与自身其他版本并存。"
+                if has_issue
+                else "无需处理。"
+            ),
+            affects_report_status=False,
+            context={
+                "plugin_id": plugin_dir.name,
+                "has_self_referential_imports": readiness.has_self_referential_imports,
+                "has_cross_plugin_imports": readiness.has_cross_plugin_imports,
+                "has_shared_base_models": readiness.has_shared_base_models,
+                "unparsed_files": list(readiness.unparsed_files),
+            },
         )
 
 

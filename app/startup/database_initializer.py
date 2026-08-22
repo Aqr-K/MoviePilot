@@ -17,8 +17,8 @@ from app.db.models import load_all_models
 from app.db.session import SessionFactory, async_session_scope
 from app.db.uow import configure_transaction_runners
 from app.runtime.log import logger
-from app.startup.database import build_database_governance
-from app.startup.transaction import TransactionalWriteRunner
+from app.startup.bindings.database import build_database_governance
+from app.startup.ports.transaction import TransactionalWriteRunner
 
 
 def _configure_migration_transaction_runner() -> None:

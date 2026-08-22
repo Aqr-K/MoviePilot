@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.runtime.config import global_vars
 from app.runtime.events import eventmanager, Event
-from app.application.chain.data import WorkflowPortProxy as WorkflowOper
+from app.application.orchestration.data import WorkflowPortProxy as WorkflowOper
 from app.foundation.reflection import ModuleHelper
 from app.runtime.log import logger
 from app.schemas.workflow import ActionContext

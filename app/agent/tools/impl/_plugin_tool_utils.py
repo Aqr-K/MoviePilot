@@ -1,11 +1,10 @@
 """插件 Agent 工具共享辅助方法"""
 
 import json
-import shutil
 from typing import Any, Optional
 
-from app.runtime.config import settings
 from app.application.plugin.runtime import get_plugin_manager
+from app.application.plugin.runtime import get_plugin_manager as PluginManager
 from app.application.plugin.install import PluginInstallCommand
 from app.application.configuration import get_configured_system_config as SystemConfigOper
 from app.adapters.external.server import MoviePilotServerHelper
@@ -336,26 +335,20 @@ async def install_plugin_runtime(
         return None
 
     async def reload_runtime(target_id: str) -> object:
-        """通过 Agent 阻塞任务适配器重载源插件及其虚拟实例。"""
+        """通过 Agent 阻塞任务适配器重建插件实例。"""
         return await run_agent_blocking(
             "plugin",
-            plugin_manager.reload_plugin_tree,
+            plugin_manager.reload_plugin,
             target_id,
         )
 
     async def refresh_registrations(target_id: str) -> object:
-        """通过 Agent 阻塞任务适配器刷新源插件及其虚拟实例注册。"""
-        result = None
-        reload_targets = list(
-            plugin_manager.get_plugin_reload_targets(target_id)
-        ) or [target_id]
-        for reload_target in reload_targets:
-            result = await run_agent_blocking(
-                "plugin",
-                refresh_plugin_registrations,
-                reload_target,
-            )
-        return result
+        """通过 Agent 阻塞任务适配器刷新服务、命令和动态路由。"""
+        return await run_agent_blocking(
+            "plugin",
+            refresh_plugin_registrations,
+            target_id,
+        )
 
     with plugin_manager.suppress_plugin_monitor(plugin_id):
         result = await PluginInstallCommand(
@@ -387,52 +380,28 @@ async def install_plugin_runtime(
 
 async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
     """
-    按现有卸载逻辑移除插件，并清理运行态注册与分组信息。
+    卸载插件：停止运行态、清理配置数据与源码目录，并注销已安装登记、动态 API、
+    定时任务与文件夹归属
+
+    :param plugin_id: 插件ID
+    :return: 预留的清理结果字段，当前为空字典
+    :raises LookupError: 插件不存在
     """
     from app.application.plugin.folders import remove_plugin_from_folders
     from app.application.plugin.routes import remove_plugin_api
     from app.application.scheduling import remove_plugin_job
 
-    plugin_manager = get_plugin_manager()
-    virtual_instance = plugin_manager.get_plugin_instance(plugin_id)
-    source_instances = plugin_manager.get_plugin_source_instances(plugin_id)
-    if not virtual_instance and source_instances:
-        instance_ids = "、".join(item.instance_id for item in source_instances)
-        raise ValueError(f"请先卸载该插件的分身：{instance_ids}")
+    plugin_manager = PluginManager()
+    plugin_manager.uninstall_plugin(plugin_id)
 
     config_oper = SystemConfigOper()
     install_plugins = config_oper.get(SystemConfigKey.UserInstalledPlugins) or []
     if plugin_id in install_plugins:
-        install_plugins = [plugin for plugin in install_plugins if plugin != plugin_id]
+        install_plugins = [pid for pid in install_plugins if pid != plugin_id]
         await config_oper.async_set(SystemConfigKey.UserInstalledPlugins, install_plugins)
 
     remove_plugin_api(plugin_id)
     remove_plugin_job(plugin_id)
-
-    plugin_class = plugin_manager.plugins.get(plugin_id)
-    was_clone = bool(getattr(plugin_class, "is_clone", False))
-    clone_files_removed = False
-
-    if virtual_instance:
-        plugin_manager.delete_plugin_config(plugin_id, force=True)
-        plugin_manager.delete_plugin_data(plugin_id, force=True)
-        plugin_manager.delete_plugin_instance(plugin_id)
-    elif was_clone:
-        plugin_manager.delete_plugin_config(plugin_id)
-        plugin_manager.delete_plugin_data(plugin_id)
-        plugin_base_dir = settings.ROOT_PATH / "app" / "plugins" / plugin_id.lower()
-        if plugin_base_dir.exists():
-            try:
-                shutil.rmtree(plugin_base_dir)
-                plugin_manager.plugins.pop(plugin_id, None)
-                clone_files_removed = True
-            except Exception:
-                clone_files_removed = False
-
     remove_plugin_from_folders(plugin_id)
-    plugin_manager.remove_plugin(plugin_id)
 
-    return {
-        "was_clone": was_clone,
-        "clone_files_removed": clone_files_removed,
-    }
+    return {}

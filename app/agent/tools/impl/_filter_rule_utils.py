@@ -8,8 +8,8 @@ from app.runtime.events import eventmanager
 from app.application.agentdata import SubscribePort as SubscribeOper
 from app.application.configuration import get_configured_system_config as SystemConfigOper
 from app.application.rules import RuleHelper
-from app.application.rules import RuleParser
-from app.application.rules import BUILTIN_RULE_SET
+from app.domain.filterrule import RuleParser
+from app.domain.filterrule import BUILTIN_RULE_SET
 from app.schemas.rule import CustomRule
 from app.schemas.system import FilterRuleGroup
 from app.schemas.event import ConfigChangeEventData

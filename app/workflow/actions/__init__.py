@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar, Union
 
-from app.chain import ChainBase
-from app.application.configuration import get_configured_system_config as SystemConfigOper
+from app.application.orchestration import ChainBase
+from app.db.oper.systemconfig import SystemConfigOper
 from app.schemas.workflow import ActionContext
 from app.schemas.workflow import ActionParams
 from app.schemas.workflow import ActionResult

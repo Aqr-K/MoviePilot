@@ -24,7 +24,7 @@ try:
 except Exception:
     pass
 
-from app.chain.system import SystemChain
+from app.application.orchestration.system import SystemChain
 from app.application.plugin.runtime import get_plugin_manager
 from app.runtime.config import global_vars, settings
 from app.runtime.health import get_application_health
@@ -33,6 +33,7 @@ from app.adapters.external.server import MoviePilotServerHelper
 from app.runtime.state import SystemHelper
 from app.runtime.log import logger, LoggerManager
 from app.startup.command_initializer import init_command, stop_command, restart_command
+from app.startup.dataports_initializer import configure_data_ports
 from app.startup.domain_initializer import configure_domain_dependencies
 from app.startup.modules_initializer import init_modules, stop_modules
 from app.startup.monitor_initializer import stop_monitor, init_monitor
@@ -195,8 +196,15 @@ def build_lifecycle_components(app: FastAPI) -> tuple[LifecycleComponent, ...]:
             start_timeout_seconds=30,
         ),
         LifecycleComponent(
-            name="路由",
+            name="数据端口装配",
             dependencies=("数据库连接预算",),
+            start=configure_data_ports,
+            start_order=55,
+            start_timeout_seconds=30,
+        ),
+        LifecycleComponent(
+            name="路由",
+            dependencies=("数据端口装配",),
             start=lambda: init_routers(app),
             start_order=60,
             start_timeout_seconds=30,

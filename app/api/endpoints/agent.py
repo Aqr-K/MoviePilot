@@ -42,13 +42,12 @@ from app.agent.runtime_loader import (
     get_moviepilot_agent_type,
     get_running_agent_manager,
 )
-from app.chain.message import MessageChain
-from app.command import Command
+from app.application.orchestration.message import MessageChain
+from app.runtime.command import Command
 from app.runtime.config import global_vars
 from app.runtime.events import Event, EventManager
 from app.api.principal import ApiPrincipal
-from app.api.dependencies.agent import get_agent_chat_service
-from app.api.dependencies.auth import get_current_active_user
+from app.api.deps import get_agent_chat_service, get_current_active_user
 from app.application.messaging.chat import (
     AgentChatRecord,
     AgentChatService,
@@ -66,6 +65,7 @@ from app.application.messaging.agent import (
 from app.application.messaging.router import has_pending_interaction
 from app.runtime.localization import LocaleHelper
 from app.runtime.log import logger
+from app.schemas.notification import channel_identity
 from app.schemas.types import EventType, NotificationChannel
 
 router = ResponseAPIRouter()
@@ -1298,9 +1298,7 @@ def _extract_web_agent_message_from_event_data(
         logger.debug(f"解析WebAgent通知事件失败: {err}")
         return None
 
-    channel = message.channel
-    channel_value = channel.value if isinstance(channel, NotificationChannel) else channel
-    if channel_value != NotificationChannel.WebAgent.value:
+    if channel_identity(message.channel) != NotificationChannel.WebAgent.value:
         return None
     return message
 
@@ -1331,9 +1329,7 @@ def _get_web_agent_message_user_id(message: _SchemaMessage) -> Optional[str]:
     :return: 用户 ID 字符串，事件不属于 WebAgent 时返回 None
     """
     try:
-        channel = message.channel
-        channel_value = channel.value if isinstance(channel, NotificationChannel) else channel
-        if channel_value != NotificationChannel.WebAgent.value:
+        if channel_identity(message.channel) != NotificationChannel.WebAgent.value:
             return None
         user_id = message.userid
         return str(user_id) if user_id is not None else None

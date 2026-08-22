@@ -11,18 +11,10 @@ from app.agent.runtime_loader import (
 )
 from app.agent.llm.gateway import register_llm_provider_runtime
 from app.application.agent import register_agent_service_providers
-from app.application.messaging.skill import register_skill_catalog_provider
 from app.runtime.config import settings
 from app.runtime.events import Event, eventmanager
 from app.runtime.log import logger
 from app.schemas.types import EventType
-
-
-def _get_skill_catalog() -> Any:
-    """按需返回 Agent 技能目录实现，供消息应用层消费端口。"""
-    from app.agent.skills.registry import SkillHelper
-
-    return SkillHelper()
 
 
 def _get_llm_provider_runtime() -> Any:
@@ -30,6 +22,22 @@ def _get_llm_provider_runtime() -> Any:
     from app.agent.llm.provider import LLMProviderManager
 
     return LLMProviderManager()
+
+
+def _configure_agent_tool_contract_base() -> None:
+    """把智能体工具基类注入插件工具声明的契约校验。
+
+    插件的启动次序排在模块服务之后，本函数在模块服务阶段的 `init_agent()` 中
+    执行，早于插件加载；使插件登记 `provides_agent_tools()` 时基类已就绪，
+    能够判定实现类的真实继承关系。与是否启用 AI 智能体功能无关，因此不受
+    `AI_AGENT_ENABLE` 开关影响。
+    """
+    from app.agent.tools.base import MoviePilotTool
+    from app.runtime.extensions.admission.agent_tool import (
+        configure_agent_tool_base,
+    )
+
+    configure_agent_tool_base(MoviePilotTool)
 
 
 # 嵌入式启动器可显式注入 manager；常规进程使用 Capability Runtime。
@@ -90,6 +98,13 @@ def _get_manual_redo_prompt_builder() -> Any:
     return build_manual_redo_prompt
 
 
+def _get_skill_helper() -> Any:
+    """首个技能管理请求才导入 SkillHelper 单例。"""
+    from app.agent.skills.registry import SkillHelper
+
+    return SkillHelper()
+
+
 async def _handle_agent_config_changed(event: Event) -> None:
     """把配置事件交给当前全局 initializer，避免监听器持有过期实例。"""
     await agent_initializer.handle_config_changed(event)
@@ -115,6 +130,7 @@ class AgentInitializer:
         初始化AI智能体管理器
         """
         try:
+            _configure_agent_tool_contract_base()
             self._shutdown_complete = False
             if agent_manager is not None:
                 if not settings.AI_AGENT_ENABLE:
@@ -185,8 +201,8 @@ register_agent_service_providers(
     capability_manager_provider=_get_capability_manager,
     llm_helper_provider=_get_llm_helper,
     manual_redo_prompt_builder_provider=_get_manual_redo_prompt_builder,
+    skill_helper_provider=_get_skill_helper,
 )
-register_skill_catalog_provider(_get_skill_catalog)
 register_llm_provider_runtime(_get_llm_provider_runtime)
 
 

@@ -16,10 +16,8 @@ from app.agent.tools.impl._system_setting_utils import (
     should_redact_setting,
 )
 from app.runtime.config import settings
-from app.application.configuration import (
-    SystemConfigReader,
-    get_configured_system_config as SystemConfigOper,
-)
+from app.application.configuration import SystemConfigReader
+from app.application.service_config import read_system_setting
 from app.runtime.log import logger
 
 
@@ -101,10 +99,6 @@ class QuerySystemSettingsTool(MoviePilotTool):
         super().__init__(session_id=session_id, user_id=user_id, **kwargs)
         self._system_config = system_config
 
-    def _get_system_config(self) -> SystemConfigReader:
-        """返回显式注入端口，旧构造形态则延迟读取组合根服务。"""
-        return self._system_config or SystemConfigOper()
-
     async def _run_confirmed(self, **kwargs) -> str:
         """仅供宿主在消费有效确认后执行一次未脱敏读取。"""
         self._secret_read_confirmed = True
@@ -126,10 +120,16 @@ class QuerySystemSettingsTool(MoviePilotTool):
         return f"查询系统设置分组: {group}"
 
     def _load_setting_value(self, spec: SettingSpec):
-        """读取指定设置项的当前值。"""
+        """读取指定设置项的当前值。
+
+        显式注入了配置读取端口时优先使用该端口；否则退回按配置键分流的
+        `read_system_setting`，服务实例配置族的事实源才不会被绕过。
+        """
         if spec.source == "settings":
             return getattr(settings, spec.key)
-        return self._get_system_config().get(spec.systemconfig_key)
+        if self._system_config is not None:
+            return self._system_config.get(spec.systemconfig_key)
+        return read_system_setting(spec.systemconfig_key)
 
     @staticmethod
     def _summarize_value(value, *, redacted: bool = False) -> dict:

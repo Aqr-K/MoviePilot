@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.application.chain.durable_events import (
+from app.application.orchestration.durable_events import (
     ChainDurableEventWriter,
     TransferHistoryRef,
     download_added_event_key,
@@ -20,7 +20,7 @@ from app.application.outbox import DurableEventCommand, OutboxIntent
 from app.db.oper.downloadhistory import DownloadHistoryOper
 from app.db.oper.transferhistory import TransferHistoryOper
 from app.db.uow import SqlAlchemyUnitOfWork
-from app.startup.outbox import SqlAlchemyOutboxRepository
+from app.startup.ports.outbox import SqlAlchemyOutboxRepository
 
 
 class _StagingTransferHistoryWriter:

@@ -16,12 +16,13 @@ from app.agent.policy.sanitizer import (
     summarize_result,
 )
 from app.agent.tools.tags import ToolTag
-from app.chain import ChainBase
+from app.application.orchestration import ChainBase
 from app.runtime.config import settings
 from app.application.messaging.agent import matches_channel_admin
 from app.runtime.extensions.service_config import ServiceConfigHelper
 from app.runtime.log import logger
 from app.schemas.message import Message
+from app.schemas.notification import resolve_channel
 from app.schemas.types import NotificationChannel, MessageType
 
 if TYPE_CHECKING:
@@ -612,9 +613,8 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
 
         user_id_str = str(self._user_id) if self._user_id else None
 
-        try:
-            channel = NotificationChannel(self._channel)
-        except ValueError:
+        channel = resolve_channel(self._channel)
+        if channel is None:
             return False
 
         try:

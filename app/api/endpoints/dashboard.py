@@ -14,13 +14,12 @@ from app.schemas.dashboard import Statistic as _SchemaStatistic
 from app.schemas.dashboard import Storage as _SchemaStorage
 from app.schemas.response import Response as _SchemaResponse
 from app.api.response import ResponseAPIRouter
-from app.chain.dashboard import DashboardChain
-from app.chain.storage import StorageChain
+from app.application.orchestration.dashboard import DashboardChain
+from app.application.orchestration.storage import StorageChain
 from app.api.context import get_api_runtime_config, resolve_api_runtime_config
 from app.application.configuration import ApiRuntimeConfig
 from app.adapters.web.security.access import verify_apitoken
-from app.api.dependencies.auth import get_current_active_superuser
-from app.api.dependencies.history import get_dashboard_query_service
+from app.api.deps import get_current_active_superuser, get_dashboard_query_service
 from app.application.dashboard import DashboardQueryService
 from app.schemas.types import StorageAction
 from app.application.directory import DirectoryHelper

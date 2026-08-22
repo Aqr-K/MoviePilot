@@ -10,7 +10,7 @@ from app.schemas.token import MfaChallenge as _SchemaMfaChallenge
 from app.schemas.token import Token as _SchemaToken
 from app.schemas.token import TokenPayload as _SchemaTokenPayload
 from app.api.response import RAW_RESPONSE_OPENAPI_KEY, ResponseAPIRouter
-from app.chain.user import MfaRequired, UserChain
+from app.application.orchestration.user import MfaRequired, UserChain
 from app.adapters.web.security.access import set_or_refresh_resource_token_cookie
 from app.application.security.token import create_access_token
 from app.api.context import get_api_runtime_config, resolve_api_runtime_config

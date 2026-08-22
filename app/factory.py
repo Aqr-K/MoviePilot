@@ -20,6 +20,7 @@ from app.adapters.web.security.access import (
     verify_token,
 )
 from app.application.security.token import create_access_token, decode_access_token
+from app.runtime.extensions.contract.instance import matches_extension
 from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.config import settings
 from app.runtime.correlation import get_correlation_id
@@ -362,6 +363,7 @@ def create_app() -> FastAPI:
             "/redoc",
         },
         log=logger,
+        route_matches=matches_extension,
     ))
 
     return _app

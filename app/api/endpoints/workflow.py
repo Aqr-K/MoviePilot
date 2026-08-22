@@ -14,7 +14,7 @@ from app.application.workflow import (
     WorkflowMutationCommand,
     WorkflowQueryService,
 )
-from app.chain.workflow import WorkflowChain
+from app.workflow.service import WorkflowChain
 from app.application.plugin.runtime import get_plugin_manager as PluginManager
 from app.workflow import WorkFlowManager
 from app.api.dependencies.auth import (
