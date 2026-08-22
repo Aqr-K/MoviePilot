@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.base import DbOper
 from app.db.models.message import Message
-from app.schemas.notification import NotificationChannel
+from app.schemas.notification import ChannelRef, channel_identity
 from app.schemas.message import MessageType
 
 
@@ -19,7 +19,7 @@ class MessageOper(DbOper):
         super().__init__(db)
 
     def add(self,
-            channel: Optional[NotificationChannel] = None,
+            channel: Optional[ChannelRef] = None,
             source: Optional[str] = None,
             mtype: Optional[MessageType] = None,
             title: Optional[str] = None,
@@ -44,7 +44,7 @@ class MessageOper(DbOper):
         :param note: 附件json
         """
         kwargs.update({
-            "channel": channel.value if channel else '',
+            "channel": channel_identity(channel) or '',
             "source": source,
             "mtype": mtype.value if mtype else '',
             "title": title,
@@ -66,7 +66,7 @@ class MessageOper(DbOper):
         return self._execute_sync_write(message.create_and_to_dict)
 
     async def async_add(self,
-                        channel: Optional[NotificationChannel] = None,
+                        channel: Optional[ChannelRef] = None,
                         source: Optional[str] = None,
                         mtype: Optional[MessageType] = None,
                         title: Optional[str] = None,
@@ -81,7 +81,7 @@ class MessageOper(DbOper):
         异步新增消息
         """
         kwargs.update({
-            "channel": channel.value if channel else '',
+            "channel": channel_identity(channel) or '',
             "source": source,
             "mtype": mtype.value if mtype else '',
             "title": title,

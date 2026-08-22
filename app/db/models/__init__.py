@@ -17,7 +17,9 @@ _MODEL_EXPORTS = {
     "Message": ("app.db.models.message", "Message"),
     "OutboxMessage": ("app.db.models.outbox", "OutboxMessage"),
     "PassKey": ("app.db.models.passkey", "PassKey"),
+    "PluginConfig": ("app.db.models.pluginconfig", "PluginConfig"),
     "PluginData": ("app.db.models.plugindata", "PluginData"),
+    "ServiceConfig": ("app.db.models.serviceconfig", "ServiceConfig"),
     "Site": ("app.db.models.site", "Site"),
     "SiteIcon": ("app.db.models.siteicon", "SiteIcon"),
     "SiteStatistic": ("app.db.models.sitestatistic", "SiteStatistic"),
@@ -32,6 +34,7 @@ _MODEL_EXPORTS = {
     "TransferPending": ("app.db.models.transferpending", "TransferPending"),
     "User": ("app.db.models.user", "User"),
     "UserConfig": ("app.db.models.userconfig", "UserConfig"),
+    "UserIdentity": ("app.db.models.user_identity", "UserIdentity"),
     "Workflow": ("app.db.models.workflow", "Workflow"),
 }
 
