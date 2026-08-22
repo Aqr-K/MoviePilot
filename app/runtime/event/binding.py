@@ -18,10 +18,11 @@ class EventHandlerBinding:
     instance: Optional[Any]
     owner_name: str
     run_sync_in_threadpool: bool = False
+    instance_key: Optional[str] = None
 
 
 HandlerInstanceResolver = Callable[
-    [Type[Any]], Optional[EventHandlerBinding]
+    [Type[Any]], Optional[list[EventHandlerBinding]]
 ]
 
 
@@ -33,10 +34,17 @@ class EventBindingResolver:
         *,
         lock: Any,
         resolvers: Callable[[], dict[str, HandlerInstanceResolver]],
+        instance_enabled: Optional[Callable[[Type[Any], Optional[str]], bool]] = None,
     ) -> None:
-        """绑定 resolver 存储，并记录未命中的处理器用于启动诊断。"""
+        """绑定 resolver 存储，并记录未命中的处理器用于启动诊断。
+
+        :param lock: 保护 resolver 存储的锁
+        :param resolvers: 已登记实例解析器的取用函数
+        :param instance_enabled: 判定某个实例键是否仍启用的谓词，缺省时不筛选
+        """
         self._lock = lock
         self._resolvers = resolvers
+        self._instance_enabled = instance_enabled
         self._unresolved: set[str] = set()
 
     def register(self, name: str, resolver: HandlerInstanceResolver) -> None:
@@ -110,18 +118,29 @@ class EventBindingResolver:
     def resolve(
         self,
         handler: Callable,
-    ) -> Optional[tuple[Callable, EventHandlerBinding, str, str]]:
-        """通过显式 resolver 解析当前实例方法；自由函数直接返回。"""
+    ) -> Optional[
+        tuple[Callable, EventHandlerBinding, str, str]
+        | list[tuple[Callable, EventHandlerBinding, str, str]]
+    ]:
+        """解析处理器的实例绑定。
+
+        自由函数不属于任何类，直调路径固定唯一，返回单个绑定元组；托管类方法
+        按已登记 resolver 解析，返回绑定列表（可能为空列表，表示该类当前没有
+        启用实例，归属已单独停用实例的绑定同样被剔除，兄弟实例继续参与调度）；
+        声明类不可解析时（插件重载 stop 阶段清除模块缓存后，窗口期内残留的旧
+        类方法声明无法定位声明类，直接调用原始函数会绕过实例绑定，旧签名可能
+        与事件调用约定不一致）返回 ``None``，调用方须整体跳过本次执行，等待
+        重载完成后按新 handler 注册自愈。
+        :param handler: 装饰阶段登记的处理器
+        :return: 单个绑定元组、绑定元组列表，或 ``None``
+        """
         owner_class = self.owner_class(handler)
-        method_name = getattr(
+        declared_method_name = getattr(
             handler,
             "__name__",
             self.parse_handler_names(handler)[1],
         )
         if owner_class is None:
-            # 插件重载会先清除模块缓存，窗口期内残留的旧类方法声明无法定位声明类；
-            # 此时直接调用原始函数会绕过实例绑定（旧签名可能与事件调用约定不一致），
-            # 因此按未绑定处理跳过，等待重载完成后按新 handler 注册自愈。
             if self.is_class_method_declaration(handler):
                 self._record_unresolved(
                     EventRegistry.handler_identifier(handler),
@@ -133,42 +152,69 @@ class EventBindingResolver:
                 owner_name=EventRegistry.handler_identifier(handler),
                 run_sync_in_threadpool=True,
             )
-            return handler, binding, "", method_name
+            return (handler, binding, "", declared_method_name)
 
         with self._lock:
             resolvers = tuple(self._resolvers().items())
-        binding = None
+        bindings = None
         resolver_name = ""
         for name, resolver in resolvers:
             candidate = resolver(owner_class)
             if candidate is not None:
-                binding = candidate
+                bindings = candidate
                 resolver_name = name
                 break
-        if binding is None:
+        if bindings is None:
             self._record_unresolved(
                 EventRegistry.handler_identifier(handler),
                 "事件处理器未绑定显式 resolver，已跳过：%s",
             )
-            return None
+            return []
         logger.debug(
             "事件处理器绑定：%s -> %s",
             EventRegistry.handler_identifier(handler),
             resolver_name,
         )
-        if binding.instance is None:
-            return None
-        method = getattr(binding.instance, method_name, None)
-        if not callable(method):
-            fallback_name = self.parse_handler_names(handler)[1]
-            method = getattr(binding.instance, fallback_name, None)
-            if fallback_name == method_name or not callable(method):
-                logger.warning(
-                    "事件处理器 %s 无法解析为实例方法 %s.%s，跳过执行",
-                    EventRegistry.handler_identifier(handler),
-                    owner_class.__name__,
-                    method_name,
-                )
-                return None
-            method_name = fallback_name
-        return method, binding, owner_class.__name__, method_name
+        resolved: list[tuple[Callable, EventHandlerBinding, str, str]] = []
+        for binding in bindings:
+            if binding.instance is None:
+                continue
+            if self._instance_enabled and not self._instance_enabled(
+                owner_class,
+                binding.instance_key,
+            ):
+                continue
+            method_name = declared_method_name
+            method = getattr(binding.instance, method_name, None)
+            if not callable(method):
+                fallback_name = self.parse_handler_names(handler)[1]
+                method = getattr(binding.instance, fallback_name, None)
+                if fallback_name == method_name or not callable(method):
+                    logger.warning(
+                        "事件处理器 %s 无法解析为实例方法 %s.%s，跳过执行",
+                        EventRegistry.handler_identifier(handler),
+                        owner_class.__name__,
+                        method_name,
+                    )
+                    continue
+                method_name = fallback_name
+            resolved.append((method, binding, owner_class.__name__, method_name))
+        return resolved
+
+    @staticmethod
+    def as_binding_sequence(
+        resolved: Optional[
+            tuple[Callable, EventHandlerBinding, str, str]
+            | list[tuple[Callable, EventHandlerBinding, str, str]]
+        ],
+    ) -> tuple[tuple[Callable, EventHandlerBinding, str, str], ...]:
+        """把 `resolve()` 的返回值归一为可直接遍历的绑定序列。
+
+        :param resolved: `resolve()` 的返回值：单个绑定元组、绑定元组列表，或 ``None``
+        :return: 绑定元组序列；输入为 ``None`` 时为空序列
+        """
+        if resolved is None:
+            return ()
+        if isinstance(resolved, list):
+            return tuple(resolved)
+        return (resolved,)

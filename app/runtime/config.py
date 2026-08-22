@@ -26,12 +26,7 @@ from app.runtime.log import (
     NonBlockingFileHandler,
 )
 from app.schemas.types import MediaType
-from app.foundation.environment import (
-    cpu_arch,
-    get_env_path,
-    is_docker,
-    is_frozen,
-)
+from app.foundation import hostenv
 from app.foundation.url import UrlUtils
 from version import APP_VERSION
 
@@ -129,6 +124,10 @@ class ConfigModel(BaseModel):
     API_TOKEN: Optional[str] = None
     # 用户认证站点
     AUTH_SITE: str = ""
+    # 第三方身份（扩展提供的登录入口，如 GitHub、媒体服务器账号）首次登录
+    # 但未绑定本项目用户时，是否自动创建新用户并完成绑定。默认关闭：开启后任何能登录该
+    # 第三方账号的人都会在本项目自动开号，仅在确认第三方认证源可信时启用
+    AUTH_IDENTITY_AUTO_CREATE_USER: bool = False
 
     # ==================== 数据库配置 ====================
     # 数据库类型，支持 sqlite 和 postgresql，默认使用 sqlite
@@ -204,6 +203,7 @@ class ConfigModel(BaseModel):
     DB_BACKUP_RETENTION_DAYS: int = 30
     # 本地备份的最大保留份数，0 表示不按数量清理
     DB_BACKUP_MAX_COUNT: int = 30
+
     # ==================== 数据清理配置 ====================
     # 是否启用数据表定时清理
     DATA_CLEANUP_ENABLE: bool = False
@@ -557,6 +557,10 @@ class ConfigModel(BaseModel):
     # 本地插件仓库目录，多个地址使用,分隔
     PLUGIN_LOCAL_REPO_PATHS: Optional[str] = None
 
+    # ==================== 废弃能力开关 ====================
+    # 已进入「默认关闭」阶段但需临时恢复的废弃能力标识，取值见 app/runtime/deprecation/notices.py
+    DEPRECATION_ENABLED: List[str] = []
+
     # ==================== 技能配置 ====================
     # 技能市场仓库地址，多个地址使用,分隔
     SKILL_MARKET: str = (
@@ -752,7 +756,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        env_file=get_env_path(),
+        env_file=hostenv.get_env_path(),
         env_file_encoding="utf-8",
     )
 
@@ -764,10 +768,13 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             if not path.exists():
                 path.mkdir(parents=True, exist_ok=True)
         # 如果是二进制程序，确保配置文件存在
-        if is_frozen():
+        if hostenv.is_frozen():
             app_env_path = self.CONFIG_PATH / "app.env"
             if not app_env_path.exists():
-                shutil.copy2(self.INNER_CONFIG_PATH / "app.env", app_env_path)
+                try:
+                    shutil.copy2(self.INNER_CONFIG_PATH / "app.env", app_env_path)
+                except Exception:
+                    pass
 
     @staticmethod
     def validate_api_token(value: Any, original_value: Any) -> Tuple[Any, bool]:
@@ -951,7 +958,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
             # 当值为 None 时，从 env 文件中删除该键，恢复为默认值
             if converted_value is None:
                 unset_key(
-                    dotenv_path=get_env_path(),
+                    dotenv_path=hostenv.get_env_path(),
                     key_to_unset=field_name,
                 )
                 logger.info(f"配置项 '{field_name}' 已清空，从 'app.env' 中移除")
@@ -963,7 +970,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
                 value_to_write = str(converted_value)
 
             set_key(
-                dotenv_path=get_env_path(),
+                dotenv_path=hostenv.get_env_path(),
                 key_to_set=field_name,
                 value_to_set=value_to_write,
                 quote_mode="always",
@@ -1036,10 +1043,7 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """
         全局用户代理字符串
         """
-        return (
-            f"{self.PROJECT_NAME}/{APP_VERSION[1:]} "
-            f"({platform.system()} {platform.release()}; {cpu_arch()})"
-        )
+        return f"{self.PROJECT_NAME}/{APP_VERSION[1:]} ({platform.system()} {platform.release()}; {hostenv.cpu_arch()})"
 
     @property
     def NORMAL_USER_AGENT(self) -> str:
@@ -1058,9 +1062,9 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         """按显式配置、容器和冻结运行环境确定配置目录。"""
         if self.CONFIG_DIR:
             return Path(self.CONFIG_DIR)
-        elif is_docker():
+        elif hostenv.is_docker():
             return Path("/config")
-        elif is_frozen():
+        elif hostenv.is_frozen():
             return Path(sys.executable).parent / "config"
         return self.ROOT_PATH / "config"
 
@@ -1092,15 +1096,6 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
         return self.CONFIG_PATH / "plugins"
 
     @property
-    def DATABASE_BACKUP_PATH(self) -> Path:
-        """返回数据库备份根目录，允许相对当前配置目录进行配置。"""
-        configured = str(self.DB_BACKUP_PATH or "").strip()
-        if not configured:
-            return self.CONFIG_PATH / "database_backup"
-        path = Path(configured).expanduser()
-        return path if path.is_absolute() else self.CONFIG_PATH / path
-
-    @property
     def LOG_PATH(self):
         """返回应用日志目录。"""
         return self.CONFIG_PATH / "logs"
@@ -1109,6 +1104,15 @@ class Settings(BaseSettings, ConfigModel, LogConfigModel):
     def COOKIE_PATH(self):
         """返回站点 Cookie 文件目录。"""
         return self.CONFIG_PATH / "cookies"
+
+    @property
+    def DATABASE_BACKUP_PATH(self) -> Path:
+        """返回数据库备份根目录，允许相对当前配置目录进行配置。"""
+        configured = str(self.DB_BACKUP_PATH or "").strip()
+        if not configured:
+            return self.CONFIG_PATH / "database_backup"
+        path = Path(configured).expanduser()
+        return path if path.is_absolute() else self.CONFIG_PATH / path
 
     @property
     def CONF(self) -> SystemConfModel:

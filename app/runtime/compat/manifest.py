@@ -22,13 +22,78 @@ class SymbolAlias:
     replacement: str
 
 
+# 编排链的旧根 app.chain 的全部子模块；插件按具体链类直接导入，逐个精确登记。
+_ORCHESTRATION_MODULES = (
+    "acoustid",
+    "agent",
+    "anilist",
+    "bangumi",
+    "dashboard",
+    "douban",
+    "download",
+    "interaction",
+    "listenbrainz",
+    "lrclib",
+    "media",
+    "mediaserver",
+    "message",
+    "musicbrainz",
+    "notification",
+    "ports",
+    "ports.dispatch",
+    "ports.download",
+    "ports.library",
+    "ports.metadata",
+    "ports.parsing",
+    "ports.search",
+    "ports.system",
+    "ports.transfer",
+    "recommend",
+    "scraping",
+    "search",
+    "site",
+    "storage",
+    "subscribe",
+    "system",
+    "theaudiodb",
+    "tmdb",
+    "torrents",
+    "transfer",
+    "tvdb",
+    "user",
+    "webhook",
+    "_interaction",
+    "_messaging",
+    "_music",
+    "_recognition",
+    "_transfer",
+)
+_ORCHESTRATION_PACKAGES = {"ports"}
+
 # 只登记已经删除旧物理源码、并完成 canonical 路径验证的模块。
 MODULE_ALIASES: Dict[str, ModuleAlias] = {
-    "app.chain.media_interaction": ModuleAlias(
-        target="app.chain.interaction",
-        replacement="app.chain.interaction",
+    "app.chain": ModuleAlias(
+        target="app.application.orchestration",
+        replacement="app.application.orchestration",
         introduced="v3.0.0",
-        owner="chain",
+        owner="application",
+        is_package=True,
+    ),
+    **{
+        f"app.chain.{name}": ModuleAlias(
+            target=f"app.application.orchestration.{name}",
+            replacement=f"app.application.orchestration.{name}",
+            introduced="v3.0.0",
+            owner="application",
+            is_package=name in _ORCHESTRATION_PACKAGES,
+        )
+        for name in _ORCHESTRATION_MODULES
+    },
+    "app.chain.media_interaction": ModuleAlias(
+        target="app.application.orchestration.interaction",
+        replacement="app.application.orchestration.interaction",
+        introduced="v3.0.0",
+        owner="application",
     ),
     "app.log": ModuleAlias(
         target="app.sdk.logging",
@@ -56,6 +121,39 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         introduced="v3.0.0",
         owner="application",
     ),
+    # 媒体库文件系统模块的 canonical 位置是 app/modules/medialibrary
+    "app.modules.filemanager": ModuleAlias(
+        target="app.modules.medialibrary",
+        replacement="app.modules.medialibrary",
+        introduced="v3.0.0",
+        owner="modules",
+        is_package=True,
+    ),
+    # 整理编排属于宿主固有业务规则，落在 app/application/transferhandler.py
+    "app.modules.filemanager.transhandler": ModuleAlias(
+        target="app.application.transferhandler",
+        replacement="app.application.transferhandler",
+        introduced="v3.0.0",
+        owner="application",
+    ),
+    # 存储后端升为一级模块，各自独立成包；存储基类与传输进度回调并入模块样板基类包
+    **{
+        f"app.modules.filemanager.storages.{name}": ModuleAlias(
+            target=f"app.modules.{package}.{name}",
+            replacement=f"app.modules.{package}.{name}",
+            introduced="v3.0.0",
+            owner="modules",
+        )
+        for name, package in (
+            ("alipan", "alipan"),
+            ("alist", "alist"),
+            ("alistgo", "alistgo"),
+            ("local", "localstorage"),
+            ("rclone", "rclone"),
+            ("smb", "smb"),
+            ("u115", "u115"),
+        )
+    },
     "app.db.agentchat_oper": ModuleAlias(
         target="app.db.oper.agentchat",
         replacement="app.db.oper.agentchat",
@@ -158,6 +256,12 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         introduced="v3.0.0",
         owner="db",
     ),
+    "app.command": ModuleAlias(
+        target="app.runtime.command",
+        replacement="app.runtime.command",
+        introduced="v3.0.0",
+        owner="runtime",
+    ),
     "app.utils.crypto": ModuleAlias(
         target="app.foundation.crypto",
         replacement="app.sdk.utilities",
@@ -254,9 +358,10 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         introduced="v3.0.0",
         owner="sdk",
     ),
+    # 防抖器只为旧插件而存在，宿主零调用方，canonical 侧无对应实现，故驻留兼容面。
     "app.utils.debounce": ModuleAlias(
-        target="app.runtime.debounce",
-        replacement="app.runtime.debounce",
+        target="app.runtime.compat.debounce",
+        replacement="app.runtime.compat.debounce",
         introduced="v3.0.0",
         owner="runtime",
     ),
@@ -569,15 +674,9 @@ MODULE_ALIASES: Dict[str, ModuleAlias] = {
         introduced="v3.0.0", owner="adapters",
     ),
     "app.helper.service": ModuleAlias(
-        target="app.sdk.services",
+        target="app.runtime.extensions.service_registry",
         replacement="app.sdk.services",
         introduced="v3.0.0", owner="runtime",
-    ),
-    "app.runtime.extensions.service_registry": ModuleAlias(
-        target="app.sdk.services",
-        replacement="app.sdk.services",
-        introduced="v3.0.0",
-        owner="sdk",
     ),
     "app.helper.sites": ModuleAlias(
         target="app.application.site.sites", replacement="app.sdk.network",
@@ -636,10 +735,23 @@ PACKAGE_ALIASES: Dict[str, ModuleAlias] = {
         owner="domain",
         is_package=True,
     ),
+    "app.modules.filemanager.storages": ModuleAlias(
+        target="app.modules._base.storage",
+        replacement="app.modules._base.storage",
+        introduced="v3.0.0",
+        owner="modules",
+        is_package=True,
+    ),
 }
 
 # 旧父包完全迁空后才登记；迁移中的物理父包继续由 PathFinder 处理。
-VIRTUAL_PACKAGES: Set[str] = {"app.core", "app.helper", "app.utils"}
+VIRTUAL_PACKAGES: Set[str] = {
+    "app.chain",
+    "app.core",
+    "app.helper",
+    "app.modules.filemanager.storages",
+    "app.utils",
+}
 
 # 旧包 __init__.py 曾公开的符号在这里显式声明，禁止模糊转发。
 PACKAGE_EXPORTS: Dict[str, Dict[str, SymbolAlias]] = {
@@ -693,6 +805,18 @@ PACKAGE_EXPORTS: Dict[str, Dict[str, SymbolAlias]] = {
             target_module="app.domain.meta.metamusic",
             target_name="MusicNameRegistry",
             replacement="app.sdk.media.MusicNameRegistry",
+        ),
+    },
+    "app.modules.filemanager.storages": {
+        "StorageBase": SymbolAlias(
+            target_module="app.modules._base.storage",
+            target_name="StorageBase",
+            replacement="app.modules._base.storage.StorageBase",
+        ),
+        "transfer_process": SymbolAlias(
+            target_module="app.modules._base.storage",
+            target_name="transfer_process",
+            replacement="app.modules._base.storage.transfer_process",
         ),
     },
 }
@@ -756,11 +880,31 @@ _MESSAGE_NOTIFICATION_SYMBOL_ALIASES: Dict[str, SymbolAlias] = {
 }
 
 SYMBOL_ALIASES: Dict[str, Dict[str, SymbolAlias]] = {
+    # app.plugins 是扩展的安装挂载点而不是宿主包：它要能被容器卷整体覆盖，因此目录里
+    # 没有 __init__.py，是个命名空间包。存量扩展写的 from app.plugins import _PluginBase
+    # 由这里解析，目录被覆盖也不影响。
+    "app.plugins": {
+        "_PluginBase": SymbolAlias(
+            target_module="app.sdk.extension",
+            target_name="_PluginBase",
+            replacement="app.sdk.extension._PluginBase",
+        ),
+        "PluginChian": SymbolAlias(
+            target_module="app.sdk.extension",
+            target_name="PluginChian",
+            replacement="app.sdk.extension.PluginChian",
+        ),
+        "plugin_instance_path": SymbolAlias(
+            target_module="app.runtime.extensions.lifecycle.paths",
+            target_name="plugin_instance_path",
+            replacement="app.runtime.extensions.lifecycle.paths.plugin_instance_path",
+        ),
+    },
     "app.agent.orchestrator": {
         "AgentChain": SymbolAlias(
-            target_module="app.chain.agent",
+            target_module="app.application.orchestration.agent",
             target_name="AgentChain",
-            replacement="app.chain.agent.AgentChain",
+            replacement="app.application.orchestration.agent.AgentChain",
         ),
         "ReplyMode": SymbolAlias(
             target_module="app.schemas.types",
@@ -769,20 +913,20 @@ SYMBOL_ALIASES: Dict[str, Dict[str, SymbolAlias]] = {
         ),
     },
     # 刮削能力从 MediaChain 拆出为独立 ScrapingChain 后，
-    # 原 app.chain.media 模块级公开的刮削选项与策略配置随迁到 app.chain.scraping
-    "app.chain.media": {
+    # media 模块级公开的刮削选项与策略配置由 scraping 模块提供
+    "app.application.orchestration.media": {
         name: SymbolAlias(
-            target_module="app.chain.scraping",
+            target_module="app.application.orchestration.scraping",
             target_name=name,
-            replacement=f"app.chain.scraping.{name}",
+            replacement=f"app.application.orchestration.scraping.{name}",
         )
         for name in ("ScrapingChain", "ScrapingOption", "ScrapingConfig")
     },
-    "app.chain.message": {
+    "app.application.orchestration.message": {
         "MediaInteractionChain": SymbolAlias(
-            target_module="app.chain.interaction",
+            target_module="app.application.orchestration.interaction",
             target_name="MediaInteractionChain",
-            replacement="app.chain.interaction.MediaInteractionChain",
+            replacement="app.application.orchestration.interaction.MediaInteractionChain",
         ),
     },
     "app.domain.media": {
@@ -800,6 +944,20 @@ SYMBOL_ALIASES: Dict[str, Dict[str, SymbolAlias]] = {
             "normalize_media_identity_payload",
             "build_media_key",
         )
+    },
+    # 媒体库文件系统模块的能力类名为 MediaLibraryModule；
+    # 整理编排落在 app/application/transferhandler.py，本模块不持有该类
+    "app.modules.medialibrary": {
+        "FileManagerModule": SymbolAlias(
+            target_module="app.modules.medialibrary",
+            target_name="MediaLibraryModule",
+            replacement="app.modules.medialibrary.MediaLibraryModule",
+        ),
+        "TransHandler": SymbolAlias(
+            target_module="app.application.transferhandler",
+            target_name="TransHandler",
+            replacement="app.application.transferhandler.TransHandler",
+        ),
     },
     "app.schemas": {
         **{
