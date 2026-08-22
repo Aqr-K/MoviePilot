@@ -1,33 +1,56 @@
 """
-规则域：用户规则组配置访问、内置规则定义与规则解析器，
-过滤模块与 Agent 工具共享同一事实来源。
+规则域：用户规则组配置访问，内置规则定义与规则解析器经 app.domain.filterrule 再导出。
 """
 
-import threading
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from pyparsing import Forward, Literal, Word, alphas, infix_notation, opAssoc, alphanums, Combine, nums, ParseResults
-
-from app.adapters.system import rust as rust_accel
 from app.application.configuration import get_configured_system_config
 from app.domain.context import MediaInfo
-from app.schemas.rule import CustomRule
+from app.domain.filterrule import BUILTIN_RULE_SET, RuleParser  # noqa: F401
+from app.runtime.extensions.registry.filter_rule import (
+    RULE_GROUP_KIND,
+    RULE_KIND,
+    FilterRuleClaim,
+    plugin_filter_rule_registry,
+)
+from app.runtime.extensions.contract.instance import split_instance_key
+from app.schemas.rule import (
+    CustomRule,
+    FilterRuleConflict,
+    FilterRuleLayer,
+    FilterRuleOrigin,
+)
 from app.schemas.system import FilterRuleGroup
 from app.schemas.types import SystemConfigKey
 
+# 规则来源层标识，次序即合并次序，靠后的压住靠前的
+BUILTIN_LAYER = "builtin"
+PLUGIN_LAYER = "plugin"
+USER_LAYER = "user"
+
 
 class RuleHelper:
-    """读取用户过滤规则配置，并按媒体上下文选择适用规则组。"""
+    """读取过滤规则配置，并按媒体上下文选择适用规则组。"""
 
     @staticmethod
     def get_rule_groups() -> List[FilterRuleGroup]:
-        """返回用户配置的全部过滤规则组。"""
-        rule_groups: List[dict] = get_configured_system_config().get(
+        """返回当前可用的全部过滤规则组，插件提供的排在用户配置之前。
+
+        同名时以用户配置为准：用户手改过的规则组不能被装了个插件之后悄悄改掉。
+        插件规则组因此与插件规则同一套优先级，四个使用场景按组名引用时不必区分
+        一个组来自插件还是用户配置。
+        """
+        groups: dict[str, FilterRuleGroup] = {
+            name: FilterRuleGroup(**definition)
+            for name, definition in plugin_filter_rule_registry.rule_group_definitions().items()
+        }
+        user_groups: List[dict] = get_configured_system_config().get(
             SystemConfigKey.UserFilterRuleGroups
         )
-        if not rule_groups:
-            return []
-        return [FilterRuleGroup(**group) for group in rule_groups]
+        for group in user_groups or []:
+            model = FilterRuleGroup(**group)
+            groups[model.name] = model
+        return list(groups.values())
 
     def get_rule_group(self, group_name: str) -> Optional[FilterRuleGroup]:
         """按名称返回过滤规则组。"""
@@ -76,231 +99,173 @@ class RuleHelper:
         )
 
 
-# 内置规则只在这里维护一份，便于过滤模块和 Agent 工具共享同一套事实来源。
-BUILTIN_RULE_SET: Dict[str, dict] = {
-    # 蓝光原盘
-    "BLU": {
-        "include": [
-            r"(?i)(\bBlu-?Ray\b.*\b(?:VC-?1|AVC|MPEG-?2)\b|\b(?:UHD|4K|2160p)\b(?:.*Blu-?Ray)?.*\b(?:HEVC|H\.?265)\b|\bBlu-?Ray\b.*\b(?:UHD|4K|2160p)\b.*\b(?:HEVC|H\.?265)\b|\b(?:COMPLETE|FULL)\b.*\b(?:(?:UHD|4K|2160p)\b.*)?Blu-?Ray\b|\b(BD25|BD50|BD66|BD100|BDMV|MiniBD)\b)"
-        ],
-        "exclude": [
-            r"(?i)(\b[XH]\.?264\b|\b[XH]\.?265\b|\bWEB-?DL\b|\bWEB-?RIP\b|\bHDTV(?:RIP)?\b|\bREMUX\b|\bBDRip\b|\bBRRip\b|\bHDRip\b|\bENCODE\b|\b(?<!WEB-|HDTV)RIP\b)"
-        ],
-    },
-    # 4K
-    "4K": {
-        "include": [r"4k|2160p|x2160"],
-        "exclude": [],
-    },
-    # 1080P
-    "1080P": {
-        "include": [r"1080[pi]|x1080"],
-        "exclude": [],
-    },
-    # 720P
-    "720P": {
-        "include": [r"720[pi]|x720"],
-        "exclude": [],
-    },
-    # 中字
-    "CNSUB": {
-        "include": [
-            r"[中国國繁简](/|\s|\\|\|)?[繁简英粤]|[英简繁](/|\s|\\|\|)?[中繁简]"
-            r"|繁體|简体|[中国國][字配]|国语|國語|中文|中字|简日|繁日|简繁|繁体"
-            r"|([\s,.-\[])(chs|cht)(|[\s,.-\]])"
-            r"|(?<![a-z0-9])(?<!\d\s)(gb|big5)(?![a-z0-9])"
-        ],
-        "exclude": [],
-        "tmdb": {
-            "original_language": "zh,cn",
-        },
-    },
-    # 官种
-    "GZ": {
-        "include": [r"官方", r"官种", r"官组"],
-        "match": ["labels"],
-    },
-    # 特效字幕
-    "SPECSUB": {
-        "include": [r"特效"],
-        "exclude": [],
-    },
-    # BluRay
-    "BLURAY": {
-        "include": [r"Blu-?Ray"],
-        "exclude": [],
-    },
-    # UHD
-    "UHD": {
-        "include": [r"UHD|UltraHD"],
-        "exclude": [],
-    },
-    # H265
-    "H265": {
-        "include": [r"[Hx].?265|HEVC"],
-        "exclude": [],
-    },
-    # H264
-    "H264": {
-        "include": [r"[Hx].?264|AVC"],
-        "exclude": [],
-    },
-    # 杜比视界
-    "DOLBY": {
-        "include": [r"Dolby[\s.]+Vision|DOVI|[\s.]+DV[\s.]+|杜比视界"],
-        "exclude": [],
-    },
-    # 杜比全景声
-    "ATMOS": {
-        "include": [r"Dolby[\s.+]+Atmos|Atmos|杜比全景[声聲]"],
-        "exclude": [],
-    },
-    # HDR
-    "HDR": {
-        "include": [r"[\s.]+HDR[\s.]+|HDR10|HDR10\+|HDRVivid"],
-        "exclude": [],
-    },
-    # SDR
-    "SDR": {
-        "include": [r"[\s.]+SDR[\s.]+"],
-        "exclude": [],
-    },
-    # 重编码
-    "REMUX": {
-        "include": [r"REMUX"],
-        "exclude": [],
-    },
-    # WEB-DL
-    "WEBDL": {
-        "include": [r"WEB-?DL|WEB-?RIP"],
-        "exclude": [],
-    },
-    # 免费
-    "FREE": {
-        "downloadvolumefactor": 0,
-    },
-    # 国语配音
-    "CNVOI": {
-        "include": [r"[国國][语語]配音|[国國]配|[国國][语語]"],
-        "exclude": [],
-        "tmdb": {
-            "original_language": "zh",
-        },
-    },
-    # 粤语配音
-    "HKVOI": {
-        "include": [r"粤语配音|粤语"],
-        "exclude": [],
-    },
-    # 60FPS
-    "60FPS": {
-        "include": [r"60fps|60帧"],
-        "exclude": [],
-    },
-    # 3D
-    "3D": {
-        "include": [r"3D"],
-        "exclude": [],
-    },
-    # Hi-Res 无损音频
-    "HIRES": {
-        "include": [r"(?i)\b(?:Hi[ ._-]?Res(?:olution)?|DSD(?:64|128|256|512)?)\b|高解析|(?:24|32)\s*(?:-?bit|位)"],
-        "exclude": [],
-    },
-    # 无损音频
-    "LOSSLESS": {
-        "include": [r"(?i)\b(?:Lossless|FLAC|ALAC|APE|WAV|WAVE|AIFF?|PCM|DSD|DSF|DFF)\b|无损"],
-        "exclude": [],
-    },
-    "FLAC": {"include": [r"(?i)(?<![A-Z0-9])FLAC(?![A-Z0-9])"], "exclude": []},
-    "ALAC": {"include": [r"(?i)(?<![A-Z0-9])ALAC(?![A-Z0-9])"], "exclude": []},
-    "APE": {"include": [r"(?i)(?<![A-Z0-9])APE(?![A-Z0-9])"], "exclude": []},
-    "WAV": {"include": [r"(?i)(?<![A-Z0-9])WAV(?:E)?(?![A-Z0-9])"], "exclude": []},
-    "DSD": {"include": [r"(?i)(?<![A-Z0-9])(?:DSD(?:64|128|256|512)?|DSF|DFF)(?![A-Z0-9])"], "exclude": []},
-    "MP3": {"include": [r"(?i)(?<![A-Z0-9])MP3(?![A-Z0-9])"], "exclude": []},
-    "AAC": {"include": [r"(?i)(?<![A-Z0-9])(?:AAC|M4A)(?![A-Z0-9])"], "exclude": []},
-    "OPUS": {"include": [r"(?i)(?<![A-Z0-9])OPUS(?![A-Z0-9])"], "exclude": []},
-    "BITRATE320": {"include": [r"(?i)(?<!\d)320\s*k(?:bps?|b(?:it)?/?s?)?(?![a-z])"], "exclude": []},
-    "BITRATE256": {"include": [r"(?i)(?<!\d)256\s*k(?:bps?|b(?:it)?/?s?)?(?![a-z])"], "exclude": []},
-    "BITRATE192": {"include": [r"(?i)(?<!\d)192\s*k(?:bps?|b(?:it)?/?s?)?(?![a-z])"], "exclude": []},
-}
+class FilterRuleOriginService:
+    """按内置 < 插件 < 用户三层交出筛选规则与规则组的来源。
 
-
-
-class RuleParser:
-
-    _lock = threading.Lock()
-    _thread_local = threading.local()
-
-    def __init__(self):
-        """
-        定义语法规则
-        """
-        with self._lock:
-            if not hasattr(self._thread_local, 'initialized'):
-                # 表达式
-                expr: Forward = Forward()
-                # 原子
-                atom: Combine = Combine(Word(alphas, alphanums) | (Word(nums) + Word(alphas, alphanums)))
-                # 逻辑非操作符
-                operator_not: Literal = Literal('!').set_parse_action(lambda t: 'not')
-                # 逻辑或操作符
-                operator_or: Literal = Literal('|').set_parse_action(lambda t: 'or')
-                # 逻辑与操作符
-                operator_and: Literal = Literal('&').set_parse_action(lambda t: 'and')
-                # 定义表达式的语法规则
-                expr <<= (operator_not + expr) | atom | ('(' + expr + ')')
-
-                # 运算符优先级
-                self.expr = infix_notation(expr,
-                                          [(operator_not, 1, opAssoc.RIGHT),
-                                           (operator_and, 2, opAssoc.LEFT),
-                                           (operator_or, 2, opAssoc.LEFT)])
-
-                self._thread_local.expr = self.expr
-                self._thread_local.initialized = True
-            else:
-                self.expr = self._thread_local.expr
-
-    def parse(self, expression: str) -> ParseResults:
-        """
-        解析给定的表达式。
-
-        参数:
-        expression -- 要解析的表达式
-
-        返回:
-        解析结果
-        """
-        rust_result = rust_accel.parse_filter_rule(expression)
-        if rust_result is not None:
-            return _RustParseResults(rust_result)
-        return self.expr.parse_string(expression)
-
-
-class _RustParseResults(list):
-    """
-    包装 Rust 解析结果，提供本模块调用方使用的 as_list/asList 接口。
+    规则集是三层合并出来的一张平表，合并完就看不出哪条来自哪里；插件带来的规则因此
+    在设置页上无从辨认，跨插件冲突失效的标识更是只在日志里留过一次告警。本服务把合并
+    前的分层原样交出，用户据此知道一条规则归谁管、以及一个标识为什么不生效。
     """
 
-    def as_list(self) -> list:
+    def __init__(self, registry: Any = None, rule_helper: Any = None) -> None:
         """
-        返回兼容 pyparsing.ParseResults.as_list 的列表结构。
-        """
-        return list(self)
+        绑定插件规则注册表与用户规则读取器
 
-    def asList(self) -> list:  # noqa: N802
+        :param registry: 插件筛选规则注册表，为空时取宿主全局注册表
+        :param rule_helper: 用户规则读取器，为空时取默认实现
         """
-        返回兼容 pyparsing.ParseResults.asList 的列表结构。
+        self._registry = registry or plugin_filter_rule_registry
+        self._rules = rule_helper or RuleHelper()
+
+    def list_rule_origins(self) -> List[FilterRuleOrigin]:
         """
-        return self.as_list()
+        列出全部筛选规则标识的来源分层
 
+        :return: 按规则标识排序的来源条目
+        """
+        return self._origins(
+            kind=RULE_KIND,
+            builtin=dict(BUILTIN_RULE_SET),
+            plugin=self._registry.rule_definitions(),
+            user={
+                rule.id: rule.model_dump()
+                for rule in self._rules.get_custom_rules()
+                if rule.id
+            },
+        )
 
-if __name__ == '__main__':
-    # 测试代码
-    expression_str = """
-     SPECSUB & CNVOI & 4K & !BLU & !REMUX & !WEBDL & 60FPS & !DOLBY & !SDR & !3D > CNSUB & CNVOI & 4K & !BLU & !REMUX & !WEBDL & 60FPS & !DOLBY & !SDR & !3D > SPECSUB & 4K & !BLU & !REMUX & !WEBDL & 60FPS & !DOLBY & !SDR & !3D > CNSUB & 4K & !BLU & !REMUX & !WEBDL & 60FPS & !DOLBY & !SDR & !3D > SPECSUB & CNVOI & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & HDR & !3D > CNSUB & CNVOI & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & HDR & !3D > SPECSUB & CNVOI & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & !3D > CNSUB & CNVOI & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & !3D > SPECSUB & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & HDR & !3D > CNSUB & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & HDR & !3D > SPECSUB & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & !3D > CNSUB & 4K & !BLU & !REMUX & !WEBDL & !DOLBY & !3D > SPECSUB & CNVOI & 4K & WEBDL & 60FPS & !DOLBY & !SDR & !3D > CNSUB & CNVOI & 4K & WEBDL & 60FPS & !DOLBY & !SDR & !3D > SPECSUB & 4K & WEBDL & 60FPS & !DOLBY & !SDR & !3D > CNSUB & 4K & WEBDL & 60FPS & !DOLBY & !SDR & !3D > SPECSUB & CNVOI & 4K & WEBDL & !DOLBY & HDR & !3D > CNSUB & CNVOI & 4K & WEBDL & !DOLBY & HDR & !3D > SPECSUB & CNVOI & 4K & WEBDL & !DOLBY & !3D > CNSUB & CNVOI & 4K & WEBDL & !DOLBY & !3D > SPECSUB & 4K & WEBDL & !DOLBY & HDR & !3D > CNSUB & 4K & WEBDL & !DOLBY & HDR & !3D > SPECSUB & 4K & WEBDL & !DOLBY & !3D > CNSUB & 4K & WEBDL & !DOLBY & !3D > SPECSUB & CNVOI & 4K & !BLU & !WEBDL & !DOLBY & HDR & !3D > CNSUB & CNVOI & 4K & !BLU & !WEBDL & !DOLBY & HDR & !3D > SPECSUB & CNVOI & 4K & !BLU & !WEBDL & !DOLBY & !3D > CNSUB & CNVOI & 4K & !BLU & !WEBDL & !DOLBY & !3D > SPECSUB & 4K & !BLU & !WEBDL & !DOLBY & HDR & !3D > CNSUB & 4K & !BLU & !WEBDL & !DOLBY & HDR & !3D > SPECSUB & 4K & !BLU & !WEBDL & !DOLBY & !SDR & !3D > CNSUB & 4K & !BLU & !WEBDL & !DOLBY & !SDR & !3D > 4K & !BLU & !REMUX & !DOLBY & HDR & !3D > 4K & !BLURAY & !REMUX & !DOLBY & !3D > SPECSUB & 1080P & !BLU & !REMUX & !WEBDL & !DOLBY & HDR & !3D > CNSUB & 1080P & !BLU & !REMUX & !WEBDL & !DOLBY & HDR & !3D > SPECSUB & 1080P & !BLU & !REMUX & !WEBDL & !DOLBY & !3D > CNSUB & 1080P & !BLU & !REMUX & !WEBDL & !DOLBY & !3D > SPECSUB & 1080P & !BLU & !WEBDL & !DOLBY & HDR & !3D > CNSUB & 1080P & !BLU & !WEBDL & !DOLBY & HDR & !3D > SPECSUB & 1080P & !BLU & !WEBDL & !DOLBY & !3D > CNSUB & 1080P & !BLU & !WEBDL & !DOLBY & !3D > SPECSUB & 1080P & WEBDL & !DOLBY & HDR & !3D > CNSUB & 1080P & WEBDL & !DOLBY & HDR & !3D > SPECSUB & 1080P & WEBDL & !DOLBY & !3D > CNSUB & 1080P & WEBDL & !DOLBY & !3D > 1080P & !BLU & !REMUX & !DOLBY & HDR & !3D > 1080P & !BLU & !REMUX & !DOLBY & !3D
-    """
-    for exp in expression_str.split('>'):
-        parsed_expr = RuleParser().parse(exp.strip())
-        print(parsed_expr.asList())
+    def list_rule_group_origins(self) -> List[FilterRuleOrigin]:
+        """
+        列出全部筛选规则组名的来源分层
+
+        规则组没有内置层：内置的是规则本身，规则组一律由插件或用户给出。
+
+        :return: 按规则组名排序的来源条目
+        """
+        return self._origins(
+            kind=RULE_GROUP_KIND,
+            builtin={},
+            plugin=self._registry.rule_group_definitions(),
+            user={
+                group.name: group.model_dump()
+                for group in self._user_rule_groups()
+                if group.name
+            },
+        )
+
+    def list_conflicts(self) -> List[FilterRuleOrigin]:
+        """
+        列出插件声明因跨插件同名而整体失效的标识
+
+        :return: 按种类与标识排序的来源条目，仅含存在冲突的标识
+        """
+        origins = [*self.list_rule_origins(), *self.list_rule_group_origins()]
+        return [origin for origin in origins if origin.conflict is not None]
+
+    @staticmethod
+    def _user_rule_groups() -> List[FilterRuleGroup]:
+        """
+        读取用户自己配置的规则组
+
+        `RuleHelper.get_rule_groups()` 交出的是插件与用户合并后的结果，分不出哪个组
+        是用户加的，因此此处直读用户配置。
+
+        :return: 用户配置的规则组列表
+        """
+        groups: List[dict] = get_configured_system_config().get(
+            SystemConfigKey.UserFilterRuleGroups
+        )
+        return [FilterRuleGroup(**group) for group in groups or []]
+
+    def _origins(
+        self,
+        kind: str,
+        builtin: Dict[str, dict],
+        plugin: Dict[str, dict],
+        user: Dict[str, dict],
+    ) -> List[FilterRuleOrigin]:
+        """
+        把三层定义与插件声明的裁决结果合成为来源条目
+
+        :param kind: 标识种类
+        :param builtin: 内置层定义
+        :param plugin: 插件层当前生效的定义，冲突失效的标识不在其中
+        :param user: 用户自定义层定义
+        :return: 按标识排序的来源条目
+        """
+        claims = {
+            claim.identity: claim
+            for claim in self._registry.claims()
+            if claim.kind == kind
+        }
+        identities = sorted({*builtin, *plugin, *user, *claims})
+        return [
+            self._origin(
+                kind=kind,
+                identity=identity,
+                builtin=builtin.get(identity),
+                plugin=plugin.get(identity),
+                user=user.get(identity),
+                claim=claims.get(identity),
+            )
+            for identity in identities
+        ]
+
+    @staticmethod
+    def _origin(
+        kind: str,
+        identity: str,
+        builtin: Optional[dict],
+        plugin: Optional[dict],
+        user: Optional[dict],
+        claim: Optional[FilterRuleClaim],
+    ) -> FilterRuleOrigin:
+        """
+        判定一个标识的生效来源与被压住的下层
+
+        :param kind: 标识种类
+        :param identity: 规则标识或规则组名
+        :param builtin: 内置层定义，无则为 None
+        :param plugin: 插件层生效定义，无或已因冲突失效则为 None
+        :param user: 用户自定义层定义，无则为 None
+        :param claim: 插件对该标识的声明及裁决结果，无插件声明则为 None
+        :return: 该标识的来源条目
+        """
+        layers: List[Tuple[FilterRuleLayer, dict]] = []
+        if builtin is not None:
+            layers.append((FilterRuleLayer(layer=BUILTIN_LAYER), builtin))
+        if plugin is not None and claim is not None and claim.effective:
+            owner = claim.owners[0]
+            extension_id, instance_id = split_instance_key(owner)
+            layers.append((
+                FilterRuleLayer(
+                    layer=PLUGIN_LAYER,
+                    owner=owner,
+                    extension_id=extension_id,
+                    instance_id=instance_id,
+                ),
+                plugin,
+            ))
+        if user is not None:
+            layers.append((FilterRuleLayer(layer=USER_LAYER), user))
+        conflict = (
+            FilterRuleConflict(
+                plugins=list(claim.plugins), owners=list(claim.owners)
+            )
+            if claim is not None and not claim.effective
+            else None
+        )
+        if not layers:
+            return FilterRuleOrigin(
+                id=identity, kind=kind, effective=False, conflict=conflict
+            )
+        source, definition = layers[-1]
+        return FilterRuleOrigin(
+            id=identity,
+            kind=kind,
+            effective=True,
+            source=source,
+            shadowed=[layer for layer, _ in layers[:-1]],
+            conflict=conflict,
+            definition=definition,
+        )

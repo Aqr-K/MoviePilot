@@ -1,7 +1,7 @@
-"""Chain 所需持久化端口的组合根注册表。
+"""编排层持久化端口的组合根注册表。
 
-Chain 只依赖本模块声明的工厂，不再直接导入数据库 Oper 或 ORM 模型。
-具体适配器由 ``app.startup`` 在进程启动时装配，测试也可以登记隔离替身。
+编排层只依赖本模块声明的工厂，具体适配器由 ``app.startup`` 在进程启动时装配，
+测试可以登记隔离替身。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class ChainDataPorts:
 
 
 class _PortProxyMeta(type):
-    """让迁移期的 Oper 名称支持按方法打桩，同时仍转发到组合根端口。"""
+    """支持按类级方法名打桩，同时把访问转发到组合根端口。"""
 
     def __getattr__(cls, name: str) -> Any:
         """把类级方法访问转发到一个新的端口实例。"""
@@ -38,7 +38,7 @@ class _PortProxyMeta(type):
 
 
 class _ChainDataPortProxy(metaclass=_PortProxyMeta):
-    """将旧的 Oper 调用形态转发到 Chain 数据端口的内部代理。"""
+    """把 Oper 形态的属性访问转发到编排层数据端口的内部代理。"""
 
     port_name: str
 

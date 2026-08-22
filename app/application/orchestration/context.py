@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from app.application.chain.data import ChainDataPorts
-from app.application.chain.durable_events import ChainDurableEventWriter
+from app.application.orchestration.data import ChainDataPorts
+from app.application.orchestration.durable_events import ChainDurableEventWriter
 from app.application.configuration import ChainRuntimeConfig
 
 

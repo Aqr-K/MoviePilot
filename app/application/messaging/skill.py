@@ -3,8 +3,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 
+from app.application.agent import get_skill_helper
 from app.application.messaging.interaction import (
     MessageGateway,
     build_navigation_buttons,
@@ -15,53 +16,7 @@ from app.application.messaging.interaction import (
 from app.schemas.message import Message
 from app.schemas.types import NotificationChannel
 
-
-class SkillCatalogPort(Protocol):
-    """消息层使用的技能目录能力端口，由启动组合根注入具体实现。"""
-
-    def add_custom_market_source(self, source: str) -> Tuple[bool, str]:
-        """添加一个自定义技能市场来源。"""
-
-    def remove_custom_market_source(self, source: str) -> Tuple[bool, str]:
-        """移除一个自定义技能市场来源。"""
-
-    def install_market_skill(self, skill: Any) -> Tuple[bool, str]:
-        """安装指定的市场技能。"""
-
-    def list_local_skills(self) -> List[Any]:
-        """列出本地技能。"""
-
-    def remove_local_skill(self, skill_id: str) -> Tuple[bool, str]:
-        """移除指定的本地技能。"""
-
-    def list_market_source_entries(self) -> List[Any]:
-        """列出技能市场来源。"""
-
-    def list_market_skills(self, force: bool = False) -> List[Any]:
-        """列出市场技能。"""
-
-    def filter_market_skills(self, skills: List[Any], query: str) -> List[Any]:
-        """按查询词过滤市场技能。"""
-
-
-SkillCatalogProvider = Callable[[], SkillCatalogPort]
-_skill_catalog_provider: Optional[SkillCatalogProvider] = None
-
-
-def register_skill_catalog_provider(provider: SkillCatalogProvider) -> None:
-    """由启动组合根注册 Agent 技能目录实现，避免消息层依赖 Agent 具体模块。"""
-    global _skill_catalog_provider
-    _skill_catalog_provider = provider
-
-
-def _resolve_skill_catalog() -> SkillCatalogPort:
-    """解析已注入的技能目录；缺少组合根装配时给出明确错误。"""
-    if _skill_catalog_provider is None:
-        raise RuntimeError(
-            "技能目录服务未注册：请先导入 app.startup.agent_initializer "
-            "完成组合根装配"
-        )
-    return _skill_catalog_provider()
+_SkillItemT = TypeVar("_SkillItemT")
 
 
 @dataclass
@@ -199,12 +154,22 @@ class SkillInteractionHandler:
     def __init__(
             self,
             messenger: MessageGateway,
-            skill_catalog: Optional[SkillCatalogPort] = None,
-            skill_helper: Optional[SkillCatalogPort] = None,
+            skill_helper: Optional[Any] = None,
     ):
-        """注入消息接口和技能目录端口，保留旧 ``skill_helper`` 关键字。"""
+        """注入消息接口，技能管理能力延迟到首次访问 skillhelper 时经门面解析。
+
+        :param messenger: 消息网关
+        :param skill_helper: 技能目录实现；为空时经 application.agent 门面解析
+        """
         self._messenger = messenger
-        self.skillhelper = skill_catalog or skill_helper or _resolve_skill_catalog()
+        self._skill_helper = skill_helper
+
+    @property
+    def skillhelper(self) -> Any:
+        """返回 SkillHelper 单例；未显式注入时经 application.agent 门面按需解析。"""
+        if self._skill_helper is None:
+            self._skill_helper = get_skill_helper()
+        return self._skill_helper
 
     def remote_manage(
             self,
@@ -1107,10 +1072,10 @@ class SkillInteractionHandler:
 
     @staticmethod
     def _page_items(
-            items: List[Any],
+            items: List[_SkillItemT],
             page: int,
             page_size: int,
-    ) -> Tuple[List[Any], int, int]:
+    ) -> Tuple[List[_SkillItemT], int, int]:
         """
         返回当前页的数据，并把页码钳制到有效范围内。
         """
@@ -1196,7 +1161,7 @@ class SkillInteractionHandler:
             force_market_refresh: bool = False,
     ) -> List[Any]:
         """
-        获取当前 /skills 会话可见的市场技能，并应用搜索词过滤。
+        获取当前 /skills 会话可见的市场技能（元素类型为 SkillInfo），并应用搜索词过滤。
         """
         skills = [
             skill

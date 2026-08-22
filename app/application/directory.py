@@ -5,12 +5,12 @@ from typing import List, Optional, Tuple
 from app.schemas.file import FileURI as _SchemaFileURI
 from app.schemas.system import TransferDirectoryConf as _SchemaTransferDirectoryConf
 from app.domain.context import MediaInfo
+from app.domain.mediapath import resolve_media_root_path
 from app.application.configuration import get_configured_system_config
 from app.runtime.log import logger
 from app.schemas.types import MediaType, StorageSchema, SystemConfigKey
 from app.adapters.system.host import SystemUtils
 
-JINJA2_VAR_PATTERN = re.compile(r"\{\{.*?}}", re.DOTALL)
 WINDOWS_DRIVE_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
 WINDOWS_DRIVE_PREFIX_PATTERN = re.compile(r"^[A-Za-z]:")
 
@@ -40,7 +40,7 @@ class DirectoryHelper:
         """
         获取所有本地的可下载目录
         """
-        return [d for d in self.get_download_dirs() if d.storage == "local"]
+        return [d for d in self.get_download_dirs() if _SchemaFileURI.is_local(d.storage)]
 
     def get_download_dir_by_save_path(
             self,
@@ -69,7 +69,8 @@ class DirectoryHelper:
             if not root:
                 continue
             root_storage, root_style, root_path = root
-            if storage != root_storage or target_style != root_style or target_path != root_path:
+            if (not _SchemaFileURI.is_same_storage(storage, root_storage)
+                    or target_style != root_style or target_path != root_path):
                 continue
             if not media_type or not dir_info.media_type:
                 return dir_info
@@ -89,7 +90,7 @@ class DirectoryHelper:
         """
         获取所有本地的媒体库目录
         """
-        return [d for d in self.get_library_dirs() if d.library_storage == "local"]
+        return [d for d in self.get_library_dirs() if _SchemaFileURI.is_local(d.library_storage)]
 
     def get_dir(self, media: Optional[MediaInfo], include_unsorted: Optional[bool] = False,
                 storage: Optional[str] = None, src_path: Path = None,
@@ -120,11 +121,11 @@ class DirectoryHelper:
             # 没有启用整理的目录
             if not d.monitor_type and not include_unsorted:
                 continue
-            # 源存储类型不匹配
-            if storage and d.storage != storage:
+            # 源存储实例不匹配
+            if storage and not _SchemaFileURI.is_same_storage(d.storage, storage):
                 continue
-            # 目标存储类型不匹配
-            if target_storage and d.library_storage != target_storage:
+            # 目标存储实例不匹配
+            if target_storage and not _SchemaFileURI.is_same_storage(d.library_storage, target_storage):
                 continue
             # 有目标目录时，目标目录不匹配媒体库目录
             if dest_path and dest_path != Path(d.library_path):
@@ -156,16 +157,16 @@ class DirectoryHelper:
         """
         判断源目录和目标目录是否在同一存储盘
 
-        :param src: 源目录路径和存储类型
-        :param tar: 目标目录路径和存储类型
+        :param src: 源目录路径和存储令牌
+        :param tar: 目标目录路径和存储令牌
         :return: 是否在同一存储盘
         """
         src_path, src_storage = src
         tar_path, tar_storage = tar
-        if "local" == tar_storage == src_storage:
+        if _SchemaFileURI.is_local(src_storage) and _SchemaFileURI.is_local(tar_storage):
             return SystemUtils.is_same_disk(src_path, tar_path)
-        # 网络存储，直接比较类型
-        return src_storage == tar_storage
+        # 网络存储，比较到实例，同类型的不同实例不算同一存储盘
+        return _SchemaFileURI.is_same_storage(src_storage, tar_storage)
 
     @staticmethod
     def get_media_root_path(
@@ -181,61 +182,20 @@ class DirectoryHelper:
         :param media_type: 媒体类型；音乐需要避开可选碟片目录并返回专辑目录
         :return: 媒体文件根路径
         """
-        if not rename_format:
-            logger.error("重命名格式不能为空")
-            return None
-        if media_type == MediaType.MUSIC:
-            # 音乐模板允许按多碟动态增加 Disc 子目录，不能按静态模板层数反推。
-            # 文件的直接父目录通常就是专辑目录；命中碟片目录时再上移一级。
-            media_root = rename_path.parent
-            if re.fullmatch(
-                    r"(?:cd|disc|disk)\s*0*\d+",
-                    media_root.name,
-                    re.IGNORECASE,
-            ):
-                media_root = media_root.parent
-            return media_root
-        # 计算重命名中的文件夹层数
-        rename_list = rename_format.split("/")
-        rename_format_level = len(rename_list) - 1
-        # 反向查找标题参数所在层
-        for level, name in enumerate(reversed(rename_list)):
-            if level == 0:
-                # 跳过文件名的标题参数
-                continue
-            matchs = JINJA2_VAR_PATTERN.findall(name)
-            if not matchs:
-                continue
-            # 处理特例，有的人重命名的第一层是年份、分辨率
-            if (any("title" in m for m in matchs)
-                and not any("season" in m for m in matchs)):
-                # 找出最后一层含有标题且不含季参数的目录作为媒体根目录
-                rename_format_level = level
-                break
-        else:
-            # 假定第一层目录是媒体根目录
-            logger.warn(f"重命名格式 {rename_format} 缺少标题目录")
-        if rename_format_level > len(rename_path.parents):
-            # 通常因为路径以/结尾，被Path规范化删除了
-            logger.error(f"路径 {rename_path} 不匹配重命名格式 {rename_format}")
-            return None
-        if rename_format_level <= 0:
-            # 所有媒体文件都存在一个目录内的特殊需求
-            rename_format_level = 1
-        # 媒体根路径
-        media_root = rename_path.parents[rename_format_level - 1]
-        return media_root
+        result = resolve_media_root_path(rename_format, rename_path, media_type)
+        if result.warning:
+            logger.warn(result.warning)
+        if result.error:
+            logger.error(result.error)
+        return result.path
 
 
 def _split_file_uri(value: str) -> Tuple[str, str]:
     """
     拆分 FileURI 字符串，保留原始路径用于安全校验。
     """
-    for storage in StorageSchema:
-        protocol = f"{storage.value}:"
-        if value.startswith(protocol):
-            return storage.value, value[len(protocol):]
-    return "local", value
+    storage, raw_path = _SchemaFileURI.split_uri(value)
+    return storage or StorageSchema.Local.value, raw_path
 
 
 def _normalize_safe_posix_path(raw_path: str) -> PurePosixPath:
@@ -286,7 +246,7 @@ def _normalize_download_path(raw_path: str, storage: str) -> Tuple[str, PurePath
     按存储类型解析下载路径，本地允许 POSIX 或已配置的 Windows drive，远端保持 FileURI POSIX 语义。
     """
     path_value = str(raw_path or "").strip()
-    if storage == "local" and WINDOWS_DRIVE_PREFIX_PATTERN.match(path_value):
+    if _SchemaFileURI.is_local(storage) and WINDOWS_DRIVE_PREFIX_PATTERN.match(path_value):
         return "windows", _normalize_safe_windows_path(path_value)
     return "posix", _normalize_safe_posix_path(path_value)
 
@@ -294,11 +254,10 @@ def _normalize_download_path(raw_path: str, storage: str) -> Tuple[str, PurePath
 def _download_path_uri(storage: str, path: PurePath) -> str:
     """
     生成可传给下载器的 save_path，保持 /download/paths 暴露的本地和远端路径风格。
+
+    只有默认本地实例的裸令牌省略存储前缀，具名本地实例保留前缀，否则回解析时会丢掉实例名。
     """
-    path_value = path.as_posix()
-    if storage == "local":
-        return path_value
-    return _SchemaFileURI(storage=storage, path=path_value).uri
+    return _SchemaFileURI(storage=storage, path=path.as_posix()).uri
 
 
 def _normalize_download_root(dir_info: _SchemaTransferDirectoryConf) -> Optional[Tuple[str, str, PurePath]]:
@@ -324,8 +283,9 @@ def validate_download_save_path(save_path: str) -> str:
     :return: 可直接传给下载接口的规范化保存目录
     """
     value = str(save_path or "").strip()
-    has_storage_prefix = any(value.startswith(f"{item.value}:") for item in StorageSchema)
-    storage, raw_path = _split_file_uri(value)
+    storage_prefix, raw_path = _SchemaFileURI.split_uri(value)
+    has_storage_prefix = storage_prefix is not None
+    storage = storage_prefix or StorageSchema.Local.value
     target_style, target_path = _normalize_download_path(raw_path, storage)
 
     download_roots = []
@@ -335,7 +295,7 @@ def validate_download_save_path(save_path: str) -> str:
             download_roots.append(root)
 
     for root_storage, root_style, root_path in download_roots:
-        if storage != root_storage:
+        if not _SchemaFileURI.is_same_storage(storage, root_storage):
             continue
         if target_style != root_style:
             continue
@@ -347,7 +307,7 @@ def validate_download_save_path(save_path: str) -> str:
             and storage == StorageSchema.Local.value
             and target_style == "posix"):
         for root_storage, root_style, root_path in download_roots:
-            if root_storage == StorageSchema.Local.value or target_style != root_style:
+            if _SchemaFileURI.is_local(root_storage) or target_style != root_style:
                 continue
             if target_path == root_path or target_path.is_relative_to(root_path):
                 return _download_path_uri(root_storage, target_path)
