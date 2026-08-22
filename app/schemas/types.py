@@ -148,6 +148,21 @@ class MediaSource(str, Enum):
 MediaSourceSelection = Union[MediaSource, Tuple[MediaSource, ...]]
 
 
+class MediaSourceCapability(str, Enum):
+    """媒体数据源的能力面，即一个来源可以被拿来做哪几件事。"""
+
+    RECOGNIZE = "recognize"  # 元数据识别
+    SEARCH = "search"  # 媒体搜索
+    DETAIL = "detail"  # 详情与演职人员
+    RECOMMEND = "recommend"  # 推荐与相似
+    DISCOVER = "discover"  # 发现与榜单
+    SCRAPE = "scrape"  # 图片与 NFO 刮削
+
+    def __str__(self) -> str:
+        """返回可直接用于 API 的规范值。"""
+        return self.value
+
+
 def media_type_to_agent(value) -> Optional[str]:
     """将枚举、Agent 键或数据库枚举值统一转换为 Agent 媒体类型。"""
     if isinstance(value, MediaType):
@@ -358,6 +373,8 @@ class SystemConfigKey(Enum):
     MountedLocalDiskDeleteEmptyDirs = "MountedLocalDiskDeleteEmptyDirs"
     # 存储配置
     Storages = "Storages"
+    # 登录认证入口配置
+    AuthProviders = "AuthProviders"
     # 搜索站点范围
     IndexerSites = "IndexerSites"
     # 订阅站点范围
@@ -370,6 +387,8 @@ class SystemConfigKey(Enum):
     CustomIdentifiers = "CustomIdentifiers"
     # 集数定位规则词表
     EpisodeFormatRuleTable = "EpisodeFormatRuleTable"
+    # 名称解析器执行顺序与启停
+    MetaParserOrder = "MetaParserOrder"
     # 转移屏蔽词
     TransferExcludeWords = "TransferExcludeWords"
     # 种子优先级规则
@@ -634,6 +653,8 @@ class StorageSchema(Enum):
 
 # 模块类型
 class ModuleType(Enum):
+    """模块类型的已知值目录，供扩展引用；宿主不再按此枚举对模块分类。"""
+
     # 下载器
     Downloader = "downloader"
     # 媒体服务器
@@ -644,6 +665,10 @@ class ModuleType(Enum):
     MediaRecognize = "mediarecognize"
     # 站点索引
     Indexer = "indexer"
+    # 存储
+    Storage = "storage"
+    # 登录认证入口，宿主无内建实现，取值供扩展声明登录入口类型时引用
+    Auth = "auth"
     # 其它
     Other = "other"
 

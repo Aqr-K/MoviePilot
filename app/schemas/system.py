@@ -34,6 +34,8 @@ class MediaServerConf(BaseModel):
     name: Optional[str] = None
     # 类型 emby/zspace/jellyfin/plex/trimemedia/ugreen/navidrome
     type: Optional[str] = None
+    # 是否为本族的默认调用目标
+    default: Optional[bool] = False
     # 配置
     config: Optional[dict] = Field(default_factory=dict)
     # 是否启用
@@ -92,6 +94,8 @@ class NotificationConf(BaseModel):
     name: Optional[str] = None
     # 类型 telegram/wechat/feishu/vocechat/synologychat/slack/webpush/qqbot
     type: Optional[str] = None
+    # 是否为本族的默认调用目标
+    default: Optional[bool] = False
     # 配置
     config: Optional[dict] = Field(default_factory=dict)
     # 场景开关
@@ -124,13 +128,56 @@ class PluginMarketSyncRequest(BaseModel):
 
 class StorageConf(BaseModel):
     """
-    存储配置
+    存储实例配置
+
+    一个存储类型可配置多份实例，``name`` 即实例名，与存储类型拼成存储令牌
+    ``u115@work``。
+
+    ``default`` 与 ``bare_token_target`` 回答的不是同一个问题：前者是本族的默认调用
+    目标，即调用没有指定存储时用哪一个，整族至多一份，与下载器、媒体服务器、消息通知
+    完全同规格；后者是不带实例名的裸令牌 ``u115`` 落到该类型的哪个实例上，每个存储
+    类型各一份，是存量路径没有实例名时才需要的兼容指针，所有路径补全实例名后即可移除。
     """
 
     # 类型 local/alipan/u115/rclone/alist
     type: Optional[str] = None
-    # 名称
+    # 实例名，同一存储类型下唯一
     name: Optional[str] = None
+    # 是否为本族的默认调用目标，即调用未指定存储时选中的那一份
+    default: Optional[bool] = False
+    # 是否承接本存储类型的裸令牌，兼容存量路径用，非默认语义
+    bare_token_target: bool = False
+    # 配置
+    config: Optional[dict] = Field(default_factory=dict)
+
+
+class AuthProviderConf(BaseModel):
+    """
+    登录认证入口配置
+
+    一个登录入口类型可配置多份实例，``name`` 即实例名，也是登录页上那个按钮的名称：
+    媒体服务器单点登录每台一份，第三方站点单点登录通常只有一份。
+
+    ``identity_provider`` 是本入口写进第三方身份绑定表 ``provider`` 列的标识，留空时
+    宿主按 ``类型@实例名`` 派生。它可显式填写，因为该列是绑定唯一键的一半，取值一变
+    就是另一个身份命名空间——把它填成分身时代那个入口用过的旧标识，即可让存量绑定继续
+    命中；反过来，两条配置填了同一个取值就是身份歧义，宿主拒绝据此产出登录入口。
+
+    派生取值随实例名走，因此**改名等于换入口**，改完之后已绑定的用户按新标识查不到自己
+    的绑定。要改名又保住绑定，先把改名前的派生取值填进本字段再改名。
+
+    本族不设默认调用目标：族级默认回答的是「调用没指定用哪个」，而登录时用户点的是
+    具体某个入口，不存在未指定这回事。
+    """
+
+    # 类型，即扩展声明的登录入口类型标识
+    type: Optional[str] = None
+    # 实例名，同一类型下唯一，即登录页上该入口的名称
+    name: Optional[str] = None
+    # 是否启用
+    enabled: Optional[bool] = False
+    # 身份绑定标识，留空时按 类型@实例名 派生
+    identity_provider: Optional[str] = None
     # 配置
     config: Optional[dict] = Field(default_factory=dict)
 

@@ -1,7 +1,8 @@
+from datetime import datetime
 from enum import Enum as _Enum
-from typing import Literal, Optional, List, Dict, Union
+from typing import Optional, List, Dict, Union
 
-from pydantic import BaseModel, Field, RootModel, field_validator
+from pydantic import BaseModel, Field, RootModel
 
 from app.schemas.common import JsonData
 
@@ -15,27 +16,6 @@ class PluginRuntimeStatus(str, _Enum):
     ACTIVE = "active"
     BLOCKED_BY_POLICY = "blocked_by_policy"
     LOAD_FAILED = "load_failed"
-
-
-class PluginInstance(BaseModel):
-    """持久化一个共享源码插件的独立运行实例。"""
-
-    instance_id: str = Field(description="运行实例 ID，也是配置、数据和路由命名空间")
-    source_plugin_id: str = Field(description="提供代码与前端资源的源插件 ID")
-    plugin_name: Optional[str] = Field(default=None, description="实例展示名称")
-    plugin_desc: Optional[str] = Field(default=None, description="实例展示描述")
-    plugin_icon: Optional[str] = Field(default=None, description="实例展示图标")
-    mode: Literal["virtual"] = Field(default="virtual", description="实例实现模式")
-
-    @field_validator("instance_id", "source_plugin_id")
-    @classmethod
-    def validate_plugin_id(cls, value: str) -> str:
-        """限制实例标识为可安全用作 Python 类名和路由段的格式。"""
-        if not value or not value[0].isalpha() or not value.isalnum():
-            raise ValueError("插件 ID 必须以字母开头且只能包含字母和数字")
-        if len(value) > 128:
-            raise ValueError("插件 ID 长度不能超过 128 个字符")
-        return value
 
 
 class Plugin(BaseModel):
@@ -93,12 +73,6 @@ class Plugin(BaseModel):
     add_time: Optional[int] = 0
     # 插件公钥
     plugin_public_key: Optional[str] = None
-    # 共享代码与前端资源的源插件 ID；普通插件为空
-    source_plugin_id: Optional[str] = None
-    # 是否为共享源码的虚拟实例
-    is_instance: Optional[bool] = False
-    # 实例实现模式；存量物理分身为空
-    instance_mode: Optional[str] = None
 
 
 class PluginRuntimeSummary(BaseModel):
@@ -108,24 +82,6 @@ class PluginRuntimeSummary(BaseModel):
     generation: int = Field(description="插件运行状态变化代次")
     pending_count: int = Field(description="仍处于准备阶段的插件数量")
     failed_count: int = Field(description="加载失败或被策略阻止的插件数量")
-
-
-class PluginCloneRequest(BaseModel):
-    """创建虚拟插件分身的请求参数。"""
-
-    suffix: str = Field(
-        min_length=1,
-        max_length=20,
-        pattern=r"^[A-Za-z0-9]+$",
-        description="追加到当前插件 ID 后的 ASCII 字母或数字后缀",
-    )
-    name: str = Field(default="", description="分身展示名称")
-    description: str = Field(default="", description="分身展示描述")
-    icon: Optional[str] = Field(default=None, description="分身展示图标")
-    version: Optional[str] = Field(
-        default=None,
-        description="兼容旧客户端保留，虚拟分身始终跟随源插件版本",
-    )
 
 
 class PluginDashboard(Plugin):
@@ -163,6 +119,12 @@ class PluginSidebarNavItem(BaseModel):
         description="权限：subscribe / discovery / search / manage / admin",
     )
     order: int = Field(default=0, description="同组内排序，越小越靠前")
+    instance_id: Optional[str] = Field(
+        default=None, description="实例标识，默认实例取值为 default"
+    )
+    instance_key: Optional[str] = Field(
+        default=None, description="实例键，默认实例的实例键等于插件 ID"
+    )
 
 
 class PluginRatingRequest(BaseModel):
@@ -209,7 +171,12 @@ class PluginRemoteInfo(BaseModel):
     id: str
     url: str
     name: str
-    source_plugin_id: Optional[str] = None
+    # 该远程入口所属实例运行的插件版本号，插件未声明 plugin_version 时为空
+    version: Optional[str] = Field(default=None, description="插件版本号")
+    # 按版本区分的联邦远程标识，格式为 `{id}#{version}`；无版本信息时与 id 相同。
+    # Module Federation 的远程名是浏览器端全局单一键空间，同一插件的两个版本
+    # 若都用 id 注册会互相覆盖，前端改用该字段注册可让不同版本天然不同名
+    remote_key: Optional[str] = Field(default=None, description="按版本区分的联邦远程标识")
 
 
 class PluginReleaseItem(BaseModel):
@@ -257,9 +224,147 @@ class PluginFoldersData(RootModel[Dict[str, Union[List[str], PluginFolderConfigD
     """插件文件夹与插件配置映射，兼容旧版数组格式与新版对象格式。"""
 
 
+class ServiceInstanceRequirementInfo(BaseModel):
+    """一个扩展点作用于哪一族服务实例的坐标。
+
+    前端据此渲染实例选择器：``capability`` 指出候选从哪一族的配置列表来，``types``
+    非空时只有类型落在其中的实例才是候选。不含实例名——选哪一台是用户的选择，声明
+    期不存在，宿主只负责把选择项交给他。
+    """
+
+    capability: str = Field(description="能力标签，候选实例取自该族的配置列表")
+    types: list[str] = Field(
+        default_factory=list, description="收窄到的类型标识，为空表示该族任意类型都可选"
+    )
+
+
 class PluginDashboardMetaItem(BaseModel):
     """插件仪表板入口摘要。"""
 
     id: str
     name: Optional[str] = None
     key: Optional[str] = None
+    # 实例标识，默认实例取值为 default
+    instance_id: Optional[str] = None
+    # 实例键，默认实例的实例键等于插件 ID
+    instance_key: Optional[str] = None
+    # 本仪表盘作用于哪一族服务实例，未声明时为 None
+    requires_service_instance: Optional[ServiceInstanceRequirementInfo] = None
+
+
+class PluginInstanceInfo(BaseModel):
+    """插件实例信息，用于实例列表与创建实例的返回。"""
+
+    instance_id: str = Field(description="实例标识，默认实例取值为 default")
+    instance_key: str = Field(description="实例键，默认实例的实例键等于插件 ID")
+    running: bool = Field(default=False, description="实例是否处于运行态")
+    state: bool = Field(default=False, description="实例启用状态，未处于运行态时为 False")
+    is_default_target: bool = Field(
+        default=False, description="是否为该插件当前的默认调用目标"
+    )
+
+
+class PluginInstanceCreate(BaseModel):
+    """创建插件实例请求体。"""
+
+    instance_id: str = Field(
+        description="新实例标识，不能包含实例键分隔符 @，且需满足单层目录名安全校验"
+    )
+    config: Optional[Dict[str, JsonData]] = Field(
+        default=None, description="实例初始配置，为空时使用空字典"
+    )
+
+
+class PluginInstalledVersion(BaseModel):
+    """插件已安装的一个版本。"""
+
+    version: str = Field(description="版本号")
+    directory: str = Field(description="版本目录名")
+    installed_at: Optional[str] = Field(default=None, description="登记的安装时间")
+    source: Optional[str] = Field(default=None, description="版本来源：market/local/migrated")
+    is_current: bool = Field(default=False, description="是否为版本元信息登记的当前版本")
+
+
+class PluginInstanceVersionBinding(BaseModel):
+    """插件实例的版本绑定情况。"""
+
+    instance_id: str = Field(description="实例标识，默认实例取值为 default")
+    instance_key: str = Field(description="实例键，默认实例的实例键等于插件 ID")
+    plugin_version: Optional[str] = Field(
+        default=None, description="已生效版本；为空表示尚未成功启动过任何版本"
+    )
+    follow_default_version: bool = Field(
+        default=True, description="是否跟随默认实例的版本"
+    )
+    target_version: Optional[str] = Field(
+        default=None,
+        description="期望版本，与已生效版本不一致表示待切换；无从解析时为空",
+    )
+    running: bool = Field(default=False, description="实例是否处于运行态")
+
+
+class PluginVersionOverview(BaseModel):
+    """插件已装版本与各实例绑定情况。"""
+
+    plugin_id: str = Field(description="插件 ID")
+    current_version: Optional[str] = Field(
+        default=None, description="版本元信息登记的当前版本"
+    )
+    installed_versions: List[PluginInstalledVersion] = Field(
+        default_factory=list, description="磁盘上可加载的已装版本"
+    )
+    instances: List[PluginInstanceVersionBinding] = Field(
+        default_factory=list, description="各实例的版本绑定情况"
+    )
+
+
+class PluginInstanceVersionSet(BaseModel):
+    """设置插件实例版本绑定请求体。"""
+
+    follow_default_version: bool = Field(
+        default=True, description="是否跟随默认实例的版本"
+    )
+    plugin_version: Optional[str] = Field(
+        default=None,
+        description="目标版本号；不跟随默认实例时必填，且必须是该插件已安装的版本",
+    )
+
+
+class PluginVersionRecycleResult(BaseModel):
+    """插件版本目录回收结果。"""
+
+    plugin_id: str = Field(description="插件 ID")
+    removed: List[str] = Field(default_factory=list, description="本次删除的版本号列表")
+    kept: Dict[str, str] = Field(
+        default_factory=dict, description="保留下来的版本号到保留理由的映射"
+    )
+
+
+class PluginInstanceLogLevelInfo(BaseModel):
+    """插件实例的日志等级设置与当前生效值。"""
+
+    instance_id: str = Field(description="实例标识，默认实例取值为 default")
+    configured_level: Optional[str] = Field(
+        default=None, description="配置的等级覆盖；为空表示跟随全局等级"
+    )
+    expires_at: Optional[datetime] = Field(
+        default=None, description="覆盖失效时间；为空表示不过期或未设置覆盖"
+    )
+    effective_level: str = Field(description="当前生效的等级，已按失效时间做过回落判定")
+
+
+class PluginInstanceLogLevelSet(BaseModel):
+    """设置插件实例日志等级请求体。"""
+
+    level: str = Field(description="目标等级，取值须在 LOG_LEVELS 内：DEBUG/INFO/WARN/ERROR")
+    expires_at: Optional[datetime] = Field(
+        default=None, description="覆盖失效时间；为空表示不过期"
+    )
+
+
+class PluginInstanceLogFileInfo(BaseModel):
+    """插件实例日志目录下的单个日志文件信息。"""
+
+    name: str = Field(description="文件名，如 plugin.log 或滚动备份 plugin.log.1")
+    size: int = Field(description="文件大小，单位字节")
+    modified_at: datetime = Field(description="文件最后修改时间")

@@ -4,11 +4,11 @@ from typing import Iterable, Optional, Dict, Any, List, Set, Callable
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import JsonData
-from app.schemas.types import MediaType, NotificationChannel
+from app.schemas.notification import ChannelField
 from app.schemas.file import FileItem
 from app.schemas.media import OptionalMediaIdentityMixin, RequiredMediaIdentityMixin
 from app.schemas.transfer import TransferInfo
-from app.schemas.types import MediaSource
+from app.schemas.types import MediaSource, MediaSourceCapability, MediaType
 
 
 class Event(BaseModel):
@@ -565,7 +565,7 @@ class ResourceDownloadEventData(ChainEventData):
     # 输入参数
     context: Any = Field(None, description="当前资源上下文")
     episodes: Optional[Set[int]] = Field(None, description="需要下载的集数")
-    channel: Optional[NotificationChannel] = Field(None, description="通知渠道")
+    channel: ChannelField = Field(None, description="通知渠道")
     origin: Optional[str] = Field(None, description="来源")
     downloader: Optional[str] = Field(None, description="下载器")
     options: Optional[dict] = Field(default={}, description="其他参数")
@@ -718,6 +718,9 @@ class MediaSourceInfo(BaseModel):
 
     插件通过该描述声明来源的展示名称和支持的媒体类型；识别、搜索和刮削的
     实际实现仍由插件模块方法提供，宿主只负责把来源传递到统一媒体链路。
+
+    ``capabilities`` 是来源能做哪几件事，由宿主按其交出的方法名推导，不由声明方
+    填写。留空表示该来源没有任何可用能力面，选择器不应把它列为可选项。
     """
 
     name: str = Field(..., description="数据源展示名称")
@@ -725,6 +728,10 @@ class MediaSourceInfo(BaseModel):
     media_types: List[MediaType] = Field(
         default_factory=lambda: [MediaType.MOVIE, MediaType.TV],
         description="支持的媒体类型",
+    )
+    capabilities: List[MediaSourceCapability] = Field(
+        default_factory=list,
+        description="来源占据的能力面，供来源选择器按用途过滤",
     )
 
 

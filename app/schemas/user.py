@@ -87,17 +87,41 @@ class UserInDB(UserInDBBase):
     hashed_password: str
 
 
+class UserIdentityInfo(BaseModel):
+    """当前用户的第三方身份绑定摘要。"""
+
+    id: int
+    provider: str
+    external_id: str
+    display_name: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AuthProviderRemote(BaseModel):
     """插件认证提供方的远程组件信息。"""
 
     id: str
     url: str
     name: str
+    # 该远程入口所属实例运行的插件版本号，插件未声明 plugin_version 时为空
+    version: Optional[str] = Field(default=None, description="插件版本号")
+    # 按版本区分的联邦远程标识，格式为 `{id}#{version}`；无版本信息时与 id 相同，
+    # 用途见 app.schemas.plugin.PluginRemoteInfo.remote_key
+    remote_key: Optional[str] = Field(default=None, description="按版本区分的联邦远程标识")
 
 
 class AuthProviderInfo(BaseModel):
-    """匿名登录页可展示的认证提供方摘要。"""
+    """匿名登录页可展示的认证提供方摘要。
 
+    本模型由未登录状态下的登录页取用，因此只带展示与路由所需的字段，不带任何配置
+    载荷——登录入口的配置里装着客户端密钥一类的东西。入口类型的配置界面另由
+    ``/service/config_form/auth/{type}`` 下发，那条端点要求管理员身份。
+    """
+
+    # 入口标识，同时是第三方身份绑定表 provider 列的取值；插件完成认证握手后
+    # 原样回传它，宿主不改写
     id: str
     type: str
     name: str
@@ -106,4 +130,12 @@ class AuthProviderInfo(BaseModel):
     icon: Optional[str] = None
     component: Optional[str] = None
     plugin_id: Optional[str] = None
+    # 登录入口类型标识，由实例配置扇出的入口才有；分身级旧钩子声明的入口为 None
+    service_type: Optional[str] = Field(
+        default=None, description="登录入口类型标识"
+    )
+    # 提供该入口的插件实例标识与实例键。两者取值都能从 plugin_id 推出，声明出来是因为
+    # response_model 会静默丢掉模型里没有的字段，而组装侧确实填了它们
+    instance_id: Optional[str] = Field(default=None, description="插件实例标识")
+    instance_key: Optional[str] = Field(default=None, description="插件实例键")
     remote: Optional[AuthProviderRemote] = None
