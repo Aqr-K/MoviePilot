@@ -19,20 +19,17 @@
       "FeishuModule": {
         "name": "飛書"
       },
-      "FileManagerModule": {
-        "name": "檔案整理"
-      },
       "FilterModule": {
         "name": "過濾器"
-      },
-      "ImdbModule": {
-        "name": "IMDb"
       },
       "IndexerModule": {
         "name": "站點索引"
       },
       "JellyfinModule": {
         "name": "Jellyfin"
+      },
+      "MediaLibraryModule": {
+        "name": "檔案整理"
       },
       "PlexModule": {
         "name": "Plex"
@@ -292,7 +289,6 @@
     "字幕站点信息不存在": "字幕站點資訊不存在",
     "附件不存在或已过期": "附件不存在或已過期",
     "附件超过 32MB，无法发送给智能助手": "附件超過 32MB，無法傳送給智慧助手",
-    "附件保存失败": "附件儲存失敗",
     "认证票据无效或已过期": "認證票據無效或已過期",
     "用户不存在或已禁用": "使用者不存在或已停用",
     "用户权限不足": "使用者權限不足",
@@ -411,7 +407,32 @@
     "订阅资源匹配完成": "訂閱資源匹配完成",
     "订阅元数据更新完成": "訂閱元資料更新完成",
     "未配置 Follow 订阅用户，跳过刷新": "未設定 Follow 訂閱使用者，跳過重新整理",
-    "订阅日历预缓存完成": "訂閱日曆預快取完成"
+    "订阅日历预缓存完成": "訂閱日曆預快取完成",
+    "已解绑": "已解綁",
+    "绑定不存在": "綁定不存在",
+    "服务实例配置缺少类型标识或实例名": "服務實例設定缺少類型標識或實例名稱",
+    "内建识别": "內建識別",
+    "内建识别环由宿主固定执行，无法启停": "內建識別環由宿主固定執行，無法啟停",
+    "内建识别环由宿主固定执行，无法排定顺序": "內建識別環由宿主固定執行，無法排定順序",
+    "名称解析环标识不能为空": "名稱解析環標識不能為空",
+    "登录入口不存在或未启用": "登入入口不存在或未啟用",
+    "登录入口的配置不可用": "登入入口的設定不可用",
+    "登录入口的授权回调地址配置有误": "登入入口的授權回呼位址設定有誤",
+    "授权请求已失效，请重新发起登录": "授權請求已失效，請重新發起登入",
+    "该 GitHub 账号不属于允许登录的组织": "該 GitHub 帳號不屬於允許登入的組織",
+    "该 GitHub 账号尚未绑定本项目用户，请先登录后在设置页完成绑定": "該 GitHub 帳號尚未綁定本專案使用者，請先登入後在設定頁完成綁定",
+    "GitHub 授权未完成": "GitHub 授權未完成",
+    "GitHub 未交回授权码": "GitHub 未交回授權碼",
+    "GitHub 登录出错，请稍后重试": "GitHub 登入發生錯誤，請稍後重試",
+    "GitHub OAuth App 的 Client ID 与 Client Secret 均不可为空": "GitHub OAuth App 的 Client ID 與 Client Secret 均不可為空",
+    "授权回调地址须是完整的 http 或 https 地址": "授權回呼位址須是完整的 http 或 https 位址",
+    "兑换 GitHub 访问令牌": "兌換 GitHub 存取權杖",
+    "读取 GitHub 账号信息": "讀取 GitHub 帳號資訊",
+    "读取 GitHub 所属组织": "讀取 GitHub 所屬組織",
+    "兑换 GitHub 访问令牌失败：对端返回的不是对象": "兌換 GitHub 存取權杖失敗：對端回傳的不是物件",
+    "读取 GitHub 账号信息失败：对端返回的不是对象": "讀取 GitHub 帳號資訊失敗：對端回傳的不是物件",
+    "读取 GitHub 账号信息失败：对端未返回账号标识": "讀取 GitHub 帳號資訊失敗：對端未回傳帳號識別碼",
+    "读取 GitHub 所属组织失败：对端返回的不是组织列表": "讀取 GitHub 所屬組織失敗：對端回傳的不是組織清單"
   },
   "message_patterns": [
     {
@@ -1421,6 +1442,90 @@
     {
       "source": "{seconds}秒",
       "target": "{seconds}秒"
+    },
+    {
+      "source": "名称解析环 {parser} 未登记",
+      "target": "名稱解析環 {parser} 未登記"
+    },
+    {
+      "source": "名称解析环 {parser} 在顺序里出现了多次",
+      "target": "名稱解析環 {parser} 在順序裡出現了多次"
+    },
+    {
+      "source": "不支持的日志等级：{level}",
+      "target": "不支援的日誌等級：{level}"
+    },
+    {
+      "source": "服务类型 {type} 只接受一份配置，当前已启用 {count} 份，且没有唯一的默认调用目标；请在设置页把其中一份设为默认调用目标，或停用多余的配置。可选配置：{candidates}",
+      "target": "服務類型 {type} 只接受一份設定，目前已啟用 {count} 份，且沒有唯一的預設呼叫目標；請在設定頁把其中一份設為預設呼叫目標，或停用多餘的設定。可選設定：{candidates}"
+    },
+    {
+      "source": "{capability} 类型 {service_type} 下不存在名为 {name} 的配置",
+      "target": "{capability} 類型 {service_type} 下不存在名為 {name} 的設定"
+    },
+    {
+      "source": "服务能力 {capability} 不支持声明服务实例",
+      "target": "服務能力 {capability} 不支援宣告服務實例"
+    },
+    {
+      "source": "服务能力 {capability} 没有默认调用目标",
+      "target": "服務能力 {capability} 沒有預設呼叫目標"
+    },
+    {
+      "source": "存储 {storage} 尚未配置账号密码",
+      "target": "儲存 {storage} 尚未設定帳號密碼"
+    },
+    {
+      "source": "【123云盘】列举目录失败：{folder} - {reason}",
+      "target": "【123雲盤】列舉目錄失敗：{folder} - {reason}"
+    },
+    {
+      "source": "【123云盘】查询 {path} 失败：{reason}",
+      "target": "【123雲盤】查詢 {path} 失敗：{reason}"
+    },
+    {
+      "source": "{action}失败：GitHub 服务不可达",
+      "target": "{action_i18n}失敗：GitHub 服務無法連線"
+    },
+    {
+      "source": "{action}失败：GitHub 返回状态码 {status}",
+      "target": "{action_i18n}失敗：GitHub 回傳狀態碼 {status}"
+    },
+    {
+      "source": "{action}失败：响应内容不是 JSON（{reason}）",
+      "target": "{action_i18n}失敗：回應內容不是 JSON（{reason}）"
+    },
+    {
+      "source": "兑换 GitHub 访问令牌失败：{reason}",
+      "target": "兌換 GitHub 存取權杖失敗：{reason}"
+    },
+    {
+      "source": "服务能力 {capability} 不是已登记的服务族，无法确定作用的实例",
+      "target": "服務能力 {capability} 不是已登記的服務族，無法確定作用的實例"
+    },
+    {
+      "source": "服务能力 {capability} 下已不存在名为 {name} 的实例配置，请改选一个仍然存在的实例；可选实例：{candidates}",
+      "target": "服務能力 {capability} 下已不存在名為 {name} 的實例設定，請改選一個仍然存在的實例；可選實例：{candidates}"
+    },
+    {
+      "source": "服务能力 {capability} 下名为 {name} 的实例配置已停用，请启用它或改选一个已启用的实例；可选实例：{candidates}",
+      "target": "服務能力 {capability} 下名為 {name} 的實例設定已停用，請啟用它或改選一個已啟用的實例；可選實例：{candidates}"
+    },
+    {
+      "source": "服务能力 {capability} 下名为 {name} 的实例配置类型不在本扩展点声明的范围内，请改选一个类型对得上的实例；可选实例：{candidates}",
+      "target": "服務能力 {capability} 下名為 {name} 的實例設定類型不在本擴充點宣告的範圍內，請改選一個類型對得上的實例；可選實例：{candidates}"
+    },
+    {
+      "source": "服务能力 {capability} 没有默认调用目标，调用必须显式指定实例；可选实例：{candidates}",
+      "target": "服務能力 {capability} 沒有預設呼叫目標，呼叫必須明確指定實例；可選實例：{candidates}"
+    },
+    {
+      "source": "服务能力 {capability} 的默认调用目标 {name} 已停用，调用必须显式指定实例；可选实例：{candidates}",
+      "target": "服務能力 {capability} 的預設呼叫目標 {name} 已停用，呼叫必須明確指定實例；可選實例：{candidates}"
+    },
+    {
+      "source": "服务能力 {capability} 未设置默认调用目标，调用必须显式指定实例；可选实例：{candidates}",
+      "target": "服務能力 {capability} 未設定預設呼叫目標，呼叫必須明確指定實例；可選實例：{candidates}"
     }
   ]
 }

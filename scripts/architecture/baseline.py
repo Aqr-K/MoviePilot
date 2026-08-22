@@ -811,7 +811,7 @@ def collect_runtime_baseline() -> dict[str, Any]:
 
 def collect_module_method_specs() -> dict[str, Any]:
     """加载无运行资源副作用的 Module Contract V2 清单。"""
-    path = APP_ROOT / "runtime" / "extensions" / "module" / "contracts.py"
+    path = APP_ROOT / "runtime" / "extensions" / "contract" / "module_method.py"
     spec = importlib.util.spec_from_file_location("architecture_module_contracts", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法加载模块契约清单：{path}")

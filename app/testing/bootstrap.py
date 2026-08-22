@@ -71,7 +71,7 @@ def isolate_config_dir() -> str:
     数据库引擎已改为惰性创建，``import app.db`` 本身不再连库；但 ``settings`` 是在
     ``import app.runtime.config`` 时构造的，那一刻就把 ``CONFIG_DIR`` 读进字段并建好配置子目录，
     之后再改环境变量对 ``settings.CONFIG_PATH`` 毫无影响——引擎晚点才建，连的仍是真实 ``user.db``。
-    故本函数必须早于首个牵入 ``app.runtime.config`` 的 import（``app.db`` / ``app.chain.*`` 都会牵入）。
+    故本函数必须早于首个牵入 ``app.runtime.config`` 的 import（``app.db`` / ``app.application.orchestration.*`` 都会牵入）。
     调用方已显式设置 ``CONFIG_DIR``（如 CI 指定隔离目录）时尊重之、不覆盖。
 
     :return: 实际生效的 CONFIG_DIR 绝对路径
@@ -113,19 +113,24 @@ def isolate_config_dir() -> str:
 
 
 def _expose_plugin_source(path: Path) -> None:
-    """让插件仓源码通过生产运行时的 ``app.plugins.<id>`` 命名空间导入。"""
+    """让插件仓源码通过生产运行时的 ``app.plugins.<id>`` 命名空间导入。
+
+    ``app.plugins`` 是命名空间包，``__path__`` 为动态重算的 ``_NamespacePath``，
+    只支持追加、不支持按位置插入；改为整体赋值一份列表，插件仓源码稳定排在最前。
+    """
     from importlib import import_module
 
     plugins_package = import_module("app.plugins")
     value = str(path)
-    if value not in plugins_package.__path__:
-        plugins_package.__path__.insert(0, value)
+    search_path = list(plugins_package.__path__)
+    if value not in search_path:
+        plugins_package.__path__ = [value, *search_path]
 
 
 def ensure_sites_stub() -> None:
     """为 ``app.application.site.sites`` 补最小垫片（仅在缺失时）。
 
-    ``app.application.site.sites`` 由独立仓库动态拉取，CI / 全新环境无该模块，而众多 ``app.chain.*`` /
+    ``app.application.site.sites`` 由独立仓库动态拉取，CI / 全新环境无该模块，而众多 ``app.application.orchestration.*`` /
     ``app.modules.*`` 在 import 期依赖它。统一补一个最小垫片，省去各测试文件各自打桩；若真实模块
     已存在（本地已拉取）则用真实模块、不覆盖，不影响真实行为。须在隔离 CONFIG_DIR 之后调用，
     以免试探性 ``import app.application.site.sites`` 牵入 ``app.runtime.config``、
@@ -188,6 +193,13 @@ def prepare_backend() -> None:
     # 测试与生产使用同一组合入口，确保领域解析器获得隔离库和测试 settings。
     from app.startup.domain_initializer import configure_domain_dependencies
     configure_domain_dependencies()
+    # 导入即向 application.agent 门面注册惰性 provider，不物化 Agent 实现；
+    # 直接构造 SkillInteractionHandler 等门面消费方的单测依赖该注册先完成。
+    import app.startup.agent_initializer  # noqa: F401
+    # 扩展经端口取用目录、存储、命名、站点资源与规则配置，须先于扩展被 import 完成注入
+    # （测试直接 import 扩展模块，不经过 ModuleManager，注册须在此显式补齐）。
+    from app.startup.hostport_initializer import configure_host_ports
+    configure_host_ports()
 
 
 def prepare_v2_backend(plugins_repo: Path) -> None:
