@@ -64,3 +64,6 @@ docs/superpowers/
 # 保留本地前端构建产物目录，目录内产物不纳入仓库
 frontend-dist/*
 !frontend-dist/.gitkeep
+
+# codegraph 索引守护进程的运行期产物
+.codegraph/
