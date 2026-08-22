@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import Any, Generator, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
-from app.foundation.reflection import ObjectUtils
 from app.foundation.singleton import Singleton
 from app.runtime.capabilities.model import (
     CapabilityLifecycleState,
@@ -14,37 +13,23 @@ from app.runtime.capabilities.model import (
 from app.runtime.capabilities.runtime import CapabilityRuntime
 from app.runtime.config import settings
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
-from app.runtime.extensions.host_module_adapter import (
+from app.runtime.extensions.contract.extension import supports_extension_hook
+from app.runtime.extensions.lifecycle.host_module_adapter import (
     HOST_MODULE_KIND,
     HostModuleAdapter,
+    HostModuleExtension,
     build_host_module_registry,
     capture_host_module_config,
     should_run_host_module,
 )
+from app.runtime.extensions.service_config import service_capability
+from app.runtime.extensions.registry.service_instance import service_instance_registry
 from app.runtime.log import logger
-from app.schemas.types import (
-    DownloaderType,
-    EventType,
-    MediaRecognizeType,
-    MediaServerType,
-    NotificationChannel,
-    ModuleType,
-    OtherModulesType,
-    StorageSchema,
-)
+from app.schemas.types import EventType
 
 
 class ModuleManager(metaclass=Singleton):
     """以 Capability Runtime 管理宿主模块，并保留旧插件同步查询合同。"""
-
-    SubType = Union[
-        DownloaderType,
-        MediaServerType,
-        NotificationChannel,
-        StorageSchema,
-        OtherModulesType,
-        MediaRecognizeType,
-    ]
 
     def __init__(self) -> None:
         """发现 data-only manifest，并按当前配置激活所需宿主模块。"""
@@ -52,6 +37,10 @@ class ModuleManager(metaclass=Singleton):
         self._lifecycle_lock = threading.RLock()
         self._modules: dict[str, type] = {}
         self._running_modules: dict[str, Any] = {}
+        # 发布视图代际；每次运行模块投影刷新都自增，用于作废能力索引缓存。
+        self._running_generation = 0
+        self._capability_index: Optional[dict[str, tuple[Any, ...]]] = None
+        self._capability_index_generation = -1
         registry = build_host_module_registry()
         self._runtime = CapabilityRuntime(
             registry,
@@ -130,11 +119,14 @@ class ModuleManager(metaclass=Singleton):
         }
         with self._lock:
             self._running_modules = running
+            self._running_generation += 1
+            self._capability_index = None
+            self._capability_index_generation = -1
 
     def resolve_event_handler_instance(
         self,
         owner_class: type,
-    ) -> Optional[EventHandlerBinding]:
+    ) -> Optional[list[EventHandlerBinding]]:
         """按 canonical class identity 绑定当前 generation，停止态阻断 fallback 构造。"""
         for spec in self._specs:
             with self._lock:
@@ -147,10 +139,12 @@ class ModuleManager(metaclass=Singleton):
                     self._runtime.snapshot(spec.id)
             if implementation is not owner_class:
                 continue
-            return EventHandlerBinding(
-                instance=self._runtime.get_running(spec.id),
-                owner_name=str(spec.metadata["name"]),
-            )
+            return [
+                EventHandlerBinding(
+                    instance=self._runtime.get_running(spec.id),
+                    owner_name=str(spec.metadata["name"]),
+                )
+            ]
         return None
 
     def _reconcile(
@@ -242,10 +236,11 @@ class ModuleManager(metaclass=Singleton):
         module = self.get_running_module(modleid)
         if module is None:
             return False, ""
-        if hasattr(module, "test") and ObjectUtils.check_method(module.test):
-            result = module.test()
-            return result if result else (False, "")
-        return True, "模块不支持测试"
+        extension = HostModuleExtension(module)
+        if not extension.supports_hook("test"):
+            return True, "模块不支持测试"
+        result = extension.self_test()
+        return result if result else (False, "")
 
     @staticmethod
     def check_setting(setting: Optional[tuple]) -> bool:
@@ -277,21 +272,86 @@ class ModuleManager(metaclass=Singleton):
     def get_running_modules(self, method: str) -> Generator:
         """返回实现了指定方法的运行模块快照。"""
         for module in self._running_snapshot():
-            candidate = getattr(module, method, None)
-            if callable(candidate) and ObjectUtils.check_method(candidate):
+            if supports_extension_hook(module, method):
                 yield module
 
-    def get_running_type_modules(self, module_type: ModuleType) -> Generator:
-        """返回指定类型的运行模块快照。"""
-        for module in self._running_snapshot():
-            if module.get_type() == module_type:
-                yield module
+    def _build_capability_index(self) -> dict[str, tuple[Any, ...]]:
+        """按扩展契约取用运行实例的已实现方法，构建方法名到提供者的索引。
 
-    def get_running_subtype_module(self, module_subtype: SubType) -> Generator:
-        """返回指定子类型的运行模块快照。"""
+        :return: 方法名到按优先级升序排列的提供者元组的映射
+        """
+        collected: dict[str, list[HostModuleExtension]] = {}
         for module in self._running_snapshot():
-            if module.get_subtype() == module_subtype:
-                yield module
+            extension = HostModuleExtension(module)
+            for name in extension.capability_names():
+                collected.setdefault(name, []).append(extension)
+        return {
+            name: tuple(
+                extension.instance
+                for extension in sorted(
+                    extensions,
+                    key=lambda item: item.priority,
+                )
+            )
+            for name, extensions in collected.items()
+        }
+
+    def _capability_index_snapshot(self) -> dict[str, tuple[Any, ...]]:
+        """返回与当前发布代际一致的能力索引，必要时重建缓存。
+
+        :return: 方法名到按优先级升序排列的提供者元组的映射
+        """
+        with self._lock:
+            index = self._capability_index
+            if (
+                index is not None
+                and self._capability_index_generation == self._running_generation
+            ):
+                return index
+            generation = self._running_generation
+        # 反射开销不进锁，避免长时间阻塞生命周期写入方。
+        rebuilt = self._build_capability_index()
+        with self._lock:
+            if generation == self._running_generation:
+                self._capability_index = rebuilt
+                self._capability_index_generation = generation
+        return rebuilt
+
+    def providers_for(self, method: str) -> tuple[Any, ...]:
+        """返回实现了指定方法的运行模块，按 `get_priority()` 升序排列。
+
+        :param method: 模块方法名称
+        :return: 提供该方法的运行模块元组；无提供者时为空元组
+        """
+        if not method:
+            return ()
+        return self._capability_index_snapshot().get(method, ())
+
+    def get_service_config_modules(self, config_key: str) -> Generator:
+        """返回消费指定服务配置键的实例持有者快照。
+
+        先产出 manifest 声明归属该服务族的运行模块，再产出扩展声明的服务实例
+        适配器。两者都只需实现 `get_instances()`，扩展声明因此无须进入模块清单，
+        也无须承担内建模块的整套生命周期。产出顺序即优先级顺序：同一实例名被
+        先后产出多次时以最后一次为准，故扩展声明的同名类型覆盖内建类型。
+
+        入参是配置存放位置，而清单与扩展声明都按服务能力标签归属，故此处先把
+        存放位置反查成标签；不对应任何服务族的存放位置没有实例持有者。
+
+        :param config_key: 服务配置键，取值为 `SystemConfigKey` 的成员值
+        :return: 实例持有者迭代器，内建模块按 manifest 发现顺序在前，扩展声明的
+            适配器按登记顺序在后
+        """
+        capability = service_capability(config_key)
+        if not capability:
+            return
+        for spec in self._specs:
+            if spec.metadata.get("service_capability") != capability:
+                continue
+            instance = self._runtime.get_running(spec.id)
+            if instance is not None:
+                yield instance
+        yield from service_instance_registry.adapters(capability)
 
     def get_module(self, module_id: str) -> Any:
         """显式物化并返回 canonical 模块类；失败保持旧合同返回 None。"""
@@ -321,6 +381,48 @@ class ModuleManager(metaclass=Singleton):
     def get_module_ids(self) -> List[str]:
         """从 manifest 返回全部模块 ID，不物化实现。"""
         return [spec.id for spec in self._specs]
+
+    def get_capability_index(self) -> Dict[str, List[str]]:
+        """取能力方法名到提供者模块标识的倒排索引。
+
+        用于诊断系统里有哪些能力、分别由哪些模块提供。单个模块推导能力出错时记
+        debug 日志后跳过该模块，不中断整张表。
+
+        :return: {能力方法名: [模块标识, ...]}, 键与值均排序
+        """
+        with self._lock:
+            running = dict(self._running_modules)
+        index: Dict[str, List[str]] = {}
+        for module_id, module in running.items():
+            try:
+                extension = HostModuleExtension(module)
+                capabilities = extension.capability_names()
+            except Exception as err:
+                logger.debug("推导模块 %s 能力出错：%s", module_id, str(err))
+                continue
+            for capability in capabilities:
+                index.setdefault(capability, []).append(module_id)
+        return {name: sorted(owners) for name, owners in sorted(index.items())}
+
+    def get_module_capabilities(self, module_id: str) -> List[str]:
+        """取一个运行态模块提供的能力方法名列表。
+
+        判定复用 `HostModuleExtension.capability_names()` 的实现，与 `providers_for`
+        同一份定义，不重新判定「什么算能力」。
+
+        :param module_id: 模块标识
+        :return: 能力方法名列表，排序后；模块未运行时为空列表
+        """
+        with self._lock:
+            module = self._running_modules.get(module_id)
+        if module is None:
+            return []
+        try:
+            extension = HostModuleExtension(module)
+            return sorted(extension.capability_names())
+        except Exception as err:
+            logger.debug("推导模块 %s 能力出错：%s", module_id, str(err))
+            return []
 
     def list_specs(self) -> tuple[CapabilitySpec, ...]:
         """返回全部轻量模块声明，包含物化或启动失败的能力。"""
