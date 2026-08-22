@@ -6,9 +6,11 @@ depends_on = []
 
 [metadata]
 name = "Jellyfin"
-type = "mediaserver"
-subtype = "Jellyfin"
+service_capability = "mediaserver"
 priority = 2
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

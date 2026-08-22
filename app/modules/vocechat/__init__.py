@@ -3,7 +3,7 @@ from urllib.parse import quote, unquote
 from typing import Optional, Union, List, Tuple, Any, Dict
 
 from app.domain.context import Context, MediaInfo
-from app.application.messaging.agent import (
+from app.runtime.channels import (
     matches_channel_admin,
     register_channel_admin_resolver,
     resolve_config_principal_ids,
@@ -14,7 +14,6 @@ from app.modules.vocechat.vocechat import VoceChat
 from app.schemas.notification import NotificationChannel
 from app.schemas.message import IncomingMessage
 from app.schemas.message import Message
-from app.schemas.types import ModuleType
 
 
 register_channel_admin_resolver(
@@ -62,13 +61,6 @@ class VoceChatModule(_MessageChannelModuleBase[VoceChat]):
     @staticmethod
     def get_name() -> str:
         return "VoceChat"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.Notification
 
     @staticmethod
     def get_subtype() -> NotificationChannel:

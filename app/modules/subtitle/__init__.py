@@ -6,11 +6,10 @@ from lxml import etree
 
 from app.runtime.config import settings
 from app.domain.context import Context
-from app.application.site.query import get_configured_site_query_service
-from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
+from app.db.oper.site import SiteOper
 from app.runtime.log import logger
+from app.runtime.hostports.siteresource import site_resource_port
 from app.modules import _ModuleBase
-from app.schemas.types import ModuleType, OtherModulesType
 from app.adapters.network.http import RequestUtils
 
 
@@ -44,20 +43,6 @@ class SubtitleModule(_ModuleBase):
     @staticmethod
     def get_name() -> str:
         return "站点字幕"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.Other
-
-    @staticmethod
-    def get_subtype() -> OtherModulesType:
-        """
-        获取模块子类型
-        """
-        return OtherModulesType.Subtitle
 
     @staticmethod
     def get_priority() -> int:
@@ -137,8 +122,8 @@ class SubtitleModule(_ModuleBase):
             return None
         # 采用API访问的站点由对应爬虫模块处理，详情页HTML不含字幕元素
         if torrent.site is not None:
-            site = get_configured_site_query_service().get_sync(torrent.site)
-            if site and (indexer := SitesHelper().get_indexer(site.domain)):
+            site = SiteOper().get(torrent.site)
+            if site and (indexer := site_resource_port.resolve().get_indexer(site.domain)):
                 if indexer.get("parser") == "mTorrent":
                     return None
         request = RequestUtils(

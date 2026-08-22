@@ -6,9 +6,8 @@ depends_on = []
 
 [metadata]
 name = "TheAudioDB"
-type = "mediarecognize"
-subtype = "TheAudioDB"
 priority = 1
+media_sources = ["theaudiodb"]
 
 [activation]
 policy = "bootstrap"

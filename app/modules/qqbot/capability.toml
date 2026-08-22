@@ -6,9 +6,12 @@ depends_on = []
 
 [metadata]
 name = "QQ"
-type = "notification"
+service_capability = "notification"
 subtype = "QQ"
 priority = 10
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

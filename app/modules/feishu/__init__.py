@@ -1,7 +1,7 @@
 from typing import Any, List, Optional, Tuple, Union
 
 from app.domain.context import Context, MediaInfo
-from app.application.messaging.agent import register_channel_admin_resolver, resolve_config_principal_ids
+from app.runtime.channels import register_channel_admin_resolver, resolve_config_principal_ids
 from app.runtime.log import logger
 from app.modules._base import _MessageChannelModuleBase
 from app.modules.feishu.feishu import Feishu
@@ -9,7 +9,6 @@ from app.schemas.message import IncomingMessage
 from app.schemas.notification import NotificationChannel
 from app.schemas.message import MessageResponse
 from app.schemas.message import Message
-from app.schemas.types import ModuleType
 
 
 register_channel_admin_resolver(
@@ -28,10 +27,6 @@ class FeishuModule(_MessageChannelModuleBase[Feishu]):
     @staticmethod
     def get_name() -> str:
         return "飞书"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        return ModuleType.Notification
 
     @staticmethod
     def get_subtype() -> NotificationChannel:
@@ -455,8 +450,12 @@ class FeishuModule(_MessageChannelModuleBase[Feishu]):
             source=source,
         )
 
-    def finalize_message(self, response: MessageResponse) -> bool:
-        if response.channel != self._channel or not isinstance(response.metadata, dict):
+    def finalize_message(self, response: MessageResponse) -> Optional[bool]:
+        # 非本渠道返回 None 表示让出：单播按「首个非空答案」仲裁，返回 False 会被当成
+        # 已认领而短路，把真正该收尾这条消息的渠道挡在后面
+        if response.channel != self._channel:
+            return None
+        if not isinstance(response.metadata, dict):
             return False
         stream_meta = response.metadata.get("feishu_streaming") or {}
         card_id = str(stream_meta.get("card_id") or "").strip()

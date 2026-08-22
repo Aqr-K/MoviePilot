@@ -1,5 +1,5 @@
 import re
-from typing import Optional, List, Tuple, Union, Dict
+from typing import Any, Optional, List, Tuple, Union, Dict
 
 import cn2an
 
@@ -19,11 +19,9 @@ from app.modules.themoviedb.tmdbv3api.exceptions import TMDbConnectionError
 from app.schemas.category import CategoryConfig
 from app.schemas.types import (
     MediaImageType,
-    MediaRecognizeType,
     MediaSource,
     MediaSourceSelection,
     MediaType,
-    ModuleType,
 )
 from app.adapters.network.http import RequestUtils
 from app.domain.media import is_media_source_enabled, is_media_source_selected
@@ -32,6 +30,11 @@ from app.foundation.text import convert as zhconv_convert
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# 榜单标识到本模块方法名的映射，discover_board 只接受在册标识，白名单校验先于 getattr 完成
+_DISCOVER_BOARDS = {
+    "trending": "tmdb_trending",
+}
 
 
 class TheMovieDbModule(_ModuleBase):
@@ -58,20 +61,6 @@ class TheMovieDbModule(_ModuleBase):
     @staticmethod
     def get_name() -> str:
         return "TheMovieDb"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.MediaRecognize
-
-    @staticmethod
-    def get_subtype() -> MediaRecognizeType:
-        """
-        获取模块子类型
-        """
-        return MediaRecognizeType.TMDB
 
     @staticmethod
     def get_priority() -> int:
@@ -1587,3 +1576,384 @@ class TheMovieDbModule(_ModuleBase):
         保存分类配置
         """
         return self.category.save(config)
+
+    def match_media(self, source: Optional[MediaSource] = None,
+                     name: str = None,
+                     mtype: Optional[MediaType] = None,
+                     year: Optional[str] = None,
+                     season: Optional[int] = None,
+                     imdbid: Optional[str] = None,
+                     raise_exception: bool = False,
+                     **kwargs) -> Optional[dict]:
+        """
+        搜索和匹配指定来源的媒体信息
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param name: 名称
+        :param mtype: 类型
+        :param year: 年份
+        :param season: 用于匹配指定季，0 表示特别季
+        :param imdbid: 本源不支持
+        :param raise_exception: 本源不支持
+        :return: 匹配到的媒体信息
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return self.match_tmdbinfo(name=name, mtype=mtype, year=year, season=season)
+
+    async def async_match_media(self, source: Optional[MediaSource] = None,
+                                 name: str = None,
+                                 mtype: Optional[MediaType] = None,
+                                 year: Optional[str] = None,
+                                 season: Optional[int] = None,
+                                 imdbid: Optional[str] = None,
+                                 raise_exception: bool = False,
+                                 **kwargs) -> Optional[dict]:
+        """
+        搜索和匹配指定来源的媒体信息（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param name: 名称
+        :param mtype: 类型
+        :param year: 年份
+        :param season: 用于匹配指定季，0 表示特别季
+        :param imdbid: 本源不支持
+        :param raise_exception: 本源不支持
+        :return: 匹配到的媒体信息
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return await self.async_match_tmdbinfo(name=name, mtype=mtype, year=year, season=season)
+
+    def person_detail(self, source: Optional[MediaSource] = None,
+                       person_id: int = None,
+                       **kwargs) -> Optional[_SchemaMediaPerson]:
+        """
+        查询指定来源的人物详情
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param person_id: 人物ID
+        :return: 人物详情
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return self.tmdb_person_detail(person_id=person_id)
+
+    async def async_person_detail(self, source: Optional[MediaSource] = None,
+                                   person_id: int = None,
+                                   **kwargs) -> Optional[_SchemaMediaPerson]:
+        """
+        查询指定来源的人物详情（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param person_id: 人物ID
+        :return: 人物详情
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return await self.async_tmdb_person_detail(person_id=person_id)
+
+    def person_credits(self, source: Optional[MediaSource] = None,
+                        person_id: int = None,
+                        page: int = 1,
+                        count: Optional[int] = None,
+                        **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的人物参演作品
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param person_id: 人物ID
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 参演作品列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return self.tmdb_person_credits(person_id=person_id, page=page)
+
+    async def async_person_credits(self, source: Optional[MediaSource] = None,
+                                    person_id: int = None,
+                                    page: int = 1,
+                                    count: Optional[int] = None,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的人物参演作品（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param person_id: 人物ID
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 参演作品列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return await self.async_tmdb_person_credits(person_id=person_id, page=page)
+
+    def media_credits(self, source: Optional[MediaSource] = None,
+                       media_id: Any = None,
+                       mtype: Optional[MediaType] = None,
+                       page: int = 1,
+                       count: Optional[int] = None,
+                       **kwargs) -> Optional[List[_SchemaMediaPerson]]:
+        """
+        查询指定来源的媒体演职员表
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 演职员列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return self.tmdb_tv_credits(tmdbid=tmdbid, page=page)
+        return self.tmdb_movie_credits(tmdbid=tmdbid, page=page)
+
+    async def async_media_credits(self, source: Optional[MediaSource] = None,
+                                   media_id: Any = None,
+                                   mtype: Optional[MediaType] = None,
+                                   page: int = 1,
+                                   count: Optional[int] = None,
+                                   **kwargs) -> Optional[List[_SchemaMediaPerson]]:
+        """
+        查询指定来源的媒体演职员表（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 演职员列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return await self.async_tmdb_tv_credits(tmdbid=tmdbid, page=page)
+        return await self.async_tmdb_movie_credits(tmdbid=tmdbid, page=page)
+
+    def media_recommend(self, source: Optional[MediaSource] = None,
+                         media_id: Any = None,
+                         mtype: Optional[MediaType] = None,
+                         page: int = 1,
+                         count: Optional[int] = None,
+                         **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相关推荐媒体
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 推荐媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return self.tmdb_tv_recommend(tmdbid=tmdbid)
+        return self.tmdb_movie_recommend(tmdbid=tmdbid)
+
+    async def async_media_recommend(self, source: Optional[MediaSource] = None,
+                                     media_id: Any = None,
+                                     mtype: Optional[MediaType] = None,
+                                     page: int = 1,
+                                     count: Optional[int] = None,
+                                     **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相关推荐媒体（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 推荐媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return await self.async_tmdb_tv_recommend(tmdbid=tmdbid)
+        return await self.async_tmdb_movie_recommend(tmdbid=tmdbid)
+
+    def media_similar(self, source: Optional[MediaSource] = None,
+                       media_id: Any = None,
+                       mtype: Optional[MediaType] = None,
+                       **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相似媒体
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :return: 相似媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return self.tmdb_tv_similar(tmdbid=tmdbid)
+        return self.tmdb_movie_similar(tmdbid=tmdbid)
+
+    async def async_media_similar(self, source: Optional[MediaSource] = None,
+                                   media_id: Any = None,
+                                   mtype: Optional[MediaType] = None,
+                                   **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相似媒体（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :return: 相似媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        if mtype == MediaType.TV:
+            return await self.async_tmdb_tv_similar(tmdbid=tmdbid)
+        return await self.async_tmdb_movie_similar(tmdbid=tmdbid)
+
+    def discover(self, source: Optional[MediaSource] = None,
+                 **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件发现指定来源的媒体
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param criteria: 筛选条件，原样转发给 tmdb_discover，不补默认值；本源要求包含 mtype、
+                         sort_by、with_genres、with_original_language、with_keywords、
+                         with_watch_providers、vote_average、vote_count、release_date 等必填项与
+                         可选的 page，必填项缺失时由 tmdb_discover 自身抛出异常
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return self.tmdb_discover(**criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                              **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件发现指定来源的媒体（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param criteria: 筛选条件，原样转发给 async_tmdb_discover，规则同步版本一致，
+                         另支持 raise_exception（触发速率限制时是否抛出异常）
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        return await self.async_tmdb_discover(**criteria)
+
+    def discover_board(self, source: Optional[MediaSource] = None,
+                        board: str = None,
+                        page: int = 1,
+                        count: int = 30,
+                        **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的榜单
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param board: 榜单标识，须命中本源白名单，未登记标识返回 None
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        method_name = _DISCOVER_BOARDS.get(board)
+        if method_name is None:
+            return None
+        return getattr(self, method_name)(page=page)
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                    board: str = None,
+                                    page: int = 1,
+                                    count: int = 30,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的榜单（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param board: 榜单标识，须命中本源白名单，未登记标识返回 None
+        :param page: 页码
+        :param count: 本源不支持
+        :param kwargs: 支持 raise_exception（触发速率限制时是否抛出异常）
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        method_name = _DISCOVER_BOARDS.get(board)
+        if method_name is None:
+            return None
+        return await getattr(self, f"async_{method_name}")(
+            page=page, raise_exception=kwargs.get("raise_exception", False)
+        )
+
+    def media_detail(self, source: Optional[MediaSource] = None,
+                      media_id: Any = None,
+                      mtype: Optional[MediaType] = None,
+                      season: Optional[int] = None,
+                      raise_exception: bool = False,
+                      **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型
+        :param season: 季号；TV 的显式值（含 0）读取季详情，None 或电影的 0 读取媒体详情
+        :param raise_exception: 本源不支持
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.tmdb_info(tmdbid=tmdbid, mtype=mtype, season=season)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                  media_id: Any = None,
+                                  mtype: Optional[MediaType] = None,
+                                  season: Optional[int] = None,
+                                  raise_exception: bool = False,
+                                  **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情（异步版本）
+        :param source: 媒体来源，非TMDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 媒体类型
+        :param season: 季号；TV 的显式值（含 0）读取季详情，None 或电影的 0 读取媒体详情
+        :param raise_exception: 本源不支持
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.TMDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tmdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_tmdb_info(tmdbid=tmdbid, mtype=mtype, season=season)

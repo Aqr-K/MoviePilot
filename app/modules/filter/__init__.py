@@ -4,13 +4,15 @@ from functools import lru_cache
 from typing import List, Tuple, Union, Dict, Optional
 
 from app.domain.context import TorrentInfo, MediaInfo
+from app.domain.filterrule import get_builtin_rule_set, parse_rule_group
 from app.domain.metainfo import MetaInfo, clear_rust_parse_options_cache, _rust_parse_options
-from app.application.rules import RuleHelper
 from app.runtime.log import logger
 from app.modules import _ModuleBase
-from app.application.rules import RuleParser
-from app.application.rules import BUILTIN_RULE_SET
-from app.schemas.types import ModuleType, OtherModulesType, SystemConfigKey
+from app.runtime.extensions.registry.filter_rule import plugin_filter_rule_registry
+from app.runtime.hostports.filterrules import filter_rule_group_port
+from app.runtime.hostports.torrentanalysis import torrent_analysis_port
+from app.schemas.filter import TorrentVerdict
+from app.schemas.types import SystemConfigKey
 from app.adapters.system import rust as rust_accel
 from app.foundation import size as size_tools
 
@@ -62,7 +64,8 @@ def _parse_publish_time(publish_time: str) -> Tuple[float, ...]:
 
 class FilterModule(_ModuleBase):
     """
-    过滤器模块，负责按内置和自定义规则筛选种子资源。
+    过滤器模块，以内置和自定义规则实现候选种子分析契约，
+    并按各分析器的合取判定筛选种子资源。
     """
 
     CONFIG_WATCH = {
@@ -72,9 +75,12 @@ class FilterModule(_ModuleBase):
         SystemConfigKey.Customization.value,
     }
 
-    # 保留一份只读内置规则定义，方便查询工具准确区分“内置规则”和“自定义规则”。
-    builtin_rule_set: Dict[str, dict] = deepcopy(BUILTIN_RULE_SET)
-    # 运行期规则集 = 内置规则 + 自定义规则覆盖。
+    # 内置规则引擎分析器的标识，写入判定结果供追溯是谁给出的结论。
+    ANALYZER_ID = "filter"
+
+    # 内置规则的只读快照，由 init_module 写入，方便查询工具区分内置规则与自定义规则。
+    builtin_rule_set: Dict[str, dict] = {}
+    # 运行期规则集 = 内置规则 + 插件规则覆盖 + 用户自定义规则覆盖。
     rule_set: Dict[str, dict] = {}
 
     def __init__(self) -> None:
@@ -82,24 +88,54 @@ class FilterModule(_ModuleBase):
         初始化过滤器模块依赖的规则仓库。
         """
         super().__init__()
-        self.rulehelper = RuleHelper()
+        self.rulehelper = filter_rule_group_port.resolve()
+        # 用户自定义规则快照，由 init_module 从系统配置读入，插件登记变化时无需重读
+        self._custom_rule_set: Dict[str, dict] = {}
+        # 组装当前规则集时插件规则注册表的版本号，用于判断规则集是否过期
+        self._plugin_rule_revision = plugin_filter_rule_registry.revision
 
     def init_module(self) -> None:
         """
-        初始化过滤规则集，合并内置规则和用户自定义规则。
+        初始化过滤规则集，按内置 < 插件 < 用户的次序合并三层规则。
         """
-        # 每次重载都先恢复为纯内置规则，避免旧的自定义规则残留在内存里。
-        self.rule_set = deepcopy(self.builtin_rule_set)
-        self.__init_custom_rules()
+        # 每次重载都先恢复为纯内置规则，避免旧的插件规则或自定义规则残留在内存里。
+        self.builtin_rule_set = deepcopy(get_builtin_rule_set())
+        self._custom_rule_set = self.__load_custom_rules()
+        self.__compose_rule_set()
 
-    def __init_custom_rules(self):
+    def __load_custom_rules(self) -> Dict[str, dict]:
         """
-        加载用户自定义规则，如跟内置规则冲突，以用户自定义规则为准
+        读取用户自定义规则。
         """
-        custom_rules = self.rulehelper.get_custom_rules()
-        for rule in custom_rules:
+        custom_rule_set: Dict[str, dict] = {}
+        for rule in self.rulehelper.get_custom_rules():
             logger.info(f"加载自定义规则 {rule.id} - {rule.name}")
-            self.rule_set[rule.id] = rule.model_dump()
+            custom_rule_set[rule.id] = rule.model_dump()
+        return custom_rule_set
+
+    def __compose_rule_set(self) -> None:
+        """
+        按内置 < 插件 < 用户的次序组装运行期规则集。
+
+        用户自定义永远赢：用户手改过的规则不能被装了个插件之后悄悄改掉。插件规则
+        每次都从注册表实时取，因此插件停用后其规则在下一次组装时即消失。
+        """
+        rule_set = deepcopy(self.builtin_rule_set)
+        revision = plugin_filter_rule_registry.revision
+        rule_set.update(deepcopy(plugin_filter_rule_registry.rule_definitions()))
+        rule_set.update(self._custom_rule_set)
+        self.rule_set = rule_set
+        self._plugin_rule_revision = revision
+
+    def __refresh_plugin_rules(self) -> None:
+        """
+        插件规则登记发生变化时重新组装运行期规则集。
+
+        插件的启停不经过模块重载路径，规则集因此需要一个自己的过期判据；版本号
+        未变时不做任何事，判定只是一次整数比较。
+        """
+        if plugin_filter_rule_registry.revision != self._plugin_rule_revision:
+            self.__compose_rule_set()
 
     @staticmethod
     def get_name() -> str:
@@ -107,20 +143,6 @@ class FilterModule(_ModuleBase):
         获取模块名称。
         """
         return "过滤器"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.Other
-
-    @staticmethod
-    def get_subtype() -> OtherModulesType:
-        """
-        获取模块子类型
-        """
-        return OtherModulesType.Filter
 
     @staticmethod
     def get_priority() -> int:
@@ -150,39 +172,142 @@ class FilterModule(_ModuleBase):
                         mediainfo: MediaInfo = None) -> List[TorrentInfo]:
         """
         过滤种子资源
+
+        判定由各分析器经 ``analyze_torrent_candidates`` 给出，按合取组合：
+        候选必须被全部分析器判为通过才保留。排序权重取分发顺序中首个给出
+        ``order`` 的分析器的取值（插件分析器先于内置分析器），全部未给出时
+        候选原有的排序权重保持不变。
+
+        插件实现 ``filter_torrents`` 时整体接管过滤，内置规则引擎不再参与；
+        插件实现 ``analyze_torrent_candidates`` 时与内置规则引擎的判定合取组合。
+
         :param rule_groups:  过滤规则组名称列表
         :param torrent_list:  资源列表
         :param mediainfo:  媒体信息
         :return: 过滤后的资源列表，添加资源优先级
         """
-        if not rule_groups:
+        verdict_groups = self.__collect_verdicts(rule_groups, torrent_list, mediainfo)
+        if not verdict_groups:
+            # 没有任何分析器给出判定，候选整体放行且不改动排序权重
             return torrent_list
+        return self.__apply_verdicts(torrent_list, verdict_groups)
+
+    def analyze_torrent_candidates(self, rule_groups: List[str],
+                                   torrent_list: List[TorrentInfo],
+                                   mediainfo: MediaInfo = None) -> Optional[List[TorrentVerdict]]:
+        """
+        按过滤规则组判定候选种子
+
+        分析器契约的内置实现：输入与 ``filter_torrents`` 一致，输出为严格的判定列表，
+        不改动候选自身。插件实现同名方法即成为并列的分析器，判定与本实现合取组合。
+
+        :param rule_groups:  过滤规则组名称列表
+        :param torrent_list:  资源列表
+        :param mediainfo:  媒体信息
+        :return: 与资源列表等长、按下标一一对应的判定列表；没有可用规则组时返回 None 表示不参与判定
+        """
+        if not rule_groups or not torrent_list:
+            return None
+        # 插件的启停不经过模块重载路径，判定前先确认规则集没有过期
+        self.__refresh_plugin_rules()
         # 查询规则表详情
         groups = self.rulehelper.get_rule_group_by_media(media=mediainfo, group_names=rule_groups)
-        if groups:
-            group_defs = [group.model_dump() if hasattr(group, "model_dump") else vars(group) for group in groups]
-            matched_orders = rust_accel.filter_torrents(
-                groups=group_defs,
-                torrent_list=torrent_list,
-                rule_set=self.rule_set,
-                mediainfo=mediainfo,
-                metainfo_options=_rust_parse_options() if self.__needs_metainfo_options(group_defs) else None,
+        if not groups:
+            return None
+        group_defs = [group.model_dump() if hasattr(group, "model_dump") else vars(group) for group in groups]
+        orders = self.__match_orders(group_defs, torrent_list, mediainfo)
+        group_names = "、".join(
+            str(group.get("name") or group.get("rule_string") or "") for group in group_defs
+        )
+        return [
+            TorrentVerdict(
+                analyzer=self.ANALYZER_ID,
+                passed=index in orders,
+                reason=(
+                    f"匹配过滤规则组 {group_names}"
+                    if index in orders
+                    else f"不匹配过滤规则组 {group_names}"
+                ),
+                order=orders.get(index),
             )
-            if matched_orders is None:
-                return self.__filter_torrents_with_python(
-                    groups=group_defs,
+            for index in range(len(torrent_list))
+        ]
+
+    def __collect_verdicts(self, rule_groups: List[str],
+                           torrent_list: List[TorrentInfo],
+                           mediainfo: MediaInfo) -> List[List[TorrentVerdict]]:
+        """
+        收集各分析器对候选种子的判定。
+        分析能力端口已注入时按多播收集全部分析器的判定，未注入时只运行内置分析器；
+        长度与候选列表不一致的判定会被丢弃，避免判定与候选错位。
+        """
+        if torrent_analysis_port.registered:
+            verdict_groups = torrent_analysis_port.resolve().analyze_torrent_candidates(
+                rule_groups=rule_groups,
+                torrent_list=torrent_list,
+                mediainfo=mediainfo,
+            )
+        else:
+            verdict_groups = [
+                self.analyze_torrent_candidates(
+                    rule_groups=rule_groups,
                     torrent_list=torrent_list,
-                    mediainfo=mediainfo
+                    mediainfo=mediainfo,
                 )
-            matched_orders, traces = self.__parse_rust_filter_result(matched_orders)
-            self.__log_rust_filter_traces(traces)
-            ret_torrents = []
-            for index, pri_order in matched_orders:
-                torrent = torrent_list[index]
-                torrent.pri_order = pri_order
-                ret_torrents.append(torrent)
-            return ret_torrents
-        return torrent_list
+            ]
+        aligned = []
+        for verdicts in verdict_groups or []:
+            if not verdicts:
+                continue
+            if len(verdicts) != len(torrent_list):
+                logger.warn(f"分析器 {verdicts[0].analyzer} 返回 {len(verdicts)} 条判定，"
+                            f"与 {len(torrent_list)} 个候选不一致，已忽略该分析器")
+                continue
+            aligned.append(verdicts)
+        return aligned
+
+    @staticmethod
+    def __apply_verdicts(torrent_list: List[TorrentInfo],
+                         verdict_groups: List[List[TorrentVerdict]]) -> List[TorrentInfo]:
+        """
+        按合取组合各分析器的判定，保留全部通过的候选并写入排序权重。
+        """
+        ret_torrents = []
+        for index, torrent in enumerate(torrent_list):
+            verdicts = [verdict_group[index] for verdict_group in verdict_groups]
+            rejected = [verdict for verdict in verdicts if not verdict.passed]
+            if rejected:
+                logger.debug(f"种子 {torrent.site_name} - {torrent.title} {torrent.description or ''} 被过滤："
+                             + "；".join(f"{verdict.analyzer} {verdict.reason}" for verdict in rejected))
+                continue
+            order = next((verdict.order for verdict in verdicts if verdict.order is not None), None)
+            if order is not None:
+                torrent.pri_order = order
+            ret_torrents.append(torrent)
+        return ret_torrents
+
+    def __match_orders(self, groups: List[dict],
+                       torrent_list: List[TorrentInfo],
+                       mediainfo: MediaInfo = None) -> Dict[int, Optional[int]]:
+        """
+        计算命中全部规则组的候选下标及其排序权重，规则组未给出层级时权重为 None。
+        """
+        matched_orders = rust_accel.filter_torrents(
+            groups=groups,
+            torrent_list=torrent_list,
+            rule_set=self.rule_set,
+            mediainfo=mediainfo,
+            metainfo_options=_rust_parse_options() if self.__needs_metainfo_options(groups) else None,
+        )
+        if matched_orders is None:
+            return self.__match_orders_with_python(
+                groups=groups,
+                torrent_list=torrent_list,
+                mediainfo=mediainfo
+            )
+        matched_orders, traces = self.__parse_rust_filter_result(matched_orders)
+        self.__log_rust_filter_traces(traces)
+        return dict(matched_orders)
 
     @staticmethod
     def __parse_rust_filter_result(result) -> Tuple[list, list]:
@@ -205,30 +330,33 @@ class FilterModule(_ModuleBase):
         for trace in traces:
             logger.debug(trace)
 
-    def __filter_torrents_with_python(self, groups: List[dict],
-                                      torrent_list: List[TorrentInfo],
-                                      mediainfo: MediaInfo = None) -> List[TorrentInfo]:
+    def __match_orders_with_python(self, groups: List[dict],
+                                   torrent_list: List[TorrentInfo],
+                                   mediainfo: MediaInfo = None) -> Dict[int, Optional[int]]:
         """
-        使用 Python 旧路径过滤种子，供 Rust 加速关闭或不可用时兜底。
+        使用 Python 规则匹配计算排序权重，供 Rust 加速关闭或不可用时兜底。
+        规则组按顺序逐轮收窄候选，排序权重以最后一个命中的规则组为准。
         """
-        ret_torrents = torrent_list
-        parser = RuleParser()
+        matched_indexes = list(range(len(torrent_list)))
+        orders: Dict[int, int] = {}
         parsed_rule_cache = {}
         for group in groups:
             rule_string = group.get("rule_string")
             if not rule_string:
                 continue
-            ret_torrents = self.__filter_torrents(
+            group_orders = self.__match_group_orders(
                 rule_string=rule_string,
                 rule_name=group.get("name") or rule_string,
-                torrent_list=ret_torrents,
+                torrent_list=torrent_list,
+                candidate_indexes=matched_indexes,
                 mediainfo=mediainfo,
-                parser=parser,
                 parsed_rule_cache=parsed_rule_cache,
             )
-            if not ret_torrents:
+            orders.update(group_orders)
+            matched_indexes = list(group_orders)
+            if not matched_indexes:
                 break
-        return ret_torrents
+        return {index: orders.get(index) for index in matched_indexes}
 
     def __needs_metainfo_options(self, groups: List[dict]) -> bool:
         """
@@ -242,64 +370,59 @@ class FilterModule(_ModuleBase):
             rule_ids.update(re.findall(r"[A-Za-z][A-Za-z0-9]*|[0-9]+[A-Za-z][A-Za-z0-9]*", rule_string))
         return any(self.rule_set.get(rule_id, {}).get("size_range") for rule_id in rule_ids)
 
-    def __filter_torrents(self, rule_string: str, rule_name: str,
-                          torrent_list: List[TorrentInfo],
-                          mediainfo: MediaInfo,
-                          parser: RuleParser,
-                          parsed_rule_cache: Dict[str, Union[list, str]]) -> List[TorrentInfo]:
+    def __match_group_orders(self, rule_string: str, rule_name: str,
+                             torrent_list: List[TorrentInfo],
+                             candidate_indexes: List[int],
+                             mediainfo: MediaInfo,
+                             parsed_rule_cache: Dict[str, Union[list, str]]) -> Dict[int, int]:
         """
-        过滤种子
+        按一个规则组匹配候选，返回命中的候选下标及其排序权重
         """
-        if not torrent_list:
-            return []
         # 只拆分一次规则层级；具体层级仍延迟到真正需要匹配时解析。
-        rule_groups = [rule_group.strip() for rule_group in rule_string.split('>')]
-        # 返回种子列表
-        ret_torrents = []
-        for torrent in torrent_list:
-            # 能命中优先级的才返回
-            if not self.__get_order(torrent, rule_groups, mediainfo, parser, parsed_rule_cache):
+        rule_levels = [rule_level.strip() for rule_level in rule_string.split('>')]
+        matched_orders: Dict[int, int] = {}
+        for index in candidate_indexes:
+            torrent = torrent_list[index]
+            # 能命中优先级的才保留
+            order = self.__get_order(torrent, rule_levels, mediainfo, parsed_rule_cache)
+            if order is None:
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} {torrent.description or ''} "
                              f"不匹配 {rule_name} 过滤规则")
                 continue
-            ret_torrents.append(torrent)
+            matched_orders[index] = order
 
-        return ret_torrents
+        return matched_orders
 
-    def __get_order(self, torrent: TorrentInfo, rule_groups: List[str],
-                    mediainfo: MediaInfo, parser: RuleParser,
-                    parsed_rule_cache: Dict[str, Union[list, str]]) -> Optional[TorrentInfo]:
+    def __get_order(self, torrent: TorrentInfo, rule_levels: List[str],
+                    mediainfo: MediaInfo,
+                    parsed_rule_cache: Dict[str, Union[list, str]]) -> Optional[int]:
         """
         获取种子匹配的规则优先级，值越大越优先，未匹配时返回None
         """
         # 优先级
         res_order = 100
-        # 是否匹配
-        matched = False
 
-        for rule_group in rule_groups:
+        for rule_level in rule_levels:
             # 解析规则组
-            parsed_group = self.__parse_rule_group(rule_group, parser, parsed_rule_cache)
+            parsed_group = self.__parse_rule_group(rule_level, parsed_rule_cache)
             if self.__match_group(torrent, parsed_group, mediainfo):
                 # 出现匹配时中断
-                matched = True
                 logger.debug(f"种子 {torrent.site_name} - {torrent.title} 优先级为 {100 - res_order + 1}")
-                torrent.pri_order = res_order
-                break
+                return res_order
             # 优先级降低，继续匹配
             res_order -= 1
 
-        return None if not matched else torrent
+        return None
 
     @staticmethod
-    def __parse_rule_group(rule_group: str, parser: RuleParser,
+    def __parse_rule_group(rule_group: str,
                            parsed_rule_cache: Dict[str, Union[list, str]]) -> Union[list, str]:
         """
         解析单个优先级层级。
         缓存粒度放在层级表达式上，兼容多个规则组复用相同表达式的情况。
         """
         if rule_group not in parsed_rule_cache:
-            parsed_rule_cache[rule_group] = parser.parse(rule_group).as_list()[0]
+            parsed_rule_cache[rule_group] = parse_rule_group(rule_group)
         return parsed_rule_cache[rule_group]
 
     def __match_group(self, torrent: TorrentInfo, rule_group: Union[list, str],

@@ -2,39 +2,21 @@ from datetime import datetime
 from typing import List, Optional, Tuple, Union
 
 from app.domain.context import Context, SubtitleInfo, TorrentInfo
-from app.application.site.health import get_configured_site_health_service
-from app.application.site.query import get_configured_site_query_service
-from app.foundation.reflection import ModuleHelper
-from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
+from app.db.oper.site import SiteOper
 from app.runtime.log import logger
+from app.runtime.hostports.siteresource import site_resource_port
 from app.modules import _ModuleBase
 from app.modules.indexer.parser import SiteParserBase
+from app.modules.indexer.parser.registry import load_builtin_parsers, resolve_parser_class
 from app.modules.indexer.spider import SiteSpider
-from app.modules.indexer.spider.haidan import HaiDanSpider
-from app.modules.indexer.spider.hddolby import HddolbySpider
 from app.modules.indexer.spider.mtorrent import MTorrentSpider
-from app.modules.indexer.spider.rousi import RousiSpider
-from app.modules.indexer.spider.sunnypt import SunnyPTSpider
-from app.modules.indexer.spider.tnode import TNodeSpider
-from app.modules.indexer.spider.torrentleech import TorrentLeech
+from app.modules.indexer.spider.registry import build_search_kwargs, resolve_spider_class
 from app.schemas.types import MediaSource
 from app.schemas.media import resolve_media_identity
-from app.modules.indexer.spider.yema import YemaSpider
 from app.schemas.site import SiteUserData
-from app.schemas.types import MediaType, ModuleType, OtherModulesType
+from app.schemas.types import MediaType
 from app.domain import site as site_rules
 from app.foundation import text as text_tools
-
-SPIDER_PARSER_CLASSES = {
-    "TNodeSpider": TNodeSpider,
-    "TorrentLeech": TorrentLeech,
-    "mTorrent": MTorrentSpider,
-    "Yema": YemaSpider,
-    "Haidan": HaiDanSpider,
-    "HDDolby": HddolbySpider,
-    "RousiPro": RousiSpider,
-    "SunnyPT": SunnyPTSpider,
-}
 
 
 class IndexerModule(_ModuleBase):
@@ -42,34 +24,14 @@ class IndexerModule(_ModuleBase):
     索引模块
     """
 
-    _site_schemas = []
-
     def init_module(self) -> None:
-        """加载站点用户数据解析器"""
-        # 加载模块
-        self._site_schemas = ModuleHelper.load(
-            'app.modules.indexer.parser',
-            filter_func=lambda _, obj: hasattr(obj, 'schema') and getattr(obj, 'schema') is not None)
-        pass
+        """导入内建站点解析器，使其按声明的 schema 标识完成登记"""
+        load_builtin_parsers()
 
     @staticmethod
     def get_name() -> str:
         """获取模块名称"""
         return "站点索引"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.Indexer
-
-    @staticmethod
-    def get_subtype() -> OtherModulesType:
-        """
-        获取模块子类型
-        """
-        return OtherModulesType.Indexer
 
     @staticmethod
     def get_priority() -> int:
@@ -86,7 +48,7 @@ class IndexerModule(_ModuleBase):
         """
         测试模块连接性
         """
-        sites = SitesHelper().get_indexers()
+        sites = site_resource_port.resolve().get_indexers()
         if not sites:
             return False, "未配置站点或未通过用户认证"
         return True, ""
@@ -104,10 +66,10 @@ class IndexerModule(_ModuleBase):
         torrent = context.torrent_info
         if torrent.site is None:
             return None
-        site = get_configured_site_query_service().get_sync(torrent.site)
+        site = SiteOper().get(torrent.site)
         if not site:
             return None
-        indexer = SitesHelper().get_indexer(site.domain)
+        indexer = site_resource_port.resolve().get_indexer(site.domain)
         if not indexer:
             return None
         if indexer.get("parser") == "mTorrent":
@@ -131,7 +93,7 @@ class IndexerModule(_ModuleBase):
             return False
 
         # 站点流控
-        state, msg = SitesHelper().check(site_rules.extract_domain(site.get("domain")))
+        state, msg = site_resource_port.resolve().check(site_rules.extract_domain(site.get("domain")))
         if state:
             logger.warn(msg)
             return False
@@ -157,9 +119,9 @@ class IndexerModule(_ModuleBase):
         """
         domain = site_rules.extract_domain(site.get("domain"))
         if error_flag:
-            get_configured_site_health_service().fail(domain)
+            SiteOper().fail(domain)
         else:
-            get_configured_site_health_service().success(
+            SiteOper().success(
                 domain=domain,
                 seconds=seconds,
             )
@@ -171,9 +133,9 @@ class IndexerModule(_ModuleBase):
         """
         domain = site_rules.extract_domain(site.get("domain"))
         if error_flag:
-            await get_configured_site_health_service().async_fail(domain)
+            await SiteOper().async_fail(domain)
         else:
-            await get_configured_site_health_service().async_success(
+            await SiteOper().async_success(
                 domain=domain,
                 seconds=seconds,
             )
@@ -234,9 +196,9 @@ class IndexerModule(_ModuleBase):
         获取站点搜索单页容量；None 表示当前搜索入口不支持可靠翻页。
         """
         site = site or {}
-        site_parser = site.get("parser")
-        if site_parser in SPIDER_PARSER_CLASSES:
-            return SPIDER_PARSER_CLASSES[site_parser].get_search_page_size(keyword=keyword)
+        spider_cls = resolve_spider_class(site.get("parser"))
+        if spider_cls is not SiteSpider:
+            return spider_cls.get_search_page_size(keyword=keyword)
         try:
             page_size = int(site.get("result_num") or SiteSpider.default_result_num())
         except (TypeError, ValueError):
@@ -274,54 +236,12 @@ class IndexerModule(_ModuleBase):
 
         # 开始搜索
         try:
-            if site.get('parser') == "TNodeSpider":
-                error_flag, result = TNodeSpider(site).search(
-                    keyword=search_word,
-                    page=page
+            spider_cls = resolve_spider_class(site.get('parser'))
+            if spider_cls is not SiteSpider:
+                call_kwargs = build_search_kwargs(
+                    spider_cls, keyword=search_word, mtype=mtype, cat=cat, page=page
                 )
-            elif site.get('parser') == "TorrentLeech":
-                error_flag, result = TorrentLeech(site).search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "mTorrent":
-                error_flag, result = MTorrentSpider(site).search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "SunnyPT":
-                error_flag, result = SunnyPTSpider(site).search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    cat=cat,
-                    page=page
-                )
-            elif site.get('parser') == "Yema":
-                error_flag, result = YemaSpider(site).search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "Haidan":
-                error_flag, result = HaiDanSpider(site).search(
-                    keyword=search_word,
-                    mtype=mtype
-                )
-            elif site.get('parser') == "HDDolby":
-                error_flag, result = HddolbySpider(site).search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "RousiPro":
-                error_flag, result = RousiSpider(site).search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    cat=cat,
-                    page=page
-                )
+                error_flag, result = spider_cls(site).search(**call_kwargs)
             else:
                 error_flag, result = self.__spider_search(
                     search_word=search_word,
@@ -418,54 +338,12 @@ class IndexerModule(_ModuleBase):
 
         # 开始搜索
         try:
-            if site.get('parser') == "TNodeSpider":
-                error_flag, result = await TNodeSpider(site).async_search(
-                    keyword=search_word,
-                    page=page
+            spider_cls = resolve_spider_class(site.get('parser'))
+            if spider_cls is not SiteSpider:
+                call_kwargs = build_search_kwargs(
+                    spider_cls, keyword=search_word, mtype=mtype, cat=cat, page=page
                 )
-            elif site.get('parser') == "TorrentLeech":
-                error_flag, result = await TorrentLeech(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "mTorrent":
-                error_flag, result = await MTorrentSpider(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "SunnyPT":
-                error_flag, result = await SunnyPTSpider(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    cat=cat,
-                    page=page
-                )
-            elif site.get('parser') == "Yema":
-                error_flag, result = await YemaSpider(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "Haidan":
-                error_flag, result = await HaiDanSpider(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype
-                )
-            elif site.get('parser') == "HDDolby":
-                error_flag, result = await HddolbySpider(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    page=page
-                )
-            elif site.get('parser') == "RousiPro":
-                error_flag, result = await RousiSpider(site).async_search(
-                    keyword=search_word,
-                    mtype=mtype,
-                    cat=cat,
-                    page=page
-                )
+                error_flag, result = await spider_cls(site).async_search(**call_kwargs)
             else:
                 error_flag, result = await self.__async_spider_search(
                     search_word=search_word,
@@ -638,18 +516,18 @@ class IndexerModule(_ModuleBase):
             """
             获取站点解析器
             """
-            for site_schema in self._site_schemas:
-                if site_schema.schema and site_schema.schema.value == site.get("schema"):
-                    return site_schema(
-                        site_name=site.get("name"),
-                        url=site.get("url"),
-                        site_cookie=site.get("cookie"),
-                        apikey=site.get("apikey"),
-                        token=site.get("token"),
-                        ua=site.get("ua"),
-                        proxy=site.get("proxy"),
-                        api_url=site.get("api_url"))
-            return None
+            parser_cls = resolve_parser_class(site.get("schema"))
+            if not parser_cls:
+                return None
+            return parser_cls(
+                site_name=site.get("name"),
+                url=site.get("url"),
+                site_cookie=site.get("cookie"),
+                apikey=site.get("apikey"),
+                token=site.get("token"),
+                ua=site.get("ua"),
+                proxy=site.get("proxy"),
+                api_url=site.get("api_url"))
 
         site_obj = __get_site_obj()
         if not site_obj:

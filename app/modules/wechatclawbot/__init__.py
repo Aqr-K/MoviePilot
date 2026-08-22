@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from app.runtime.cache import TTLCache
 from app.domain.context import Context, MediaInfo
-from app.application.messaging.agent import (
+from app.runtime.channels import (
     matches_channel_admin,
     register_channel_admin_resolver,
     resolve_config_principal_ids,
@@ -13,7 +13,7 @@ from app.modules._base import _MessageChannelModuleBase
 from app.modules.wechatclawbot.wechatclawbot import WechatClawBot
 from app.schemas.message import IncomingMessage
 from app.schemas.message import Message
-from app.schemas.types import NotificationChannel, ModuleType, NotificationAction
+from app.schemas.types import NotificationChannel, NotificationAction
 
 
 register_channel_admin_resolver(
@@ -46,11 +46,6 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
     def get_name() -> str:
         """获取模块名称。"""
         return "微信 ClawBot"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """获取模块类型。"""
-        return ModuleType.Notification
 
     @staticmethod
     def get_subtype() -> NotificationChannel:
@@ -141,7 +136,8 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
         """解析微信 ClawBot 客户端实例，返回 (客户端, 错误信息)。
 
         优先使用已加载的配置实例，均无配置时退回到基于表单参数的临时客户端，
-        用于未保存配置的扫码状态预览。
+        用于未保存配置的扫码状态预览。请求未带渠道名且本模块有多个已启用配置时，
+        把无法确定目标的原因作为错误信息交给调用方展示。
         """
         source_name = str(params.get("source") or "").strip() or None
         fallback_name = str(params.get("fallback_source") or "").strip() or None
@@ -159,7 +155,10 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
                 if client:
                     return client, None
         else:
-            client = self.get_instance()
+            try:
+                client = self.get_instance()
+            except LookupError as err:
+                return None, str(err)
             if client:
                 return client, None
 

@@ -6,9 +6,11 @@ depends_on = []
 
 [metadata]
 name = "极影视"
-type = "mediaserver"
-subtype = "ZSpace"
+service_capability = "mediaserver"
 priority = 6
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

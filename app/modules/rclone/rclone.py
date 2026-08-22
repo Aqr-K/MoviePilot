@@ -10,7 +10,7 @@ from app.schemas.file import StorageUsage as _SchemaStorageUsage
 from app.schemas.workflow import FileItem as _SchemaFileItem
 from app.runtime.config import settings
 from app.runtime.log import logger
-from app.modules.filemanager.storages import StorageBase, transfer_process
+from app.modules._base.storage import StorageBase, transfer_process
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema
 from app.foundation import temporal as time_tools
@@ -123,7 +123,7 @@ class Rclone(StorageBase):
             return _SchemaFileItem()
         if item.get("IsDir"):
             return _SchemaFileItem(
-                storage=self.schema.value,
+                storage=self.storage_token,
                 type="dir",
                 path=f"{parent}{item.get('Name')}" + "/",
                 name=item.get("Name"),
@@ -132,7 +132,7 @@ class Rclone(StorageBase):
             )
         else:
             return _SchemaFileItem(
-                storage=self.schema.value,
+                storage=self.storage_token,
                 type="file",
                 path=f"{parent}{item.get('Name')}",
                 name=item.get("Name"),
@@ -265,7 +265,7 @@ class Rclone(StorageBase):
         if folder:
             return folder
         # 逐级查找和创建目录
-        fileitem = _SchemaFileItem(storage=self.schema.value, type="dir", path="/")
+        fileitem = _SchemaFileItem(storage=self.storage_token, type="dir", path="/")
         for part in normalized.parts[1:]:
             current_path = Path(self.__normalize_remote_path(Path(fileitem.path) / part))
             with self.__get_path_lock(current_path):

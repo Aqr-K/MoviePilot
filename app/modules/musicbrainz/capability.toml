@@ -6,9 +6,8 @@ depends_on = []
 
 [metadata]
 name = "MusicBrainz"
-type = "mediarecognize"
-subtype = "MusicBrainz"
 priority = 0
+media_sources = ["musicbrainz"]
 
 [activation]
 policy = "bootstrap"

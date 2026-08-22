@@ -1,9 +1,10 @@
 from typing import Tuple, Union
 
+from sqlalchemy import text
+
 from app.runtime.config import settings
-from app.application.database import get_database_governance
+from app.db import SessionFactory
 from app.modules import _ModuleBase
-from app.schemas.types import ModuleType, OtherModulesType
 
 
 class PostgreSQLModule(_ModuleBase):
@@ -17,20 +18,6 @@ class PostgreSQLModule(_ModuleBase):
     @staticmethod
     def get_name() -> str:
         return "PostgreSQL"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.Other
-
-    @staticmethod
-    def get_subtype() -> OtherModulesType:
-        """
-        获取模块子类型
-        """
-        return OtherModulesType.PostgreSQL
 
     @staticmethod
     def get_priority() -> int:
@@ -51,7 +38,11 @@ class PostgreSQLModule(_ModuleBase):
         """
         if settings.DB_TYPE != "postgresql":
             return None
-        error = get_database_governance().test()
-        if error:
-            return False, f"PostgreSQL连接失败：{error}"
+        db = SessionFactory()
+        try:
+            db.execute(text("SELECT 1"))
+        except Exception as e:
+            return False, f"PostgreSQL连接失败：{e}"
+        finally:
+            db.close()
         return True, ""

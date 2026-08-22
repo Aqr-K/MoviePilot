@@ -3,14 +3,21 @@ from abc import abstractmethod, ABCMeta
 from typing import Generic, Tuple, Union, TypeVar, Type, Dict, Optional, Callable
 from pathlib import Path
 
-from app.runtime.extensions.service_config import ServiceConfigHelper
+from app.runtime.extensions.contract.instance import describe_instance_candidates
+from app.runtime.extensions.projection.module_declarations import builtin_multi_instance
+from app.runtime.extensions.service_config import (
+    ServiceConfigHelper,
+    create_service_instance,
+    select_instance_configs,
+    service_capability_configs,
+)
 from app.runtime.log import logger
+from app.schemas.file import FileURI
 from app.schemas.message import Message
 from app.schemas.system import NotificationConf
 from app.schemas.system import MediaServerConf
 from app.schemas.system import DownloaderConf
-from app.schemas.types import ModuleType, DownloaderType, MediaServerType, NotificationChannel, StorageSchema, \
-    OtherModulesType, SystemConfigKey, MediaRecognizeType
+from app.schemas.types import ModuleType, NotificationChannel, SystemConfigKey
 from app.runtime.reload import ConfigReloadMixin
 
 
@@ -65,27 +72,6 @@ class _ModuleBase(ConfigReloadMixin, metaclass=ABCMeta):
         pass
 
     @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        pass
-
-    @staticmethod
-    def get_subtype() -> Union[
-        DownloaderType,
-        MediaServerType,
-        NotificationChannel,
-        StorageSchema,
-        OtherModulesType,
-        MediaRecognizeType,
-    ]:
-        """
-        获取模块子类型（下载器、媒体服务器、消息通道、存储类型、其他杂项模块类型）
-        """
-        pass
-
-    @staticmethod
     def get_priority() -> int:
         """
         获取模块优先级，数字越小优先级越高，只有同一接口下优先级才生效
@@ -118,6 +104,9 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
     抽象服务基类，负责服务的初始化、获取实例和配置管理
     """
 
+    # 本族服务的能力标签，决定 get_configs() 从哪一族用户配置里取值
+    SERVICE_CAPABILITY: Optional[str] = None
+
     def __init__(self):
         """
         初始化 ServiceBase 类的实例
@@ -130,6 +119,9 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
                      service_type: Optional[Union[Type[TService], Callable[..., TService]]] = None):
         """
         初始化服务，获取配置并实例化对应服务
+
+        单条配置构造失败只跳过它自己，同类型下其余配置照常产出实例：一条连不上的
+        配置不应让整个模块连同其余可用实例一起失效。
 
         :param service_name: 服务名称，作为配置匹配的依据
         :param service_type: 服务的类型，可以是类类型（Type[TService]）、工厂函数（Callable）或 None 来跳过实例化
@@ -144,14 +136,15 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
         self._instances = {}
         if not service_type:
             return
-        for conf in self._configs.values():
-            # 通过服务类型或工厂函数来创建实例
-            if isinstance(service_type, type):
-                # 如果传入的是类类型，调用构造函数实例化
-                self._instances[conf.name] = service_type(name=conf.name, **conf.config)
-            else:
-                # 如果传入的是工厂函数，直接调用工厂函数
-                self._instances[conf.name] = service_type(conf)
+        impl = service_type if isinstance(service_type, type) else None
+        factory = None if impl is not None else service_type
+        for name, conf in self._configs.items():
+            try:
+                self._instances[name] = create_service_instance(
+                    name, conf, impl=impl, factory=factory
+                )
+            except Exception as err:
+                logger.error(f"{service_name} 实例 {name} 构造失败，已跳过：{err}")
 
     def get_instances(self) -> Dict[str, TService]:
         """
@@ -167,6 +160,7 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
 
         :param name: 实例名称，可选。如果为 None，则返回默认实例
         :return: 返回符合条件的服务实例，若不存在则返回 None
+        :raises LookupError: 未指定名称，且本模块名下无法确定唯一的默认配置
         """
         if not self._instances:
             return None
@@ -175,14 +169,25 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
         name = self.get_default_config_name()
         return self._instances.get(name) if name else None
 
-    @abstractmethod
     def get_configs(self) -> Dict[str, TConf]:
         """
-        获取已启用的服务配置字典
+        获取本模块名下已启用的服务配置字典
 
-        :return: 返回配置字典
+        按本族能力标签读取用户配置，只保留类型与本模块一致、已启用且具名的配置。
+        三族的差别只在能力标签，筛选规则不逐族重复。
+
+        本类型能配几份取自本模块 `capability.toml` 的声明，与扩展声明的类型同规格：
+        清单没声明的类型按多实例处置，与该字段出现之前的行为一致。
+
+        :return: 返回配置字典 ``{配置名称: 配置}``
         """
-        pass
+        declared = builtin_multi_instance(self.SERVICE_CAPABILITY, self._service_name)
+        return select_instance_configs(
+            service_capability_configs(self.SERVICE_CAPABILITY),
+            self._service_name,
+            capability=self.SERVICE_CAPABILITY,
+            multi_instance=True if declared is None else declared,
+        )
 
     def get_config(self, name: Optional[str] = None) -> Optional[TConf]:
         """
@@ -190,6 +195,7 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
 
         :param name: 配置名称，可选。如果为 None，则返回默认服务配置
         :return: 返回符合条件的配置，若不存在则返回 None
+        :raises LookupError: 未指定名称，且本模块名下无法确定唯一的默认配置
         """
         if not self._configs:
             return None
@@ -198,15 +204,37 @@ class ServiceBase(Generic[TService, TConf], metaclass=ABCMeta):
         name = self.get_default_config_name()
         return self._configs.get(name) if name else None
 
+    def _describe_configs(self) -> str:
+        """
+        列出本模块名下可供显式指定的配置名及其启用状态
+
+        :return: 候选描述文案，一个配置都没有时为「无」
+        """
+        return describe_instance_candidates(
+            (conf.name, bool(getattr(conf, "enabled", True)))
+            for conf in (self._configs or {}).values()
+        )
+
     def get_default_config_name(self) -> Optional[str]:
         """
         获取默认服务配置的名称
 
-        :return: 默认第一个配置的名称
+        本族的默认标记字段虽已存在，但配置界面还没有指定它的入口，此刻一律读到假值，
+        因此只在本模块名下恰好只有一条已启用配置时才能确定目标——此时结果与登记顺序
+        无关，不构成替调用方做选择。有多条时不按顺序取第一条。
+
+        :return: 默认配置的名称；本模块名下没有已启用配置时为 None
+        :raises LookupError: 本模块名下有多条已启用配置，无法确定默认配置
         """
-        # 默认使用第一个配置的名称
-        first_conf = next(iter(self._configs.values()), None)
-        return first_conf.name if first_conf else None
+        configs = list((self._configs or {}).values())
+        if not configs:
+            return None
+        if len(configs) == 1:
+            return configs[0].name
+        raise LookupError(
+            f"{self._service_name} 有多个已启用配置，调用必须显式指定名称；"
+            f"可选配置：{self._describe_configs()}"
+        )
 
 
 class _MessageBase(ServiceBase[TService, NotificationConf]):
@@ -214,6 +242,7 @@ class _MessageBase(ServiceBase[TService, NotificationConf]):
     消息基类
     """
     CONFIG_WATCH = {SystemConfigKey.Notifications.value}
+    SERVICE_CAPABILITY = ModuleType.Notification.value
 
     def __init__(self):
         """
@@ -221,17 +250,6 @@ class _MessageBase(ServiceBase[TService, NotificationConf]):
         """
         super().__init__()
         self._channel: Optional[NotificationChannel] = None
-
-    def get_configs(self) -> Dict[str, NotificationConf]:
-        """
-        获取已启用的消息通知渠道的配置字典
-
-        :return: 返回消息通知的配置字典
-        """
-        configs = ServiceConfigHelper.get_notification_configs()
-        if not self._service_name:
-            return {}
-        return {conf.name: conf for conf in configs if conf.type == self._service_name and conf.enabled}
 
     def check_message(self, message: Message, source: str = None) -> bool:
         """
@@ -262,6 +280,7 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
     下载器基类
     """
     CONFIG_WATCH = {SystemConfigKey.Downloaders.value}
+    SERVICE_CAPABILITY = ModuleType.Downloader.value
 
     def __init__(self):
         """
@@ -285,34 +304,52 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
 
     def get_default_config_name(self) -> Optional[str]:
         """
-        获取默认服务配置的名称
+        获取本模块名下默认下载器配置的名称
 
-        :return: 优先从所有下载器中查找配置了默认的下载器，如果没有配置，则获取第一个下载器名称
+        默认标记在全部下载器中全局唯一，而本模块只持有自身类型的实例，因此默认归属其它
+        类型时本模块没有默认下载器，返回 None 让该类型的模块认领；标记已停用等同于用户
+        选定的目标当前不可用，一律报错而不改走另一个下载器。从未标记过默认时，只在全部
+        已启用下载器恰好只有一条的前提下认定它就是目标，多于一条不按顺序取第一条。
+
+        :return: 默认下载器配置的名称；默认归属其它类型或没有任何已启用下载器时为 None
+        :raises LookupError: 本模块名下有已启用配置，但全部下载器中没有可用的默认标记
         """
-        # 优先查找默认配置
         if self._default_config_name:
             return self._default_config_name
 
         configs = ServiceConfigHelper.get_downloader_configs()
-        for conf in configs:
-            if conf.default:
-                self._default_config_name = conf.name
-                return self._default_config_name
-        # 如果没有默认配置，返回第一个配置的名称
-        first_conf = next(iter(configs), None)
-        self._default_config_name = first_conf.name if first_conf else None
-        return self._default_config_name
+        enabled_configs = [conf for conf in configs if conf.enabled]
+        marked = next((conf for conf in configs if conf.default), None)
 
-    def get_configs(self) -> Dict[str, DownloaderConf]:
-        """
-        获取已启用的下载器的配置字典
+        if marked is not None and marked.enabled:
+            if marked.type != self._service_name:
+                return None
+            self._default_config_name = marked.name
+            return self._default_config_name
 
-        :return: 返回下载器配置字典
-        """
-        configs = ServiceConfigHelper.get_downloader_configs()
-        if not self._service_name:
-            return {}
-        return {conf.name: conf for conf in configs if conf.type == self._service_name and conf.enabled}
+        if marked is None and len(enabled_configs) == 1:
+            sole_conf = enabled_configs[0]
+            if sole_conf.type != self._service_name:
+                return None
+            self._default_config_name = sole_conf.name
+            return self._default_config_name
+
+        # 本模块名下无配置可用时保持沉默，让确实持有候选的模块给出报错
+        if not self._configs:
+            return None
+
+        candidates = describe_instance_candidates(
+            (conf.name, bool(conf.enabled)) for conf in configs
+        )
+        if marked is not None:
+            raise LookupError(
+                f"默认下载器 {marked.name} 已停用，调用必须显式指定下载器；"
+                f"可选下载器：{candidates}"
+            )
+        raise LookupError(
+            f"存在多个已启用下载器但未设置默认下载器，调用必须显式指定下载器；"
+            f"可选下载器：{candidates}"
+        )
 
     def reset_default_config_name(self):
         """
@@ -345,11 +382,7 @@ class _DownloaderBase(ServiceBase[TService, DownloaderConf]):
         """
         去掉存储协议前缀 if any，下载器无法识别本地存储协议。
         """
-        for s in StorageSchema:
-            prefix = f"{s.value}:"
-            if path.startswith(prefix):
-                return path[len(prefix):]
-        return path
+        return FileURI.split_uri(path)[1]
 
     def normalize_path(self, path: Path, downloader: Optional[str]) -> str:
         """
@@ -393,14 +426,4 @@ class _MediaServerBase(ServiceBase[TService, MediaServerConf]):
     媒体服务器基类
     """
     CONFIG_WATCH = {SystemConfigKey.MediaServers.value}
-
-    def get_configs(self) -> Dict[str, MediaServerConf]:
-        """
-        获取已启用的媒体服务器的配置字典
-
-        :return: 返回媒体服务器配置字典
-        """
-        configs = ServiceConfigHelper.get_mediaserver_configs()
-        if not self._service_name:
-            return {}
-        return {conf.name: conf for conf in configs if conf.type == self._service_name and conf.enabled}
+    SERVICE_CAPABILITY = ModuleType.MediaServer.value

@@ -6,9 +6,8 @@ depends_on = []
 
 [metadata]
 name = "Bangumi"
-type = "mediarecognize"
-subtype = "Bangumi"
 priority = 3
+media_sources = ["bangumi"]
 
 [activation]
 policy = "bootstrap"

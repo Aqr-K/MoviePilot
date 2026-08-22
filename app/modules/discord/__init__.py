@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import quote, unquote
 
 from app.domain.context import MediaInfo, Context
-from app.application.messaging.agent import (
+from app.runtime.channels import (
     matches_channel_admin,
     register_channel_admin_resolver,
     resolve_config_principal_ids,
@@ -15,7 +15,6 @@ from app.schemas.message import IncomingMessage
 from app.schemas.notification import NotificationChannel
 from app.schemas.message import MessageResponse
 from app.schemas.message import Message
-from app.schemas.types import ModuleType
 from app.adapters.network.http import RequestUtils
 
 try:
@@ -74,13 +73,6 @@ class DiscordModule(_MessageChannelModuleBase[Discord]):
     @staticmethod
     def get_name() -> str:
         return "Discord"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.Notification
 
     @staticmethod
     def get_subtype() -> NotificationChannel:

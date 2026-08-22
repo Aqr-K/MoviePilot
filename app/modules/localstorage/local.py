@@ -7,10 +7,10 @@ from typing import Optional, List
 from app.schemas.file import StorageUsage as _SchemaStorageUsage
 from app.schemas.workflow import FileItem as _SchemaFileItem
 from app.runtime.config import global_vars, settings
-from app.application.directory import DirectoryHelper
+from app.runtime.hostports.directories import directory_config_port
 from app.runtime.log import logger
 from app.adapters.system.fsproxy import fsproxy
-from app.modules.filemanager.storages import StorageBase, transfer_process
+from app.modules._base.storage import StorageBase, transfer_process
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import StorageSchema
 from app.adapters.system.host import SystemUtils
@@ -55,7 +55,7 @@ class LocalStorage(StorageBase):
         # 等于把这个热点路径的开销翻倍
         info = fsproxy.stat(path)
         return _SchemaFileItem(
-            storage=self.schema.value,
+            storage=self.storage_token,
             type="file",
             path=path.as_posix(),
             name=path.name,
@@ -70,7 +70,7 @@ class LocalStorage(StorageBase):
         获取目录项
         """
         return _SchemaFileItem(
-            storage=self.schema.value,
+            storage=self.storage_token,
             type="dir",
             path=path.as_posix() + "/",
             name=path.name,
@@ -90,7 +90,7 @@ class LocalStorage(StorageBase):
                 partitions = SystemUtils.get_windows_drives() or ["C:/"]
                 for partition in partitions:
                     ret_items.append(_SchemaFileItem(
-                        storage=self.schema.value,
+                        storage=self.storage_token,
                         type="dir",
                         path=partition + "/",
                         name=partition,
@@ -470,7 +470,7 @@ class LocalStorage(StorageBase):
         """
         存储使用情况
         """
-        directory_helper = DirectoryHelper()
+        directory_helper = directory_config_port.resolve()
         total_storage, free_storage = SystemUtils.space_usage(
             [Path(d.download_path) for d in directory_helper.get_local_download_dirs() if d.download_path] +
             [Path(d.library_path) for d in directory_helper.get_local_library_dirs() if d.library_path],

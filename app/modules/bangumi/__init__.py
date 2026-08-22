@@ -10,14 +10,18 @@ from app.runtime.log import logger
 from app.modules import _ModuleBase
 from app.modules.bangumi.bangumi import BangumiApi
 from app.schemas.types import (
-    MediaRecognizeType,
     MediaSource,
     MediaSourceSelection,
     MediaType,
-    ModuleType,
 )
 from app.adapters.network.http import RequestUtils
 from app.domain.media import is_media_source_enabled
+from app.schemas.media import normalize_media_source
+
+# 榜单标识到本模块方法名的映射，discover_board 只接受在册标识，白名单校验先于 getattr 完成
+_DISCOVER_BOARDS = {
+    "calendar": "bangumi_calendar",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,20 +77,6 @@ class BangumiModule(_ModuleBase):
         获取模块名称
         """
         return "Bangumi"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.MediaRecognize
-
-    @staticmethod
-    def get_subtype() -> MediaRecognizeType:
-        """
-        获取模块子类型
-        """
-        return MediaRecognizeType.Bangumi
 
     @staticmethod
     def get_priority() -> int:
@@ -487,3 +477,277 @@ class BangumiModule(_ModuleBase):
         logger.info(f"开始清除{self.get_name()}缓存 ...")
         self.bangumiapi.clear_cache()
         logger.info(f"{self.get_name()}缓存清除完成")
+
+    def person_detail(self, source: Optional[MediaSource] = None,
+                       person_id: int = None,
+                       **kwargs) -> Optional[_SchemaMediaPerson]:
+        """
+        查询指定来源的人物详情
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param person_id: 人物ID
+        :return: 人物详情
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        return self.bangumi_person_detail(person_id=person_id)
+
+    async def async_person_detail(self, source: Optional[MediaSource] = None,
+                                   person_id: int = None,
+                                   **kwargs) -> Optional[_SchemaMediaPerson]:
+        """
+        查询指定来源的人物详情（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param person_id: 人物ID
+        :return: 人物详情
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        return await self.async_bangumi_person_detail(person_id=person_id)
+
+    def person_credits(self, source: Optional[MediaSource] = None,
+                        person_id: int = None,
+                        page: int = 1,
+                        count: Optional[int] = None,
+                        **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的人物参演作品
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param person_id: 人物ID
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 参演作品列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        return self.bangumi_person_credits(person_id=person_id)
+
+    async def async_person_credits(self, source: Optional[MediaSource] = None,
+                                    person_id: int = None,
+                                    page: int = 1,
+                                    count: Optional[int] = None,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的人物参演作品（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param person_id: 人物ID
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 参演作品列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        return await self.async_bangumi_person_credits(person_id=person_id)
+
+    def media_credits(self, source: Optional[MediaSource] = None,
+                       media_id: Any = None,
+                       mtype: Optional[MediaType] = None,
+                       page: int = 1,
+                       count: Optional[int] = None,
+                       **kwargs) -> Optional[List[_SchemaMediaPerson]]:
+        """
+        查询指定来源的媒体演职员表
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持，单一接口不分电影剧集
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 演职员列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        if media_id is None:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.bangumi_credits(bangumiid=bangumiid)
+
+    async def async_media_credits(self, source: Optional[MediaSource] = None,
+                                   media_id: Any = None,
+                                   mtype: Optional[MediaType] = None,
+                                   page: int = 1,
+                                   count: Optional[int] = None,
+                                   **kwargs) -> Optional[List[_SchemaMediaPerson]]:
+        """
+        查询指定来源的媒体演职员表（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持，单一接口不分电影剧集
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 演职员列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        if media_id is None:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_bangumi_credits(bangumiid=bangumiid)
+
+    def media_recommend(self, source: Optional[MediaSource] = None,
+                         media_id: Any = None,
+                         mtype: Optional[MediaType] = None,
+                         page: int = 1,
+                         count: Optional[int] = None,
+                         **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相关推荐媒体
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持，单一接口不分电影剧集
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 推荐媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        if media_id is None:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.bangumi_recommend(bangumiid=bangumiid)
+
+    async def async_media_recommend(self, source: Optional[MediaSource] = None,
+                                     media_id: Any = None,
+                                     mtype: Optional[MediaType] = None,
+                                     page: int = 1,
+                                     count: Optional[int] = None,
+                                     **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相关推荐媒体（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持，单一接口不分电影剧集
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 推荐媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        if media_id is None:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_bangumi_recommend(bangumiid=bangumiid)
+
+    def discover(self, source: Optional[MediaSource] = None,
+                 **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件发现指定来源的媒体
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param criteria: 筛选条件，原样转发给 bangumi_discover，不补默认值
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        return self.bangumi_discover(**criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                              **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件发现指定来源的媒体（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param criteria: 筛选条件，原样转发给 async_bangumi_discover，不补默认值
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        return await self.async_bangumi_discover(**criteria)
+
+    def discover_board(self, source: Optional[MediaSource] = None,
+                        board: str = None,
+                        page: int = 1,
+                        count: int = 30,
+                        **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的榜单
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param board: 榜单标识，须命中本源白名单，未登记标识返回 None
+        :param page: 本源不支持，calendar 接口无分页参数
+        :param count: 本源不支持，calendar 接口无分页参数
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        method_name = _DISCOVER_BOARDS.get(board)
+        if method_name is None:
+            return None
+        return getattr(self, method_name)()
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                    board: str = None,
+                                    page: int = 1,
+                                    count: int = 30,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的榜单（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param board: 榜单标识，须命中本源白名单，未登记标识返回 None
+        :param page: 本源不支持，calendar 接口无分页参数
+        :param count: 本源不支持，calendar 接口无分页参数
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        method_name = _DISCOVER_BOARDS.get(board)
+        if method_name is None:
+            return None
+        return await getattr(self, f"async_{method_name}")()
+
+    def media_detail(self, source: Optional[MediaSource] = None,
+                      media_id: Any = None,
+                      mtype: Optional[MediaType] = None,
+                      season: Optional[int] = None,
+                      raise_exception: bool = False,
+                      **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持
+        :param season: 本源不支持
+        :param raise_exception: 本源不支持
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        if media_id is None:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.bangumi_info(bangumiid=bangumiid)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                  media_id: Any = None,
+                                  mtype: Optional[MediaType] = None,
+                                  season: Optional[int] = None,
+                                  raise_exception: bool = False,
+                                  **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情（异步版本）
+        :param source: 媒体来源，非Bangumi来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持
+        :param season: 本源不支持
+        :param raise_exception: 本源不支持
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.Bangumi:
+            return None
+        if media_id is None:
+            return None
+        try:
+            bangumiid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await self.async_bangumi_info(bangumiid=bangumiid)

@@ -6,9 +6,12 @@ depends_on = []
 
 [metadata]
 name = "Synology Chat"
-type = "notification"
+service_capability = "notification"
 subtype = "SynologyChat"
 priority = 5
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

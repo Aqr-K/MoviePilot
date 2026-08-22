@@ -6,9 +6,12 @@ depends_on = []
 
 [metadata]
 name = "WebPush"
-type = "notification"
+service_capability = "notification"
 subtype = "WebPush"
 priority = 6
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

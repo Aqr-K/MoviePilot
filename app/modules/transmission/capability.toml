@@ -6,9 +6,11 @@ depends_on = []
 
 [metadata]
 name = "Transmission"
-type = "downloader"
-subtype = "Transmission"
+service_capability = "downloader"
 priority = 2
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

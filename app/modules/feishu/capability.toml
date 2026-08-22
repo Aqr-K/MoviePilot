@@ -6,9 +6,12 @@ depends_on = []
 
 [metadata]
 name = "飞书"
-type = "notification"
+service_capability = "notification"
 subtype = "Feishu"
 priority = 2
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

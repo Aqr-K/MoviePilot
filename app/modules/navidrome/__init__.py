@@ -10,13 +10,13 @@ from app.schemas.mediaserver import MediaServerPlayItem as _SchemaMediaServerPla
 from app.schemas.mediaserver import MediaServerSeasonInfo as _SchemaMediaServerSeasonInfo
 from app.domain.context import MediaInfo
 from app.runtime.events import eventmanager
-from app.application.mediaserver import MusicMediaServerHelper
+from app.domain.library import MusicMediaServerHelper
 from app.runtime.log import logger
 from app.modules import _MediaServerBase, _ModuleBase
 from app.modules.navidrome.navidrome import Navidrome
 from app.schemas.event import AuthCredentials
 from app.schemas.event import AuthInterceptCredentials
-from app.schemas.types import ChainEventType, MediaServerType, MediaType, ModuleType
+from app.schemas.types import ChainEventType, MediaType
 
 
 class NavidromeModule(_ModuleBase, _MediaServerBase[Navidrome]):
@@ -33,16 +33,6 @@ class NavidromeModule(_ModuleBase, _MediaServerBase[Navidrome]):
     def get_name() -> str:
         """返回模块显示名称。"""
         return "Navidrome"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """返回模块类型。"""
-        return ModuleType.MediaServer
-
-    @staticmethod
-    def get_subtype() -> MediaServerType:
-        """返回媒体服务器子类型。"""
-        return MediaServerType.Navidrome
 
     @staticmethod
     def get_priority() -> int:

@@ -6,9 +6,11 @@ depends_on = []
 
 [metadata]
 name = "Rtorrent"
-type = "downloader"
-subtype = "Rtorrent"
+service_capability = "downloader"
 priority = 3
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

@@ -6,8 +6,6 @@ depends_on = []
 
 [metadata]
 name = "站点索引"
-type = "indexer"
-subtype = "Indexer"
 priority = 0
 
 [activation]

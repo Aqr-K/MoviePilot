@@ -1,0 +1,19 @@
+schema_version = 1
+id = "AliPanModule"
+kind = "host_module"
+entrypoint = "app.modules.alipan:AliPanModule"
+depends_on = []
+
+[metadata]
+name = "阿里云盘"
+subtype = "Alipan"
+priority = 1
+
+[metadata.service_instance]
+capability = "storage"
+type = "alipan"
+multi_instance = true
+
+[activation]
+policy = "bootstrap"
+watch = ["Storages"]

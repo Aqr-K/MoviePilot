@@ -6,9 +6,11 @@ depends_on = []
 
 [metadata]
 name = "飞牛影视"
-type = "mediaserver"
-subtype = "TrimeMedia"
+service_capability = "mediaserver"
 priority = 4
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

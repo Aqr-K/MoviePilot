@@ -1,13 +1,11 @@
 schema_version = 1
-id = "FileManagerModule"
+id = "MediaLibraryModule"
 kind = "host_module"
-entrypoint = "app.modules.filemanager:FileManagerModule"
+entrypoint = "app.modules.medialibrary:MediaLibraryModule"
 depends_on = []
 
 [metadata]
 name = "文件整理"
-type = "other"
-subtype = "FileManager"
 priority = 4
 
 [activation]

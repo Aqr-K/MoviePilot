@@ -9,13 +9,13 @@ from app.schemas.mediaserver import MediaServerSeasonInfo as _SchemaMediaServerS
 from app.schemas.mediaserver import WebhookEventInfo as _SchemaWebhookEventInfo
 from app.domain.context import MediaInfo
 from app.runtime.events import eventmanager
-from app.application.mediaserver import MusicMediaServerHelper
+from app.domain.library import MusicMediaServerHelper
 from app.runtime.log import logger
 from app.modules._base import _MediaServerModuleBase
 from app.modules.plex.plex import Plex
 from app.schemas.event import AuthCredentials
 from app.schemas.event import AuthInterceptCredentials
-from app.schemas.types import MediaType, ModuleType, ChainEventType, MediaServerType
+from app.schemas.types import MediaType, ChainEventType
 
 
 class PlexModule(_MediaServerModuleBase[Plex]):
@@ -33,20 +33,6 @@ class PlexModule(_MediaServerModuleBase[Plex]):
     @staticmethod
     def get_name() -> str:
         return "Plex"
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.MediaServer
-
-    @staticmethod
-    def get_subtype() -> MediaServerType:
-        """
-        获取模块子类型
-        """
-        return MediaServerType.Plex
 
     @staticmethod
     def get_priority() -> int:

@@ -6,9 +6,12 @@ depends_on = []
 
 [metadata]
 name = "企业微信"
-type = "notification"
+service_capability = "notification"
 subtype = "Wechat"
 priority = 1
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

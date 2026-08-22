@@ -1,0 +1,19 @@
+schema_version = 1
+id = "RcloneModule"
+kind = "host_module"
+entrypoint = "app.modules.rclone:RcloneModule"
+depends_on = []
+
+[metadata]
+name = "Rclone"
+subtype = "Rclone"
+priority = 5
+
+[metadata.service_instance]
+capability = "storage"
+type = "rclone"
+multi_instance = true
+
+[activation]
+policy = "bootstrap"
+watch = ["Storages"]

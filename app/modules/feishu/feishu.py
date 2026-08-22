@@ -52,8 +52,8 @@ from lark_oapi.event.callback.model.p2_card_action_trigger import (
 
 from app.runtime.config import settings
 from app.domain.context import Context, MediaInfo
-from app.application.security.user import get_configured_user_channel_lookup
-from app.application.messaging.agent import matches_channel_admin
+from app.db.oper.user import UserOper
+from app.runtime.channels import matches_channel_admin
 from app.runtime.log import logger
 from app.schemas.message import IncomingMessage
 from app.schemas.message import Message
@@ -67,7 +67,7 @@ class UserOper:
     @staticmethod
     def get_name(**bindings) -> Optional[str]:
         """把渠道标识查询转发到启动组合根登记的用户端口。"""
-        return get_configured_user_channel_lookup()(**bindings)
+        return UserOper().get_name(**bindings)
 
 
 class Feishu:

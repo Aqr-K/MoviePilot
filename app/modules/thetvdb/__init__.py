@@ -1,11 +1,14 @@
 from threading import Lock
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
+
+from fastapi.concurrency import run_in_threadpool
 
 from app.runtime.config import settings
 from app.runtime.log import logger
 from app.modules import _ModuleBase
 from app.modules.thetvdb import tvdb_v4_official
-from app.schemas.types import ModuleType, MediaRecognizeType
+from app.schemas.media import normalize_media_source
+from app.schemas.types import MediaSource, MediaType
 
 
 class TheTvDbModule(_ModuleBase):
@@ -93,20 +96,6 @@ class TheTvDbModule(_ModuleBase):
         return "TheTvDb"
 
     @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.MediaRecognize
-
-    @staticmethod
-    def get_subtype() -> MediaRecognizeType:
-        """
-        获取模块子类型
-        """
-        return MediaRecognizeType.TVDB
-
-    @staticmethod
     def get_priority() -> int:
         """
         获取模块优先级，数字越小优先级越高，只有同一接口下优先级才生效
@@ -185,3 +174,54 @@ class TheTvDbModule(_ModuleBase):
         if tvdb := self.tvdb:
             tvdb.clear_cache()
         logger.info(f"{self.get_name()}缓存清除完成")
+
+    def media_detail(self, source: Optional[MediaSource] = None,
+                      media_id: Any = None,
+                      mtype: Optional[MediaType] = None,
+                      season: Optional[int] = None,
+                      raise_exception: bool = False,
+                      **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情
+        :param source: 媒体来源，非TVDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持
+        :param season: 本源不支持
+        :param raise_exception: 本源不支持
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.TVDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tvdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return self.tvdb_info(tvdbid=tvdbid)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                  media_id: Any = None,
+                                  mtype: Optional[MediaType] = None,
+                                  season: Optional[int] = None,
+                                  raise_exception: bool = False,
+                                  **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情（异步版本）。本模块没有原生异步实现，
+        经 run_in_threadpool 把同步的 tvdb_info 移出事件循环执行。
+        :param source: 媒体来源，非TVDB来源返回 None
+        :param media_id: 媒体来源原生ID，须可转换为int，转换失败或为空返回 None
+        :param mtype: 本源不支持
+        :param season: 本源不支持
+        :param raise_exception: 本源不支持
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.TVDB:
+            return None
+        if media_id is None:
+            return None
+        try:
+            tvdbid = int(media_id)
+        except (TypeError, ValueError):
+            return None
+        return await run_in_threadpool(self.tvdb_info, tvdbid=tvdbid)

@@ -6,9 +6,8 @@ depends_on = []
 
 [metadata]
 name = "TheTvDb"
-type = "mediarecognize"
-subtype = "TVDB"
 priority = 4
+media_sources = ["tvdb"]
 
 [activation]
 policy = "bootstrap"

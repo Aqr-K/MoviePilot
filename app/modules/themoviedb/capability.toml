@@ -6,9 +6,8 @@ depends_on = []
 
 [metadata]
 name = "TheMovieDb"
-type = "mediarecognize"
-subtype = "TMDB"
 priority = 1
+media_sources = ["themoviedb"]
 
 [activation]
 policy = "bootstrap"

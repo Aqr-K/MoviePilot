@@ -6,9 +6,12 @@ depends_on = []
 
 [metadata]
 name = "Slack"
-type = "notification"
+service_capability = "notification"
 subtype = "Slack"
 priority = 3
+
+[metadata.service_instance]
+multi_instance = true
 
 [activation]
 policy = "when_configured"

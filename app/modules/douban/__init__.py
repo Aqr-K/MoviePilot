@@ -25,14 +25,24 @@ from app.schemas.types import (
     MediaSource,
     MediaSourceSelection,
     MediaType,
-    ModuleType,
-    MediaRecognizeType,
 )
 from app.runtime.execution import retry
 from app.adapters.network.http import RequestUtils
 from app.runtime.rate import rate_limit_exponential
 from app.domain.media import is_media_source_enabled, is_media_source_selected
 from app.foundation.text import convert as zhconv_convert
+from app.schemas.media import normalize_media_source
+
+# 榜单标识到本模块方法名的映射，discover_board 只接受在册标识，白名单校验先于 getattr 完成
+_DISCOVER_BOARDS = {
+    "movie_showing": "movie_showing",
+    "movie_hot": "movie_hot",
+    "movie_top250": "movie_top250",
+    "tv_hot": "tv_hot",
+    "tv_animation": "tv_animation",
+    "tv_weekly_chinese": "tv_weekly_chinese",
+    "tv_weekly_global": "tv_weekly_global",
+}
 
 
 class DoubanModule(_ModuleBase):
@@ -69,20 +79,6 @@ class DoubanModule(_ModuleBase):
     def get_music_source() -> MediaSource:
         """返回音乐识别使用的数据源标识。"""
         return DoubanModule._music_source
-
-    @staticmethod
-    def get_type() -> ModuleType:
-        """
-        获取模块类型
-        """
-        return ModuleType.MediaRecognize
-
-    @staticmethod
-    def get_subtype() -> MediaRecognizeType:
-        """
-        获取模块子类型
-        """
-        return MediaRecognizeType.Douban
 
     @staticmethod
     def get_priority() -> int:
@@ -1957,3 +1953,315 @@ class DoubanModule(_ModuleBase):
                 works = collections.get("works")
                 return [MediaInfo(douban_info=work.get("subject")) for work in works]
         return []
+
+    def match_media(self, source: Optional[MediaSource] = None,
+                     name: str = None,
+                     mtype: Optional[MediaType] = None,
+                     year: Optional[str] = None,
+                     season: Optional[int] = None,
+                     imdbid: Optional[str] = None,
+                     raise_exception: bool = False,
+                     **kwargs) -> Optional[dict]:
+        """
+        搜索和匹配指定来源的媒体信息
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param name: 名称
+        :param mtype: 类型
+        :param year: 年份
+        :param season: 季号
+        :param imdbid: IMDB ID
+        :param raise_exception: 触发速率限制时是否抛出异常
+        :return: 匹配到的媒体信息
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return self.match_doubaninfo(name=name, imdbid=imdbid, mtype=mtype,
+                                      year=year, season=season, raise_exception=raise_exception)
+
+    async def async_match_media(self, source: Optional[MediaSource] = None,
+                                 name: str = None,
+                                 mtype: Optional[MediaType] = None,
+                                 year: Optional[str] = None,
+                                 season: Optional[int] = None,
+                                 imdbid: Optional[str] = None,
+                                 raise_exception: bool = False,
+                                 **kwargs) -> Optional[dict]:
+        """
+        搜索和匹配指定来源的媒体信息（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param name: 名称
+        :param mtype: 类型
+        :param year: 年份
+        :param season: 季号
+        :param imdbid: IMDB ID
+        :param raise_exception: 触发速率限制时是否抛出异常
+        :return: 匹配到的媒体信息
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return await self.async_match_doubaninfo(name=name, imdbid=imdbid, mtype=mtype,
+                                                  year=year, season=season, raise_exception=raise_exception)
+
+    def person_detail(self, source: Optional[MediaSource] = None,
+                       person_id: int = None,
+                       **kwargs) -> Optional[_SchemaMediaPerson]:
+        """
+        查询指定来源的人物详情
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param person_id: 人物ID
+        :return: 人物详情
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return self.douban_person_detail(person_id=person_id)
+
+    async def async_person_detail(self, source: Optional[MediaSource] = None,
+                                   person_id: int = None,
+                                   **kwargs) -> Optional[_SchemaMediaPerson]:
+        """
+        查询指定来源的人物详情（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param person_id: 人物ID
+        :return: 人物详情
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return await self.async_douban_person_detail(person_id=person_id)
+
+    def person_credits(self, source: Optional[MediaSource] = None,
+                        person_id: int = None,
+                        page: int = 1,
+                        count: Optional[int] = None,
+                        **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的人物参演作品
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param person_id: 人物ID
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 参演作品列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return self.douban_person_credits(person_id=person_id, page=page)
+
+    async def async_person_credits(self, source: Optional[MediaSource] = None,
+                                    person_id: int = None,
+                                    page: int = 1,
+                                    count: Optional[int] = None,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的人物参演作品（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param person_id: 人物ID
+        :param page: 页码
+        :param count: 本源不支持
+        :return: 参演作品列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return await self.async_douban_person_credits(person_id=person_id, page=page)
+
+    def media_credits(self, source: Optional[MediaSource] = None,
+                       media_id: Any = None,
+                       mtype: Optional[MediaType] = None,
+                       page: int = 1,
+                       count: Optional[int] = None,
+                       **kwargs) -> Optional[List[_SchemaMediaPerson]]:
+        """
+        查询指定来源的媒体演职员表
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param media_id: 媒体来源原生ID，为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 演职员列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        if media_id is None:
+            return None
+        doubanid = str(media_id)
+        if mtype == MediaType.TV:
+            return self.douban_tv_credits(doubanid=doubanid)
+        return self.douban_movie_credits(doubanid=doubanid)
+
+    async def async_media_credits(self, source: Optional[MediaSource] = None,
+                                   media_id: Any = None,
+                                   mtype: Optional[MediaType] = None,
+                                   page: int = 1,
+                                   count: Optional[int] = None,
+                                   **kwargs) -> Optional[List[_SchemaMediaPerson]]:
+        """
+        查询指定来源的媒体演职员表（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param media_id: 媒体来源原生ID，为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 演职员列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        if media_id is None:
+            return None
+        doubanid = str(media_id)
+        if mtype == MediaType.TV:
+            return await self.async_douban_tv_credits(doubanid=doubanid)
+        return await self.async_douban_movie_credits(doubanid=doubanid)
+
+    def media_recommend(self, source: Optional[MediaSource] = None,
+                         media_id: Any = None,
+                         mtype: Optional[MediaType] = None,
+                         page: int = 1,
+                         count: Optional[int] = None,
+                         **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相关推荐媒体
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param media_id: 媒体来源原生ID，为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 推荐媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        if media_id is None:
+            return None
+        doubanid = str(media_id)
+        if mtype == MediaType.TV:
+            return self.douban_tv_recommend(doubanid=doubanid)
+        return self.douban_movie_recommend(doubanid=doubanid)
+
+    async def async_media_recommend(self, source: Optional[MediaSource] = None,
+                                     media_id: Any = None,
+                                     mtype: Optional[MediaType] = None,
+                                     page: int = 1,
+                                     count: Optional[int] = None,
+                                     **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的相关推荐媒体（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param media_id: 媒体来源原生ID，为空返回 None
+        :param mtype: 媒体类型，TV走剧集接口，其余（含未指定）按电影处理
+        :param page: 本源不支持
+        :param count: 本源不支持
+        :return: 推荐媒体列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        if media_id is None:
+            return None
+        doubanid = str(media_id)
+        if mtype == MediaType.TV:
+            return await self.async_douban_tv_recommend(doubanid=doubanid)
+        return await self.async_douban_movie_recommend(doubanid=doubanid)
+
+    def discover(self, source: Optional[MediaSource] = None,
+                 **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件发现指定来源的媒体
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param criteria: 筛选条件，原样转发给 douban_discover，不补默认值；本源要求 mtype、sort、
+                         tags 等必填项与可选的 page、count，必填项缺失时由 douban_discover 自身
+                         抛出异常
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return self.douban_discover(**criteria)
+
+    async def async_discover(self, source: Optional[MediaSource] = None,
+                              **criteria) -> Optional[List[MediaInfo]]:
+        """
+        按条件发现指定来源的媒体（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param criteria: 筛选条件，原样转发给 async_douban_discover，规则同步版本一致
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        return await self.async_douban_discover(**criteria)
+
+    def discover_board(self, source: Optional[MediaSource] = None,
+                        board: str = None,
+                        page: int = 1,
+                        count: int = 30,
+                        **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的榜单
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param board: 榜单标识，须命中本源白名单，未登记标识返回 None
+        :param page: 页码
+        :param count: 每页数量
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        method_name = _DISCOVER_BOARDS.get(board)
+        if method_name is None:
+            return None
+        return getattr(self, method_name)(page=page, count=count)
+
+    async def async_discover_board(self, source: Optional[MediaSource] = None,
+                                    board: str = None,
+                                    page: int = 1,
+                                    count: int = 30,
+                                    **kwargs) -> Optional[List[MediaInfo]]:
+        """
+        查询指定来源的榜单（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param board: 榜单标识，须命中本源白名单，未登记标识返回 None
+        :param page: 页码
+        :param count: 每页数量
+        :return: 媒体信息列表
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        method_name = _DISCOVER_BOARDS.get(board)
+        if method_name is None:
+            return None
+        return await getattr(self, f"async_{method_name}")(page=page, count=count)
+
+    def media_detail(self, source: Optional[MediaSource] = None,
+                      media_id: Any = None,
+                      mtype: Optional[MediaType] = None,
+                      season: Optional[int] = None,
+                      raise_exception: bool = False,
+                      **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param media_id: 媒体来源原生ID，为空返回 None
+        :param mtype: 媒体类型
+        :param season: 本源不支持
+        :param raise_exception: 触发速率限制时是否抛出异常
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        if media_id is None:
+            return None
+        return self.douban_info(doubanid=str(media_id), mtype=mtype, raise_exception=raise_exception)
+
+    async def async_media_detail(self, source: Optional[MediaSource] = None,
+                                  media_id: Any = None,
+                                  mtype: Optional[MediaType] = None,
+                                  season: Optional[int] = None,
+                                  raise_exception: bool = False,
+                                  **kwargs) -> Optional[dict]:
+        """
+        查询指定来源的媒体详情（异步版本）
+        :param source: 媒体来源，非豆瓣来源返回 None
+        :param media_id: 媒体来源原生ID，为空返回 None
+        :param mtype: 媒体类型
+        :param season: 本源不支持
+        :param raise_exception: 触发速率限制时是否抛出异常
+        :return: 媒体详情
+        """
+        if normalize_media_source(source) is not MediaSource.Douban:
+            return None
+        if media_id is None:
+            return None
+        return await self.async_douban_info(doubanid=str(media_id), mtype=mtype, raise_exception=raise_exception)
