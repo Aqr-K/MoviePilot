@@ -76,8 +76,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 6978,
-  "edge_sha256": "d78e4c94d2e36deba9423d3b86d9b39f4ea8e04ec53ff7e94a21cae2b0df6d65",
+  "edge_count": 6980,
+  "edge_sha256": "9a7abdd504449b74d0b29c9f8c925a1f061ce52fede243d7d2d2a836683f1ad8",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -391,6 +391,7 @@
     "app.agent.orchestrator -> app.agent.callback",
     "app.agent.orchestrator -> app.agent.contracts",
     "app.agent.orchestrator -> app.agent.llm",
+    "app.agent.orchestrator -> app.agent.llm.helper",
     "app.agent.orchestrator -> app.agent.llm.server_tools",
     "app.agent.orchestrator -> app.agent.mcp",
     "app.agent.orchestrator -> app.agent.memory",
@@ -407,6 +408,7 @@
     "app.agent.orchestrator -> app.agent.middleware.tool_selection",
     "app.agent.orchestrator -> app.agent.middleware.usage",
     "app.agent.orchestrator -> app.agent.policy",
+    "app.agent.orchestrator -> app.agent.policy.contracts",
     "app.agent.orchestrator -> app.agent.prompt",
     "app.agent.orchestrator -> app.agent.runtime",
     "app.agent.orchestrator -> app.agent.runtime_loader",
