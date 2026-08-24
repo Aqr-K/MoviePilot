@@ -308,6 +308,89 @@ def test_quota_slot_is_returned_after_body_raises():
 
 
 # --------------------------------------------------------------------------- #
+# 同步配额闸门（`slot`）：供不经事件循环的调用方（如线程池提交前）使用
+# --------------------------------------------------------------------------- #
+
+def test_sync_slot_caps_concurrent_slots_of_one_plugin():
+    """同一插件的并发占用不超过它自己的槽位数，多个线程直接争抢同一把闸门。"""
+    quota = _quota(2, wait_timeout=5)
+    state = {"live": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def occupy():
+        with quota.slot("PluginA"):
+            with lock:
+                state["live"] += 1
+                state["peak"] = max(state["peak"], state["live"])
+            time.sleep(0.05)
+            with lock:
+                state["live"] -= 1
+
+    threads = [threading.Thread(target=occupy) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert state["peak"] == 2
+
+
+def test_sync_slot_is_released_after_body_raises():
+    """同步闸门里抛异常也要归还槽位，否则配额会被异常路径逐次漏光。"""
+    quota = _quota(1, wait_timeout=0.05)
+
+    with pytest.raises(RuntimeError):
+        with quota.slot("PluginA"):
+            raise RuntimeError("boom")
+
+    with quota.slot("PluginA") as acquired:
+        assert acquired is True
+
+
+def test_sync_slot_wait_timeout_warns_with_plugin_name_and_admits(monkeypatch):
+    """槽位等不到时点名插件记录告警并放行，不静默丢弃调用。"""
+    warnings = []
+    monkeypatch.setattr(
+        quota_module, "logger", SimpleNamespace(warn=warnings.append)
+    )
+    quota = _quota(1, wait_timeout=0.05)
+
+    with quota.slot("PluginA") as first:
+        with quota.slot("PluginA") as second:
+            pass
+
+    assert first is True
+    assert second is False
+    assert any("PluginA" in message for message in warnings)
+
+
+def test_sync_slot_release_from_different_thread_is_safe():
+    """跨线程手动驱动 `__enter__`/`__exit__`：取槽线程与释放槽线程不同也不出错。
+
+    这正是 `dispatch.py` 在广播事件提交到线程池前的用法：提交方线程取槽，
+    池 worker 线程执行完毕后释放。
+    """
+    quota = _quota(1, wait_timeout=1)
+    cm = quota.slot("PluginA")
+    acquired = cm.__enter__()
+    assert acquired is True
+
+    released = {"done": False}
+
+    def release_elsewhere():
+        cm.__exit__(None, None, None)
+        released["done"] = True
+
+    thread = threading.Thread(target=release_elsewhere)
+    thread.start()
+    thread.join(timeout=2)
+
+    assert released["done"] is True
+    with quota.slot("PluginA") as reacquired:
+        assert reacquired is True
+
+
+# --------------------------------------------------------------------------- #
 # 配额记录的回收
 # --------------------------------------------------------------------------- #
 

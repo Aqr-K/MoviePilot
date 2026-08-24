@@ -1,5 +1,6 @@
 """定时服务组合根：把执行引擎与四类作业的登记路径装配到一起。"""
 
+from apscheduler.events import EVENT_JOB_MISSED
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -11,12 +12,14 @@ from app.runtime.scheduler import SchedulerEngine, lock
 from app.schemas.types import SystemConfigKey
 from app.scheduler.agent_tasks import AgentTaskScheduling
 from app.scheduler.plugins import PluginScheduling
+from app.scheduler.supervision import JobSupervision
 from app.scheduler.workflows import WorkflowScheduling
 from app.startup.bindings.scheduling.manifest import build_host_jobs
 from app.startup.bindings.scheduling.systemjobs import UserAuthChecker
 
 
 class Scheduler(
+    JobSupervision,
     SchedulerEngine,
     AgentTaskScheduling,
     WorkflowScheduling,
@@ -100,6 +103,8 @@ class Scheduler(
                 timezone=settings.TZ,
                 executors={"default": ThreadPoolExecutor(settings.CONF.scheduler)},
             )
+            # 错过触发只有调度器自己知道，作业函数根本不会被调用，必须监听事件才看得到
+            self._scheduler.add_listener(self.on_job_missed, EVENT_JOB_MISSED)
 
             # 宿主业务作业按清单登记
             for job in build_host_jobs(user_auth=self._user_auth.check):

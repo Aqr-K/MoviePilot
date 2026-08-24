@@ -627,6 +627,24 @@ class ConfigModel(BaseModel):
     # 阻塞检测独立采样线程的采样周期（秒）
     LOOP_BLOCKING_DETECTOR_SAMPLE_INTERVAL_SECONDS: float = 0.1
 
+    # ==================== 定时作业看门狗与熔断配置 ====================
+    # 定时作业看门狗总开关：观测作业墙钟执行时长并对超时作业点名告警，只观测不终止作业，默认开启
+    SCHEDULER_WATCHDOG_ENABLE: bool = True
+    # 看门狗采样线程的采样周期（秒），线程随作业开始按需启动、作业收口后自行退出
+    SCHEDULER_WATCHDOG_SAMPLE_INTERVAL_SECONDS: float = 60.0
+    # 单次作业执行超过该时长（秒）即判定超时
+    SCHEDULER_WATCHDOG_JOB_OVERDUE_SECONDS: float = 3600.0
+    # 插件定时作业熔断总开关：连续失败达阈值后跳过后续触发；
+    # 自动跳过是破坏性动作，默认关闭，关闭时仍按同一阈值点名告警
+    PLUGIN_JOB_BREAKER_ENABLE: bool = False
+    # 连续失败达到该次数即判定作业不可用，中途任何一次成功都会清零计数
+    PLUGIN_JOB_BREAKER_FAILURE_THRESHOLD: int = 5
+    # 相邻两次失败相隔超过该时长（秒）即视为互不相关，连续失败计数归零；
+    # 触发周期长于该窗口的作业因此永远不会被熔断
+    PLUGIN_JOB_BREAKER_FAILURE_WINDOW_SECONDS: float = 86400.0
+    # 跳闸后经过该时长（秒）放行一次半开试探
+    PLUGIN_JOB_BREAKER_RECOVERY_SECONDS: float = 1800.0
+
     # ==================== 安全配置 ====================
     # 允许的图片缓存域名
     SECURITY_IMAGE_DOMAINS: list = Field(

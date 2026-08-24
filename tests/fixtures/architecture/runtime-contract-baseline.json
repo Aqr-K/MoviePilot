@@ -1609,6 +1609,10 @@
         "count": 1
       },
       {
+        "caller": "app.runtime.extensions.remote.proxy",
+        "count": 1
+      },
+      {
         "caller": "app.startup.hostport_initializer",
         "count": 9
       },

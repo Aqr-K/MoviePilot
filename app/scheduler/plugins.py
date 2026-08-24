@@ -62,6 +62,9 @@ class PluginScheduling:
                     self._jobs.pop(job_id, None)
             if not jobs_to_remove:
                 return
+            # 作业不再登记后释放其熔断记录：记录随作业消亡，映射不随插件启停无界增长；
+            # 重载走的也是先注销后注册，因此重载会让插件带着干净的熔断状态重新开始
+            self.discard_job_circuits(job_id for job_id, _ in jobs_to_remove)
             plugin_name = PluginManager().get_plugin_attr(pid, "plugin_name")
             # 遍历移除任务
             for job_id, service in jobs_to_remove:

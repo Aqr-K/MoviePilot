@@ -12,6 +12,7 @@ from app.runtime.event.binding import EventBindingResolver, EventHandlerBinding
 from app.runtime.event.registry import EventRegistry
 from app.runtime.execution import run_in_threadpool
 from app.runtime.extensions.contract.instance import split_instance_key
+from app.runtime.extensions.plugin_quota import PluginExecutionQuota
 from app.runtime.log import logger, wrap_for_plugin_instance
 from app.schemas.types import EventType
 
@@ -45,14 +46,16 @@ class EventDispatcher:
         event_loop: Callable[[], Any],
         event_factory: Callable[..., Any],
         error_handler: Callable[..., None],
+        plugin_quota: PluginExecutionQuota | None = None,
     ) -> None:
-        """注入注册表、绑定器、执行器和错误策略回调。"""
+        """注入注册表、绑定器、执行器、错误策略回调和插件并发闸门。"""
         self._registry = registry
         self._binding_resolver = binding_resolver
         self._executor = executor
         self._event_loop = event_loop
         self._event_factory = event_factory
         self._error_handler = error_handler
+        self._plugin_quota = plugin_quota or PluginExecutionQuota()
 
     def dispatch_chain(self, event: Any) -> bool:
         """同步按优先级顺序执行链式事件快照。"""
@@ -139,11 +142,42 @@ class EventDispatcher:
                     self._event_loop(),
                 )
             else:
-                self._executor().submit(
-                    self.safe_invoke_sync,
-                    handler,
-                    isolated,
-                )
+                self._submit_broadcast_handler(handler, isolated)
+
+    def _submit_broadcast_handler(self, handler: Callable, event: Any) -> None:
+        """按处理器归属的插件占用一个并发槽位后提交到共享线程池；宿主处理器不受限。
+
+        槽位必须在提交前的调用线程上取，取到后交由池 worker 执行；执行完毕
+        （含异常）后通过 future 的完成回调归还，槽位绝不在 worker 内部获取，
+        否则排队任务会占着池线程等待自己的信号量，比不设配额更糟。
+        :param handler: 原始注册处理器
+        :param event: 已隔离的待投递事件
+        :return: 无返回值
+        """
+        plugin_id = self._broadcast_plugin_id(handler)
+        if plugin_id is None:
+            self._executor().submit(self.safe_invoke_sync, handler, event)
+            return
+        slot = self._plugin_quota.slot(plugin_id)
+        slot.__enter__()
+        future = self._executor().submit(self.safe_invoke_sync, handler, event)
+        future.add_done_callback(lambda _future: slot.__exit__(None, None, None))
+
+    def _broadcast_plugin_id(self, handler: Callable) -> str | None:
+        """判定广播处理器归属的插件标识；宿主处理器返回空值。
+
+        只有插件的实例解析器会在绑定里写入 `instance_key`（宿主内置类和宿主模块
+        的绑定均不带该字段），因此该字段是区分插件处理器与宿主处理器的可靠依据。
+        :param handler: 原始注册处理器
+        :return: 插件标识；处理器不属于任何插件时为 None
+        """
+        resolved = self._binding_resolver.resolve(handler)
+        for _method, binding, _class_name, _method_name in (
+            EventBindingResolver.as_binding_sequence(resolved)
+        ):
+            if binding.instance_key:
+                return split_instance_key(binding.instance_key)[0]
+        return None
 
     def safe_invoke_sync(self, handler: Callable, event: Any) -> None:
         """仅在处理器启用时执行同步调用。"""

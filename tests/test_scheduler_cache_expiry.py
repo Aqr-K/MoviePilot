@@ -13,13 +13,18 @@ class _BackgroundSchedulerStub:
     """记录系统定时任务注册结果的调度器替身。"""
 
     def __init__(self):
-        """初始化任务记录。"""
+        """初始化任务与事件监听记录。"""
         self.jobs = []
+        self.listeners = []
         self.started = False
 
     def add_job(self, func, trigger, **kwargs):
         """记录一次任务注册。"""
         self.jobs.append({"func": func, "trigger": trigger, **kwargs})
+
+    def add_listener(self, callback, mask):
+        """记录一次调度器事件监听登记。"""
+        self.listeners.append((callback, mask))
 
     def start(self):
         """记录调度器已启动。"""

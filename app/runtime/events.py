@@ -20,6 +20,10 @@ from app.runtime.event.binding import (
 from app.runtime.event.dispatch import EventDispatcher
 from app.runtime.event.errors import EventErrorNotifier, EventErrorPolicy
 from app.runtime.event.registry import EventRegistry
+from app.runtime.extensions.plugin_quota import (
+    PLUGIN_QUOTA_BROADCAST_WAIT_TIMEOUT,
+    PluginExecutionQuota,
+)
 
 DEFAULT_EVENT_PRIORITY = 10  # 事件的默认优先级
 MIN_EVENT_CONSUMER_THREADS = 1  # 最小事件消费者线程数
@@ -123,6 +127,12 @@ class EventManager(metaclass=Singleton):
                 payload,
             ),
         )
+        # 广播事件扇出到共享线程池前的插件并发闸门；与插件管理器侧的调用配额各自
+        # 独立记账，二者对应不同的共享线程池。取槽发生在唯一的广播消费者线程上，
+        # 故用远短于协程路径的等待超时，避免单个插件占满配额时拖停全部事件分发。
+        self.__broadcast_plugin_quota = PluginExecutionQuota(
+            wait_timeout=PLUGIN_QUOTA_BROADCAST_WAIT_TIMEOUT,
+        )
         self.__dispatcher = EventDispatcher(
             registry=self.__registry,
             binding_resolver=self.__binding_resolver,
@@ -130,6 +140,7 @@ class EventManager(metaclass=Singleton):
             event_loop=lambda: global_vars.loop,
             event_factory=Event,
             error_handler=lambda **kwargs: self.__handle_event_error(**kwargs),
+            plugin_quota=self.__broadcast_plugin_quota,
         )
 
     def register_handler_instance_resolver(

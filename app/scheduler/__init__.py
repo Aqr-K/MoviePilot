@@ -9,11 +9,13 @@ from app.runtime.scheduler import SCHEDULER_PROGRESS_PREFIX, lock
 from app.scheduler.agent_tasks import AgentTaskScheduling
 from app.scheduler.composition import Scheduler
 from app.scheduler.plugins import PluginScheduling
+from app.scheduler.supervision import JobSupervision
 from app.scheduler.workflows import WorkflowScheduling
 
 __all__ = [
     "AGENT_TASK_JOB_PREFIX",
     "AgentTaskScheduling",
+    "JobSupervision",
     "PluginScheduling",
     "SCHEDULER_PROGRESS_PREFIX",
     "Scheduler",

@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from contextlib import asynccontextmanager
-from typing import AsyncIterator, Callable, Dict, Tuple
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncIterator, Callable, Dict, Iterator, Tuple
 
 from app.runtime.config import settings
 from app.runtime.log import logger
@@ -17,6 +17,10 @@ PLUGIN_QUOTA_POOL_DIVISOR = 4
 PLUGIN_QUOTA_MIN_SLOTS = 2
 # 等待空闲槽位的超时秒数
 PLUGIN_QUOTA_WAIT_TIMEOUT = 60.0
+# 广播扇出路径等待空闲槽位的超时秒数。该路径在唯一的广播消费者线程上取槽，
+# 等待期间全部排队事件都停止分发，因此超时必须远小于协程路径的取值：
+# 宁可让占满配额的插件短暂突破上限，也不能让一个插件拖停整条事件总线
+PLUGIN_QUOTA_BROADCAST_WAIT_TIMEOUT = 1.0
 # 异步等待空闲槽位时的重试间隔秒数
 PLUGIN_QUOTA_POLL_INTERVAL = 0.05
 
@@ -141,3 +145,28 @@ class PluginExecutionQuota:
             f"等待 {self._wait_timeout:.1f} 秒仍无空闲槽位，本次调用不再受配额约束"
         )
         return False
+
+    @contextmanager
+    def slot(self, plugin_id: str) -> Iterator[bool]:
+        """占用插件的一个并发槽位，退出时归还，语义与 `async_slot` 一致。
+
+        供不在事件循环里的调用方使用，调用线程会被阻塞直至取得槽位或等待超时。
+        调用方必须在把任务交给线程池之前取槽，而不是在池 worker 内部取——worker
+        内部取会让排队任务占着池线程等待自己的信号量，比不设配额更糟；因此若要
+        跨线程使用（取槽线程与释放槽线程不同），需自行驱动
+        `__enter__`/`__exit__`，不能用 `with` 包住整个提交加执行过程。
+        :param plugin_id: 插件标识
+        :return: 同步上下文管理器，产出本次是否在配额内取得槽位
+        """
+        semaphore, capacity = self.gate(plugin_id)
+        acquired = semaphore.acquire(timeout=self._wait_timeout)
+        if not acquired:
+            logger.warn(
+                f"插件 {plugin_id} 并发执行数已达配额 {capacity}，"
+                f"等待 {self._wait_timeout:.1f} 秒仍无空闲槽位，本次调用不再受配额约束"
+            )
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                semaphore.release()
