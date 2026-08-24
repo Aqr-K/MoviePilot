@@ -247,9 +247,13 @@ async def test_stop_closes_tool_executor_after_factory_materialization(
     cleanup.assert_called_once_with(wait=False, cancel_futures=True)
 
 
-@pytest.mark.anyio
-async def test_stop_does_not_wait_for_running_blocking_tool(monkeypatch) -> None:
-    """应用关闭不得等待已经进入线程池且尚未返回的工具调用。"""
+def test_stop_does_not_wait_for_running_blocking_tool(monkeypatch) -> None:
+    """应用关闭不得等待已经进入线程池且尚未返回的工具调用。
+
+    工具阻塞调用依赖 asyncio 线程池桥接（`asyncio.get_running_loop`），
+    与终端会话管理器一样只能在 asyncio 事件循环下工作，因此本用例不
+    参与 anyio 多后端参数化，用 `asyncio.run` 直接驱动。
+    """
     from app.agent.tools.base import MoviePilotTool
 
     started = threading.Event()
@@ -260,25 +264,28 @@ async def test_stop_does_not_wait_for_running_blocking_tool(monkeypatch) -> None
         release.wait()
         return "done"
 
-    worker = asyncio.create_task(
-        MoviePilotTool.run_blocking("web", _blocking_call)
-    )
-    assert await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
-    monkeypatch.setattr(agent_initializer, "begin_agent_shutdown", AsyncMock())
-    monkeypatch.setattr(
-        agent_initializer,
-        "is_tool_factory_materialized",
-        lambda: True,
-    )
-    monkeypatch.setattr(
-        agent_initializer,
-        "agent_initializer",
-        agent_initializer.AgentInitializer(),
-    )
+    async def _scenario() -> None:
+        worker = asyncio.create_task(
+            MoviePilotTool.run_blocking("web", _blocking_call)
+        )
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
+        monkeypatch.setattr(agent_initializer, "begin_agent_shutdown", AsyncMock())
+        monkeypatch.setattr(
+            agent_initializer,
+            "is_tool_factory_materialized",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            agent_initializer,
+            "agent_initializer",
+            agent_initializer.AgentInitializer(),
+        )
 
-    try:
-        await asyncio.wait_for(agent_initializer.stop_agent(), timeout=0.2)
-        assert worker.done() is False
-    finally:
-        release.set()
-        assert await asyncio.wait_for(worker, timeout=1) == "done"
+        try:
+            await asyncio.wait_for(agent_initializer.stop_agent(), timeout=0.2)
+            assert worker.done() is False
+        finally:
+            release.set()
+            assert await asyncio.wait_for(worker, timeout=1) == "done"
+
+    asyncio.run(_scenario())

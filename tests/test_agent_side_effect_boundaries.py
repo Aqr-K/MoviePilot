@@ -97,157 +97,192 @@ def test_timeout_does_not_mark_safe_reads_for_reconciliation() -> None:
     assert receipt.needs_reconcile is False
 
 
-@pytest.mark.anyio
-async def test_terminal_manager_close_terminates_running_pipe_session() -> None:
-    """应用关闭时终端管理器必须终止仍在运行的管道进程。"""
-    manager = _TerminalSessionManager()
-    payload = await manager.start(
-        command=_shell_command("import time; time.sleep(30)"),
-        use_pty=False,
-    )
-    session = manager.get_session(payload["session_id"])
+def test_terminal_manager_close_terminates_running_pipe_session() -> None:
+    """应用关闭时终端管理器必须终止仍在运行的管道进程。
 
-    await manager.close()
+    终端会话管理器基于 asyncio 原生锁与 asyncio 子进程管道，只能在
+    asyncio 事件循环下工作，因此本用例不参与 anyio 多后端参数化。
+    """
 
-    assert session.process is not None
-    assert session.process.returncode is not None
-    assert session.status == "killed"
-    assert manager._sessions == {}
+    async def _scenario() -> None:
+        manager = _TerminalSessionManager()
+        payload = await manager.start(
+            command=_shell_command("import time; time.sleep(30)"),
+            use_pty=False,
+        )
+        session = manager.get_session(payload["session_id"])
 
+        await manager.close()
 
-@pytest.mark.anyio
-async def test_terminal_manager_close_waits_for_starting_session() -> None:
-    """关闭必须接管已经获准但尚未登记的终端启动。"""
-    manager = _TerminalSessionManager()
-    start_entered = asyncio.Event()
-    allow_start = asyncio.Event()
-    session = _TerminalSession(
-        session_id="term-starting",
-        command="sleep",
-        cwd=".",
-        pid=12345,
-        use_pty=False,
-    )
+        assert session.process is not None
+        assert session.process.returncode is not None
+        assert session.status == "killed"
+        assert manager._sessions == {}
 
-    async def _start_session(*_args) -> _TerminalSession:
-        start_entered.set()
-        await allow_start.wait()
-        return session
-
-    manager._start_pipe_session = _start_session
-    manager._terminate_session = AsyncMock()
-
-    start_task = asyncio.create_task(
-        manager.start(command="sleep", use_pty=False)
-    )
-    await start_entered.wait()
-    close_task = asyncio.create_task(manager.close())
-    await asyncio.sleep(0)
-
-    assert close_task.done() is False
-
-    allow_start.set()
-    with pytest.raises(RuntimeError, match="已关闭"):
-        await start_task
-    await close_task
-
-    manager._terminate_session.assert_awaited_once_with(session)
-    assert manager._sessions == {}
+    asyncio.run(_scenario())
 
 
-@pytest.mark.anyio
-async def test_terminal_manager_rejects_start_after_close() -> None:
-    """应用关闭后的终端管理器不得重新创建外部进程。"""
-    manager = _TerminalSessionManager()
+def test_terminal_manager_close_waits_for_starting_session() -> None:
+    """关闭必须接管已经获准但尚未登记的终端启动。
 
-    await manager.close()
+    终端会话管理器基于 asyncio 原生锁与 asyncio 子进程管道，只能在
+    asyncio 事件循环下工作，因此本用例不参与 anyio 多后端参数化。
+    """
 
-    with pytest.raises(RuntimeError, match="已关闭"):
-        await manager.start(command="echo closed", use_pty=False)
+    async def _scenario() -> None:
+        manager = _TerminalSessionManager()
+        start_entered = asyncio.Event()
+        allow_start = asyncio.Event()
+        session = _TerminalSession(
+            session_id="term-starting",
+            command="sleep",
+            cwd=".",
+            pid=12345,
+            use_pty=False,
+        )
+
+        async def _start_session(*_args) -> _TerminalSession:
+            start_entered.set()
+            await allow_start.wait()
+            return session
+
+        manager._start_pipe_session = _start_session
+        manager._terminate_session = AsyncMock()
+
+        start_task = asyncio.create_task(
+            manager.start(command="sleep", use_pty=False)
+        )
+        await start_entered.wait()
+        close_task = asyncio.create_task(manager.close())
+        await asyncio.sleep(0)
+
+        assert close_task.done() is False
+
+        allow_start.set()
+        with pytest.raises(RuntimeError, match="已关闭"):
+            await start_task
+        await close_task
+
+        manager._terminate_session.assert_awaited_once_with(session)
+        assert manager._sessions == {}
+
+    asyncio.run(_scenario())
 
 
-@pytest.mark.anyio
-async def test_terminal_manager_cancellation_terminates_unregistered_session() -> None:
-    """调用方取消时必须回收已经创建但尚未登记的终端进程。"""
-    manager = _TerminalSessionManager()
-    session_created = asyncio.Event()
-    registration_locked = asyncio.Event()
-    release_registration = asyncio.Event()
-    termination_started = asyncio.Event()
-    session = _TerminalSession(
-        session_id="term-cancelled",
-        command="sleep",
-        cwd=".",
-        pid=12345,
-        use_pty=False,
-    )
+def test_terminal_manager_rejects_start_after_close() -> None:
+    """应用关闭后的终端管理器不得重新创建外部进程。
 
-    async def _hold_registration_lock() -> None:
-        await session_created.wait()
-        async with manager._lock:
-            registration_locked.set()
-            await release_registration.wait()
+    终端会话管理器基于 asyncio 原生锁与 asyncio 子进程管道，只能在
+    asyncio 事件循环下工作，因此本用例不参与 anyio 多后端参数化。
+    """
 
-    async def _start_session(*_args) -> _TerminalSession:
-        session_created.set()
+    async def _scenario() -> None:
+        manager = _TerminalSessionManager()
+
+        await manager.close()
+
+        with pytest.raises(RuntimeError, match="已关闭"):
+            await manager.start(command="echo closed", use_pty=False)
+
+    asyncio.run(_scenario())
+
+
+def test_terminal_manager_cancellation_terminates_unregistered_session() -> None:
+    """调用方取消时必须回收已经创建但尚未登记的终端进程。
+
+    终端会话管理器基于 asyncio 原生锁与 asyncio 子进程管道，只能在
+    asyncio 事件循环下工作，因此本用例不参与 anyio 多后端参数化。
+    """
+
+    async def _scenario() -> None:
+        manager = _TerminalSessionManager()
+        session_created = asyncio.Event()
+        registration_locked = asyncio.Event()
+        release_registration = asyncio.Event()
+        termination_started = asyncio.Event()
+        session = _TerminalSession(
+            session_id="term-cancelled",
+            command="sleep",
+            cwd=".",
+            pid=12345,
+            use_pty=False,
+        )
+
+        async def _hold_registration_lock() -> None:
+            await session_created.wait()
+            async with manager._lock:
+                registration_locked.set()
+                await release_registration.wait()
+
+        async def _start_session(*_args) -> _TerminalSession:
+            session_created.set()
+            await registration_locked.wait()
+            return session
+
+        async def _terminate_session(_session: _TerminalSession) -> None:
+            termination_started.set()
+
+        lock_holder = asyncio.create_task(_hold_registration_lock())
+        manager._start_pipe_session = _start_session
+        manager._terminate_session = AsyncMock(side_effect=_terminate_session)
+        start_task = asyncio.create_task(
+            manager.start(command="sleep", use_pty=False)
+        )
         await registration_locked.wait()
-        return session
+        await asyncio.sleep(0)
 
-    async def _terminate_session(_session: _TerminalSession) -> None:
-        termination_started.set()
+        start_task.cancel()
+        await termination_started.wait()
+        release_registration.set()
+        with pytest.raises(asyncio.CancelledError):
+            await start_task
+        await lock_holder
 
-    lock_holder = asyncio.create_task(_hold_registration_lock())
-    manager._start_pipe_session = _start_session
-    manager._terminate_session = AsyncMock(side_effect=_terminate_session)
-    start_task = asyncio.create_task(
-        manager.start(command="sleep", use_pty=False)
-    )
-    await registration_locked.wait()
-    await asyncio.sleep(0)
+        manager._terminate_session.assert_awaited_once_with(session)
+        assert manager._sessions == {}
+        assert manager._starting == 0
 
-    start_task.cancel()
-    await termination_started.wait()
-    release_registration.set()
-    with pytest.raises(asyncio.CancelledError):
-        await start_task
-    await lock_holder
-
-    manager._terminate_session.assert_awaited_once_with(session)
-    assert manager._sessions == {}
-    assert manager._starting == 0
+    asyncio.run(_scenario())
 
 
-@pytest.mark.anyio
-async def test_langchain_timeout_records_policy_failure() -> None:
-    """LangChain 工具超时必须形成不泄露异常凭据的失败消息。"""
-    tool = _SlowWriteTool(session_id="session-1", user_id="user-1")
-    orchestrator = MagicMock()
-    orchestrator.start.side_effect = DEFAULT_TOOL_POLICY_ORCHESTRATOR.start
-    orchestrator.fail.side_effect = DEFAULT_TOOL_POLICY_ORCHESTRATOR.fail
-    orchestrator.finish.side_effect = DEFAULT_TOOL_POLICY_ORCHESTRATOR.finish
-    middleware = AgentPolicyMiddleware(
-        context=_policy_context(),
-        orchestrator=orchestrator,
-        tools=[tool],
-    )
-    request = SimpleNamespace(
-        tool=tool,
-        tool_call={"id": "call-timeout", "name": tool.name, "args": {}},
-    )
+def test_langchain_timeout_records_policy_failure() -> None:
+    """LangChain 工具超时必须形成不泄露异常凭据的失败消息。
 
-    async def _handler(_request):
-        result = await tool._arun()
-        return ToolMessage(content=result, tool_call_id="call-timeout")
+    工具超时保护基于 `asyncio.wait_for`，只能在 asyncio 事件循环下
+    工作，因此本用例不参与 anyio 多后端参数化。
+    """
 
-    with patch("app.agent.tools.base.settings.LLM_TOOL_TIMEOUT", 0.01):
-        result = await middleware.awrap_tool_call(request, _handler)
+    async def _scenario() -> None:
+        tool = _SlowWriteTool(session_id="session-1", user_id="user-1")
+        orchestrator = MagicMock()
+        orchestrator.start.side_effect = DEFAULT_TOOL_POLICY_ORCHESTRATOR.start
+        orchestrator.fail.side_effect = DEFAULT_TOOL_POLICY_ORCHESTRATOR.fail
+        orchestrator.finish.side_effect = DEFAULT_TOOL_POLICY_ORCHESTRATOR.finish
+        middleware = AgentPolicyMiddleware(
+            context=_policy_context(),
+            orchestrator=orchestrator,
+            tools=[tool],
+        )
+        request = SimpleNamespace(
+            tool=tool,
+            tool_call={"id": "call-timeout", "name": tool.name, "args": {}},
+        )
 
-    assert "工具执行超时" in result.content
-    assert "若工具包含外部写操作" in result.content
-    assert "请先确认实际状态再重试" in result.content
-    assert result.status == "error"
-    orchestrator.fail.assert_called_once()
-    orchestrator.finish.assert_not_called()
+        async def _handler(_request):
+            result = await tool._arun()
+            return ToolMessage(content=result, tool_call_id="call-timeout")
+
+        with patch("app.agent.tools.base.settings.LLM_TOOL_TIMEOUT", 0.01):
+            result = await middleware.awrap_tool_call(request, _handler)
+
+        assert "工具执行超时" in result.content
+        assert "若工具包含外部写操作" in result.content
+        assert "请先确认实际状态再重试" in result.content
+        assert result.status == "error"
+        orchestrator.fail.assert_called_once()
+        orchestrator.finish.assert_not_called()
+
+    asyncio.run(_scenario())
 
 
 @pytest.mark.anyio
@@ -352,85 +387,99 @@ def test_subagent_control_middleware_close_is_idempotent() -> None:
     assert middleware._tasks == {}
 
 
-@pytest.mark.anyio
-async def test_subagent_close_has_bounded_cancel_wait() -> None:
-    """子代理忽略首次取消时，控制器关闭仍必须在上限内返回。"""
-    middleware = object.__new__(SubAgentTaskControlMiddleware)
-    release = asyncio.Event()
-    cancelled = asyncio.Event()
+def test_subagent_close_has_bounded_cancel_wait() -> None:
+    """子代理忽略首次取消时，控制器关闭仍必须在上限内返回。
 
-    async def _ignore_first_cancel() -> None:
-        try:
-            await asyncio.Future()
-        except asyncio.CancelledError:
-            cancelled.set()
-            await release.wait()
+    子代理任务控制器基于 asyncio 原生 Task/Semaphore，只能在 asyncio
+    事件循环下工作，因此本用例不参与 anyio 多后端参数化。
+    """
 
-    task = asyncio.create_task(_ignore_first_cancel())
-    record = SimpleNamespace(
-        task_id="subagent-stubborn",
-        description="stubborn",
-        subagent_type="general-purpose",
-        task=task,
-        created_at=datetime.now(),
-        started_at=datetime.now(),
-        finished_at=None,
-    )
-    middleware._tasks = {record.task_id: record}
-    await asyncio.sleep(0)
+    async def _scenario() -> None:
+        middleware = object.__new__(SubAgentTaskControlMiddleware)
+        release = asyncio.Event()
+        cancelled = asyncio.Event()
 
-    with patch(
-        "app.agent.middleware.subagents.SUBAGENT_CANCEL_GRACE_SECONDS",
-        0.01,
-    ):
-        await asyncio.wait_for(middleware.close(), timeout=0.2)
+        async def _ignore_first_cancel() -> None:
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
 
-    assert cancelled.is_set()
-    assert task.done() is False
-    assert middleware._tasks == {}
-
-    release.set()
-    await asyncio.wait_for(task, timeout=0.2)
-
-
-@pytest.mark.anyio
-async def test_subagent_cancel_reports_tasks_still_stopping() -> None:
-    """取消上限到达后不得把仍运行的子代理报告为取消成功。"""
-    middleware = object.__new__(SubAgentTaskControlMiddleware)
-    release = asyncio.Event()
-
-    async def _ignore_first_cancel() -> None:
-        try:
-            await asyncio.Future()
-        except asyncio.CancelledError:
-            await release.wait()
-
-    task = asyncio.create_task(_ignore_first_cancel())
-    record = SimpleNamespace(
-        task_id="subagent-stopping",
-        description="stopping",
-        subagent_type="general-purpose",
-        task=task,
-        created_at=datetime.now(),
-        started_at=datetime.now(),
-        finished_at=None,
-    )
-    middleware._tasks = {record.task_id: record}
-    await asyncio.sleep(0)
-
-    with patch(
-        "app.agent.middleware.subagents.SUBAGENT_CANCEL_GRACE_SECONDS",
-        0.01,
-    ):
-        payload = await middleware._control_task(
-            action="cancel",
-            task_id=record.task_id,
+        task = asyncio.create_task(_ignore_first_cancel())
+        record = SimpleNamespace(
+            task_id="subagent-stubborn",
+            description="stubborn",
+            subagent_type="general-purpose",
+            task=task,
+            created_at=datetime.now(),
+            started_at=datetime.now(),
+            finished_at=None,
         )
+        middleware._tasks = {record.task_id: record}
+        await asyncio.sleep(0)
 
-    result = json.loads(payload)
-    assert result["success"] is False
-    assert result["cancel_pending_task_ids"] == [record.task_id]
-    assert result["tasks"][0]["status"] == "running"
+        with patch(
+            "app.agent.middleware.subagents.SUBAGENT_CANCEL_GRACE_SECONDS",
+            0.01,
+        ):
+            await asyncio.wait_for(middleware.close(), timeout=0.2)
 
-    release.set()
-    await asyncio.wait_for(task, timeout=0.2)
+        assert cancelled.is_set()
+        assert task.done() is False
+        assert middleware._tasks == {}
+
+        release.set()
+        await asyncio.wait_for(task, timeout=0.2)
+
+    asyncio.run(_scenario())
+
+
+def test_subagent_cancel_reports_tasks_still_stopping() -> None:
+    """取消上限到达后不得把仍运行的子代理报告为取消成功。
+
+    子代理任务控制器基于 asyncio 原生 Task/Semaphore，只能在 asyncio
+    事件循环下工作，因此本用例不参与 anyio 多后端参数化。
+    """
+
+    async def _scenario() -> None:
+        middleware = object.__new__(SubAgentTaskControlMiddleware)
+        release = asyncio.Event()
+
+        async def _ignore_first_cancel() -> None:
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                await release.wait()
+
+        task = asyncio.create_task(_ignore_first_cancel())
+        record = SimpleNamespace(
+            task_id="subagent-stopping",
+            description="stopping",
+            subagent_type="general-purpose",
+            task=task,
+            created_at=datetime.now(),
+            started_at=datetime.now(),
+            finished_at=None,
+        )
+        middleware._tasks = {record.task_id: record}
+        await asyncio.sleep(0)
+
+        with patch(
+            "app.agent.middleware.subagents.SUBAGENT_CANCEL_GRACE_SECONDS",
+            0.01,
+        ):
+            payload = await middleware._control_task(
+                action="cancel",
+                task_id=record.task_id,
+            )
+
+        result = json.loads(payload)
+        assert result["success"] is False
+        assert result["cancel_pending_task_ids"] == [record.task_id]
+        assert result["tasks"][0]["status"] == "running"
+
+        release.set()
+        await asyncio.wait_for(task, timeout=0.2)
+
+    asyncio.run(_scenario())
