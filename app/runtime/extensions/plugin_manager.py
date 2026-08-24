@@ -345,7 +345,7 @@ _LifecycleParams = ParamSpec("_LifecycleParams")
 _LifecycleResult = TypeVar("_LifecycleResult")
 
 
-def observe_plugin_lifecycle(
+def _observe_plugin_lifecycle(
         operation: str,
 ) -> Callable[[Callable[_LifecycleParams, _LifecycleResult]], Callable[_LifecycleParams, _LifecycleResult]]:
     """为插件生命周期入口记录不含插件标识的低基数耗时。"""
@@ -451,7 +451,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         for plugin_id in classification.ready:
             self.start(plugin_id)
 
-    @observe_plugin_lifecycle("start")
+    @_observe_plugin_lifecycle("start")
     def start(
         self,
         pid: Optional[str] = None,
@@ -985,7 +985,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if matches_extension(key, pid)
         ]
 
-    @observe_plugin_lifecycle("initialize")
+    @_observe_plugin_lifecycle("initialize")
     def init_plugin(self, plugin_id: str, conf: dict, instance_id: Optional[str] = None):
         """
         初始化插件
@@ -1038,7 +1038,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         with self._plugin_agent_tools_cache_lock:
             return self._plugin_agent_tools_revision
 
-    @observe_plugin_lifecycle("stop")
+    @_observe_plugin_lifecycle("stop")
     def stop(self, pid: Optional[str] = None, instance_id: Optional[str] = None):
         """
         停止插件服务
@@ -1721,7 +1721,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         self.stop(plugin_id)
 
-    @observe_plugin_lifecycle("reload")
+    @_observe_plugin_lifecycle("reload")
     def reload_plugin(self, plugin_id: str) -> PluginRuntimeStatus:
         """
         将一个插件重新加载到内存
