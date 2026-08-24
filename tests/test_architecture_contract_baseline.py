@@ -125,8 +125,8 @@ def test_transaction_debt_baseline_is_a_model_and_oper_ratchet() -> None:
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
 
     assert baseline["schema_version"] == 1
-    assert baseline["model_decorators"]["count"] == 79
-    assert sum(baseline["model_decorators"]["by_kind"].values()) == 79
+    assert baseline["model_decorators"]["count"] == 71
+    assert sum(baseline["model_decorators"]["by_kind"].values()) == 71
     assert baseline["model_transaction_calls"] == {"count": 0, "calls": []}
     assert baseline["model_session_factories"] == {"count": 0, "calls": []}
     assert baseline["oper_transaction_calls"] == {"count": 0, "calls": []}
