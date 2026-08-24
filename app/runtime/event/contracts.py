@@ -130,9 +130,25 @@ EVENT_CONTRACTS = {
 }
 
 
-def get_event_contract(event_type: EventType | ChainEventType) -> EventContract:
+def _normalize_event_type(
+    event_type: EventType | ChainEventType | str,
+) -> EventType | ChainEventType:
+    """把事件标识归一为登记用的 enum 成员。
+
+    `EventType`/`ChainEventType` 是普通 `Enum`，按值哈希与按成员哈希不等价；
+    调用方历史上既有传成员也有传 `.value` 字符串的用法，这里统一收口。
+    """
+    if isinstance(event_type, (EventType, ChainEventType)):
+        return event_type
+    try:
+        return EventType(event_type)
+    except ValueError:
+        return ChainEventType(event_type)
+
+
+def get_event_contract(event_type: EventType | ChainEventType | str) -> EventContract:
     """返回 enum 事件的完整登记契约。"""
-    return EVENT_CONTRACTS[event_type]
+    return EVENT_CONTRACTS[_normalize_event_type(event_type)]
 
 
 def validate_event_payload(
